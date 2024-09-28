@@ -33,8 +33,8 @@ namespace PowerLanguage.Indicator
 		{
 			// create variable objects, function objects, plot objects etc.
 			Length = Function.ModifiedRSI.DEFAULT_LENGTH;
-			LowPassLength = Function.ModifiedRSI.DEFAULT_LP_LENGTH;
-			HighPassLength = Function.ModifiedRSI.DEFAULT_HP_LENGTH;
+			LowPassLength = Function.ModifiedRSI.DEFAULT_LOW_PASS_LENGTH;
+			HighPassLength = Function.ModifiedRSI.DEFAULT_HIGH_PASS_LENGTH;
 			m_rsi = new Function.ModifiedRSI(this);
 			m_plot = AddPlot(new PlotAttributes("MRSI", EPlotShapes.Line, Color.Red));
 		}

@@ -14,8 +14,8 @@ namespace PowerLanguage
 		{
 			//constants
 			public const int DEFAULT_LENGTH = 14;
-			public const int DEFAULT_LP_LENGTH = Function.RoofingFilter.DEFAULT_LP_LENGTH;
-			public const int DEFAULT_HP_LENGTH = Function.RoofingFilter.DEFAULT_HP_LENGTH;
+			public const int DEFAULT_LOW_PASS_LENGTH = Function.RoofingFilter.DEFAULT_LOW_PASS_LENGTH;
+			public const int DEFAULT_HIGH_PASS_LENGTH = Function.RoofingFilter.DEFAULT_HIGH_PASS_LENGTH;
 
 			//inputs
 
@@ -27,7 +27,7 @@ namespace PowerLanguage
 
 			//attributes
 			private Function.RoofingFilter m_roofingFilter;
-			private double m_previousStochastic;
+			private VariableSeries<double> m_stochastic;
 
 			//interface methods
 			public ModifiedStochastic(CStudyControl _master) : base(_master) { }
@@ -36,9 +36,10 @@ namespace PowerLanguage
 			protected override void Create()
 			{				
 				Length = DEFAULT_LENGTH;
-				LowPassLength = Function.RoofingFilter.DEFAULT_LP_LENGTH;
-				HighPassPeriod = Function.RoofingFilter.DEFAULT_HP_LENGTH;
+				LowPassLength = Function.RoofingFilter.DEFAULT_LOW_PASS_LENGTH;
+				HighPassLength = Function.RoofingFilter.DEFAULT_HIGH_PASS_LENGTH;
 				m_roofingFilter = new RoofingFilter(this);
+				m_stochastic = new VariableSeries<double>(this);
 			}
 
 			protected override void StartCalc()
@@ -46,10 +47,9 @@ namespace PowerLanguage
 				if (LowPassLength <= 0) throw new ArgumentException("Low pass length must be larger than 0.");
 				if (HighPassLength <= 0) throw new ArgumentException("High pass length must be larger than 0.");
 				if (LowPassLength > HighPassLength) throw new ArgumentException("Low pass length must be less than high pass length.");
-				m_roofingFilter.LPLength = LowPassLength;
-				m_roofingFilter.HPLength = HighPassLength;
+				m_roofingFilter.LowPassLength = LowPassLength;
+				m_roofingFilter.HighPassLength = HighPassLength;
 				m_roofingFilter.Price = Bars.Close;
-				m_previousStochastic = 0.0d;
 			}
 
 			protected override System.Double CalcBar()
@@ -58,15 +58,13 @@ namespace PowerLanguage
 
 				if (Bars.Status == EBarState.Close)
 				{
-					m_stochastic.Value = 0.0d;  //zero the stochastic value till we have enough bars to calculate it off the roofing filter output
-
-					if (Bars.CurrentBar >= Length && Bars.CurrentBar >= LowPassLength)
+					m_stochastic.Value = 0.0d;
+					if (Bars.CurrentBar >= Length && Bars.CurrentBar >= HighPassLength)
 					{
 						double highest = m_roofingFilter.Highest(Length);
 						double lowest = m_roofingFilter.Lowest(Length);
-						double stochastic = (m_roofingFilter[0] - lowest) / (highest - lowest);
-						result = m_roofingFilter.C1 * (stochastic - m_stochasticPrevious) / 2 + m_roofingFilter.C2 * this[1] + m_roofingFilter.C3 * this[2];
-						m_previousStochastic = stochastic;
+						m_stochastic.Value = (m_roofingFilter[0] - lowest) / (highest - lowest);
+						result = m_roofingFilter.C1 * (m_stochastic[0] - m_stochastic[1]) / 2 + m_roofingFilter.C2 * this[1] + m_roofingFilter.C3 * this[2];
 					}
 				}
 

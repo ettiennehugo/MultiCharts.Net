@@ -14,8 +14,8 @@ namespace PowerLanguage
 		{
 			//constants
 			public const int DEFAULT_LENGTH = 14;
-			public const int DEFAULT_LP_LENGTH = Function.RoofingFilter.DEFAULT_LP_LENGTH;
-			public const int DEFAULT_HP_LENGTH = Function.RoofingFilter.DEFAULT_HP_LENGTH;
+			public const int DEFAULT_LOW_PASS_LENGTH = Function.RoofingFilter.DEFAULT_LOW_PASS_LENGTH;
+			public const int DEFAULT_HIGH_PASS_LENGTH = Function.RoofingFilter.DEFAULT_HIGH_PASS_LENGTH;
 
 			//inputs
 
@@ -37,8 +37,8 @@ namespace PowerLanguage
 			protected override void Create()
 			{
 				Length = DEFAULT_LENGTH;
-				LowPassLength = Function.RoofingFilter.DEFAULT_LP_LENGTH;
-				HighPassPeriod = Function.RoofingFilter.DEFAULT_HP_LENGTH;
+				LowPassLength = Function.RoofingFilter.DEFAULT_LOW_PASS_LENGTH;
+				HighPassLength = Function.RoofingFilter.DEFAULT_HIGH_PASS_LENGTH;
 				m_roofingFilter = new RoofingFilter(this);
 			}
 
@@ -47,8 +47,8 @@ namespace PowerLanguage
 				if (LowPassLength <= 0) throw new ArgumentException("Low pass length must be larger than 0.");
 				if (HighPassLength <= 0) throw new ArgumentException("High pass length must be larger than 0.");
 				if (LowPassLength > HighPassLength) throw new ArgumentException("Low pass length must be less than high pass length.");
-				m_roofingFilter.LPLength = LowPassLength;
-				m_roofingFilter.HPLength = HighPassLength;
+				m_roofingFilter.LowPassLength = LowPassLength;
+				m_roofingFilter.HighPassLength = HighPassLength;
 				m_roofingFilter.Price = Bars.Close;
 				m_previousClosesUp = 0.0d;
 				m_previousDenominator = 0.0d;
@@ -58,7 +58,7 @@ namespace PowerLanguage
 			{
 				double result = 0.0d;
 
-				if (Bars.Status == EBarState.Close && Bars.CurrentBar >= Length && Bars.CurrentBar >= LowPassLength)
+				if (Bars.Status == EBarState.Close && Bars.CurrentBar >= Length && Bars.CurrentBar >= HighPassLength)
 				{
 					double closesUp = 0;
 					double closesDown = 0;
@@ -66,8 +66,8 @@ namespace PowerLanguage
 					{
 						double rfCurrent = m_roofingFilter[i];
 						double rfPrevious = m_roofingFilter[i + 1];
-						if (rfCurrent > rfPrevious) closesUp += rfCurrent + rfPrevious;
-						else if (rfCurrent < rfPrevious) closesDown += rfCurrent + rfPrevious;
+						if (rfCurrent > rfPrevious) closesUp += rfCurrent - rfPrevious;
+						else if (rfCurrent < rfPrevious) closesDown += rfPrevious - rfCurrent;
 						double denominator = closesUp + closesDown;
 						if (denominator != 0.0d && m_previousDenominator != 0.0d) result = m_roofingFilter.C1 * (closesUp / denominator + m_previousClosesUp / m_previousDenominator) / 2 + m_roofingFilter.C2 * this[1] + m_roofingFilter.C3 * this[2];
 						m_previousClosesUp = closesUp;
