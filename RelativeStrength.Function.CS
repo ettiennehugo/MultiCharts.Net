@@ -17,12 +17,13 @@ namespace PowerLanguage
 
 			//properties
 			public int Length { get; set; }
+			public int SmoothingLength { get; set; }
 			public IInstrument Instrument1 { get; set; }
 			public IInstrument Instrument2 { get; set; }
 
 			//attributes
-			VariableSeries<double> m_instrument1GrowthRate;
-			VariableSeries<double> m_instrument2GrowthRate;
+			private Function.SuperSmoother m_superSmoother;
+			private VariableSeries<double> m_rawRelativeStrength;		//relative strength without smoothing		
 
 			//interface methods
 			public RelativeStrength(CStudyControl _master) : base(_master) { }
@@ -31,23 +32,32 @@ namespace PowerLanguage
 			protected override void Create()
 			{
 				Length = LENGTH;
-				m_instrument1GrowthRate = new VariableSeries<double>(this);
-				m_instrument2GrowthRate = new VariableSeries<double>(this);
+				m_rawRelativeStrength = new VariableSeries<double>(this);
+				m_superSmoother = new SuperSmoother(this);
 			}
 
-			protected override void StartCalc() { }
+			protected override void StartCalc() {
+				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : SuperSmoother.DEFAULT_LENGTH;	//relative strength does allow no smoothing but supersmoother requires a smoothing larger than 0
+				m_superSmoother.Price = m_rawRelativeStrength;
+			}
 
 			protected override System.Double CalcBar()
 			{
-				if (Instrument1.CurrentBar < Length || Instrument2.CurrentBar < Length)
-					return 0;
+				if (Instrument1.Status == EBarState.Close || Instrument2.Status == EBarState.Close)
+				{
+					m_rawRelativeStrength.Value = 0.0d;
+					if (Instrument1.CurrentBar > Length && Instrument2.CurrentBar > Length)
+					{
+						double instrument2GrowthRate = Instrument2.Close[0] / Instrument2.Close[Length];
+						if (instrument2GrowthRate != 0.0d)
+						{
+							double instrument1GrowthRate = Instrument1.Close[0] / Instrument1.Close[Length]; 
+							m_rawRelativeStrength.Value = instrument1GrowthRate / instrument2GrowthRate;
+						}
+					}
+				}
 
-				m_instrument1GrowthRate.Value = Instrument1.Close[0] / Instrument1.Close[Length];
-				m_instrument2GrowthRate.Value = Instrument2.Close[0] / Instrument2.Close[Length];
-				
-				//TBD: Should you apply some level of smoothing here.
-				
-				return m_instrument1GrowthRate[0] / m_instrument2GrowthRate[0];
+				return SmoothingLength > 0 ? m_superSmoother[0] : m_rawRelativeStrength[0];
 			}
 
 			//methods
