@@ -86,13 +86,13 @@ namespace PowerLanguage.Strategy {
 			//prioritize signals with a higher efficiency ratio in portfolio trading
 			//lower efficiency ratio means the price moves more smoothly, so we need to use 1 - ER to prioritize the signals.
 			//m_priority = 1 - m_efficiencyRatio.Value;
-			MyPortfolioData["RankStrategyR"] = m_relativeStrength.Value;
+			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = m_relativeStrength.Value;
 
 			//determine whether we should send an entry order
 			if (m_marketBars.Close[0] > m_marketSmoother.Value &&	//market is bullish
 				//m_relativeStrength[0] > 1.0d && //instrument is stronger than market
 				(VolumePeriod == 0 || Bars.Volume[0] > m_volumeWithSD.AvgPlusLevel2[0]) && //above average volume on breakout
-				Bars.Close[0] > Bars.Close.Highest(HighBreakoutPeriod, 1))
+				Bars.Close[0] > Bars.High.Highest(HighBreakoutPeriod, 1))
 				m_le.Send(positionSize());
 		}
 
