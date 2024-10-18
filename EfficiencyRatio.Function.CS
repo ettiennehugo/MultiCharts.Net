@@ -29,49 +29,50 @@ namespace PowerLanguage
 			protected override void Create()
 			{
 				Length = LENGTH;
-				m_initRatios = true;
 				m_ratioTuples = new List<Tuple<Double, Double, Double>>();
 			}
 
 			protected override void StartCalc()
 			{
 				if (Length <= 0) throw new Exception("Length must be positive.");
+				m_initRatios = true;
+				m_ratioTuples.Clear();
 			}
 
 			protected override System.Double CalcBar()
 			{
 				Double result = 0.0;
 
-				if (Bars.CurrentBar > Length)
+				if (Bars.Status == EBarState.Close && Bars.CurrentBar > Length)
 				{
 					if (m_initRatios)
 					{
 						//initialize the data list used to incrementally compute the efficiency ratio
 						for (int i = Length - 1; i > 0; i--)
 							m_ratioTuples.Add(new Tuple<Double, Double, Double>(Bars.Open[i], Bars.Close[i], Math.Abs(Bars.Close[i] - Bars.Close[i - 1])));
+						m_initRatios = false;
 					}
 					else
 					{
 						//remove stale oldest entry in the list and add latest entry for the current bar
-						m_initRatios = false;
 						m_ratioTuples.RemoveAt(0);
 						m_ratioTuples.Add(new Tuple<Double, Double, Double>(Bars.Open[0], Bars.Close[0], Math.Abs(Bars.Close[0] - Bars.Close[1])));
 					}
 
 					//compute the efficiency ratio
-					Double start = -1.0;
+					Double start = m_ratioTuples[0].Item1;
 					Double end = -1.0;
 					Double totalPriceMove = -1.0;
 
 					foreach (var ratio in m_ratioTuples)
 					{
-						if (start == -1.0) start = ratio.Item2;
 						end = ratio.Item2;
 						totalPriceMove += ratio.Item3;
 					}
 
+					// 1 == very efficient vs 0 == very inefficient
 					if (totalPriceMove != 0.0)
-						result = 100 * Math.Abs(end - start) / totalPriceMove;
+						result = Math.Abs(end - start) / totalPriceMove;
 				}
 
 				return result;
