@@ -3,8 +3,10 @@ using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
 
-namespace PowerLanguage.Indicator{
-	public class RelativeStrength : IndicatorObject {
+namespace PowerLanguage.Indicator
+{
+	public class _RelativeStrength : IndicatorObject
+	{
 		//constants
 
 
@@ -16,18 +18,18 @@ namespace PowerLanguage.Indicator{
 		[Input] public int SmoothingLength { get; set; }
 
 		//attributes
-		private Function.RelativeStrength m_relativeStrength;
+		private Function._RelativeStrength m_relativeStrength;
 		private IPlotObject m_plot;
 		private IPlotObject m_plotOne;
 
 		//interface methods
-		public RelativeStrength(object _ctx) : base(_ctx) { }
+		public _RelativeStrength(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
-			Length = Function.RelativeStrength.LENGTH;
+			Length = Function._RelativeStrength.LENGTH;
 			SmoothingLength = Function.SuperSmoother.DEFAULT_LENGTH;
-			m_relativeStrength = new Function.RelativeStrength(this);
+			m_relativeStrength = new Function._RelativeStrength(this);
 			m_plot = AddPlot(new PlotAttributes("RS", EPlotShapes.Line, Color.Red));
 			m_plotOne = AddPlot(new PlotAttributes("", EPlotShapes.Line, Color.LightGray));
 		}
@@ -35,6 +37,7 @@ namespace PowerLanguage.Indicator{
 		protected override void StartCalc()
 		{
 			m_relativeStrength.Length = Length;
+			m_relativeStrength.SmoothingLength = SmoothingLength;
 			m_relativeStrength.Instrument1 = BarsOfData(1);
 			m_relativeStrength.Instrument2 = BarsOfData(2);
 		}
