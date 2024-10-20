@@ -18,20 +18,21 @@ namespace PowerLanguage.Indicator
 
 		//attributes
 		private IPlotObject m_efficiencyRatioPlot;
-		private EfficiencyRatio m_efficiencyRatio;
+		private Function._EfficiencyRatio m_efficiencyRatio;
 
 		public _EfficiencyRatio(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
 			Length = LENGTH;
-			m_efficiencyRatio = new EfficiencyRatio(this);
+			m_efficiencyRatio = new Function._EfficiencyRatio(this);
 			m_efficiencyRatioPlot = AddPlot(new PlotAttributes("ER", EPlotShapes.Line, Color.LightGray));
 		}
 
 		protected override void StartCalc()
 		{
 			m_efficiencyRatio.Length = Length;
+			m_efficiencyRatio.Instrument = Bars;
 		}
 
 		protected override void CalcBar()
