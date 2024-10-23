@@ -85,9 +85,9 @@ namespace PowerLanguage.Strategy
     protected override void StartCalc()
     {
       //initialize indicators and objects used
-      _FastSuperSmoother.Period = FastPeriod;
+      _FastSuperSmoother.Length = FastPeriod;
       _FastSuperSmoother.Price = Bars.Close;
-      _SlowSuperSmoother.Period = SlowPeriod;
+      _SlowSuperSmoother.Length = SlowPeriod;
       _SlowSuperSmoother.Price = Bars.Close;
     }
 

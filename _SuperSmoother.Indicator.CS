@@ -26,7 +26,7 @@ namespace PowerLanguage.Indicator
 
     protected override void StartCalc()
     {
-      m_superSmoother.Period = Period;
+      m_superSmoother.Length = Period;
       m_superSmoother.Price = Bars.Close;
     }
 
