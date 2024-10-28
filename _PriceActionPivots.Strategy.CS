@@ -52,9 +52,9 @@ namespace PowerLanguage.Strategy {
       m_SlowXAverage = new XAverage(this);
       m_FastMA = new VariableSeries<Double>(this);
       m_SlowMA = new VariableSeries<Double>(this);
-      m_LE_SMM = OrderCreator.MarketThisBar(new SOrderParameters(Contracts.Default, "PAPVLE", EOrderAction.Buy));           //static money management orders
-      m_SE_SMM = OrderCreator.MarketThisBar(new SOrderParameters(Contracts.Default, "PAPVSE", EOrderAction.SellShort));
-      m_LX = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PAPVLX", EOrderAction.Sell));                   //exit orders
+      m_LE_SMM = OrderCreator.MarketThisBar(new SOrderParameters(Contracts.UserSpecified, "PAPVLE", EOrderAction.Buy));     //static money management orders
+      m_SE_SMM = OrderCreator.MarketThisBar(new SOrderParameters(Contracts.UserSpecified, "PAPVSE", EOrderAction.SellShort));
+      m_LX = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PAPVLX", EOrderAction.Sell));                       //exit orders
       m_SX = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PAPVSX", EOrderAction.BuyToCover));
       m_StopLossPrice = 0;
       m_UpdateStopLoss = false;
@@ -141,12 +141,12 @@ namespace PowerLanguage.Strategy {
 
           //static position sizing controlled by the user settings
           if (EnableLong && openLongTrade) {
-            m_LE_SMM.Send();
+            m_LE_SMM.Send(positionSize());
             m_StopLossPrice = pivotBar.low;
           }
 
           if (EnableShort && openShortTrade) {
-            m_SE_SMM.Send();
+            m_SE_SMM.Send(positionSize());
             m_StopLossPrice = pivotBar.high;
           }
         }
@@ -172,5 +172,27 @@ namespace PowerLanguage.Strategy {
       if (PositionSide < 0)
         m_SX.Send(m_StopLossPrice);
     }
-  }
+
+		private int positionSize()
+		{
+			double equityAvailable = 0.0d;
+			int result = 0;
+			if (Bars.Close[0] == 0.0d) return result;
+
+			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
+			switch (Environment.ApplicationCode)
+			{
+				case EApplicationCode.Charting:
+					equityAvailable = this.InitialCapital + this.NetProfit;
+					break;
+				case EApplicationCode.Portfolio:
+					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * (this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d);
+					break;
+			}
+
+			if (equityAvailable > 0) result = (int)Math.Truncate(equityAvailable / Bars.Close[0]);
+
+			return result;
+		}
+	}
 }

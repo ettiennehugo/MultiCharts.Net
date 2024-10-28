@@ -29,7 +29,7 @@ namespace PowerLanguage.Strategy
 		{
 			if ((TrailingStopActivationPct == 0 && TrailingStopPct != 0) ||
 					(TrailingStopActivationPct != 0 && TrailingStopPct == 0))
-				throw new Exception("Trailing stop activation and trailing stop percentage is used together.");
+				throw new Exception("Trailing stop activation and trailing stop percentage should be used used together.");
 		}
 
 		protected override void CalcBar()

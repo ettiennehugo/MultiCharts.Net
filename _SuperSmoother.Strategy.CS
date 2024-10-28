@@ -5,7 +5,6 @@ using System.Linq;
 using ATCenterProxy.interop;
 using PowerLanguage.Function;
 using PowerLanguage.Indicator;
-using System.Net.Mime;
 
 namespace PowerLanguage.Strategy
 {

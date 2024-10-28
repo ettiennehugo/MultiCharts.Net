@@ -3584,7 +3584,7 @@ namespace PowerLanguage.Strategy
         _volumeWithSD[i].Level1 = _volumeSettings[i].level1;
         _volumeWithSD[i].Level2 = _volumeSettings[i].level2;
         _volumeWithSD[i].Level3 = _volumeSettings[i].level3;
-        _volumeWithSD[i].Volume = dataFeed.Volume;
+        _volumeWithSD[i].Volume = dataFeed.TrueVolume();
       }
     }
 
@@ -4899,9 +4899,9 @@ namespace PowerLanguage.Strategy
         _linRegSlowFC[i].price = dataFeed.Close;
         _linRegSlowFC[i].length = _linRegSlowLength;
         _ssmaFastAvgFC[i].Price = dataFeed.Close;
-        _ssmaFastAvgFC[i].Period = _ssmaFastLength;
+        _ssmaFastAvgFC[i].Length = _ssmaFastLength;
         _ssmaSlowAvgFC[i].Price = dataFeed.Close;
-        _ssmaSlowAvgFC[i].Period = _ssmaSlowLength;
+        _ssmaSlowAvgFC[i].Length = _ssmaSlowLength;
       }
     }
 

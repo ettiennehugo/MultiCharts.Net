@@ -16,7 +16,7 @@ namespace PowerLanguage
       public const double SQRT_2 = 1.414213562373095d;
 
       //Properties:
-      public int Period { get; set; }
+      public int Length { get; set; }
       public ISeries<double> Price { get; set; }
       public double A1 { get { return m_a1; } }
       public double B1 { get { return m_b1; } }
@@ -37,18 +37,18 @@ namespace PowerLanguage
 
       protected override void Create()
       {
-        Period = DEFAULT_PERIOD;
+        Length = DEFAULT_PERIOD;
       }
 
       protected override void StartCalc()
       {
-        if (Period <= 0)
-          throw new Exception("Supersmoother requires a positive integer for the period.");
+        if (Length <= 0)
+          throw new Exception("Supersmoother requires a positive integer for Length.");
 
-        //compute the coefficients of the SuperSmoother based on given period
+        //compute the coefficients of the SuperSmoother based on given length
         m_result = 0;
-        m_a1 = Math.Exp(-SQRT_2 * Math.PI / Period);
-        m_b1 = 2.0d * m_a1 * Math.Cos(SQRT_2 * Math.PI / Period);
+        m_a1 = Math.Exp(-SQRT_2 * Math.PI / Length);
+        m_b1 = 2.0d * m_a1 * Math.Cos(SQRT_2 * Math.PI / Length);
         m_c2 = m_b1;
         m_c3 = -m_a1 * m_a1;
         m_c1 = 1.0d - m_c2 - m_c3;

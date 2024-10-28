@@ -21,7 +21,7 @@ namespace PowerLanguage
 
 
 			//properties
-			public int Length { get; set; }		//stochastic length
+			public int Length { get; set; }						//stochastic length
 			public int LowPassLength { get; set; }    //roofing filter low pass length
 			public int HighPassLength { get; set; }   //roofing filter high pass length
 
