@@ -8,19 +8,24 @@ namespace PowerLanguage.Strategy {
 	public class _BreakoutWithConfirmLE : PortfolioSignalObject {
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
-		public const int RS_SMOOTHING_PERIOD = 20;
+		public const int DEFAULT_MARKET_PERIOD = 200;
+		public const int RS_SMOOTHING_PERIOD = 0;
 
 		//properties:
 		[Input] public int HighBreakoutPeriod { get; set; }		//only applies when we use long trading (no stop-loss based on this yet)
-		[Input] public int SuperSmootherPeriod { get; set; }	//used only to exit trades
+		[Input] public int SuperSmootherPeriod { get; set; }  //used only to exit trades		
+		[Input] public bool RiskBasedPositionSizing { get; set; }
+		[Input] public double MaxRiskEquityPerPosPercent { get; set; }
 		[Input] public int VolumePeriod { get; set; }
+		[Input] public double MaxVolumeBasedPosPercent { get; set; }
+		[Input] public int RelativeEfficiencyPeriod { get; set; }
 		[Input] public int MarketPeriod { get; set; }
 
 		//attributes:
 		//private EfficiencyRatio m_efficiencyRatio;
-		private RelativeStrength m_relativeStrength;
+		private _RelativeEfficiency m_relativeEfficiency;
 		private SuperSmoother m_instrumentSmoother;
-		private VolumeWithSD m_volumeWithSD;
+		private VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketBars;
 		private SuperSmoother m_marketSmoother;
 		private IOrderMarket m_le;
@@ -32,16 +37,20 @@ namespace PowerLanguage.Strategy {
 		{
 			//initialize input parameters
 			HighBreakoutPeriod = DEFAULT_PERIOD;
+			RelativeEfficiencyPeriod = DEFAULT_PERIOD;
 			SuperSmootherPeriod = DEFAULT_PERIOD;
 			VolumePeriod = DEFAULT_PERIOD;
-			MarketPeriod = DEFAULT_PERIOD;
+			RiskBasedPositionSizing = true;
+			MaxRiskEquityPerPosPercent = 1.0d;
+			MaxVolumeBasedPosPercent = 10.0d;
+			MarketPeriod = DEFAULT_MARKET_PERIOD;
 
 			//create functions used
 			//m_efficiencyRatio = new EfficiencyRatio(this);
 			m_instrumentSmoother = new SuperSmoother(this);
-			m_volumeWithSD = new VolumeWithSD(this);
+			m_instrumentVolume = new VolumeWithSD(this);
 			m_marketSmoother = new SuperSmoother(this);
-			m_relativeStrength = new RelativeStrength(this);
+			m_relativeEfficiency = new _RelativeEfficiency(this);
 
 			//create order types
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Buy));
@@ -52,15 +61,16 @@ namespace PowerLanguage.Strategy {
 		{
 			//initialize functions used
 			//m_efficiencyRatio.Length = InstrumentPeriod;
-			m_relativeStrength.Length = HighBreakoutPeriod;
-			m_relativeStrength.SmoothingLength = RS_SMOOTHING_PERIOD;
-			m_relativeStrength.Instrument1 = this.BarsOfData(1);
-			m_relativeStrength.Instrument2 = this.BarsOfData(2);
+			m_relativeEfficiency.Length = RelativeEfficiencyPeriod;
+			m_relativeEfficiency.SmoothingLength = RS_SMOOTHING_PERIOD;
+			m_relativeEfficiency.Instrument1 = this.BarsOfData(1);
+			m_relativeEfficiency.Instrument2 = this.BarsOfData(2);
 			m_instrumentSmoother.Length = SuperSmootherPeriod;
 			m_instrumentSmoother.Price = Bars.Close;
-			m_volumeWithSD.Length = VolumePeriod > 0 ? VolumePeriod : VolumeWithSD.DEFAULT_LENGTH;
+			m_instrumentVolume.Length = VolumePeriod > 0 ? VolumePeriod : VolumeWithSD.DEFAULT_LENGTH;
+			m_instrumentVolume.Volume = Bars.TrueVolume();
 			m_marketSmoother.Length = MarketPeriod;
-			m_marketBars = this.BarsOfData(1);
+			m_marketBars = this.BarsOfData(2);
 			m_marketSmoother.Price = m_marketBars.Close;
 		}
 
@@ -86,14 +96,16 @@ namespace PowerLanguage.Strategy {
 			//prioritize signals with a higher efficiency ratio in portfolio trading
 			//lower efficiency ratio means the price moves more smoothly, so we need to use 1 - ER to prioritize the signals.
 			//m_priority = 1 - m_efficiencyRatio.Value;
-			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = m_relativeStrength.Value;
+			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = m_relativeEfficiency.Value;
 
 			//determine whether we should send an entry order
 			if (m_marketBars.Close[0] > m_marketSmoother.Value &&	//market is bullish
-				//m_relativeStrength[0] > 1.0d && //instrument is stronger than market
-				(VolumePeriod == 0 || Bars.Volume[0] > m_volumeWithSD.AvgPlusLevel2[0]) && //above average volume on breakout
-				Bars.Close[0] > Bars.High.Highest(HighBreakoutPeriod, 1))
+					Bars.Close[0] > Bars.High.Highest(HighBreakoutPeriod, 1))
+			{
+				int size = RiskBasedPositionSizing ? riskBasedPositionSize() : positionSize();
+				size = volumeBasedPositionSize(size);
 				m_le.Send(positionSize());
+			}
 		}
 
 		protected void calcBarExit()
@@ -106,24 +118,74 @@ namespace PowerLanguage.Strategy {
 				m_lx.Send();
 		}
 
-		private int positionSize()
+		private double equityAvailable()
 		{
 			double equityAvailable = 0.0d;
-			int result = 0;
-			if (Bars.Close[0] == 0.0d) return result;
 
 			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
 			switch (Environment.ApplicationCode)
 			{
 				case EApplicationCode.Charting:
-					equityAvailable = this.InitialCapital + this.NetProfit;
+					equityAvailable = (this.InitialCapital + this.NetProfit) * MaxRiskEquityPerPosPercent;
 					break;
 				case EApplicationCode.Portfolio:
-					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * (this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d);
+					double percentEquity = MaxRiskEquityPerPosPercent > 0.0d ? MaxRiskEquityPerPosPercent : this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d;
+					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * percentEquity;
 					break;
 			}
 
-			if (equityAvailable > 0) result = (int)Math.Truncate(equityAvailable / Bars.Close[0]);
+			return equityAvailable;
+		}
+
+		private int riskBasedPositionSize()
+		{
+			int result = 0;
+
+			double positionCash = equityAvailable();
+			if (positionCash > 0)
+			{
+				double risk;
+				try
+				{
+					risk = checked(Math.Round(Math.Abs(Bars.Close[0] - m_instrumentSmoother[0]), 2));
+					if (risk != 0.0d) result = checked((int)Math.Truncate(positionCash / risk));
+				}
+				catch (OverflowException)
+				{
+					return 0;   //risk overflow exception occurred, ignore signal
+				}
+			}
+
+			return result;
+		}
+
+		private int volumeBasedPositionSize(int size)
+		{
+			int result = size;
+
+			if (MaxVolumeBasedPosPercent > 0.0d && Bars.CurrentBar >= VolumePeriod)
+			{
+				try
+				{
+					int clippedSize = (int)checked(Math.Round(m_instrumentVolume.Average[0] * (MaxVolumeBasedPosPercent / 100.0d), 0));
+					result = clippedSize < size ? clippedSize : size;
+				}
+				catch (OverflowException)
+				{
+					Output.WriteLine("WARNING - volumeBasedPositionSize raised an overflow exception.");
+				}
+			}
+
+			return result;
+		}
+
+		private int positionSize()
+		{
+			int result = 0;
+			if (Bars.Close[0] == 0.0d) return result;
+
+			double positionCash = equityAvailable();
+			result = (int)Math.Truncate(positionCash / Bars.Close[0]);
 
 			return result;
 		}

@@ -38,7 +38,7 @@ namespace PowerLanguage
 
 			protected override void StartCalc()
 			{
-				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : SuperSmoother.DEFAULT_LENGTH;  //relative strength does allow no smoothing but supersmoother requires a smoothing larger than 0
+				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : SuperSmoother.DEFAULT_PERIOD;  //relative strength does allow no smoothing but supersmoother requires a smoothing larger than 0
 				m_superSmoother.Price = m_rawRelativeStrength;
 			}
 

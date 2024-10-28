@@ -63,8 +63,8 @@ namespace PowerLanguage
 
       protected override void StartCalc()
       {
-        if (Volume == null) Volume = Bars.TrueVolume();
-        average.Period = Length;
+        if (Volume == null) throw new InvalidOperationException("Volume series is not set.");
+				average.Length = Length;
         average.Price = Volume;
       }
 

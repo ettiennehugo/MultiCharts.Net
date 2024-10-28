@@ -18,7 +18,7 @@ namespace PowerLanguage.Strategy {
 
 		//attributes:
 		//private EfficiencyRatio m_efficiencyRatio;
-		private RelativeStrength m_relativeStrength;
+		private _RelativeStrength m_relativeStrength;
 		private SuperSmoother m_instrumentSmoother;
 		private VolumeWithSD m_volumeWithSD;
 		private IInstrument m_marketBars;
@@ -41,7 +41,7 @@ namespace PowerLanguage.Strategy {
 			m_instrumentSmoother = new SuperSmoother(this);
 			m_volumeWithSD = new VolumeWithSD(this);
 			m_marketSmoother = new SuperSmoother(this);
-			m_relativeStrength = new RelativeStrength(this);
+			m_relativeStrength = new _RelativeStrength(this);
 
 			//create order types
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, EOrderAction.SellShort));
@@ -59,8 +59,9 @@ namespace PowerLanguage.Strategy {
 			m_instrumentSmoother.Length = SuperSmootherPeriod;
 			m_instrumentSmoother.Price = Bars.Close;
 			m_volumeWithSD.Length = VolumePeriod > 0 ? VolumePeriod : VolumeWithSD.DEFAULT_LENGTH;
+			m_volumeWithSD.Volume = Bars.TrueVolume();
 			m_marketSmoother.Length = MarketPeriod;
-			m_marketBars = this.BarsOfData(1);
+			m_marketBars = this.BarsOfData(2);
 			m_marketSmoother.Price = m_marketBars.Close;
 		}
 
