@@ -40,7 +40,8 @@ namespace PowerLanguage
 
 			protected override void StartCalc()
 			{
-				if (Length == 0) throw new Exception("Length must be greater than 0");
+				if (Length <= 0) throw new Exception("Length must be a positive number");
+				if (Epsilon <= 0.0d) throw new Exception("Epsilon must be a positive number");
 				m_atr.Instrument = Instrument;
 				m_atr.Length = Length;
 			}

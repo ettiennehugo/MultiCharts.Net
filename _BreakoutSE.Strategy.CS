@@ -6,7 +6,7 @@ using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy
 {
-  public class _BreakoutSE : PortfolioSignalObject
+  public class _BreakoutSE : _CustomSignal
   {
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
@@ -103,7 +103,9 @@ namespace PowerLanguage.Strategy
 				//m_relativeStrength[0] < 1.0d && //instrument is weaker than market
 				(VolumePeriod == 0 || Bars.Volume[0] > m_volumeWithSD.AvgPlusLevel2[0]) && //above average volume breakout
 				Bars.Close[0] < Bars.Low.Lowest(LowBreakoutPeriod, 1))
-			  m_se.Send(positionSize());
+
+				//TODO - Cap the position size to about 5-10% of the daily volume, this strategy does give a lot of entries that would not be able to be filled in real life.
+				m_se.Send(positionSize(Bars));
 		}
 
 		protected void calcBarExit()
@@ -113,28 +115,6 @@ namespace PowerLanguage.Strategy
 				Bars.Close.CrossesOver(m_instrumentSmoother[0], 1)  //no market filter - in general this is a better exit since the signal would turn bullish most likely before the market does
 				)
 				m_sx.Send();
-		}
-
-		private int positionSize()
-		{
-			double equityAvailable = 0.0d;
-			int result = 0;
-			if (Bars.Close[0] == 0.0d) return result;
-
-			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
-			switch (Environment.ApplicationCode)
-			{
-				case EApplicationCode.Charting:
-					equityAvailable = this.InitialCapital + this.NetProfit;
-					break;
-				case EApplicationCode.Portfolio:
-					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * (this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d);
-					break;
-			}
-
-			if (equityAvailable > 0) result = (int)Math.Truncate(equityAvailable / Bars.Close[0]);
-
-			return result;
 		}
   }
 }

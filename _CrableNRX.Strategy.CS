@@ -11,13 +11,16 @@ namespace PowerLanguage.Strategy {
 	/// 2, 4 and 7 and the default for Y is 20.
 	/// Requires two data feeds, the entry data feed based off the minute timeframe since it uses an opening bar range to determine the risk and a secondary data
 	/// feed on the daily timeframe used to determine the narrow range days.
+	///	Required Feeds:
+	///		1. Entry data feed - typically some minute data feed.
+	///		2. Scanner data feed - typically daily data feed for the same instrument.
 	/// Entry:
 	///   * Stock must have shown some minimal momentum in the past, typically 30 to 100% up in the past 6 months.
 	///		* Current X-bar lookback we have a range tightening and it is the smallest range in the last narraw range period.
 	///		* Waits for a high volume opening range bar to form on the entry data feed.
 	///		* IF the opening bar is a high volume bullish bar an entry is placed at the high of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
-	public class _CrableNRX : PortfolioSignalObject 
+	public class _CrableNRX : _OpeningRangeBarSignal 
 	{
 		//constants
 
@@ -27,36 +30,54 @@ namespace PowerLanguage.Strategy {
 		[Input] int GrowthDays { get; set; }								 //number of days to look back for the growth
 		[Input] public int NarrowRangeDays { get; set; }     //X-days is the narrowest X-day range relative to any X-day range within the previous narrow range period-market days
 		[Input] public int NarrowRangePeriod { get; set; }   //period to scan for narrow range days
+		[Input] double AtrEpsilon { get; set; }              //percentage of the ATR to use for the range close factor in Darvas box computations
 
 		//properties
 
 
 		//attributes
-		private IOrderMarket buy_order;
+		private PowerLanguage.Function._CrableNRX m_crableNRX;
 
 		//interface methods
+		IInstrument m_scannerTimeFrame;
 		public _CrableNRX(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
-			NarrowRangeDays = 4;
+			MinimumGrowthPercent = 30;
+			GrowthDays = 120;
+			NarrowRangeDays = 7;
 			NarrowRangePeriod = 20;
-			buy_order = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.Buy));
+			m_crableNRX = new PowerLanguage.Function._CrableNRX(this);
 		}
 
 		protected override void StartCalc()
 		{
-			// assign inputs 
+			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
+			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
+			//Bars is used as the entry time frame criteria
+			m_scannerTimeFrame = BarsOfData(2);
+			m_crableNRX.Instrument = m_scannerTimeFrame;
+			m_crableNRX.ScanLength = NarrowRangePeriod;
+			m_crableNRX.Length = NarrowRangeDays;
+			MinimumGrowthPercent /= 100.0d;
+			MinimumGrowthPercent += 1.0d;
 		}
 
 		protected override void CalcBar()
 		{
+			switch (Environment.CalcReason)
+			{
+				case CalculationReason.Default:
+					//scanner criteria
+					if (m_scannerTimeFrame.CurrentBar <= GrowthDays) return; //not enough data
+					if (m_scannerTimeFrame.Close[0] / m_scannerTimeFrame.Close[GrowthDays] < MinimumGrowthPercent) return;  //not enough growth
+					if (!m_crableNRX[0]) return; //no Crable narrow range bars detection on daily timeframe
 
-			//TODO - develop narrow range bar FUNCTION.
-			
-			
-			// strategy logic 
-			buy_order.Send();
+					//entry criteria
+					base.CalcBar();
+					break;
+			}
 		}
 
 		//methods

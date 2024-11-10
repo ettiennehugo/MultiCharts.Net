@@ -104,13 +104,13 @@ namespace PowerLanguage.Strategy {
 						m_state = State.FirstExit;
 						if (this.PositionSide > 0)
 						{
-							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1];
-							m_secondStopPrice = m_entryResolution.Low[0];	//initialize the stop price to the ENTRY day low
+							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1] - (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);
+							m_secondStopPrice = m_entryResolution.Low[0] - (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);  //initialize the stop price to the ENTRY day low
 						}
 						else
 						{
-							m_firstStopPrice = m_entryResolution.High[1] - this.EntryPrice();
-							m_secondStopPrice = m_entryResolution.High[0];  //initialize the stop price to the ENTRY day high
+							m_firstStopPrice = m_entryResolution.High[1] - this.EntryPrice() + (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);
+							m_secondStopPrice = m_entryResolution.High[0] + (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);   //initialize the stop price to the ENTRY day high
 						}
 						break;
 					case State.FirstExit:

@@ -5,7 +5,7 @@ using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy {
-	public class _BreakoutWithConfirmLE : PortfolioSignalObject {
+	public class _BreakoutWithConfirmLE : _CustomSignal {
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
 		public const int DEFAULT_MARKET_PERIOD = 200;
@@ -101,11 +101,7 @@ namespace PowerLanguage.Strategy {
 			//determine whether we should send an entry order
 			if (m_marketBars.Close[0] > m_marketSmoother.Value &&	//market is bullish
 					Bars.Close[0] > Bars.High.Highest(HighBreakoutPeriod, 1))
-			{
-				int size = RiskBasedPositionSizing ? riskBasedPositionSize() : positionSize();
-				size = volumeBasedPositionSize(size);
-				m_le.Send(positionSize());
-			}
+				m_le.Send(RiskBasedPositionSizing ? positionSize(Bars, m_instrumentSmoother[0]) : positionSize(Bars));
 		}
 
 		protected void calcBarExit()
@@ -116,78 +112,6 @@ namespace PowerLanguage.Strategy {
 				Bars.Close.CrossesUnder(m_instrumentSmoother[0], 1) //no market filter - in general this is a better exit since the signal would turn bearish most likely before the market does
 				)
 				m_lx.Send();
-		}
-
-		private double equityAvailable()
-		{
-			double equityAvailable = 0.0d;
-
-			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
-			switch (Environment.ApplicationCode)
-			{
-				case EApplicationCode.Charting:
-					equityAvailable = (this.InitialCapital + this.NetProfit) * MaxRiskEquityPerPosPercent;
-					break;
-				case EApplicationCode.Portfolio:
-					double percentEquity = MaxRiskEquityPerPosPercent > 0.0d ? MaxRiskEquityPerPosPercent : this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d;
-					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * percentEquity;
-					break;
-			}
-
-			return equityAvailable;
-		}
-
-		private int riskBasedPositionSize()
-		{
-			int result = 0;
-
-			double positionCash = equityAvailable();
-			if (positionCash > 0)
-			{
-				double risk;
-				try
-				{
-					risk = checked(Math.Round(Math.Abs(Bars.Close[0] - m_instrumentSmoother[0]), 2));
-					if (risk != 0.0d) result = checked((int)Math.Truncate(positionCash / risk));
-				}
-				catch (OverflowException)
-				{
-					return 0;   //risk overflow exception occurred, ignore signal
-				}
-			}
-
-			return result;
-		}
-
-		private int volumeBasedPositionSize(int size)
-		{
-			int result = size;
-
-			if (MaxVolumeBasedPosPercent > 0.0d && Bars.CurrentBar >= VolumePeriod)
-			{
-				try
-				{
-					int clippedSize = (int)checked(Math.Round(m_instrumentVolume.Average[0] * (MaxVolumeBasedPosPercent / 100.0d), 0));
-					result = clippedSize < size ? clippedSize : size;
-				}
-				catch (OverflowException)
-				{
-					Output.WriteLine("WARNING - volumeBasedPositionSize raised an overflow exception.");
-				}
-			}
-
-			return result;
-		}
-
-		private int positionSize()
-		{
-			int result = 0;
-			if (Bars.Close[0] == 0.0d) return result;
-
-			double positionCash = equityAvailable();
-			result = (int)Math.Truncate(positionCash / Bars.Close[0]);
-
-			return result;
 		}
 	}
 }

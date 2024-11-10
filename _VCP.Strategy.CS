@@ -8,6 +8,9 @@ namespace PowerLanguage.Strategy {
 	/// <summary>
 	/// Volatility contraction pattern strategy the price action is contracting into narrower bar ranges and then breaks out of that range.
 	/// This is typically the pattern traded by Mark Minervini.
+	///	Required Feeds:
+	///		1. Entry data feed - typically some minute data feed.
+	///		2. Scanner data feed - typically daily data feed for the same instrument.
 	/// Entry:
 	///   * Stock must have shown some minimal momentum in the past, typically 30 to 100% up in the past 6 months.
 	///		* Stock must be contracting into a narrower range in the past x-days.

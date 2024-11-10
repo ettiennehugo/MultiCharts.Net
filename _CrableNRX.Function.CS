@@ -41,6 +41,8 @@ namespace PowerLanguage
 
 			protected override void StartCalc() 
 			{
+				if (Length <= 0) throw new Exception("Length must be a positive number");
+				if (ScanLength <= 0) throw new Exception("ScanLength must be a positive number");
 				if (Length > ScanLength) throw new Exception("Length must be less than or equal to ScanLength");
 			}
 

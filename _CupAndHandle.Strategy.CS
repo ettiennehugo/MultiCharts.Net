@@ -7,8 +7,11 @@ using ATCenterProxy.interop;
 namespace PowerLanguage.Strategy {
 	/// <summary>
 	/// Cup and handle pattern strategy.
+	///	Required Feeds:
+	///		1. Entry data feed - typically some minute data feed.
+	///		2. Scanner data feed - typically daily data feed for the same instrument.
 	/// </summary>
-	public class _CupAndHandle : PortfolioSignalObject
+	public class _CupAndHandle : _OpeningRangeBarSignal
 	{
 		//constants
 
