@@ -1,3 +1,7 @@
+.vs/
+bin/
+obj/
+packages/
 _AbsoluteCurrencyStrength.Indicator.CS
 _BollingerBand.Strategy.CS
 _BollingerBand2.Strategy.CS

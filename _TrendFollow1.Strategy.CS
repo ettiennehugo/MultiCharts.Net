@@ -13,9 +13,11 @@ namespace PowerLanguage.Strategy {
 	{
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
+		public const int DEFAULT_SLOW_PERIOD = 200;
 
 		//properties:
-		[Input] public int Period { get; set; }
+		[Input] public int FastPeriod { get; set; } //fast period of the instrument supersmoother
+		[Input] public int SlowPeriod { get; set; } //slow period of the instrument supersmoother - used to determine bullishness or bearishness of instrument the trend
 		[Input] public bool RiskBasedPositionSizing { get; set; }
 		[Input] public double MaxRiskEquityPerPosPercent { get; set; }
 		[Input] public int VolumePeriod { get; set; }
@@ -26,7 +28,8 @@ namespace PowerLanguage.Strategy {
 
 		//attributes:
 		private PowerLanguage.Function._EfficiencyRatio m_efficiencyRatio;
-		private SuperSmoother m_instrumentSmoother;
+		private SuperSmoother m_instrumentFastSmoother;
+		private SuperSmoother m_instrumentSlowSmoother;
 		private PowerLanguage.Function.VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketInstrument;
 		private SuperSmoother m_marketSmoother;
@@ -38,7 +41,8 @@ namespace PowerLanguage.Strategy {
 		protected override void Create()
 		{
 			//initialize input parameters
-			Period = DEFAULT_PERIOD;
+			FastPeriod = DEFAULT_PERIOD;
+			SlowPeriod = DEFAULT_SLOW_PERIOD;
 			RiskBasedPositionSizing = true;
 			MaxRiskEquityPerPosPercent = 1.0;		//make zero or less to use portfolio percentage
 			VolumePeriod = DEFAULT_PERIOD;
@@ -48,7 +52,8 @@ namespace PowerLanguage.Strategy {
 			EnableShort = true;
 
 			//create functions used
-			m_instrumentSmoother = new SuperSmoother(this);
+			m_instrumentFastSmoother = new SuperSmoother(this);
+			m_instrumentSlowSmoother = new SuperSmoother(this);
 			m_instrumentVolume = new VolumeWithSD(this);
 			m_marketSmoother = new SuperSmoother(this);
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
@@ -61,16 +66,22 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc()
 		{
 			//initialize functions used
+			if (FastPeriod <= 0) throw new Exception("FastPeriod must be greater than zero.");
+			if (SlowPeriod <= 0) throw new Exception("SlowPeriod must be greater than zero.");
+			if (VolumePeriod <= 0) throw new Exception("VolumePeriod must be greater than zero.");
+			if (FastPeriod >= SlowPeriod) throw new Exception("FastPeriod must be less than SlowPeriod.");
 			if (MaxRiskEquityPerPosPercent > 1.0d) throw new Exception("MaxRiskEquityPerPosPercent must be less than 1.0.");
 			if (MaxVolumeBasedPosPercent > 1.0d) throw new Exception("MaxVolumeBasedPosPercent must be less than 1.0.");
 			m_marketInstrument = BarsOfData(2);
-			m_instrumentSmoother.Length = Period;
-			m_instrumentSmoother.Price = Bars.Close;
+			m_instrumentFastSmoother.Length = FastPeriod;
+			m_instrumentFastSmoother.Price = Bars.Close;
+			m_instrumentSlowSmoother.Length = SlowPeriod;
+			m_instrumentSlowSmoother.Price = Bars.Close;
 			m_instrumentVolume.Length = VolumePeriod;
 			m_instrumentVolume.Volume = Bars.Volume;
 			m_marketSmoother.Length = MarketPeriod != 0 ? MarketPeriod : _SuperSmoother.DEFAULT_PERIOD;
 			m_marketSmoother.Price = m_marketInstrument.Close;
-			m_efficiencyRatio.Length = Period;
+			m_efficiencyRatio.Length = FastPeriod;
 			m_efficiencyRatio.Instrument = Bars;
 			m_instrumentVolume.Length = VolumePeriod;
 			m_instrumentVolume.Volume = Bars.TrueVolume();
@@ -95,17 +106,19 @@ namespace PowerLanguage.Strategy {
 			//process the entry logic
 			//determine whether we should send an entry order
 			if (EnableLong &&
-				(MarketPeriod <= 0 || m_marketSmoother[0] < m_marketInstrument.Close[0]) &&
-				Bars.Close.CrossesOver(m_instrumentSmoother[0], 1))
+				(MarketPeriod <= 0 || m_marketSmoother[0] < m_marketInstrument.Close[0]) &&	//market is bullish
+				m_instrumentFastSmoother[0] > m_instrumentSlowSmoother[0] &&  //instrument is bullish
+				Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_le.Send(size);
 			}
 			else if (EnableShort && 
-				     (MarketPeriod <= 0 || m_marketSmoother[0] > m_marketInstrument.Close[0]) &&
-				     Bars.Close.CrossesUnder(m_instrumentSmoother[0], 1))
+				     (MarketPeriod <= 0 || m_marketSmoother[0] > m_marketInstrument.Close[0]) &&	//market is bearish
+						 m_instrumentFastSmoother[0] < m_instrumentSlowSmoother[0] &&  //instrument is bearish
+						 Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_se.Send(size);
 			}
 		}
