@@ -1,3 +1,7 @@
+.vs/
+bin/
+obj/
+packages/
 _AbsoluteCurrencyStrength.Indicator.CS
 _BollingerBand.Strategy.CS
 _BollingerBand2.Strategy.CS
@@ -20,6 +24,7 @@ _PAMTF2.Strategy.CS
 _Percent_Exit_Pair.Strategy.CS
 _PercentChangeOverTime.Indicator.CS
 _PinBar.Strategy.CS
+_Portfolio_Ranking.Strategy.CS
 _Renko1.Strategy.CS
 _Renko2.Strategy.CS
 _RenkoPriceChannels.Indicator.CS
@@ -265,6 +270,7 @@ Profit_Target.Strategy.CS
 Profitable_Closes_LX.Strategy.CS
 Profitable_Closes_SX.Strategy.CS
 Rate_of_Chg.Indicator.CS
+RelativeStrength.Indicator.CS
 RSI.Indicator.CS
 RSI_LE.Strategy.CS
 RSI_SE.Strategy.CS
