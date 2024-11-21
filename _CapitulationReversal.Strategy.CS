@@ -62,7 +62,7 @@ namespace PowerLanguage.Strategy
 			if (ScanLength <= 0) throw new Exception("Scan length must be greater than zero.");
 			if (DownPercent <= 0.0d || DownPercent >= 100.0d) throw new Exception("Down percent must be greater than zero but less than hundred percent.");
       //Bars is used as the entry time frame criteria
-        	m_scannerTimeFrame = BarsOfData(2);
+      m_scannerTimeFrame = BarsOfData(2);
 			m_marketTimeFrame = BarsOfData(3);
 			MinimumGrowthPercent /= 100.0d;
 			MinimumGrowthPercent += 1.0d;
@@ -78,7 +78,7 @@ namespace PowerLanguage.Strategy
 					//scanner criteria
 					if (m_scannerTimeFrame.CurrentBar <= GrowthDays) return; //not enough data
 					if (m_scannerTimeFrame.Close[0] / m_scannerTimeFrame.Close[GrowthDays] < MinimumGrowthPercent) return;  //not enough growth
-					if (m_marketTimeFrame.Close[0] < m_marketTimeFrame.Close.Average(200)) return; //market is not bullish
+					if (m_marketTimeFrame.Close[0] < m_marketTimeFrame.Close.Average(MarketBullishLength)) return; //market is not bullish
 					if (m_marketTimeFrame.Close[0] > m_marketTimeFrame.High.Highest(ScanLength) * DownPercent) return; //market is not down by required percentage
 					if (m_scannerTimeFrame.Close[0] > m_scannerTimeFrame.High.Highest(ScanLength) * DownPercent) return; //stock is not down by required percentage
 					if (GapDownPercent > 0.0d && (m_scannerTimeFrame.Open[0] - m_scannerTimeFrame.Close[1]) / m_scannerTimeFrame.Close[1] > GapDownPercent) return; //gap down on the open

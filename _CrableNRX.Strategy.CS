@@ -26,6 +26,11 @@ namespace PowerLanguage.Strategy {
 
 
 		//inputs
+		//_OpeningRangeBarSignal inputs
+		[Input] public int VolumeLength { get; set; }           //volume length to use for opening bar volume detection
+		[Input] public double VolumeStdDevFactor { get; set; }  //volume standard deviation factor to use for high volume detection
+		[Input] public double MaxVolumeBasedPosPercent { get; set; }  //maximum volume based position size as a percentage of equity
+
 		[Input] double MinimumGrowthPercent { get; set; }    //minimum required growth in the past x-days
 		[Input] int GrowthDays { get; set; }								 //number of days to look back for the growth
 		[Input] public int NarrowRangeDays { get; set; }     //X-days is the narrowest X-day range relative to any X-day range within the previous narrow range period-market days
@@ -44,6 +49,7 @@ namespace PowerLanguage.Strategy {
 
 		protected override void Create()
 		{
+			base.Create();
 			MinimumGrowthPercent = 30;
 			GrowthDays = 120;
 			NarrowRangeDays = 7;
@@ -53,6 +59,10 @@ namespace PowerLanguage.Strategy {
 
 		protected override void StartCalc()
 		{
+			_VolumeLength = VolumeLength;
+			_VolumeStdDevFactor = VolumeStdDevFactor;
+			_MaxVolumeBasedPosPercent = MaxVolumeBasedPosPercent;
+			base.StartCalc();
 			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
 			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
 			//Bars is used as the entry time frame criteria
@@ -65,7 +75,7 @@ namespace PowerLanguage.Strategy {
 		}
 
 		protected override void CalcBar()
-		{
+		{			
 			switch (Environment.CalcReason)
 			{
 				case CalculationReason.Default:

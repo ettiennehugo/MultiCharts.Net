@@ -70,7 +70,7 @@ namespace PowerLanguage
 				double lowerHigh = lowAverage + epilonValue;
 
 				//check that all the bars' low/high fall within the upper and lower ranges
-				for (int i = Length; i > 0; i--)
+				for (int i = Length - 1; i >= 0; i--)
 					if (Instrument.Low[i] < lowerLow || Instrument.Low[i] > lowerHigh || Instrument.High[i] < upperLow || Instrument.High[i] > upperHigh)
 						return false;
 

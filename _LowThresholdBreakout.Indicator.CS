@@ -31,49 +31,48 @@ namespace PowerLanguage.Indicator
     [Input] public bool Debug { get; set; }
 
     //attributes
-    protected Function._ScannerLowThresholdBreakout scannerLowThresholdBreakout;
-    protected List<CriteriaMetArea> criteriaMetAreas;
+    protected Function._LowThresholdBreakout m_lowThresholdBreakout;
+    protected List<CriteriaMetArea> m_criteriaMetAreas;
     protected Color FONT_COLOR = Color.LightGray;
     protected float FRAME_LINE_WIDTH = 3.0f;
     protected float X_PADDING = 3.0f;
     protected float Y_PADDING = 3.0f;
 
-    public _LowThresholdBreakout(object _ctx) : base(_ctx) { }
+		//interface methods
+		public _LowThresholdBreakout(object _ctx) : base(_ctx) { }
 
     protected override void Create()
     {
       ChartCustomDraw.Register(this);
 
-      ScanBullishBearish = Function._ScannerLowThresholdBreakout.SCAN_BULLISH_BEARISH;
-      TradeIntensityShortPeriod = Function._ScannerLowThresholdBreakout.TRADE_INTENSITY_SHORT_PERIOD;
-      TradeIntensityLongPeriod = Function._ScannerLowThresholdBreakout.TRADE_INTENSITY_LONG_PERIOD;
-      TradeIntensityPercent = Function._ScannerLowThresholdBreakout.TRADE_INTENSITY_PERCENT;
-      PreviousDayIncreasePercent = Function._ScannerLowThresholdBreakout.PREVIOUS_DAY_INCREASE_PERCENT;
-      MinimumPrice = Function._ScannerLowThresholdBreakout.MINIMUM_PRICE;
-      MinimumAverageVolume = Function._ScannerLowThresholdBreakout.MINIMUM_AVERAGE_VOLUME;
-      AverageVolumeLength = Function._ScannerLowThresholdBreakout.AVERAGE_VOLUME_LENGTH;
-      Debug = Function._ScannerLowThresholdBreakout.DEBUG;
+      ScanBullishBearish = Function._LowThresholdBreakout.SCAN_BULLISH_BEARISH;
+      TradeIntensityShortPeriod = Function._LowThresholdBreakout.TRADE_INTENSITY_SHORT_PERIOD;
+      TradeIntensityLongPeriod = Function._LowThresholdBreakout.TRADE_INTENSITY_LONG_PERIOD;
+      TradeIntensityPercent = Function._LowThresholdBreakout.TRADE_INTENSITY_PERCENT;
+      PreviousDayIncreasePercent = Function._LowThresholdBreakout.PREVIOUS_DAY_INCREASE_PERCENT;
+      MinimumPrice = Function._LowThresholdBreakout.MINIMUM_PRICE;
+      MinimumAverageVolume = Function._LowThresholdBreakout.MINIMUM_AVERAGE_VOLUME;
+      AverageVolumeLength = Function._LowThresholdBreakout.AVERAGE_VOLUME_LENGTH;
+      m_lowThresholdBreakout = new Function._LowThresholdBreakout(this);
+			Debug = Function._LowThresholdBreakout.DEBUG;
 
-      scannerLowThresholdBreakout = new Function._ScannerLowThresholdBreakout(this);
-
-      //create additional attributes
-      criteriaMetAreas = new List<CriteriaMetArea>();
-
+			//create additional attributes
+			m_criteriaMetAreas = new List<CriteriaMetArea>();
     }
 
     protected override void StartCalc()
     {
-      scannerLowThresholdBreakout.TradeIntensityShortPeriod = TradeIntensityShortPeriod;
-      scannerLowThresholdBreakout.TradeIntensityLongPeriod = TradeIntensityLongPeriod;
-      scannerLowThresholdBreakout.PreviousDayIncreasePercent = PreviousDayIncreasePercent;
-      scannerLowThresholdBreakout.MinimumPrice = MinimumPrice;
-      scannerLowThresholdBreakout.MinimumAverageVolume = MinimumAverageVolume;
-      scannerLowThresholdBreakout.AverageVolumeLength = AverageVolumeLength;
-      scannerLowThresholdBreakout.Historical = true;
-      scannerLowThresholdBreakout.Debug = Debug;
+      m_lowThresholdBreakout.TradeIntensityShortPeriod = TradeIntensityShortPeriod;
+      m_lowThresholdBreakout.TradeIntensityLongPeriod = TradeIntensityLongPeriod;
+      m_lowThresholdBreakout.PreviousDayIncreasePercent = PreviousDayIncreasePercent;
+      m_lowThresholdBreakout.MinimumPrice = MinimumPrice;
+      m_lowThresholdBreakout.MinimumAverageVolume = MinimumAverageVolume;
+      m_lowThresholdBreakout.AverageVolumeLength = AverageVolumeLength;
+      m_lowThresholdBreakout.Historical = true;
+      m_lowThresholdBreakout.Debug = Debug;
 
       //clear set of criteria met areas
-      criteriaMetAreas.Clear();
+      m_criteriaMetAreas.Clear();
     }
 
     protected override void Destroy()
@@ -83,17 +82,17 @@ namespace PowerLanguage.Indicator
 
     protected override void CalcBar()
     {
-      scannerLowThresholdBreakout.Call();  
+      m_lowThresholdBreakout.Call();  
 
-      if (Environment.CalcReason == CalculationReason.Default && scannerLowThresholdBreakout.CriteriaMet)
+      if (Environment.CalcReason == CalculationReason.Default && m_lowThresholdBreakout.CriteriaMet)
       {
         CriteriaMetArea criteriaMetArea = new CriteriaMetArea();
         criteriaMetArea.high.Time = Bars.Time[0];
         criteriaMetArea.high.Price = Bars.High[0];
         criteriaMetArea.low.Time = Bars.Time[0];
         criteriaMetArea.low.Price = Bars.Low[0];
-        criteriaMetArea.barDirection = scannerLowThresholdBreakout.CurrentBarDirection;
-        criteriaMetAreas.Add(criteriaMetArea);
+        criteriaMetArea.barDirection = m_lowThresholdBreakout.CurrentBarDirection;
+        m_criteriaMetAreas.Add(criteriaMetArea);
       }
     }
 
@@ -108,7 +107,7 @@ namespace PowerLanguage.Indicator
         using (Brush bearishBrush = new SolidBrush(Color.FromArgb(64, BearishHighlightColor.R, BearishHighlightColor.G, BearishHighlightColor.B)))
         using (Pen bearishPen = new Pen(BearishHighlightColor, FRAME_LINE_WIDTH))
         {
-          foreach (CriteriaMetArea area in criteriaMetAreas)
+          foreach (CriteriaMetArea area in m_criteriaMetAreas)
           {
             //compute area for rectangle around price movement
             PointF startPoint = context.Environment.ChartPoint2Point(area.high);

@@ -7,9 +7,8 @@ namespace PowerLanguage
 {
 	namespace Function
 	{
-		public sealed class _BearishOverextension : FunctionSimple<System.Boolean>
+		public sealed class _CapitulationReversal : FunctionSimple<System.Boolean>
 		{
-
 			//constants
 
 
@@ -23,8 +22,8 @@ namespace PowerLanguage
 
 
 			//interface methods
-			public _BearishOverextension(CStudyControl _master) : base(_master) { }
-			public _BearishOverextension(CStudyControl _master, int _ds) : base(_master, _ds) { }
+			public _CapitulationReversal(CStudyControl _master) : base(_master) { }
+			public _CapitulationReversal(CStudyControl _master, int _ds) : base(_master, _ds) { }
 
 			protected override void Create()
 			{

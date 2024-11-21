@@ -8,7 +8,8 @@ using PowerLanguage.Function;
 
 namespace PowerLanguage.Indicator
 {
-  public class _EpisodicPivot : IndicatorObject, IChartCustomDrawer
+	[SameAsSymbol]
+	public class _EpisodicPivot : IndicatorObject, IChartCustomDrawer
   {
     //types
     protected struct CriteriaMetArea
@@ -26,8 +27,8 @@ namespace PowerLanguage.Indicator
     [Input] public Color HighlightColor { get; set; }
 
     //attributes
-    private Function._ScannerEpisodicPivot scannerEpisodicPivot;
-    protected List<CriteriaMetArea> criteriaMetAreas;
+    private Function._EpisodicPivot m_episodicPivot;
+    protected List<CriteriaMetArea> m_criteriaMetAreas;
     protected float FRAME_LINE_WIDTH = 3.0f;
     protected float X_PADDING = 3.0f;
     protected float Y_PADDING = 3.0f;
@@ -39,18 +40,18 @@ namespace PowerLanguage.Indicator
       ChartCustomDraw.Register(this);
 
       //default inputs
-      MinimumPrice = Function._ScannerEpisodicPivot.MINIMUM_PRICE;
-      VolumeLength = Function._ScannerEpisodicPivot.VOLUME_LENGTH;
-      AverageVolume = Function._ScannerEpisodicPivot.AVERAGE_VOLUME;
-      AverageDollarVolume = Function._ScannerEpisodicPivot.AVERAGE_DOLLAR_VOLUME;
-      PercentageChange = Function._ScannerEpisodicPivot.PERCENTAGE_CHANGE;
+      MinimumPrice = Function._EpisodicPivot.MINIMUM_PRICE;
+      VolumeLength = Function._EpisodicPivot.VOLUME_LENGTH;
+      AverageVolume = Function._EpisodicPivot.AVERAGE_VOLUME;
+      AverageDollarVolume = Function._EpisodicPivot.AVERAGE_DOLLAR_VOLUME;
+      PercentageChange = Function._EpisodicPivot.PERCENTAGE_CHANGE;
       HighlightColor = Color.LightGray;
 
       //create additional attributes
-      criteriaMetAreas = new List<CriteriaMetArea>();
+      m_criteriaMetAreas = new List<CriteriaMetArea>();
 
       //create scanner function
-      scannerEpisodicPivot = new Function._ScannerEpisodicPivot(this);
+      m_episodicPivot = new Function._EpisodicPivot(this);
     }
 
     protected override void Destroy()
@@ -61,29 +62,29 @@ namespace PowerLanguage.Indicator
     protected override void StartCalc()
     {
       //set inputs
-      scannerEpisodicPivot.MinimumPrice = MinimumPrice;
-      scannerEpisodicPivot.VolumeLength = VolumeLength;
-      scannerEpisodicPivot.AverageVolume = AverageVolume;
-      scannerEpisodicPivot.AverageDollarVolume = AverageDollarVolume;
-      scannerEpisodicPivot.PercentageChange = PercentageChange;
-      scannerEpisodicPivot.Historical = true;
+      m_episodicPivot.MinimumPrice = MinimumPrice;
+      m_episodicPivot.VolumeLength = VolumeLength;
+      m_episodicPivot.AverageVolume = AverageVolume;
+      m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
+      m_episodicPivot.PercentageChange = PercentageChange;
+      m_episodicPivot.Historical = true;
 
       //clear set of criteria met areas
-      criteriaMetAreas.Clear();
+      m_criteriaMetAreas.Clear();
     }
 
     protected override void CalcBar()
     {
-      scannerEpisodicPivot.Call();
+      m_episodicPivot.Call();
 
-      if (Environment.CalcReason == CalculationReason.Default && scannerEpisodicPivot.CriteriaMet)
+      if (Environment.CalcReason == CalculationReason.Default && m_episodicPivot.CriteriaMet)
       {
         CriteriaMetArea criteriaMetArea = new CriteriaMetArea();
         criteriaMetArea.high.Time = Bars.Time[0];
         criteriaMetArea.high.Price = Bars.High[0];
         criteriaMetArea.low.Time = Bars.Time[0];
         criteriaMetArea.low.Price = Bars.Low[0];
-        criteriaMetAreas.Add(criteriaMetArea);
+        m_criteriaMetAreas.Add(criteriaMetArea);
       }
     }
 
@@ -94,7 +95,7 @@ namespace PowerLanguage.Indicator
         using (Brush brush = new SolidBrush(Color.FromArgb(64, HighlightColor.R, HighlightColor.G, HighlightColor.B)))
         using (Pen pen = new Pen(HighlightColor, FRAME_LINE_WIDTH))
         {
-          foreach (CriteriaMetArea area in criteriaMetAreas)
+          foreach (CriteriaMetArea area in m_criteriaMetAreas)
           {
             //compute area for rectangle around price movement
             PointF startPoint = context.Environment.ChartPoint2Point(area.high);

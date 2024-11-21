@@ -1,5 +1,4 @@
-﻿using FileHelpers;
-using System;
+﻿using System;
 using System.Drawing;
 using System.Linq;
 
@@ -8,7 +7,6 @@ namespace PowerLanguage
 {
 	namespace Function
 	{
-
 		//General types shared among indicators
 		public enum EScanBullishBearish
 		{
@@ -41,10 +39,10 @@ namespace PowerLanguage
 		///   - Close[0] / Close[1] < Close[1] / Close[2] - saw a price increase
 		///   - Close[1] / Close[2] < 0.98 (2% decrease) - did not see a huge price decrease before
 		///
-		/// TODO:
+		/// TODO: TBD - watch video and see what else needs to be implemented for this.
 		/// 
 		/// </summary>
-		public sealed class _ScannerLowThresholdBreakout : FunctionSimple<System.Boolean>
+		public sealed class _LowThresholdBreakout : FunctionSimple<System.Boolean>
 		{
 			//constants
 			public const EScanBullishBearish SCAN_BULLISH_BEARISH = EScanBullishBearish.BullishAndBearish;
@@ -96,9 +94,9 @@ namespace PowerLanguage
 			private double m_bearishPreviousDayDecreasePercent;
 			private int m_firstBarToCheck;
 
-			public _ScannerLowThresholdBreakout(CStudyControl _master) : base(_master) { }
-			public _ScannerLowThresholdBreakout(CStudyControl _master, int _ds) : base(_master, _ds) { }
-
+			//interface methods
+			public _LowThresholdBreakout(CStudyControl _master) : base(_master) { }
+			public _LowThresholdBreakout(CStudyControl _master, int _ds) : base(_master, _ds) { }
 
 			protected override void Create()
 			{
@@ -223,5 +221,9 @@ namespace PowerLanguage
 				return m_historicalCriteria;
 			}
 		}
+
+		//methods
+
+
 	}
 }
