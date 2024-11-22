@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
+using PowerLanguage.Indicator;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -23,18 +24,20 @@ namespace PowerLanguage.Strategy {
 
 
 		//inputs
-		[Input] double MinimumGrowthPercent { get; set; }    //minimum required growth in the past x-days
-		[Input] int GrowthDays { get; set; }								 //number of days to look back for the growth
-		[Input] double MinimumGapUpPercent { get; set; }     //minimum required gap up on the open
-		[Input] double MaximumGapUpPercent { get; set; }     //maximum required gap up on the open - this is to avoid garbage stocks that are potentially up hundreds of percent
-		[Input] double OverExtensionAtrFactor { get; set; }  //factor used to check whether the stock is overextended
+		[Input] public double MinimumPrice { get; set; }
+		[Input] public int GrowthDays { get; set; }
+		[Input] public double GrowthPercent { get; set; }
+		[Input] public int VolumeLength { get; set; }
+		[Input] public int AverageVolume { get; set; }
+		[Input] public int AverageDollarVolume { get; set; }
+		[Input] public double MinimumPercentageChange { get; set; }
+		[Input] public double MaximumPercentageChange { get; set; }
 
 		//properties
 
 
 		//attributes
-		private IInstrument m_scannerTimeFrame;
-
+		private Function._EpisodicPivot m_episodicPivot;
 
 		//interface methods
 		public _EpisodicPivot(object _ctx) : base(_ctx) { }
@@ -42,43 +45,33 @@ namespace PowerLanguage.Strategy {
 		//methods
 		protected override void Create()
 		{
-			MinimumGrowthPercent = 30;
-			GrowthDays = 120;
-			MinimumGapUpPercent = 10;
-			MaximumGapUpPercent = 30;
-			OverExtensionAtrFactor = 3.0d;    //must be within 3 ATR's of the moving average
+			MinimumPrice = Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
+			GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+			GrowthPercent = Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
+			VolumeLength = Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
+			AverageVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
+			AverageDollarVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
+			MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
+			MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
+			m_episodicPivot = new Function._EpisodicPivot(this);
 		}
 
 		protected override void StartCalc()
 		{
-			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
-			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
-			if (MinimumGapUpPercent <= 0) throw new Exception("Minimum gap up percent must be greater than zero.");
-			if (MaximumGapUpPercent <= 0) throw new Exception("Maximum gap up percent must be greater than zero.");
-			if (MinimumGapUpPercent >= MaximumGapUpPercent) throw new Exception("Minimum gap up percent must be less than the maximum gap up percent.");
-			m_scannerTimeFrame = BarsOfData(2);
-			MinimumGrowthPercent /= 100.0d;
-			MinimumGrowthPercent += 1.0d;
-			MaximumGapUpPercent /= 100.0d;
-			MaximumGapUpPercent += 1.0d;
+			m_episodicPivot.Instrument = Bars;
+			m_episodicPivot.MinimumPrice = MinimumPrice;
+			m_episodicPivot.GrowthDays = GrowthDays;
+			m_episodicPivot.GrowthPercent = GrowthPercent;
+			m_episodicPivot.VolumeLength = VolumeLength;
+			m_episodicPivot.AverageVolume = AverageVolume;
+			m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
+			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
+			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
 		}
 
 		protected override void CalcBar()
 		{
-			switch (Environment.CalcReason)
-			{
-				case CalculationReason.Default:
-					//scanner criteria
-					if (m_scannerTimeFrame.CurrentBar <= GrowthDays) return; //not enough data
-					if (m_scannerTimeFrame.Close[0] / m_scannerTimeFrame.Close[GrowthDays] > MinimumGrowthPercent) return;  //not enough growth
-					double gapUpPercent = (m_scannerTimeFrame.Open[0] - m_scannerTimeFrame.Close[1]) / m_scannerTimeFrame.Close[1];
-					if (gapUpPercent > MinimumGapUpPercent && gapUpPercent < MaximumGapUpPercent) return; //no minimum gap up on the open
-					if (!isWithinAverageRange(m_scannerTimeFrame, 10, 20, OverExtensionAtrFactor)) return; //stock is overextended
-
-					//entry criteria
-					base.CalcBar();
-					break;
-			}
+			if (m_episodicPivot[0]) base.CalcBar();
 		}
 	}
 }

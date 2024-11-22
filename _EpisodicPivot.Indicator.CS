@@ -18,12 +18,15 @@ namespace PowerLanguage.Indicator
       public ChartPoint low;
     };
 
-    //inputs
-    [Input] public double MinimumPrice { get; set; }
-    [Input] public int VolumeLength { get; set; }
+		//inputs
+		[Input] public double MinimumPrice { get; set; }
+		[Input] public int GrowthDays { get; set; }
+		[Input] public double GrowthPercent { get; set; }
+		[Input] public int VolumeLength { get; set; }
     [Input] public int AverageVolume { get; set; }
     [Input] public int AverageDollarVolume { get; set; }
-    [Input] public double PercentageChange { get; set; }
+    [Input] public double MinimumPercentageChange { get; set; }
+    [Input] public double MaximumPercentageChange { get; set; }
     [Input] public Color HighlightColor { get; set; }
 
     //attributes
@@ -38,19 +41,18 @@ namespace PowerLanguage.Indicator
     protected override void Create()
     {
       ChartCustomDraw.Register(this);
-
-      //default inputs
-      MinimumPrice = Function._EpisodicPivot.MINIMUM_PRICE;
-      VolumeLength = Function._EpisodicPivot.VOLUME_LENGTH;
-      AverageVolume = Function._EpisodicPivot.AVERAGE_VOLUME;
-      AverageDollarVolume = Function._EpisodicPivot.AVERAGE_DOLLAR_VOLUME;
-      PercentageChange = Function._EpisodicPivot.PERCENTAGE_CHANGE;
+      
+      MinimumPrice = Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
+      GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+      GrowthPercent = Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
+      VolumeLength = Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
+      AverageVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
+      AverageDollarVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
+      MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
+      MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
       HighlightColor = Color.LightGray;
 
-      //create additional attributes
       m_criteriaMetAreas = new List<CriteriaMetArea>();
-
-      //create scanner function
       m_episodicPivot = new Function._EpisodicPivot(this);
     }
 
@@ -62,12 +64,15 @@ namespace PowerLanguage.Indicator
     protected override void StartCalc()
     {
       //set inputs
-      m_episodicPivot.MinimumPrice = MinimumPrice;
+      m_episodicPivot.Instrument = Bars;
+			m_episodicPivot.MinimumPrice = MinimumPrice;
+      m_episodicPivot.GrowthDays = GrowthDays;
+      m_episodicPivot.GrowthPercent = GrowthPercent;
       m_episodicPivot.VolumeLength = VolumeLength;
       m_episodicPivot.AverageVolume = AverageVolume;
       m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
-      m_episodicPivot.PercentageChange = PercentageChange;
-      m_episodicPivot.Historical = true;
+      m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
+      m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
 
       //clear set of criteria met areas
       m_criteriaMetAreas.Clear();
@@ -75,9 +80,9 @@ namespace PowerLanguage.Indicator
 
     protected override void CalcBar()
     {
-      m_episodicPivot.Call();
+      //m_episodicPivot.Call(); - TBD is this required???
 
-      if (Environment.CalcReason == CalculationReason.Default && m_episodicPivot.CriteriaMet)
+      if (m_episodicPivot[0])
       {
         CriteriaMetArea criteriaMetArea = new CriteriaMetArea();
         criteriaMetArea.high.Time = Bars.Time[0];

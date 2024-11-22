@@ -7,9 +7,12 @@ namespace PowerLanguage
 {
 	namespace Function
 	{
+		/// <summary>
+		/// Determines whether a stock is in a bearish overextension with a gradual decline in price, we don't want to see massive
+		/// volatility in the price that would make it hard to determine where the price is going.
+		/// </summary>
 		public sealed class _BearishOverextension : FunctionSimple<System.Boolean>
 		{
-
 			//constants
 
 

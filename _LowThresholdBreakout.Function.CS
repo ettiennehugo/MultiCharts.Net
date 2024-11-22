@@ -25,6 +25,9 @@ namespace PowerLanguage
 		}
 
 		/// <summary>
+		/// Detects low threshold breakouts in the market for trading larger market cap stocks that do not move alot but move slowly
+		/// and breaking out slowly. Essentially breakouts that are not breaking out with a lot of force.
+		/// https://www.youtube.com/watch?v=KRFNu_NnoHk
 		/// Rules:
 		/// * Minimum volume over 3-days > 100 000
 		/// * Close > $1
@@ -77,8 +80,8 @@ namespace PowerLanguage
 			public ECurrentBarDirection CurrentBarDirection { get { return m_currentBarDirection; } }
 
 			//attributes
-			private AverageFC m_shortMA;
-			private AverageFC m_longMA;
+			private Function.SuperSmoother m_shortMA;
+			private Function.SuperSmoother m_longMA;
 			private bool m_criteriaMet;
 			private bool m_lowThresholdCriteria;
 			private bool m_minimumPriceCriteria;
@@ -113,8 +116,8 @@ namespace PowerLanguage
 				Debug = DEBUG;
 
 				//create indicators, plots
-				m_shortMA = new AverageFC(this);
-				m_longMA = new AverageFC(this);
+				m_shortMA = new Function.SuperSmoother(this);
+				m_longMA = new Function.SuperSmoother(this);
 			}
 
 			protected override void StartCalc()
@@ -147,17 +150,14 @@ namespace PowerLanguage
 				m_bearishPreviousDayDecreasePercent = 1.0 - m_previousDayIncreasePercent;
 
 				//setup indicators
-				m_shortMA.price = Bars.Close;
-				m_shortMA.length = TradeIntensityShortPeriod;
-				m_longMA.price = Bars.Close;
-				m_longMA.length = TradeIntensityLongPeriod;
+				m_shortMA.Price = Bars.Close;
+				m_shortMA.Length = TradeIntensityShortPeriod;
+				m_longMA.Price = Bars.Close;
+				m_longMA.Length = TradeIntensityLongPeriod;
 
 				//determine the first bar to check
 				m_firstBarToCheck = TradeIntensityLongPeriod >= AverageVolumeLength ? TradeIntensityLongPeriod : AverageVolumeLength;
 				m_firstBarToCheck = m_firstBarToCheck < 2 ? 2 : m_firstBarToCheck;  //need at least two bars based on calculations below
-
-				//clear debug output
-				if (Debug) Output.Clear();
 			}
 
 			protected override System.Boolean CalcBar()

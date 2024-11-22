@@ -39,8 +39,7 @@ namespace PowerLanguage.Strategy
 
 
 		//attributes
-		private IInstrument m_scannerTimeFrame;   //Capitulation reversal scanning timeframe, typically daily 
-		private IInstrument m_marketTimeFrame;    //market timeframe, typically daily 
+		PowerLanguage.Function._CapitulationReversal m_capitulationReversal;
 
 		//interface methods
 		public _CapitulationReversal(object _ctx) : base(_ctx) { }
@@ -48,45 +47,30 @@ namespace PowerLanguage.Strategy
 		//methods
 		protected override void Create()
 		{
-			MinimumGrowthPercent = 30;
-			GrowthDays = 120;
-			MarketBullishLength = 200;
-			ScanLength = 20;
-			DownPercent = 10.0d;
+			MinimumGrowthPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_MINIMUM_GROWTH_PERCENT;
+			GrowthDays = PowerLanguage.Function._CapitulationReversal.DEFAULT_GROWTH_DAYS;
+			MarketBullishLength = PowerLanguage.Function._CapitulationReversal.DEFAULT_MARKET_BULLISH_LENGTH;
+			ScanLength = PowerLanguage.Function._CapitulationReversal.DEFAULT_SCAN_LENGTH;
+			DownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_DOWN_PERCENT;
+			GapDownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_GAP_DOWN_PERCENT;
 		}
 
 		protected override void StartCalc()
 		{
-			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
-			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
-			if (ScanLength <= 0) throw new Exception("Scan length must be greater than zero.");
-			if (DownPercent <= 0.0d || DownPercent >= 100.0d) throw new Exception("Down percent must be greater than zero but less than hundred percent.");
-      //Bars is used as the entry time frame criteria
-      m_scannerTimeFrame = BarsOfData(2);
-			m_marketTimeFrame = BarsOfData(3);
-			MinimumGrowthPercent /= 100.0d;
-			MinimumGrowthPercent += 1.0d;
-			DownPercent = 1.0d - DownPercent / 100.0d;
-			GapDownPercent /= 100.0d;
+			m_capitulationReversal.Instrument = BarsOfData(2); //Longer timeframe bars for the instrument, e.g. daily
+			m_capitulationReversal.Market = BarsOfData(3); //Market data bars used to determine market pullback, e.g. daily
+			m_capitulationReversal.MinimumGrowthPercent = MinimumGrowthPercent;
+			m_capitulationReversal.GrowthDays = GrowthDays;
+			m_capitulationReversal.MarketBullishLength = MarketBullishLength;
+			m_capitulationReversal.ScanLength = ScanLength;
+			m_capitulationReversal.DownPercent = DownPercent;
+			m_capitulationReversal.GapDownPercent = GapDownPercent;
 		}
 
 		protected override void CalcBar()
 		{
-			switch (Environment.CalcReason)
-			{
-				case CalculationReason.Default:
-					//scanner criteria
-					if (m_scannerTimeFrame.CurrentBar <= GrowthDays) return; //not enough data
-					if (m_scannerTimeFrame.Close[0] / m_scannerTimeFrame.Close[GrowthDays] < MinimumGrowthPercent) return;  //not enough growth
-					if (m_marketTimeFrame.Close[0] < m_marketTimeFrame.Close.Average(MarketBullishLength)) return; //market is not bullish
-					if (m_marketTimeFrame.Close[0] > m_marketTimeFrame.High.Highest(ScanLength) * DownPercent) return; //market is not down by required percentage
-					if (m_scannerTimeFrame.Close[0] > m_scannerTimeFrame.High.Highest(ScanLength) * DownPercent) return; //stock is not down by required percentage
-					if (GapDownPercent > 0.0d && (m_scannerTimeFrame.Open[0] - m_scannerTimeFrame.Close[1]) / m_scannerTimeFrame.Close[1] > GapDownPercent) return; //gap down on the open
-
-					//entry criteria
-					base.CalcBar();
-					break;
-			}
+			//if we get a capitulation reversal signal then we can start to look for a high volume opening bar entry
+			if (m_capitulationReversal[0]) base.CalcBar();
 		}
 	}
 }

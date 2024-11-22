@@ -21,6 +21,7 @@ namespace PowerLanguage.Indicator{
 		private IPlotObject m_plot;
 		private Function._CrableNRX m_crableNRX;
 		private Function._DarvasBox m_darvaBox;
+		//private Function._CapitulationReversal m_capitulationReversal;
 
 		//interface methods
 		public _ScannerGeneric(object _ctx) : base(_ctx) { }
