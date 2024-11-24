@@ -37,7 +37,7 @@ namespace PowerLanguage.Strategy {
 
 
 		//attributes
-		private Function._EpisodicPivot m_episodicPivot;
+		private PowerLanguage.Function._EpisodicPivot m_episodicPivot;
 
 		//interface methods
 		public _EpisodicPivot(object _ctx) : base(_ctx) { }
@@ -45,15 +45,15 @@ namespace PowerLanguage.Strategy {
 		//methods
 		protected override void Create()
 		{
-			MinimumPrice = Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
-			GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
-			GrowthPercent = Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
-			VolumeLength = Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
-			AverageVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
-			AverageDollarVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
-			MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
-			MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
-			m_episodicPivot = new Function._EpisodicPivot(this);
+			MinimumPrice = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
+			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
+			VolumeLength = PowerLanguage.Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
+			AverageVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
+			AverageDollarVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
+			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
+			MaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
+			m_episodicPivot = new PowerLanguage.Function._EpisodicPivot(this);
 		}
 
 		protected override void StartCalc()
