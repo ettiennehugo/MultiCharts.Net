@@ -28,8 +28,8 @@ namespace PowerLanguage
 			public const int DEFAULT_VOLUME_LENGTH = 20;
 			public const int DEFAULT_AVERAGE_VOLUME = 150000;
 			public const int DEFAULT_AVERAGE_DOLLAR_VOLUME = 20000000;
-			public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 7.0;
-			public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 15.0;
+			public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.07;
+			public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.15;
 
 			//inputs
 			public IInstrument Instrument {  get; set; }
@@ -46,8 +46,7 @@ namespace PowerLanguage
 
 
 			//attributes
-			private double m_minimumPercentageChange;
-			private double m_maximumPercentageChange;
+
 			
 			//interface methods
 			public _EpisodicPivot(CStudyControl _master) : base(_master) { }
@@ -76,16 +75,13 @@ namespace PowerLanguage
 				if (MinimumPercentageChange <= 0) throw new Exception("MinimumPercentageChange must be larger than zero.");
 				if (MaximumPercentageChange <= 0) throw new Exception("MaximumPercentageChange must be larger than zero.");
 				if (MinimumPercentageChange > MaximumPercentageChange) throw new Exception("MinimumPercentageChange must be smaller or equal to MaximumPercentageChange.");
-
-				m_minimumPercentageChange = MinimumPercentageChange / 100.0;
-				m_maximumPercentageChange = MaximumPercentageChange / 100.0;
 			}
 
 			protected override System.Boolean CalcBar()
 			{				
 				if (Instrument.CurrentBar < VolumeLength && Instrument.CurrentBar < GrowthDays) return false;
 				if (Instrument.Close[0] < MinimumPrice) return false;
-				if (((Instrument.Close[0] / Instrument.Close[GrowthDays]) - 1) > GrowthPercent) return false;
+				if (((Instrument.Close[0] / Instrument.Close[GrowthDays]) - 1) < GrowthPercent) return false;
 				if (Instrument.Volume.Average(VolumeLength) < AverageVolume) return false;
 				
 				double averageDollarVolume = 0.0;

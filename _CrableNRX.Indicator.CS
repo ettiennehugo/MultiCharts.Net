@@ -13,6 +13,7 @@ namespace PowerLanguage.Indicator{
 		//inputs
 		[Input] public int Length { get; set; }
 		[Input] public int ScanLength { get; set; }
+		[Input] public bool Debug { get; set; }
 
 		//properties
 
@@ -29,8 +30,10 @@ namespace PowerLanguage.Indicator{
 
 		protected override void Create()
 		{
+			base.Create();
 			Length = Function._CrableNRX.DEFAULT_LENGTH;
 			ScanLength = Function._CrableNRX.DEFAULT_SCAN_LENGTH;
+			Debug = false;
 			m_plotO = AddPlot(new PlotAttributes("", EPlotShapes.LeftTick, Color.Purple));
 			m_plotH = AddPlot(new PlotAttributes("", EPlotShapes.BarHigh, Color.Purple));
 			m_plotL = AddPlot(new PlotAttributes("", EPlotShapes.BarLow, Color.Purple));
@@ -49,7 +52,7 @@ namespace PowerLanguage.Indicator{
 		{
 			if (m_crableNRX[0])
 			{
-				Output.WriteLine("NRX - {0}", Bars.Time[0]);
+				if (Debug) Output.WriteLine("CrableNRX Indicator, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
 				m_plotO.Set(Bars.Open[0]);
 				m_plotH.Set(Bars.High[0]);
 				m_plotL.Set(Bars.Low[0]);

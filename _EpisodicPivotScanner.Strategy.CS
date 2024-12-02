@@ -1,0 +1,85 @@
+﻿using System;
+using System.Drawing;
+using System.Linq;
+using PowerLanguage.Function;
+using ATCenterProxy.interop;
+
+namespace PowerLanguage.Strategy {
+	/// <summary>
+	/// Episodic Pivot Scanner signal that works with the high-volume opening bar money management signal.
+	/// </summary>
+	public class _EpisodicPivotScanner : _CustomSignal {
+		//constants
+
+
+		//inputs
+		[Input] public double MinimumPrice { get; set; }
+		[Input] public int GrowthDays { get; set; }
+		[Input] public double GrowthPercent { get; set; }
+		[Input] public int VolumeLength { get; set; }
+		[Input] public int AverageVolume { get; set; }
+		[Input] public int AverageDollarVolume { get; set; }
+		[Input] public double MinimumPercentageChange { get; set; } //gap up must be at least this minimum
+		[Input] public double MaximumPercentageChange { get; set; } //gap up clipped to this maximum to avoid pump-and-dump stocks
+		[Input] public bool Debug { get; set; } //debug flag to print out the values
+
+		//properties
+
+
+		//attributes
+		PowerLanguage.Function._EpisodicPivot m_episodicPivot;
+
+		//interface methods
+		public _EpisodicPivotScanner(object _ctx) : base(_ctx) { }
+
+		protected override void Create()
+		{
+			MinimumPrice = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
+			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
+			VolumeLength = PowerLanguage.Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
+			AverageVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
+			AverageDollarVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
+			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
+			MaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
+			Debug = false;
+			m_episodicPivot = new PowerLanguage.Function._EpisodicPivot(this);
+		}
+
+		protected override void StartCalc()
+		{
+			m_episodicPivot.Instrument = Bars;
+			m_episodicPivot.MinimumPrice = MinimumPrice;
+			m_episodicPivot.GrowthDays = GrowthDays;
+			m_episodicPivot.GrowthPercent = GrowthPercent;
+			m_episodicPivot.VolumeLength = VolumeLength;
+			m_episodicPivot.AverageVolume = AverageVolume;
+			m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
+			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
+			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
+		}
+
+		protected override void CalcBar()
+		{
+			if (Environment.CalcReason == CalculationReason.Default && m_episodicPivot[0])
+			{
+				if (Debug) Output.WriteLine("EpisodicPivot, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
+				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Long;
+				//TODO fill values for the PMMS signal
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_PRICE
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_RISK
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_STOP_LOSS
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_STRATEGY_DATA
+
+			}
+			else
+				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
+		}
+
+		//methods
+
+
+	}
+}

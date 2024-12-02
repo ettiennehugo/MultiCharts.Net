@@ -21,10 +21,11 @@ namespace PowerLanguage.Strategy {
 	public class _PMMS_HighVolumeOpeningRange : _CustomSignal {
 		//constants
 		public const string PARAMETER_SCAN_FOR_ENTRY = "HVORScanForEntry";	//strategies associated with this portfolio signal should set this bool to true to enable entry scanning
+		public const string PARAMETER_ENTRY_DIRECTION = "HVOREntryDirection";	//direction to scan for entry, long vs short
 		public const string PARAMETER_ENTRY_PRICE = "HVOREntryPrice";		//entry price for a position
-		public const string PARAMETER_RISK = "HVORRisk";					//risk for a position
-		public const string PARAMETER_STOP_LOSS = "HVORStopLoss";      		//stop-loss for a position
-		public const string PARAMETER_STRATEGY_DATA = "HVORStrategyData";   //dat stored per strategy for the portfolio signal
+		public const string PARAMETER_RISK = "HVORRisk";								//risk for a position
+		public const string PARAMETER_STOP_LOSS = "HVORStopLoss";      	//stop-loss for a position
+		public const string PARAMETER_STRATEGY_DATA = "HVORStrategyData";   //data stored per strategy for the portfolio signal
 		public const int DEFAULT_BAR_SIZE = 5;						//use 5 minutes as the default bar size
 		public const bool DEFAULT_INCLUDE_PRE_POST_MARKET = false;
 		public const int DEFAULT_VOLUME_LENGTH = 450;								//5-days of 5-minute bars excluding the pre- and post-market sessions

@@ -28,9 +28,10 @@ namespace PowerLanguage.Indicator
     [Input] public double MinimumPercentageChange { get; set; }
     [Input] public double MaximumPercentageChange { get; set; }
     [Input] public Color HighlightColor { get; set; }
+    [Input] public bool Debug { get; set; }
 
-    //attributes
-    private Function._EpisodicPivot m_episodicPivot;
+		//attributes
+		private Function._EpisodicPivot m_episodicPivot;
     protected List<CriteriaMetArea> m_criteriaMetAreas;
     protected float FRAME_LINE_WIDTH = 3.0f;
     protected float X_PADDING = 3.0f;
@@ -51,8 +52,9 @@ namespace PowerLanguage.Indicator
       MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
       MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
       HighlightColor = Color.LightGray;
+			Debug = false;
 
-      m_criteriaMetAreas = new List<CriteriaMetArea>();
+			m_criteriaMetAreas = new List<CriteriaMetArea>();
       m_episodicPivot = new Function._EpisodicPivot(this);
     }
 
@@ -84,7 +86,8 @@ namespace PowerLanguage.Indicator
 
       if (m_episodicPivot[0])
       {
-        CriteriaMetArea criteriaMetArea = new CriteriaMetArea();
+				if (Debug) Output.WriteLine("EpisodicPivot Indicator, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+				CriteriaMetArea criteriaMetArea = new CriteriaMetArea();
         criteriaMetArea.high.Time = Bars.Time[0];
         criteriaMetArea.high.Price = Bars.High[0];
         criteriaMetArea.low.Time = Bars.Time[0];

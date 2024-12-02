@@ -12,7 +12,8 @@ namespace PowerLanguage.Indicator{
 
 		//inputs
 		[Input] public int Length { get; set; }       //required length of the Darvas box
-		[Input] public double Epsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal" 
+		[Input] public double Epsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal"
+		[Input] public bool Debug { get; set; }       //debug flag to print out the values
 
 		//properties
 
@@ -29,8 +30,10 @@ namespace PowerLanguage.Indicator{
 
 		protected override void Create()
 		{
+			base.Create();
 			Length = Function._DarvasBox.DEFAULT_LENGTH;
 			Epsilon = Function._DarvasBox.DEFAULT_EPSILON;
+			Debug = false;
 			m_darvasBox = new Function._DarvasBox(this);
 			m_plotO = AddPlot(new PlotAttributes("", EPlotShapes.LeftTick, Color.Purple));
 			m_plotH = AddPlot(new PlotAttributes("", EPlotShapes.BarHigh, Color.Purple));
@@ -49,7 +52,7 @@ namespace PowerLanguage.Indicator{
 		{
 			if (m_darvasBox[0])
 			{
-				Output.WriteLine("DB - {0}", Bars.Time[0]);
+				if (Debug) Output.WriteLine("DarvasBox Indicator, {0} {1}", Bars.Info.Name, Bars.Time[0]);
 				m_plotO.Set(Bars.Open[0]);
 				m_plotH.Set(Bars.High[0]);
 				m_plotL.Set(Bars.Low[0]);

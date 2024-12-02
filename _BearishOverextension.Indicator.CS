@@ -19,6 +19,7 @@ namespace PowerLanguage.Indicator
 		[Input] public int FastSmoothingLength { get; set; }
 		[Input] public int SlowSmoothingLength { get; set; }
 		[Input] public int GradualDeclineLength { get; set; }
+		[Input] public bool Debug { get; set; }
 
 		//properties
 
@@ -42,6 +43,7 @@ namespace PowerLanguage.Indicator
 			FastSmoothingLength = Function._BearishOverextension.DEFAULT_FAST_SMOOTHER_LENGTH;
 			SlowSmoothingLength = Function._BearishOverextension.DEFAULT_SLOW_SMOOTHER_LENGTH;
 			GradualDeclineLength = Function._BearishOverextension.DEFAULT_GRADUAL_DECLINE_LENGTH;
+			Debug = false;
 			m_plotO = AddPlot(new PlotAttributes("", EPlotShapes.LeftTick, Color.Purple));
 			m_plotH = AddPlot(new PlotAttributes("", EPlotShapes.BarHigh, Color.Purple));
 			m_plotL = AddPlot(new PlotAttributes("", EPlotShapes.BarLow, Color.Purple));
@@ -65,7 +67,7 @@ namespace PowerLanguage.Indicator
 		{
 			if (m_bearishOverextension[0])
 			{
-				Output.WriteLine("BOE - {0}", Bars.Time[0]);
+				if (Debug) Output.WriteLine("BearishOverextension Indicator, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
 				m_plotO.Set(Bars.Open[0]);
 				m_plotH.Set(Bars.High[0]);
 				m_plotL.Set(Bars.Low[0]);

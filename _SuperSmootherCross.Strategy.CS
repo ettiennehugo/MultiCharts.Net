@@ -35,60 +35,66 @@ namespace PowerLanguage.Strategy
   /// 
   /// 
   /// </summary>
-  public class _SuperSmootherCross : SignalObject
+  public class _SuperSmootherCross : _CustomSignal
   {
     //Constants:
     public const int DEFAULT_FAST_PERIOD = 40;
     public const int DEFAULT_SLOW_PERIOD = 120;
     private const int CROSS_LOOKBACK = 1;
+		public const double DEFAULT_MAX_RISK_EQUITY_PER_POS_PERCENT = 0.01d;
 
-    //Properties:
-    [Input] public int FastPeriod { get; set; }
+		//Properties:
+		[Input] public int FastPeriod { get; set; }
     [Input] public int SlowPeriod { get; set; }
-    [Input] public bool EnableLong { get; set; }
+		[Input] public bool RiskBasedPositionSizing { get; set; }
+		[Input] public double MaxRiskEquityPerPosPercent { get; set; }
+		[Input] public bool EnableLong { get; set; }
     [Input] public bool EnableShort { get; set; }
 
     //Attributes:
-    private SuperSmoother _FastSuperSmoother;
-    private SuperSmoother _SlowSuperSmoother;
-    private VariableSeries<double> _Fast;
-    private VariableSeries<double> _Slow;
-    private IOrderMarket _LE;
-    private IOrderMarket _SE;
-    private IOrderMarket _LX;
-    private IOrderMarket _SX;
+    private SuperSmoother m_fastSuperSmoother;
+    private SuperSmoother m_slowSuperSmoother;
+    private VariableSeries<double> m_fast;
+    private VariableSeries<double> m_slow;
+    private IOrderMarket m_le;
+    private IOrderMarket m_se;
+    private IOrderMarket m_lx;
+    private IOrderMarket m_sx;
+		private double m_stopLossPercent;
 
-    public _SuperSmootherCross(object _ctx) : base(_ctx)
+		public _SuperSmootherCross(object _ctx) : base(_ctx)
     {
       //initialize additional inputs for strategy
       FastPeriod = DEFAULT_FAST_PERIOD;
       SlowPeriod = DEFAULT_SLOW_PERIOD;
-      EnableLong = true;
+			RiskBasedPositionSizing = false;
+			MaxRiskEquityPerPosPercent = DEFAULT_MAX_RISK_EQUITY_PER_POS_PERCENT;
+			EnableLong = true;
       EnableShort = true;
     }
 
     protected override void Create()
     {		
       //create indicators used
-      _FastSuperSmoother = new SuperSmoother(this);
-      _SlowSuperSmoother = new SuperSmoother(this);
-      _Fast = new VariableSeries<double>(this);
-      _Slow = new VariableSeries<double>(this);
+      m_fastSuperSmoother = new SuperSmoother(this);
+      m_slowSuperSmoother = new SuperSmoother(this);
+      m_fast = new VariableSeries<double>(this);
+      m_slow = new VariableSeries<double>(this);
 
       //create the order types used
-      _LE = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LE", EOrderAction.Buy));
-      _SE = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SE", EOrderAction.SellShort));
-      _LX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LX", EOrderAction.Sell));
-      _SX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SX", EOrderAction.BuyToCover));
+      m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LE", EOrderAction.Buy));
+      m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SE", EOrderAction.SellShort));
+      m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LX", EOrderAction.Sell));
+      m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SX", EOrderAction.BuyToCover));
     }
 
     protected override void StartCalc()
     {
       //initialize indicators and objects used
-      _FastSuperSmoother.Length = FastPeriod;
-      _FastSuperSmoother.Price = Bars.Close;
-      _SlowSuperSmoother.Length = SlowPeriod;
-      _SlowSuperSmoother.Price = Bars.Close;
+      m_fastSuperSmoother.Length = FastPeriod;
+      m_fastSuperSmoother.Price = Bars.Close;
+      m_slowSuperSmoother.Length = SlowPeriod;
+      m_slowSuperSmoother.Price = Bars.Close;
     }
 
     protected override void CalcBar()
@@ -106,8 +112,8 @@ namespace PowerLanguage.Strategy
       //update series indicators if this is the bar close
       if (Bars.Status == EBarState.Close)
       {
-        _Fast.Value = _FastSuperSmoother[0];
-        _Slow.Value = _SlowSuperSmoother[0];
+        m_fast.Value = m_fastSuperSmoother[0];
+        m_slow.Value = m_slowSuperSmoother[0];
       }
 
       //process the entry/exit logic
@@ -117,43 +123,30 @@ namespace PowerLanguage.Strategy
 
     private void calcBarEntry()
     {
-      //determine whether we should send an entry order
-      if (EnableLong && _Fast.CrossesOver(_Slow, CROSS_LOOKBACK))
-        _LE.Send(positionSize());
-      else if (EnableShort && _Fast.CrossesUnder(_Slow, CROSS_LOOKBACK))
-        _SE.Send(positionSize());
-    }
+			//determine whether we should send an entry order
+
+			//TODO - calculating the stop-loss off the delta of the fast/slow SuperSmoother results in HUGE positions for the risk based entries.
+
+			if (EnableLong && m_fast.CrossesOver(m_slow, CROSS_LOOKBACK))
+      {
+		    double ssDelta = m_fastSuperSmoother[0] - m_slowSuperSmoother[0];
+				int size = RiskBasedPositionSizing ? positionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent);
+				m_le.Send(size);
+			}
+			else if (EnableShort && m_fast.CrossesUnder(m_slow, CROSS_LOOKBACK))
+      {
+		    double ssDelta = m_fastSuperSmoother[0] - m_slowSuperSmoother[0];
+				int size = RiskBasedPositionSizing ? positionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent);
+				m_se.Send(size);
+			}
+		}
 
     private void calcBarExit()
     {
-      //send standard exit orders
-      if (PositionSide > 0 && _Fast.CrossesUnder(_Slow, CROSS_LOOKBACK))
-        _LX.Send();
-
-      if (PositionSide < 0 && _Fast.CrossesOver(_Slow, CROSS_LOOKBACK))
-        _SX.Send();
-    }
-
-		private int positionSize()
-		{
-			double equityAvailable = 0.0d;
-			int result = 0;
-			if (Bars.Close[0] == 0.0d) return result;
-
-			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
-			switch (Environment.ApplicationCode)
-			{
-				case EApplicationCode.Charting:
-					equityAvailable = this.InitialCapital + this.NetProfit;
-					break;
-				case EApplicationCode.Portfolio:
-					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * (this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d);
-					break;
-			}
-
-			if (equityAvailable > 0) result = (int)Math.Truncate(equityAvailable / Bars.Close[0]);
-
-			return result;
-		}
+		if (PositionSide > 0 && m_fast.CrossesUnder(m_slow, CROSS_LOOKBACK))
+			m_lx.Send();
+		if (PositionSide < 0 && m_fast.CrossesOver(m_slow, CROSS_LOOKBACK))
+			m_sx.Send();
 	}
+}
 }

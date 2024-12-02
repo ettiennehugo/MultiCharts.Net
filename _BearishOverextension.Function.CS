@@ -74,7 +74,7 @@ namespace PowerLanguage
 
 			protected override System.Boolean CalcBar()
 			{
-				if (Environment.CalcReason != CalculationReason.Default) return false; //only calculate on bar close (default reason
+				if (Environment.CalcReason != CalculationReason.Default) return false; //only calculate on bar close default reason
 				if (Instrument.CurrentBar <= DropDays || Instrument.CurrentBar <= ATRLength || Instrument.CurrentBar <= DEFAULT_SLOW_SMOOTHER_LENGTH) return false; //not enough data
 				if (Instrument.Close[0] / Instrument.Close[DropDays] > 1.0d + MinimumDropPercent) return false;  //not enough drop																																																 				
 				if (m_atr[0] * MinimumOverextensionFactor > m_smootherSlow[0] - Instrument.Close[0]) return false; //no bearish overextension away from the slow average price

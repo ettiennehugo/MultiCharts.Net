@@ -57,19 +57,18 @@ namespace PowerLanguage
 			public const int MINIMUM_AVERAGE_VOLUME = 100000;
 			public const int AVERAGE_VOLUME_LENGTH = 3;
 			public const bool HISTORICAL = false;
-			public const bool DEBUG = false;
 
 			//inputs
-			[Input] public EScanBullishBearish ScanBullishBearish { get; set; }  //market direction to scan
-			[Input] public int TradeIntensityShortPeriod { get; set; }  //short period for the trade intensity filter
-			[Input] public int TradeIntensityLongPeriod { get; set; }  //short period for the trade intensity filter
-			[Input] public double TradeIntensityPercent { get; set; } //percentage for trade intensity
-			[Input] public double PreviousDayIncreasePercent { get; set; }  //percentage increase for pervious trading day to limit how much price can move before the low threshold detection
-			[Input] public double MinimumPrice { get; set; }          //minimum price for stock
-			[Input] public double MinimumAverageVolume { get; set; }  //minimum average volume for stock to trade at
-			[Input] public int AverageVolumeLength { get; set; }      //length in number of bars used to compute average volume
-			[Input] public bool Historical { get; set; }              //allow historical scanning so if ever the criteria is met the scanner will output true to allow chart analysis
-			[Input] public bool Debug { get; set; }
+			public EScanBullishBearish ScanBullishBearish { get; set; }  //market direction to scan
+			public int TradeIntensityShortPeriod { get; set; }  //short period for the trade intensity filter
+			public int TradeIntensityLongPeriod { get; set; }  //short period for the trade intensity filter
+			public double TradeIntensityPercent { get; set; } //percentage for trade intensity
+			public double PreviousDayIncreasePercent { get; set; }  //percentage increase for pervious trading day to limit how much price can move before the low threshold detection
+			public double MinimumPrice { get; set; }          //minimum price for stock
+			public double MinimumAverageVolume { get; set; }  //minimum average volume for stock to trade at
+			public int AverageVolumeLength { get; set; }      //length in number of bars used to compute average volume
+			public bool Historical { get; set; }              //allow historical scanning so if ever the criteria is met the scanner will output true to allow chart analysis
+			public bool Debug { get; set; }
 
 			//properties
 			public bool CriteriaMet { get { return m_criteriaMet; } }
@@ -113,7 +112,7 @@ namespace PowerLanguage
 				MinimumAverageVolume = MINIMUM_AVERAGE_VOLUME;
 				AverageVolumeLength = AVERAGE_VOLUME_LENGTH;
 				Historical = HISTORICAL;
-				Debug = DEBUG;
+				Debug = false;
 
 				//create indicators, plots
 				m_shortMA = new Function.SuperSmoother(this);

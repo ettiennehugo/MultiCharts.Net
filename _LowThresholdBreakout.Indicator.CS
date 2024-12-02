@@ -54,7 +54,7 @@ namespace PowerLanguage.Indicator
       MinimumAverageVolume = Function._LowThresholdBreakout.MINIMUM_AVERAGE_VOLUME;
       AverageVolumeLength = Function._LowThresholdBreakout.AVERAGE_VOLUME_LENGTH;
       m_lowThresholdBreakout = new Function._LowThresholdBreakout(this);
-			Debug = Function._LowThresholdBreakout.DEBUG;
+			Debug = false;
 
 			//create additional attributes
 			m_criteriaMetAreas = new List<CriteriaMetArea>();

@@ -9,7 +9,7 @@ namespace PowerLanguage.Strategy {
 	/// Trend following strategy using a supersmoother cross. Need to be paired with good StopsAndExits strategy to make good money.
 	/// Needs multiple data stream inputs.
 	/// </summary>
-	public class _TrendFollow1 : _CustomSignal
+	public class _TrendFollow2 : _CustomSignal
 	{
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
@@ -25,6 +25,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public int MarketPeriod { get; set; }		//market period used to avoid entries that moves against the market trend.
 		[Input] public bool EnableLong { get; set; }
 		[Input] public bool EnableShort { get; set; }
+		[Input] public bool EnableExit { get; set; }	//handle exit for the positions, disable if some other exit strategy is used
 
 		//attributes:
 		private PowerLanguage.Function._EfficiencyRatio m_efficiencyRatio;
@@ -35,8 +36,10 @@ namespace PowerLanguage.Strategy {
 		private SuperSmoother m_marketSmoother;
 		private IOrderMarket m_le;
 		private IOrderMarket m_se;
+		private IOrderMarket m_lx;
+		private IOrderMarket m_sx;
 
-		public _TrendFollow1(object _ctx) : base(_ctx) { }
+		public _TrendFollow2(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
@@ -50,6 +53,7 @@ namespace PowerLanguage.Strategy {
 			MarketPeriod = DEFAULT_PERIOD;
 			EnableLong = true;
 			EnableShort = true;
+			EnableExit = true;
 
 			//create functions used
 			m_instrumentFastSmoother = new SuperSmoother(this);
@@ -59,8 +63,10 @@ namespace PowerLanguage.Strategy {
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
 
 			//create order types
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF1LE", EOrderAction.Buy));
-			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF1SE", EOrderAction.SellShort));
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF2LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF2SE", EOrderAction.SellShort));
+			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF2LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF2SX", EOrderAction.BuyToCover));
 		}
 
 		protected override void StartCalc()
@@ -101,7 +107,12 @@ namespace PowerLanguage.Strategy {
 			//lower efficiency ratio means the price moves more smoothly, so we need to use 1 - ER to prioritize these signals.
 			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = 1 - m_efficiencyRatio.Value;
 			
-			//process the entry logic
+			calcBarEntry();
+			if (EnableExit) calcBarExit();
+		}
+		
+		protected void calcBarEntry()
+		{
 			//determine whether we should send an entry order
 			if (EnableLong &&
 				(MarketPeriod <= 0 || m_marketSmoother[0] < m_marketInstrument.Close[0]) &&	//market is bullish
@@ -120,5 +131,14 @@ namespace PowerLanguage.Strategy {
 				m_se.Send(size);
 			}
 		}
+
+		protected void calcBarExit()
+		{
+			if (this.PositionSide > 0 && Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1))
+				m_lx.Send();
+			else if (this.PositionSide < 0 && Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1))
+				m_sx.Send();
+		}
+		
 	}
 }

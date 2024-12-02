@@ -1,49 +1,56 @@
 ﻿using System;
 using System.Drawing;
+using System.Collections.Generic;
 using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy {
 
-	public class _PMMS_Test1 : PortfolioSignalObject {
-    //constants
-    public const double DEFAULT_ACCOUNT_EQUITY_TO_USE = 1.0;
-    public const double DEFAULT_ACCOUNT_EQUITY_PER_POSITION = 0.1;
-    public const int DEFAULT_MINIMUM_POSITION_SIZE = 1;
-    public const int DEFAULT_MAXIMUM_POSITION_SIZE = 10000;
+	public class _PMMS_Test1 : _CustomSignal {
 
+	//constants
+
+		
     //inputs
-    [Input] public double AccountEquityToUse { get; set; }
-    [Input] public double AccountEquityPerPosition { get; set; }
-    [Input] public int MinimumPosSize { get; set; }
-    [Input] public int MaximumPosSize { get; set; }
-
+	[Input] public int BuyBestX {get; set; }
+			
     //attributes
+	private Dictionary<int, double> m_bestStrategies = new Dictionary<int, double>();
+
+	//interface methods
     public _PMMS_Test1(object _ctx):base(_ctx){}
 
 	protected override void Create() {
-      AccountEquityToUse = DEFAULT_ACCOUNT_EQUITY_TO_USE;
-      AccountEquityPerPosition = DEFAULT_ACCOUNT_EQUITY_PER_POSITION;
-      MinimumPosSize = DEFAULT_MINIMUM_POSITION_SIZE;
-      MaximumPosSize = DEFAULT_MAXIMUM_POSITION_SIZE;
-    }
+		BuyBestX = 10;
+		m_bestStrategies = new Dictionary<int, double>();
+	}
 
 	protected override void CalcBar(){
-      for (int i = 0; i < PortfolioStrategies.Count; i++) {
+	   this.StrategiesDenyEntriesAll();
+
+	   m_bestStrategies.Clear();
+	   for (int i = 0; i < PortfolioStrategies.Count; i++) {
         IPortfolioStrategy strategy = PortfolioStrategies[i];
+		strategy.AllowExits = true;
+		strategy.AllowExitsLong = true;
+		strategy.AllowExitsShort = true;
         IStrategy signal = strategy.Signals[0];
-
-
-        //TODO: This does not necessarily take into account current positions already in a strategy or other strategies.
-
-
-        double equityPerPosition = this.PortfolioEquity() * AccountEquityToUse * AccountEquityPerPosition;
-        strategy.EntryContracts = (int)Math.Truncate(equityPerPosition / signal.Bars.Close[0]);
-
-        strategy.EntryContracts = strategy.EntryContracts < MinimumPosSize ? MinimumPosSize : strategy.EntryContracts;
-        strategy.EntryContracts = strategy.EntryContracts > MaximumPosSize ? MaximumPosSize : strategy.EntryContracts;
+        double value = strategy.PortfolioData["RotationalValue"].safe_cast2double();
+		m_bestStrategies.Add(i, value);
       }
+	
+	  var inLongStrategies = new List<int>();
+	  this.StrategiesInLong(ref inLongStrategies);
+	
+	  m_bestStrategies = m_bestStrategies.OrderByDescending(elem => elem.Value).ToDictionary(x => x.Key, y => y.Value);
+  	  for (int i = 0; i < BuyBestX; i++)
+		  if (!inLongStrategies.Contains(m_bestStrategies.Keys.ElementAt(i)))
+		{
+          IPortfolioStrategy strategy = PortfolioStrategies[i];
+		  strategy.AllowEntries = true;
+		  strategy.AllowEntriesLong = true;
+		}
     }
-	}
+  }
 }
