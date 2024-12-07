@@ -16,15 +16,18 @@ namespace PowerLanguage
 		{
 			//constants
 			public const int DEFAULT_LENGTH = 10;
-			public const double DEFAULT_EPSILON = 0.15;   //15% of ATR within the average low/high prives would be included in the Darvas box
+			public const double DEFAULT_EPSILON = 0.5;   //50% of ATR within the average low/high prices would be included in the Darvas box
 
 			//inputs
 			public IInstrument Instrument { get; set; } //instrument price feed to use for the scan		
 			public int Length { get; set; }       //required length of the Darvas box
-			public double Epsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal" 
+			public double Epsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal" - larger values would be needed since as bars contract the ATR gets smaller
 
 			//properties
-
+			public double Low { get; private set; }  //low of the Darvas box
+			public double High { get; private set; } //high of the Darvas box
+			public DateTime FirstBar { get; private set; }  //first bar of the Darvas box
+			public DateTime LastBar { get; private set; }   //last bar of the Darvas box
 
 			//attributes
 			private Function._ATR m_atr;
@@ -66,21 +69,16 @@ namespace PowerLanguage
 				lowAverage /= Length;
 
 				//setup the upper and lower ranges based on the ATR
-				double upperLow = highAverage - epilonValue;
-				double upperHigh = highAverage + epilonValue;
-				double lowerLow = lowAverage - epilonValue;
-				double lowerHigh = lowAverage + epilonValue;
+				FirstBar = DateTime.MinValue;
+				LastBar = DateTime.MinValue;
+				High = highAverage + epilonValue;
+				Low = lowAverage - epilonValue;
 
-				//check that all the bars' low/high fall within the upper and lower ranges
 				for (int i = Length - 1; i >= 0; i--)
-				{
-					if ((Instrument.Low[i] > lowerLow && Instrument.Low[i] < lowerHigh && Instrument.High[i] > upperLow && Instrument.High[i] < upperHigh) || //bar with low/highs in the low/high ranges
-							(Instrument.Low[i] > lowerLow && Instrument.Low[i] < lowerHigh && Instrument.High[i] < upperLow) ||   //bar with low in the low range and high below the upper range
-							(Instrument.Low[i] > lowerHigh && Instrument.High[i] > upperLow && Instrument.High[i] < upperHigh) || //bar with low above the low range and high in the high range
-							(Instrument.Low[i] > lowerHigh && Instrument.High[i] < upperLow)) //bar with low/highs above the low range and below the high range
-						continue;
-				  return false;
-				}
+					if (Instrument.Low[i] < Low || Instrument.High[i] > High) return false;
+
+				FirstBar = Instrument.Time[Length - 1];
+				LastBar = Instrument.Time[0];
 
 				return true;  //all bars meet the criteria for the Darvas box
 			}

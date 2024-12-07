@@ -51,16 +51,16 @@ namespace PowerLanguage
 				if (Instrument.CurrentBar < ScanLength) return false;
 
 				//get the size of the largest bar in the required length, if the range is narrowing the first bar back should be the largest
-				double requiredScanLength = Math.Abs(Instrument.Open[Length] - Instrument.Close[Length]);
+				double requiredScanLength = Math.Abs(Instrument.High[Length - 1] - Instrument.Low[Length - 1]);
 
 				//check whether at least the last length of bars are narrowing 
-				for (int i = Length; i > 0; i--)
-					if (Math.Abs(Instrument.Open[i] - Instrument.Close[i]) < Math.Abs(Instrument.Open[i - 1] - Instrument.Close[i - 1])) return false;
+				for (int i = Length - 1; i > 0; i--)
+					if (Math.Abs(Instrument.High[i] - Instrument.Low[i]) < Math.Abs(Instrument.High[i - 1] - Instrument.Low[i - 1])) return false;
 
 				//check that the above narrowing range is the tightest range of bars
 				//in the scan length
-				for (int i = ScanLength; i > Length; i--)
-					if (Math.Abs(Instrument.Open[i] - Instrument.Close[i]) < requiredScanLength) return false;
+				for (int i = ScanLength - 1; i > Length - 1; i--)
+					if (Math.Abs(Instrument.High[i] - Instrument.Low[i]) < requiredScanLength) return false;
 
 				return true;  //all bars meet the criteria for the Crable narrow range bars
 			}

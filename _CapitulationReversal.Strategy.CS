@@ -31,8 +31,7 @@ namespace PowerLanguage.Strategy
 		[Input] double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
 		[Input] int GrowthDays { get; set; }                //number of days to look back for the growth
 		[Input] int ScanLength { get; set; }                //lookback length for the market high
-		[Input] int MarketBullishLength { get; set; }       //length used to determine if the market is bullish
-		[Input] double DownPercent { get; set; }						//market down percent from the high in the past y-days
+		[Input] double DownPercent { get; set; }			//market down percent from the high in the past y-days
 		[Input] double GapDownPercent { get; set; }         //minimum required gap down on the open - 0 to skip checking for a gap down
 
 		//properties
@@ -49,7 +48,6 @@ namespace PowerLanguage.Strategy
 		{
 			MinimumGrowthPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_MINIMUM_GROWTH_PERCENT;
 			GrowthDays = PowerLanguage.Function._CapitulationReversal.DEFAULT_GROWTH_DAYS;
-			MarketBullishLength = PowerLanguage.Function._CapitulationReversal.DEFAULT_MARKET_BULLISH_LENGTH;
 			ScanLength = PowerLanguage.Function._CapitulationReversal.DEFAULT_SCAN_LENGTH;
 			DownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_DOWN_PERCENT;
 			GapDownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_GAP_DOWN_PERCENT;
@@ -61,7 +59,6 @@ namespace PowerLanguage.Strategy
 			m_capitulationReversal.Market = BarsOfData(3); //Market data bars used to determine market pullback, e.g. daily
 			m_capitulationReversal.MinimumGrowthPercent = MinimumGrowthPercent;
 			m_capitulationReversal.GrowthDays = GrowthDays;
-			m_capitulationReversal.MarketBullishLength = MarketBullishLength;
 			m_capitulationReversal.ScanLength = ScanLength;
 			m_capitulationReversal.DownPercent = DownPercent;
 			m_capitulationReversal.GapDownPercent = GapDownPercent;

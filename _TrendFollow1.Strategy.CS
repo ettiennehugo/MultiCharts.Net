@@ -14,10 +14,18 @@ namespace PowerLanguage.Strategy {
 		//constants:
 		public const int DEFAULT_PERIOD = 50;
 		public const int DEFAULT_SLOW_PERIOD = 200;
+		public const double DEFAULT_GROWTH_PERCENT = 0.3;	//percentage that stock needs to be up over a given growth period
+		public const double DEFAULT_DECLINE_PERCENT = -0.3; //percentage that stock needs to be down over a given decline period
+		public const int DEFAULT_GROWTH_PERIOD = 120;
+		public const int DEFAULT_DECLINE_PERIOD = 120;
 
 		//properties:
 		[Input] public int FastPeriod { get; set; } //fast period of the instrument supersmoother
 		[Input] public int SlowPeriod { get; set; } //slow period of the instrument supersmoother - used to determine bullishness or bearishness of instrument the trend
+		[Input] public double GrowthPercent { get; set; } // growth percentage required before we consider going long
+		[Input] public int GrowthPeriod { get; set; }	//growth period to check for momentum on the stock
+		[Input] public double DeclinePercent { get; set; } // decline percentage required before we consider going long
+		[Input] public int DeclinePeriod { get; set; }	// decline period to check for momentum on the stock		
 		[Input] public bool RiskBasedPositionSizing { get; set; }
 		[Input] public double MaxRiskEquityPerPosPercent { get; set; }
 		[Input] public int VolumePeriod { get; set; }
@@ -33,8 +41,8 @@ namespace PowerLanguage.Strategy {
 		private PowerLanguage.Function.VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketInstrument;
 		private SuperSmoother m_marketSmoother;
-		private IOrderMarket m_le;
-		private IOrderMarket m_se;
+		private IOrderPriced m_le;
+		private IOrderPriced m_se;
 
 		public _TrendFollow1(object _ctx) : base(_ctx) { }
 
@@ -43,6 +51,10 @@ namespace PowerLanguage.Strategy {
 			//initialize input parameters
 			FastPeriod = DEFAULT_PERIOD;
 			SlowPeriod = DEFAULT_SLOW_PERIOD;
+			GrowthPercent = DEFAULT_GROWTH_PERCENT;
+			GrowthPeriod = DEFAULT_GROWTH_PERIOD; 
+			DeclinePercent = DEFAULT_DECLINE_PERCENT;
+			DeclinePeriod = DEFAULT_DECLINE_PERIOD; 
 			RiskBasedPositionSizing = true;
 			MaxRiskEquityPerPosPercent = 0.01;		//make zero or less to use portfolio percentage
 			VolumePeriod = DEFAULT_PERIOD;
@@ -59,8 +71,8 @@ namespace PowerLanguage.Strategy {
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
 
 			//create order types
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF1LE", EOrderAction.Buy));
-			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TF1SE", EOrderAction.SellShort));
+			m_le = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "TF1LE", EOrderAction.Buy));
+			m_se = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "TF1SE", EOrderAction.SellShort));
 		}
 
 		protected override void StartCalc()
@@ -70,6 +82,10 @@ namespace PowerLanguage.Strategy {
 			if (FastPeriod >= SlowPeriod) throw new Exception("FastPeriod must be less than SlowPeriod.");
 			if (MaxRiskEquityPerPosPercent > 1.0d) throw new Exception("MaxRiskEquityPerPosPercent must be less than 1.0.");
 			if (MaxVolumeBasedPosPercent > 1.0d) throw new Exception("MaxVolumeBasedPosPercent must be less than 1.0.");
+			if (GrowthPercent < 0) throw new Exception("GrowthPercent should be zero (off) or more than zero.");
+			if (GrowthPeriod < 0) throw new Exception("GrowthPeriod should be zero (off) or more than zero.");
+			if (DeclinePercent > 0) throw new Exception("DeclinePercent should be zero (off) or less than zero.");
+			if (DeclinePeriod < 0) throw new Exception("DeclinePeriod should be zero (off) or more than zero.");
 			m_marketInstrument = BarsOfData(2);
 			m_instrumentFastSmoother.Length = FastPeriod;
 			m_instrumentFastSmoother.Price = Bars.Close;
@@ -106,18 +122,20 @@ namespace PowerLanguage.Strategy {
 			if (EnableLong &&
 				(MarketPeriod <= 0 || m_marketSmoother[0] < m_marketInstrument.Close[0]) &&	//market is bullish
 				m_instrumentFastSmoother[0] > m_instrumentSlowSmoother[0] &&  //instrument is bullish
-				Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1))
+				Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1) &&
+				(GrowthPercent == 0.0d || GrowthPeriod == 0.0d || (Bars.CurrentBar > GrowthPeriod && Bars.Close[GrowthPeriod] != 0.0d && (Bars.Close[0] / Bars.Close[GrowthPeriod]) - 1 >= GrowthPercent)))
 			{
 				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
-				m_le.Send(size);
+				m_le.Send(Bars.Close[0], size);
 			}
 			else if (EnableShort && 
 				     (MarketPeriod <= 0 || m_marketSmoother[0] > m_marketInstrument.Close[0]) &&	//market is bearish
-						 m_instrumentFastSmoother[0] < m_instrumentSlowSmoother[0] &&  //instrument is bearish
-						 Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1))
+					 m_instrumentFastSmoother[0] < m_instrumentSlowSmoother[0] &&  //instrument is bearish
+					 Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1) &&
+					 (DeclinePercent == 0.0d || DeclinePeriod == 0.0d || (Bars.CurrentBar > DeclinePeriod && Bars.Close[DeclinePeriod] != 0.0d && 1 - (Bars.Close[0] / Bars.Close[DeclinePeriod]) <= DeclinePercent)))
 			{
 				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
-				m_se.Send(size);
+				m_se.Send(Bars.Close[0], size);
 			}
 		}
 	}
