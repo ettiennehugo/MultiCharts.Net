@@ -136,40 +136,53 @@ namespace PowerLanguage
 				//analyse the pivots to determine the swing highs and lows
 
 
-//				//THESE loops should run for 0/1 to Lenght - 1 to detect the major highs and lows OR you need to reverse the lists
-//
-//
-//				for (int i = Length - 1; i > 1; i--)
-//				{
-//					//check if the pivot is a major high or low
-//					if (m_pivots[i].Analysis | PivotAnalysis.MinorHigh == PivotAnalysis.MinorHigh)
-//					{
-//						//check if the pivot is a major high
-//						if (m_pivots[i].High > m_pivots[i - 1].High && m_pivots[i].High > m_pivots[i + 1].High)
-//							m_pivots[i].Analysis |= PivotAnalysis.MajorHigh;
-//					}
-//
-//					if (m_pivots[i].Analysis | PivotAnalysis.MinorLow == PivotAnalysis.MinorLow)
-//					{
-//						//check if the pivot is a major low
-//						if (m_pivots[i].Low > m_pivots[i - 1].Low && m_pivots[i].Low > m_pivots[i + 1].Low)
-//							m_pivots[i].Analysis |= PivotAnalysis.MajorLow;
-//					}
-//				}
-//
-//
-//				//TODO
-//				// - start with a pivot and scan for the next extreme high or low based on Index
-//				// - remove pivots between the two extreme points to get the proper swing points
-//				// - need to keep the last bar in the scan as a pivot point
-//
-//
-//
-//				//check that the pivot points form some flag pattern
-//				double epsilon = (m_atr.Value * Epsilon) / 2;
-//
-//				//TODO
-//
+				//				//THESE loops should run for 0/1 to Lenght - 1 to detect the major highs and lows OR you need to reverse the lists
+				//
+				//
+				//				for (int i = Length - 1; i > 1; i--)
+				//				{
+				//					//check if the pivot is a major high or low
+				//					if (m_pivots[i].Analysis | PivotAnalysis.MinorHigh == PivotAnalysis.MinorHigh)
+				//					{
+				//						//check if the pivot is a major high
+				//						if (m_pivots[i].High > m_pivots[i - 1].High && m_pivots[i].High > m_pivots[i + 1].High)
+				//							m_pivots[i].Analysis |= PivotAnalysis.MajorHigh;
+				//					}
+				//
+				//					if (m_pivots[i].Analysis | PivotAnalysis.MinorLow == PivotAnalysis.MinorLow)
+				//					{
+				//						//check if the pivot is a major low
+				//						if (m_pivots[i].Low > m_pivots[i - 1].Low && m_pivots[i].Low > m_pivots[i + 1].Low)
+				//							m_pivots[i].Analysis |= PivotAnalysis.MajorLow;
+				//					}
+				//				}
+				//
+				//
+				//				//TODO
+				//				// - WORK OUT A FEW STRATEGIES TO SCAN FOR DIFFERENT VARIATIONS OF VCP PATTERNS
+				//        //   - rising flag
+				//				//   - falling flag
+				// 			  //   - symmetrical triangle
+				//				//   - ascending triangle
+				//				//   - descending triangle
+				//				//   - pennant
+				//				//   - wedge
+				//				//   - cup and handle
+				//				//	   - straight/rounded cup and normal handle
+				//				//     - cup with a W cup and a normal handle
+				//        //     - cup with a rounded cup and a W handle
+				//        //     - cup with a W cup and a W handle
+				//				// - start with a pivot and scan for the next extreme high or low based on Index
+				//				// - remove pivots between the two extreme points to get the proper swing points
+				//				// - need to keep the last bar in the scan as a pivot point
+				//
+				//
+				//
+				//				//check that the pivot points form some flag pattern
+				//				double epsilon = (m_atr.Value * Epsilon) / 2;
+				//
+				//				//TODO
+				//
 				// function logic
 				return default(System.Boolean);
 			}

@@ -10,14 +10,17 @@ namespace PowerLanguage
 		/// <summary>
 		/// Determines whether a stock is in a bearish overextension with a gradual decline in price, we don't want to see massive
 		/// volatility in the price that would make it hard to determine where the price is going.
+		/// Notes:
+		/// * This indicator would need to be run most likely based on industry group or sector to work effectively since the notion of
+		///   bearish overextension would differ between sectors, e.g. percentage down and number of down days etc.
 		/// </summary>
 		public sealed class _BearishOverextension : FunctionSimple<System.Boolean>
 		{
 			//constants
 			public const double DEFAULT_MINIMUM_DROP_PERCENT = -0.25; //25% drop required
-			public const int DEFAULT_DROP_DAYS = 120;								  //six months drop
+			public const int DEFAULT_DROP_DAYS = 60;								  //six months drop
 			public const int DEFAULT_ATR_LENGTH = 14;                 //14-day ATR
-			public const double DEFAULT_MINIMUM_OVEREXTENSION_FACTOR = 3.0d; //factor of the ATR to determine overextension
+			public const double DEFAULT_MINIMUM_OVEREXTENSION_FACTOR = 5.0d; //factor of the ATR to determine overextension
 			public const int DEFAULT_GRADUAL_DECLINE_LENGTH = 40;     //scan length to check gradual decline of the price without much consolidation
 			public const int DEFAULT_FAST_SMOOTHER_LENGTH = 10;       //smoothing length for price move
 			public const int DEFAULT_SLOW_SMOOTHER_LENGTH = 100;      //smoothing length to measure gradual decline against
@@ -75,12 +78,13 @@ namespace PowerLanguage
 			protected override System.Boolean CalcBar()
 			{
 				if (Environment.CalcReason != CalculationReason.Default) return false; //only calculate on bar close default reason
-				if (Instrument.CurrentBar <= DropDays || Instrument.CurrentBar <= ATRLength || Instrument.CurrentBar <= DEFAULT_SLOW_SMOOTHER_LENGTH) return false; //not enough data
-				if (Instrument.Close[0] / Instrument.Close[DropDays] > 1.0d + MinimumDropPercent) return false;  //not enough drop																																																 				
-				if (m_atr[0] * MinimumOverextensionFactor > m_smootherSlow[0] - Instrument.Close[0]) return false; //no bearish overextension away from the slow average price
+				if (Instrument.CurrentBar <= DropDays || Instrument.CurrentBar <= ATRLength || Instrument.CurrentBar <= SlowSmoothingLength) return false; //not enough data
+				if (Instrument.Close[0] / Instrument.High.Highest(DropDays) > 1.0d + MinimumDropPercent) return false;  //not enough drop in price from the high																																																 				
+				double delta = m_smootherSlow[0] - Instrument.Close[0];
+				if (delta > 0.0d && m_atr[0] * MinimumOverextensionFactor > delta) return false; //no bearish overextension away from the slow average price
 
 				//check that the smoother fast never crosses over the slow smoother length over the last gradual decline length
-				for (int i = 0; i < GradualDeclineLength; i++)
+				for (int i = 0; i < GradualDeclineLength - 1; i++)
 					if (m_smootherFast[i] > m_smootherSlow[i] || Instrument.Close[i] > m_smootherSlow[i]) return false;
 
 				return true;

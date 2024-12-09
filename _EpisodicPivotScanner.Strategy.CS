@@ -13,12 +13,8 @@ namespace PowerLanguage.Strategy {
 
 
 		//inputs
-		[Input] public double MinimumPrice { get; set; }
 		[Input] public int GrowthDays { get; set; }
 		[Input] public double GrowthPercent { get; set; }
-		[Input] public int VolumeLength { get; set; }
-		[Input] public int AverageVolume { get; set; }
-		[Input] public int AverageDollarVolume { get; set; }
 		[Input] public double MinimumPercentageChange { get; set; } //gap up must be at least this minimum
 		[Input] public double MaximumPercentageChange { get; set; } //gap up clipped to this maximum to avoid pump-and-dump stocks
 		[Input] public bool Debug { get; set; } //debug flag to print out the values
@@ -34,12 +30,8 @@ namespace PowerLanguage.Strategy {
 
 		protected override void Create()
 		{
-			MinimumPrice = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
 			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
 			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
-			VolumeLength = PowerLanguage.Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
-			AverageVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
-			AverageDollarVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
 			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 			Debug = false;
@@ -49,12 +41,8 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc()
 		{
 			m_episodicPivot.Instrument = Bars;
-			m_episodicPivot.MinimumPrice = MinimumPrice;
 			m_episodicPivot.GrowthDays = GrowthDays;
 			m_episodicPivot.GrowthPercent = GrowthPercent;
-			m_episodicPivot.VolumeLength = VolumeLength;
-			m_episodicPivot.AverageVolume = AverageVolume;
-			m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
 			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
 			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
 		}
@@ -66,6 +54,7 @@ namespace PowerLanguage.Strategy {
 				if (Debug) Output.WriteLine("EpisodicPivot, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
 				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
 				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Long;
+
 				//TODO fill values for the PMMS signal
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_PRICE

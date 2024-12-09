@@ -86,17 +86,13 @@ namespace PowerLanguage.Indicator {
     private SortedList<DateTime, BarText> barTexts;
 
     protected override void Create() {
-      ChartCustomDraw.Register(this);
       barTexts = new SortedList<DateTime, BarText>();
     }
 
-    protected override void Destroy() {
-      ChartCustomDraw.Unregister(this);
-    }
-
     protected override void StartCalc() {
-      //we need to create the price action analysis here since it's dependent on the fractal layer count input variable
-      priceActionAnalysis = new PriceActionAnalysis(FractalLayers);
+			ChartCustomDraw.Register(this);
+			//we need to create the price action analysis here since it's dependent on the fractal layer count input variable
+			priceActionAnalysis = new PriceActionAnalysis(FractalLayers);
       priceActionAnalysis.Size = Size;
       priceActionAnalysis.AtrLength = AtrLength;
       priceActionAnalysis.VolumeLength = VolumeLength;
@@ -111,10 +107,11 @@ namespace PowerLanguage.Indicator {
     }
 
     protected override void StopCalc() {
-      ChartCustomDraw.ReDraw();
-    }
+			ChartCustomDraw.Unregister(this);
+			barTexts.Clear(); //clear the bar texts collection as the indicator is being removed/disabled
+		}
 
-    protected override void CalcBar() {
+		protected override void CalcBar() {
       bool priceActionChanged = false;
 
       //update the price action analysis if we have enough bars to analyse

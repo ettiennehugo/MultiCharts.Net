@@ -11,6 +11,8 @@ namespace PowerLanguage
 		/// Determines whether the current bar can be considered to be the last bar forming a Darvas Box of at least X-bars long.
 		/// Computes an average upper and lower range based on the ATR and checks that all the bars' low/high fall within the range or
 		/// that the low/high of a bar at least would fall within the range setup for the bar.
+		/// Notes:
+		/// * Looking at the Darvas Box you need to be prepared to go both long and short as the box breakout can go in either direction.
 		/// </summary>
 		public sealed class _DarvasBox : FunctionSimple<System.Boolean>
 		{

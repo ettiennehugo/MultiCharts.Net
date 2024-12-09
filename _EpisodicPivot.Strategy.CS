@@ -45,12 +45,8 @@ namespace PowerLanguage.Strategy {
 		//methods
 		protected override void Create()
 		{
-			MinimumPrice = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
 			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
 			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
-			VolumeLength = PowerLanguage.Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
-			AverageVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
-			AverageDollarVolume = PowerLanguage.Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
 			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 			m_episodicPivot = new PowerLanguage.Function._EpisodicPivot(this);
@@ -59,12 +55,8 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc()
 		{
 			m_episodicPivot.Instrument = Bars;
-			m_episodicPivot.MinimumPrice = MinimumPrice;
 			m_episodicPivot.GrowthDays = GrowthDays;
 			m_episodicPivot.GrowthPercent = GrowthPercent;
-			m_episodicPivot.VolumeLength = VolumeLength;
-			m_episodicPivot.AverageVolume = AverageVolume;
-			m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
 			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
 			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
 		}

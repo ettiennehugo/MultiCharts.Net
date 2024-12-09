@@ -43,8 +43,6 @@ namespace PowerLanguage.Indicator
 
     protected override void Create()
     {
-      ChartCustomDraw.Register(this);
-
       ScanBullishBearish = Function._LowThresholdBreakout.SCAN_BULLISH_BEARISH;
       TradeIntensityShortPeriod = Function._LowThresholdBreakout.TRADE_INTENSITY_SHORT_PERIOD;
       TradeIntensityLongPeriod = Function._LowThresholdBreakout.TRADE_INTENSITY_LONG_PERIOD;
@@ -62,7 +60,8 @@ namespace PowerLanguage.Indicator
 
     protected override void StartCalc()
     {
-      m_lowThresholdBreakout.TradeIntensityShortPeriod = TradeIntensityShortPeriod;
+			ChartCustomDraw.Register(this);
+			m_lowThresholdBreakout.TradeIntensityShortPeriod = TradeIntensityShortPeriod;
       m_lowThresholdBreakout.TradeIntensityLongPeriod = TradeIntensityLongPeriod;
       m_lowThresholdBreakout.PreviousDayIncreasePercent = PreviousDayIncreasePercent;
       m_lowThresholdBreakout.MinimumPrice = MinimumPrice;
@@ -75,12 +74,13 @@ namespace PowerLanguage.Indicator
       m_criteriaMetAreas.Clear();
     }
 
-    protected override void Destroy()
+    protected override void StopCalc()
     {
       ChartCustomDraw.Unregister(this);
-    }
+			m_criteriaMetAreas.Clear(); //clear set of criteria met areas as indicator is being removed/disabled
+		}
 
-    protected override void CalcBar()
+		protected override void CalcBar()
     {
       m_lowThresholdBreakout.Call();  
 

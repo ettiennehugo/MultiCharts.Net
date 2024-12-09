@@ -19,15 +19,10 @@ namespace PowerLanguage.Indicator
     };
 
 		//inputs
-		[Input] public double MinimumPrice { get; set; }
 		[Input] public int GrowthDays { get; set; }
 		[Input] public double GrowthPercent { get; set; }
-		[Input] public int VolumeLength { get; set; }
-    [Input] public int AverageVolume { get; set; }
-    [Input] public int AverageDollarVolume { get; set; }
     [Input] public double MinimumPercentageChange { get; set; }
     [Input] public double MaximumPercentageChange { get; set; }
-    [Input] public Color HighlightColor { get; set; }
     [Input] public bool Debug { get; set; }
 
 		//attributes
@@ -40,39 +35,24 @@ namespace PowerLanguage.Indicator
     public _EpisodicPivot(object _ctx) : base(_ctx) { }
 
     protected override void Create()
-    {
-      ChartCustomDraw.Register(this);
-      
-      MinimumPrice = Function._EpisodicPivot.DEFAULT_MINIMUM_PRICE;
+    {      
       GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
       GrowthPercent = Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
-      VolumeLength = Function._EpisodicPivot.DEFAULT_VOLUME_LENGTH;
-      AverageVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_VOLUME;
-      AverageDollarVolume = Function._EpisodicPivot.DEFAULT_AVERAGE_DOLLAR_VOLUME;
       MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
       MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
-      HighlightColor = Color.LightGray;
 			Debug = false;
 
 			m_criteriaMetAreas = new List<CriteriaMetArea>();
       m_episodicPivot = new Function._EpisodicPivot(this);
     }
 
-    protected override void Destroy()
-    {
-      ChartCustomDraw.Unregister(this);
-    }
-
     protected override void StartCalc()
     {
-      //set inputs
-      m_episodicPivot.Instrument = Bars;
-			m_episodicPivot.MinimumPrice = MinimumPrice;
+			ChartCustomDraw.Register(this);   //TODO - custom drawing just remains on the chart.
+			//set inputs
+			m_episodicPivot.Instrument = Bars;
       m_episodicPivot.GrowthDays = GrowthDays;
       m_episodicPivot.GrowthPercent = GrowthPercent;
-      m_episodicPivot.VolumeLength = VolumeLength;
-      m_episodicPivot.AverageVolume = AverageVolume;
-      m_episodicPivot.AverageDollarVolume = AverageDollarVolume;
       m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
       m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
 
@@ -80,10 +60,14 @@ namespace PowerLanguage.Indicator
       m_criteriaMetAreas.Clear();
     }
 
-    protected override void CalcBar()
-    {
-      //m_episodicPivot.Call(); - TBD is this required???
+		protected override void StopCalc()
+		{
+			ChartCustomDraw.Unregister(this);
+			m_criteriaMetAreas.Clear();   //clear set of criteria met areas as indicator is being removed/disabled
+		}
 
+		protected override void CalcBar()
+    {
       if (m_episodicPivot[0])
       {
 				if (Debug) Output.WriteLine("EpisodicPivot Indicator, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
@@ -100,8 +84,8 @@ namespace PowerLanguage.Indicator
     {
       if (phase == EDrawPhases.BeforeBGShapes)
       {
-        using (Brush brush = new SolidBrush(Color.FromArgb(64, HighlightColor.R, HighlightColor.G, HighlightColor.B)))
-        using (Pen pen = new Pen(HighlightColor, FRAME_LINE_WIDTH))
+        using (Brush brush = new SolidBrush(Color.FromArgb(64, Color.Purple.R, Color.Purple.G, Color.Purple.B)))
+        using (Pen pen = new Pen(Color.Purple, FRAME_LINE_WIDTH))
         {
           foreach (CriteriaMetArea area in m_criteriaMetAreas)
           {

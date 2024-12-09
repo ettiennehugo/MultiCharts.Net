@@ -53,7 +53,6 @@ namespace PowerLanguage.Strategy {
 			m_lowThresholdBreakout.MinimumAverageVolume = MinimumAverageVolume;
 			m_lowThresholdBreakout.AverageVolumeLength = AverageVolumeLength;
 			m_lowThresholdBreakout.Historical = false;    //TODO remove this Historical parameter
-			m_lowThresholdBreakout.Debug = Debug;
 		}
 
 		protected override void CalcBar()
