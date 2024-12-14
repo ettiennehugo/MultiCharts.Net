@@ -17,17 +17,20 @@ namespace PowerLanguage
 			//constants
 			public const int DEFAULT_LENGTH = 7;
 			public const int DEFAULT_SCAN_LENGTH = 20;
+			public const double DEFAULT_MINIMUM_ATR = 0.2;
+			public const int DEFAULT_ATR_LENGTH = 20;
 
 			//inputs
 			public IInstrument Instrument { get; set; } //instrument price feed to use for the scan		
 			public int Length { get; set; }       //required length of the narrow range bars
 			public int ScanLength { get; set; }   //scan length for the narrow range bars
+			public double MinimumATR { get; set; } //minimum ATR value required to make sure we don't get instruments that are not moving produce tight bars
 
 			//properties
 
 
 			//attributes
-
+			private Function._ATR m_atr;
 
 			//interface methods
 			public _CrableNRX(CStudyControl _master) : base(_master) { }
@@ -37,6 +40,7 @@ namespace PowerLanguage
 			{
 				Length = DEFAULT_LENGTH;
 				ScanLength = DEFAULT_SCAN_LENGTH;
+				m_atr = new _ATR(this);
 			}
 
 			protected override void StartCalc() 
@@ -44,18 +48,22 @@ namespace PowerLanguage
 				if (Length <= 0) throw new Exception("Length must be a positive number");
 				if (ScanLength <= 0) throw new Exception("ScanLength must be a positive number");
 				if (Length > ScanLength) throw new Exception("Length must be less than or equal to ScanLength");
+				if (MinimumATR <= 0) throw new Exception("MinimumATR needs to be a positive number");
+				m_atr.Instrument = Instrument;
+				m_atr.Length = DEFAULT_ATR_LENGTH;
 			}
 
 			protected override System.Boolean CalcBar()
 			{
-				if (Instrument.CurrentBar < ScanLength) return false;
-
+				if (Instrument.CurrentBar < ScanLength || Instrument.CurrentBar < DEFAULT_ATR_LENGTH) return false;
+				if (m_atr[0] < MinimumATR) return false;	//no minimum price movement
+				
 				//get the size of the largest bar in the required length, if the range is narrowing the first bar back should be the largest
 				double requiredScanLength = Math.Abs(Instrument.High[Length - 1] - Instrument.Low[Length - 1]);
 
-				//check whether at least the last length of bars are narrowing 
+				//check whether at least the last length of bars are not empty and are narrowing
 				for (int i = Length - 1; i > 0; i--)
-					if (Math.Abs(Instrument.High[i] - Instrument.Low[i]) < Math.Abs(Instrument.High[i - 1] - Instrument.Low[i - 1])) return false;
+					if (Instrument.High[i] == Instrument.Low[i] || Math.Abs(Instrument.High[i] - Instrument.Low[i]) < Math.Abs(Instrument.High[i - 1] - Instrument.Low[i - 1])) return false;
 
 				//check that the above narrowing range is the tightest range of bars
 				//in the scan length

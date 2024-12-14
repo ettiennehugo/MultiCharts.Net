@@ -16,6 +16,7 @@ namespace PowerLanguage.Strategy {
 		//inputs
 		[Input] public int Length { get; set; }       //required length of the narrow range bars
 		[Input] public int ScanLength { get; set; }   //scan length for the narrow range bars
+		[Input] public double MinimumATR { get; set; }
 		[Input] public bool Debug { get; set; }       //debug flag to print out the values
 
 		//properties
@@ -31,6 +32,7 @@ namespace PowerLanguage.Strategy {
 		{
 			Length = PowerLanguage.Function._CrableNRX.DEFAULT_LENGTH;
 			ScanLength = PowerLanguage.Function._CrableNRX.DEFAULT_SCAN_LENGTH;
+			MinimumATR = PowerLanguage.Function._CrableNRX.DEFAULT_MINIMUM_ATR;
 			Debug = false;
 			m_crableNRX = new PowerLanguage.Function._CrableNRX(this);
 		}
@@ -40,6 +42,7 @@ namespace PowerLanguage.Strategy {
 			m_crableNRX.Instrument = Bars;
 			m_crableNRX.Length = Length;
 			m_crableNRX.ScanLength = ScanLength;
+			m_crableNRX.MinimumATR = MinimumATR;
 		}
 
 		protected override void CalcBar()

@@ -16,7 +16,7 @@ namespace PowerLanguage.Strategy {
 	///	  * Stock must have shown some minimum decline in the past, typically 30 to 100% down in the past 6 months.
 	///	  * Stock is gradually declining in price without much consolidation over a specified period.
 	///	  * Stock price is becoming overextended to the downside, typically 3x the ATR or more.
-	///	  * IF the opening bar is a high volume bullish bar an entry is placed at the low of the opening bar for the breakout entry with risk based on the opening bar range.
+	///	  * IF the opening bar is a high volume bullish bar an entry is placed at the high/close of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
 	public class _BearishOverextension : _OpeningRangeBarSignal
 	{

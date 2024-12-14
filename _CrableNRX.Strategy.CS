@@ -35,6 +35,7 @@ namespace PowerLanguage.Strategy {
 		[Input] int GrowthDays { get; set; }								 //number of days to look back for the growth
 		[Input] public int NarrowRangeDays { get; set; }     //X-days is the narrowest X-day range relative to any X-day range within the previous narrow range period-market days
 		[Input] public int NarrowRangePeriod { get; set; }   //period to scan for narrow range days
+		[Input] public double MinimumATR { get; set;}        //minimum required price movement to avoid stocks that are collapsing in price
 		[Input] double AtrEpsilon { get; set; }              //percentage of the ATR to use for the range close factor in Darvas box computations
 
 		//properties
@@ -54,6 +55,7 @@ namespace PowerLanguage.Strategy {
 			GrowthDays = 120;
 			NarrowRangeDays = 7;
 			NarrowRangePeriod = 20;
+			MinimumATR = 0.2;
 			m_crableNRX = new PowerLanguage.Function._CrableNRX(this);
 		}
 
@@ -70,6 +72,7 @@ namespace PowerLanguage.Strategy {
 			m_crableNRX.Instrument = m_scannerTimeFrame;
 			m_crableNRX.ScanLength = NarrowRangePeriod;
 			m_crableNRX.Length = NarrowRangeDays;
+			m_crableNRX.MinimumATR = MinimumATR;
 			MinimumGrowthPercent /= 100.0d;
 			MinimumGrowthPercent += 1.0d;
 		}

@@ -13,6 +13,7 @@ namespace PowerLanguage.Indicator{
 		//inputs
 		[Input] public int Length { get; set; }
 		[Input] public int ScanLength { get; set; }
+		[Input] public double MinimumATR { get; set; }
 		[Input] public bool Debug { get; set; }
 
 		//properties
@@ -33,6 +34,7 @@ namespace PowerLanguage.Indicator{
 			base.Create();
 			Length = Function._CrableNRX.DEFAULT_LENGTH;
 			ScanLength = Function._CrableNRX.DEFAULT_SCAN_LENGTH;
+			MinimumATR = Function._CrableNRX.DEFAULT_MINIMUM_ATR;
 			Debug = false;
 			m_plotO = AddPlot(new PlotAttributes("", EPlotShapes.LeftTick, Color.Purple));
 			m_plotH = AddPlot(new PlotAttributes("", EPlotShapes.BarHigh, Color.Purple));
@@ -46,6 +48,7 @@ namespace PowerLanguage.Indicator{
 			m_crableNRX.Instrument = Bars;
 			m_crableNRX.Length = Length;
 			m_crableNRX.ScanLength = ScanLength;
+			m_crableNRX.MinimumATR = MinimumATR;
 		}
 
 		protected override void CalcBar()
