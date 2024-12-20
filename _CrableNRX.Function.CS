@@ -11,6 +11,9 @@ namespace PowerLanguage
 		/// Determines whether the current bar can be considered the last bar of an X-bar narrow range bars. E.g. for a length of
 		/// 7 and scan length of 20 the function will return true if the last set of 7-bars could be considered the narrowest range.
 		/// The bar open/close does not have to fall within the range of the previous bar but the high/low range must be narrowing.
+		/// Notes:
+		/// * The NR4 is based on a length of 3 bars and the NR7 is based on a length of 6 bars being the narrowest the 4th and 7th
+		///   bars would be used to look for the breakout.
 		/// </summary>
 		public sealed class _CrableNRX : FunctionSimple<System.Boolean>
 		{

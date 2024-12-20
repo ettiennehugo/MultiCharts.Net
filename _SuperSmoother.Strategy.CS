@@ -73,11 +73,11 @@ namespace PowerLanguage.Strategy
 		protected void CalcBarDefault()
 		{
 			//prioritize signals with a higher efficiency ratio in portfolio trading
-			//lower efficiency ratio means the price moves more smoothly, so we need to use 1 - ER to prioritize these signals.
-			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = 1 - m_efficiencyRatio.Value;
+			//higher efficiency ratio means the price moves more smoothly
+			if (Environment.ApplicationCode == EApplicationCode.Portfolio) MyPortfolioData["RotationalValue"] = m_efficiencyRatio.Value;
 			
 			//process the entry/exit logic
-			calcBarEntry();
+			calcBarEntry();	
 			calcBarExit();
 		}
 

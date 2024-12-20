@@ -85,7 +85,7 @@ namespace PowerLanguage
 						EfficiencyRatio = 0;
 						for (int i = 0; i < EfficiencyRatioLength; i++)
 							EfficiencyRatio += Math.Abs(Price[i] - Price[i + 1]);
-						EfficiencyRatio = Math.Abs(Price[0] - Price[EfficiencyRatioLength]) / EfficiencyRatio;
+						EfficiencyRatio = Math.Abs(Price[0] - Price[EfficiencyRatioLength - 1]) / EfficiencyRatio;
 
 						//compute the smoothing constant
 						SmoothingConstant = EfficiencyRatio * (fastSmoothing - slowSmoothing) + slowSmoothing;

@@ -13,6 +13,8 @@ namespace PowerLanguage
 		/// that the low/high of a bar at least would fall within the range setup for the bar.
 		/// Notes:
 		/// * Looking at the Darvas Box you need to be prepared to go both long and short as the box breakout can go in either direction.
+		/// * If only the long side is desired then you need to filter stocks that are already up (e.g. 30 to 100% in the past 6 months)
+		///   then only look for long breakouts.
 		/// </summary>
 		public sealed class _DarvasBox : FunctionSimple<System.Boolean>
 		{
