@@ -1,4 +1,5 @@
-﻿using System;
+﻿using PowerLanguage.Indicator;
+using System;
 using System.Drawing;
 using System.Linq;
 
@@ -29,28 +30,31 @@ namespace PowerLanguage
 		public sealed class _CapitulationReversal : FunctionSimple<System.Boolean>
 		{
 			//constants
-			public const double DEFAULT_MINIMUM_GROWTH_PERCENT = 0.3;	//30% growth required
-			public const int DEFAULT_GROWTH_DAYS = 120;
-			public const int DEFAULT_SCAN_LENGTH = 20;
-			public const double DEFAULT_DOWN_PERCENT = 0.1d;          //stock/market down 10% from the high
-			public const double DEFAULT_GAP_DOWN_PERCENT = 0.07d;	  //stock gap down on entry day by at least 7%
-			public const int DEFAULT_FAST_SSMA = 10;				  //additional supersmoother cross filter to check that stock is not declining
-			public const int DEFAULT_SLOW_SSMA = 100;				  //additional supercsmoother filter to check that stock is not declining
+			public const double DEFAULT_MINIMUM_GROWTH_PERCENT = 0.3; //30% growth required
+			public const int DEFAULT_GROWTH_DAYS = 60;
+			public const int DEFAULT_SCAN_LENGTH = 40;
+			public const double DEFAULT_STOCK_DOWN_PERCENT = 0.1d;  //market down 10% from the high
+			public const double DEFAULT_MARKET_DOWN_PERCENT = 0.08d;  //market down 8% from the high
+			public const double DEFAULT_GAP_DOWN_PERCENT = 0.07d;   //stock gap down on entry day by at least 7%
+			public const int DEFAULT_FAST_SSMA = 10;          //additional supersmoother cross filter to check that stock is not declining
+			public const int DEFAULT_SLOW_SSMA = 100;         //additional supercsmoother filter to check that stock is not declining
 
 			//properties
 			public double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
 			public int GrowthDays { get; set; }                //number of days to look back for the growth
 			public int ScanLength { get; set; }                //lookback length for the market high
-			public double DownPercent { get; set; }            //market down percent from the high in the past y-days
+			public double StockDownPercent { get; set; }       //market down percent from the high in the past y-days
+			public double MarketDownPercent { get; set; }      //market down percent from the high in the past y-days
 			public double GapDownPercent { get; set; }         //minimum required gap down on the open - 0 to skip checking for a gap down
 			public IInstrument Instrument { get; set; }        //larger timeframe instrument bar data, e.g. daily, to determine pullback state
 			public IInstrument Market { get; set; }            //market instrument bar data, e.g. daily, to determine market pullback state
 
 			//attributes
-			private double m_downPercent;
+			private double m_stockDownPercent;
+			private double m_marketDownPercent;
 			private Function._SuperSmoother m_fastSSMA;
 			private Function._SuperSmoother m_slowSSMA;
-			
+
 			//interface methods
 			public _CapitulationReversal(CStudyControl _master) : base(_master) { }
 			public _CapitulationReversal(CStudyControl _master, int _ds) : base(_master, _ds) { }
@@ -60,7 +64,8 @@ namespace PowerLanguage
 				MinimumGrowthPercent = DEFAULT_MINIMUM_GROWTH_PERCENT;
 				GrowthDays = DEFAULT_GROWTH_DAYS;
 				ScanLength = DEFAULT_SCAN_LENGTH;
-				DownPercent = DEFAULT_DOWN_PERCENT;
+				StockDownPercent = DEFAULT_STOCK_DOWN_PERCENT;
+				MarketDownPercent = DEFAULT_MARKET_DOWN_PERCENT;
 				GapDownPercent = DEFAULT_GAP_DOWN_PERCENT;
 				m_fastSSMA = new Function._SuperSmoother(this);
 				m_slowSSMA = new Function._SuperSmoother(this);
@@ -71,13 +76,15 @@ namespace PowerLanguage
 				if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
 				if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
 				if (ScanLength <= 0) throw new Exception("Scan length must be greater than zero.");
-				if (DownPercent <= 0.0d || DownPercent >= 1.0d) throw new Exception("Down percent must be greater than zero but less than 1.0.");
+				if (StockDownPercent <= 0.0d || StockDownPercent >= 1.0d) throw new Exception("Stock down percent must be greater than zero but less than 1.0.");
+				if (MarketDownPercent <= 0.0d || MarketDownPercent >= 1.0d) throw new Exception("Market down percent must be greater than zero but less than 1.0.");
 				if (GapDownPercent < 0.0d || GapDownPercent >= 1.0d) throw new Exception("Gap Down percent must be greater or equal to zero but less than 1.0.");
-				m_downPercent = 1 - DownPercent;
-				m_fastSSMA.Price = Bars.Close;
+				m_stockDownPercent = 1 - StockDownPercent;
+				m_marketDownPercent = 1 - MarketDownPercent;
+				m_fastSSMA.Price = Market.Close;
 				m_fastSSMA.Length = DEFAULT_FAST_SSMA;
-				m_slowSSMA.Price = Bars.Close;
-				m_slowSSMA.Length = DEFAULT_SLOW_SSMA;				
+				m_slowSSMA.Price = Market.Close;
+				m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
 			}
 
 			protected override System.Boolean CalcBar()
@@ -85,15 +92,15 @@ namespace PowerLanguage
 				if (Environment.CalcReason == CalculationReason.Default)
 				{
 					//scanner criteria
-					if (Instrument.CurrentBar <= GrowthDays || Instrument.CurrentBar <= DEFAULT_FAST_SSMA || Instrument.CurrentBar <= DEFAULT_SLOW_SSMA) return false; //not enough data
+					if (Instrument.CurrentBar <= GrowthDays || Instrument.CurrentBar <= ScanLength /*|| Instrument.CurrentBar <= DEFAULT_FAST_SSMA || Instrument.CurrentBar <= DEFAULT_SLOW_SSMA*/) return false; //not enough data
 
 					//NOTE: We need to get the highest close over the scan length as the growth percentage as the pullback will "eat" into that growth
 					if ((Instrument.Close.Highest(ScanLength) / Instrument.Close[GrowthDays - 1]) - 1 < MinimumGrowthPercent) return false;  //not enough growth
-					
-					if (m_fastSSMA[0] < m_slowSSMA[0]) return false;	//market is not bullish
-					if (Instrument.Close[0] > m_fastSSMA[0] || Instrument.Close[0] < m_slowSSMA[0]) return false;	//bar should be between the fast and slow SSMA
-					if (Market.Close[0] > Market.High.Highest(ScanLength) * m_downPercent) return false; //market is not down by required percentage
-					if (Instrument.Close[0] > Instrument.High.Highest(ScanLength) * m_downPercent) return false; //stock is not down by required percentage
+
+					if (m_fastSSMA[0] < m_slowSSMA[0]) return false;  //market is not bullish
+					//if (Instrument.Close[0] > m_fastSSMA[0] || Instrument.Close[0] < m_slowSSMA[0]) return false; //bar should be between the fast and slow SSMA
+					if (Market.Close[0] > Market.High.Highest(ScanLength) * m_marketDownPercent) return false; //market is not down by required percentage
+					if (Instrument.Close[0] > Instrument.High.Highest(ScanLength) * m_stockDownPercent) return false; //stock is not down by required percentage
 					if (GapDownPercent > 0.0d)
 					{
 						double gapPercent = (Instrument.Open[0] - Instrument.Close[1]) / Instrument.Close[1];
@@ -101,7 +108,7 @@ namespace PowerLanguage
 					}
 					return true;  //all criteria met - strategies need to decide on entry criteria based on this signal
 				}
-				
+
 				return false;
 			}
 
