@@ -37,7 +37,7 @@ namespace PowerLanguage
 			public const double DEFAULT_MARKET_DOWN_PERCENT = 0.08d;  //market down 8% from the high
 			public const double DEFAULT_GAP_DOWN_PERCENT = 0.07d;   //stock gap down on entry day by at least 7%
 			public const int DEFAULT_FAST_SSMA = 10;          //additional supersmoother cross filter to check that stock is not declining
-			public const int DEFAULT_SLOW_SSMA = 100;         //additional supercsmoother filter to check that stock is not declining
+			public const int DEFAULT_SLOW_SSMA = 200;         //additional supercsmoother filter to check that stock is not declining
 
 			//properties
 			public double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
@@ -98,7 +98,6 @@ namespace PowerLanguage
 					if ((Instrument.Close.Highest(ScanLength) / Instrument.Close[GrowthDays - 1]) - 1 < MinimumGrowthPercent) return false;  //not enough growth
 
 					if (m_fastSSMA[0] < m_slowSSMA[0]) return false;  //market is not bullish
-					//if (Instrument.Close[0] > m_fastSSMA[0] || Instrument.Close[0] < m_slowSSMA[0]) return false; //bar should be between the fast and slow SSMA
 					if (Market.Close[0] > Market.High.Highest(ScanLength) * m_marketDownPercent) return false; //market is not down by required percentage
 					if (Instrument.Close[0] > Instrument.High.Highest(ScanLength) * m_stockDownPercent) return false; //stock is not down by required percentage
 					if (GapDownPercent > 0.0d)
