@@ -28,7 +28,7 @@ namespace PowerLanguage.Indicator
 		protected override void Create()
 		{
 			Length = Function._RelativeStrength.LENGTH;
-			SmoothingLength = Function.SuperSmoother.DEFAULT_PERIOD;
+			SmoothingLength = Function._SuperSmoother.DEFAULT_PERIOD;
 			m_relativeStrength = new Function._RelativeStrength(this);
 			m_plot = AddPlot(new PlotAttributes("RS", EPlotShapes.Line, Color.Red));
 			m_plotOne = AddPlot(new PlotAttributes("", EPlotShapes.Line, Color.LightGray));

@@ -4776,8 +4776,8 @@ namespace PowerLanguage.Strategy
     protected List<LinearRegValue> _linRegSlowFC;
     protected List<VariableSeries<Double>> _linRegFast;
     protected List<VariableSeries<Double>> _linRegSlow;
-    protected List<SuperSmoother> _ssmaFastAvgFC;
-    protected List<SuperSmoother> _ssmaSlowAvgFC;
+    protected List<PowerLanguage.Function._SuperSmoother> _ssmaFastAvgFC;
+    protected List<PowerLanguage.Function._SuperSmoother> _ssmaSlowAvgFC;
     protected List<VariableSeries<Double>> _ssmaFastAvg;
     protected List<VariableSeries<Double>> _ssmaSlowAvg;
 
@@ -4842,8 +4842,8 @@ namespace PowerLanguage.Strategy
       _linRegSlowFC = new List<LinearRegValue>(Interpreter.MAX_DATA_STREAM);
       _linRegFast = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
       _linRegSlow = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
-      _ssmaFastAvgFC = new List<SuperSmoother>(Interpreter.MAX_DATA_STREAM);
-      _ssmaSlowAvgFC = new List<SuperSmoother>(Interpreter.MAX_DATA_STREAM);
+      _ssmaFastAvgFC = new List<PowerLanguage.Function._SuperSmoother>(Interpreter.MAX_DATA_STREAM);
+      _ssmaSlowAvgFC = new List<PowerLanguage.Function._SuperSmoother>(Interpreter.MAX_DATA_STREAM);
       _ssmaFastAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
       _ssmaSlowAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
 
@@ -4862,8 +4862,8 @@ namespace PowerLanguage.Strategy
         _linRegSlowFC.Add(new LinearRegValue(_interpreter.Strategy));
         _linRegFast.Add(new VariableSeries<Double>(_interpreter.Strategy));
         _linRegSlow.Add(new VariableSeries<Double>(_interpreter.Strategy));
-        _ssmaFastAvgFC.Add(new SuperSmoother(_interpreter.Strategy));
-        _ssmaSlowAvgFC.Add(new SuperSmoother(_interpreter.Strategy));
+        _ssmaFastAvgFC.Add(new PowerLanguage.Function._SuperSmoother(_interpreter.Strategy));
+        _ssmaSlowAvgFC.Add(new PowerLanguage.Function._SuperSmoother(_interpreter.Strategy));
         _ssmaFastAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
         _ssmaSlowAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
       }

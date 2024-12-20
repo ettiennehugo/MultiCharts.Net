@@ -48,8 +48,8 @@ namespace PowerLanguage
 
 			//attributes
 			private double m_downPercent;
-			private Function.SuperSmoother m_fastSSMA;
-			private Function.SuperSmoother m_slowSSMA;
+			private Function._SuperSmoother m_fastSSMA;
+			private Function._SuperSmoother m_slowSSMA;
 			
 			//interface methods
 			public _CapitulationReversal(CStudyControl _master) : base(_master) { }
@@ -62,8 +62,8 @@ namespace PowerLanguage
 				ScanLength = DEFAULT_SCAN_LENGTH;
 				DownPercent = DEFAULT_DOWN_PERCENT;
 				GapDownPercent = DEFAULT_GAP_DOWN_PERCENT;
-				m_fastSSMA = new Function.SuperSmoother(this);
-				m_slowSSMA = new Function.SuperSmoother(this);
+				m_fastSSMA = new Function._SuperSmoother(this);
+				m_slowSSMA = new Function._SuperSmoother(this);
 			}
 
 			protected override void StartCalc()

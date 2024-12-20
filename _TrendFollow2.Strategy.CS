@@ -29,11 +29,11 @@ namespace PowerLanguage.Strategy {
 
 		//attributes:
 		private PowerLanguage.Function._EfficiencyRatio m_efficiencyRatio;
-		private SuperSmoother m_instrumentFastSmoother;
-		private SuperSmoother m_instrumentSlowSmoother;
+		private PowerLanguage.Function._SuperSmoother m_instrumentFastSmoother;
+		private PowerLanguage.Function._SuperSmoother m_instrumentSlowSmoother;
 		private PowerLanguage.Function.VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketInstrument;
-		private SuperSmoother m_marketSmoother;
+		private PowerLanguage.Function._SuperSmoother m_marketSmoother;
 		private IOrderMarket m_le;
 		private IOrderMarket m_se;
 		private IOrderMarket m_lx;
@@ -56,10 +56,10 @@ namespace PowerLanguage.Strategy {
 			EnableExit = true;
 
 			//create functions used
-			m_instrumentFastSmoother = new SuperSmoother(this);
-			m_instrumentSlowSmoother = new SuperSmoother(this);
+			m_instrumentFastSmoother = new PowerLanguage.Function._SuperSmoother(this);
+			m_instrumentSlowSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_instrumentVolume = new VolumeWithSD(this);
-			m_marketSmoother = new SuperSmoother(this);
+			m_marketSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
 
 			//create order types

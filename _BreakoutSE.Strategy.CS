@@ -23,10 +23,10 @@ namespace PowerLanguage.Strategy
 		private _EfficiencyRatio m_efficiencyRatio;
 		//private RelativeStrength m_relativeStrength;
 		public double m_priority;
-		private SuperSmoother m_instrumentSmoother;
+		private PowerLanguage.Function._SuperSmoother m_instrumentSmoother;
 		private VolumeWithSD m_volumeWithSD;
 		private IInstrument m_marketBars;
-		private SuperSmoother m_marketSmoother;
+		private _SuperSmoother m_marketSmoother;
 		private IOrderMarket m_se;
 		private IOrderMarket m_sx;
 
@@ -45,9 +45,9 @@ namespace PowerLanguage.Strategy
 			//create functions used
 			m_priority = 0.0d;
 			m_efficiencyRatio = new _EfficiencyRatio(this);
-			m_instrumentSmoother = new SuperSmoother(this);
+			m_instrumentSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_volumeWithSD = new VolumeWithSD(this);
-			//m_marketSmoother = new SuperSmoother(this);
+			//m_marketSmoother = new _SuperSmoother(this);
 			//m_relativeStrength = new RelativeStrength(this);
 
 			//create order types

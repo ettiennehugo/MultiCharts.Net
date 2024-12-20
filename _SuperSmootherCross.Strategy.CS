@@ -52,8 +52,8 @@ namespace PowerLanguage.Strategy
     [Input] public bool EnableShort { get; set; }
 
     //Attributes:
-    private SuperSmoother m_fastSuperSmoother;
-    private SuperSmoother m_slowSuperSmoother;
+    private PowerLanguage.Function._SuperSmoother m_fastSuperSmoother;
+    private PowerLanguage.Function._SuperSmoother m_slowSuperSmoother;
     private VariableSeries<double> m_fast;
     private VariableSeries<double> m_slow;
     private IOrderMarket m_le;
@@ -76,8 +76,8 @@ namespace PowerLanguage.Strategy
     protected override void Create()
     {		
       //create indicators used
-      m_fastSuperSmoother = new SuperSmoother(this);
-      m_slowSuperSmoother = new SuperSmoother(this);
+      m_fastSuperSmoother = new PowerLanguage.Function._SuperSmoother(this);
+      m_slowSuperSmoother = new PowerLanguage.Function._SuperSmoother(this);
       m_fast = new VariableSeries<double>(this);
       m_slow = new VariableSeries<double>(this);
 

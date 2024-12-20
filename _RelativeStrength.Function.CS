@@ -22,7 +22,7 @@ namespace PowerLanguage
 			public IInstrument Instrument2 { get; set; }
 
 			//attributes
-			private Function.SuperSmoother m_superSmoother;
+			private Function._SuperSmoother m_superSmoother;
 			private VariableSeries<double> m_rawRelativeStrength;   //relative strength without smoothing		
 
 			//interface methods
@@ -33,12 +33,12 @@ namespace PowerLanguage
 			{
 				Length = LENGTH;
 				m_rawRelativeStrength = new VariableSeries<double>(this);
-				m_superSmoother = new SuperSmoother(this);
+				m_superSmoother = new _SuperSmoother(this);
 			}
 
 			protected override void StartCalc()
 			{
-				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : SuperSmoother.DEFAULT_PERIOD;  //relative strength does allow no smoothing but supersmoother requires a smoothing larger than 0
+				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : _SuperSmoother.DEFAULT_PERIOD;  //relative strength does allow no smoothing but supersmoother requires a smoothing larger than 0
 				m_superSmoother.Price = m_rawRelativeStrength;
 			}
 

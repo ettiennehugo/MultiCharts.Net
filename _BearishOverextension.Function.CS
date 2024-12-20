@@ -39,8 +39,8 @@ namespace PowerLanguage
 
 
 			//attributes
-			private Function.SuperSmoother m_smootherFast;
-			private Function.SuperSmoother m_smootherSlow;
+			private Function._SuperSmoother m_smootherFast;
+			private Function._SuperSmoother m_smootherSlow;
 			private Function._ATR m_atr;
 
 			//interface methods
@@ -57,8 +57,8 @@ namespace PowerLanguage
 				SlowSmoothingLength = DEFAULT_SLOW_SMOOTHER_LENGTH;
 				GradualDeclineLength = DEFAULT_GRADUAL_DECLINE_LENGTH;
 				m_atr = new Function._ATR(this);
-				m_smootherFast = new Function.SuperSmoother(this);
-				m_smootherSlow = new Function.SuperSmoother(this);
+				m_smootherFast = new Function._SuperSmoother(this);
+				m_smootherSlow = new Function._SuperSmoother(this);
 			}
 
 			protected override void StartCalc()

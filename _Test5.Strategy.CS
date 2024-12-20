@@ -41,7 +41,7 @@ namespace PowerLanguage.Strategy
     [Input] public bool EnableShort { get; set; }
 
     //attributes
-    private SuperSmoother m_superSmoother;
+    private PowerLanguage.Function._SuperSmoother m_superSmoother;
     private _EfficiencyRatio m_efficiencyRatio;
     private VolumeWithSD m_volumeWithSD;
     private IOrderMarket m_le;
@@ -68,7 +68,7 @@ namespace PowerLanguage.Strategy
       EnableShort = true;
 
       //create indicators used
-      m_superSmoother = new SuperSmoother(this);
+      m_superSmoother = new PowerLanguage.Function._SuperSmoother(this);
       m_efficiencyRatio = new _EfficiencyRatio(this);
       m_volumeWithSD = new VolumeWithSD(this);
 

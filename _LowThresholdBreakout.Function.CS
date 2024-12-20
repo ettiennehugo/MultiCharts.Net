@@ -79,8 +79,8 @@ namespace PowerLanguage
 			public ECurrentBarDirection CurrentBarDirection { get { return m_currentBarDirection; } }
 
 			//attributes
-			private Function.SuperSmoother m_shortMA;
-			private Function.SuperSmoother m_longMA;
+			private Function._SuperSmoother m_shortMA;
+			private Function._SuperSmoother m_longMA;
 			private bool m_criteriaMet;
 			private bool m_lowThresholdCriteria;
 			private bool m_minimumPriceCriteria;
@@ -115,8 +115,8 @@ namespace PowerLanguage
 				Debug = false;
 
 				//create indicators, plots
-				m_shortMA = new Function.SuperSmoother(this);
-				m_longMA = new Function.SuperSmoother(this);
+				m_shortMA = new Function._SuperSmoother(this);
+				m_longMA = new Function._SuperSmoother(this);
 			}
 
 			protected override void StartCalc()

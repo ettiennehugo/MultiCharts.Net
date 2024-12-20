@@ -13,14 +13,14 @@ namespace PowerLanguage.Indicator
 
     //Attributes:
     private IPlotObject m_plot;
-    private SuperSmoother m_superSmoother;
+    private Function._SuperSmoother m_superSmoother;
 
     public _SuperSmoother(object _ctx) : base(_ctx) { }
 
     protected override void Create()
     {
       Period = 10;
-      m_superSmoother = new SuperSmoother(this);
+      m_superSmoother = new Function._SuperSmoother(this);
       m_plot = AddPlot(new PlotAttributes("SS", EPlotShapes.Line, Color.Red));
     }
 

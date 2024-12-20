@@ -23,7 +23,7 @@ namespace PowerLanguage.Strategy
 
 		//attributes:
 		private PowerLanguage.Function._EfficiencyRatio m_efficiencyRatio;
-		private SuperSmoother m_superSmoother;
+		private PowerLanguage.Function._SuperSmoother m_superSmoother;
 		private IOrderMarket m_le;
 		private IOrderMarket m_se;
 		private IOrderMarket m_lx;
@@ -41,7 +41,7 @@ namespace PowerLanguage.Strategy
 			EnableShort = true;
 
 			//create functions used
-			m_superSmoother = new SuperSmoother(this);
+			m_superSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
 
 			//create order types

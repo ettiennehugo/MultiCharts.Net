@@ -33,7 +33,7 @@ namespace PowerLanguage
       public ISeries<double> AvgMinusLevel3 { get { return avgMinusLevel3; } }  //Average minus level 3 of standard deviation.
 
       //Attributes:
-      private SuperSmoother average;
+      private _SuperSmoother average;
       private VariableSeries<double> averageSeries;
       private VariableSeries<double> avgPlusLevel1;
       private VariableSeries<double> avgPlusLevel2;
@@ -58,7 +58,7 @@ namespace PowerLanguage
         avgMinusLevel1 = new VariableSeries<double>(this);
         avgMinusLevel2 = new VariableSeries<double>(this);
         avgMinusLevel3 = new VariableSeries<double>(this);
-        average = new SuperSmoother(this);
+        average = new _SuperSmoother(this);
       }
 
       protected override void StartCalc()
