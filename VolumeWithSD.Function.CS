@@ -81,16 +81,16 @@ namespace PowerLanguage
 
 				double sigma = Math.Sqrt(volumeDeltaSum / Length);
 				averageSeries.Value = volumeAverage;
-        avgPlusLevel1.Value = volumeAverage + Level1 * sigma;
-        avgPlusLevel2.Value = volumeAverage + Level2 * sigma;
-        avgPlusLevel3.Value = volumeAverage + Level3 * sigma;
+        avgPlusLevel1.Value = volumeAverage + (Level1 * sigma);
+        avgPlusLevel2.Value = volumeAverage + (Level2 * sigma);
+        avgPlusLevel3.Value = volumeAverage + (Level3 * sigma);
 
         //average minus levels gets clipped to zero
-        avgMinusLevel1.Value = volumeAverage - Level1 * sigma;
+        avgMinusLevel1.Value = volumeAverage - (Level1 * sigma);
         avgMinusLevel1.Value = avgMinusLevel1.Value >= 0 ? avgMinusLevel1.Value : 0;
-        avgMinusLevel2.Value = volumeAverage - Level2 * sigma;
+        avgMinusLevel2.Value = volumeAverage - (Level2 * sigma);
         avgMinusLevel2.Value = avgMinusLevel2.Value >= 0 ? avgMinusLevel2.Value : 0;
-        avgMinusLevel3.Value = volumeAverage - Level3 * sigma;
+        avgMinusLevel3.Value = volumeAverage - (Level3 * sigma);
         avgMinusLevel3.Value = avgMinusLevel3.Value >= 0 ? avgMinusLevel3.Value : 0;
 
         return volumeAverage;

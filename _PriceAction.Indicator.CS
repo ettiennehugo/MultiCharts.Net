@@ -106,15 +106,17 @@ namespace PowerLanguage.Indicator {
 			barTexts.Clear(); //clear the bar texts collection as the indicator is being removed/disabled
 		}
 
+    private DateTime testDate = new DateTime(2023, 8, 3);
+
 		protected override void CalcBar() {
       bool priceActionChanged = false;
 
       //update the price action analysis if we have enough bars to analyse
       if (Bars.Status == EBarState.Close && Bars.CurrentBar > 2)
-        priceActionChanged = priceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+				priceActionChanged = priceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
-      //update price action texts for bars analysed
-      if (true == priceActionChanged) {
+			//update price action texts for bars analysed
+			if (true == priceActionChanged) {
         //update the set of changed bars from the price action analysis                
         for (int index = 0; index < priceActionAnalysis.ChangedBars.Values.Count; index++) {
           PriceActionBar bar = priceActionAnalysis.ChangedBars.Values[index];
