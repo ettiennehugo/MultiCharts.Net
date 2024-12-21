@@ -206,13 +206,7 @@ namespace PowerLanguage.Strategy {
       //add bar to price action data
       //NOTE: Price action always wait for complete bars before analysis so we always compute the analysis on the bar's close.
       if (Bars.Status == EBarState.Close)
-        priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
-
-
-
-
-
-
+        priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
       //we only process entries when we detected price action
       if (true == priceActionChanged) {

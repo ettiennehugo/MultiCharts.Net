@@ -99,7 +99,7 @@ namespace PowerLanguage.Strategy {
     //TODO: Define additional inputs for the strategy.
     [Input] public int DeltaPricePips { get; set; }             //Delta between price-at-value at which the strategy would start looking for entries.
     [Input] public int PriceActionFractalLayers { get; set; }   //Fractal layers to instantiate for price action analysis.
-    [Input] public int VolumeLength { get; set; }               //Length for volume average and standard deviation computation
+    //[Input] public int VolumeLength { get; set; }               //Length for volume average and standard deviation computation
     [Input] public int StopLossBufferPips { get; set; }                 //buffer pips for the stop-loss
     [Input] public int MMStartPosSize { get; set; }             //money management start position size (0 = disable MM), e.g. 10000 starts with one mini lot
     [Input] public double MMProfitDelta { get; set; }           //money management profit delta at which new positions are added, e.g. 500 adds a new position when 500-curreny unit profit is made
@@ -145,7 +145,7 @@ namespace PowerLanguage.Strategy {
       //initialize additional inputs for strategy
       DeltaPricePips = DEFAULT_DELTA_PRICE_PIPS;
       PriceActionFractalLayers = DEFAULT_FRACTAL_LAYERS;
-      VolumeLength = DEFAULT_VOLUME_LENGTH;
+      //VolumeLength = DEFAULT_VOLUME_LENGTH;
       StopLossBufferPips = DEFAULT_STOP_LOSS_BUFFER_PIPS;
       MMStartNetProfit = 0.0;
       MMStaticPositionSize = 100000;
@@ -197,8 +197,8 @@ namespace PowerLanguage.Strategy {
       _LongTermVolumeProfiles = VolumeProfileByDataStream(2);
       _ShortTermPriceAction = new PriceActionAnalysis(PriceActionFractalLayers);
       _LongTermPriceAction = new PriceActionAnalysis(PriceActionFractalLayers);
-      _ShortTermPriceAction.VolumeLength = VolumeLength;
-      _LongTermPriceAction.VolumeLength = VolumeLength;
+      //_ShortTermPriceAction.VolumeLength = VolumeLength;
+      //_LongTermPriceAction.VolumeLength = VolumeLength;
       _ShortTermPOC = 0.0;
       _LongTermPOC = 0.0;
       _DeltaPriceValue = DeltaPricePips * _PipValue;
@@ -212,10 +212,10 @@ namespace PowerLanguage.Strategy {
     protected override void CalcBar() {
       //update the price action analysis
       if (_ShortTermBars.Status == EBarState.Close)
-        _ShortTermPriceAction.Analyse(_ShortTermBars.Time[0], Bars.CurrentBar, _ShortTermBars.Open[0], _ShortTermBars.High[0], _ShortTermBars.Low[0], _ShortTermBars.Close[0], _ShortTermBars.Volume[0]);
+        _ShortTermPriceAction.Analyse(_ShortTermBars.Time[0], _ShortTermBars.Open[0], _ShortTermBars.High[0], _ShortTermBars.Low[0], _ShortTermBars.Close[0], _ShortTermBars.Volume[0]);
 
       if (_LongTermBars.Status == EBarState.Close)
-        _LongTermPriceAction.Analyse(_LongTermBars.Time[0], Bars.CurrentBar, _LongTermBars.Open[0], _LongTermBars.High[0], _LongTermBars.Low[0], _LongTermBars.Close[0], _LongTermBars.Volume[0]);
+        _LongTermPriceAction.Analyse(_LongTermBars.Time[0], _LongTermBars.Open[0], _LongTermBars.High[0], _LongTermBars.Low[0], _LongTermBars.Close[0], _LongTermBars.Volume[0]);
 
       //analyse the entry/exit
       switch (Environment.CalcReason) {
@@ -302,7 +302,7 @@ namespace PowerLanguage.Strategy {
         //doji with high volume
         if (!enterLong && state.doji) {
           PriceActionBar currentBar = _ShortTermPriceAction.CurrentBar;
-          enterLong = currentBar.state.doji && currentBar.state.volumeHigh;
+          enterLong = currentBar.state.doji; // && currentBar.state.volumeHigh;
 
           if (enterLong) {
             _StopLossPrice = currentBar.low - StopLossBufferPips * _PipValue;
@@ -384,7 +384,7 @@ namespace PowerLanguage.Strategy {
         //doji with high volume
         if (!enterShort && state.doji) {
           PriceActionBar currentBar = _ShortTermPriceAction.CurrentBar;
-          enterShort = currentBar.state.doji && currentBar.state.volumeHigh;
+          enterShort = currentBar.state.doji; // && currentBar.state.volumeHigh;
 
           if (enterShort) {
             _StopLossPrice = currentBar.high + StopLossBufferPips * _PipValue;

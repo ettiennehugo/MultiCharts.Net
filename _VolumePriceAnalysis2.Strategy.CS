@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy {
       //      so that intrabar order generation can be used to get exact back testing on smaller timeframe
       //      bars during back testing.
       if (Bars.Status == EBarState.Close)
-        _PriceAction.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+        _PriceAction.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
       //process the entry/exit logic
       if (PositionSide == 0)

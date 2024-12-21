@@ -29,12 +29,12 @@ namespace PowerLanguage.Indicator{
 	    [Input] public int BarBufferSize { get; set; }          //number of bars to keep for price action analysis
 	    [Input] public int FractalLayers { get; set; }          //number of fractal layers to use for analysis
 	    [Input] public int AtrLength { get; set; }              //count to use to compute the ATR bar size
-	    [Input] public int VolumeLength { get; set; }           //length to use for the volume average
+	    //[Input] public int VolumeLength { get; set; }           //length to use for the volume average
 	    [Input] public double FactorDoji { get; set; }          //factor of ATR to consider a bar a doji
 	    [Input] public double FactorClose { get; set; }         //factor of ATR to consider price values close
 	    [Input] public double FactorStrong { get; set; }        //factor of ATR to consider a bar as a strong move
 	    [Input] public double FactorEpsilon { get; set; }       //factor of ATR used to judge stuffs????
-	    [Input] public int TopBottomSearchLength { get; set; }  //number of bars to search to double top/bottom
+	    //[Input] public int TopBottomSearchLength { get; set; }  //number of bars to search to double top/bottom
 
 	    private IPlotObject _dblBottom;
 	    private IPlotObject _dblTop;
@@ -46,12 +46,11 @@ namespace PowerLanguage.Indicator{
 	      BarBufferSize = PriceActionAnalysis.DefaultSize;
 	      FractalLayers = DEFAULT_FRACTAL_LAYERS;
 	      AtrLength = PriceActionAnalysis.DefaultAtrLength;
-	      VolumeLength = PriceActionAnalysis.DefaultVolumeLength;
+	      //VolumeLength = PriceActionAnalysis.DefaultVolumeLength;
 	      FactorDoji = PriceActionAnalysis.DefaultFactorDoji;
 	      FactorClose = PriceActionAnalysis.DefaultFactorClose;
 	      FactorStrong = PriceActionAnalysis.DefaultFactorStrong;
 	      FactorEpsilon = PriceActionAnalysis.DefaultFactorEpsilon;
-	      TopBottomSearchLength = PriceActionAnalysis.DefaultTopBottomSearchLength;		
 		}		
 
 		protected override void Create() {
@@ -65,12 +64,11 @@ namespace PowerLanguage.Indicator{
 	      priceActionAnalysis = new PriceActionAnalysis(FractalLayers);
 	      priceActionAnalysis.Size = BarBufferSize;
 	      priceActionAnalysis.AtrLength = AtrLength;
-	      priceActionAnalysis.VolumeLength = VolumeLength;
+	      //priceActionAnalysis.VolumeLength = VolumeLength;
 	      priceActionAnalysis.FactorDoji = FactorDoji;
 	      priceActionAnalysis.FactorClose = FactorClose;
 	      priceActionAnalysis.FactorStrong = FactorStrong;
 	      priceActionAnalysis.FactorEpsilon = FactorEpsilon;
-	      priceActionAnalysis.TopBottomSearchLength = TopBottomSearchLength;
 
 	      //reset the price action indicators
 	      _dblBottom.Set(0);
@@ -93,7 +91,7 @@ namespace PowerLanguage.Indicator{
 				
 		protected override void CalcBar(){
 	      if (Bars.Status == EBarState.Close && Bars.CurrentBar > 2)
-	        priceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+	        priceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
 	      //update indicator values based off the bar lookback
 	      bool dblBottom = false;

@@ -26,11 +26,10 @@ namespace PowerLanguage.Indicator {
     [Input] public int FractalLayers { get; set; }
     [Input] public int AtrLength { get; set; }
     [Input] public int VolumeLength { get; set; }
-    [Input] public double FactorDoji { get; set; }
+		[Input] public double FactorDoji { get; set; }
     [Input] public double FactorClose { get; set; }
     [Input] public double FactorStrong { get; set; }
     [Input] public double FactorEpsilon { get; set; }
-    [Input] public int TopBottomSearchLength { get; set; }
     [Input] public Color TextColor { get; set; }
     [Input] public int TextFontSize { get; set; }
     [Input] public bool ShowEngulfing { get; set; }
@@ -48,21 +47,17 @@ namespace PowerLanguage.Indicator {
     [Input] public bool ShowDblBottom { get; set; }
     [Input] public bool ShowLowerLow { get; set; }
     [Input] public bool ShowHigherLow { get; set; }
-    [Input] public bool VolumeAboveAverage { get; set; }
-    [Input] public bool VolumeHigh { get; set; }
-    [Input] public bool VolumeVeryHigh { get; set; }
-    [Input] public bool VolumeUltraHigh { get; set; }
+    [Input] public bool ShowVolume { get; set; }
 
-    public _PriceAction(object _ctx) : base(_ctx) {
+		public _PriceAction(object _ctx) : base(_ctx) {
       Size = PriceActionAnalysis.DefaultSize;
       FractalLayers = 3;
       AtrLength = PriceActionAnalysis.DefaultAtrLength;
-      VolumeLength = PriceActionAnalysis.DefaultVolumeLength;
-      FactorDoji = PriceActionAnalysis.DefaultFactorDoji;
+			VolumeLength = PriceActionAnalysis.DefaultVolumeLength;
+			FactorDoji = PriceActionAnalysis.DefaultFactorDoji;
       FactorClose = PriceActionAnalysis.DefaultFactorClose;
       FactorStrong = PriceActionAnalysis.DefaultFactorStrong;
       FactorEpsilon = PriceActionAnalysis.DefaultFactorEpsilon;
-      TopBottomSearchLength = PriceActionAnalysis.DefaultTopBottomSearchLength;
       TextColor = Color.LightGray;
       TextFontSize = 8;
       ShowEngulfing = false;
@@ -80,7 +75,8 @@ namespace PowerLanguage.Indicator {
       ShowDblBottom = false;
       ShowLowerLow = false;
       ShowHigherLow = false;
-    }
+			ShowVolume = false;
+		}
 
     private PriceActionAnalysis priceActionAnalysis;
     private SortedList<DateTime, BarText> barTexts;
@@ -95,12 +91,11 @@ namespace PowerLanguage.Indicator {
 			priceActionAnalysis = new PriceActionAnalysis(FractalLayers);
       priceActionAnalysis.Size = Size;
       priceActionAnalysis.AtrLength = AtrLength;
-      priceActionAnalysis.VolumeLength = VolumeLength;
-      priceActionAnalysis.FactorDoji = FactorDoji;
+			priceActionAnalysis.VolumeLength = VolumeLength;
+			priceActionAnalysis.FactorDoji = FactorDoji;
       priceActionAnalysis.FactorClose = FactorClose;
       priceActionAnalysis.FactorStrong = FactorStrong;
       priceActionAnalysis.FactorEpsilon = FactorEpsilon;
-      priceActionAnalysis.TopBottomSearchLength = TopBottomSearchLength;
 
       //clear the bar texts collection
       barTexts.Clear();
@@ -116,7 +111,7 @@ namespace PowerLanguage.Indicator {
 
       //update the price action analysis if we have enough bars to analyse
       if (Bars.Status == EBarState.Close && Bars.CurrentBar > 2)
-        priceActionChanged = priceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+        priceActionChanged = priceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
       //update price action texts for bars analysed
       if (true == priceActionChanged) {
@@ -163,14 +158,6 @@ namespace PowerLanguage.Indicator {
         priceActionState.Add("Strong");
       if (ShowBreakout && bar.state.breakout)
         priceActionState.Add("Breakout");
-      if (VolumeAboveAverage && bar.state.volumeAboveAverage)
-        priceActionState.Add("VolumeAboveAvg");
-      if (VolumeHigh && bar.state.volumeHigh)
-        priceActionState.Add("VolumeHigh");
-      if (VolumeVeryHigh && bar.state.volumeVeryHigh)
-        priceActionState.Add("VolumeVeryHigh");
-      if (VolumeUltraHigh && bar.state.volumeUltraHigh)
-        priceActionState.Add("VolumeUltraHigh");
 
       if (ShowPivots) {
         //always display the pivot state of the highest fractal layer for which the pivot point is detected
@@ -205,6 +192,26 @@ namespace PowerLanguage.Indicator {
         priceActionState.Add("LL");
       if (ShowHigherLow && bar.state.higherLow)
         priceActionState.Add("HL");
+      
+      if (ShowVolume)
+      {
+        if (bar.state.volumePlus3SD)
+          priceActionState.Add("VolumePlus3SD");
+        else if (bar.state.volumePlus2SD)
+          priceActionState.Add("VolumePlus2SD");
+        else if (bar.state.volumePlus1SD)
+          priceActionState.Add("VolumePlus1SD");
+        else if (bar.state.volumeAboveAverage)
+          priceActionState.Add("VolumeAboveAverage");
+        else if (bar.state.volumeMinus3SD)
+          priceActionState.Add("VolumeMinus3SD");
+        else if (bar.state.volumeMinus2SD)
+          priceActionState.Add("VolumeMinus2SD");
+        else if (bar.state.volumeMinus1SD)
+          priceActionState.Add("VolumeMinus1SD");
+        else if (bar.state.volumeBelowAverage)
+					priceActionState.Add("VolumeBelowAverage");
+			}
 
       text.text = String.Join(", ", priceActionState);
     }

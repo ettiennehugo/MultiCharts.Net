@@ -145,7 +145,7 @@ namespace PowerLanguage.Strategy {
     private void CalcBarDefault() {
       //update the price action analysis if we have enough bars to analyse
       if (Bars.Status == EBarState.Close)
-        _priceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+        _priceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 
       //check market position and process bar accordingly
       if (_priceActionAnalysis.Bars.Count > 0 && PositionSide == 0) {

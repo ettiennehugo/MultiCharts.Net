@@ -120,7 +120,7 @@ namespace PowerLanguage.Strategy {
             bool priceActionChanged = false;
 						
             //add bar to price action data
-            priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+            priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
 						
 			//update stop-loss price if required
 			if (priceActionChanged && (m_PriceActionAnalysis.AnalysisState.pivotLow || m_PriceActionAnalysis.AnalysisState.pivotHigh)) {

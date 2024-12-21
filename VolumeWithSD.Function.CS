@@ -33,7 +33,6 @@ namespace PowerLanguage
       public ISeries<double> AvgMinusLevel3 { get { return avgMinusLevel3; } }  //Average minus level 3 of standard deviation.
 
       //Attributes:
-      private _SuperSmoother average;
       private VariableSeries<double> averageSeries;
       private VariableSeries<double> avgPlusLevel1;
       private VariableSeries<double> avgPlusLevel2;
@@ -58,33 +57,43 @@ namespace PowerLanguage
         avgMinusLevel1 = new VariableSeries<double>(this);
         avgMinusLevel2 = new VariableSeries<double>(this);
         avgMinusLevel3 = new VariableSeries<double>(this);
-        average = new _SuperSmoother(this);
       }
 
       protected override void StartCalc()
       {
         if (Volume == null) throw new InvalidOperationException("Volume series is not set.");
-				average.Length = Length;
-        average.Price = Volume;
-      }
+				if (Length < 1) throw new InvalidOperationException("Length must be greater than 0.");
+			}
 
       protected override double CalcBar()
       {
-        double sd = Volume.StandardDeviationCustom(Length, 1);
-        averageSeries.Value = average.Value;
-        avgPlusLevel1.Value = average.Value + Level1 * sd;
-        avgPlusLevel2.Value = average.Value + Level2 * sd;
-        avgPlusLevel3.Value = average.Value + Level3 * sd;
+				double volumeSum = 0.0d;
+				for (int index = Length; index > 0; index--)
+					volumeSum += Volume[index];
+				
+        double volumeAverage = volumeSum / Length;
+				double volumeDeltaSum = 0.0d;
+				for (int index = Length; index > 0; index--)
+				{
+					double volume = Volume[index];
+					volumeDeltaSum += Math.Pow(volume - volumeAverage, 2);
+				}
+
+				double sigma = Math.Sqrt(volumeDeltaSum / Length);
+				averageSeries.Value = volumeAverage;
+        avgPlusLevel1.Value = volumeAverage + Level1 * sigma;
+        avgPlusLevel2.Value = volumeAverage + Level2 * sigma;
+        avgPlusLevel3.Value = volumeAverage + Level3 * sigma;
 
         //average minus levels gets clipped to zero
-        avgMinusLevel1.Value = average.Value - Level1 * sd;
+        avgMinusLevel1.Value = volumeAverage - Level1 * sigma;
         avgMinusLevel1.Value = avgMinusLevel1.Value >= 0 ? avgMinusLevel1.Value : 0;
-        avgMinusLevel2.Value = average.Value - Level2 * sd;
+        avgMinusLevel2.Value = volumeAverage - Level2 * sigma;
         avgMinusLevel2.Value = avgMinusLevel2.Value >= 0 ? avgMinusLevel2.Value : 0;
-        avgMinusLevel3.Value = average.Value - Level3 * sd;
+        avgMinusLevel3.Value = volumeAverage - Level3 * sigma;
         avgMinusLevel3.Value = avgMinusLevel3.Value >= 0 ? avgMinusLevel3.Value : 0;
 
-        return average.Value;
+        return volumeAverage;
       }
     }
   }

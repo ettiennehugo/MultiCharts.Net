@@ -91,7 +91,7 @@ namespace PowerLanguage.Strategy
     protected override void CalcBar()
     {
       //update indicator values
-      bool priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+      bool priceActionChanged = m_PriceActionAnalysis.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
       m_CenterLine.Value = m_LinRegFC[0];
 
       double scaledAtr = ScalingFactor * this.AverageTrueRange(ATRLength);

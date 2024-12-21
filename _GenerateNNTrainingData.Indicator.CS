@@ -360,8 +360,6 @@ namespace PowerLanguage.Indicator
         //setup components used to compute the input/output parameters for the training data
         _priceAction = new PriceActionAnalysis(1);
         _priceAction.AtrLength = ATRLength;
-        _priceAction.VolumeLength = VolumeLength;
-
       }
       else
       {
@@ -396,7 +394,7 @@ namespace PowerLanguage.Indicator
         _CSVData.Add(Bars.Time[0], newTrainingBar);
 
         //allow the price action to analyze the bar
-        if (_priceAction.Analyse(Bars.Time[0], Bars.CurrentBar, Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]))
+        if (_priceAction.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]))
         {
           //update the set of bars that were modified
           foreach (KeyValuePair<DateTime, PriceActionBar> bar in _priceAction.ChangedBars)
@@ -415,16 +413,16 @@ namespace PowerLanguage.Indicator
             trainingBar.reversal = bar.Value.state.reversal ? 1 : 0;
             trainingBar.strong = bar.Value.state.strong ? 1 : 0;
             trainingBar.breakout = bar.Value.state.breakout ? 1 : 0;
-            trainingBar.small = bar.Value.state.small ? 1 : 0;
-            trainingBar.large = bar.Value.state.large ? 1 : 0;
-            trainingBar.volumeAboveAverage = bar.Value.state.volumeAboveAverage ? 1 : 0;
-            trainingBar.volumeHigh = bar.Value.state.volumeHigh ? 1 : 0;
-            trainingBar.volumeVeryHigh = bar.Value.state.volumeVeryHigh ? 1 : 0;
-            trainingBar.volumeUltraHigh = bar.Value.state.volumeUltraHigh ? 1 : 0;
-            trainingBar.volumeBelowAverage = bar.Value.state.volumeBelowAverage ? 1 : 0;
-            trainingBar.volumeLow = bar.Value.state.volumeLow ? 1 : 0;
-            trainingBar.volumeVeryLow = bar.Value.state.volumeVeryLow ? 1 : 0;
-            trainingBar.volumeUltraLow = bar.Value.state.volumeUltraLow ? 1 : 0;
+//            trainingBar.small = bar.Value.state.small ? 1 : 0;
+//            trainingBar.large = bar.Value.state.large ? 1 : 0;
+//            trainingBar.volumeAboveAverage = bar.Value.state.volumeAboveAverage ? 1 : 0;
+//            trainingBar.volumeHigh = bar.Value.state.volumeHigh ? 1 : 0;
+//            trainingBar.volumeVeryHigh = bar.Value.state.volumeVeryHigh ? 1 : 0;
+//            trainingBar.volumeUltraHigh = bar.Value.state.volumeUltraHigh ? 1 : 0;
+//            trainingBar.volumeBelowAverage = bar.Value.state.volumeBelowAverage ? 1 : 0;
+//            trainingBar.volumeLow = bar.Value.state.volumeLow ? 1 : 0;
+//            trainingBar.volumeVeryLow = bar.Value.state.volumeVeryLow ? 1 : 0;
+//            trainingBar.volumeUltraLow = bar.Value.state.volumeUltraLow ? 1 : 0;
 
             //set pivot points and their associated timestamp when detected
             trainingBar.pivotHigh = bar.Value.state.pivotState[0].pivotHigh ? 1 : 0;

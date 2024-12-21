@@ -4359,7 +4359,7 @@ namespace PowerLanguage.Strategy
         else
           dataFeed = _interpreter.Strategy.Bars;
 
-        _priceAction[i].Analyse(dataFeed.Time[0], dataFeed.CurrentBar, dataFeed.Open[0], dataFeed.High[0], dataFeed.Low[0], dataFeed.Close[0], dataFeed.Volume[0]);
+        _priceAction[i].Analyse(dataFeed.Time[0], dataFeed.Open[0], dataFeed.High[0], dataFeed.Low[0], dataFeed.Close[0], dataFeed.Volume[0]);
       }
 
       return new ValueType();
