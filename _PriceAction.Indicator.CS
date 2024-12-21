@@ -26,6 +26,7 @@ namespace PowerLanguage.Indicator {
     [Input] public int FractalLayers { get; set; }
     [Input] public int AtrLength { get; set; }
     [Input] public int VolumeLength { get; set; }
+    [Input] public int PivotsToCheckForTopsBottoms { get; set; }
 		[Input] public double FactorDoji { get; set; }
     [Input] public double FactorClose { get; set; }
     [Input] public double FactorStrong { get; set; }
@@ -54,6 +55,7 @@ namespace PowerLanguage.Indicator {
       FractalLayers = 3;
       AtrLength = PriceActionAnalysis.DefaultAtrLength;
 			VolumeLength = PriceActionAnalysis.DefaultVolumeLength;
+			PivotsToCheckForTopsBottoms = PriceActionAnalysis.DefaultPivotsToCheckForTopsBottoms;
 			FactorDoji = PriceActionAnalysis.DefaultFactorDoji;
       FactorClose = PriceActionAnalysis.DefaultFactorClose;
       FactorStrong = PriceActionAnalysis.DefaultFactorStrong;
@@ -92,6 +94,7 @@ namespace PowerLanguage.Indicator {
       priceActionAnalysis.Size = Size;
       priceActionAnalysis.AtrLength = AtrLength;
 			priceActionAnalysis.VolumeLength = VolumeLength;
+			priceActionAnalysis.PivotsToCheckForTopsBottoms = PivotsToCheckForTopsBottoms;
 			priceActionAnalysis.FactorDoji = FactorDoji;
       priceActionAnalysis.FactorClose = FactorClose;
       priceActionAnalysis.FactorStrong = FactorStrong;
@@ -105,8 +108,6 @@ namespace PowerLanguage.Indicator {
 			ChartCustomDraw.Unregister(this);
 			barTexts.Clear(); //clear the bar texts collection as the indicator is being removed/disabled
 		}
-
-    private DateTime testDate = new DateTime(2023, 8, 3);
 
 		protected override void CalcBar() {
       bool priceActionChanged = false;
