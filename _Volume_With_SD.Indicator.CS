@@ -59,9 +59,9 @@ namespace PowerLanguage.Indicator {
     protected override void CalcBar() {
       volumePlot.Set(volumeWithSD.Volume.Value);
 
-      if (PublicFunctions.DoubleGreater(Bars.Close[0], Bars.Close[1]))
+      if (Bars.Open[0] < Bars.Close[0])
         volumePlot.Colors[0] = Color.LawnGreen;
-      else if (PublicFunctions.DoubleLess(Bars.Close[0], Bars.Close[1]))
+      else if (Bars.Open[0] > Bars.Close[0])
         volumePlot.Colors[0] = Color.IndianRed;
 
       avgPlus3SD.Set(volumeWithSD.AvgPlusLevel3.Value);

@@ -41,8 +41,10 @@ namespace PowerLanguage.Strategy {
   /// </summary>
 
 
-  //IMPORTANT: NONE of the strategies below will really work unless you have some convolution of different factors, e.g. a double top/bottom is worthless unless there's some other
-  //           aspects working in it's favor like a Fib retracement and zero level price being defended (1.9700 or 1.9000) and support/resistance.
+  //IMPORTANT:
+  // * NONE of the strategies below will really work unless you have some convolution of different factors, e.g. a double top/bottom is worthless unless there's some other
+  //   aspects working in it's favor like a Fib retracement and zero level price being defended (1.9700 or 1.9000) and support/resistance.
+  // * A lot of the price action trading should work in the direction of the trend and pick specific stocks that are the strongest.
 	
 
   // * Entry strategy 1 - Double top/bottom formed, this would require getting the pivots working and double top/bottom detection working. This would entail entering the

@@ -186,15 +186,15 @@ namespace PowerLanguage.Indicator {
       if (ShowDblTop && bar.state.doubleTop)
         priceActionState.Add("DblTop");
       if (ShowHigherHigh && bar.state.higherHigh)
-        priceActionState.Add("HH");
+        priceActionState.Add("HigherHigh");
       if (ShowLowerHigh && bar.state.lowerHigh)
-        priceActionState.Add("LH");
+        priceActionState.Add("LowerHigh");
       if (ShowDblBottom && bar.state.doubleBottom)
         priceActionState.Add("DblBtm");
       if (ShowLowerLow && bar.state.lowerLow)
-        priceActionState.Add("LL");
+        priceActionState.Add("LowerLow");
       if (ShowHigherLow && bar.state.higherLow)
-        priceActionState.Add("HL");
+        priceActionState.Add("HigherLow");
       
       if (ShowVolume)
       {
