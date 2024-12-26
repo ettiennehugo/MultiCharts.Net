@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 namespace PowerLanguage
 {
@@ -9,55 +10,45 @@ namespace PowerLanguage
 	{
 		/// <summary>
 		/// Determines whether the last set of bars can be considered a volatility contraction pattern over a specified
-		/// scan length of bars.
-		/// TBD - should we also determine whether the VCP is a rising flag or falling flag???
+		/// scan length of bars. Uses a very short and longer term super smoother and then based off the crosses made by
+		/// these it looks at the following:
+		///   * counts at least a given number of legs
+		///   * leg lengths should be contracting
+		///   * SS crossovers forming the legs should at least by a specific number of bars apart to avoid whipsaws due to price noise
+		///   * [optional] legs should overlay one another by a prescribed minimum to be considerd a VCP
 		/// </summary>
 		public sealed class _VCP : FunctionSimple<System.Boolean>
 		{
 			//constants
-			public const int MINIMUM_SWING_LENGTH = 3;
-			public const int MINIMUM_SCAN_LENGTH = 5;
+			public const int MINIMUM_SCAN_LENGTH = 10;
 			public const int DEFAULT_SCAN_LENGTH = 50;
-			public const double DEFAULT_EPSILON = 0.01;   //1% of ATR would be considered equal in price value
+			public const int MINIMUM_LEG_COUNT = 3;
+			public const int MINIMUM_LEG_BAR_DELTA = 2;
+			public const int DEFAULT_FAST_LENGTH = 10;
+			public const int DEFAULT_SLOW_LENGTH = 12;
+			public const double DEFAULT_MINIMUM_LEG_OVERLAY = 0.8;	//legs should have an 80% overlay to be considered a contraction
 
 			//types
-			public enum PivotAnalysis : uint
-			{
-				None = 0,
-				SwingHigh = 1,
-				SwingLow = 2,
-				MajorHigh = 4,
-				MajorLow = 8,
-				MinorHigh = 16,
-				MinorLow = 32,
-				LastBar = 64,
-			}
 
-			public struct PivotPoint
-			{
-				public double High;
-				public double Low;
-				public int Index;
-				public PivotAnalysis Analysis;
-			}
-
+			
 			//inputs
 			public IInstrument Instrument { get; set; } //instrument price feed to use for the scan		
 			public int ScanLength { get; set; }   //scan length for the VCP
-			public double Epsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal" 
+			public int MinimumLegCount { get; set; }	//minimum number of required legs
+			public int MinimumLegBarDelta { get; set; } //minimum number of bars between legs to avoid whipsaws
+			public double MinimumLegOverlay { get; set; } //minimum required leg overlay to be considered a VCP, 0 to simply check for contaction without overlay
 
 			//properties
-			public double HighestHigh { get; private set; }
-			public double LowestLow { get; private set; }
-			public List<PivotPoint> LowPivots { get { return m_lowPivots; } }
-			public List<PivotPoint> HighPivots { get { return m_highPivots; } }
-
+			// properties to be used for rendering the VCP
+			public DateTime FirstBar { get; private set; }
+			public DateTime LastBar { get; private set; }
+			public double Low { get; private set; }
+			public double High { get; private set; }
 
 			//attributes
-			private Function._ATR m_atr;
-			private List<PivotPoint> m_lowPivots;
-			private List<PivotPoint> m_highPivots;
-			private List<PivotPoint> m_pivots;
+			private Function._SuperSmoother m_fastSS;
+			private Function._SuperSmoother m_slowSS;
+			private List<Tuple<int, double, DateTime>> m_legs;    //data for bar index, SS cross value, and time of the cross
 
 			//interface methods
 			public _VCP(CStudyControl _master) : base(_master) { }
@@ -66,204 +57,123 @@ namespace PowerLanguage
 			protected override void Create()
 			{
 				ScanLength = DEFAULT_SCAN_LENGTH;
-				Epsilon = DEFAULT_EPSILON;
-				m_atr = new Function._ATR(this);
-				m_lowPivots = new List<PivotPoint>();
-				m_highPivots = new List<PivotPoint>();
-				m_pivots = new List<PivotPoint>();
+				MinimumLegCount = MINIMUM_LEG_COUNT;
+				MinimumLegBarDelta = MINIMUM_LEG_BAR_DELTA;
+				MinimumLegOverlay = DEFAULT_MINIMUM_LEG_OVERLAY;
+				m_fastSS = new Function._SuperSmoother(this);
+				m_slowSS = new Function._SuperSmoother(this);
+				m_legs = new List<Tuple<int, double, DateTime>>();
 			}
 
 			protected override void StartCalc()
 			{
-				if (ScanLength < MINIMUM_SCAN_LENGTH) throw new Exception("Scan length must be greater than 5");
-				m_atr.Instrument = Instrument;
-				m_atr.Length = ScanLength;
+				if (ScanLength < MINIMUM_SCAN_LENGTH) throw new Exception("Scan length must be greater than 10");
+				if (MinimumLegCount < MINIMUM_LEG_COUNT) throw new Exception("Minimum leg count must at least be 3");
+				if (MinimumLegBarDelta < 0) throw new Exception("Minimum leg bar delta must be zero or positive");
+				if (MinimumLegOverlay < 0 || MinimumLegOverlay > 1.0d) throw new Exception("Minimum leg overlay is percentage");
+				m_fastSS.Length = DEFAULT_FAST_LENGTH;
+				m_fastSS.Price = Instrument.Close;
+				m_slowSS.Length = DEFAULT_SLOW_LENGTH;
+				m_slowSS.Price = Instrument.Close;
+				m_legs.Clear();
 			}
 
 			protected override System.Boolean CalcBar()
 			{
-				//initialize the highest high and lowest low
-				HighestHigh = -1;
-				LowestLow = -1;
+				//clear function state
+				m_legs.Clear();
+				FirstBar = DateTime.MinValue;
+				LastBar = DateTime.MaxValue;
+				High = double.PositiveInfinity;
+				Low = double.NegativeInfinity;
+				double vcpLow = double.PositiveInfinity;
+				double vcpHigh = double.NegativeInfinity;
 
-				if (Instrument.CurrentBar < ScanLength + 1) return false; //+1 since we want to test the bar before the first bar analysed 
-
-				//determine pivot points for the scan length of bars
-				m_lowPivots.Clear();
-				m_highPivots.Clear();
-				m_pivots.Clear();
-
-				for (int i = ScanLength; i > 1; i--)
+				//determine the set of legs based on the scan length and the minimum required leg count
+				for (int i = 0; i < ScanLength; i++)
 				{
-					//NOTE: An outside bar of a VCP contracting could be both the high and low pivot, we check 3 cases
-					// 1. where the bar is both a low and high pivot
-					// 2. where the bar is a high pivot
-					// 3. where the bar is a low pivot
-					if (Instrument.High[i] > Instrument.High[i - 1] && Instrument.High[i] > Instrument.High[i + 1] &&
-							Instrument.Low[i] > Instrument.Low[i - 1] && Instrument.Low[i] > Instrument.Low[i + 1])
+					//determine whether we have a swing point
+					if ((m_fastSS[i] < m_slowSS[i] && m_fastSS[i + 1] >= m_slowSS[i + 1]) ||
+							(m_fastSS[i] > m_slowSS[i] && m_fastSS[i + 1] <= m_slowSS[i + 1]))
 					{
-						PivotPoint pivot = new PivotPoint();
-						pivot.High = Instrument.High[i];
-						pivot.Low = Instrument.Low[i];
-						pivot.Index = i;
-						pivot.Analysis = PivotAnalysis.MinorHigh | PivotAnalysis.MinorLow;
-						m_lowPivots.Add(pivot);
-						m_highPivots.Add(pivot);
-						m_pivots.Add(pivot);
+						//filter swing points that are too close to one another due to price noise
+						if (m_legs.Count == 0)
+						{
+							vcpLow = Math.Min(vcpLow, Instrument.Low[i]);
+							vcpHigh = Math.Max(vcpHigh, Instrument.High[i]);
+							m_legs.Add(new Tuple<int, double, DateTime>(Instrument.CurrentBar - i, m_fastSS[i], Instrument.Time[i]));
+						}
+						else if (Instrument.CurrentBar - m_legs[m_legs.Count - 1].Item1 >= MinimumLegBarDelta)
+						{
+							vcpLow = Math.Min(vcpLow, Instrument.Low[i]);
+							vcpHigh = Math.Max(vcpHigh, Instrument.High[i]);
+							m_legs.Add(new Tuple<int, double, DateTime>(Instrument.CurrentBar - i, m_fastSS[i], Instrument.Time[i]));
+						}
 					}
-					else if (Instrument.High[i] > Instrument.High[i - 1] && Instrument.High[i] > Instrument.High[i + 1])
-					{
-						PivotPoint pivot = new PivotPoint();
-						pivot.High = Instrument.High[i];
-						pivot.Index = i;
-						pivot.Analysis = PivotAnalysis.MinorHigh;
-						m_highPivots.Add(pivot);
-						m_pivots.Add(pivot);
-					}
-					else if (Instrument.Low[i] > Instrument.Low[i - 1] && Instrument.Low[i] > Instrument.Low[i + 1])
-					{
-						PivotPoint pivot = new PivotPoint();
-						pivot.Low = Instrument.Low[i];
-						pivot.Index = i;
-						pivot.Analysis = PivotAnalysis.MinorLow;
-						m_lowPivots.Add(pivot);
-						m_pivots.Add(pivot);
-					}
+
+					//terminate when we have enough swing points for VCP analysis
+					if (m_legs.Count >= (MinimumLegCount * 2 - 1)) break;
 				}
 
-				//the last bar should always be considered a pseudo pivot point since we'd
-				//expect the VCP to contract into the last bar
-				PivotPoint lastPivot = new PivotPoint();
-				lastPivot.High = Instrument.High[0];
-				lastPivot.Low = Instrument.Low[0];
-				lastPivot.Index = 0;
-				lastPivot.Analysis = PivotAnalysis.LastBar;
-				m_lowPivots.Add(lastPivot);
-				m_highPivots.Add(lastPivot);
+				//determine leg lengths if we have enough legs in the scan distance, e.g. 3 legs
+				//would require 5 points (3 * 2 - 1)
+				if (m_legs.Count < (MinimumLegCount * 2 - 1)) return false;
 
-				//setup the highest high and lowest low
-				LowestLow = m_lowPivots.Min(p => p.Low);
-				HighestHigh = m_highPivots.Max(p => p.High);
+				//determine whether leg lengths are contracting
+				double previousLength = double.PositiveInfinity;
+				double length = double.PositiveInfinity;
+				double previousLow = double.PositiveInfinity;
+				double previousHigh = double.PositiveInfinity;
+				for (int i = m_legs.Count - 2; i >= 0; i--)
+				{
+					//determine the length of the leg
+					length = Math.Abs(m_legs[i].Item2 - m_legs[i + 1].Item2);
 
+					//once we have two legs' lengths computed we need to compare the lengths
+					//to ensure they are contracting
+					if (previousLength != double.PositiveInfinity && length > previousLength) return false;
 
-				////analyse the pivots to determine the swing highs and lows
-				//// - we require that each swing low/high or high/low is at least 3 bars apart except for the last bar
-				//int nextSwingIndex = 0;
-				//foreach (PivotPoint pivot in m_pivots)
-				//{
-				//	if (pivot.Index < nextSwingIndex) continue; //skip this pivot point if it's already been analysed
+					//check that the legs overlay one another by the prescibed percentage
+					if (MinimumLegOverlay > 0.0d)
+					{
+						double currentLow = Math.Min(m_legs[i].Item2, m_legs[i + 1].Item2);
+						double currentHigh = Math.Max(m_legs[i].Item2, m_legs[i + 1].Item2);
+						double lowest = Math.Min(currentLow, previousLow);
+						double highest = Math.Max(currentHigh, previousHigh);
+						double lowHighDelta = highest - lowest;
 
-				//	if ((pivot.Analysis & PivotAnalysis.MinorHigh) == PivotAnalysis.MinorHigh && (pivot.Analysis & PivotAnalysis.MinorLow) == PivotAnalysis.MinorLow)
-				//	{
-				//		//try to find a major high or low from the current pivot point
-				//		PivotPoint? pivotPoint = findMajorPivot(pivot, PivotAnalysis.MajorHigh);
-				//		if (pivotPoint == null)
-				//		{
-				//			pivotPoint = findMajorPivot(pivot, PivotAnalysis.MajorLow);
-				//			pivotPoint.Value.Analysis |= PivotAnalysis.MajorLow;
-				//		}
-				//		else
-				//			pivotPoint.Value.Analysis |= PivotAnalysis.MajorHigh;
-				//		nextSwingIndex = pivotPoint.Index;
-				//	}
-				//	else if ((pivot.Analysis & PivotAnalysis.MinorHigh) == PivotAnalysis.MinorHigh)
-				//	{
-				//		//try to find a major high from the current pivot point
-				//		PivotPoint? pivotPoint = findMajorPivot(pivot, PivotAnalysis.MajorLow);
-				//		pivotPoint.Analysis |= PivotAnalysis.MajorLow;
-				//		nextSwingIndex = pivotPoint.Index;
-				//	}
-				//	if ((pivot.Analysis & PivotAnalysis.MinorLow) == PivotAnalysis.MinorLow)
-				//	{
-				//		//try to find a major low from the current pivot point
-				//		PivotPoint? pivotPoint = findMajorPivot(pivot, PivotAnalysis.MajorHigh);
-				//		pivotPoint.Analysis |= PivotAnalysis.MajorHigh;
-				//		nextSwingIndex = pivotPoint.Index;
-				//	}
-				//}
+						//if no overlay return false
+						if (currentLow > highest || currentHigh < lowest) return false;
 
-				////check that distances between the major swing points are contracting
-				//double previousDistance = getStartDistance();
-				//PivotPoint? previousMajorPivot = null;
-				//foreach (PivotPoint pivotPoint in m_pivots)
-				//{
-				//  //check that the distance between the major swing points is contracting
-				//	if ((pivotPoint.Analysis & PivotAnalysis.MajorHigh) == PivotAnalysis.MajorHigh)
-				//	{
-				//		//check that the distance between the major high and the last bar is contracting
-				//		if (previousMajorPivot == null) previousMajorPivot = pivotPoint;
-				//		else
-				//		{
-				//			double currentDistance = Math.Abs(pivotPoint.High - previousMajorPivot.Low);
-				//			if (currentDistance > previousDistance)
-				//				return false;
-				//			previousDistance = currentDistance;
-				//		}
-				//	}
-				//	else if ((pivotPoint.Analysis & PivotAnalysis.MajorLow) == PivotAnalysis.MajorLow)
-				//	{
-				//		//check that the distance between the major low and the last bar is contracting
-				//		if (previousMajorPivot == null) previousMajorPivot = pivotPoint;
-				//		else
-				//		{
-				//			double currentDistance = Math.Abs(previousMajorPivot.High - pivotPoint.Low);
-				//			if (currentDistance > previousDistance)
-				//				return false;
-				//			previousDistance = currentDistance;
-				//		}
-				//	}
-				//}
+						if (!double.IsInfinity(lowHighDelta) && lowHighDelta != 0.0d)
+						{
+							double overlay = double.PositiveInfinity;
+							if (currentLow > previousLow && currentHigh > previousHigh)
+								overlay = (previousHigh - currentLow) / lowHighDelta;
+							else
+								overlay = (currentHigh - previousLow) / lowHighDelta;
 
+							if (overlay < MinimumLegOverlay) return false;
+						}
+					}
+
+					//save values for the next iteration
+					previousLow = Math.Min(m_legs[i].Item2, m_legs[i + 1].Item2);
+					previousHigh = Math.Max(m_legs[i].Item2, m_legs[i + 1].Item2);
+					previousLength = length;
+				}
+
+				//set the output properties for the block of bars that are forming VCP
+				FirstBar = m_legs[m_legs.Count - 1].Item3;
+				LastBar = m_legs[0].Item3;
+				Low = vcpLow;
+				High = vcpHigh;
 
 				return true;
 			}
 
 			//methods
-			private double getStartDistance()
-			{
-				if (m_pivots.Count < 2) return 0.0d; //need at least 2 pivots to determine the distance between them
-
-				double distance = 0;
-				PivotPoint firstPivot = m_pivots[0];
-				PivotPoint secondPivot = m_pivots[1];
-
-				if ((firstPivot.Analysis & PivotAnalysis.MajorHigh) == PivotAnalysis.MajorHigh)
-					distance = Math.Abs(firstPivot.High - secondPivot.Low);
-				else if ((firstPivot.Analysis & PivotAnalysis.MajorLow) == PivotAnalysis.MajorLow)
-					distance = Math.Abs(firstPivot.Low - secondPivot.High);
-
-				return distance;
-			}
-
-			private PivotPoint? findMajorPivot(PivotPoint pivot, PivotAnalysis analysis)
-			{
-				PivotPoint? pivotPoint = null;
-//				bool searchLeg = false;
-//
-//				foreach (PivotPoint otherPivot in m_pivots)
-//				{
-//					//if (!searchLeg && otherPivot != pivot) continue;
-//
-//					searchLeg = true;
-//					if (analysis == PivotAnalysis.MajorHigh)
-//					{
-//
-//						//TODO - how to properly scan for a leg high pivot point
-//
-//					}
-//					else if (analysis == PivotAnalysis.MajorLow)
-//					{
-//
-//						//TODO - how to properly scan for a leg low pivot point
-//
-//					}
-//
-//					if (pivotPoint != null) break;
-//				}
-
-				return pivotPoint;
-			}
-
+			
 
 		}
 	}
