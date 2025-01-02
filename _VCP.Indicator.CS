@@ -12,6 +12,7 @@ namespace PowerLanguage.Indicator
 	{
 		//constants
 		public const float VCP_LINE_WIDTH = 5.0f;
+		public const float TEXT_Y_PADDING = 5.0f;
 
 		//inputs
 		[Input] public int FastLength { get; set; }          //fast length of the VCP KAMA
@@ -21,9 +22,8 @@ namespace PowerLanguage.Indicator
 		[Input] public int MaximumScanLength { get; set; }   //maximum scan length for the VCP
 		[Input] public int MinimumRequiredLegs { get; set; }  //minimum number of legs required to form the VCP
 		[Input] public double MinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
-		[Input] public Color VCPColor { get; set; }
-		[Input] public Color TextColor { get; set; }
-		[Input] public float TextFontSize { get; set; }
+		[Input] public Color Color { get; set; }
+		[Input] public float FontSize { get; set; }
 		[Input] public bool Debug { get; set; }
 
 		//properties
@@ -45,9 +45,8 @@ namespace PowerLanguage.Indicator
 			MaximumScanLength = Function._VCP.DEFAULT_MAXIMUM_SCAN_LENGTH;
 			MinimumRequiredLegs = Function._VCP.DEFAULT_MINIMUM_REQUIRED_LEGS;
 			MinimumPercentageContracingLegs = Function._VCP.DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
-			VCPColor = Color.Blue;
-			TextColor = Color.LightGray;
-			TextFontSize = 10.0f;
+			Color = Color.Blue;
+			FontSize = 10.0f;
 			Debug = false;
 			m_vcp = new Function._VCP(this);
 			m_vcps = new List<Tuple<DateTime, DateTime, double, double, double, List<Tuple<int, int, DateTime, double>>>>();
@@ -98,10 +97,10 @@ namespace PowerLanguage.Indicator
 			//only render VCP's on before the foreground shapes	
 			if (phase != EDrawPhases.BeforeFGShapes) return;
 
-			using (Font textFont = new Font("Arial", TextFontSize, FontStyle.Regular))
+			using (Font textFont = new Font("Arial", FontSize, FontStyle.Regular))
 			using (StringFormat textFormat = new StringFormat(StringFormatFlags.NoWrap))
-			using (Pen vcpPen = new Pen(VCPColor, VCP_LINE_WIDTH))
-			using (Brush textBrush = new SolidBrush(TextColor))
+			using (Pen vcpPen = new Pen(Color, VCP_LINE_WIDTH))
+			using (Brush textBrush = new SolidBrush(Color))
 			{
 				foreach (var vcp in m_vcps)
 				{
@@ -110,7 +109,7 @@ namespace PowerLanguage.Indicator
 					PointF start = context.Environment.ChartPoint2Point(new ChartPoint(vcp.Item1, vcp.Item3));
 					PointF end = context.Environment.ChartPoint2Point(new ChartPoint(vcp.Item2, vcp.Item4));
 					RectangleF rect = new RectangleF(start, new SizeF(end.X - start.X, end.Y - start.Y));
-					RectangleF vcpRectWithText = new RectangleF(rect.X, rect.Y - textSize.Height, rect.Width, rect.Height + textSize.Height);
+					RectangleF vcpRectWithText = new RectangleF(rect.X, rect.Y - textSize.Height, rect.Width, rect.Height + textSize.Height + TEXT_Y_PADDING);
 
 					if (context.DirtyRect.IntersectsWith(vcpRectWithText))
 					{
@@ -122,7 +121,7 @@ namespace PowerLanguage.Indicator
 								context.graphics.DrawLine(vcpPen, legStart, legEnd);
 						}
 
-						PointF textPoint = new PointF(vcpRectWithText.X + (vcpRectWithText.Width / 2.0f), vcpRectWithText.Y);
+						PointF textPoint = new PointF(vcpRectWithText.X + (vcpRectWithText.Width / 2.0f), vcpRectWithText.Y + TEXT_Y_PADDING);
 						context.graphics.DrawString(text, textFont, textBrush, textPoint, textFormat);
 					}
 				}

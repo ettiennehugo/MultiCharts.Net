@@ -135,7 +135,7 @@ namespace PowerLanguage
 			}
 
 			//DEBUG - Set date here to stop below for analysis on a specific date/time.
-			//static DateTime test = new DateTime(2023, 4, 18, 18, 30, 0);
+			static DateTime test = new DateTime(2023, 5, 18, 18, 30, 0);
 
 			protected override System.Boolean CalcBar()
 			{
@@ -153,8 +153,8 @@ namespace PowerLanguage
 				if (Instrument.CurrentBar < (MinimumScanLength + OVERSCAN_LENGTH)) return false;
 
 				//DEBUG - Set breakpoint here to stop at a specific date/time for analysis.
-				//if (Instrument.Time[0] == test)
-				//	Output.Write("Debug");
+				if (Instrument.Time[0] == test)
+					Output.Write("Debug");
 
 				scanForIntervals();
 
@@ -185,7 +185,7 @@ namespace PowerLanguage
 				//partition the scan length into intervals formed of bars grouped by the KAMA cross points
 				PivotInterval interval = new PivotInterval
 				{
-					Type = Instrument.Close[MinimumScanLength] > m_kama[MinimumScanLength - 1] ? PivotIntervalType.Above : PivotIntervalType.Below,
+					Type = Instrument.Close[MaximumScanLength - 1] > m_kama[MaximumScanLength - 1] ? PivotIntervalType.Above : PivotIntervalType.Below,
 					OpenBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
 					HighBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
 					LowBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
@@ -446,7 +446,7 @@ namespace PowerLanguage
 						}
 						else
 							if (m_pivotIntervals[i].HighBarNumber != m_pivotIntervals[i].LowBarNumber)
-							PivotPoints.Add(new Tuple<int, int, DateTime, double>(m_pivotIntervals[i].HighBarNumber, m_pivotIntervals[i].HighBarIndex, m_pivotIntervals[i].HighTime, m_pivotIntervals[i].High));
+							  PivotPoints.Add(new Tuple<int, int, DateTime, double>(m_pivotIntervals[i].HighBarNumber, m_pivotIntervals[i].HighBarIndex, m_pivotIntervals[i].HighTime, m_pivotIntervals[i].High));
 					}
 					else if (i == m_pivotIntervals.Count - 1)
 					{
@@ -458,7 +458,7 @@ namespace PowerLanguage
 						}
 						else
 							if (m_pivotIntervals[i].HighBarNumber != Instrument.CurrentBar)
-							PivotPoints.Add(new Tuple<int, int, DateTime, double>(m_pivotIntervals[i].HighBarNumber, m_pivotIntervals[i].HighBarIndex, m_pivotIntervals[i].HighTime, m_pivotIntervals[i].High));
+							  PivotPoints.Add(new Tuple<int, int, DateTime, double>(m_pivotIntervals[i].HighBarNumber, m_pivotIntervals[i].HighBarIndex, m_pivotIntervals[i].HighTime, m_pivotIntervals[i].High));
 
 						//create the end-point of the last leg (and thus the end-point of the VCP stretching to the current bar being processed)
 						PivotPoints.Add(new Tuple<int, int, DateTime, double>(Instrument.CurrentBar, 0, Instrument.Time[0], Instrument.Close[0]));
