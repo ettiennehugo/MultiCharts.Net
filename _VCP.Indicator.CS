@@ -18,9 +18,8 @@ namespace PowerLanguage.Indicator
 		[Input] public int FastLength { get; set; }          //fast length of the VCP KAMA
 		[Input] public int SlowLength { get; set; }          //slow length of the VCP KAMA
 		[Input] public double MinimumATRDelta { get; set; }  //minimum ATR delta between the high and low of the VCP
-		[Input] public int MinimumScanLength { get; set; }   //minimum scan length for the VCP
-		[Input] public int MaximumScanLength { get; set; }   //maximum scan length for the VCP
-		[Input] public int MinimumRequiredLegs { get; set; }  //minimum number of legs required to form the VCP
+		[Input] public int ScanLength { get; set; }					 //scan length for the VCP
+		[Input] public int MinimumRequiredLegs { get; set; } //minimum number of legs required to form the VCP
 		[Input] public double MinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
 		[Input] public Color Color { get; set; }
 		[Input] public float FontSize { get; set; }
@@ -41,8 +40,7 @@ namespace PowerLanguage.Indicator
 			FastLength = Function._VCP.DEFAULT_FAST_LENGTH;
 			SlowLength = Function._VCP.DEFAULT_SLOW_LENGTH;
 			MinimumATRDelta = Function._VCP.DEFAULT_MINIMUM_ATR_DELTA;
-			MinimumScanLength = Function._VCP.DEFAULT_MINIMUM_SCAN_LENGTH;
-			MaximumScanLength = Function._VCP.DEFAULT_MAXIMUM_SCAN_LENGTH;
+			ScanLength = Function._VCP.DEFAULT_SCAN_LENGTH;
 			MinimumRequiredLegs = Function._VCP.DEFAULT_MINIMUM_REQUIRED_LEGS;
 			MinimumPercentageContracingLegs = Function._VCP.DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
 			Color = Color.Blue;
@@ -59,8 +57,7 @@ namespace PowerLanguage.Indicator
 			m_vcp.FastLength = FastLength;
 			m_vcp.SlowLength = SlowLength;
 			m_vcp.MinimumATRDelta = MinimumATRDelta;
-			m_vcp.MinimumScanLength = MinimumScanLength;
-			m_vcp.MaximumScanLength = MaximumScanLength;
+			m_vcp.ScanLength = ScanLength;
 			m_vcp.MinimumRequiredLegs = MinimumRequiredLegs;
 			m_vcp.MinimumPercentageContracingLegs = MinimumPercentageContracingLegs;
 		}

@@ -54,7 +54,7 @@ namespace PowerLanguage.Strategy {
 
 		protected override void StartCalc()
 		{
-			m_episodicPivot.Instrument = Bars;
+			m_episodicPivot.Instrument = BarsOfData(2);
 			m_episodicPivot.GrowthDays = GrowthDays;
 			m_episodicPivot.GrowthPercent = GrowthPercent;
 			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;

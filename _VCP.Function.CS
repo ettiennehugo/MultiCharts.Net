@@ -9,8 +9,8 @@ namespace PowerLanguage
 	namespace Function
 	{
 		/// <summary>
-		/// Determines whether the last set of bars can be considered a volatility contraction pattern over a specified
-		/// minimum to maximum scan length. The algorithm is as follows:
+		/// Determines whether the last set of bars can be considered a volatility contraction pattern over a specified scan length. 
+		/// The algorithm is as follows:
 		/// * Uses a KAMA with an ATR channel to determine intervals at which the price consoliation would pivot above/below the KAMA.
 		/// * A big problem for this algorithm is to try and avoid whipsaws around the KAMA and thus incorrectly partitioning the pice
 		///   data swings, an ATR channel upper/lower bounds are used to avoid whipsaw moves due to price moves.
@@ -18,15 +18,15 @@ namespace PowerLanguage
 		/// * IF the legs are contracting (i.e. the legs have a high overlay) then the pattern is considered a volatility contraction pattern.
 		///		- A minimum percentage is introduced to scan for leg contractions, if the set of legs contracting out of the total number of legs if above this
 		///		  percentage then the pattern is considered a volatility contraction pattern.
-		///	* NOTE - The VCP could indicate both a build up to a breakout or a build up to a breakdown, the VCP itself does not indicate the direction. Use the VCP
-		///	         with recent momentum indicators to determine the direction of the breakout/breakdown.
+		///	NOTES:
+		///	* The VCP could indicate both a build up to a breakout or a build up to a breakdown, the VCP itself does not indicate the direction. Use the VCP
+		///	  with recent momentum indicators to determine the direction of the breakout/breakdown.
 		/// </summary>
 		public sealed class _VCP : FunctionSimple<System.Boolean>
 		{
 			//constants
 			public const int MINIMUM_SCAN_LENGTH = 10;
-			public const int DEFAULT_MINIMUM_SCAN_LENGTH = 50;
-			public const int DEFAULT_MAXIMUM_SCAN_LENGTH = 80;
+			public const int DEFAULT_SCAN_LENGTH = 50;
 			public const double DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS = 0.8;   //per default require 80% of the legs to contract to form the VCP - there might be some noise that might cause one or two legs to not contract
 			public const int OVERSCAN_LENGTH = 20;   //we need some level of overscan before the start of the VCP to ensure we capture the full length of the first leg as best possible
 			public const double DEFAULT_MINIMUM_ATR_DELTA = 0.5;  //minimum ATR delta from the KAMA to consider a move significant enough for a new pivot interval
@@ -76,8 +76,7 @@ namespace PowerLanguage
 			public int FastLength { get; set; }          //fast length for the KAMA
 			public int SlowLength { get; set; }          //slow length for the KAMA
 			public double MinimumATRDelta { get; set; }  //minimum ATR delta from the KAMA to consider a move significant enough for a new pivot interval
-			public int MinimumScanLength { get; set; }   //minimum scan length for the VCP
-			public int MaximumScanLength { get; set; }   //maximum scan length for the VCP
+			public int ScanLength { get; set; }					 //scan length for the VCP
 			public int MinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
 			public double MinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
 
@@ -108,8 +107,7 @@ namespace PowerLanguage
 				FastLength = DEFAULT_FAST_LENGTH;
 				SlowLength = DEFAULT_SLOW_LENGTH;
 				MinimumATRDelta = DEFAULT_MINIMUM_ATR_DELTA;
-				MinimumScanLength = DEFAULT_MINIMUM_SCAN_LENGTH;
-				MaximumScanLength = DEFAULT_MAXIMUM_SCAN_LENGTH;
+				ScanLength = DEFAULT_SCAN_LENGTH;
 				MinimumPercentageContracingLegs = DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
 				m_kama = new Function._KAMA(this);
 				m_atr = new Function._ATR(this);
@@ -124,9 +122,7 @@ namespace PowerLanguage
 				if (SlowLength <= 0) throw new Exception("Slow length must be greater than 0");
 				if (FastLength >= SlowLength) throw new Exception("Fast length must be less than the slow length");
 				if (MinimumATRDelta <= 0) throw new Exception("Minimum ATR delta must be greater than 0");
-				if (MinimumScanLength < MINIMUM_SCAN_LENGTH) throw new Exception("Minimum scan length must be greater than 10");
-				if (MaximumScanLength < MINIMUM_SCAN_LENGTH) throw new Exception("Maximum scan length must be greater than 10");
-				if (MaximumScanLength < MinimumScanLength) throw new Exception("Maximum scan length must be greater or equal to the minimum scan length");
+				if (ScanLength < MINIMUM_SCAN_LENGTH) throw new Exception("Maximum scan length must be greater than 10");
 				if (MinimumPercentageContracingLegs < 0 || MinimumPercentageContracingLegs > 1.0d) throw new Exception("Minimum percentage of contracting legs must be between 0 and 1");
 				m_kama.FastLength = FastLength;
 				m_kama.SlowLength = SlowLength;
@@ -150,7 +146,7 @@ namespace PowerLanguage
 				Low = double.NegativeInfinity;
 
 				//check that we have enough bars to process
-				if (Instrument.CurrentBar < (MinimumScanLength + OVERSCAN_LENGTH)) return false;
+				if (Instrument.CurrentBar < (ScanLength + OVERSCAN_LENGTH)) return false;
 
 				//DEBUG - Set breakpoint here to stop at a specific date/time for analysis.
 				if (Instrument.Time[0] == test)
@@ -185,30 +181,30 @@ namespace PowerLanguage
 				//partition the scan length into intervals formed of bars grouped by the KAMA cross points
 				PivotInterval interval = new PivotInterval
 				{
-					Type = Instrument.Close[MaximumScanLength - 1] > m_kama[MaximumScanLength - 1] ? PivotIntervalType.Above : PivotIntervalType.Below,
-					OpenBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
-					HighBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
-					LowBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
-					CloseBarNumber = Instrument.CurrentBar - MaximumScanLength + 1,
-					OpenBarIndex = MaximumScanLength - 1,
-					HighBarIndex = MaximumScanLength - 1,
-					LowBarIndex = MaximumScanLength - 1,
-					CloseBarIndex = MaximumScanLength - 1,
-					OpenTime = Instrument.Time[MaximumScanLength - 1],
-					HighTime = Instrument.Time[MaximumScanLength - 1],
-					LowTime = Instrument.Time[MaximumScanLength - 1],
-					CloseTime = Instrument.Time[MaximumScanLength - 1],
-					Open = Instrument.Open[MaximumScanLength - 1],
-					High = Instrument.High[MaximumScanLength - 1],
-					Low = Instrument.Low[MaximumScanLength - 1],
-					Close = Instrument.Close[MaximumScanLength - 1],
-					HighestClose = Instrument.Close[MaximumScanLength - 1],
-					LowestClose = Instrument.Close[MinimumScanLength - 1]
+					Type = Instrument.Close[ScanLength - 1] > m_kama[ScanLength - 1] ? PivotIntervalType.Above : PivotIntervalType.Below,
+					OpenBarNumber = Instrument.CurrentBar - ScanLength + 1,
+					HighBarNumber = Instrument.CurrentBar - ScanLength + 1,
+					LowBarNumber = Instrument.CurrentBar - ScanLength + 1,
+					CloseBarNumber = Instrument.CurrentBar - ScanLength + 1,
+					OpenBarIndex = ScanLength - 1,
+					HighBarIndex = ScanLength - 1,
+					LowBarIndex = ScanLength - 1,
+					CloseBarIndex = ScanLength - 1,
+					OpenTime = Instrument.Time[ScanLength - 1],
+					HighTime = Instrument.Time[ScanLength - 1],
+					LowTime = Instrument.Time[ScanLength - 1],
+					CloseTime = Instrument.Time[ScanLength - 1],
+					Open = Instrument.Open[ScanLength - 1],
+					High = Instrument.High[ScanLength - 1],
+					Low = Instrument.Low[ScanLength - 1],
+					Close = Instrument.Close[ScanLength - 1],
+					HighestClose = Instrument.Close[ScanLength - 1],
+					LowestClose = Instrument.Close[ScanLength - 1]
 				};
 
 				//NOTE: We construct the intervals around the maximum scan length and will cull the intervals/legs not required up to the minimum
 				//      scan length to still meet the number of required legs for the VCP.
-				for (int i = MaximumScanLength - 2; i >= 0; i--)    //-2 since we start with the first bar as an interval above
+				for (int i = ScanLength - 2; i >= 0; i--)    //-2 since we start with the first bar as an interval above
 																														//determine whether price has crossed the SSMA
 					if ((Instrument.Close[i] > m_kama[i] && Instrument.Close[i + 1] <= m_kama[i + 1]) ||
 							(Instrument.Close[i] < m_kama[i] && Instrument.Close[i + 1] >= m_kama[i + 1]))
@@ -389,7 +385,7 @@ namespace PowerLanguage
 				//      containing a small number of bars initially but once extended contains enough bars to form it's own interval.
 				for (int i = 0; i < OVERSCAN_LENGTH; i++)
 				{
-					int barIndex = MaximumScanLength + i;
+					int barIndex = ScanLength + i;
 					if (m_pivotIntervals[0].Type == PivotIntervalType.Above)
 					{
 						//check for a trend that is moving lower at the start of the VCP above the KAMA

@@ -7,6 +7,9 @@ using ATCenterProxy.interop;
 namespace PowerLanguage.Strategy {
 	/// <summary>
 	/// Episodic Pivot Scanner signal that works with the high-volume opening bar money management signal.
+	/// https://www.youtube.com/watch?v=YyNOhw2OLuI
+	///	Required Feeds:
+	///		1. Scanner data feed - typically daily data feed for the same instrument.
 	/// </summary>
 	public class _EpisodicPivotScanner : _CustomSignal {
 		//constants
@@ -49,6 +52,7 @@ namespace PowerLanguage.Strategy {
 
 		protected override void CalcBar()
 		{
+			this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
 			if (Environment.CalcReason == CalculationReason.Default && m_episodicPivot[0])
 			{
 				if (Debug) Output.WriteLine("EpisodicPivot, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
@@ -63,8 +67,6 @@ namespace PowerLanguage.Strategy {
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_STRATEGY_DATA
 
 			}
-			else
-				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
 		}
 
 		//methods
