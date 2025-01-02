@@ -38,13 +38,13 @@ namespace PowerLanguage.Indicator
     private VariableSeries<double> upperLine;
     private VariableSeries<double> lowerLine;
     //private LinearRegValue linRegFC;
-    private KAMA kama;
+    private PowerLanguage.Function._KAMA kama;
     private int longestLength;
 
     protected override void Create()
     {
       //linRegFC = new LinearRegValue(this);
-      kama = new KAMA(this);
+      kama = new PowerLanguage.Function._KAMA(this);
       centerLine = new VariableSeries<double>(this);
       upperLine = new VariableSeries<double>(this);
       lowerLine = new VariableSeries<double>(this);
@@ -69,7 +69,6 @@ namespace PowerLanguage.Indicator
 
     protected override void CalcBar()
     {
-      //centerLine.Value = linRegFC[0];
       centerLine.Value = kama[0];
 
       double scaledAtr = ScalingFactor * this.AverageTrueRange(ATRLength);

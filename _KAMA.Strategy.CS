@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
-using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy {
     /// <summary>
@@ -50,7 +49,7 @@ namespace PowerLanguage.Strategy {
         [Input] public bool Debug { get; set; }                     //flag to enable debug output to the output console
 
         //Attributes:
-        private KAMA _kama;
+        private PowerLanguage.Function._KAMA _kama;
         private IOrderMarket _LE_DMM;
         private IOrderMarket _SE_DMM;
         private IOrderMarket _LE_SMM;
@@ -76,7 +75,7 @@ namespace PowerLanguage.Strategy {
 
         protected override void Create() {
             //create indicators used
-            _kama = new KAMA(this);
+            _kama = new PowerLanguage.Function._KAMA(this);
 
             //create the order types used
             _LE_DMM = OrderCreator.MarketThisBar(new SOrderParameters(Contracts.UserSpecified, "KAMADLE", EOrderAction.Buy));         //dynamic money management orders

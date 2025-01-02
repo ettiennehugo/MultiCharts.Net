@@ -23,7 +23,7 @@ namespace PowerLanguage
 		///                 so far.
 		/// 
 		/// </summary>		
-		public sealed class KAMA : FunctionSeries<System.Double>
+		public sealed class _KAMA : FunctionSeries<System.Double>
 		{
 			//Constants:
 			const int DEFAULT_FAST_LENGTH = 2;
@@ -44,8 +44,8 @@ namespace PowerLanguage
 			private double slowSmoothing;
 			private double result;
 
-			public KAMA(CStudyControl _master) : base(_master) { }
-			public KAMA(CStudyControl _master, int _ds) : base(_master, _ds) { }
+			public _KAMA(CStudyControl _master) : base(_master) { }
+			public _KAMA(CStudyControl _master, int _ds) : base(_master, _ds) { }
 
 			protected override void Create()
 			{

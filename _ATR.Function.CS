@@ -12,7 +12,7 @@ namespace PowerLanguage
 		public sealed class _ATR : FunctionSeries<System.Double>
 		{
 			//constants
-
+			public const int DEFAULT_LENGTH = 14;
 
 			//inputs
 			public IInstrument Instrument { get; set; } //data feed to use for the ATR calculation
@@ -27,6 +27,11 @@ namespace PowerLanguage
 			//interface methods
 			public _ATR(CStudyControl _master) : base(_master) { }
 			public _ATR(CStudyControl _master, int _ds) : base(_master, _ds) { }
+
+			protected override void Create()
+			{
+				Length = DEFAULT_LENGTH;
+			}
 
 			protected override void StartCalc() 
 			{
