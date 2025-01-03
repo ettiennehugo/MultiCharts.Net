@@ -2,9 +2,13 @@
 using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
+using ATCenterProxy.interop;
+using System.Diagnostics;
 
-namespace PowerLanguage.Indicator{
-	public class _HighVolumeSpike : IndicatorObject {
+namespace PowerLanguage.Strategy
+{
+	public class _HighVolumeSpikeScanner : _CustomSignal
+	{
 		//constants
 
 
@@ -13,20 +17,16 @@ namespace PowerLanguage.Indicator{
 		[Input] public double GrowthPercentage { get; set; }  //percentage growth to consider as spike
 		[Input] public int VolumeLength { get; set; }         //length to determine for volume average
 		[Input] public double VolumeSigmaMultiplier { get; set; }  //volume multiplier of average to consider as spike
-		[Input] public bool Debug { get; set; }
+		[Input] public bool Debug { get; set; }              //debug flag to print out the values
 
 		//properties
 
 
 		//attributes
-		private IPlotObject m_plotO;
-		private IPlotObject m_plotH;
-		private IPlotObject m_plotL;
-		private IPlotObject m_plotC;
-		private Function._HighVolumeSpike m_highVolumeSpike;
+		private PowerLanguage.Function._HighVolumeSpike m_highVolumeSpike;
 
 		//interface methods
-		public _HighVolumeSpike(object _ctx) : base(_ctx) { }
+		public _HighVolumeSpikeScanner(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
@@ -34,11 +34,8 @@ namespace PowerLanguage.Indicator{
 			GrowthPercentage = PowerLanguage.Function._HighVolumeSpike.DEFAULT_GROWTH_PERCENTAGE;
 			VolumeLength = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_LENGTH;
 			VolumeSigmaMultiplier = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_SIGMA_MULTIPLIER;
-			m_plotO = AddPlot(new PlotAttributes("", EPlotShapes.LeftTick, Color.Purple));
-			m_plotH = AddPlot(new PlotAttributes("", EPlotShapes.BarHigh, Color.Purple));
-			m_plotL = AddPlot(new PlotAttributes("", EPlotShapes.BarLow, Color.Purple));
-			m_plotC = AddPlot(new PlotAttributes("", EPlotShapes.RightTick, Color.Purple));
-			m_highVolumeSpike = new Function._HighVolumeSpike(this);
+			m_highVolumeSpike = new PowerLanguage.Function._HighVolumeSpike(this);
+			Debug = false;
 		}
 
 		protected override void StartCalc()
@@ -52,13 +49,23 @@ namespace PowerLanguage.Indicator{
 
 		protected override void CalcBar()
 		{
-			if (m_highVolumeSpike[0])
+			this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
+
+			if (Environment.CalcReason == CalculationReason.Default && m_highVolumeSpike[0])
 			{
-				if (Debug) Output.WriteLine("HighVolumeSpike Indicator, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
-				m_plotO.Set(Bars.Open[0]);
-				m_plotH.Set(Bars.High[0]);
-				m_plotL.Set(Bars.Low[0]);
-				m_plotC.Set(Bars.Close[0]);
+				if (Debug) Output.WriteLine("HighVolumeSpike, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
+				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Short;
+
+
+				//TODO fill values for the PMMS signal
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_PRICE
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_RISK
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_STOP_LOSS
+				//_PMMS_HighVolumeOpeningRange.PARAMETER_STRATEGY_DATA
+
+
 			}
 		}
 

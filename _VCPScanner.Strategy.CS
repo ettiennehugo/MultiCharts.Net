@@ -19,7 +19,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public int ScanLength { get; set; }          //scan length for the VCP
 		[Input] public int MinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
 		[Input] public double MinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
-		[Input] public bool Debug { get; set; } //debug flag to print out the values
+		[Input] public bool Debug { get; set; }							 //debug flag to print out the values
 
 		//properties
 

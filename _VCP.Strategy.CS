@@ -72,7 +72,9 @@ namespace PowerLanguage.Strategy {
 		{
 			if (Bars.CurrentBar < GrowthDays) return;
 			double growthPercent = Bars.Close[GrowthDays - 1] != 0.0d ? (Bars.Close[0] - Bars.Close[GrowthDays - 1]) / Bars.Close[GrowthDays - 1] : 0.0d;
-			if (m_growthPercent < growthPercent && m_vcp[0]) base.CalcBar();
+			if (m_growthPercent > growthPercent) return;
+			if (!m_vcp[0]) return;
+			base.CalcBar();
 		}
 	}
 }

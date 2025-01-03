@@ -18,9 +18,11 @@ namespace PowerLanguage.Strategy {
 		public int _VolumeLength { get; set; }           //volume length to use for opening bar volume detection
 		public double _VolumeStdDevFactor { get; set; }  //volume standard deviation factor to use for high volume detection
 		public double _MaxVolumeBasedPosPercent { get; set; }  //maximum volume based position size as a percentage of equity
+		public EMarketPositionSide _EntryPositionSide { get; set; }  //position side to take on the opening 
 
 		//attributes
 		protected IOrderPriced m_le;
+		protected IOrderPriced m_se;
 
 		//interface methods
 		public _OpeningRangeBarSignal(object _ctx) : base(_ctx) { }
@@ -28,7 +30,9 @@ namespace PowerLanguage.Strategy {
 		protected override void Create()
 		{
 			base.Create();
+			_EntryPositionSide = EMarketPositionSide.Long;		//default long entries
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Buy));
+			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.SellShort));
 		}
 
 		protected override void StartCalc()
@@ -46,13 +50,19 @@ namespace PowerLanguage.Strategy {
 			m_le.Send(Bars.Close[0], positionSize(Bars, positionSize(Bars, Bars.Open[0] - Bars.Info.MinMove), _VolumeLength, _MaxVolumeBasedPosPercent));
 		}
 
-		//methods
+		//methods		
 		/// <summary>
 		/// Determine a high volume opening bar for the session that closes in the top 25% percent of the opening bar range.
 		/// </summary>
 		private bool highVolumeOpeningBar()
 		{
-			if ((Bars.Close[0] - Bars.Low[0]) / (Bars.High[0] - Bars.Low[0]) < 0.75) return false;    //not a bullish closing in the top 25% of the range
+			if (_EntryPositionSide == EMarketPositionSide.Long)
+			{
+				if ((Bars.Close[0] - Bars.Low[0]) / (Bars.High[0] - Bars.Low[0]) < 0.75) return false;    //not a bullish closing in the top 25% of the range
+			}
+			else
+				if ((Bars.Low[0] - Bars.Close[0]) / (Bars.High[0] - Bars.Low[0]) < 0.75) return false;    //not a bearish closing in the bottom 25% of the range
+
 			SessionObject session = Bars.Sessions.SessionForDate(Bars.Time[0]);
 			if (session.StartTime == Bars.Time[0].TimeOfDay) return false; //not an opening bar
 			if (Bars.Volume[0] < _VolumeStdDevFactor * Bars.Volume.StandardDeviationCustom(_VolumeLength, 1)) return false;  //not a high volume bar
