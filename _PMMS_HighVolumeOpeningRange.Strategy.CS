@@ -7,6 +7,7 @@ using ATCenterProxy.interop;
 using IronPython.Compiler;
 using PowerLanguage.TradeManager;
 using System.Windows.Forms;
+using Microsoft.Scripting.Metadata;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -33,6 +34,20 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_MAX_VOLUME_BASED_POS_PERCENT = 0.2; //enter at maximum of 20% of the average volume over the volume length
 
 		//types
+		/// <summary>
+		/// Records an entry direction for the strategy.
+		/// </summary>
+		public struct StrategyEntry
+		{
+
+
+			//TODO
+			// - complete this structure where scanner strategies can set the entry direction, risk, stop-loss and entry price.
+			// - in the StartCalc create an entry in a list in the dictionary for each of the strategies in the portfolio so that the strategy can update their associated signals.
+
+
+		}
+
 		/// <summary>
 		/// Per strategy data stored to monitor entry position.
 		/// </summary>
