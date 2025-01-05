@@ -8,7 +8,8 @@ namespace PowerLanguage
 	namespace Function
 	{
 		/// <summary>
-		/// Checks whether the price moves higher by at least some percentage over the last N bars. Typically used to short pump-and-dump stocks.
+		/// Checks whether the price moves higher by at least some percentage over the last N bars. Typically used to short pump-and-dump stocks,
+		/// markets like the Nasdaq and OTC would be more ideal to trade with this.
 		/// </summary>
 		public sealed class _HighVolumeSpike : FunctionSimple<System.Boolean> {
 			//constants

@@ -4,6 +4,7 @@ using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
 using System.Diagnostics;
+using System.IO;
 
 namespace PowerLanguage.Strategy {
 	public class _VCPScanner : _CustomSignal {
@@ -27,6 +28,7 @@ namespace PowerLanguage.Strategy {
 		//attributes
 		private double m_growthPercent;
 		private PowerLanguage.Function._VCP m_vcp;
+		private string m_trace;
 
 		//interface methods
 		public _VCPScanner(object _ctx) : base(_ctx) { }
@@ -54,7 +56,7 @@ namespace PowerLanguage.Strategy {
 			m_vcp.ScanLength = ScanLength;
 			m_vcp.MinimumRequiredLegs = MinimumRequiredLegs;
 			m_vcp.MinimumPercentageContracingLegs = MinimumPercentageContracingLegs;
-			m_growthPercent = 1.0d + MinimumGrowthPercent;	//only checking positive growth
+			m_growthPercent = 1.0d + MinimumGrowthPercent;  //only checking positive growth
 		}
 
 		protected override void CalcBar()
@@ -66,7 +68,24 @@ namespace PowerLanguage.Strategy {
 			double growthPercent = Bars.Close[GrowthDays - 1] != 0.0d ? (Bars.Close[0] - Bars.Close[GrowthDays - 1]) / Bars.Close[GrowthDays - 1] : 0.0d;
 			if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent && m_vcp[0])
 			{
-				if (Debug) Output.WriteLine("VCP, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+				if (Debug)
+				{
+					string trace = string.Format("VCP, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+					if (MyPortfolioData.ContainsKey(_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE))
+					{
+						StreamWriter debugTrace = (StreamWriter)MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE];
+						lock (debugTrace) debugTrace.WriteLine(trace);
+					}
+					Output.WriteLine(trace);
+
+					//string debugMessage = MyPortfolioData.ContainsKey(_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE) ? (string)MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE] : "";
+					//if (debugMessage.Length > 0) debugMessage += _PMMS_DebugTrace.TRACE_SEPARATOR;
+					//string trace = string.Format("VCP, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+					//debugMessage += trace;
+					//MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE] = debugMessage;
+					//Output.WriteLine(trace);
+				}
+
 				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
 				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Long;
 

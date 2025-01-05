@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
+using System.IO;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -21,7 +22,7 @@ namespace PowerLanguage.Strategy {
 
 
 		//attributes
-		PowerLanguage.Function._ShortTheSpike m_shortTheSpike;
+		private PowerLanguage.Function._ShortTheSpike m_shortTheSpike;
 
 		//interface methods
 		public _ShortTheSpikeScanner(object _ctx) : base(_ctx) { }
@@ -42,11 +43,30 @@ namespace PowerLanguage.Strategy {
 
 		protected override void CalcBar()
 		{
+			this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
+
 			if (Environment.CalcReason == CalculationReason.Default && m_shortTheSpike[0])
 			{
-				if (Debug) Output.WriteLine("ShortTheSpike, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
-				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
-				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Short;
+				if (Debug)
+				{
+					string trace = string.Format("ShortTheSpike, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+					if (MyPortfolioData.ContainsKey(_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE))
+					{
+						StreamWriter debugTrace = (StreamWriter)MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE];
+						lock (debugTrace) debugTrace.WriteLine(trace);
+					}
+					Output.WriteLine(trace);
+
+					//string debugMessage = MyPortfolioData.ContainsKey(_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE) ? (string)MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE] : "";
+					//if (debugMessage.Length > 0) debugMessage += _PMMS_DebugTrace.TRACE_SEPARATOR;
+					//string trace = string.Format("ShortTheSpike, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+					//debugMessage += trace;
+					//MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE] = debugMessage;
+					//Output.WriteLine(trace);
+				}
+
+				MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = true;
+				MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_DIRECTION] = EMarketPositionSide.Short;
 				//TODO fill values for the PMMS signal
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_ENTRY_PRICE
@@ -55,8 +75,6 @@ namespace PowerLanguage.Strategy {
 				//_PMMS_HighVolumeOpeningRange.PARAMETER_STRATEGY_DATA
 
 			}
-			else
-				this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
 		}
 
 		//methods
