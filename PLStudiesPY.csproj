@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{33EC1BFC-C85E-4C92-95F4-22012DEEA427}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>PLStudiesPY</RootNamespace>
+    <AssemblyName>PLStudiesPY</AssemblyName>
+    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="System.Drawing.dll" />
+    <Reference Include="System.Windows.Forms.dll" />
+    <Reference Include="System.dll" />
+    <Reference Include="System.Data.dll" />
+    <Reference Include="System.Xml.dll" />
+    <Reference Include="System.Core.dll" />
+    <Reference Include="Microsoft.CSharp.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\PLTypes.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\PLStudiesProxy.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\PLBuiltInFunctions.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\PLTradeManager.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\ATCenterProxy.interop.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\PLDataLoader.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\IronPython.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\IronPython.Modules.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Dynamic.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Scripting.dll" />
+    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Scripting.Metadata.dll" />
+  </ItemGroup>
+  <ItemGroup />
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
