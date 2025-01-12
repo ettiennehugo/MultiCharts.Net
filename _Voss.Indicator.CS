@@ -10,7 +10,7 @@ namespace PowerLanguage.Indicator{
 
 		public _Voss(object _ctx):base(_ctx){}
 
-    private Voss vossFC;
+    private Function._Voss vossFC;
     private IPlotObject filterPlot;
     private IPlotObject vossPlot;
 

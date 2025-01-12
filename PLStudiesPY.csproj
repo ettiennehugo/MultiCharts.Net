@@ -41,17 +41,17 @@
     <Reference Include="System.Xml.dll" />
     <Reference Include="System.Core.dll" />
     <Reference Include="Microsoft.CSharp.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\PLTypes.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\PLStudiesProxy.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\PLBuiltInFunctions.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\PLTradeManager.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\ATCenterProxy.interop.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\PLDataLoader.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\IronPython.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\IronPython.Modules.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Dynamic.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Scripting.dll" />
-    <Reference Include="C:\Program Files\MultiCharts .NET64\Microsoft.Scripting.Metadata.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLStudiesProxy.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLBuiltInFunctions.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTradeManager.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\ATCenterProxy.interop.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLDataLoader.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\IronPython.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\IronPython.Modules.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Dynamic.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.Metadata.dll" />
   </ItemGroup>
   <ItemGroup />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
