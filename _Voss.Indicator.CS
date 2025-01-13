@@ -18,7 +18,7 @@ namespace PowerLanguage.Indicator{
       // create variable objects, function objects, plot objects etc.
       Period = 20;
       Predict = 3;
-      vossFC = new Voss(this);
+      vossFC = new Function._Voss(this);
       filterPlot = AddPlot(new PlotAttributes("Filter", EPlotShapes.Line, Color.Red));
       vossPlot = AddPlot(new PlotAttributes("Voss", EPlotShapes.Line, Color.Blue));
 		}
