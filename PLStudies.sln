@@ -1,13 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.28307.1525
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35527.113 d17.12
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PLStudies", "PLStudies.csproj", "{5BDED609-14F2-4653-9A44-7681B05072BC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PLStudies", "PLStudies.csproj", "{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}"
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "PLStudiesVB", "PLStudiesVB.vbproj", "{4BD71D9B-76F8-4990-BF1B-4372708E3EFF}"
 EndProject
-Project("{33EC1BFC-C85E-4C92-95F4-22012DEEA427}") = "PLStudiesPY", "PLStudiesPY.csproj", "{33EC1BFC-C85E-4C92-95F4-22012DEEA427}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PLStudiesPY", "PLStudiesPY.csproj", "{33EC1BFC-C85E-4C92-95F4-22012DEEA427}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,10 +15,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{5BDED609-14F2-4653-9A44-7681B05072BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{5BDED609-14F2-4653-9A44-7681B05072BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{5BDED609-14F2-4653-9A44-7681B05072BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{5BDED609-14F2-4653-9A44-7681B05072BC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{4BD71D9B-76F8-4990-BF1B-4372708E3EFF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{4BD71D9B-76F8-4990-BF1B-4372708E3EFF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4BD71D9B-76F8-4990-BF1B-4372708E3EFF}.Release|Any CPU.ActiveCfg = Release|Any CPU
