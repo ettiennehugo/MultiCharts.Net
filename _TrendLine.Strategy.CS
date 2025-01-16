@@ -11,7 +11,6 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Runtime.InteropServices;
 using IronPython.Runtime;
 using Newtonsoft.Json.Linq;
-using PowerLanguage.details;
 
 namespace PowerLanguage.Strategy
 {
@@ -39,53 +38,54 @@ namespace PowerLanguage.Strategy
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     ///  
     /// ExitLine
-    /// 	• LineId - trend line id
-    ///		• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
-    ///		• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+    /// • LineId - trend line id
+    ///	• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+    ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+    /// 
     /// ExitMovingAverage
-	///     • Length - length of the moving average.
-    ///     • Type - enum Simple, Exponential, SuperSmoother
-	///     • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
-	///     • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
-	///     • [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
-	///     • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+	/// • Length - length of the moving average.
+    /// • Type - enum Simple, Exponential, SuperSmoother
+	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
+	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
+	/// • [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// EntryZone
-    ///		• FirstLineId - first trend line used to define the zone
-    ///		• SecondLineId - second trend line used to define the zone
-    ///		• EntryType - enum of Long, Short
-    ///		• EquityPercent - percent of the ACCOUNT size to enter into the position
-    ///		• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
-    ///		• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
+    ///	• FirstLineId - first trend line used to define the zone
+    ///	• SecondLineId - second trend line used to define the zone
+    ///	• EntryType - enum of Long, Short
+    ///	• EquityPercent - percent of the ACCOUNT size to enter into the position
+    ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
+    ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     /// 
     /// ExitZone
-    ///		• FirstLineId - first trend line used to define the zone
-    ///		• SecondLineId - second trend line used to define the zone
-    ///		• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
-    ///		• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
-    ///		• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+    ///	• FirstLineId - first trend line used to define the zone
+    ///	• SecondLineId - second trend line used to define the zone
+    ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
+    ///	• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// ExitStopLoss
-    ///		• Percent - exit the position if the price moves against you by the specified percentage.
-    ///		• [optional] PositionPercent - percent of the POSITION to exit, default 1.0 (100%)
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    ///	• Percent - exit the position if the price moves against you by the specified percentage.
+    ///	• [optional] PositionPercent - percent of the POSITION to exit, default 1.0 (100%)
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitProfit
-    ///		• Percent - exit the position one the price moved in your favor by this percentage
-    ///		• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    ///	• Percent - exit the position one the price moved in your favor by this percentage
+    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitDays
-    /// 	• Count - number of days after which the position should be closed
-    ///		• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%) 
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    /// • Count - number of days after which the position should be closed
+    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%) 
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitEntryBarLowHigh
-    ///		• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
-    ///		• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
-    ///		• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    ///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
+    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
+    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     ///		
     /// Example JSON:
     /// [
@@ -162,7 +162,17 @@ namespace PowerLanguage.Strategy
             public _TrendLine m_studyControl;
 
             public Instruction(_TrendLine control) { m_studyControl = control; }
-            public abstract void Parse(JToken token);
+
+            public abstract void Parse(JProperty property);
+            public virtual void Parse(JToken token)
+            {
+                foreach (var child in token.Children())
+                {
+                    if (child.Type != JTokenType.Property) continue;
+                    Parse((JProperty)child);
+                }
+            }
+
             public virtual void StartCalc() { }
             public virtual void StopCalc() { }
             public abstract void CalcBar();
@@ -173,6 +183,59 @@ namespace PowerLanguage.Strategy
                 foreach (ITrendLineObject line in m_studyControl.DrwTrendLine.GetTrendLineObjects(EDrawingSource.AnyTechOrManual))
                     if (line.ID == id) return line;
                 return null;
+            }
+        }
+
+        public abstract class Exit : Instruction
+        {
+            public EExitType ExitType { get; set; }
+            public double ExitPercent { get; set; }
+            public DateTime ValidUntil { get; set; }
+
+            protected IOrderPriced m_orderLx;
+            protected IOrderPriced m_orderSx;
+            protected IOrderStopLimit m_orderLxSL;
+            protected IOrderStopLimit m_orderSxSL;
+
+            public Exit(_TrendLine control) : base(control)
+            {
+                ExitType = EExitType.Stop;
+                ExitPercent = 1.0;
+                ValidUntil = DateTime.MaxValue;
+            }
+
+            public override void StartCalc()
+            {
+                m_orderLx = null;
+                m_orderSx = null;
+                m_orderLxSL = null;
+                m_orderSxSL = null;
+
+                switch (ExitType)
+                {
+                    case EExitType.Stop:
+                        m_orderLx = m_studyControl.AllocateLxStp();
+                        m_orderSx = m_studyControl.AllocateSxStp();
+                        break;
+                    case EExitType.StopLimit:
+                        m_orderLxSL = m_studyControl.AllocateLxStpLmt();
+                        m_orderSxSL = m_studyControl.AllocateSxStpLmt();
+                        break;
+                }
+            }
+
+            public override void Parse(JProperty property)
+            {
+                string name = property.Name.ToLower();
+                if (name == "exittype") ExitType = property.Value.ToObject<EExitType>();
+                if (name == "exitpercent") ExitPercent = property.Value.ToObject<double>();
+                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "Exit - ExitPercent must be between 0 and 1");
+                return Tuple.Create(true, string.Empty);
             }
         }
 
@@ -207,33 +270,29 @@ namespace PowerLanguage.Strategy
                 AddToPosition = false;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "entrytype") EntryType = prop.Value.ToObject<EEntryType>();
-                    if (prop.Name.ToLower() == "equitypercent") EntryPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "criteria") Criteria = prop.Value.ToObject<EEntryExitCriteria>();
-                    if (prop.Name.ToLower() == "bufferprice") BufferPrice = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "closepercentile") ClosePercentile = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "startdate") StartDate = prop.Value.ToObject<DateTime>();
-                    if (prop.Name.ToLower() == "enddate") EndDate = prop.Value.ToObject<DateTime>();
-                    if (prop.Name.ToLower() == "starttime") StartTime = prop.Value.ToObject<DateTime>();
-                    if (prop.Name.ToLower() == "endtime") EndTime = prop.Value.ToObject<DateTime>();
-                    if (prop.Name.ToLower() == "validuntil") ValidUntil = prop.Value.ToObject<DateTime>();
-                    if (prop.Name.ToLower() == "addtoposition") AddToPosition = prop.Value.ToObject<bool>();
-                }
+                string name = property.Name.ToLower();
+                if (name == "entrytype") EntryType = property.Value.ToObject<EEntryType>();
+                if (name == "equitypercent") EntryPercent = property.Value.ToObject<double>();
+                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
+                if (name == "bufferprice") BufferPrice = property.Value.ToObject<double>();
+                if (name == "closepercentile") ClosePercentile = property.Value.ToObject<double>();
+                if (name == "startdate") StartDate = property.Value.ToObject<DateTime>();
+                if (name == "enddate") EndDate = property.Value.ToObject<DateTime>();
+                if (name == "starttime") StartTime = property.Value.ToObject<DateTime>();
+                if (name == "endtime") EndTime = property.Value.ToObject<DateTime>();
+                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
+                if (name == "addtoposition") AddToPosition = property.Value.ToObject<bool>();
             }
 
             public override void StartCalc()
             {
                 m_line = getTrendLine(LineId);
                 if (EntryType == EEntryType.Long)
-                    m_order = m_studyControl.allocateLeLmt();
+                    m_order = m_studyControl.AllocateLeLmt();
                 else
-                    m_order = m_studyControl.allocateSeLmt();
+                    m_order = m_studyControl.AllocateSeLmt();
             }
 
             public override void CalcBar()
@@ -312,60 +371,30 @@ namespace PowerLanguage.Strategy
             }
         };
 
-        public class ExitLine : Instruction
+        public class ExitLine : Exit
         {
             public int LineId { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
-            public DateTime ValidUntil { get; set; }
 
             private ITrendLineObject m_line;
-            IOrderPriced m_orderLx;
-            IOrderPriced m_orderSx;
-            IOrderStopLimit m_orderLxSL;
-            IOrderStopLimit m_orderSxSL;
 
             public ExitLine(_TrendLine control) : base(control)
             {
                 Criteria = EEntryExitCriteria.Close;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
-                ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "lineid") LineId = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "criteria") Criteria = prop.Value.ToObject<EEntryExitCriteria>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                    if (prop.Name.ToLower() == "validuntil") ValidUntil = prop.Value.ToObject<DateTime>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (name == "lineid") LineId = property.Value.ToObject<int>();
+                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
             }
 
             public override void StartCalc()
             {
-                m_orderLx = null;
-				m_orderSx = null;
-                m_orderLxSL = null;
-				m_orderSxSL = null;
-				
+                base.StartCalc();
                 m_line = getTrendLine(LineId);
-                if (ExitType == EExitType.Stop)
-                {
-                    m_orderLx = m_studyControl.allocateLxStp();
-                    m_orderSx = m_studyControl.allocateSxStp();
-                }
-                else if (ExitType == EExitType.StopLimit)
-                {
-                    m_orderLxSL = m_studyControl.allocateLxStpLmt();
-                    m_orderSxSL = m_studyControl.allocateSxStpLmt();
-                }
             }
 
             public override void CalcBar()
@@ -381,77 +410,169 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found"));
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "ExitLine - ExitPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
             }
 
             private void exitLong()
             {
-                throw new NotImplementedException();
+                double trendLineValue = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
+                switch (Criteria)
+                {
+                    case EEntryExitCriteria.Close:
+                        if (m_studyControl.Bars.Close[0] < trendLineValue)
+                        {
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
+                            if (ExitType == EExitType.Stop)
+                                m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
+                            else if (ExitType == EExitType.StopLimit)
+                                m_orderLxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
+                        }
+                        break;
+                    case EEntryExitCriteria.LowHigh:
+                        if (m_studyControl.Bars.Low[0] < trendLineValue)
+                        {
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on low at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
+                            if (ExitType == EExitType.Stop)
+                                m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
+                            else if (ExitType == EExitType.StopLimit)
+                                m_orderLxSL.Send(m_studyControl.Bars.Low[0], m_studyControl.Bars.Low[0], positionSize);
+                        }
+                        break;
+                }
             }
 
             private void exitShort()
             {
-                throw new NotImplementedException();
+                double trendLineValue = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
+                switch (Criteria)
+                {
+                    case EEntryExitCriteria.Close:
+                        if (m_studyControl.Bars.Close[0] > trendLineValue)
+                        {
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
+                            if (ExitType == EExitType.Stop)
+                                m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
+                            else if (ExitType == EExitType.StopLimit)
+                                m_orderSxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
+                        }
+                        break;
+                    case EEntryExitCriteria.LowHigh:
+                        if (m_studyControl.Bars.High[0] > trendLineValue)
+                        {
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on high at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
+                            if (ExitType == EExitType.Stop)
+                                m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
+                            else if (ExitType == EExitType.StopLimit)
+                                m_orderSxSL.Send(m_studyControl.Bars.High[0], m_studyControl.Bars.High[0], positionSize);
+                        }
+                        break;
+                }
             }
-        };
+        }
 
-        public class ExitMovingAverage : Instruction
+        public class ExitMovingAverage : Exit
         {
             public int Length { get; set; }
             public EMovingAverageType Type { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
-            public DateTime ValidUntil { get; set; }
+
+            private PowerLanguage.Function.AverageFC m_averageSimple;
+            private PowerLanguage.Function.XAverage m_averageExponential;
+            private PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
 
             public ExitMovingAverage(_TrendLine control) : base(control)
             {
                 Criteria = EEntryExitCriteria.Close;
                 ExitPercent = 1.0;
                 ExitType = EExitType.Stop;
-                ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "length") Length = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "type") Type = prop.Value.ToObject<EMovingAverageType>();
-                    if (prop.Name.ToLower() == "criteria") Criteria = prop.Value.ToObject<EEntryExitCriteria>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                    if (prop.Name.ToLower() == "validuntil") ValidUntil = prop.Value.ToObject<DateTime>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (name == "length") Length = property.Value.ToObject<int>();
+                if (name == "type") Type = property.Value.ToObject<EMovingAverageType>();
+                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
             }
 
             public override void StartCalc()
             {
+                base.StartCalc();
+                m_averageSimple = null;
+                m_averageExponential = null;
+                m_averageSuperSmoother = null;
 
-                //allocate a moving average object from the study control
-                throw new NotImplementedException();
-
+                switch (Type)
+                {
+                    case EMovingAverageType.Simple:
+                        m_averageSimple = m_studyControl.AllocateSimpleAverage();
+                        m_averageSimple.length = Length;
+                        break;
+                    case EMovingAverageType.Exponential:
+                        m_averageExponential = m_studyControl.AllocateExponentialAverage();
+                        m_averageExponential.Length = Length;
+                        break;
+                    case EMovingAverageType.SuperSmoother:
+                        m_averageSuperSmoother = m_studyControl.AllocateSuperSmoother();
+                        m_averageSuperSmoother.Length = Length;
+                        break;
+                }
             }
 
             public override void CalcBar()
             {
+                if (m_studyControl.PositionSide == 0) return;
                 if (m_studyControl.Bars.CurrentBar < Length) return;
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
                 if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
 
-                throw new NotImplementedException();
-
+                switch (Type)
+                {
+                    case EMovingAverageType.Simple:
+                        exitAverage(m_averageSimple);
+                        break;
+                    case EMovingAverageType.Exponential:
+                        exitAverage(m_averageExponential);
+                        break;
+                    case EMovingAverageType.SuperSmoother:
+                        exitAverage(m_averageSuperSmoother);
+                        break;
+                }
             }
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "ExitMovingAverage - ExitPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
+            }
+
+            private void exitAverage(ISeries<double> values)
+            {
+                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
+                if (m_studyControl.PositionSide > 0)
+                {
+                    if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Long exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
+                    if (ExitType == EExitType.Stop)
+                        m_orderLx.Send(values[0], positionSize);
+                    else if (ExitType == EExitType.StopLimit)
+                        m_orderLxSL.Send(values[0], values[0], positionSize);
+                }
+                else if (m_studyControl.PositionSide < 0)
+                {
+                    if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Short exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
+                    if (ExitType == EExitType.Stop)
+                        m_orderSx.Send(values[0], positionSize);
+                    else if (ExitType == EExitType.StopLimit)
+                        m_orderSxSL.Send(values[0], values[0], positionSize);
+                }
             }
         }
 
@@ -475,20 +596,16 @@ namespace PowerLanguage.Strategy
                 ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "firstlineid") FirstLineId = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "secondlineid") SecondLineId = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "entrytype") EntryType = prop.Value.ToObject<EOrderAction>();
-                    if (prop.Name.ToLower() == "entrypercent") EntryPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "criteria") Criteria = prop.Value.ToObject<EEntryExitCriteria>();
-                    if (prop.Name.ToLower() == "addtoposition") AddToPosition = prop.Value.ToObject<bool>();
-                    if (prop.Name.ToLower() == "validuntil") ValidUntil = prop.Value.ToObject<DateTime>();
-                }
+                string name = property.Name.ToLower();
+                if (name == "firstlineid") FirstLineId = property.Value.ToObject<int>();
+                if (name == "secondlineid") SecondLineId = property.Value.ToObject<int>();
+                if (name == "entrytype") EntryType = property.Value.ToObject<EOrderAction>();
+                if (name == "entrypercent") EntryPercent = property.Value.ToObject<double>();
+                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
+                if (name == "addtoposition") AddToPosition = property.Value.ToObject<bool>();
+                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
             }
 
             public override void StartCalc()
@@ -511,13 +628,11 @@ namespace PowerLanguage.Strategy
             }
         };
 
-        public class ExitZone : Instruction
+        public class ExitZone : Exit
         {
             public int FirstLineId { get; set; }
             public int SecondLineId { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
             public DateTime ValidUntil { get; set; }
 
             private ITrendLineObject m_firstLine;
@@ -526,24 +641,17 @@ namespace PowerLanguage.Strategy
             public ExitZone(_TrendLine control) : base(control)
             {
                 Criteria = EEntryExitCriteria.Close;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
                 ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "firstlineid") FirstLineId = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "secondlineid") SecondLineId = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "criteria") Criteria = prop.Value.ToObject<EEntryExitCriteria>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                    if (prop.Name.ToLower() == "validuntil") ValidUntil = prop.Value.ToObject<DateTime>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (name == "firstlineid") FirstLineId = property.Value.ToObject<int>();
+                if (name == "secondlineid") SecondLineId = property.Value.ToObject<int>();
+                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
+                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
             }
 
             public override void StartCalc()
@@ -559,38 +667,50 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (m_firstLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", FirstLineId));
                 if (m_secondLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", SecondLineId));
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "ExitZone - ExitPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
             }
         };
 
-        public class ExitStopLoss : Instruction
+        public class ExitStopLoss : Exit
         {
             public double LossPrice { get; set; }
             public double LossPercent { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
 
             public ExitStopLoss(_TrendLine control) : base(control)
             {
                 LossPercent = -1.0;
                 LossPrice = -1.0;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (name == "losspercent") LossPercent = property.Value.ToObject<double>();
+                if (name == "lossprice") LossPrice = property.Value.ToObject<double>();
+            }
+
+            public override void StartCalc()
+            {
+                m_orderLx = null;
+                m_orderSx = null;
+                m_orderLxSL = null;
+                m_orderSxSL = null;
+
+                switch (ExitType)
                 {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "losspercent") LossPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "lossprice") LossPrice = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
+                    case EExitType.Stop:
+                        m_orderLx = m_studyControl.AllocateLxStp();
+                        m_orderSx = m_studyControl.AllocateSxStp();
+                        break;
+                    case EExitType.StopLimit:
+                        m_orderLxSL = m_studyControl.AllocateLxStpLmt();
+                        m_orderSxSL = m_studyControl.AllocateSxStpLmt();
+                        break;
                 }
             }
 
@@ -601,38 +721,31 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (LossPercent == -1.0 && LossPrice == -1.0) return Tuple.Create(false, "ExitStopLoss - LossPercent or LossPrice must be specified");
                 if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, "ExitStopLoss - LossPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
             }
         };
 
-        public class ExitProfit : Instruction
+        public class ExitProfit : Exit
         {
             public double ProfitPercent { get; set; }
             public double ProfitPrice { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
 
             public ExitProfit(_TrendLine control) : base(control)
             {
                 ProfitPercent = -1.0;
                 ProfitPrice = -1.0;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "profitpercent") ProfitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "profitprice") ProfitPrice = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (name == "profitpercent") ProfitPercent = property.Value.ToObject<double>();
+                if (name == "profitprice") ProfitPrice = property.Value.ToObject<double>();
             }
 
             public override void CalcBar()
@@ -648,29 +761,20 @@ namespace PowerLanguage.Strategy
             }
         };
 
-        public class ExitDays : Instruction
+        public class ExitDays : Exit
         {
             public int Count { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
 
             public ExitDays(_TrendLine control) : base(control)
             {
-                Count = 0;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
+                Count = 1;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "count") Count = prop.Value.ToObject<int>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (property.Name.ToLower() == "count") Count = property.Value.ToObject<int>();
             }
 
             public override void CalcBar()
@@ -680,35 +784,27 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (Count <= 0) return Tuple.Create(false, "ExitDays - Count must be greater than 0");
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "ExitDays - ExitPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
             }
         };
 
-        public class ExitEntryBarLowHigh : Instruction
+        public class ExitEntryBarLowHigh : Exit
         {
             public double BufferPrice { get; set; }
-            public double ExitPercent { get; set; }
-            public EExitType ExitType { get; set; }
 
             public ExitEntryBarLowHigh(_TrendLine control) : base(control)
             {
                 BufferPrice = 0.0;
-                ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
             }
 
-            public override void Parse(JToken token)
+            public override void Parse(JProperty property)
             {
-                foreach (var child in token.Children())
-                {
-                    if (child.Type != JTokenType.Property) continue;
-                    var prop = (JProperty)child;
-                    if (prop.Name.ToLower() == "bufferprice") BufferPrice = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exitpercent") ExitPercent = prop.Value.ToObject<double>();
-                    if (prop.Name.ToLower() == "exittype") ExitType = prop.Value.ToObject<EExitType>();
-                }
+                base.Parse(property);
+                string name = property.Name.ToLower();
+                if (property.Name.ToLower() == "bufferprice") BufferPrice = property.Value.ToObject<double>();
             }
 
             public override void CalcBar()
@@ -718,8 +814,9 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                Tuple<bool, string> baseResult = base.IsValid();
+                if (!baseResult.Item1) return baseResult;
                 if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryBarLowHigh - BufferPrice must be greater than or equal to 0");
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "ExitEntryBarLowHigh - ExitPercent must be between 0 and 1");
                 return Tuple.Create(true, string.Empty);
             }
         };
@@ -759,32 +856,30 @@ namespace PowerLanguage.Strategy
 
 
         //attributes
-        List<IOrderPriced> m_leLmt;
-        int m_leLmtAllocated;
-        List<IOrderPriced> m_lxStp;
-        int m_lxStpAllocated;
-        List<IOrderStopLimit> m_leStpLmt;
-        int m_leStpLmtAllocated;
-        List<IOrderStopLimit> m_lxStpLmt;
-        int m_lxStpLmtAllocated;
-        List<IOrderPriced> m_seLmt;
-        int m_seLmtAllocated;
-        List<IOrderPriced> m_sxStp;
-        int m_sxStpAllocated;
-        List<IOrderStopLimit> m_seStpLmt;
-        int m_seStpLmtAllocated;
-        List<IOrderStopLimit> m_sxStpLmt;
-        int m_sxStpLmtAllocated;
+        private List<IOrderPriced> m_leLmt;
+        private int m_leLmtAllocated;
+        private List<IOrderPriced> m_lxStp;
+        private int m_lxStpAllocated;
+        private List<IOrderStopLimit> m_leStpLmt;
+        private int m_leStpLmtAllocated;
+        private List<IOrderStopLimit> m_lxStpLmt;
+        private int m_lxStpLmtAllocated;
+        private List<IOrderPriced> m_seLmt;
+        private int m_seLmtAllocated;
+        private List<IOrderPriced> m_sxStp;
+        private int m_sxStpAllocated;
+        private List<IOrderStopLimit> m_seStpLmt;
+        private int m_seStpLmtAllocated;
+        private List<IOrderStopLimit> m_sxStpLmt;
+        private int m_sxStpLmtAllocated;
 
-        //TODO - add simple and exponential moving averages
-        List<PowerLanguage.Function._SuperSmoother> m_superSmoothers;
-        int m_superSmoothersAllocated;
-
-        //TODO
-        //  - add order sets that can be allocated by the instructions, e.g. allocateLongLimit, allocateShortStopLimit, etc.
-        //  - add moving averages that can be allocated by the instructions, e.g. allocateSimpleMovingAverage, allocateExponentialMovingAverage, etc.
-
-        protected List<Instruction> m_instructions;
+        private List<PowerLanguage.Function.AverageFC> m_averageSimple;
+        private int m_averageSimpleAllocated;
+        private List<PowerLanguage.Function.XAverage> m_averageExponential;
+        private int m_averageExponentialAllocated;
+        private List<PowerLanguage.Function._SuperSmoother> m_averageSuperSmoothers;
+        private int m_averageSuperSmoothersAllocated;
+        private List<Instruction> m_instructions;
 
         //interface methods
         public _TrendLine(object _ctx) : base(_ctx) { }
@@ -815,7 +910,7 @@ namespace PowerLanguage.Strategy
             foreach (var instruction in m_instructions) instruction.CalcBar();
         }
 
-        IOrderPriced allocateLeLmt()
+        public IOrderPriced AllocateLeLmt()
         {
             if (m_leLmtAllocated >= m_leLmt.Count) throw new InvalidOperationException("No more Long Limit orders available");
             IOrderPriced result = m_leLmt[m_leLmtAllocated];
@@ -823,7 +918,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderPriced allocateSeLmt()
+        public IOrderPriced AllocateSeLmt()
         {
             if (m_seLmtAllocated >= m_seLmt.Count) throw new InvalidOperationException("No more Short Limit orders available");
             IOrderPriced result = m_seLmt[m_seLmtAllocated];
@@ -831,7 +926,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderPriced allocateLxStp()
+        public IOrderPriced AllocateLxStp()
         {
             if (m_lxStpAllocated >= m_lxStp.Count) throw new InvalidOperationException("No more Long Exit Stop orders available");
             IOrderPriced result = m_lxStp[m_lxStpAllocated];
@@ -839,7 +934,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderPriced allocateSxStp()
+        public IOrderPriced AllocateSxStp()
         {
             if (m_sxStpAllocated >= m_sxStp.Count) throw new InvalidOperationException("No more Short Exit Stop orders available");
             IOrderPriced result = m_sxStp[m_sxStpAllocated];
@@ -847,7 +942,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderStopLimit allocateLeStpLmt()
+        public IOrderStopLimit AllocateLeStpLmt()
         {
             if (m_leStpLmtAllocated >= m_leStpLmt.Count) throw new InvalidOperationException("No more Long Stop Limit orders available");
             IOrderStopLimit result = m_leStpLmt[m_leStpLmtAllocated];
@@ -855,7 +950,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderStopLimit allocateSeStpLmt()
+        public IOrderStopLimit AllocateSeStpLmt()
         {
             if (m_seStpLmtAllocated >= m_seStpLmt.Count) throw new InvalidOperationException("No more Short Stop Limit orders available");
             IOrderStopLimit result = m_seStpLmt[m_seStpLmtAllocated];
@@ -863,7 +958,7 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderStopLimit allocateLxStpLmt()
+        public IOrderStopLimit AllocateLxStpLmt()
         {
             if (m_lxStpAllocated >= m_lxStpLmt.Count) throw new InvalidOperationException("No more Long Exit Stop Limit orders available");
             IOrderStopLimit result = m_lxStpLmt[m_lxStpAllocated];
@@ -871,11 +966,35 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        IOrderStopLimit allocateSxStpLmt()
+        public IOrderStopLimit AllocateSxStpLmt()
         {
             if (m_sxStpLmtAllocated >= m_sxStpLmt.Count) throw new InvalidOperationException("No more Short Exit Stop Limit orders available");
             IOrderStopLimit result = m_sxStpLmt[m_sxStpLmtAllocated];
             m_sxStpLmtAllocated++;
+            return result;
+        }
+
+        public PowerLanguage.Function.AverageFC AllocateSimpleAverage()
+        {
+            if (m_averageSimpleAllocated >= m_averageSimple.Count) throw new InvalidOperationException("No more Simple Moving Averages available");
+            PowerLanguage.Function.AverageFC result = m_averageSimple[m_averageSimpleAllocated];
+            m_averageSimpleAllocated++;
+            return result;
+        }
+
+        public PowerLanguage.Function.XAverage AllocateExponentialAverage()
+        {
+            if (m_averageExponentialAllocated >= m_averageExponential.Count) throw new InvalidOperationException("No more Exponential Moving Averages available");
+            PowerLanguage.Function.XAverage result = m_averageExponential[m_averageExponentialAllocated];
+            m_averageExponentialAllocated++;
+            return result;
+        }
+
+        public PowerLanguage.Function._SuperSmoother AllocateSuperSmoother()
+        {
+            if (m_averageSuperSmoothersAllocated >= m_averageSuperSmoothers.Count) throw new InvalidOperationException("No more Super Smoothers available");
+            PowerLanguage.Function._SuperSmoother result = m_averageSuperSmoothers[m_averageSuperSmoothersAllocated];
+            m_averageSuperSmoothersAllocated++;
             return result;
         }
 
@@ -906,10 +1025,16 @@ namespace PowerLanguage.Strategy
 
         private void createMovingAverages()
         {
-            m_superSmoothers = new List<PowerLanguage.Function._SuperSmoother>();
+            m_averageSimple = new List<PowerLanguage.Function.AverageFC>();
+            m_averageExponential = new List<PowerLanguage.Function.XAverage>();
+            m_averageSuperSmoothers = new List<PowerLanguage.Function._SuperSmoother>();
 
             for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
-                m_superSmoothers.Add(new PowerLanguage.Function._SuperSmoother(this));
+            {
+                m_averageSimple.Add(new PowerLanguage.Function.AverageFC(this));
+                m_averageExponential.Add(new PowerLanguage.Function.XAverage(this));
+                m_averageSuperSmoothers.Add(new PowerLanguage.Function._SuperSmoother(this));
+            }
         }
 
         private void resetOrders()
@@ -926,7 +1051,16 @@ namespace PowerLanguage.Strategy
 
         private void resetMovingAverages()
         {
-            m_superSmoothersAllocated = 0;
+            m_averageSimpleAllocated = 0;
+            m_averageExponentialAllocated = 0;
+            m_averageSuperSmoothersAllocated = 0;
+
+            for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
+            {
+                m_averageSimple[i].price = Bars.Close;
+                m_averageExponential[i].Price = Bars.Close;
+                m_averageSuperSmoothers[i].Price = Bars.Close;
+            }
         }
 
         private void parseAndValidateInstructions()
