@@ -24,6 +24,7 @@ namespace PowerLanguage.Strategy
     /// 
     /// Instructions:
     /// EntryLine
+    /// • Type - set to "EntryLine" 
     ///	• LineId - trend line id 
     ///	• EntryType - enum of Long, Short
     ///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
@@ -38,12 +39,14 @@ namespace PowerLanguage.Strategy
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     ///  
     /// ExitLine
+    /// • Type - set to "ExitLine" 
     /// • LineId - trend line id
     ///	• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     /// 
     /// ExitMovingAverage
+    /// • Type - set to "ExitMovingAverage" 
 	/// • Length - length of the moving average.
     /// • Type - enum Simple, Exponential, SuperSmoother
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -52,6 +55,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// EntryZone
+    /// • Type - set to "EntryZone" 
     ///	• FirstLineId - first trend line used to define the zone
     ///	• SecondLineId - second trend line used to define the zone
     ///	• EntryType - enum of Long, Short
@@ -60,6 +64,7 @@ namespace PowerLanguage.Strategy
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     /// 
     /// ExitZone
+    /// • Type - set to "ExitZone" 
     ///	• FirstLineId - first trend line used to define the zone
     ///	• SecondLineId - second trend line used to define the zone
     ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
@@ -68,28 +73,33 @@ namespace PowerLanguage.Strategy
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// ExitStopLoss
+    /// • Type - set to "ExitStopLoss" 
     ///	• Percent - exit the position if the price moves against you by the specified percentage.
     ///	• [optional] PositionPercent - percent of the POSITION to exit, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitProfit
+    /// • Type - set to "ExitProfit" 
     ///	• Percent - exit the position one the price moved in your favor by this percentage
     ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitDays
+    /// • Type - set to "ExitDays" 
     /// • Count - number of days after which the position should be closed
     ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%) 
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitEntryBarLowHigh
+    /// • Type - set to "ExitEntryBarLowHigh" 
     ///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
     ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     ///		
     /// Example JSON:
     /// [
-    ///		"EntryLine" : {
+    ///	    {
+    ///	        "Type" : "EntryLine"
     ///			"LineId" : 1,
     ///			"EntryType" : "Long", 
     ///			"EquityPercent" : 0.01,
@@ -98,7 +108,8 @@ namespace PowerLanguage.Strategy
     ///			"StartTime" : "9:35 AM",
     ///			"EndTime" : "9:35 AM"
     ///		},
-    ///		"EntryLine" : {
+    ///		{
+    ///	        "Type" : "EntryLine"
     ///			"LineId" : 2,
     ///			"EntryType" : "Short", 
     ///			"EquityPercent" : 0.01,
@@ -107,14 +118,17 @@ namespace PowerLanguage.Strategy
     ///			"StartTime" : "9:35 AM",
     ///			"EndTime" : "9:35 AM"
     ///		},
-    ///		"ExitLine" : {
+    ///		{
+    ///	        "Type" : "EntryLine"
     ///			"LineId" : 3,
     ///			"PositionPercent" : 0.5,
     ///		},
-    ///		"ExitProfit" : {
+    ///		{
+    ///	        "Type" : "ExitProfit"
     ///			"Percent" : 0.5
     ///		}
-    ///		"ExitEntryBarLowHigh" : {
+    ///		{
+    ///		    "Type" : "ExitEntryBarLowHigh",
     ///			"BufferPrice" : 0.05,
     ///		}
     /// ]
@@ -310,7 +324,7 @@ namespace PowerLanguage.Strategy
         {
             public int LineId { get; set; }
             public EEntryType EntryType { get; set; }
-            public double EntryPercent { get; set; }
+            public double EquityPercent { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
             public double BufferPrice { get; set; }
             public double ClosePercentile { get; set; }
@@ -326,7 +340,7 @@ namespace PowerLanguage.Strategy
 
             public EntryLine(_TrendLine control) : base(control)
             {
-                EntryPercent = 1.0;
+                EquityPercent = 1.0;
                 Criteria = EEntryExitCriteria.Close;
                 BufferPrice = 0.0;
                 ClosePercentile = 0.05;
@@ -334,14 +348,16 @@ namespace PowerLanguage.Strategy
                 EndDate = DateTime.MaxValue;
                 StartTime = DateTime.MinValue;
                 EndTime = DateTime.MaxValue;
+                ValidUntil = DateTime.MaxValue;
                 AddToPosition = false;
             }
 
             public override void Parse(JProperty property)
             {
                 string name = property.Name.ToLower();
+                if (name == "lineid") LineId = property.Value.ToObject<int>();
                 if (name == "entrytype") EntryType = property.Value.ToObject<EEntryType>();
-                if (name == "equitypercent") EntryPercent = property.Value.ToObject<double>();
+                if (name == "equitypercent") EquityPercent = property.Value.ToObject<double>();
                 if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
                 if (name == "bufferprice") BufferPrice = property.Value.ToObject<double>();
                 if (name == "closepercentile") ClosePercentile = property.Value.ToObject<double>();
@@ -380,7 +396,7 @@ namespace PowerLanguage.Strategy
             public override Tuple<bool, string> IsValid()
             {
                 if (m_line == null) return Tuple.Create(false, string.Format("EntryLine - trendline with id {0} not found"));
-                if (EntryPercent <= 0 || EntryPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
+                if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
                 if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, "EntryLine - ClosePercentile must be between 0 and 1");
                 if (StartDate > EndDate) return Tuple.Create(false, "EntryLine - StartDate must be before EndDate");
                 if (StartTime > EndTime) return Tuple.Create(false, "EntryLine - StartTime must be before EndTime");
@@ -407,7 +423,7 @@ namespace PowerLanguage.Strategy
                     if (closePercentileCheck)
                     {
                         if (m_studyControl.Debug) m_studyControl.Output.WriteLine("EntryLine - Long entry at {0}, {1}", m_studyControl.Bars.Time[0], m_line.PriceValue(m_studyControl.Bars.Time[0]));
-                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EntryPercent));
+                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EquityPercent));
                     }
                 }
             }
@@ -432,7 +448,7 @@ namespace PowerLanguage.Strategy
                     if (closePercentileCheck)
                     {
                         if (m_studyControl.Debug) m_studyControl.Output.WriteLine("EntryLine - Short entry at {0}, {1}", m_studyControl.Bars.Time[0], m_line.PriceValue(m_studyControl.Bars.Time[0]));
-                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EntryPercent));
+                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EquityPercent));
                     }
                 }
             }
@@ -686,6 +702,7 @@ namespace PowerLanguage.Strategy
 
             public override void CalcBar()
             {
+                //TODO
                 throw new NotImplementedException();
             }
 
@@ -732,6 +749,7 @@ namespace PowerLanguage.Strategy
 
             public override void CalcBar()
             {
+                //TODO
                 throw new NotImplementedException();
             }
 
@@ -1056,8 +1074,9 @@ namespace PowerLanguage.Strategy
         {
             resetOrders();
             resetMovingAverages();
-            parseAndValidateInstructions();
+            parseInstructions();
             foreach (var instruction in m_instructions) instruction.StartCalc();
+            validateInstructions();
         }
 
         protected override void StopCalc()
@@ -1245,17 +1264,33 @@ namespace PowerLanguage.Strategy
             }
         }
 
-        private void parseAndValidateInstructions()
+        private void parseInstructions()
         {
             m_instructions.Clear();
-            JObject root = JObject.Parse(Instructions);
-            foreach (var property in root.Properties())
+            JArray instructions = (JArray)JToken.Parse(Instructions);
+
+            foreach (var property in instructions)
             {
-                var instruction = InstructionFactory.CreateInstruction(property.Name, this);
-                instruction.Parse(property.Value);
+                var objectProperty = (JObject)property;
+                string typeValue = "";
+                foreach (var prop in objectProperty.Properties())
+                {
+                    if (prop.Name.ToLower() == "type")
+                    {
+                        typeValue = prop.Value.ToString().ToLower();
+                        break;
+                    }
+                }
+
+                if (typeValue == "") throw new ArgumentException("Instruction type not found");
+                var instruction = InstructionFactory.CreateInstruction(typeValue, this);
+                instruction.Parse(property);
                 m_instructions.Add(instruction);
             }
+        }
 
+        private void validateInstructions()
+        {
             foreach (var instruction in m_instructions)
             {
                 var result = instruction.IsValid();
