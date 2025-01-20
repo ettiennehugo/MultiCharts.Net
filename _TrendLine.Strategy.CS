@@ -9,8 +9,8 @@ using PowerLanguage.Indicator;
 using PowerLanguage.TradeManager;
 using System.Runtime.InteropServices.ComTypes;
 using System.Runtime.InteropServices;
-using IronPython.Runtime;
 using Newtonsoft.Json.Linq;
+using System.Runtime.Remoting.Messaging;
 
 namespace PowerLanguage.Strategy
 {
@@ -24,9 +24,9 @@ namespace PowerLanguage.Strategy
     /// 
     /// Instructions:
     /// EntryLine
-    /// • Type - set to "EntryLine" 
+    /// • Instruction - "EntryLine" 
     ///	• LineId - trend line id 
-    ///	• EntryType - enum of Long, Short
+    ///	• Direction - enum of Long, Short
     ///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
     ///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
     ///	• [optional] EntryPercentRoundingUp - (boolean) round the entry position up to the next whole number, default false
@@ -39,59 +39,61 @@ namespace PowerLanguage.Strategy
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     ///  
     /// ExitLine
-    /// • Type - set to "ExitLine" 
+    /// • Instruction - "ExitLine" 
     /// • LineId - trend line id
-    ///	• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
+	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     /// 
     /// ExitMovingAverage
-    /// • Type - set to "ExitMovingAverage" 
+    /// • Instruction - "ExitMovingAverage" 
 	/// • Length - length of the moving average.
-    /// • Type - enum Simple, Exponential, SuperSmoother
+    /// • MovingAverageType - enum Simple, Exponential, SuperSmoother
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
-    /// EntryZone
-    /// • Type - set to "EntryZone" 
+    /// EntryZone - TBD
+    /// • Instruction - "EntryZone" 
     ///	• FirstLineId - first trend line used to define the zone
     ///	• SecondLineId - second trend line used to define the zone
-    ///	• EntryType - enum of Long, Short
+    ///	• Direction - enum of Long, Short
     ///	• EquityPercent - percent of the ACCOUNT size to enter into the position
     ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
     /// 
-    /// ExitZone
-    /// • Type - set to "ExitZone" 
+    /// ExitZone - TBD
+    /// • Instruction - "ExitZone" 
     ///	• FirstLineId - first trend line used to define the zone
     ///	• SecondLineId - second trend line used to define the zone
     ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
-    ///	• [optional] PositionPercent - percent of POSITION to close, default 1.0 (100%)
+	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// ExitStopLoss
-    /// • Type - set to "ExitStopLoss" 
-    ///	• Percent - exit the position if the price moves against you by the specified percentage.
-    ///	• [optional] PositionPercent - percent of the POSITION to exit, default 1.0 (100%)
+    /// • Instruction - "ExitStopLoss" 
+    ///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
+    ///	• [alternate] LossPrice - exit the position if the price moves against you by a specified amount. 
+	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitProfit
-    /// • Type - set to "ExitProfit" 
-    ///	• Percent - exit the position one the price moved in your favor by this percentage
-    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
+    /// • Instruction - "ExitProfit" 
+    ///	• [alternate] ProfitPercent - exit the position one the price moved in your favor by this percentage
+    ///	• [alternate] ProfitPrice - exit the position one the price moved in your favor by this amount
+	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitDays
-    /// • Type - set to "ExitDays" 
+    /// • Instruction - "ExitDays" 
     /// • Count - number of days after which the position should be closed
-    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%) 
+    ///	• [optional] ExitPercent - percent of POSITION to exit, default 1.0 (100%) 
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitEntryBarLowHigh
-    /// • Type - set to "ExitEntryBarLowHigh" 
+    /// • Instruction - "ExitEntryBarLowHigh" 
     ///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
     ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
     ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
@@ -99,7 +101,7 @@ namespace PowerLanguage.Strategy
     /// Example JSON:
     /// [
     ///	    {
-    ///	        "Type" : "EntryLine"
+    ///	        "Instruction" : "EntryLine"
     ///			"LineId" : 1,
     ///			"EntryType" : "Long", 
     ///			"EquityPercent" : 0.01,
@@ -109,7 +111,7 @@ namespace PowerLanguage.Strategy
     ///			"EndTime" : "9:35 AM"
     ///		},
     ///		{
-    ///	        "Type" : "EntryLine"
+    ///	        "Instruction" : "EntryLine"
     ///			"LineId" : 2,
     ///			"EntryType" : "Short", 
     ///			"EquityPercent" : 0.01,
@@ -119,16 +121,16 @@ namespace PowerLanguage.Strategy
     ///			"EndTime" : "9:35 AM"
     ///		},
     ///		{
-    ///	        "Type" : "EntryLine"
+    ///	        "Instruction" : "EntryLine"
     ///			"LineId" : 3,
     ///			"PositionPercent" : 0.5,
     ///		},
     ///		{
-    ///	        "Type" : "ExitProfit"
+    ///	        "Instruction" : "ExitProfit"
     ///			"Percent" : 0.5
     ///		}
     ///		{
-    ///		    "Type" : "ExitEntryBarLowHigh",
+    ///		    "Instruction" : "ExitEntryBarLowHigh",
     ///			"BufferPrice" : 0.05,
     ///		}
     /// ]
@@ -143,16 +145,17 @@ namespace PowerLanguage.Strategy
         public const int MAX_MOVINGAVERAGES = 5;
 
         //types
-        public enum EEntryType
+        public enum EEntryDirection
         {
             Long,
             Short
         };
 
-        public enum EExitType
+        public enum EOrderType
         {
             Market,
             Stop,
+            Limit,
             StopLimit
         };
 
@@ -176,22 +179,38 @@ namespace PowerLanguage.Strategy
         {
             public _TrendLine m_studyControl;
 
+            public string Name { get; set; }
+
             public Instruction(_TrendLine control) { m_studyControl = control; }
 
-            public abstract void Parse(JProperty property);
+            public virtual bool Parse(JProperty property)
+            {
+                string name = property.Name.ToLower();
+                if (name == "instruction") { Name = property.Value.ToString().ToLower(); return true; }
+                return false;
+            }
+
             public virtual void Parse(JToken token)
             {
                 foreach (var child in token.Children())
                 {
                     if (child.Type != JTokenType.Property) continue;
-                    Parse((JProperty)child);
+                    //this exception is added to perform strict parsing of the input JSON since classes to catch typo's that would not
+                    //be caught due to parameter defaults provided, e.g. an entry has parameter EquityPercent that defaults to 1.0, if the
+                    //user has a typo on the entry property EqutyPercent set to 0.05 without strict validation the entry would enter at 1.0 (100%)
+                    //and not the intended 0.05 (5%)
+                    if (!Parse((JProperty)child)) throw new ArgumentException(string.Format("Failed to process property - {0}", child.Path));
                 }
+            }
+
+            public virtual Tuple<bool, string> IsValid()
+            {
+                return Tuple.Create(true, string.Empty);
             }
 
             public virtual void StartCalc() { }
             public virtual void StopCalc() { }
             public abstract void CalcBar();
-            public abstract Tuple<bool, string> IsValid();
 
             protected ITrendLineObject getTrendLine(int id)
             {
@@ -259,9 +278,123 @@ namespace PowerLanguage.Strategy
             }
         }
 
+
+
+        //TODO - Finish work around the supported entries and start testing the parsing/validation of each of the instructions.
+
+
+
+        public abstract class Entry : Instruction
+        {
+            public EEntryDirection Direction { get; set; }
+            public EOrderType EntryType { get; set; }
+            public EEntryExitCriteria Criteria { get; set; }
+            public double EquityPercent { get; set; }
+            public bool AddToPosition { get; set; }
+            public DateTime ValidUntil { get; set; }
+
+            protected IOrderMarket m_orderLeMkt;
+            protected IOrderMarket m_orderSeMkt;
+            protected IOrderPriced m_orserLeStp;
+            protected IOrderPriced m_orderSeStp;
+            protected IOrderPriced m_orderLeLmt;
+            protected IOrderPriced m_orderSeLmt;
+            protected IOrderStopLimit m_orderLeStpLmt;
+            protected IOrderStopLimit m_orderSeStpLmt;
+
+            public Entry(_TrendLine control) : base(control)
+            {
+                Direction = EEntryDirection.Long;
+                EntryType = EOrderType.Market;
+                EquityPercent = 1.0;
+                Criteria = EEntryExitCriteria.Close;
+                AddToPosition = false;
+            }
+
+            public override bool Parse(JProperty property)
+            {
+                string name = property.Name.ToLower();
+                if (name == "direction") { Direction = property.Value.ToObject<EEntryDirection>(); return true; }
+                if (name == "entrytype") { EntryType = property.Value.ToObject<EOrderType>(); return true; }
+                if (name == "equitypercent") { EquityPercent = property.Value.ToObject<double>(); return true; }
+                if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+                if (name == "addtoposition") { AddToPosition = property.Value.ToObject<bool>(); return true; }
+                if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "Entry - EquityPercent must be between 0 and 1");
+                return base.IsValid();
+            }
+
+            public override void StartCalc()
+            {
+                base.StartCalc();
+                m_orderLeMkt = null;
+                m_orderSeMkt = null;
+                m_orserLeStp = null;
+                m_orderSeStp = null;
+                m_orderLeLmt = null;
+                m_orderSeLmt = null;
+                m_orderLeStpLmt = null;
+                m_orderSeStpLmt = null;
+
+                switch (EntryType)
+                {
+                    case EOrderType.Market:
+                        switch (Direction)
+                        {
+                            case EEntryDirection.Long:
+                                m_orderLeMkt = m_studyControl.AllocateLeMrk();
+                                break;
+                            case EEntryDirection.Short:
+                                m_orderSeMkt = m_studyControl.AllocateSeMrk();
+                                break;
+                        }
+                        break;
+                    case EOrderType.Stop:
+                        switch (Direction)
+                        {
+                            case EEntryDirection.Long:
+                                m_orserLeStp = m_studyControl.AllocateLeStp();
+                                break;
+                            case EEntryDirection.Short:
+                                m_orderSeStp = m_studyControl.AllocateSeStp();
+                                break;
+                        }
+                        break;
+                    case EOrderType.Limit:
+                        switch (Direction)
+                        {
+                            case EEntryDirection.Long:
+                                m_orderLeLmt = m_studyControl.AllocateLeLmt();
+                                break;
+                            case EEntryDirection.Short:
+                                m_orderSeLmt = m_studyControl.AllocateSeLmt();
+                                break;
+                        }
+                        break;
+                    case EOrderType.StopLimit:
+                        switch (Direction)
+                        {
+                            case EEntryDirection.Long:
+                                m_orderLeStpLmt = m_studyControl.AllocateLeStpLmt();
+                                break;
+                            case EEntryDirection.Short:
+                                m_orderSeStpLmt = m_studyControl.AllocateSeStpLmt();
+                                break;
+                        }
+                        break;
+                }
+            }
+
+        }
+
         public abstract class Exit : Instruction
         {
-            public EExitType ExitType { get; set; }
+            public EOrderType ExitType { get; set; }
             public double ExitPercent { get; set; }
             public DateTime ValidUntil { get; set; }
 
@@ -272,9 +405,26 @@ namespace PowerLanguage.Strategy
 
             public Exit(_TrendLine control) : base(control)
             {
-                ExitType = EExitType.Stop;
+                ExitType = EOrderType.Stop;
                 ExitPercent = 1.0;
                 ValidUntil = DateTime.MaxValue;
+            }
+
+            public override bool Parse(JProperty property)
+            {
+                if (base.Parse(property)) return true;
+                bool result = false;
+                string name = property.Name.ToLower();
+                if (name == "exittype") { ExitType = property.Value.ToObject<EOrderType>(); result = true; }
+                if (name == "exitpercent") { ExitPercent = property.Value.ToObject<double>(); result = true; }
+                if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); result = true; }
+                return result;
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "Exit - ExitPercent must be between 0 and 1");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -286,29 +436,19 @@ namespace PowerLanguage.Strategy
 
                 switch (ExitType)
                 {
-                    case EExitType.Stop:
+                    case EOrderType.Stop:
                         m_orderLx = m_studyControl.AllocateLxStp();
                         m_orderSx = m_studyControl.AllocateSxStp();
                         break;
-                    case EExitType.StopLimit:
+                    case EOrderType.Limit:
+                        m_orderLx = m_studyControl.AllocateLxLmt();
+                        m_orderSx = m_studyControl.AllocateSxLmt();
+                        break;
+                    case EOrderType.StopLimit:
                         m_orderLxSL = m_studyControl.AllocateLxStpLmt();
                         m_orderSxSL = m_studyControl.AllocateSxStpLmt();
                         break;
                 }
-            }
-
-            public override void Parse(JProperty property)
-            {
-                string name = property.Name.ToLower();
-                if (name == "exittype") ExitType = property.Value.ToObject<EExitType>();
-                if (name == "exitpercent") ExitPercent = property.Value.ToObject<double>();
-                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
-            }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "Exit - ExitPercent must be between 0 and 1");
-                return Tuple.Create(true, string.Empty);
             }
 
             protected int exitSize()
@@ -320,59 +460,56 @@ namespace PowerLanguage.Strategy
             }
         }
 
-        public class EntryLine : Instruction
+        public class EntryLine : Entry
         {
             public int LineId { get; set; }
-            public EEntryType EntryType { get; set; }
-            public double EquityPercent { get; set; }
-            public EEntryExitCriteria Criteria { get; set; }
             public double BufferPrice { get; set; }
             public double ClosePercentile { get; set; }
             public DateTime StartDate { get; set; }
             public DateTime EndDate { get; set; }
             public DateTime StartTime { get; set; }
             public DateTime EndTime { get; set; }
-            public DateTime ValidUntil { get; set; }
-            public bool AddToPosition { get; set; }
 
             private ITrendLineObject m_line;
             private IOrderPriced m_order;
 
             public EntryLine(_TrendLine control) : base(control)
             {
-                EquityPercent = 1.0;
-                Criteria = EEntryExitCriteria.Close;
                 BufferPrice = 0.0;
                 ClosePercentile = 0.05;
                 StartDate = DateTime.MinValue;
                 EndDate = DateTime.MaxValue;
                 StartTime = DateTime.MinValue;
                 EndTime = DateTime.MaxValue;
-                ValidUntil = DateTime.MaxValue;
-                AddToPosition = false;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
                 string name = property.Name.ToLower();
-                if (name == "lineid") LineId = property.Value.ToObject<int>();
-                if (name == "entrytype") EntryType = property.Value.ToObject<EEntryType>();
-                if (name == "equitypercent") EquityPercent = property.Value.ToObject<double>();
-                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
-                if (name == "bufferprice") BufferPrice = property.Value.ToObject<double>();
-                if (name == "closepercentile") ClosePercentile = property.Value.ToObject<double>();
-                if (name == "startdate") StartDate = property.Value.ToObject<DateTime>();
-                if (name == "enddate") EndDate = property.Value.ToObject<DateTime>();
-                if (name == "starttime") StartTime = property.Value.ToObject<DateTime>();
-                if (name == "endtime") EndTime = property.Value.ToObject<DateTime>();
-                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
-                if (name == "addtoposition") AddToPosition = property.Value.ToObject<bool>();
+                if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
+                if (name == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+                if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
+                if (name == "startdate") { StartDate = property.Value.ToObject<DateTime>(); return true; }
+                if (name == "enddate") { EndDate = property.Value.ToObject<DateTime>(); return true; }
+                if (name == "starttime") { StartTime = property.Value.ToObject<DateTime>(); return true; }
+                if (name == "endtime") { EndTime = property.Value.ToObject<DateTime>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (m_line == null) return Tuple.Create(false, string.Format("EntryLine - trendline with id {0} not found"));
+                if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
+                if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, "EntryLine - ClosePercentile must be between 0 and 1");
+                if (StartDate > EndDate) return Tuple.Create(false, "EntryLine - StartDate must be before EndDate");
+                if (StartTime > EndTime) return Tuple.Create(false, "EntryLine - StartTime must be before EndTime");
+                return base.IsValid();
             }
 
             public override void StartCalc()
             {
                 m_line = getTrendLine(LineId);
-                if (EntryType == EEntryType.Long)
+                if (Direction == EEntryDirection.Long)
                     m_order = m_studyControl.AllocateLeLmt();
                 else
                     m_order = m_studyControl.AllocateSeLmt();
@@ -387,20 +524,10 @@ namespace PowerLanguage.Strategy
                 if (m_studyControl.Bars.Time[0].TimeOfDay < StartTime.TimeOfDay || m_studyControl.Bars.Time[0].TimeOfDay > EndTime.TimeOfDay) return;
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
-                if (EntryType == EEntryType.Long) 
+                if (Direction == EEntryDirection.Long) 
                     longEntry();
                 else 
                     shortEntry();
-            }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (m_line == null) return Tuple.Create(false, string.Format("EntryLine - trendline with id {0} not found"));
-                if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
-                if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, "EntryLine - ClosePercentile must be between 0 and 1");
-                if (StartDate > EndDate) return Tuple.Create(false, "EntryLine - StartDate must be before EndDate");
-                if (StartTime > EndTime) return Tuple.Create(false, "EntryLine - StartTime must be before EndTime");
-                return Tuple.Create(true, string.Empty);
             }
 
             private void longEntry()
@@ -466,12 +593,19 @@ namespace PowerLanguage.Strategy
                 Criteria = EEntryExitCriteria.Close;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
                 string name = property.Name.ToLower();
-                if (name == "lineid") LineId = property.Value.ToObject<int>();
-                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
+                if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
+                if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found"));
+                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitLine - Market exit not supported");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -492,15 +626,6 @@ namespace PowerLanguage.Strategy
                     exitShort();
             }
 
-            public override Tuple<bool, string> IsValid()
-            {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
-                if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found"));
-                if (ExitType == EExitType.Market) return Tuple.Create(false, "ExitLine - Market exit not supported");
-                return Tuple.Create(true, string.Empty);
-            }
-
             private void exitLong()
             {
                 double trendLineValue = m_line.PriceValue(m_studyControl.Bars.Time[0]);
@@ -511,9 +636,9 @@ namespace PowerLanguage.Strategy
                         if (m_studyControl.Bars.Close[0] < trendLineValue)
                         {
                             if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EExitType.Stop)
+                            if (ExitType == EOrderType.Stop)
                                 m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EExitType.StopLimit)
+                            else if (ExitType == EOrderType.StopLimit)
                                 m_orderLxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
                         }
                         break;
@@ -521,9 +646,9 @@ namespace PowerLanguage.Strategy
                         if (m_studyControl.Bars.Low[0] < trendLineValue)
                         {
                             if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on low at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EExitType.Stop)
+                            if (ExitType == EOrderType.Stop)
                                 m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EExitType.StopLimit)
+                            else if (ExitType == EOrderType.StopLimit)
                                 m_orderLxSL.Send(m_studyControl.Bars.Low[0], m_studyControl.Bars.Low[0], positionSize);
                         }
                         break;
@@ -540,9 +665,9 @@ namespace PowerLanguage.Strategy
                         if (m_studyControl.Bars.Close[0] > trendLineValue)
                         {
                             if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EExitType.Stop)
+                            if (ExitType == EOrderType.Stop)
                                 m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EExitType.StopLimit)
+                            else if (ExitType == EOrderType.StopLimit)
                                 m_orderSxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
                         }
                         break;
@@ -550,9 +675,9 @@ namespace PowerLanguage.Strategy
                         if (m_studyControl.Bars.High[0] > trendLineValue)
                         {
                             if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on high at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EExitType.Stop)
+                            if (ExitType == EOrderType.Stop)
                                 m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EExitType.StopLimit)
+                            else if (ExitType == EOrderType.StopLimit)
                                 m_orderSxSL.Send(m_studyControl.Bars.High[0], m_studyControl.Bars.High[0], positionSize);
                         }
                         break;
@@ -574,16 +699,23 @@ namespace PowerLanguage.Strategy
             {
                 Criteria = EEntryExitCriteria.Close;
                 ExitPercent = 1.0;
-                ExitType = EExitType.Stop;
+                ExitType = EOrderType.Stop;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
                 string name = property.Name.ToLower();
-                if (name == "length") Length = property.Value.ToObject<int>();
-                if (name == "type") Type = property.Value.ToObject<EMovingAverageType>();
-                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
+                if (name == "length") { Length = property.Value.ToObject<int>(); return true; }
+                if (name == "movingaveragetype") { Type = property.Value.ToObject<EMovingAverageType>(); return true; }
+                if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
+                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitMovingAverage - Market exit not supported");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -631,67 +763,56 @@ namespace PowerLanguage.Strategy
                 }
             }
 
-            public override Tuple<bool, string> IsValid()
-            {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
-                if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
-                if (ExitType == EExitType.Market) return Tuple.Create(false, "ExitMovingAverage - Market exit not supported");
-                return Tuple.Create(true, string.Empty);
-            }
-
             private void exitAverage(ISeries<double> values)
             {
                 int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
                 if (m_studyControl.PositionSide > 0)
                 {
                     if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Long exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
-                    if (ExitType == EExitType.Stop)
+                    if (ExitType == EOrderType.Stop)
                         m_orderLx.Send(values[0], positionSize);
-                    else if (ExitType == EExitType.StopLimit)
+                    else if (ExitType == EOrderType.StopLimit)
                         m_orderLxSL.Send(values[0], values[0], positionSize);
                 }
                 else if (m_studyControl.PositionSide < 0)
                 {
                     if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Short exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
-                    if (ExitType == EExitType.Stop)
+                    if (ExitType == EOrderType.Stop)
                         m_orderSx.Send(values[0], positionSize);
-                    else if (ExitType == EExitType.StopLimit)
+                    else if (ExitType == EOrderType.StopLimit)
                         m_orderSxSL.Send(values[0], values[0], positionSize);
                 }
             }
         }
 
-        public class EntryZone : Instruction
+        public class EntryZone : Entry
         {
             public int FirstLineId { get; set; }
             public int SecondLineId { get; set; }
-            public EOrderAction EntryType { get; set; }
-            public double EntryPercent { get; set; }
-            public EEntryExitCriteria Criteria { get; set; }
-            public bool AddToPosition { get; set; }
-            public DateTime ValidUntil { get; set; }
 
             private ITrendLineObject m_firstLine;
             private ITrendLineObject m_secondLine;
 
             public EntryZone(_TrendLine control) : base(control)
             {
+                Direction = EEntryDirection.Long;
                 Criteria = EEntryExitCriteria.Close;
-                AddToPosition = false;
                 ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
                 string name = property.Name.ToLower();
-                if (name == "firstlineid") FirstLineId = property.Value.ToObject<int>();
-                if (name == "secondlineid") SecondLineId = property.Value.ToObject<int>();
-                if (name == "entrytype") EntryType = property.Value.ToObject<EOrderAction>();
-                if (name == "entrypercent") EntryPercent = property.Value.ToObject<double>();
-                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
-                if (name == "addtoposition") AddToPosition = property.Value.ToObject<bool>();
-                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
+                if (name == "firstlineid") { FirstLineId = property.Value.ToObject<int>(); return true; }
+                if (name == "secondlineid") { SecondLineId = property.Value.ToObject<int>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (m_firstLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", FirstLineId));
+                if (m_secondLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", SecondLineId));
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -705,14 +826,6 @@ namespace PowerLanguage.Strategy
                 //TODO
                 throw new NotImplementedException();
             }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (m_firstLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", FirstLineId));
-                if (m_secondLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", SecondLineId));
-                if (EntryPercent <= 0 || EntryPercent > 1.0) return Tuple.Create(false, "EntryZone - EntryPercent must be between 0 and 1");
-                return Tuple.Create(true, string.Empty);
-            }
         };
 
         public class ExitZone : Exit
@@ -720,7 +833,6 @@ namespace PowerLanguage.Strategy
             public int FirstLineId { get; set; }
             public int SecondLineId { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
-            public DateTime ValidUntil { get; set; }
 
             private ITrendLineObject m_firstLine;
             private ITrendLineObject m_secondLine;
@@ -731,14 +843,21 @@ namespace PowerLanguage.Strategy
                 ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
                 string name = property.Name.ToLower();
-                if (name == "firstlineid") FirstLineId = property.Value.ToObject<int>();
-                if (name == "secondlineid") SecondLineId = property.Value.ToObject<int>();
-                if (name == "criteria") Criteria = property.Value.ToObject<EEntryExitCriteria>();
-                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
+                if (name == "firstlineid") { FirstLineId = property.Value.ToObject<int>(); return true; }
+                if (name == "secondlineid") { SecondLineId = property.Value.ToObject<int>(); return true; }
+                if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (m_firstLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", FirstLineId));
+                if (m_secondLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", SecondLineId));
+                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitZone - Market exit not supported");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -752,16 +871,6 @@ namespace PowerLanguage.Strategy
                 //TODO
                 throw new NotImplementedException();
             }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
-                if (m_firstLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", FirstLineId));
-                if (m_secondLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", SecondLineId));
-                if (ExitType == EExitType.Market) return Tuple.Create(false, "ExitZone - Market exit not supported");
-                return Tuple.Create(true, string.Empty);
-            }
         };
 
         /// <summary>
@@ -770,6 +879,12 @@ namespace PowerLanguage.Strategy
         public abstract class ExitPriced : Exit
         {
             public ExitPriced(_TrendLine control) : base(control) { }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitPriced - Market exit not supported");
+                return base.IsValid();
+            }
 
             public override void CalcBar()
             {
@@ -780,10 +895,10 @@ namespace PowerLanguage.Strategy
                 {
                     switch (ExitType)
                     {
-                        case EExitType.Stop:
+                        case EOrderType.Stop:
                             m_orderLx.Send(price, exitSize());
                             break;
-                        case EExitType.StopLimit:
+                        case EOrderType.StopLimit:
                             m_orderLxSL.Send(price, price, exitSize());
                             break;
                     }
@@ -792,22 +907,14 @@ namespace PowerLanguage.Strategy
                 {
                     switch (ExitType)
                     {
-                        case EExitType.Stop:
+                        case EOrderType.Stop:
                             m_orderSx.Send(price, exitSize());
                             break;
-                        case EExitType.StopLimit:
+                        case EOrderType.StopLimit:
                             m_orderSxSL.Send(price, price, exitSize());
                             break;
                     }
                 }
-            }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
-                if (ExitType == EExitType.Market) return Tuple.Create(false, "ExitPriced - Market exit not supported");
-                return Tuple.Create(true, string.Empty);
             }
 
             /// <summary>
@@ -827,22 +934,20 @@ namespace PowerLanguage.Strategy
                 LossPrice = -1.0;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
                 string name = property.Name.ToLower();
-                if (name == "losspercent") LossPercent = property.Value.ToObject<double>();
-                if (name == "lossprice") LossPrice = property.Value.ToObject<double>();
+                if (name == "losspercent") { LossPercent = property.Value.ToObject<double>(); return true; }
+                if (name == "lossprice") { LossPrice = property.Value.ToObject<double>(); return true; }
+                return base.Parse(property);
             }
 
             public override Tuple<bool, string> IsValid()
             {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
                 if (LossPercent == -1.0 && LossPrice == -1.0) return Tuple.Create(false, "ExitStopLoss - LossPercent or LossPrice must be specified");
                 if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, "ExitStopLoss - LossPrice must be a positive number (will be negated by strategy)");
                 if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, "ExitStopLoss - LossPercent must be between 0 and 1");
-                return Tuple.Create(true, string.Empty);
+                return base.IsValid();
             }
 
             protected override double exitPrice()
@@ -864,19 +969,19 @@ namespace PowerLanguage.Strategy
                 ProfitPrice = -1.0;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
                 string name = property.Name.ToLower();
-                if (name == "profitpercent") ProfitPercent = property.Value.ToObject<double>();
-                if (name == "profitprice") ProfitPrice = property.Value.ToObject<double>();
+                if (name == "profitpercent") { ProfitPercent = property.Value.ToObject<double>(); return true; }
+                if (name == "profitprice") { ProfitPrice = property.Value.ToObject<double>(); return true; }
+                return base.Parse(property);
             }
 
             public override Tuple<bool, string> IsValid()
             {
                 if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, "ExitProfit - ProfitPercent or ProfitPrice must be specified");
                 if (ProfitPercent != -1.0 && (ProfitPercent <= 0.0 || ProfitPercent > 1.0)) return Tuple.Create(false, "ExitProfit - ProfitPercent must be between 0 and 1");
-                return Tuple.Create(true, string.Empty);
+                return base.IsValid();
             }
 
             protected override double exitPrice()
@@ -900,16 +1005,18 @@ namespace PowerLanguage.Strategy
             public ExitDays(_TrendLine control) : base(control)
             {
                 Count = 1;
-                ExitPercent = 1.0;
-                ValidUntil = DateTime.MaxValue;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                string name = property.Name.ToLower();
-                if (property.Name.ToLower() == "count") Count = property.Value.ToObject<int>();
-                if (name == "exitpercent") ExitPercent = property.Value.ToObject<double>();
-                if (name == "validuntil") ValidUntil = property.Value.ToObject<DateTime>();
+                if (property.Name.ToLower() == "count") { Count = property.Value.ToObject<int>(); return true; }
+                return base.Parse(property);
+            }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (Count <= 0) return Tuple.Create(false, "ExitDays - Count must be larger than 0");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -945,6 +1052,7 @@ namespace PowerLanguage.Strategy
         public class ExitEntryBarLowHigh : ExitPriced
         {
             public double BufferPrice { get; set; }
+
             private double m_stopLossPrice;
 
             public ExitEntryBarLowHigh(_TrendLine control) : base(control)
@@ -952,20 +1060,17 @@ namespace PowerLanguage.Strategy
                 BufferPrice = 0.0;
             }
 
-            public override void Parse(JProperty property)
+            public override bool Parse(JProperty property)
             {
-                base.Parse(property);
-                string name = property.Name.ToLower();
-                if (property.Name.ToLower() == "bufferprice") BufferPrice = property.Value.ToObject<double>();
+                if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+                return base.Parse(property);
             }
 
             public override Tuple<bool, string> IsValid()
             {
-                Tuple<bool, string> baseResult = base.IsValid();
-                if (!baseResult.Item1) return baseResult;
-                if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryBarLowHigh - BufferPrice must be greater than or equal to 0");
-                if (ExitType == EExitType.Market) return Tuple.Create(false, "ExitEntryBarLowHigh - Market exit not supported");
-                return Tuple.Create(true, string.Empty);
+                if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryBarLowHigh - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
+                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitEntryBarLowHigh - Market exit not supported");
+                return base.IsValid();
             }
 
             public override void StartCalc()
@@ -1030,26 +1135,39 @@ namespace PowerLanguage.Strategy
 
 
         //attributes
-        private List<IOrderMarket> m_lxMrk;
-        private int m_lxMrkAllocated;
-        private List<IOrderMarket> m_sxMrk;
-        private int m_sxMrkAllocated;
+        private List<IOrderMarket> m_leMrk;
+        private int m_leMrkAllocated;
+        private List<IOrderMarket> m_seMrk;
+        private int m_seMrkAllocated;
+        private List<IOrderPriced> m_leStp;
+        private int m_leStpAllocated;
+        private List<IOrderPriced> m_seStp;
+        private int m_seStpAllocated;
         private List<IOrderPriced> m_leLmt;
         private int m_leLmtAllocated;
-        private List<IOrderPriced> m_lxStp;
-        private int m_lxStpAllocated;
-        private List<IOrderStopLimit> m_leStpLmt;
-        private int m_leStpLmtAllocated;
-        private List<IOrderStopLimit> m_lxStpLmt;
-        private int m_lxStpLmtAllocated;
         private List<IOrderPriced> m_seLmt;
         private int m_seLmtAllocated;
-        private List<IOrderPriced> m_sxStp;
-        private int m_sxStpAllocated;
         private List<IOrderStopLimit> m_seStpLmt;
         private int m_seStpLmtAllocated;
         private List<IOrderStopLimit> m_sxStpLmt;
         private int m_sxStpLmtAllocated;
+
+        private List<IOrderMarket> m_lxMrk;
+        private int m_lxMrkAllocated;
+        private List<IOrderMarket> m_sxMrk;
+        private int m_sxMrkAllocated;
+        private List<IOrderPriced> m_lxStp;
+        private int m_lxStpAllocated;
+        private List<IOrderPriced> m_sxStp;
+        private int m_sxStpAllocated;
+        private List<IOrderPriced> m_lxLmt;
+        private int m_lxLmtAllocated;
+        private List<IOrderPriced> m_sxLmt;
+        private int m_sxLmtAllocated;
+        private List<IOrderStopLimit> m_leStpLmt;
+        private int m_leStpLmtAllocated;
+        private List<IOrderStopLimit> m_lxStpLmt;
+        private int m_lxStpLmtAllocated;
 
         private List<PowerLanguage.Function.AverageFC> m_averageSimple;
         private int m_averageSimpleAllocated;
@@ -1089,19 +1207,35 @@ namespace PowerLanguage.Strategy
             foreach (var instruction in m_instructions) instruction.CalcBar();
         }
 
-        public IOrderMarket AllocateLxMrk()
+        public IOrderMarket AllocateLeMrk()
         {
-            if (m_lxMrkAllocated >= m_lxMrk.Count) throw new InvalidOperationException("No more Long Market exit orders available");
-            IOrderMarket result = m_lxMrk[m_lxMrkAllocated];
-            m_lxMrkAllocated++;
+            if (m_leMrkAllocated >= m_leMrk.Count) throw new InvalidOperationException("No more Long Market entry orders available");
+            IOrderMarket result = m_leMrk[m_leMrkAllocated];
+            m_leMrkAllocated++;
             return result;
         }
 
-        public IOrderMarket AllocateSxMrk()
+        public IOrderMarket AllocateSeMrk()
         {
-            if (m_sxMrkAllocated >= m_sxMrk.Count) throw new InvalidOperationException("No more Short Market exit orders available");
-            IOrderMarket result = m_sxMrk[m_sxMrkAllocated];
-            m_sxMrkAllocated++;
+            if (m_seMrkAllocated >= m_seMrk.Count) throw new InvalidOperationException("No more Short Market entry orders available");
+            IOrderMarket result = m_seMrk[m_seMrkAllocated];
+            m_seMrkAllocated++;
+            return result;
+        }
+
+        public IOrderPriced AllocateLeStp()
+        {
+            if (m_leStpAllocated >= m_leStp.Count) throw new InvalidOperationException("No more Long Stop orders available");
+            IOrderPriced result = m_leStp[m_leStpAllocated];
+            m_leStpAllocated++;
+            return result;
+        }
+
+        public IOrderPriced AllocateSeStp()
+        {
+            if (m_seStpAllocated >= m_seStp.Count) throw new InvalidOperationException("No more Short Stop orders available");
+            IOrderPriced result = m_seStp[m_seStpAllocated];
+            m_seStpAllocated++;
             return result;
         }
 
@@ -1121,6 +1255,38 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
+        public IOrderStopLimit AllocateLeStpLmt()
+        {
+            if (m_leStpLmtAllocated >= m_leStpLmt.Count) throw new InvalidOperationException("No more Long Stop Limit orders available");
+            IOrderStopLimit result = m_leStpLmt[m_leStpLmtAllocated];
+            m_leStpLmtAllocated++;
+            return result;
+        }
+
+        public IOrderStopLimit AllocateSeStpLmt()
+        {
+            if (m_seStpLmtAllocated >= m_seStpLmt.Count) throw new InvalidOperationException("No more Short Stop Limit orders available");
+            IOrderStopLimit result = m_seStpLmt[m_seStpLmtAllocated];
+            m_seStpLmtAllocated++;
+            return result;
+        }
+
+        public IOrderMarket AllocateLxMrk()
+        {
+            if (m_lxMrkAllocated >= m_lxMrk.Count) throw new InvalidOperationException("No more Long Market exit orders available");
+            IOrderMarket result = m_lxMrk[m_lxMrkAllocated];
+            m_lxMrkAllocated++;
+            return result;
+        }
+
+        public IOrderMarket AllocateSxMrk()
+        {
+            if (m_sxMrkAllocated >= m_sxMrk.Count) throw new InvalidOperationException("No more Short Market exit orders available");
+            IOrderMarket result = m_sxMrk[m_sxMrkAllocated];
+            m_sxMrkAllocated++;
+            return result;
+        }
+
         public IOrderPriced AllocateLxStp()
         {
             if (m_lxStpAllocated >= m_lxStp.Count) throw new InvalidOperationException("No more Long Exit Stop orders available");
@@ -1137,19 +1303,19 @@ namespace PowerLanguage.Strategy
             return result;
         }
 
-        public IOrderStopLimit AllocateLeStpLmt()
+        public IOrderPriced AllocateLxLmt()
         {
-            if (m_leStpLmtAllocated >= m_leStpLmt.Count) throw new InvalidOperationException("No more Long Stop Limit orders available");
-            IOrderStopLimit result = m_leStpLmt[m_leStpLmtAllocated];
-            m_leStpLmtAllocated++;
+            if (m_lxLmtAllocated >= m_lxLmt.Count) throw new InvalidOperationException("No more Long Exit Limit orders available");
+            IOrderPriced result = m_lxLmt[m_lxLmtAllocated];
+            m_lxLmtAllocated++;
             return result;
         }
 
-        public IOrderStopLimit AllocateSeStpLmt()
+        public IOrderPriced AllocateSxLmt()
         {
-            if (m_seStpLmtAllocated >= m_seStpLmt.Count) throw new InvalidOperationException("No more Short Stop Limit orders available");
-            IOrderStopLimit result = m_seStpLmt[m_seStpLmtAllocated];
-            m_seStpLmtAllocated++;
+            if (m_sxLmtAllocated >= m_sxLmt.Count) throw new InvalidOperationException("No more Short Exit Limit orders available");
+            IOrderPriced result = m_sxLmt[m_sxLmtAllocated];
+            m_sxLmtAllocated++;
             return result;
         }
 
@@ -1196,27 +1362,41 @@ namespace PowerLanguage.Strategy
         //methods
         private void createOrders()
         {
+            m_leMrk = new List<IOrderMarket>();
+            m_seMrk = new List<IOrderMarket>();
+            m_leStp = new List<IOrderPriced>();
+            m_seStp = new List<IOrderPriced>();
+            m_leLmt = new List<IOrderPriced>();
+            m_seLmt = new List<IOrderPriced>();
+            m_leStpLmt = new List<IOrderStopLimit>();
+            m_seStpLmt = new List<IOrderStopLimit>();
+
             m_lxMrk = new List<IOrderMarket>();
             m_sxMrk = new List<IOrderMarket>();
-            m_leLmt = new List<IOrderPriced>();
             m_lxStp = new List<IOrderPriced>();
-            m_leStpLmt = new List<IOrderStopLimit>();
-            m_lxStpLmt = new List<IOrderStopLimit>();
-            m_seLmt = new List<IOrderPriced>();
             m_sxStp = new List<IOrderPriced>();
-            m_seStpLmt = new List<IOrderStopLimit>();
+            m_lxLmt = new List<IOrderPriced>();
+            m_sxLmt = new List<IOrderPriced>();
+            m_lxStpLmt = new List<IOrderStopLimit>();
             m_sxStpLmt = new List<IOrderStopLimit>();
 
             for (int i = 0; i < MAX_INSTRUCTIONS; i++)
             {
-                m_lxMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LXMrk" + i, EOrderAction.Sell)));
-                m_sxMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SXMrk" + i, EOrderAction.BuyToCover)));
+                m_leMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LEMrk" + i, EOrderAction.Buy)));
+                m_seMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SEMrk" + i, EOrderAction.SellShort)));
+                m_leStp.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LEStp" + i, EOrderAction.Buy)));
+                m_seStp.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SEStp" + i, EOrderAction.SellShort)));
                 m_leLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LELmt" + i, EOrderAction.Buy)));
                 m_seLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SELmt" + i, EOrderAction.SellShort)));
-                m_lxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXStp" + i, EOrderAction.Sell)));
-                m_sxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXStp" + i, EOrderAction.BuyToCover)));
                 m_leStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "LEStpLmt" + i, EOrderAction.Buy)));
                 m_seStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "SEStpLmt" + i, EOrderAction.SellShort)));
+
+                m_lxMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LXMrk" + i, EOrderAction.Sell)));
+                m_sxMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SXMrk" + i, EOrderAction.BuyToCover)));
+                m_lxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXStp" + i, EOrderAction.Sell)));
+                m_sxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXStp" + i, EOrderAction.BuyToCover)));
+                m_lxLmt.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXLmt" + i, EOrderAction.Sell)));
+                m_sxLmt.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXLmt" + i, EOrderAction.BuyToCover)));
                 m_lxStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "LXStpLmt" + i, EOrderAction.Sell)));
                 m_sxStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "SXStpLmt" + i, EOrderAction.BuyToCover)));
             }
@@ -1238,14 +1418,21 @@ namespace PowerLanguage.Strategy
 
         private void resetOrders()
         {
-            m_lxMrkAllocated = 0;
-            m_sxMrkAllocated = 0;
+            m_leMrkAllocated = 0;
+            m_seMrkAllocated = 0;
+            m_leStpAllocated = 0;
+            m_seStpAllocated = 0;
             m_leLmtAllocated = 0;
             m_seLmtAllocated = 0;
-            m_lxStpAllocated = 0;
-            m_sxStpAllocated = 0;
             m_leStpLmtAllocated = 0;
             m_seLmtAllocated = 0;
+
+            m_lxMrkAllocated = 0;
+            m_sxMrkAllocated = 0;
+            m_lxStpAllocated = 0;
+            m_sxStpAllocated = 0;
+            m_lxLmtAllocated = 0;
+            m_sxLmtAllocated = 0;
             m_lxStpLmtAllocated = 0;
             m_sxStpLmtAllocated = 0;
         }
@@ -1272,18 +1459,18 @@ namespace PowerLanguage.Strategy
             foreach (var property in instructions)
             {
                 var objectProperty = (JObject)property;
-                string typeValue = "";
+                string instructionStr = "";
                 foreach (var prop in objectProperty.Properties())
                 {
-                    if (prop.Name.ToLower() == "type")
+                    if (prop.Name.ToLower() == "instruction")
                     {
-                        typeValue = prop.Value.ToString().ToLower();
+                        instructionStr = prop.Value.ToString().ToLower();
                         break;
                     }
                 }
 
-                if (typeValue == "") throw new ArgumentException("Instruction type not found");
-                var instruction = InstructionFactory.CreateInstruction(typeValue, this);
+                if (instructionStr == "") throw new ArgumentException("Instruction type not found");
+                var instruction = InstructionFactory.CreateInstruction(instructionStr, this);
                 instruction.Parse(property);
                 m_instructions.Add(instruction);
             }
