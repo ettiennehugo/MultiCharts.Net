@@ -26,11 +26,11 @@ namespace PowerLanguage.Strategy
     /// EntryLine
     /// • Instruction - "EntryLine" 
     ///	• LineId - trend line id 
-    ///	• Direction - enum of Long, Short
+    ///	• Direction - enum of long, short, default long
     ///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
+    /// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
+    ///	• [optional] MaxVolumeBasedPercent - percent of the average volume to use as the maximum position size, default 0.2 (20%), set to 0.0 to disable.
     ///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
-    ///	• [optional] EntryPercentRoundingUp - (boolean) round the entry position up to the next whole number, default false
-    ///	• [optional] BufferPrice - price to add/subtract from the trend line, only enter the position when you have a break above/below the trendline with the buffer price included in the price calculation, default 0.0
     ///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean the closing price must not more than 5% from the high for a long entry, vice versa for low/short entries
     ///		○ raise a warning when this value is below 0.5, meaning the user wants to price to close on the opposite side of the bar
     ///	• [optional] StartDate/EndDate - Start/end dates to check for an entry
@@ -41,8 +41,8 @@ namespace PowerLanguage.Strategy
     /// ExitLine
     /// • Instruction - "ExitLine" 
     /// • LineId - trend line id
-	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
+    ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     /// 
     /// ExitMovingAverage
@@ -51,59 +51,42 @@ namespace PowerLanguage.Strategy
     /// • MovingAverageType - enum Simple, Exponential, SuperSmoother
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
-	/// • [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
-    ///
-    /// EntryZone - TBD
-    /// • Instruction - "EntryZone" 
-    ///	• FirstLineId - first trend line used to define the zone
-    ///	• SecondLineId - second trend line used to define the zone
-    ///	• Direction - enum of Long, Short
-    ///	• EquityPercent - percent of the ACCOUNT size to enter into the position
-    ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
-    ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
-    /// 
-    /// ExitZone - TBD
-    /// • Instruction - "ExitZone" 
-    ///	• FirstLineId - first trend line used to define the zone
-    ///	• SecondLineId - second trend line used to define the zone
-    ///	• [optional] Criteria - enum of Close, LowHigh count the entry met when the bar closes in the zone vs whether the price just entered the zone via the high/low 
-	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
-    ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     ///
     /// ExitStopLoss
     /// • Instruction - "ExitStopLoss" 
     ///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
     ///	• [alternate] LossPrice - exit the position if the price moves against you by a specified amount. 
-	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
+    ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitProfit
     /// • Instruction - "ExitProfit" 
     ///	• [alternate] ProfitPercent - exit the position one the price moved in your favor by this percentage
     ///	• [alternate] ProfitPrice - exit the position one the price moved in your favor by this amount
-	/// • [optional] ExitPercent - percent of POSITION to close, default 1.0 (100%)
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
+    ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitDays
     /// • Instruction - "ExitDays" 
     /// • Count - number of days after which the position should be closed
-    ///	• [optional] ExitPercent - percent of POSITION to exit, default 1.0 (100%) 
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    /// • [optional] Strategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
+    ///	• [optional] ExitPercent - percent of INITIAL POSITION to exit, default 1.0 (100%) 
+    ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     /// 
     /// ExitEntryBarLowHigh
     /// • Instruction - "ExitEntryBarLowHigh" 
     ///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
-    ///	• [optional] PositionPercent - percent of POSITION to exit, default 1.0 (100%)
-    ///	• [optional] ExitType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+    ///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
+    ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
     ///		
     /// Example JSON:
     /// [
     ///	    {
     ///	        "Instruction" : "EntryLine"
     ///			"LineId" : 1,
-    ///			"EntryType" : "Long", 
+    ///			"Direction" : "Long", 
     ///			"EquityPercent" : 0.01,
     ///			"BufferPrice" : 0.05,
     ///			"ClosePercentile" : 0.75,
@@ -113,7 +96,7 @@ namespace PowerLanguage.Strategy
     ///		{
     ///	        "Instruction" : "EntryLine"
     ///			"LineId" : 2,
-    ///			"EntryType" : "Short", 
+    ///			"Direction" : "Short", 
     ///			"EquityPercent" : 0.01,
     ///			"BufferPrice" : 0.05,
     ///			"ClosePercentile" : 0.75,
@@ -128,6 +111,7 @@ namespace PowerLanguage.Strategy
     ///		{
     ///	        "Instruction" : "ExitProfit"
     ///			"Percent" : 0.5
+    ///			"ProfitPrice": 5.0
     ///		}
     ///		{
     ///		    "Instruction" : "ExitEntryBarLowHigh",
@@ -139,16 +123,24 @@ namespace PowerLanguage.Strategy
     {
         //constants
         /// <summary>
-        /// Maximum number of long, short type entries/exit supported and the number of moving averages supported.
+        /// Maximum number of long, short type entries/exit supported, number of moving averages supported and default volume length period.
         /// </summary>
         public const int MAX_INSTRUCTIONS = 10;
         public const int MAX_MOVINGAVERAGES = 5;
+        public const int DEFAULT_VOLUME_PERIOD = 20;
 
         //types
         public enum EEntryDirection
         {
             Long,
-            Short
+            Short,
+        };
+
+        public enum EEntryStrategy
+        {
+            Breakout,
+            Fade,
+            BreakoutOrFade
         };
 
         public enum EOrderType
@@ -173,6 +165,12 @@ namespace PowerLanguage.Strategy
             Simple,
             Exponential,
             SuperSmoother
+        };
+
+        public enum EExitDaysCountStrategy
+        {
+            CalendarDays,
+            TradingDays
         };
 
         public abstract class Instruction
@@ -221,14 +219,16 @@ namespace PowerLanguage.Strategy
 
             /// <summary>
             /// Determine the current open position size.
+            /// Note: Market position is negative for short positions so we need to use the absolute value.
             /// </summary>
             protected int currentOpenPositionSize()
             {
-                return m_studyControl.StrategyInfo.MarketPosition;
+                return Math.Abs(m_studyControl.StrategyInfo.MarketPosition);
             }
 
             /// <summary>
             /// Determine the current total position size based on both the open and closed trades of the position.
+            /// Note: Market position is negative for short positions so we need to use the absolute value.
             /// </summary>
             protected int currentTotalPositionSize()
             {
@@ -238,7 +238,7 @@ namespace PowerLanguage.Strategy
                     size += trade.ExitOrder.Contracts;
                 foreach (ITrade trade in m_studyControl.Positions[0].OpenTrades)
                     size += trade.EntryOrder.Contracts;
-                return size;
+                return Math.Abs(size);
             }
 
             /// <summary>
@@ -278,45 +278,43 @@ namespace PowerLanguage.Strategy
             }
         }
 
-
-
-        //TODO - Finish work around the supported entries and start testing the parsing/validation of each of the instructions.
-
-
-
         public abstract class Entry : Instruction
         {
             public EEntryDirection Direction { get; set; }
-            public EOrderType EntryType { get; set; }
+            public EOrderType OrderType { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
             public double EquityPercent { get; set; }
+            public double MaxVolumeBasedPercent { get; set; }
             public bool AddToPosition { get; set; }
             public DateTime ValidUntil { get; set; }
 
             protected IOrderMarket m_orderLeMkt;
             protected IOrderMarket m_orderSeMkt;
-            protected IOrderPriced m_orserLeStp;
-            protected IOrderPriced m_orderSeStp;
-            protected IOrderPriced m_orderLeLmt;
-            protected IOrderPriced m_orderSeLmt;
+            protected IOrderPriced m_orderLePriced;     //use for stop and limit orders
+            protected IOrderPriced m_orderSePriced;     //use for stop and limit orders
             protected IOrderStopLimit m_orderLeStpLmt;
             protected IOrderStopLimit m_orderSeStpLmt;
+            protected EEntryDirection m_autoTradeDirection;   //direction to take when the entry direction is set to auto, subclasses need to fill this in and it should never be auto since it will result in a noop
 
             public Entry(_TrendLine control) : base(control)
             {
                 Direction = EEntryDirection.Long;
-                EntryType = EOrderType.Market;
+                m_autoTradeDirection = EEntryDirection.Long;
+                OrderType = EOrderType.Market;
                 EquityPercent = 1.0;
+                MaxVolumeBasedPercent = 0.2;
                 Criteria = EEntryExitCriteria.Close;
                 AddToPosition = false;
+                ValidUntil = DateTime.MaxValue;
             }
 
             public override bool Parse(JProperty property)
             {
                 string name = property.Name.ToLower();
                 if (name == "direction") { Direction = property.Value.ToObject<EEntryDirection>(); return true; }
-                if (name == "entrytype") { EntryType = property.Value.ToObject<EOrderType>(); return true; }
+                if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); return true; }
                 if (name == "equitypercent") { EquityPercent = property.Value.ToObject<double>(); return true; }
+                if (name == "maxvolumebasedpercent") { MaxVolumeBasedPercent = property.Value.ToObject<double>(); return true; }
                 if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
                 if (name == "addtoposition") { AddToPosition = property.Value.ToObject<bool>(); return true; }
                 if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
@@ -326,6 +324,7 @@ namespace PowerLanguage.Strategy
             public override Tuple<bool, string> IsValid()
             {
                 if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "Entry - EquityPercent must be between 0 and 1");
+                if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, "Entry - MaxVolumeBasedPercent must be between 0 and 1");
                 return base.IsValid();
             }
 
@@ -334,14 +333,12 @@ namespace PowerLanguage.Strategy
                 base.StartCalc();
                 m_orderLeMkt = null;
                 m_orderSeMkt = null;
-                m_orserLeStp = null;
-                m_orderSeStp = null;
-                m_orderLeLmt = null;
-                m_orderSeLmt = null;
+                m_orderLePriced = null;
+                m_orderSePriced = null;
                 m_orderLeStpLmt = null;
                 m_orderSeStpLmt = null;
 
-                switch (EntryType)
+                switch (OrderType)
                 {
                     case EOrderType.Market:
                         switch (Direction)
@@ -358,10 +355,10 @@ namespace PowerLanguage.Strategy
                         switch (Direction)
                         {
                             case EEntryDirection.Long:
-                                m_orserLeStp = m_studyControl.AllocateLeStp();
+                                m_orderLePriced = m_studyControl.AllocateLeStp();
                                 break;
                             case EEntryDirection.Short:
-                                m_orderSeStp = m_studyControl.AllocateSeStp();
+                                m_orderSePriced = m_studyControl.AllocateSeStp();
                                 break;
                         }
                         break;
@@ -369,10 +366,10 @@ namespace PowerLanguage.Strategy
                         switch (Direction)
                         {
                             case EEntryDirection.Long:
-                                m_orderLeLmt = m_studyControl.AllocateLeLmt();
+                                m_orderLePriced = m_studyControl.AllocateLeLmt();
                                 break;
                             case EEntryDirection.Short:
-                                m_orderSeLmt = m_studyControl.AllocateSeLmt();
+                                m_orderSePriced = m_studyControl.AllocateSeLmt();
                                 break;
                         }
                         break;
@@ -390,22 +387,78 @@ namespace PowerLanguage.Strategy
                 }
             }
 
+            protected virtual int entrySize()
+            {
+                int size = m_studyControl.positionSize(m_studyControl.Bars, EquityPercent);
+
+                if (MaxVolumeBasedPercent != 0.0)
+                {
+                    int maximumPositionBasedOnVolume = (int)Math.Truncate(m_studyControl.Bars.Volume.Average(_TrendLine.DEFAULT_VOLUME_PERIOD) * MaxVolumeBasedPercent);
+                    size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
+                }
+
+                return size;
+            }
+
+            /// <summary>
+            /// Sends an entry order at an optional price and specific size based on the entry type and direction.
+            /// For market orders the order is sent immediately so subclasses needs to make sure they send market
+            /// orders only when required.
+            /// </summary>
+            protected void sendOrder(double price = 0.0)
+            {
+                switch (Direction)
+                {
+                    case EEntryDirection.Long:
+                        switch (OrderType)
+                        {
+                            case EOrderType.Market:
+                                m_orderLeMkt.Send(entrySize());
+                                break;
+                            case EOrderType.Stop:
+                            case EOrderType.Limit:
+                                m_orderLePriced.Send(price, entrySize());
+                                break;
+                            case EOrderType.StopLimit:
+                                m_orderLeStpLmt.Send(price, price, entrySize());
+                                break;
+                        }
+                        break;
+                    case EEntryDirection.Short:
+                        switch (OrderType)
+                        {
+                            case EOrderType.Market:
+                                m_orderSeMkt.Send(entrySize());
+                                break;
+                            case EOrderType.Stop:
+                            case EOrderType.Limit:
+                                m_orderSePriced.Send(price, entrySize());
+                                break;
+                            case EOrderType.StopLimit:
+                                m_orderSeStpLmt.Send(price, price, entrySize());
+                                break;
+                        }
+                        break;
+                }
+            }
         }
 
         public abstract class Exit : Instruction
         {
-            public EOrderType ExitType { get; set; }
+            public EOrderType OrderType { get; set; }
             public double ExitPercent { get; set; }
             public DateTime ValidUntil { get; set; }
 
-            protected IOrderPriced m_orderLx;
-            protected IOrderPriced m_orderSx;
+            protected IOrderMarket m_orderLxMkt;
+            protected IOrderMarket m_orderSxMkt;
+            protected IOrderPriced m_orderLxPriced;
+            protected IOrderPriced m_orderSxPriced;
             protected IOrderStopLimit m_orderLxSL;
             protected IOrderStopLimit m_orderSxSL;
 
             public Exit(_TrendLine control) : base(control)
             {
-                ExitType = EOrderType.Stop;
+                OrderType = EOrderType.Stop;
                 ExitPercent = 1.0;
                 ValidUntil = DateTime.MaxValue;
             }
@@ -415,7 +468,7 @@ namespace PowerLanguage.Strategy
                 if (base.Parse(property)) return true;
                 bool result = false;
                 string name = property.Name.ToLower();
-                if (name == "exittype") { ExitType = property.Value.ToObject<EOrderType>(); result = true; }
+                if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); result = true; }
                 if (name == "exitpercent") { ExitPercent = property.Value.ToObject<double>(); result = true; }
                 if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); result = true; }
                 return result;
@@ -429,20 +482,27 @@ namespace PowerLanguage.Strategy
 
             public override void StartCalc()
             {
-                m_orderLx = null;
-                m_orderSx = null;
+                base.StartCalc();
+                m_orderLxMkt = null;
+                m_orderSxMkt = null;
+                m_orderLxPriced = null;
+                m_orderSxPriced = null;
                 m_orderLxSL = null;
                 m_orderSxSL = null;
 
-                switch (ExitType)
+                switch (OrderType)
                 {
+                    case EOrderType.Market:
+                        m_orderLxMkt = m_studyControl.AllocateLxMrk();
+                        m_orderSxMkt = m_studyControl.AllocateSxMrk();
+                        break;
                     case EOrderType.Stop:
-                        m_orderLx = m_studyControl.AllocateLxStp();
-                        m_orderSx = m_studyControl.AllocateSxStp();
+                        m_orderLxPriced = m_studyControl.AllocateLxStp();
+                        m_orderSxPriced = m_studyControl.AllocateSxStp();
                         break;
                     case EOrderType.Limit:
-                        m_orderLx = m_studyControl.AllocateLxLmt();
-                        m_orderSx = m_studyControl.AllocateSxLmt();
+                        m_orderLxPriced = m_studyControl.AllocateLxLmt();
+                        m_orderSxPriced = m_studyControl.AllocateSxLmt();
                         break;
                     case EOrderType.StopLimit:
                         m_orderLxSL = m_studyControl.AllocateLxStpLmt();
@@ -455,15 +515,53 @@ namespace PowerLanguage.Strategy
             {
                 if (m_studyControl.PositionSide == 0) return 0;
                 if (ExitPercent == 1.0) return currentOpenPositionSize();
-                int size = (int)Math.Truncate(currentTotalPositionSize() * ExitPercent);
+                //NOTE: Since MC does not support partial order filling we need to round up to the nearest integer larger integer otherwise
+                //      partial positions remain that are stopped out etc.
+                int size = (int)Math.Ceiling(currentTotalPositionSize() * ExitPercent);
                 return size;
+            }
+
+            protected void sendOrder(double price = 0.0)
+            {
+                if (m_studyControl.PositionSide > 0)
+                {
+                    switch (OrderType)
+                    {
+                        case EOrderType.Market:
+                            m_orderLxMkt.Send(exitSize());
+                            break;
+                        case EOrderType.Stop:
+                        case EOrderType.Limit:
+                            m_orderLxPriced.Send(price, exitSize());
+                            break;
+                        case EOrderType.StopLimit:
+                            m_orderLxSL.Send(price, price, exitSize());
+                            break;
+                    }
+                }
+                else if (m_studyControl.PositionSide < 0)
+                {
+                    switch (OrderType)
+                    {
+                        case EOrderType.Market:
+                            m_orderSxMkt.Send(exitSize());
+                            break;
+                        case EOrderType.Stop:
+                        case EOrderType.Limit:
+                            m_orderSxPriced.Send(price, exitSize());
+                            break;
+                        case EOrderType.StopLimit:
+                            m_orderSxSL.Send(price, price, exitSize());
+                            break;
+                    }
+                }
             }
         }
 
         public class EntryLine : Entry
         {
             public int LineId { get; set; }
-            public double BufferPrice { get; set; }
+            public EEntryStrategy Strategy { get; set; }
             public double ClosePercentile { get; set; }
             public DateTime StartDate { get; set; }
             public DateTime EndDate { get; set; }
@@ -471,11 +569,11 @@ namespace PowerLanguage.Strategy
             public DateTime EndTime { get; set; }
 
             private ITrendLineObject m_line;
-            private IOrderPriced m_order;
 
             public EntryLine(_TrendLine control) : base(control)
             {
-                BufferPrice = 0.0;
+                LineId = -1;
+                Strategy = EEntryStrategy.Breakout;
                 ClosePercentile = 0.05;
                 StartDate = DateTime.MinValue;
                 EndDate = DateTime.MaxValue;
@@ -487,7 +585,7 @@ namespace PowerLanguage.Strategy
             {
                 string name = property.Name.ToLower();
                 if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
-                if (name == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+                if (name == "strategy") { Strategy = property.Value.ToObject<EEntryStrategy>(); return true; }
                 if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
                 if (name == "startdate") { StartDate = property.Value.ToObject<DateTime>(); return true; }
                 if (name == "enddate") { EndDate = property.Value.ToObject<DateTime>(); return true; }
@@ -508,11 +606,8 @@ namespace PowerLanguage.Strategy
 
             public override void StartCalc()
             {
+                base.StartCalc();
                 m_line = getTrendLine(LineId);
-                if (Direction == EEntryDirection.Long)
-                    m_order = m_studyControl.AllocateLeLmt();
-                else
-                    m_order = m_studyControl.AllocateSeLmt();
             }
 
             public override void CalcBar()
@@ -524,59 +619,99 @@ namespace PowerLanguage.Strategy
                 if (m_studyControl.Bars.Time[0].TimeOfDay < StartTime.TimeOfDay || m_studyControl.Bars.Time[0].TimeOfDay > EndTime.TimeOfDay) return;
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
-                if (Direction == EEntryDirection.Long) 
-                    longEntry();
-                else 
-                    shortEntry();
+                switch (Direction)
+                {
+                    case EEntryDirection.Long:
+                        longEntry();
+                        break;
+                    case EEntryDirection.Short:
+                        shortEntry();
+                        break;
+                }
             }
 
             private void longEntry()
             {
-                if (m_studyControl.Bars.Close[1] < (m_line.PriceValue(m_studyControl.Bars.Time[1]) + BufferPrice) &&
-                    m_studyControl.Bars.Close[0] > (m_line.PriceValue(m_studyControl.Bars.Time[0]) + BufferPrice))
+                double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+                switch (Criteria)
                 {
-                    bool closePercentileCheck = true;
-                    double entryPrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-                    if (Criteria == EEntryExitCriteria.Close)
-                    {
-                        double low = m_studyControl.Bars.Low[0];
-                        double close = m_studyControl.Bars.Close[0];
-                        double range = m_studyControl.Bars.High[0] - low;
-                        double closePercentile = range != 0 ? (close - low) / range : 0;    //this will skip trades for bars with no range
-                        closePercentileCheck = closePercentile > ClosePercentile;
-                        entryPrice = close;
-                    }
+                    case EEntryExitCriteria.Close:
+                        //need to consider both breakout and fade entries
+                        bool entryCriteriaMet = false;
 
-                    if (closePercentileCheck)
-                    {
-                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("EntryLine - Long entry at {0}, {1}", m_studyControl.Bars.Time[0], m_line.PriceValue(m_studyControl.Bars.Time[0]));
-                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EquityPercent));
-                    }
+                        switch (Strategy)
+                        {
+                            case EEntryStrategy.Breakout:
+                                entryCriteriaMet = m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+                                break;
+                            case EEntryStrategy.Fade:
+                                entryCriteriaMet = m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+                                break;
+                            case EEntryStrategy.BreakoutOrFade:
+                                entryCriteriaMet = (m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice);
+                                break;
+                        }
+
+                        if (entryCriteriaMet)
+                        {
+                            //long entries need to consider the close percentile to determine if the price is at the high of the bar
+                            double high = m_studyControl.Bars.High[0];
+                            double close = m_studyControl.Bars.Close[0];
+                            double range = high - m_studyControl.Bars.Low[0];
+                            double closePercentile = range != 0 ? (high - close) / range : 0;    //this will skip trades for bars with no range
+
+                            if (closePercentile > ClosePercentile)
+                            {
+                                if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
+                                sendOrder(close);
+                            }
+                        }
+                        break;
+                    case EEntryExitCriteria.LowHigh:
+                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long entry at low/high {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+                        sendOrder(linePrice);
+                        break;
                 }
             }
 
             private void shortEntry()
             {
-                if (m_studyControl.Bars.Close[1] > (m_line.PriceValue(m_studyControl.Bars.Time[1]) - BufferPrice) &&
-                    m_studyControl.Bars.Close[0] < (m_line.PriceValue(m_studyControl.Bars.Time[0]) - BufferPrice))
+                double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+                switch (Criteria)
                 {
-                    bool closePercentileCheck = true;
-                    double entryPrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-                    if (Criteria == EEntryExitCriteria.Close)
-                    {
-                        double high = m_studyControl.Bars.High[0];
-                        double close = m_studyControl.Bars.Close[0];
-                        double range = high - m_studyControl.Bars.Low[0];
-                        double closePercentile = range != 0 ? 1 - (high - close) / range : 0;    //this will skip trades for bars with no range, 1 - to invert the percentile check
-                        closePercentileCheck = closePercentile > ClosePercentile;
-                        entryPrice = close;
-                    }
+                    case EEntryExitCriteria.Close:
+                        bool entryCriteriaMet = false;
+                        switch (Strategy)
+                        {
+                            case EEntryStrategy.Breakout:
+                                entryCriteriaMet = m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+                                break;
+                            case EEntryStrategy.Fade:
+                                entryCriteriaMet = m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+                                break;
+                            case EEntryStrategy.BreakoutOrFade:
+                                entryCriteriaMet = (m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice);
+                                break;
+                        }
 
-                    if (closePercentileCheck)
-                    {
-                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("EntryLine - Short entry at {0}, {1}", m_studyControl.Bars.Time[0], m_line.PriceValue(m_studyControl.Bars.Time[0]));
-                        m_order.Send(entryPrice, m_studyControl.positionSize(m_studyControl.Bars, EquityPercent));
-                    }
+                        if (entryCriteriaMet)
+                        {
+                            double low = m_studyControl.Bars.Low[0];
+                            double close = m_studyControl.Bars.Close[0];
+                            double range = m_studyControl.Bars.High[0] - low;
+                            double closePercentile = range != 0 ? 1 - (close - low) / range : 0;    //this will skip trades for bars with no range, 1 - to invert percentile
+
+                            if (closePercentile > ClosePercentile)
+                            {
+                                if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
+                                sendOrder(close);
+                            }
+                        }
+                        break;
+                    case EEntryExitCriteria.LowHigh:
+                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at low/high {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+                        sendOrder(linePrice);
+                        break;
                 }
             }
         };
@@ -603,8 +738,8 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
-                if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found"));
-                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitLine - Market exit not supported");
+                if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found", LineId));
+                if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitLine - Market exit not supported");
                 return base.IsValid();
             }
 
@@ -628,67 +763,73 @@ namespace PowerLanguage.Strategy
 
             private void exitLong()
             {
-                double trendLineValue = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
+                double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
                 switch (Criteria)
                 {
                     case EEntryExitCriteria.Close:
-                        if (m_studyControl.Bars.Close[0] < trendLineValue)
+                        if (m_studyControl.Bars.Close[0] < linePrice)
                         {
-                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EOrderType.Stop)
-                                m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EOrderType.StopLimit)
-                                m_orderLxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long exit on close at {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+                            sendOrder(m_studyControl.Bars.Close[0]);
                         }
                         break;
                     case EEntryExitCriteria.LowHigh:
-                        if (m_studyControl.Bars.Low[0] < trendLineValue)
-                        {
-                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Long exit on low at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EOrderType.Stop)
-                                m_orderLx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EOrderType.StopLimit)
-                                m_orderLxSL.Send(m_studyControl.Bars.Low[0], m_studyControl.Bars.Low[0], positionSize);
-                        }
+                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long exit on low at {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+                        sendOrder(linePrice);
                         break;
                 }
             }
 
             private void exitShort()
             {
-                double trendLineValue = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
+                double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
                 switch (Criteria)
                 {
                     case EEntryExitCriteria.Close:
-                        if (m_studyControl.Bars.Close[0] > trendLineValue)
+                        if (m_studyControl.Bars.Close[0] > linePrice)
                         {
-                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on close at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EOrderType.Stop)
-                                m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EOrderType.StopLimit)
-                                m_orderSxSL.Send(m_studyControl.Bars.Close[0], m_studyControl.Bars.Close[0], positionSize);
+                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short exit on close at {0}, {1}", Name, m_studyControl.Bars.Time[0], linePrice);
+                            sendOrder(m_studyControl.Bars.Close[0]);
                         }
                         break;
                     case EEntryExitCriteria.LowHigh:
-                        if (m_studyControl.Bars.High[0] > trendLineValue)
-                        {
-                            if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitLine - Short exit on high at {0}, {1}", m_studyControl.Bars.Time[0], trendLineValue);
-                            if (ExitType == EOrderType.Stop)
-                                m_orderSx.Send(m_studyControl.Bars.Close[0], positionSize);
-                            else if (ExitType == EOrderType.StopLimit)
-                                m_orderSxSL.Send(m_studyControl.Bars.High[0], m_studyControl.Bars.High[0], positionSize);
-                        }
+                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short exit on high at {0}, {1}", Name, m_studyControl.Bars.Time[0], linePrice);
+                        sendOrder(linePrice);
                         break;
                 }
             }
         }
 
-        public class ExitMovingAverage : Exit
+        /// <summary>
+        /// Base class for priced exits used for stop/stop-limit orders at a determined price.
+        /// </summary>
+        public abstract class ExitPriced : Exit
+        {
+            public ExitPriced(_TrendLine control) : base(control) { }
+
+            public override Tuple<bool, string> IsValid()
+            {
+                if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitPriced - Market exit not supported");
+                return base.IsValid();
+            }
+
+            public override void CalcBar()
+            {
+                if (m_studyControl.PositionSide == 0) return;
+                if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+                sendOrder(exitPrice());
+            }
+
+            /// <summary>
+            /// Subclasses need to calculate the exit price per contract to exit the position.
+            /// </summary>
+            abstract protected double exitPrice();
+        }
+
+        public class ExitMovingAverage : ExitPriced
         {
             public int Length { get; set; }
-            public EMovingAverageType Type { get; set; }
+            public EMovingAverageType MovingAverageType { get; set; }
             public EEntryExitCriteria Criteria { get; set; }
 
             private PowerLanguage.Function.AverageFC m_averageSimple;
@@ -699,14 +840,14 @@ namespace PowerLanguage.Strategy
             {
                 Criteria = EEntryExitCriteria.Close;
                 ExitPercent = 1.0;
-                ExitType = EOrderType.Stop;
+                OrderType = EOrderType.Stop;
             }
 
             public override bool Parse(JProperty property)
             {
                 string name = property.Name.ToLower();
                 if (name == "length") { Length = property.Value.ToObject<int>(); return true; }
-                if (name == "movingaveragetype") { Type = property.Value.ToObject<EMovingAverageType>(); return true; }
+                if (name == "movingaveragetype") { MovingAverageType = property.Value.ToObject<EMovingAverageType>(); return true; }
                 if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
                 return base.Parse(property);
             }
@@ -714,7 +855,6 @@ namespace PowerLanguage.Strategy
             public override Tuple<bool, string> IsValid()
             {
                 if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
-                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitMovingAverage - Market exit not supported");
                 return base.IsValid();
             }
 
@@ -725,7 +865,7 @@ namespace PowerLanguage.Strategy
                 m_averageExponential = null;
                 m_averageSuperSmoother = null;
 
-                switch (Type)
+                switch (MovingAverageType)
                 {
                     case EMovingAverageType.Simple:
                         m_averageSimple = m_studyControl.AllocateSimpleAverage();
@@ -744,183 +884,30 @@ namespace PowerLanguage.Strategy
 
             public override void CalcBar()
             {
-                if (m_studyControl.PositionSide == 0) return;
                 if (m_studyControl.Bars.CurrentBar < Length) return;
-                if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+                if (m_studyControl.PositionSide == 0) return;
                 if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
+                base.CalcBar();
+            }
 
-                switch (Type)
+            protected override double exitPrice()
+            {
+                double result = 0.0;
+                switch (MovingAverageType)
                 {
                     case EMovingAverageType.Simple:
-                        exitAverage(m_averageSimple);
+                        result = m_averageSimple[0];
                         break;
                     case EMovingAverageType.Exponential:
-                        exitAverage(m_averageExponential);
+                        result = m_averageExponential[0];
                         break;
                     case EMovingAverageType.SuperSmoother:
-                        exitAverage(m_averageSuperSmoother);
+                        result = m_averageSuperSmoother[0];
                         break;
                 }
+
+                return result;
             }
-
-            private void exitAverage(ISeries<double> values)
-            {
-                int positionSize = m_studyControl.positionSize(m_studyControl.Bars, ExitPercent);
-                if (m_studyControl.PositionSide > 0)
-                {
-                    if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Long exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
-                    if (ExitType == EOrderType.Stop)
-                        m_orderLx.Send(values[0], positionSize);
-                    else if (ExitType == EOrderType.StopLimit)
-                        m_orderLxSL.Send(values[0], values[0], positionSize);
-                }
-                else if (m_studyControl.PositionSide < 0)
-                {
-                    if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - Short exit at {0}, {1}", m_studyControl.Bars.Time[0], values[0]);
-                    if (ExitType == EOrderType.Stop)
-                        m_orderSx.Send(values[0], positionSize);
-                    else if (ExitType == EOrderType.StopLimit)
-                        m_orderSxSL.Send(values[0], values[0], positionSize);
-                }
-            }
-        }
-
-        public class EntryZone : Entry
-        {
-            public int FirstLineId { get; set; }
-            public int SecondLineId { get; set; }
-
-            private ITrendLineObject m_firstLine;
-            private ITrendLineObject m_secondLine;
-
-            public EntryZone(_TrendLine control) : base(control)
-            {
-                Direction = EEntryDirection.Long;
-                Criteria = EEntryExitCriteria.Close;
-                ValidUntil = DateTime.MaxValue;
-            }
-
-            public override bool Parse(JProperty property)
-            {
-                string name = property.Name.ToLower();
-                if (name == "firstlineid") { FirstLineId = property.Value.ToObject<int>(); return true; }
-                if (name == "secondlineid") { SecondLineId = property.Value.ToObject<int>(); return true; }
-                return base.Parse(property);
-            }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (m_firstLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", FirstLineId));
-                if (m_secondLine == null) return Tuple.Create(false, string.Format("EntryZone - trendline with id {0} not found", SecondLineId));
-                return base.IsValid();
-            }
-
-            public override void StartCalc()
-            {
-                m_firstLine = getTrendLine(FirstLineId);
-                m_secondLine = getTrendLine(SecondLineId);
-            }
-
-            public override void CalcBar()
-            {
-                //TODO
-                throw new NotImplementedException();
-            }
-        };
-
-        public class ExitZone : Exit
-        {
-            public int FirstLineId { get; set; }
-            public int SecondLineId { get; set; }
-            public EEntryExitCriteria Criteria { get; set; }
-
-            private ITrendLineObject m_firstLine;
-            private ITrendLineObject m_secondLine;
-
-            public ExitZone(_TrendLine control) : base(control)
-            {
-                Criteria = EEntryExitCriteria.Close;
-                ValidUntil = DateTime.MaxValue;
-            }
-
-            public override bool Parse(JProperty property)
-            {
-                string name = property.Name.ToLower();
-                if (name == "firstlineid") { FirstLineId = property.Value.ToObject<int>(); return true; }
-                if (name == "secondlineid") { SecondLineId = property.Value.ToObject<int>(); return true; }
-                if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
-                return base.Parse(property);
-            }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (m_firstLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", FirstLineId));
-                if (m_secondLine == null) return Tuple.Create(false, string.Format("ExitZone - trendline with id {0} not found", SecondLineId));
-                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitZone - Market exit not supported");
-                return base.IsValid();
-            }
-
-            public override void StartCalc()
-            {
-                m_firstLine = getTrendLine(FirstLineId);
-                m_secondLine = getTrendLine(SecondLineId);
-            }
-
-            public override void CalcBar()
-            {
-                //TODO
-                throw new NotImplementedException();
-            }
-        };
-
-        /// <summary>
-        /// Base class for priced exits used for stop/stop-limit orders at a determined price.
-        /// </summary>
-        public abstract class ExitPriced : Exit
-        {
-            public ExitPriced(_TrendLine control) : base(control) { }
-
-            public override Tuple<bool, string> IsValid()
-            {
-                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitPriced - Market exit not supported");
-                return base.IsValid();
-            }
-
-            public override void CalcBar()
-            {
-                if (m_studyControl.PositionSide == 0) return;
-                if (m_studyControl.Bars.Time[0] > ValidUntil) return;
-                double price = exitPrice();
-                if (m_studyControl.PositionSide > 0)
-                {
-                    switch (ExitType)
-                    {
-                        case EOrderType.Stop:
-                            m_orderLx.Send(price, exitSize());
-                            break;
-                        case EOrderType.StopLimit:
-                            m_orderLxSL.Send(price, price, exitSize());
-                            break;
-                    }
-                }
-                else if (m_studyControl.PositionSide < 0)
-                {
-                    switch (ExitType)
-                    {
-                        case EOrderType.Stop:
-                            m_orderSx.Send(price, exitSize());
-                            break;
-                        case EOrderType.StopLimit:
-                            m_orderSxSL.Send(price, price, exitSize());
-                            break;
-                    }
-                }
-            }
-
-            /// <summary>
-            /// Subclasses need to calculate the exit price per contract to exit the position.
-            /// </summary>
-            abstract protected double exitPrice();
         }
 
         public class ExitStopLoss : ExitPriced
@@ -953,10 +940,11 @@ namespace PowerLanguage.Strategy
             protected override double exitPrice()
             {
                 double averageEntryPrice = currentPositionAverageEntryPrice();
-                if (LossPrice != -1.0) return averageEntryPrice - LossPrice;
-                return averageEntryPrice - (averageEntryPrice * (1 - LossPercent));
+                if (LossPrice != -1.0) return m_studyControl.PositionSide > 0 ? averageEntryPrice - LossPrice : averageEntryPrice + LossPrice;
+                double priceDelta = averageEntryPrice * LossPercent;
+                return m_studyControl.PositionSide > 0 ? averageEntryPrice - priceDelta : averageEntryPrice + priceDelta;
             }
-        };
+        }
 
         public class ExitProfit : ExitPriced
         {
@@ -967,6 +955,7 @@ namespace PowerLanguage.Strategy
             {
                 ProfitPercent = -1.0;
                 ProfitPrice = -1.0;
+                OrderType = EOrderType.Limit;
             }
 
             public override bool Parse(JProperty property)
@@ -979,6 +968,7 @@ namespace PowerLanguage.Strategy
 
             public override Tuple<bool, string> IsValid()
             {
+                if (OrderType == EOrderType.Stop) return Tuple.Create(false, "ExitProfit - Stop exit not supported");
                 if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, "ExitProfit - ProfitPercent or ProfitPrice must be specified");
                 if (ProfitPercent != -1.0 && (ProfitPercent <= 0.0 || ProfitPercent > 1.0)) return Tuple.Create(false, "ExitProfit - ProfitPercent must be between 0 and 1");
                 return base.IsValid();
@@ -987,10 +977,14 @@ namespace PowerLanguage.Strategy
             protected override double exitPrice()
             {
                 double averageEntryPrice = currentPositionAverageEntryPrice();
-                if (ProfitPrice != -1.0) return averageEntryPrice + ProfitPrice;
-                return averageEntryPrice * (1 + ProfitPercent);
+                if (ProfitPrice != -1.0)
+                {
+                    double exitPrice = m_studyControl.PositionSide > 0 ? averageEntryPrice + ProfitPrice : averageEntryPrice - ProfitPrice;
+                    return exitPrice > 0 ? exitPrice : 0;
+                }
+                return m_studyControl.PositionSide > 0 ? averageEntryPrice * (1 + ProfitPercent) : averageEntryPrice * (1 - ProfitPercent);
             }
-        };
+        }
 
         /// <summary>
         /// Exit at the market close after a certain number of days.
@@ -998,23 +992,32 @@ namespace PowerLanguage.Strategy
         public class ExitDays : Exit
         {
             public int Count { get; set; }
+            public EExitDaysCountStrategy Strategy { get; set; }
 
-            protected new IOrderMarket m_orderLx;
-            protected new IOrderMarket m_orderSx;
+            private bool m_exitOrderFilled;
+            private int m_tradingDaysCount;
+            private DateTime m_lastCheckedDate;
 
             public ExitDays(_TrendLine control) : base(control)
             {
+                OrderType = EOrderType.Market;
+                Strategy = EExitDaysCountStrategy.TradingDays;
+                m_exitOrderFilled = false;
+                m_tradingDaysCount = 0;
+                m_lastCheckedDate = DateTime.MinValue;
                 Count = 1;
             }
 
             public override bool Parse(JProperty property)
             {
                 if (property.Name.ToLower() == "count") { Count = property.Value.ToObject<int>(); return true; }
+                if (property.Name.ToLower() == "strategy") { Strategy = property.Value.ToObject<EExitDaysCountStrategy>(); return true; }
                 return base.Parse(property);
             }
 
             public override Tuple<bool, string> IsValid()
             {
+                if (OrderType != EOrderType.Market) return Tuple.Create(false, "ExitDays - Exit only supports market orders");
                 if (Count <= 0) return Tuple.Create(false, "ExitDays - Count must be larger than 0");
                 return base.IsValid();
             }
@@ -1022,32 +1025,77 @@ namespace PowerLanguage.Strategy
             public override void StartCalc()
             {
                 base.StartCalc();
-                m_orderLx = m_studyControl.AllocateLxMrk();
-                m_orderSx = m_studyControl.AllocateSxMrk();
+                m_exitOrderFilled = false;
+                m_tradingDaysCount = 0;
+                m_lastCheckedDate = DateTime.MinValue;
             }
 
             public override void CalcBar()
             {
-                if (m_studyControl.PositionSide == 0) return;
+                if (m_studyControl.PositionSide == 0)
+                {
+                    //reset exit order state when position goes flat
+                    m_exitOrderFilled = false;
+                    m_tradingDaysCount = 0;
+                    m_lastCheckedDate = DateTime.MinValue;
+                    return;
+                }
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
-                DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-                entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-                TimeSpan days = m_studyControl.Bars.Time[0] - entryDate;
+                switch (m_studyControl.Environment.CalcReason)
+                {
+                    case CalculationReason.OrderFilled:
+                        //check whether order was filled to ensure exit is only triggered once
+                        foreach (var item in m_studyControl.TradeManager.TradingData.Orders.Items)
+                        {
+                            if (item.OrderID == getOrderId() && item.LeftContracts == 0) m_exitOrderFilled = true;
+                            break;
+                        }
+                        break;
+                    case CalculationReason.Default:
+                        DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+                        if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
-                if (days.Days > Count)
-                    if (m_studyControl.PositionSide > 0)
-                    {
-                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitDays - Long exit at {0}", m_studyControl.Bars.Time[0]);
-                        m_orderLx.Send(exitSize());
-                    }
-                    else if (m_studyControl.PositionSide < 0)
-                    {
-                        if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitDays - Short exit at {0}", m_studyControl.Bars.Time[0]);
-                        m_orderSx.Send(exitSize());
-                    }
+                        switch (Strategy)
+                        {
+                            case EExitDaysCountStrategy.CalendarDays:
+                                TimeSpan days = m_studyControl.Bars.Time[0] - entryDate;
+                                if (days.Days >= Count && !m_exitOrderFilled) sendOrder();
+                                break;
+                            case EExitDaysCountStrategy.TradingDays:
+                                if (m_lastCheckedDate == DateTime.MinValue)
+                                {
+                                    m_tradingDaysCount = 1;
+                                    m_lastCheckedDate = m_studyControl.Bars.Time[0];
+                                    return;
+                                }
+                         
+                                if (m_studyControl.Bars.Time[0].Date != m_lastCheckedDate.Date)
+                                {
+                                    m_lastCheckedDate = m_studyControl.Bars.Time[0];
+                                    m_tradingDaysCount++;
+                                }
+
+                                if (m_tradingDaysCount >= Count && !m_exitOrderFilled) sendOrder();
+                                break;
+                        }
+
+                        break;
+                }
+
+
             }
-        };
+
+            private int getOrderId()
+            {
+                if (m_studyControl.PositionSide > 0)
+                    return m_orderLxMkt.ID;
+                else if (m_studyControl.PositionSide < 0)
+                    return m_orderSxMkt.ID;
+                return -1;
+            }
+
+        }
 
         public class ExitEntryBarLowHigh : ExitPriced
         {
@@ -1069,7 +1117,7 @@ namespace PowerLanguage.Strategy
             public override Tuple<bool, string> IsValid()
             {
                 if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryBarLowHigh - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
-                if (ExitType == EOrderType.Market) return Tuple.Create(false, "ExitEntryBarLowHigh - Market exit not supported");
+                if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitEntryBarLowHigh - Market exit not supported");
                 return base.IsValid();
             }
 
@@ -1081,7 +1129,7 @@ namespace PowerLanguage.Strategy
 
             public override void CalcBar()
             {
-                if (m_studyControl.PositionSide == 0) 
+                if (m_studyControl.PositionSide == 0)
                     m_stopLossPrice = -1.0;     //reset stop-loss price when we position went flat
                 else if (m_stopLossPrice == -1.0)
                 {
@@ -1098,7 +1146,7 @@ namespace PowerLanguage.Strategy
             {
                 return m_stopLossPrice;
             }
-        };
+        }
 
         /// <summary>
         /// InstructionFactory used to create instructions based on some specific instruction name and associated type.
@@ -1110,8 +1158,6 @@ namespace PowerLanguage.Strategy
                 { "entryline", control => new _TrendLine.EntryLine(control) },
                 { "exitline", control => new _TrendLine.ExitLine(control) },
                 { "exitmovingaverage", control => new _TrendLine.ExitMovingAverage(control) },
-                { "entryzone", control => new _TrendLine.EntryZone(control) },
-                { "exitzone", control => new _TrendLine.ExitZone(control) },
                 { "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
                 { "exitprofit", control => new _TrendLine.ExitProfit(control) },
                 { "exitdays", control => new _TrendLine.ExitDays(control) },
@@ -1384,8 +1430,8 @@ namespace PowerLanguage.Strategy
             {
                 m_leMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LEMrk" + i, EOrderAction.Buy)));
                 m_seMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SEMrk" + i, EOrderAction.SellShort)));
-                m_leStp.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LEStp" + i, EOrderAction.Buy)));
-                m_seStp.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SEStp" + i, EOrderAction.SellShort)));
+                m_leStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LEStp" + i, EOrderAction.Buy)));
+                m_seStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SEStp" + i, EOrderAction.SellShort)));
                 m_leLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LELmt" + i, EOrderAction.Buy)));
                 m_seLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SELmt" + i, EOrderAction.SellShort)));
                 m_leStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "LEStpLmt" + i, EOrderAction.Buy)));
@@ -1395,8 +1441,8 @@ namespace PowerLanguage.Strategy
                 m_sxMrk.Add(OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SXMrk" + i, EOrderAction.BuyToCover)));
                 m_lxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXStp" + i, EOrderAction.Sell)));
                 m_sxStp.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXStp" + i, EOrderAction.BuyToCover)));
-                m_lxLmt.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXLmt" + i, EOrderAction.Sell)));
-                m_sxLmt.Add(OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXLmt" + i, EOrderAction.BuyToCover)));
+                m_lxLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LXLmt" + i, EOrderAction.Sell)));
+                m_sxLmt.Add(OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SXLmt" + i, EOrderAction.BuyToCover)));
                 m_lxStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "LXStpLmt" + i, EOrderAction.Sell)));
                 m_sxStpLmt.Add(OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "SXStpLmt" + i, EOrderAction.BuyToCover)));
             }
@@ -1468,8 +1514,7 @@ namespace PowerLanguage.Strategy
                         break;
                     }
                 }
-
-                if (instructionStr == "") throw new ArgumentException("Instruction type not found");
+                if (instructionStr == "") throw new ArgumentException(string.Format("Instruction type not found - {0}", property.ToString()));
                 var instruction = InstructionFactory.CreateInstruction(instructionStr, this);
                 instruction.Parse(property);
                 m_instructions.Add(instruction);
