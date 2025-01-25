@@ -31,8 +31,9 @@ namespace PowerLanguage.Strategy
     /// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
     ///	• [optional] MaxVolumeBasedPercent - percent of the average volume to use as the maximum position size, default 0.2 (20%), set to 0.0 to disable.
     ///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
-    ///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean the closing price must not more than 5% from the high for a long entry, vice versa for low/short entries
-    ///		○ raise a warning when this value is below 0.5, meaning the user wants to price to close on the opposite side of the bar
+    ///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean that for a long trade the close price must be within 5% of the high of the bar
+    ///	                               while for short trades it would mean the close price must be within 5% of the low of the bar - default value is 0.5 (50%) meaning for long trades the close price must be
+    ///	                               in the top half of the bar and for short trades the close price must be in the bottom half of the bar
     ///	• [optional] StartDate/EndDate - Start/end dates to check for an entry
     ///	• [optional] StartTime/EndTime - Start/end time filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for an entry the first half hour of the regular stock trading day
     ///	• [optional] ValidUntil - date/time until which the entry should hold, defaults to DateTime.Max (if this field is specified with the EndDate/EndTime fields the entry would become disabled which ever date/time comes first)
@@ -164,7 +165,7 @@ namespace PowerLanguage.Strategy
         {
             Simple,
             Exponential,
-            SuperSmoother
+            SuperSmoother,
         };
 
         public enum EExitDaysCountStrategy
@@ -574,7 +575,7 @@ namespace PowerLanguage.Strategy
             {
                 LineId = -1;
                 Strategy = EEntryStrategy.Breakout;
-                ClosePercentile = 0.05;
+                ClosePercentile = 0.5;
                 StartDate = DateTime.MinValue;
                 EndDate = DateTime.MaxValue;
                 StartTime = DateTime.MinValue;
@@ -654,13 +655,12 @@ namespace PowerLanguage.Strategy
 
                         if (entryCriteriaMet)
                         {
-                            //long entries need to consider the close percentile to determine if the price is at the high of the bar
-                            double high = m_studyControl.Bars.High[0];
+                            double low = m_studyControl.Bars.Low[0];
                             double close = m_studyControl.Bars.Close[0];
-                            double range = high - m_studyControl.Bars.Low[0];
-                            double closePercentile = range != 0 ? (high - close) / range : 0;    //this will skip trades for bars with no range
+                            double range = m_studyControl.Bars.High[0] - low;
+                            double closePercentile = range != 0 ? (close - low) / range : 0;    //this will skip trades for bars with no range
 
-                            if (closePercentile > ClosePercentile)
+                            if (closePercentile >= ClosePercentile)
                             {
                                 if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
                                 sendOrder(close);
@@ -699,9 +699,11 @@ namespace PowerLanguage.Strategy
                             double low = m_studyControl.Bars.Low[0];
                             double close = m_studyControl.Bars.Close[0];
                             double range = m_studyControl.Bars.High[0] - low;
-                            double closePercentile = range != 0 ? 1 - (close - low) / range : 0;    //this will skip trades for bars with no range, 1 - to invert percentile
+                            //this will skip trades for bars with no range, for short trades 1 - closePercentile is used to invert the percentiles so that
+                            //close prices closer to the bottom of the bar would be considered higher percentiles
+                            double closePercentile = range != 0 ? 1 - (close - low) / range : 0;
 
-                            if (closePercentile > ClosePercentile)
+                            if (closePercentile >= ClosePercentile)
                             {
                                 if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
                                 sendOrder(close);
@@ -826,7 +828,7 @@ namespace PowerLanguage.Strategy
             abstract protected double exitPrice();
         }
 
-        public class ExitMovingAverage : ExitPriced
+        public class ExitMovingAverage : ExitPriced     //TODO - Test and fix this  
         {
             public int Length { get; set; }
             public EMovingAverageType MovingAverageType { get; set; }
@@ -884,8 +886,8 @@ namespace PowerLanguage.Strategy
 
             public override void CalcBar()
             {
-                if (m_studyControl.Bars.CurrentBar < Length) return;
                 if (m_studyControl.PositionSide == 0) return;
+                if (m_studyControl.Bars.CurrentBar < Length) return;
                 if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
                 base.CalcBar();
             }
@@ -970,7 +972,7 @@ namespace PowerLanguage.Strategy
             {
                 if (OrderType == EOrderType.Stop) return Tuple.Create(false, "ExitProfit - Stop exit not supported");
                 if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, "ExitProfit - ProfitPercent or ProfitPrice must be specified");
-                if (ProfitPercent != -1.0 && (ProfitPercent <= 0.0 || ProfitPercent > 1.0)) return Tuple.Create(false, "ExitProfit - ProfitPercent must be between 0 and 1");
+                if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, "ExitProfit - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit");
                 return base.IsValid();
             }
 
@@ -1063,6 +1065,10 @@ namespace PowerLanguage.Strategy
                                 if (days.Days >= Count && !m_exitOrderFilled) sendOrder();
                                 break;
                             case EExitDaysCountStrategy.TradingDays:
+                                //TBD - need to make sure this will work correctly when a position is adopted from the broker, if the strategy is not calculated
+                                //      all the way up to the current bar the trading days count will be off
+                                // https://www.multicharts.com/trading-software/index.php?title=Advanced._AutoTrading
+                                // https://www.multicharts.com/trading-software/index.php/Auto_Trading#Recalculate_on_Broker_Events
                                 if (m_lastCheckedDate == DateTime.MinValue)
                                 {
                                     m_tradingDaysCount = 1;
@@ -1131,7 +1137,9 @@ namespace PowerLanguage.Strategy
             {
                 if (m_studyControl.PositionSide == 0)
                     m_stopLossPrice = -1.0;     //reset stop-loss price when we position went flat
-                else if (m_stopLossPrice == -1.0)
+                else if (m_studyControl.Environment.CalcReason == CalculationReason.Default && 
+                         m_studyControl.Bars.Status == EBarState.Close && 
+                         m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
                 {
                     if (m_studyControl.PositionSide > 0)
                         m_stopLossPrice = m_studyControl.Bars.Low[0] - BufferPrice;
