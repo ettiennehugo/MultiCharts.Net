@@ -34,7 +34,6 @@ namespace PowerLanguage.Strategy
     ///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean that for a long trade the close price must be within 5% of the high of the bar
     ///	                               while for short trades it would mean the close price must be within 5% of the low of the bar - default value is 0.5 (50%) meaning for long trades the close price must be
     ///	                               in the top half of the bar and for short trades the close price must be in the bottom half of the bar
-    ///	• [optional] StartDate/EndDate - Start/end dates to check for an entry
     ///	• [optional] StartTime/EndTime - Start/end time filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for an entry the first half hour of the regular stock trading day
     ///	• [optional] ValidUntil - date/time until which the entry should hold, defaults to DateTime.Max (if this field is specified with the EndDate/EndTime fields the entry would become disabled which ever date/time comes first)
     ///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
@@ -44,6 +43,7 @@ namespace PowerLanguage.Strategy
     /// • LineId - trend line id
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
     ///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+    ///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
     ///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
     /// 
     /// ExitMovingAverage
@@ -564,20 +564,18 @@ namespace PowerLanguage.Strategy
             public int LineId { get; set; }
             public EEntryStrategy Strategy { get; set; }
             public double ClosePercentile { get; set; }
-            public DateTime StartDate { get; set; }
-            public DateTime EndDate { get; set; }
             public DateTime StartTime { get; set; }
             public DateTime EndTime { get; set; }
 
             private ITrendLineObject m_line;
+            private DateTime m_startDate;
+            private DateTime m_endDate;
 
             public EntryLine(_TrendLine control) : base(control)
             {
                 LineId = -1;
                 Strategy = EEntryStrategy.Breakout;
                 ClosePercentile = 0.5;
-                StartDate = DateTime.MinValue;
-                EndDate = DateTime.MaxValue;
                 StartTime = DateTime.MinValue;
                 EndTime = DateTime.MaxValue;
             }
@@ -588,8 +586,6 @@ namespace PowerLanguage.Strategy
                 if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
                 if (name == "strategy") { Strategy = property.Value.ToObject<EEntryStrategy>(); return true; }
                 if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
-                if (name == "startdate") { StartDate = property.Value.ToObject<DateTime>(); return true; }
-                if (name == "enddate") { EndDate = property.Value.ToObject<DateTime>(); return true; }
                 if (name == "starttime") { StartTime = property.Value.ToObject<DateTime>(); return true; }
                 if (name == "endtime") { EndTime = property.Value.ToObject<DateTime>(); return true; }
                 return base.Parse(property);
@@ -600,7 +596,6 @@ namespace PowerLanguage.Strategy
                 if (m_line == null) return Tuple.Create(false, string.Format("EntryLine - trendline with id {0} not found"));
                 if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
                 if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, "EntryLine - ClosePercentile must be between 0 and 1");
-                if (StartDate > EndDate) return Tuple.Create(false, "EntryLine - StartDate must be before EndDate");
                 if (StartTime > EndTime) return Tuple.Create(false, "EntryLine - StartTime must be before EndTime");
                 return base.IsValid();
             }
@@ -609,6 +604,14 @@ namespace PowerLanguage.Strategy
             {
                 base.StartCalc();
                 m_line = getTrendLine(LineId);
+                m_startDate = DateTime.MinValue;
+                m_endDate = DateTime.MaxValue;
+
+                if (m_line != null)
+                {
+                    m_startDate = m_line.Begin.Time;
+                    m_endDate = m_line.End.Time;
+                }
             }
 
             public override void CalcBar()
@@ -616,7 +619,7 @@ namespace PowerLanguage.Strategy
                 if (m_studyControl.Bars.CurrentBar < 2) return;
                 if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
                 if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
-                if (m_studyControl.Bars.Time[0].Date < StartDate || m_studyControl.Bars.Time[0].Date > EndDate) return;
+                if (m_studyControl.Bars.Time[0].Date < m_startDate || m_studyControl.Bars.Time[0].Date > m_endDate) return;
                 if (m_studyControl.Bars.Time[0].TimeOfDay < StartTime.TimeOfDay || m_studyControl.Bars.Time[0].TimeOfDay > EndTime.TimeOfDay) return;
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
@@ -724,6 +727,8 @@ namespace PowerLanguage.Strategy
             public EEntryExitCriteria Criteria { get; set; }
 
             private ITrendLineObject m_line;
+            private DateTime m_startDate;
+            private DateTime m_endDate;
 
             public ExitLine(_TrendLine control) : base(control)
             {
@@ -749,12 +754,21 @@ namespace PowerLanguage.Strategy
             {
                 base.StartCalc();
                 m_line = getTrendLine(LineId);
+                m_startDate = DateTime.MinValue;
+                m_endDate = DateTime.MaxValue;
+
+                if (m_line != null)
+                {
+                    m_startDate = m_line.Begin.Time;
+                    m_endDate = m_line.End.Time;
+                }
             }
 
             public override void CalcBar()
             {
                 if (m_studyControl.PositionSide == 0) return;
                 if (m_studyControl.Bars.CurrentBar < 2) return;
+                if (m_studyControl.Bars.Time[0].Date < m_startDate || m_studyControl.Bars.Time[0].Date > m_endDate) return;
                 if (m_studyControl.Bars.Time[0] > ValidUntil) return;
                 if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
                 if (m_studyControl.PositionSide > 0)
@@ -828,7 +842,7 @@ namespace PowerLanguage.Strategy
             abstract protected double exitPrice();
         }
 
-        public class ExitMovingAverage : ExitPriced     //TODO - Test and fix this  
+        public class ExitMovingAverage : ExitPriced
         {
             public int Length { get; set; }
             public EMovingAverageType MovingAverageType { get; set; }
