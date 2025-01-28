@@ -43,7 +43,7 @@
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\Ichimoku.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\PriceAction.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\RiskManagement.dll" />
-    <Reference Include="C:\Users\ettie\.nuget\packages\newtonsoft.json\13.0.3\lib\net40\Newtonsoft.Json.dll" />
+    <Reference Include="C:\Users\ettie\.nuget\packages\newtonsoft.json\13.0.3\lib\net45\Newtonsoft.Json.dll" />
     <Reference Include="System.dll" />
     <Reference Include="System.Data.dll" />
     <Reference Include="System.Xml.dll" />
@@ -199,7 +199,9 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS" />
+    <Compile Include="_TPO_.Indicator.CS">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
