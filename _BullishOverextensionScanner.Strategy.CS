@@ -44,6 +44,7 @@ namespace PowerLanguage.Strategy
 			FastSmoothingLength = PowerLanguage.Function._BullishOverextension.DEFAULT_FAST_SMOOTHER_LENGTH;
 			SlowSmoothingLength = PowerLanguage.Function._BullishOverextension.DEFAULT_SLOW_SMOOTHER_LENGTH;
 			GradualInclineLength = PowerLanguage.Function._BullishOverextension.DEFAULT_GRADUAL_INCLINE_LENGTH;
+			Debug = false;
 			m_bullishOverextension = new PowerLanguage.Function._BullishOverextension(this);
 
 		}

@@ -81,10 +81,21 @@ namespace PowerLanguage
 				if (GapDownPercent < 0.0d || GapDownPercent >= 1.0d) throw new Exception("Gap Down percent must be greater or equal to zero but less than 1.0.");
 				m_stockDownPercent = 1 - StockDownPercent;
 				m_marketDownPercent = 1 - MarketDownPercent;
-				m_fastSSMA.Price = Market.Close;
-				m_fastSSMA.Length = DEFAULT_FAST_SSMA;
-				m_slowSSMA.Price = Market.Close;
-				m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
+
+				//allow market to the null since the scanner window does not support multiple data feeds,
+				//default to stock price data use if market is not given
+				if (Market == null)
+				{
+					m_fastSSMA.Price = Instrument.Close;
+					m_fastSSMA.Length = DEFAULT_FAST_SSMA;
+					m_slowSSMA.Price = Instrument.Close;
+					m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
+				} else {
+					m_fastSSMA.Price = Market.Close;
+					m_fastSSMA.Length = DEFAULT_FAST_SSMA;
+					m_slowSSMA.Price = Market.Close;
+					m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
+				}
 			}
 
 			protected override System.Boolean CalcBar()
@@ -97,8 +108,8 @@ namespace PowerLanguage
 					//NOTE: We need to get the highest close over the scan length as the growth percentage as the pullback will "eat" into that growth
 					if ((Instrument.Close.Highest(ScanLength) / Instrument.Close[GrowthDays - 1]) - 1 < MinimumGrowthPercent) return false;  //not enough growth
 
-					if (m_fastSSMA[0] < m_slowSSMA[0]) return false;  //market is not bullish
-					if (Market.Close[0] > Market.High.Highest(ScanLength) * m_marketDownPercent) return false; //market is not down by required percentage
+					if (m_fastSSMA[0] < m_slowSSMA[0]) return false;  //market/instrument is not bullish
+					if (Market != null && Market.Close[0] > Market.High.Highest(ScanLength) * m_marketDownPercent) return false; //market is not down by required percentage
 					if (Instrument.Close[0] > Instrument.High.Highest(ScanLength) * m_stockDownPercent) return false; //stock is not down by required percentage
 					if (GapDownPercent > 0.0d)
 					{

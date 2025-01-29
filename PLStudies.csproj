@@ -510,6 +510,7 @@
     <Compile Include="_VWAP.Indicator.CS" />
     <Compile Include="_VWAPCrossover.Strategy.CS" />
     <Compile Include="_Voss.Function.CS" />
+    <Compile Include="_ScannerCollection.Indicator.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
