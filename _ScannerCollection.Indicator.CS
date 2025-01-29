@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
+using PowerLanguage.Strategy;
 
 namespace PowerLanguage.Indicator{
 /// <summary>
@@ -24,6 +25,7 @@ namespace PowerLanguage.Indicator{
 			DarvasBox = 5,
 			EpisodicPivot = 6,
 			HighVolumeSpike = 7,
+			VCP = 8,
 		}
 
 		//properties
@@ -70,6 +72,15 @@ namespace PowerLanguage.Indicator{
 		[Input] public int HighVolumeSpikeVolumeLength { get; set; }         //length to determine for volume average
 		[Input] public double HighVolumeSpikeVolumeSigmaMultiplier { get; set; }  //volume multiplier of average to consider as spike
 
+		[Input] public double VCPMinimumGrowthPercent { get; set; } //minimum required growth in the past x-days
+		[Input] public int VCPGrowthDays { get; set; }          //number of days to look back for the growth
+		[Input] public int VCPFastLength { get; set; }          //fast length for the KAMA
+		[Input] public int VCPSlowLength { get; set; }          //slow length for the KAMA
+		[Input] public double VCPMinimumATRDelta { get; set; }  //minimum ATR delta from the KAMA to consider a move significant enough for a new pivot interval
+		[Input] public int VCPScanLength { get; set; }          //scan length for the VCP
+		[Input] public int VCPMinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
+		[Input] public double VCPMinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
+
 		[Input] public bool Debug { get; set; }                  //debug flag to print out the values
 
 		//attribute
@@ -82,6 +93,8 @@ namespace PowerLanguage.Indicator{
 		private PowerLanguage.Function._DarvasBox m_darvasBox;
 		private PowerLanguage.Function._EpisodicPivot m_episodicPivot;
 		private PowerLanguage.Function._HighVolumeSpike m_highVolumeSpike;
+		private double m_growthPercent;
+		private PowerLanguage.Function._VCP m_vcp;
 
 		//interface methods
 		public _ScannerCollection(object _ctx):base(_ctx){}
@@ -130,6 +143,15 @@ namespace PowerLanguage.Indicator{
 			HighVolumeSpikeVolumeLength = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_LENGTH;
 			HighVolumeSpikeVolumeSigmaMultiplier = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_SIGMA_MULTIPLIER;
 
+			VCPMinimumGrowthPercent = PowerLanguage.Strategy._VCP.DEFAULT_MINIMUM_GROWTH_PERCENT;
+			VCPGrowthDays = PowerLanguage.Strategy._VCP.DEFAULT_GROWTH_DAYS;
+			VCPFastLength = PowerLanguage.Function._VCP.DEFAULT_FAST_LENGTH;
+			VCPSlowLength = PowerLanguage.Function._VCP.DEFAULT_SLOW_LENGTH;
+			VCPMinimumATRDelta = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_ATR_DELTA;
+			VCPScanLength = PowerLanguage.Function._VCP.DEFAULT_SCAN_LENGTH;
+			VCPMinimumRequiredLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_REQUIRED_LEGS;
+			VCPMinimumPercentageContracingLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
+
 			Debug = false;
 
 			m_adr = new PowerLanguage.Function._ADR(this);
@@ -141,6 +163,7 @@ namespace PowerLanguage.Indicator{
 			m_darvasBox = new PowerLanguage.Function._DarvasBox(this);
 			m_episodicPivot = new PowerLanguage.Function._EpisodicPivot(this);
 			m_highVolumeSpike = new PowerLanguage.Function._HighVolumeSpike(this);
+			m_vcp = new PowerLanguage.Function._VCP(this);
 		}
 
 		protected override void StartCalc() {
@@ -195,6 +218,15 @@ namespace PowerLanguage.Indicator{
 			m_highVolumeSpike.VolumeLength = HighVolumeSpikeVolumeLength;
 			m_highVolumeSpike.VolumeSigmaMultiplier = HighVolumeSpikeVolumeSigmaMultiplier;
 
+			m_vcp.Instrument = Bars;
+			m_vcp.FastLength = VCPFastLength;
+			m_vcp.SlowLength = VCPSlowLength;
+			m_vcp.MinimumATRDelta = VCPMinimumATRDelta;
+			m_vcp.ScanLength = VCPScanLength;
+			m_vcp.MinimumRequiredLegs = VCPMinimumRequiredLegs;
+			m_vcp.MinimumPercentageContracingLegs = VCPMinimumPercentageContracingLegs;
+			m_growthPercent = 1.0d + VCPMinimumGrowthPercent;  //only checking positive growth
+
 			//Debug = false;  - TODO wire this to functions
 		}
 
@@ -217,6 +249,13 @@ namespace PowerLanguage.Indicator{
 				m_plot.Set((double)ScannerMatch.EpisodicPivot);
 			else if (m_highVolumeSpike[0])
 				m_plot.Set((double)ScannerMatch.HighVolumeSpike);
+			else if (m_vcp[0])
+			{
+				//growth filter for VCP
+				if (Bars.CurrentBar < VCPGrowthDays) return;
+				double growthPercent = Bars.Close[VCPGrowthDays - 1] != 0.0d ? (Bars.Close[0] - Bars.Close[VCPGrowthDays - 1]) / Bars.Close[VCPGrowthDays - 1] : 0.0d;
+				if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent) m_plot.Set((double)ScannerMatch.VCP);
+			}
 		}
 
 		//methods
