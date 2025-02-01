@@ -14,9 +14,9 @@ namespace PowerLanguage
 		{
 			//constants
 			public const int LENGTH = 20;
-			
+
 			//inputs
-			[Input]public int Length { get; set; }
+			[Input] public int Length { get; set; }
 
 			public _ADR(CStudyControl _master) : base(_master) { }
 			public _ADR(CStudyControl _master, int _ds) : base(_master, _ds) { }
@@ -26,7 +26,7 @@ namespace PowerLanguage
 				Length = LENGTH;
 			}
 
-			protected override void StartCalc() 
+			protected override void StartCalc()
 			{
 				if (Length <= 0) throw new Exception("Length must be positive");
 			}
@@ -37,11 +37,30 @@ namespace PowerLanguage
 
 				if (Bars.CurrentBar > Length)
 				{
-					for (int i = 0; i < Length; i++) value += (Bars.High[i] / Bars.Low[i]) - 1;
-					value = (100 * value) / Length;				
-        		}
+					for (int i = 0; i < Length; i++)
+					{
+						// Ensure Bars.Low[i] is not zero to avoid division by zero
+						if (Bars.Low[i] != 0)
+						{
+							// Calculate the ratio
+							double ratio = Bars.High[i] / Bars.Low[i];
 
-        		return value;
+							// Check for overflow/underflow and adjust if necessary
+							if (double.IsInfinity(ratio) || double.IsNaN(ratio))
+								ratio = 1.0; // Set to a neutral value to avoid affecting the result
+
+							value += ratio - 1;
+						}
+					}
+
+					// Check for overflow/underflow in the final value and adjust if necessary
+					if (double.IsInfinity(value) || double.IsNaN(value))
+						value = 0.0; // Set to a neutral value to avoid affecting the result
+					else
+						value = (100 * value) / Length;
+				}
+
+				return value;
 			}
 		}
 	}

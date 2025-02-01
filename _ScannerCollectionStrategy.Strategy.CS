@@ -3,6 +3,8 @@ using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
+using System.Diagnostics.Eventing.Reader;
+using System.ComponentModel.Design;
 
 namespace PowerLanguage.Strategy {
 /// <summary>
@@ -23,11 +25,20 @@ namespace PowerLanguage.Strategy {
 /// * Close rest of the position if the market starts diverging away from the x-day moving average, OR
 /// * Close rest of the position if the market closes under the x-day moving average 
 /// 
+/// Notes:
+/// * IMPORTANT: To correctly trade the opening bar the sessions should all be assigned to the Regular Trading Hours for stocks, otherwise opening bar entries would be made
+///              in the pre-/post-market sessions.
 /// </summary>
-	public class _ScannerCollectionStrategy : SignalObject {
+	public class _ScannerCollectionStrategy : _CustomSignal {
 		//constants
+		public const double DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT = 0.01;
+		public const double DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE = 0.1;
+		public const double DEFAULT_ENTRY_MAX_RISK_BASED_EQUITY_PERCENT = 0.25;
+		public const double DEFAULT_ENTRY_BUFFER_STOP_LOSS_PRICE = 0.0;
+		public const double DEFAULT_EXIT_FIRST_EXIT_PERCENT = 0.5;
+		public const int DEFAULT_EXIT_FIRST_EXIT_DAYS = 5;
+		public const int DEFAULT_EXIT_MOVING_AVERAGE_LENGTH = 10;
 
-		
 		//types
 		/// <summary>
 		/// Values set in the plot when different scanners match.
@@ -105,7 +116,10 @@ namespace PowerLanguage.Strategy {
 		[Input] public int VCPMinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
 		[Input] public double VCPMinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
 
-		[Input] public double EntryAccountEquityPercent { get; set; }	//account equity percent to use for entry
+		[Input] public double EntryAccountEquityAtRiskPercent { get; set; }	//account equity percent to use for entry
+		[Input] public double EntryBarClosePercentile { get; set; } //close price in terms of the range of the bar that would be considered a "strong" close
+		[Input] public double EntryBufferStopLossPrice { get; set; }	//buffer price to add to the determined stop-loss price
+		[Input] public double EntryMaxRiskBasedEquityPercent { get; set; }	//since all entry sizes are computed on risk basis this is the maximum percentage of the account to user per position
 		[Input] public int ExitMovingAverageLength { get; set; }		//moving average length used for exits
 		[Input] public double ExitFirstExitPercent { get; set; }		//percentage of position to exit after below n-days (0 to disable)
 		[Input] public int ExitFirstExitDays { get; set; }					//number of days after which we should exit the first part of the 
@@ -118,8 +132,10 @@ namespace PowerLanguage.Strategy {
 		private IInstrument m_market;
 		private IOrderPriced m_le;
 		private IOrderPriced m_se;
-		private IOrderPriced m_lx;
-		private IOrderPriced m_sx;
+		private IOrderMarket m_firstLx;
+		private IOrderMarket m_firstSx;
+		private IOrderMarket m_secondLx;
+		private IOrderMarket m_secondSx;
 		private PowerLanguage.Function._ADR m_adr;
 		private PowerLanguage.Function._BearishOverextension m_bearishOverextension;
 		private PowerLanguage.Function._BullishOverextension m_bullishOverextension;
@@ -132,6 +148,9 @@ namespace PowerLanguage.Strategy {
 		private PowerLanguage.Function._VCP m_vcp;
 		private PowerLanguage.Function._SuperSmoother m_exitMovingAverage;
 		private DateTime m_entryDateTime;
+		private int m_entrySize;
+		private double m_stopLossPrice;
+		private VariableSeries<bool> m_lastBarInSession;
 
 		//interface methods
 		public _ScannerCollectionStrategy(object _ctx):base(_ctx){}
@@ -139,8 +158,10 @@ namespace PowerLanguage.Strategy {
 		protected override void Create() {
 			m_le = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "scsLE", EOrderAction.Buy));
 			m_se = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "scsSE", EOrderAction.SellShort));
-			m_lx = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "scsLX", EOrderAction.Sell));
-			m_sx = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "scsSX", EOrderAction.BuyToCover));
+			m_firstLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs1LX", EOrderAction.Sell));
+			m_firstSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs1SX", EOrderAction.BuyToCover));
+			m_secondLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs2LX", EOrderAction.Sell));
+			m_secondSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs2SX", EOrderAction.BuyToCover));
 
 			ADRLength = PowerLanguage.Function._ADR.LENGTH;
 			MinimumADR = 0.02;
@@ -202,10 +223,13 @@ namespace PowerLanguage.Strategy {
 			VCPMinimumRequiredLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_REQUIRED_LEGS;
 			VCPMinimumPercentageContracingLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
 
-			EntryAccountEquityPercent = 0.01;
-			ExitFirstExitPercent = 0.5;
-			ExitFirstExitDays = 5;
-			ExitMovingAverageLength = 10;
+			EntryAccountEquityAtRiskPercent = DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT;
+			EntryBarClosePercentile = DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE;
+			EntryMaxRiskBasedEquityPercent = DEFAULT_ENTRY_MAX_RISK_BASED_EQUITY_PERCENT;
+			EntryBufferStopLossPrice = DEFAULT_ENTRY_BUFFER_STOP_LOSS_PRICE;
+			ExitFirstExitPercent = DEFAULT_EXIT_FIRST_EXIT_PERCENT;
+			ExitFirstExitDays = DEFAULT_EXIT_FIRST_EXIT_DAYS;
+			ExitMovingAverageLength = DEFAULT_EXIT_MOVING_AVERAGE_LENGTH;
 
 			Debug = false;
 
@@ -219,12 +243,15 @@ namespace PowerLanguage.Strategy {
 			m_highVolumeSpike = new PowerLanguage.Function._HighVolumeSpike(this);
 			m_vcp = new PowerLanguage.Function._VCP(this);
 			m_exitMovingAverage = new PowerLanguage.Function._SuperSmoother(this);
+			m_lastBarInSession = new VariableSeries<bool>(this);
 		}
 
 		protected override void StartCalc() {
 			m_adr.Length = ADRLength;
 			if (MinimumADR < 0.0 || MinimumADR > 1.0) throw new ArgumentException("MinimumADR is a percentage and should be between 0 and 1 (zero to switch off the filter)");
-			if (EntryAccountEquityPercent <= 0.0 || EntryAccountEquityPercent > 1.0) throw new ArgumentException("EntryAccountEquityPercent must be between 0 and 1 [exclusive]");
+			if (EntryAccountEquityAtRiskPercent <= 0.0 || EntryAccountEquityAtRiskPercent > 1.0) throw new ArgumentException("EntryAccountEquityPercent must be between 0 and 1 [exclusive]");
+			if (EntryBarClosePercentile <= 0.0 || EntryBarClosePercentile > 1.0) throw new ArgumentException("EntryBarClosePercentile must be between 0 [exclusive] and 1 [inclusive]");
+			if (EntryBufferStopLossPrice < 0) throw new ArgumentException("EntryBufferStopLossPrice must be larger or equal to 0");
 			if (ExitFirstExitPercent < 0.0 || ExitFirstExitPercent > 1.0) throw new ArgumentException("ExitFirstExitPercent must be between 0 and 1 [inclusive]");
 			if (ExitFirstExitDays < 0) throw new ArgumentException("ExitFirstExitDays must be equal or greater than 0");
 			if (ExitMovingAverageLength <= 0) throw new ArgumentException("ExitMovingAverageLength mustr be larger than 0");
@@ -292,15 +319,19 @@ namespace PowerLanguage.Strategy {
 			m_exitMovingAverage.Length = ExitMovingAverageLength;
 
 			m_growthPercent = 1.0d + VCPMinimumGrowthPercent;  //only checking positive growth
+			m_stopLossPrice = 0;
+			m_entrySize = 0;
 			m_entryDateTime = DateTime.MinValue;
-
-			//Debug = false;  - TODO wire this to functions
+			m_lastBarInSession.Value = false;
 		}
 
 		protected override void CalcBar(){			
 			switch (Environment.CalcReason)
 			{
 				case CalculationReason.Default:
+					if (Bars.Status == EBarState.Close && Bars.LastBarInSession) 
+						m_lastBarInSession.Value = true;
+
 					if (PositionSide == 0)
 						calcEntry();
 					else
@@ -315,8 +346,9 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		private void calcEntry()
 		{
-			//reset the entry date since we are no longer in a position
+			//reset the entry state since we are no longer in a position
 			m_entryDateTime = DateTime.MinValue;
+			m_stopLossPrice = 0.0;
 
 			if (m_adr[0] < MinimumADR) return;  //minimum average daily range move is too small
 			ScannerMatch scannerMatch = ScannerMatch.None;
@@ -341,9 +373,7 @@ namespace PowerLanguage.Strategy {
 				if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent) scannerMatch = ScannerMatch.VCP;
 			}
 
-
 			//TBD - should the "long" entries rather be breakout entries??? (at least for the VCP - try to test this as well)
-			
 
 			switch (scannerMatch)
 			{
@@ -354,16 +384,47 @@ namespace PowerLanguage.Strategy {
 				case ScannerMatch.DarvasBox:
 				case ScannerMatch.EpisodicPivot:
 				case ScannerMatch.VCP:
+					//this bar is an opening bar is the previous bar was the last bar in the session
+					//and we're only interested to send the order on the bar close
+					if (m_lastBarInSession[1] && Bars.Status == EBarState.Close)
+					{
+						double low = Bars.Low[0];
+						double close = Bars.Close[0];
+						double range = Bars.High[0] - low;
+						double closePercentile = range != 0 ? (close - low) / range : 0;    //this will skip trades for bars with no range
 
-					//TODO - send limit on the close of the first bar of the trading session
-
+						if (closePercentile >= EntryBarClosePercentile)
+						{
+							if (Debug) Output.WriteLine("{0} - Long entry at close {1}, {2}", scannerMatch.ToString(), Bars.Time[0], close);
+							m_stopLossPrice = low + EntryBufferStopLossPrice;
+							m_entrySize = entrySize(close, m_stopLossPrice);
+							m_le.Send(close, m_entrySize);
+						}
+					}
 					break;
 				//short entries
 				case ScannerMatch.BullishOverExtension:
 				case ScannerMatch.HighVolumeSpike:
+					//this bar is an opening bar is the previous bar was the last bar in the session
+					//and we're only interested to send the order on the bar close
+					if (m_lastBarInSession[1] && Bars.Status == EBarState.Close)
+					{
+						double low = Bars.Low[0];
+						double close = Bars.Close[0];
+						double high = Bars.High[0];
+						double range = high - low;
+						//this will skip trades for bars with no range, for short trades 1 - closePercentile is used to invert the percentiles so that
+						//close prices closer to the bottom of the bar would be considered higher percentiles
+						double closePercentile = range != 0 ? 1 - (close - low) / range : 0;
 
-					//TODO - send limit on the close of the first bar of the trading session
-
+						if (closePercentile >= EntryBarClosePercentile)
+						{
+							if (Debug) Output.WriteLine("{0} - Short entry at close {1}, {2}", scannerMatch.ToString(), Bars.Time[0], close);
+							m_stopLossPrice = high - EntryBufferStopLossPrice;
+							m_entrySize = entrySize(close, m_stopLossPrice);
+							m_se.Send(close, m_entrySize);
+						}
+					}
 					break;
 			}
 		}
@@ -373,12 +434,50 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		private void calcExit() {
 			if (m_entryDateTime == DateTime.MinValue) m_entryDateTime = m_stock.Time[0];
+			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
+			GenerateStopLoss(m_stopLossPrice);
 
+			//exit half position into the n-day exit
+			if (m_entrySize == (int)Math.Abs(StrategyInfo.MarketPosition))
+			{
+				TimeSpan entryToCurrentBar = m_stock.Time[0] - m_entryDateTime;
+				if (entryToCurrentBar.Days >= ExitFirstExitDays)
+					if (PositionSide > 0)
+						m_firstLx.Send();
+					else
+						m_firstSx.Send();
+			}
 
-			//TODO - implement exits based on entry date for first exit and moving average
+			//exit when the bar closes above/below the moving average
+			if (Bars.Status == EBarState.Close && Bars.LastBarInSession)
+				if (PositionSide > 0 && Bars.Close[0] < m_exitMovingAverage[0])
+					m_secondLx.Send();
+				else if (Bars.Close[0] > m_exitMovingAverage[0])
+					m_secondSx.Send();
+		}
 
+		/// <summary>
+		/// Computes the entry size based on the risk created by the entryPRice and stopLossPrice.
+		/// </summary>
+		private int entrySize(double entryPrice, double stopLossPrice) {
+			if (entryPrice == 0)
+			{
+				if (Debug) Output.WriteLine("Error: entryPrice is zero so no size to compute.");
+				return 0;
+			}
 
+			double equity = equityAvailable();
+			double positionEquity = equity * EntryAccountEquityAtRiskPercent;
+			double risk = entryPrice > stopLossPrice ? entryPrice - stopLossPrice /* long risk */ : stopLossPrice - entryPrice /* short risk */;
+			int size = risk != 0 ? (int)Math.Truncate(positionEquity / risk) : 0;
 
+			//clip position size based on entry equity per position or the account equity
+			if (EntryMaxRiskBasedEquityPercent < 1.0)
+				equity = equity * EntryMaxRiskBasedEquityPercent;
+			int equityClippedPositionSize = (int)Math.Truncate(equity / entryPrice);
+			size = size < equityClippedPositionSize ? size : equityClippedPositionSize;
+
+			return size;
 		}
 	}
 }
