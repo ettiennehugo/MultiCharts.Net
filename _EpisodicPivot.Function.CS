@@ -32,18 +32,18 @@ namespace PowerLanguage
 			public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.15;
 
 			//inputs
-			public IInstrument Instrument {  get; set; }
+			public IInstrument Instrument { get; set; }
 			public int GrowthDays { get; set; }
 			public double GrowthPercent { get; set; }
-			public double MinimumPercentageChange { get; set; }	//gap up must be at least this minimum
-			public double MaximumPercentageChange { get; set; }	//gap up clipped to this maximum to avoid pump-and-dump stocks
+			public double MinimumPercentageChange { get; set; } //gap up must be at least this minimum
+			public double MaximumPercentageChange { get; set; } //gap up clipped to this maximum to avoid pump-and-dump stocks
 
 			//properties
 
 
 			//attributes
 
-			
+
 			//interface methods
 			public _EpisodicPivot(CStudyControl _master) : base(_master) { }
 			public _EpisodicPivot(CStudyControl _master, int _ds) : base(_master, _ds) { }
@@ -66,9 +66,11 @@ namespace PowerLanguage
 			}
 
 			protected override System.Boolean CalcBar()
-			{	
+			{
 				if (Instrument.CurrentBar < GrowthDays) return false;
-				if (((Instrument.Close[0] / Instrument.Close.Lowest(GrowthDays)) - 1) < GrowthPercent) return false;
+				double lowest = Instrument.Close.Lowest(GrowthDays);
+				if (lowest == 0 || Instrument.High[1] == 0) return false;		//avoid divide by zero
+				if (((Instrument.Close[0] / lowest) - 1) < GrowthPercent) return false;
 				double instrumentGrowth = (Instrument.Low[0] / Instrument.High[1]) - 1;
 				if (instrumentGrowth < MinimumPercentageChange || instrumentGrowth > MaximumPercentageChange) return false;
 
