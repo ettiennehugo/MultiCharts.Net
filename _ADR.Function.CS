@@ -55,7 +55,7 @@ namespace PowerLanguage
 					if (double.IsInfinity(value) || double.IsNaN(value))
 						value = 0.0; //set to a neutral value to avoid affecting the result
 					else
-						value = (100 * value) / Length;
+						value = 100 * ((value / Length) - 1);
 				}
 
 				return value;
