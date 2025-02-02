@@ -107,6 +107,7 @@ namespace PowerLanguage
 					if (Instrument.CurrentBar <= GrowthDays || Instrument.CurrentBar <= ScanLength /*|| Instrument.CurrentBar <= DEFAULT_FAST_SSMA || Instrument.CurrentBar <= DEFAULT_SLOW_SSMA*/) return false; //not enough data
 
 					//NOTE: We need to get the highest close over the scan length as the growth percentage as the pullback will "eat" into that growth
+					if (Instrument.Close[1] == 0 || Instrument.Close[GrowthDays - 1] == 0) return false;		//avoid division by zero
 					if ((Instrument.Close.Highest(ScanLength) / Instrument.Close[GrowthDays - 1]) - 1 < MinimumGrowthPercent) return false;  //not enough growth
 
 					if (Market != null && m_fastSSMA[0] < m_slowSSMA[0]) return false;  //[optional] market is not bullish
