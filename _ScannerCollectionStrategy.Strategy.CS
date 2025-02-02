@@ -23,7 +23,8 @@ namespace PowerLanguage.Strategy {
 /// * If the order is filled the stop-loss is placed above/below the low/high of the entry bar.
 /// * Close third to half of the position about n-days into the trade
 /// * Close rest of the position if the market starts diverging away from the x-day moving average, OR
-/// * Close rest of the position if the market closes under the x-day moving average 
+/// * Close rest of the position if the market closes under the x-day moving average
+/// * Exit orders are sent n-minutes before the session close
 /// 
 /// Notes:
 /// * IMPORTANT: To correctly trade the opening bar the sessions should all be assigned to the Regular Trading Hours for stocks, otherwise opening bar entries would be made
@@ -38,6 +39,7 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_EXIT_FIRST_EXIT_PERCENT = 0.5;
 		public const int DEFAULT_EXIT_FIRST_EXIT_DAYS = 5;
 		public const int DEFAULT_EXIT_MOVING_AVERAGE_LENGTH = 10;
+		public const int DEFAULT_EXIT_SECOND_MINUTES_BEFORE_SESSION_END = 10;
 
 		//types
 		/// <summary>
@@ -123,7 +125,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public int ExitMovingAverageLength { get; set; }		//moving average length used for exits
 		[Input] public double ExitFirstExitPercent { get; set; }		//percentage of position to exit after below n-days (0 to disable)
 		[Input] public int ExitFirstExitDays { get; set; }					//number of days after which we should exit the first part of the 
-
+		[Input] public int ExitSecondMinutesBeforeSessionEnd { get; set; }	//minutes before the session end to start sending exit market orders
 
 		[Input] public bool Debug { get; set; }                  //debug flag to print out the values
 
@@ -151,6 +153,8 @@ namespace PowerLanguage.Strategy {
 		private int m_entrySize;
 		private double m_stopLossPrice;
 		private VariableSeries<bool> m_lastBarInSession;
+		private ScannerMatch m_scannerMatch;
+		private TimeSpan m_exitSecondTimeSpan;
 
 		//interface methods
 		public _ScannerCollectionStrategy(object _ctx):base(_ctx){}
@@ -230,6 +234,7 @@ namespace PowerLanguage.Strategy {
 			ExitFirstExitPercent = DEFAULT_EXIT_FIRST_EXIT_PERCENT;
 			ExitFirstExitDays = DEFAULT_EXIT_FIRST_EXIT_DAYS;
 			ExitMovingAverageLength = DEFAULT_EXIT_MOVING_AVERAGE_LENGTH;
+			ExitSecondMinutesBeforeSessionEnd = DEFAULT_EXIT_SECOND_MINUTES_BEFORE_SESSION_END;
 
 			Debug = false;
 
@@ -254,7 +259,8 @@ namespace PowerLanguage.Strategy {
 			if (EntryBufferStopLossPrice < 0) throw new ArgumentException("EntryBufferStopLossPrice must be larger or equal to 0");
 			if (ExitFirstExitPercent < 0.0 || ExitFirstExitPercent > 1.0) throw new ArgumentException("ExitFirstExitPercent must be between 0 and 1 [inclusive]");
 			if (ExitFirstExitDays < 0) throw new ArgumentException("ExitFirstExitDays must be equal or greater than 0");
-			if (ExitMovingAverageLength <= 0) throw new ArgumentException("ExitMovingAverageLength mustr be larger than 0");
+			if (ExitMovingAverageLength <= 0) throw new ArgumentException("ExitMovingAverageLength must be larger than 0");
+			if (ExitSecondMinutesBeforeSessionEnd < 0) throw new ArgumentException("ExitSecondMinutesBeforeSessionEnd must be larger or equal than 0");
 
 			m_stock = BarsOfData(1);
 			m_market = BarsOfData(2);
@@ -323,6 +329,8 @@ namespace PowerLanguage.Strategy {
 			m_entrySize = 0;
 			m_entryDateTime = DateTime.MinValue;
 			m_lastBarInSession.Value = false;
+			m_scannerMatch = ScannerMatch.None;
+			m_exitSecondTimeSpan = new TimeSpan(0, ExitSecondMinutesBeforeSessionEnd, 0);
 		}
 
 		protected override void CalcBar(){			
@@ -351,31 +359,31 @@ namespace PowerLanguage.Strategy {
 			m_stopLossPrice = 0.0;
 
 			if (m_adr[0] < MinimumADR) return;  //minimum average daily range move is too small
-			ScannerMatch scannerMatch = ScannerMatch.None;
+			m_scannerMatch = ScannerMatch.None;
 			if (BearishOverExtensionEnable && m_bearishOverextension[0])
-				scannerMatch = ScannerMatch.BearishOverExtension;
+				m_scannerMatch = ScannerMatch.BearishOverExtension;
 			else if (BullishOverExtensionEnable && m_bullishOverextension[0])
-				scannerMatch = ScannerMatch.BullishOverExtension;
+				m_scannerMatch = ScannerMatch.BullishOverExtension;
 			else if (CapitulationReversalEnable && m_capitulationReversal[0])
-				scannerMatch = ScannerMatch.CapitulationReversal;
+				m_scannerMatch = ScannerMatch.CapitulationReversal;
 			else if (CrableNRXEnable && m_crableNRX[0])
-				scannerMatch = ScannerMatch.CrableNRX;
+				m_scannerMatch = ScannerMatch.CrableNRX;
 			else if (DarvasBoxEnable && m_darvasBox[0])
-				scannerMatch = ScannerMatch.DarvasBox;
+				m_scannerMatch = ScannerMatch.DarvasBox;
 			else if (EpisodicPivotEnable && m_episodicPivot[0])
-				scannerMatch = ScannerMatch.EpisodicPivot;
+				m_scannerMatch = ScannerMatch.EpisodicPivot;
 			else if (HighVolumeSpikeEnable && m_highVolumeSpike[0])
-				scannerMatch = ScannerMatch.HighVolumeSpike;
+				m_scannerMatch = ScannerMatch.HighVolumeSpike;
 			else if (VCPEnable && m_vcp[0])
 			{
 				if (Bars.CurrentBar < VCPGrowthDays) return;
 				double growthPercent = Bars.Close[VCPGrowthDays - 1] != 0.0d ? (Bars.Close[0] - Bars.Close[VCPGrowthDays - 1]) / Bars.Close[VCPGrowthDays - 1] : 0.0d;
-				if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent) scannerMatch = ScannerMatch.VCP;
+				if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent) m_scannerMatch = ScannerMatch.VCP;
 			}
 
 			//TBD - should the "long" entries rather be breakout entries??? (at least for the VCP - try to test this as well)
 
-			switch (scannerMatch)
+			switch (m_scannerMatch)
 			{
 				//long entries
 				case ScannerMatch.BearishOverExtension:
@@ -395,7 +403,7 @@ namespace PowerLanguage.Strategy {
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Long entry at close {1}, {2}", scannerMatch.ToString(), Bars.Time[0], close);
+							if (Debug) Output.WriteLine("{0} - Long entry at close {1}, {2}", m_scannerMatch.ToString(), Bars.Time[0], close);
 							m_stopLossPrice = low + EntryBufferStopLossPrice;
 							m_entrySize = entrySize(close, m_stopLossPrice);
 							m_le.Send(close, m_entrySize);
@@ -419,7 +427,7 @@ namespace PowerLanguage.Strategy {
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Short entry at close {1}, {2}", scannerMatch.ToString(), Bars.Time[0], close);
+							if (Debug) Output.WriteLine("{0} - Short entry at close {1}, {2}", m_scannerMatch.ToString(), Bars.Time[0], close);
 							m_stopLossPrice = high - EntryBufferStopLossPrice;
 							m_entrySize = entrySize(close, m_stopLossPrice);
 							m_se.Send(close, m_entrySize);
@@ -433,11 +441,14 @@ namespace PowerLanguage.Strategy {
 		/// Implement exit rules around the first and second exits.
 		/// </summary>
 		private void calcExit() {
+			//record first day of trade to determine n-day exit
 			if (m_entryDateTime == DateTime.MinValue) m_entryDateTime = m_stock.Time[0];
+
+			//STOP-LOSS - keep stop-loss in place based on entry bar
 			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 			GenerateStopLoss(m_stopLossPrice);
 
-			//exit half position into the n-day exit
+			//FIRST EXIT - if we're still holdng the full entry position exit half position into the n-day exit
 			if (m_entrySize == (int)Math.Abs(StrategyInfo.MarketPosition))
 			{
 				TimeSpan entryToCurrentBar = m_stock.Time[0] - m_entryDateTime;
@@ -448,12 +459,46 @@ namespace PowerLanguage.Strategy {
 						m_firstSx.Send();
 			}
 
-			//exit when the bar closes above/below the moving average
-			if (Bars.Status == EBarState.Close && Bars.LastBarInSession)
-				if (PositionSide > 0 && Bars.Close[0] < m_exitMovingAverage[0])
-					m_secondLx.Send();
-				else if (Bars.Close[0] > m_exitMovingAverage[0])
-					m_secondSx.Send();
+			//SECOND EXIT - determine whether we're getting within the n-minute window of the session exit to start
+			//scanning for the second exit
+			TimeSpan currentBarTime = Bars.Time[0].TimeOfDay;
+			bool scanForSecondExit = false;
+
+			foreach (var session in Bars.Sessions)
+			{
+				if (session.EndDay == Bars.Time[0].DayOfWeek &&
+						session.EndTime - currentBarTime <= m_exitSecondTimeSpan)
+				{
+					scanForSecondExit = true;
+					break;
+				}
+			}
+
+			//exit when the bar closes above/below the moving average based off associated entry and
+			//we're getting close (n-minutes) from the session close
+			//NOTE: The second exit can actually exit the full position if the price starts to fall on the
+			//      opposite side of the moving average
+			if (scanForSecondExit)
+				if (PositionSide > 0)
+					switch (m_scannerMatch)
+					{
+						case ScannerMatch.BearishOverExtension:
+							if (Bars.Close[0] > m_exitMovingAverage[0]) m_secondLx.Send();
+							break;
+						default:
+							if (Bars.Close[0] < m_exitMovingAverage[0]) m_secondLx.Send();
+							break;
+					}
+				else 
+					switch (m_scannerMatch)
+					{
+						case ScannerMatch.BullishOverExtension:
+							if (Bars.Close[0] < m_exitMovingAverage[0]) m_secondSx.Send();
+							break;
+						default:
+							if (Bars.Close[0] > m_exitMovingAverage[0]) m_secondSx.Send();
+							break;
+					}
 		}
 
 		/// <summary>

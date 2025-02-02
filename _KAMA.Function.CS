@@ -88,13 +88,13 @@ namespace PowerLanguage
 
 						//avoid division by zero
 						if (EfficiencyRatio == 0)
-							EfficiencyRatio = 1e-10; // Small value to avoid division by zero and not too small to result in an overflow
+							EfficiencyRatio = 1e-10; //small value to avoid division by zero and not too small to result in an overflow
 
 						EfficiencyRatio = Math.Abs(Price[0] - Price[EfficiencyRatioLength - 1]) / EfficiencyRatio;
 
 						//compute the smoothing constant
 						SmoothingConstant = EfficiencyRatio * (fastSmoothing - slowSmoothing) + slowSmoothing;
-						SmoothingConstant = SmoothingConstant * SmoothingConstant;  // Previous result must be squared
+						SmoothingConstant = SmoothingConstant * SmoothingConstant;  //previous result must be squared
 
 						//compute the new KAMA value
 						double previous = this[1];
