@@ -118,6 +118,10 @@ namespace PowerLanguage.Strategy {
 		[Input] public int VCPMinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
 		[Input] public double VCPMinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
 
+		
+		//TODO - add minimum price values for long and short entries
+		
+		
 		[Input] public double EntryAccountEquityAtRiskPercent { get; set; }	//account equity percent to use for entry
 		[Input] public double EntryBarClosePercentile { get; set; } //close price in terms of the range of the bar that would be considered a "strong" close
 		[Input] public double EntryBufferStopLossPrice { get; set; }	//buffer price to add to the determined stop-loss price
@@ -403,7 +407,7 @@ namespace PowerLanguage.Strategy {
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Long entry at close {1}, {2}", m_scannerMatch.ToString(), Bars.Time[0], close);
+							if (Debug) Output.WriteLine("{0} - Long entry on {1} at close {2}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, Bars.Time[0], close);
 							m_stopLossPrice = low + EntryBufferStopLossPrice;
 							m_entrySize = entrySize(close, m_stopLossPrice);
 							m_le.Send(close, m_entrySize);
@@ -427,7 +431,7 @@ namespace PowerLanguage.Strategy {
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Short entry at close {1}, {2}", m_scannerMatch.ToString(), Bars.Time[0], close);
+							if (Debug) Output.WriteLine("{0} - Short entry on {1} at close {2}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, Bars.Time[0], close);
 							m_stopLossPrice = high - EntryBufferStopLossPrice;
 							m_entrySize = entrySize(close, m_stopLossPrice);
 							m_se.Send(close, m_entrySize);
@@ -449,14 +453,24 @@ namespace PowerLanguage.Strategy {
 			GenerateStopLoss(m_stopLossPrice);
 
 			//FIRST EXIT - if we're still holdng the full entry position exit half position into the n-day exit
-			if (m_entrySize == (int)Math.Abs(StrategyInfo.MarketPosition))
+			int currentPositionSize = (int)Math.Abs(StrategyInfo.MarketPosition);
+			if (m_entrySize == currentPositionSize)
 			{
 				TimeSpan entryToCurrentBar = m_stock.Time[0] - m_entryDateTime;
 				if (entryToCurrentBar.Days >= ExitFirstExitDays)
+				{
+					int sizeToClose = (int)Math.Truncate((double)m_entrySize / 2);
 					if (PositionSide > 0)
-						m_firstLx.Send();
+					{
+						if (Debug) Output.WriteLine("{0} - First long exit on {1}, selling {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, sizeToClose, m_stock.Time[0], Bars.Close[0]);
+						m_firstLx.Send(sizeToClose);
+					}
 					else
-						m_firstSx.Send();
+					{
+						if (Debug) Output.WriteLine("{0} - First short exit on {1}, buying {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, sizeToClose, m_stock.Time[0], Bars.Close[0]);
+						m_firstSx.Send(sizeToClose);
+					}
+				}
 			}
 
 			//SECOND EXIT - determine whether we're getting within the n-minute window of the session exit to start
@@ -483,20 +497,35 @@ namespace PowerLanguage.Strategy {
 					switch (m_scannerMatch)
 					{
 						case ScannerMatch.BearishOverExtension:
-							if (Bars.Close[0] > m_exitMovingAverage[0]) m_secondLx.Send();
+							if (Bars.Close[0] > m_exitMovingAverage[0]) {
+								if (Debug) Output.WriteLine("{0} - Second long exit on {1}, selling {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, currentPositionSize, m_stock.Time[0], Bars.Close[0]);
+								m_secondLx.Send();
+							}
 							break;
 						default:
-							if (Bars.Close[0] < m_exitMovingAverage[0]) m_secondLx.Send();
+							if (Bars.Close[0] < m_exitMovingAverage[0])
+							{
+								if (Debug) Output.WriteLine("{0} - Second long exit on {1}, selling {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, currentPositionSize, m_stock.Time[0], Bars.Close[0]);
+								m_secondLx.Send();
+							}
 							break;
 					}
 				else 
 					switch (m_scannerMatch)
 					{
 						case ScannerMatch.BullishOverExtension:
-							if (Bars.Close[0] < m_exitMovingAverage[0]) m_secondSx.Send();
+							if (Bars.Close[0] < m_exitMovingAverage[0])
+							{
+								if (Debug) Output.WriteLine("{0} - Second short exit on {1}, buying {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, currentPositionSize, m_stock.Time[0], Bars.Close[0]);
+								m_secondSx.Send();
+							}
 							break;
 						default:
-							if (Bars.Close[0] > m_exitMovingAverage[0]) m_secondSx.Send();
+							if (Bars.Close[0] > m_exitMovingAverage[0])
+							{
+								if (Debug) Output.WriteLine("{0} - Second short exit on {1}, buying {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, currentPositionSize, m_stock.Time[0], Bars.Close[0]);
+								m_secondSx.Send();
+							}
 							break;
 					}
 		}
