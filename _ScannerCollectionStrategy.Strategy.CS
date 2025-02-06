@@ -33,7 +33,7 @@ namespace PowerLanguage.Strategy {
 	public class _ScannerCollectionStrategy : _CustomSignal {
 		//constants
 		public const double DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT = 0.01;
-		public const double DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE = 0.1;
+		public const double DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE = 0.9;
 		public const double DEFAULT_ENTRY_MAX_RISK_BASED_EQUITY_PERCENT = 0.25;
 		public const double DEFAULT_ENTRY_BUFFER_STOP_LOSS_PRICE = 0.0;
 		public const double DEFAULT_EXIT_FIRST_EXIT_PERCENT = 0.5;
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy {
 		private PowerLanguage.Function._SuperSmoother m_exitMovingAverage;
 		private DateTime m_entryDateTime;
 		private int m_entrySize;
-		private double m_stopLossPrice;
+		private double m_riskAmountPerContract;
 		private VariableSeries<bool> m_lastBarInSession;
 		private ScannerMatch m_scannerMatch;
 		private TimeSpan m_exitSecondTimeSpan;
@@ -168,13 +168,13 @@ namespace PowerLanguage.Strategy {
 			m_se = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "scsSE", EOrderAction.SellShort));
 			m_firstLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs1LX", EOrderAction.Sell));
 			m_firstSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs1SX", EOrderAction.BuyToCover));
-			m_secondLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs2LX", EOrderAction.Sell));
-			m_secondSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "scs2SX", EOrderAction.BuyToCover));
+			m_secondLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "scs2LX", EOrderAction.Sell));
+			m_secondSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "scs2SX", EOrderAction.BuyToCover));
 
 			ADRLength = PowerLanguage.Function._ADR.LENGTH;
 			MinimumADR = 0.02;
 
-			BearishOverExtensionEnable = false;
+			BearishOverExtensionEnable = true;
 			BearishOverExtensionMinimumDropPercent = PowerLanguage.Function._BearishOverextension.DEFAULT_MINIMUM_DROP_PERCENT;
 			BearishOverExtensionDropDays = PowerLanguage.Function._BearishOverextension.DEFAULT_DROP_DAYS;
 			BearishOverExtensionATRLength = PowerLanguage.Function._BearishOverextension.DEFAULT_ATR_LENGTH;
@@ -183,7 +183,7 @@ namespace PowerLanguage.Strategy {
 			BearishOverExtensionSlowSmoothingLength = PowerLanguage.Function._BearishOverextension.DEFAULT_SLOW_SMOOTHER_LENGTH;
 			BearishOverExtensionGradualDeclineLength = PowerLanguage.Function._BearishOverextension.DEFAULT_GRADUAL_DECLINE_LENGTH;
 
-			BullishOverExtensionEnable = false;
+			BullishOverExtensionEnable = true;
 			BullishOverExtensionMinimumRisePercent = PowerLanguage.Function._BullishOverextension.DEFAULT_MINIMUM_RISE_PERCENT;
 			BullishOverExtensionRiseDays = PowerLanguage.Function._BullishOverextension.DEFAULT_RISE_DAYS;
 			BullishOverExtensionATRLength = PowerLanguage.Function._BullishOverextension.DEFAULT_ATR_LENGTH;
@@ -192,7 +192,7 @@ namespace PowerLanguage.Strategy {
 			BullishOverExtensionSlowSmoothingLength = PowerLanguage.Function._BullishOverextension.DEFAULT_SLOW_SMOOTHER_LENGTH;
 			BullishOverExtensionGradualInclineLength = PowerLanguage.Function._BullishOverextension.DEFAULT_GRADUAL_INCLINE_LENGTH;
 
-			CapitulationReversalEnable = false;
+			CapitulationReversalEnable = true;
 			CapitulationReversalMinimumGrowthPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_MINIMUM_GROWTH_PERCENT;
 			CapitulationReversalGrowthDays = PowerLanguage.Function._CapitulationReversal.DEFAULT_GROWTH_DAYS;
 			CapitulationReversalScanLength = PowerLanguage.Function._CapitulationReversal.DEFAULT_SCAN_LENGTH;
@@ -200,28 +200,28 @@ namespace PowerLanguage.Strategy {
 			CapitulationReversalMarketDownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_MARKET_DOWN_PERCENT;
 			CapitulationReversalGapDownPercent = PowerLanguage.Function._CapitulationReversal.DEFAULT_GAP_DOWN_PERCENT;
 
-			CrableNRXEnable = false;
+			CrableNRXEnable = true;
 			CrableNRXLength = PowerLanguage.Function._CrableNRX.DEFAULT_LENGTH;
 			CrableNRXScanLength = PowerLanguage.Function._CrableNRX.DEFAULT_SCAN_LENGTH;
 			CrableNRXMinimumATR = PowerLanguage.Function._CrableNRX.DEFAULT_MINIMUM_ATR;
 
-			DarvasBoxEnable = false;
+			DarvasBoxEnable = true;
 			DarvasBoxLength = PowerLanguage.Function._DarvasBox.DEFAULT_LENGTH;
 			DarvasBoxEpsilon = PowerLanguage.Function._DarvasBox.DEFAULT_EPSILON;
 
-			EpisodicPivotEnable = false;
+			EpisodicPivotEnable = true;
 			EpisodicPivotGrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
 			EpisodicPivotGrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
 			EpisodicPivotMinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			EpisodicPivotMaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 
-			HighVolumeSpikeEnable = false;
+			HighVolumeSpikeEnable = true;
 			HighVolumeSpikeLength = PowerLanguage.Function._HighVolumeSpike.DEFAULT_LENGTH;
 			HighVolumeSpikeGrowthPercentage = PowerLanguage.Function._HighVolumeSpike.DEFAULT_GROWTH_PERCENTAGE;
 			HighVolumeSpikeVolumeLength = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_LENGTH;
 			HighVolumeSpikeVolumeSigmaMultiplier = PowerLanguage.Function._HighVolumeSpike.DEFAULT_VOLUME_SIGMA_MULTIPLIER;
 
-			VCPEnable = false;
+			VCPEnable = true;
 			VCPMinimumGrowthPercent = PowerLanguage.Strategy._VCP.DEFAULT_MINIMUM_GROWTH_PERCENT;
 			VCPGrowthDays = PowerLanguage.Strategy._VCP.DEFAULT_GROWTH_DAYS;
 			VCPFastLength = PowerLanguage.Function._VCP.DEFAULT_FAST_LENGTH;
@@ -266,8 +266,8 @@ namespace PowerLanguage.Strategy {
 			if (ExitMovingAverageLength <= 0) throw new ArgumentException("ExitMovingAverageLength must be larger than 0");
 			if (ExitSecondMinutesBeforeSessionEnd < 0) throw new ArgumentException("ExitSecondMinutesBeforeSessionEnd must be larger or equal than 0");
 
-			m_stock = BarsOfData(1);
-			m_market = BarsOfData(2);
+			m_stock = BarsOfData(2);
+			m_market = BarsOfData(3);
 
 			m_bearishOverextension.Instrument = m_stock;
 			m_bearishOverextension.MinimumDropPercent = BearishOverExtensionMinimumDropPercent;
@@ -329,7 +329,7 @@ namespace PowerLanguage.Strategy {
 			m_exitMovingAverage.Length = ExitMovingAverageLength;
 
 			m_growthPercent = 1.0d + VCPMinimumGrowthPercent;  //only checking positive growth
-			m_stopLossPrice = 0;
+			m_riskAmountPerContract = 0;
 			m_entrySize = 0;
 			m_entryDateTime = DateTime.MinValue;
 			m_lastBarInSession.Value = false;
@@ -341,8 +341,9 @@ namespace PowerLanguage.Strategy {
 			switch (Environment.CalcReason)
 			{
 				case CalculationReason.Default:
-					if (Bars.Status == EBarState.Close && Bars.LastBarInSession) 
-						m_lastBarInSession.Value = true;
+					
+					if (Bars.Status == EBarState.Close) 
+						m_lastBarInSession.Value = Bars.LastBarInSession;
 
 					if (PositionSide == 0)
 						calcEntry();
@@ -360,7 +361,7 @@ namespace PowerLanguage.Strategy {
 		{
 			//reset the entry state since we are no longer in a position
 			m_entryDateTime = DateTime.MinValue;
-			m_stopLossPrice = 0.0;
+			m_riskAmountPerContract = 0.0;
 
 			if (m_adr[0] < MinimumADR) return;  //minimum average daily range move is too small
 			m_scannerMatch = ScannerMatch.None;
@@ -396,20 +397,21 @@ namespace PowerLanguage.Strategy {
 				case ScannerMatch.DarvasBox:
 				case ScannerMatch.EpisodicPivot:
 				case ScannerMatch.VCP:
-					//this bar is an opening bar is the previous bar was the last bar in the session
+					//this bar is an opening bar if the previous bar was the last bar in the session
 					//and we're only interested to send the order on the bar close
 					if (m_lastBarInSession[1] && Bars.Status == EBarState.Close)
 					{
 						double low = Bars.Low[0];
 						double close = Bars.Close[0];
 						double range = Bars.High[0] - low;
-						double closePercentile = range != 0 ? (close - low) / range : 0;    //this will skip trades for bars with no range
+						double risk = close - low; 
+						double closePercentile = range != 0 ? risk / range : 0;    //this will skip trades for bars with no range
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Long entry on {1} at close {2}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, Bars.Time[0], close);
-							m_stopLossPrice = low + EntryBufferStopLossPrice;
-							m_entrySize = entrySize(close, m_stopLossPrice);
+							m_riskAmountPerContract = risk + EntryBufferStopLossPrice;
+							m_entrySize = entrySize(close, m_riskAmountPerContract);
+							if (Debug) Output.WriteLine("{0} - Long entry on {1}({2}) at close {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
 							m_le.Send(close, m_entrySize);
 						}
 					}
@@ -417,23 +419,23 @@ namespace PowerLanguage.Strategy {
 				//short entries
 				case ScannerMatch.BullishOverExtension:
 				case ScannerMatch.HighVolumeSpike:
-					//this bar is an opening bar is the previous bar was the last bar in the session
+					//this bar is an opening bar if the previous bar was the last bar in the session
 					//and we're only interested to send the order on the bar close
 					if (m_lastBarInSession[1] && Bars.Status == EBarState.Close)
 					{
-						double low = Bars.Low[0];
 						double close = Bars.Close[0];
 						double high = Bars.High[0];
-						double range = high - low;
+						double range = high - Bars.Low[0];
+						double risk = high - close;
 						//this will skip trades for bars with no range, for short trades 1 - closePercentile is used to invert the percentiles so that
 						//close prices closer to the bottom of the bar would be considered higher percentiles
-						double closePercentile = range != 0 ? 1 - (close - low) / range : 0;
+						double closePercentile = range != 0 ? risk / range : 0;
 
 						if (closePercentile >= EntryBarClosePercentile)
 						{
-							if (Debug) Output.WriteLine("{0} - Short entry on {1} at close {2}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, Bars.Time[0], close);
-							m_stopLossPrice = high - EntryBufferStopLossPrice;
-							m_entrySize = entrySize(close, m_stopLossPrice);
+							m_riskAmountPerContract = risk + EntryBufferStopLossPrice;
+							m_entrySize = entrySize(close, m_riskAmountPerContract);
+							if (Debug) Output.WriteLine("{0} - Short entry on {1}({2}) at close {3}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
 							m_se.Send(close, m_entrySize);
 						}
 					}
@@ -450,11 +452,11 @@ namespace PowerLanguage.Strategy {
 
 			//STOP-LOSS - keep stop-loss in place based on entry bar
 			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
-			GenerateStopLoss(m_stopLossPrice);
 
 			//FIRST EXIT - if we're still holdng the full entry position exit half position into the n-day exit
 			int currentPositionSize = (int)Math.Abs(StrategyInfo.MarketPosition);
-			if (m_entrySize == currentPositionSize)
+			bool scanForSecondExit = m_entrySize != currentPositionSize;    //second exit scan will only be done once the first exit was performed
+			if (!scanForSecondExit)
 			{
 				TimeSpan entryToCurrentBar = m_stock.Time[0] - m_entryDateTime;
 				if (entryToCurrentBar.Days >= ExitFirstExitDays)
@@ -472,32 +474,35 @@ namespace PowerLanguage.Strategy {
 					}
 				}
 			}
+			else if (StrategyInfo.AvgEntryPrice != m_riskAmountPerContract)
+				m_riskAmountPerContract = StrategyInfo.AvgEntryPrice;   //move stop-loss to break even
+
+			GenerateStopLoss(m_riskAmountPerContract);
 
 			//SECOND EXIT - determine whether we're getting within the n-minute window of the session exit to start
-			//scanning for the second exit
-			TimeSpan currentBarTime = Bars.Time[0].TimeOfDay;
-			bool scanForSecondExit = false;
-
-			foreach (var session in Bars.Sessions)
-			{
-				if (session.EndDay == Bars.Time[0].DayOfWeek &&
-						session.EndTime - currentBarTime <= m_exitSecondTimeSpan)
-				{
-					scanForSecondExit = true;
-					break;
-				}
-			}
-
 			//exit when the bar closes above/below the moving average based off associated entry and
 			//we're getting close (n-minutes) from the session close
-			//NOTE: The second exit can actually exit the full position if the price starts to fall on the
-			//      opposite side of the moving average
 			if (scanForSecondExit)
+			{
+				scanForSecondExit = false;	//only scan for exit once we get into the n-minute window from the close
+				TimeSpan currentBarTime = Bars.Time[0].TimeOfDay;
+
+				foreach (var session in Bars.Sessions)
+				{
+					if (session.EndDay == Bars.Time[0].DayOfWeek &&
+							session.EndTime - currentBarTime <= m_exitSecondTimeSpan)
+					{
+						scanForSecondExit = true;
+						break;
+					}
+				}
+
 				if (PositionSide > 0)
 					switch (m_scannerMatch)
 					{
 						case ScannerMatch.BearishOverExtension:
-							if (Bars.Close[0] > m_exitMovingAverage[0]) {
+							if (Bars.Close[0] > m_exitMovingAverage[0])
+							{
 								if (Debug) Output.WriteLine("{0} - Second long exit on {1}, selling {2} at {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, currentPositionSize, m_stock.Time[0], Bars.Close[0]);
 								m_secondLx.Send();
 							}
@@ -510,7 +515,7 @@ namespace PowerLanguage.Strategy {
 							}
 							break;
 					}
-				else 
+				else
 					switch (m_scannerMatch)
 					{
 						case ScannerMatch.BullishOverExtension:
@@ -528,12 +533,13 @@ namespace PowerLanguage.Strategy {
 							}
 							break;
 					}
+			}
 		}
 
 		/// <summary>
 		/// Computes the entry size based on the risk created by the entryPRice and stopLossPrice.
 		/// </summary>
-		private int entrySize(double entryPrice, double stopLossPrice) {
+		private int entrySize(double entryPrice, double riskPerContract) {
 			if (entryPrice == 0)
 			{
 				if (Debug) Output.WriteLine("Error: entryPrice is zero so no size to compute.");
@@ -542,8 +548,7 @@ namespace PowerLanguage.Strategy {
 
 			double equity = equityAvailable();
 			double positionEquity = equity * EntryAccountEquityAtRiskPercent;
-			double risk = entryPrice > stopLossPrice ? entryPrice - stopLossPrice /* long risk */ : stopLossPrice - entryPrice /* short risk */;
-			int size = risk != 0 ? (int)Math.Truncate(positionEquity / risk) : 0;
+			int size = riskPerContract != 0 ? (int)Math.Truncate(positionEquity / riskPerContract) : 0;
 
 			//clip position size based on entry equity per position or the account equity
 			if (EntryMaxRiskBasedEquityPercent < 1.0)
