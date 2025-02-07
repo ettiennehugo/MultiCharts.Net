@@ -3514,7 +3514,7 @@ namespace PowerLanguage.Strategy
 
     //Attributes:
     protected List<VolumeSettings> _volumeSettings;     //Volume settings for the different layers.
-    protected List<VolumeWithSD> _volumeWithSD;         //List of volume indicators for the defined timeframes.
+    protected List<_VolumeWithSD> _volumeWithSD;         //List of volume indicators for the defined timeframes.
 
     public VolumeFunctions(Interpreter interpreter) : base(tkn_factory_name, interpreter)
     {
@@ -3554,11 +3554,11 @@ namespace PowerLanguage.Strategy
       }
 
       //create the set of required volume indicators for the number of time frames required by the calling script
-      _volumeWithSD = new List<VolumeWithSD>(Interpreter.MAX_DATA_STREAM);
+      _volumeWithSD = new List<_VolumeWithSD>(Interpreter.MAX_DATA_STREAM);
 
       for (int i = 0; i < Interpreter.MAX_DATA_STREAM; i++)
       {
-        VolumeWithSD volumeWithSD = new VolumeWithSD(_interpreter.Strategy);
+        _VolumeWithSD volumeWithSD = new _VolumeWithSD(_interpreter.Strategy);
         _volumeWithSD.Add(volumeWithSD);
       }
     }
@@ -3584,7 +3584,7 @@ namespace PowerLanguage.Strategy
         _volumeWithSD[i].Level1 = _volumeSettings[i].level1;
         _volumeWithSD[i].Level2 = _volumeSettings[i].level2;
         _volumeWithSD[i].Level3 = _volumeSettings[i].level3;
-        _volumeWithSD[i].Volume = dataFeed.TrueVolume();
+        _volumeWithSD[i].Instrument = dataFeed;
       }
     }
 
@@ -3657,7 +3657,7 @@ namespace PowerLanguage.Strategy
           _volumeSettings[timeframe].level3 = wrapper.GetDoubleParameter(1, String.Format("Function {0} requires a double parameter with the timeframe to designate the level factor for the standard deviation for level 3.", tkn_volume_level3));
           break;
         case tkn_volume:
-          result = new ValueType(_volumeWithSD[timeframe].Volume.Value);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume.Value);
           break;
         case tkn_volume_avg:
           result = new ValueType(_volumeWithSD[timeframe].Value);
@@ -3665,30 +3665,30 @@ namespace PowerLanguage.Strategy
         case tkn_volume_below_avg:
           //NOTE: Below average volume includes low and ultra-low volume.
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] < _volumeWithSD[timeframe][bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] < _volumeWithSD[timeframe][bars_ago]);
           break;
         case tkn_volume_low:
           //NOTE: Low volume also includes ultra-low volume.
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] < _volumeWithSD[timeframe].AvgMinusLevel1[bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] < _volumeWithSD[timeframe].AvgMinusLevel1[bars_ago]);
           break;
         case tkn_volume_ultra_low:
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] < _volumeWithSD[timeframe].AvgMinusLevel2[bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] < _volumeWithSD[timeframe].AvgMinusLevel2[bars_ago]);
           break;
         case tkn_volume_above_avg:
           //NOTE: Above average volume includes high and ultra-high volume.
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] > _volumeWithSD[timeframe][bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] > _volumeWithSD[timeframe][bars_ago]);
           break;
         case tkn_volume_high:
           //NOTE: High volume also includes ultra-high volume.
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] > _volumeWithSD[timeframe].AvgPlusLevel1[bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] > _volumeWithSD[timeframe].AvgPlusLevel1[bars_ago]);
           break;
         case tkn_volume_ultra_high:
           bars_ago = wrapper.GetIntegerParameter(1, 0);
-          result = new ValueType(_volumeWithSD[timeframe].Volume[bars_ago] > _volumeWithSD[timeframe].AvgPlusLevel2[bars_ago]);
+          result = new ValueType(_volumeWithSD[timeframe].Instrument.Volume[bars_ago] > _volumeWithSD[timeframe].AvgPlusLevel2[bars_ago]);
           break;
         case tkn_volume_rising:
           lookback = wrapper.GetIntegerParameter(1, 3);
@@ -3701,7 +3701,7 @@ namespace PowerLanguage.Strategy
             raising = true;       //per default assume that volume is raising and do a counter proof of invariant
 
             for (int i = 0; i < lookback; i++)
-              if (_volumeWithSD[timeframe].Volume[i] < _volumeWithSD[timeframe].Volume[i + 1])
+              if (_volumeWithSD[timeframe].Instrument.Volume[i] < _volumeWithSD[timeframe].Instrument.Volume[i + 1])
               {
                 //volume is not strictly raising accross the lookback period, return false 
                 raising = false;
@@ -3722,7 +3722,7 @@ namespace PowerLanguage.Strategy
             dropping = true;       //per default assume that volume is dropping and do a counter proof of invariant
 
             for (int i = 0; i < lookback; i++)
-              if (_volumeWithSD[timeframe].Volume[i] > _volumeWithSD[timeframe].Volume[i + 1])
+              if (_volumeWithSD[timeframe].Instrument.Volume[i] > _volumeWithSD[timeframe].Instrument.Volume[i + 1])
               {
                 //volime is not strictly dropping accross the lookback period, return false
                 dropping = false;

@@ -29,7 +29,7 @@ namespace PowerLanguage
 
 
 			//attributes
-			private Function.VolumeWithSD m_volume;   //volume function
+			private Function._VolumeWithSD m_volume;   //volume function
 
 			//interface methods
 			public _HighVolumeSpike(CStudyControl _master) : base(_master) { }
@@ -37,7 +37,7 @@ namespace PowerLanguage
 
 			protected override void Create()
 			{
-				m_volume = new Function.VolumeWithSD(this);
+				m_volume = new Function._VolumeWithSD(this);
 			}
 
 			protected override void StartCalc()
@@ -46,7 +46,7 @@ namespace PowerLanguage
 				//GrowthPercentage can be negative to test for decrease
 				if (VolumeLength <= 0) throw new Exception("VolumeLength must be larger than 0");
 				if (VolumeSigmaMultiplier <= 0) throw new Exception("VolumeMultiplier must be larger than 0");
-				m_volume.Volume = Instrument.Volume;
+				m_volume.Instrument = Instrument;
 				m_volume.Length = VolumeLength;
 			}
 

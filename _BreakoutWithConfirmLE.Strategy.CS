@@ -25,7 +25,7 @@ namespace PowerLanguage.Strategy {
 		//private EfficiencyRatio m_efficiencyRatio;
 		private _RelativeEfficiency m_relativeEfficiency;
 		private PowerLanguage.Function._SuperSmoother m_instrumentSmoother;
-		private VolumeWithSD m_instrumentVolume;
+		private _VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketBars;
 		private PowerLanguage.Function._SuperSmoother m_marketSmoother;
 		private IOrderMarket m_le;
@@ -48,7 +48,7 @@ namespace PowerLanguage.Strategy {
 			//create functions used
 			//m_efficiencyRatio = new EfficiencyRatio(this);
 			m_instrumentSmoother = new PowerLanguage.Function._SuperSmoother(this);
-			m_instrumentVolume = new VolumeWithSD(this);
+			m_instrumentVolume = new _VolumeWithSD(this);
 			m_marketSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_relativeEfficiency = new _RelativeEfficiency(this);
 
@@ -67,8 +67,8 @@ namespace PowerLanguage.Strategy {
 			m_relativeEfficiency.Instrument2 = this.BarsOfData(2);
 			m_instrumentSmoother.Length = SuperSmootherPeriod;
 			m_instrumentSmoother.Price = Bars.Close;
-			m_instrumentVolume.Length = VolumePeriod > 0 ? VolumePeriod : VolumeWithSD.DEFAULT_LENGTH;
-			m_instrumentVolume.Volume = Bars.TrueVolume();
+			m_instrumentVolume.Length = VolumePeriod > 0 ? VolumePeriod : _VolumeWithSD.DEFAULT_LENGTH;
+			m_instrumentVolume.Instrument = Bars;
 			m_marketSmoother.Length = MarketPeriod;
 			m_marketBars = this.BarsOfData(2);
 			m_marketSmoother.Price = m_marketBars.Close;

@@ -32,6 +32,11 @@ namespace PowerLanguage.Strategy {
 /// </summary>
 	public class _ScannerCollectionStrategy : _CustomSignal {
 		//constants
+		public const int DEFAULT_DARVAS_GROWTH_DAYS = 120;
+		public const double DEFAULT_DARVAS_GROWTH_PERCENT = 0.3;
+		public const double DEFAULT_ENTRY_MINIMUM_PRICE = 1.0;
+		public const int DEFAULT_ENTRY_MINIMUM_AVERAGE_VOLUME = 4000000;
+		public const double DEFAULT_ENTRY_MINIMUM_AVERAGE_DOLLAR_VOLUME = 15000000;
 		public const double DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT = 0.01;
 		public const double DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE = 0.9;
 		public const double DEFAULT_ENTRY_MAX_RISK_BASED_EQUITY_PERCENT = 0.25;
@@ -95,6 +100,8 @@ namespace PowerLanguage.Strategy {
 		[Input] public bool DarvasBoxEnable { get; set; }      //enable Darvas Box
 		[Input] public int DarvasBoxLength { get; set; }       //required length of the Darvas box
 		[Input] public double DarvasBoxEpsilon { get; set; }   //epsilon factor to use for the ATR for price comparisons being "equal" 
+		[Input] public double DarvasBoxMinimumGrowthPercent { get; set; } //minimum required growth in the past x-days
+		[Input] public int DarvasBoxGrowthDays { get; set; }          //number of days to look back for the growth
 
 		[Input] public bool EpisodicPivotEnable { get; set; }      //enable Episodic Pivot
 		[Input] public int EpisodicPivotGrowthDays { get; set; }
@@ -118,10 +125,10 @@ namespace PowerLanguage.Strategy {
 		[Input] public int VCPMinimumRequiredLegs { get; set; } //minimum number of required legs to form the VCP
 		[Input] public double VCPMinimumPercentageContracingLegs { get; set; } //minimum percentage of acceptable legs contracting to form the VCP, e.g. 0.8 means 80% of the discovered legs need to contract to meet our VCP criteria 
 
-		
-		//TODO - add minimum price values for long and short entries
-		
-		
+		[Input] public double EntryMinimumPrice { get; set; }			//minimum price for the stocks to trade
+		[Input] public int EntryAverageVolumeLength { get; set; }	//length used to compute the average volume and average dollar volume
+		[Input] public int EntryMinimumAverageVolume { get; set; }	//minimum average daily volume of the stock
+		[Input] public double EntryMinimumAverageDollarVolume { get; set; }	//minimum average dollar volume of the stock
 		[Input] public double EntryAccountEquityAtRiskPercent { get; set; }	//account equity percent to use for entry
 		[Input] public double EntryBarClosePercentile { get; set; } //close price in terms of the range of the bar that would be considered a "strong" close
 		[Input] public double EntryBufferStopLossPrice { get; set; }	//buffer price to add to the determined stop-loss price
@@ -143,6 +150,7 @@ namespace PowerLanguage.Strategy {
 		private IOrderMarket m_secondLx;
 		private IOrderMarket m_secondSx;
 		private PowerLanguage.Function._ADR m_adr;
+		private PowerLanguage.Function._VolumeWithSD m_volumeWithSD;
 		private PowerLanguage.Function._BearishOverextension m_bearishOverextension;
 		private PowerLanguage.Function._BullishOverextension m_bullishOverextension;
 		private PowerLanguage.Function._CapitulationReversal m_capitulationReversal;
@@ -150,7 +158,6 @@ namespace PowerLanguage.Strategy {
 		private PowerLanguage.Function._DarvasBox m_darvasBox;
 		private PowerLanguage.Function._EpisodicPivot m_episodicPivot;
 		private PowerLanguage.Function._HighVolumeSpike m_highVolumeSpike;
-		private double m_growthPercent;
 		private PowerLanguage.Function._VCP m_vcp;
 		private PowerLanguage.Function._SuperSmoother m_exitMovingAverage;
 		private DateTime m_entryDateTime;
@@ -208,6 +215,8 @@ namespace PowerLanguage.Strategy {
 			DarvasBoxEnable = true;
 			DarvasBoxLength = PowerLanguage.Function._DarvasBox.DEFAULT_LENGTH;
 			DarvasBoxEpsilon = PowerLanguage.Function._DarvasBox.DEFAULT_EPSILON;
+			DarvasBoxGrowthDays = DEFAULT_DARVAS_GROWTH_DAYS;
+			DarvasBoxMinimumGrowthPercent = DEFAULT_DARVAS_GROWTH_PERCENT;
 
 			EpisodicPivotEnable = true;
 			EpisodicPivotGrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
@@ -231,6 +240,10 @@ namespace PowerLanguage.Strategy {
 			VCPMinimumRequiredLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_REQUIRED_LEGS;
 			VCPMinimumPercentageContracingLegs = PowerLanguage.Function._VCP.DEFAULT_MINIMUM_PERCENTAGE_CONTRACTING_LEGS;
 
+			EntryMinimumPrice = DEFAULT_ENTRY_MINIMUM_PRICE;
+			EntryAverageVolumeLength = PowerLanguage.Function._VolumeWithSD.DEFAULT_LENGTH;
+			EntryMinimumAverageVolume = DEFAULT_ENTRY_MINIMUM_AVERAGE_VOLUME;
+			EntryMinimumAverageDollarVolume = DEFAULT_ENTRY_MINIMUM_AVERAGE_DOLLAR_VOLUME;
 			EntryAccountEquityAtRiskPercent = DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT;
 			EntryBarClosePercentile = DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE;
 			EntryMaxRiskBasedEquityPercent = DEFAULT_ENTRY_MAX_RISK_BASED_EQUITY_PERCENT;
@@ -243,6 +256,7 @@ namespace PowerLanguage.Strategy {
 			Debug = false;
 
 			m_adr = new PowerLanguage.Function._ADR(this);
+			m_volumeWithSD = new PowerLanguage.Function._VolumeWithSD(this);
 			m_bearishOverextension = new PowerLanguage.Function._BearishOverextension(this);
 			m_bullishOverextension = new PowerLanguage.Function._BullishOverextension(this);
 			m_capitulationReversal = new PowerLanguage.Function._CapitulationReversal(this);
@@ -256,8 +270,18 @@ namespace PowerLanguage.Strategy {
 		}
 
 		protected override void StartCalc() {
+			m_stock = BarsOfData(2);
+			m_market = BarsOfData(3);
+
 			m_adr.Length = ADRLength;
+			m_volumeWithSD.Length = EntryAverageVolumeLength;
+			m_volumeWithSD.Instrument = m_stock;
+
 			if (MinimumADR < 0.0 || MinimumADR > 1.0) throw new ArgumentException("MinimumADR is a percentage and should be between 0 and 1 (zero to switch off the filter)");
+			if (DarvasBoxGrowthDays < 0) throw new ArgumentException("DarvasBoxGrowthDays needs to be larger or equal to zero (0 = disable)");
+			if (EntryMinimumPrice < 0.0) throw new ArgumentException("EntryMinimumPrice needs to be larger or equal to zero (0 = disable)");
+			if (EntryMinimumAverageVolume < 0.0) throw new ArgumentException("EntryMinimumAverageVolume needs to be larger or equal to zero (0 = disable)");
+			if (EntryMinimumAverageDollarVolume < 0.0) throw new ArgumentException("EntryMinimumAverageDollarVolume needs to be larger or equal to zero (0 = disable)");
 			if (EntryAccountEquityAtRiskPercent <= 0.0 || EntryAccountEquityAtRiskPercent > 1.0) throw new ArgumentException("EntryAccountEquityPercent must be between 0 and 1 [exclusive]");
 			if (EntryBarClosePercentile <= 0.0 || EntryBarClosePercentile > 1.0) throw new ArgumentException("EntryBarClosePercentile must be between 0 [exclusive] and 1 [inclusive]");
 			if (EntryBufferStopLossPrice < 0) throw new ArgumentException("EntryBufferStopLossPrice must be larger or equal to 0");
@@ -265,9 +289,6 @@ namespace PowerLanguage.Strategy {
 			if (ExitFirstExitDays < 0) throw new ArgumentException("ExitFirstExitDays must be equal or greater than 0");
 			if (ExitMovingAverageLength <= 0) throw new ArgumentException("ExitMovingAverageLength must be larger than 0");
 			if (ExitSecondMinutesBeforeSessionEnd < 0) throw new ArgumentException("ExitSecondMinutesBeforeSessionEnd must be larger or equal than 0");
-
-			m_stock = BarsOfData(2);
-			m_market = BarsOfData(3);
 
 			m_bearishOverextension.Instrument = m_stock;
 			m_bearishOverextension.MinimumDropPercent = BearishOverExtensionMinimumDropPercent;
@@ -328,7 +349,6 @@ namespace PowerLanguage.Strategy {
 			m_exitMovingAverage.Price = m_stock.Close;
 			m_exitMovingAverage.Length = ExitMovingAverageLength;
 
-			m_growthPercent = 1.0d + VCPMinimumGrowthPercent;  //only checking positive growth
 			m_riskAmountPerContract = 0;
 			m_entrySize = 0;
 			m_entryDateTime = DateTime.MinValue;
@@ -341,7 +361,6 @@ namespace PowerLanguage.Strategy {
 			switch (Environment.CalcReason)
 			{
 				case CalculationReason.Default:
-					
 					if (Bars.Status == EBarState.Close) 
 						m_lastBarInSession.Value = Bars.LastBarInSession;
 
@@ -360,11 +379,15 @@ namespace PowerLanguage.Strategy {
 		private void calcEntry()
 		{
 			//reset the entry state since we are no longer in a position
+			m_scannerMatch = ScannerMatch.None;
 			m_entryDateTime = DateTime.MinValue;
 			m_riskAmountPerContract = 0.0;
 
+			if (Bars.Close[0] < EntryMinimumPrice) return;  //minimum price is too small
+			if (m_volumeWithSD.Average[0] < EntryMinimumAverageVolume) return;	//minimum volume not met
+			if (m_volumeWithSD.AverageDollarVolume[0] < EntryMinimumAverageDollarVolume) return;	//minimum dollar volume not met
 			if (m_adr[0] < MinimumADR) return;  //minimum average daily range move is too small
-			m_scannerMatch = ScannerMatch.None;
+
 			if (BearishOverExtensionEnable && m_bearishOverextension[0])
 				m_scannerMatch = ScannerMatch.BearishOverExtension;
 			else if (BullishOverExtensionEnable && m_bullishOverextension[0])
@@ -373,17 +396,23 @@ namespace PowerLanguage.Strategy {
 				m_scannerMatch = ScannerMatch.CapitulationReversal;
 			else if (CrableNRXEnable && m_crableNRX[0])
 				m_scannerMatch = ScannerMatch.CrableNRX;
-			else if (DarvasBoxEnable && m_darvasBox[0])
-				m_scannerMatch = ScannerMatch.DarvasBox;
+			else if (DarvasBoxEnable && m_darvasBox[0] && m_stock.CurrentBar > DarvasBoxGrowthDays)
+			{
+				double lowest = m_stock.Close.Lowest(DarvasBoxGrowthDays);
+				if (lowest != 0 && m_stock.High[1] != 0 &&
+						((m_stock.Close[0] / lowest) - 1) > DarvasBoxMinimumGrowthPercent) 
+					m_scannerMatch = ScannerMatch.DarvasBox;
+			}
 			else if (EpisodicPivotEnable && m_episodicPivot[0])
 				m_scannerMatch = ScannerMatch.EpisodicPivot;
 			else if (HighVolumeSpikeEnable && m_highVolumeSpike[0])
 				m_scannerMatch = ScannerMatch.HighVolumeSpike;
-			else if (VCPEnable && m_vcp[0])
+			else if (VCPEnable && m_vcp[0] && m_stock.CurrentBar > VCPGrowthDays)
 			{
-				if (Bars.CurrentBar < VCPGrowthDays) return;
-				double growthPercent = Bars.Close[VCPGrowthDays - 1] != 0.0d ? (Bars.Close[0] - Bars.Close[VCPGrowthDays - 1]) / Bars.Close[VCPGrowthDays - 1] : 0.0d;
-				if (Environment.CalcReason == CalculationReason.Default && m_growthPercent < growthPercent) m_scannerMatch = ScannerMatch.VCP;
+				double lowest = m_stock.Close.Lowest(VCPGrowthDays);
+				if (lowest != 0 && m_stock.High[1] != 0 &&
+						((m_stock.Close[0] / lowest) - 1) > VCPMinimumGrowthPercent)
+					m_scannerMatch = ScannerMatch.VCP;
 			}
 
 			//TBD - should the "long" entries rather be breakout entries??? (at least for the VCP - try to test this as well)

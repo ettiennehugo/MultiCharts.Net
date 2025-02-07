@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
-    <ProductVersion>8.0.30703</ProductVersion>
+    <ProductVersion>9.0.30729</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{BA43FF06-FD46-45B7-BAC8-6E047AD0F86C}</ProjectGuid>
     <OutputType>Library</OutputType>
@@ -10,10 +10,9 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <TargetFrameworkProfile />
+    <Platform Condition=" '$(Platform)' == '' ">x64</Platform>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -21,34 +20,32 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="System.Drawing.dll" />
     <Reference Include="System.Windows.Forms.dll" />
+    <Reference Include="System.Runtime.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\FileHelpers.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\Ichimoku.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\PriceAction.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\RiskManagement.dll" />
     <Reference Include="C:\Users\ettie\.nuget\packages\newtonsoft.json\13.0.3\lib\net45\Newtonsoft.Json.dll" />
-    <Reference Include="System.dll" />
-    <Reference Include="System.Data.dll" />
-    <Reference Include="System.Xml.dll" />
-    <Reference Include="System.Core.dll" />
-    <Reference Include="Microsoft.CSharp.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.CSharp.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLStudiesProxy.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLBuiltInFunctions.dll" />
@@ -60,6 +57,7 @@
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Dynamic.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.Metadata.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\netstandard.dll" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Volume_Brkout.Indicator.CS" />
@@ -199,9 +197,7 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="_TPO_.Indicator.CS" />
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
@@ -351,7 +347,6 @@
     <Compile Include="RoofingFilter.Function.CS" />
     <Compile Include="SineWave.Function.CS" />
     <Compile Include="USHolidays.Function.CS" />
-    <Compile Include="VolumeWithSD.Function.CS" />
     <Compile Include="VWAP.Function.CS" />
     <Compile Include="_AdaptiveSuperSmoother.Function.CS" />
     <Compile Include="_AdaptiveSuperSmoother.Indicator.CS" />
@@ -514,13 +509,12 @@
     <Compile Include="_Voss.Function.CS" />
     <Compile Include="_ScannerCollection.Indicator.CS" />
     <Compile Include="_ScannerCollectionStrategy.Strategy.CS" />
-    <Compile Include="KAMA.Function.CS" />
     <Compile Include="_ScannerConsolidation.Indicator.CS" />
     <Compile Include="_ScannerEpisodicPivot.Function.CS" />
     <Compile Include="_ScannerEpisodicPivot.Indicator.CS" />
     <Compile Include="_ScannerLowThresholdBreakout.Function.CS" />
     <Compile Include="_ScannerLowThresholdBreakout.Indicator.CS" />
-    <Compile Include="SuperSmoother.Function.CS" />
+    <Compile Include="_VolumeWithSD.Function.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

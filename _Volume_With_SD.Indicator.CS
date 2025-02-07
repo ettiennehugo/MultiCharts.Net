@@ -19,7 +19,7 @@ namespace PowerLanguage.Indicator {
     [Input] public double Level2 { get; set; }   //Level 2 factor for +/- standard deviation.
     [Input] public double Level3 { get; set; }   //Level 3 factor for +/- standard deviation.
 
-    private VolumeWithSD volumeWithSD; // <== Need to add a time filter to this function!!! This will enable computing volume per session and overlap.
+    private _VolumeWithSD volumeWithSD; // <== Need to add a time filter to this function!!! This will enable computing volume per session and overlap.
     private IPlotObject volumePlot;
     private IPlotObject avgPlus1SD;
     private IPlotObject avgPlus2SD;
@@ -32,11 +32,11 @@ namespace PowerLanguage.Indicator {
     public _Volume_With_SD(object _ctx) : base(_ctx) { }
 
     protected override void Create() {
-      volumeWithSD = new VolumeWithSD(this);
-      Length = VolumeWithSD.DEFAULT_LENGTH;
-      Level1 = VolumeWithSD.DEFAULT_LEVEL1;
-      Level2 = VolumeWithSD.DEFAULT_LEVEL2;
-      Level3 = VolumeWithSD.DEFAULT_LEVEL3;
+      volumeWithSD = new _VolumeWithSD(this);
+      Length = _VolumeWithSD.DEFAULT_LENGTH;
+      Level1 = _VolumeWithSD.DEFAULT_LEVEL1;
+      Level2 = _VolumeWithSD.DEFAULT_LEVEL2;
+      Level3 = _VolumeWithSD.DEFAULT_LEVEL3;
 
       volumePlot = AddPlot(new PlotAttributes("Vol", EPlotShapes.Histogram, Color.White, Color.Empty, 3, 0, true));
       avgPlus3SD = AddPlot(new PlotAttributes("+3SD", EPlotShapes.Line, Color.FromArgb(128, 196, 128)));
@@ -50,14 +50,14 @@ namespace PowerLanguage.Indicator {
 
     protected override void StartCalc() {
       volumeWithSD.Length = Length;
-      volumeWithSD.Volume = Bars.TrueVolume();
+      volumeWithSD.Instrument = Bars;
       volumeWithSD.Level1 = Level1;
       volumeWithSD.Level2 = Level2;
       volumeWithSD.Level3 = Level3;
     }
 
     protected override void CalcBar() {
-      volumePlot.Set(volumeWithSD.Volume.Value);
+      volumePlot.Set(Bars.Volume.Value);
 
       if (Bars.Open[0] < Bars.Close[0])
         volumePlot.Colors[0] = Color.LawnGreen;

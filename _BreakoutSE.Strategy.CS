@@ -24,7 +24,7 @@ namespace PowerLanguage.Strategy
 		//private RelativeStrength m_relativeStrength;
 		public double m_priority;
 		private PowerLanguage.Function._SuperSmoother m_instrumentSmoother;
-		private VolumeWithSD m_volumeWithSD;
+		private _VolumeWithSD m_volumeWithSD;
 		private IInstrument m_marketBars;
 		private _SuperSmoother m_marketSmoother;
 		private IOrderMarket m_se;
@@ -46,7 +46,7 @@ namespace PowerLanguage.Strategy
 			m_priority = 0.0d;
 			m_efficiencyRatio = new _EfficiencyRatio(this);
 			m_instrumentSmoother = new PowerLanguage.Function._SuperSmoother(this);
-			m_volumeWithSD = new VolumeWithSD(this);
+			m_volumeWithSD = new _VolumeWithSD(this);
 			//m_marketSmoother = new _SuperSmoother(this);
 			//m_relativeStrength = new RelativeStrength(this);
 
@@ -65,8 +65,8 @@ namespace PowerLanguage.Strategy
 			//m_relativeStrength.Instrument2 = this.BarsOfData(2);
 			m_instrumentSmoother.Length = SuperSmootherPeriod;
 			m_instrumentSmoother.Price = Bars.Close;
-			m_volumeWithSD.Length = VolumePeriod > 0 ? VolumePeriod : VolumeWithSD.DEFAULT_LENGTH;
-			m_volumeWithSD.Volume = Bars.TrueVolume();
+			m_volumeWithSD.Length = VolumePeriod > 0 ? VolumePeriod : _VolumeWithSD.DEFAULT_LENGTH;
+			m_volumeWithSD.Instrument = Bars;
 			//m_marketSmoother.Length = MarketPeriod;
 			//m_marketBars = this.BarsOfData(1);
 			//m_marketSmoother.Price = m_marketBars.Close;

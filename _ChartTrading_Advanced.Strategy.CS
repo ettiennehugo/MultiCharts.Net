@@ -68,7 +68,7 @@ namespace PowerLanguage.Strategy
     private ExitOrder _exitOrder;
     private ExitOrder _previousExitOrder;
     private int _previousMarketPosition;
-    private VolumeWithSD _volumeWithSD;
+    private _VolumeWithSD _volumeWithSD;
     private bool _exitPosition;
 
     private IOrderMarket _marketLE;
@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
       _stopLimitSE = OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "SLSE", EOrderAction.SellShort));
       _stopLimitSX = OrderCreator.StopLimit(new SOrderParameters(Contracts.UserSpecified, "SLSX", EOrderAction.BuyToCover, OrderExit.Total));
 
-      _volumeWithSD = new VolumeWithSD(this);
+      _volumeWithSD = new _VolumeWithSD(this);
     }
 
     protected override void Destroy()
@@ -234,7 +234,7 @@ namespace PowerLanguage.Strategy
 
       //set inputs for functions
       _volumeWithSD.Length = VolumeWithSDLength;
-      _volumeWithSD.Volume = Bars.TrueVolume();
+      _volumeWithSD.Instrument = Bars;
 
       //setup our toolbar buttons
       if (!initializedToolbar)

@@ -31,7 +31,7 @@ namespace PowerLanguage.Strategy {
 		private PowerLanguage.Function._EfficiencyRatio m_efficiencyRatio;
 		private PowerLanguage.Function._SuperSmoother m_instrumentFastSmoother;
 		private PowerLanguage.Function._SuperSmoother m_instrumentSlowSmoother;
-		private PowerLanguage.Function.VolumeWithSD m_instrumentVolume;
+		private PowerLanguage.Function._VolumeWithSD m_instrumentVolume;
 		private IInstrument m_marketInstrument;
 		private PowerLanguage.Function._SuperSmoother m_marketSmoother;
 		private IOrderMarket m_le;
@@ -58,7 +58,7 @@ namespace PowerLanguage.Strategy {
 			//create functions used
 			m_instrumentFastSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_instrumentSlowSmoother = new PowerLanguage.Function._SuperSmoother(this);
-			m_instrumentVolume = new VolumeWithSD(this);
+			m_instrumentVolume = new _VolumeWithSD(this);
 			m_marketSmoother = new PowerLanguage.Function._SuperSmoother(this);
 			m_efficiencyRatio = new PowerLanguage.Function._EfficiencyRatio(this);
 
@@ -82,13 +82,13 @@ namespace PowerLanguage.Strategy {
 			m_instrumentSlowSmoother.Length = SlowPeriod;
 			m_instrumentSlowSmoother.Price = Bars.Close;
 			m_instrumentVolume.Length = VolumePeriod;
-			m_instrumentVolume.Volume = Bars.Volume;
+			m_instrumentVolume.Instrument = Bars;
 			m_marketSmoother.Length = MarketPeriod != 0 ? MarketPeriod : _SuperSmoother.DEFAULT_PERIOD;
 			m_marketSmoother.Price = m_marketInstrument.Close;
 			m_efficiencyRatio.Length = FastPeriod;
 			m_efficiencyRatio.Instrument = Bars;
 			m_instrumentVolume.Length = VolumePeriod;
-			m_instrumentVolume.Volume = Bars.TrueVolume();
+			m_instrumentVolume.Instrument = Bars;
 		}
 
 		protected override void CalcBar()

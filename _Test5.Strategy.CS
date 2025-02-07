@@ -43,7 +43,7 @@ namespace PowerLanguage.Strategy
     //attributes
     private PowerLanguage.Function._SuperSmoother m_superSmoother;
     private _EfficiencyRatio m_efficiencyRatio;
-    private VolumeWithSD m_volumeWithSD;
+    private _VolumeWithSD m_volumeWithSD;
     private IOrderMarket m_le;
     private IOrderMarket m_se;
     private IOrderMarket m_lx;
@@ -70,7 +70,7 @@ namespace PowerLanguage.Strategy
       //create indicators used
       m_superSmoother = new PowerLanguage.Function._SuperSmoother(this);
       m_efficiencyRatio = new _EfficiencyRatio(this);
-      m_volumeWithSD = new VolumeWithSD(this);
+      m_volumeWithSD = new _VolumeWithSD(this);
 
       //create the order types used
       m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE", EOrderAction.Buy));
@@ -84,7 +84,7 @@ namespace PowerLanguage.Strategy
       m_superSmoother.Length = SuperSmootherLength;
       m_efficiencyRatio.Length = EfficiencyRatioLength;
       m_volumeWithSD.Length = BreakoutLength;
-      m_volumeWithSD.Volume = Bars.Volume;
+      m_volumeWithSD.Instrument = Bars;
     }
 
     protected override void CalcBar()
