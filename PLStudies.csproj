@@ -197,7 +197,9 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS" />
+    <Compile Include="_TPO_.Indicator.CS">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
@@ -515,6 +517,7 @@
     <Compile Include="_ScannerLowThresholdBreakout.Function.CS" />
     <Compile Include="_ScannerLowThresholdBreakout.Indicator.CS" />
     <Compile Include="_VolumeWithSD.Function.CS" />
+    <Compile Include="_QullamaggieBase.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

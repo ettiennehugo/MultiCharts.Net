@@ -15,7 +15,7 @@ namespace PowerLanguage.Indicator{
 		public _ADR(object _ctx):base(_ctx){}
 
 		protected override void Create() {
-			Length = Function._ADR.LENGTH;
+			Length = Function._ADR.DEFAULT_LENGTH;
 			adr = new Function._ADR(this);
 			plot = AddPlot(new PlotAttributes("ADR", EPlotShapes.Line, Color.Green));
 		}
@@ -23,6 +23,7 @@ namespace PowerLanguage.Indicator{
 		protected override void StartCalc() 
 		{
 			adr.Length = Length;
+			adr.Instrument = Bars;
 		}
 		
 		protected override void CalcBar()

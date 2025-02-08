@@ -108,7 +108,7 @@ namespace PowerLanguage.Indicator{
 		public _ScannerCollection(object _ctx):base(_ctx){}
 
 		protected override void Create() {
-			ADRLength = PowerLanguage.Function._ADR.LENGTH;
+			ADRLength = PowerLanguage.Function._ADR.DEFAULT_LENGTH;
 			MinimumADR = 0.02;
 
 			BearishOverExtensionEnable = false;
@@ -184,6 +184,7 @@ namespace PowerLanguage.Indicator{
 
 		protected override void StartCalc() {
 			m_adr.Length = ADRLength;
+			m_adr.Instrument = Bars;
 			if (MinimumADR < 0.0 || MinimumADR > 1.0) throw new ArgumentException("MinimumADR is a percentage and should be between 0 and 1 (zero to switch off the filter)");
 
 			m_bearishOverextension.Instrument = Bars;

@@ -67,26 +67,34 @@ namespace PowerLanguage.Strategy {
 		}
 
 		/// <summary>
+		/// Position size based on the maximum risk equity per position as a percentage of equity per position.
+		/// </summary>
+		protected int positionSize(double risk, double maxRiskEquityPerPosPercent)
+		{
+			int result = 0;
+			if (risk == 0.0d) return result;
+			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
+			result = (int)Math.Truncate(positionCash / risk);
+			return result;
+		}
+
+		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price.
 		/// </summary>
 		protected int positionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d)
 		{
 			int result = 0;
 
-			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
-			if (positionCash > 0)
+			double risk;
+			try
 			{
-				double risk;
-				try
-				{
-					risk = checked(Math.Round(Math.Abs(bars.Close[0] - stopLossPrice), 2));
-					if (risk != 0.0d) result = checked((int)Math.Truncate(positionCash / risk));
-				}
-				catch (OverflowException)
-				{
-					Output.WriteLine("WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
-					return 0;   //risk overflow exception occurred, ignore signal
-				}
+				risk = checked(Math.Round(Math.Abs(bars.Close[0] - stopLossPrice), 2));
+				result = positionSize(risk, maxRiskEquityPerPosPercent);					
+			}
+			catch (OverflowException)
+			{
+				Output.WriteLine("WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
+				return 0;   //risk overflow exception occurred, ignore signal
 			}
 
 			return result;
@@ -99,7 +107,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected int positionSize(IInstrument bars, int size, int volumePeriod, double maxAvgVolumePercent)
 		{
-			int result = size;
+			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
 
 			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= volumePeriod)
 			{

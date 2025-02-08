@@ -40,9 +40,6 @@ namespace PowerLanguage
 
 			protected override System.Double CalcBar()
 			{
-				if (Instrument.CurrentBar < Length)
-					return 0.0;
-
 				if (Instrument.CurrentBar == Length)
 				{
 					//compute the first value for the average true range

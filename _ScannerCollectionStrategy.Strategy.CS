@@ -178,7 +178,7 @@ namespace PowerLanguage.Strategy {
 			m_secondLx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "scs2LX", EOrderAction.Sell));
 			m_secondSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "scs2SX", EOrderAction.BuyToCover));
 
-			ADRLength = PowerLanguage.Function._ADR.LENGTH;
+			ADRLength = PowerLanguage.Function._ADR.DEFAULT_LENGTH;
 			MinimumADR = 0.02;
 
 			BearishOverExtensionEnable = true;
@@ -274,6 +274,7 @@ namespace PowerLanguage.Strategy {
 			m_market = BarsOfData(3);
 
 			m_adr.Length = ADRLength;
+			m_adr.Instrument = m_stock;
 			m_volumeWithSD.Length = EntryAverageVolumeLength;
 			m_volumeWithSD.Instrument = m_stock;
 

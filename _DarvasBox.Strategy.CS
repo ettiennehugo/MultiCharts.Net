@@ -12,65 +12,79 @@ namespace PowerLanguage.Strategy {
 	///		1. Entry data feed - typically some minute data feed.
 	///		2. Scanner data feed - typically daily data feed for the same instrument.
 	/// Entry:
-	///   * Stock must have shown some minimal momentum in the past, typically 30% or more up in the past 6 months.
+	///   * Stock must have shown some minimal momentum in the past, typically 30% or more up in the past 1,3 or 6 months.
 	///	  * Stock must have consolidated for at least x-bars within a Darvas box.
 	///	  * Waits for a high volume opening range bar to form on the entry data feed.
 	///	  * IF the opening bar is a high volume bullish bar an entry is placed at the high of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
-	public class _DarvasBox : _OpeningRangeBarSignal {
+	public class _DarvasBox : _QullamaggieBase {
 		//constants
-
+		public const double DEFAULT_MINIMUM_GROWTH_PERCENT = 0.3;
+		public const string DEFAULT_GROWTH_LOOKBACKS = "20,60,120"; //1, 3, 6 months trading days (20- trading days per month)
 
 		//inputs
-		[Input] double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
-		[Input] int GrowthDays { get; set; }          		//number of days to look back for the growth
-		[Input] int MinimumLength { get; set; }			  	//minimum required length of the Darvas box
-		[Input] double AtrEpsilon { get; set; }  			//percentage of the ATR to use for the range close factor in Darvas box computations
-		
+		[Input] public double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
+		[Input] public string GrowthDays { get; set; }          		//number of days to look back for the growth
+		[Input] public int DarvasBoxLength { get; set; }			  	//minimum required length of the Darvas box
+		[Input] public double AtrEpsilon { get; set; }  			//percentage of the ATR to use for the range close factor in Darvas box computations
+
 		//attributes
-		private IInstrument m_scannerTimeFrame; 	//Darvas box scanning timeframe, typically daily 
 		private PowerLanguage.Function._DarvasBox m_darvasBox;
-		
+		private int[] m_growthDays;
+		private int m_maxGrowthDays;
+
 		//interface methods
 		public _DarvasBox(object _ctx) : base(_ctx) { }
 
 		//methods
 		protected override void Create()
 		{
-			MinimumGrowthPercent = 30;
-			GrowthDays = 120;
-			MinimumLength = 10;
-			AtrEpsilon = 0.05;
+			base.Create();
+			MinimumGrowthPercent = DEFAULT_MINIMUM_GROWTH_PERCENT;
+			GrowthDays = DEFAULT_GROWTH_LOOKBACKS;
+			DarvasBoxLength = PowerLanguage.Function._DarvasBox.DEFAULT_LENGTH;
+			AtrEpsilon = PowerLanguage.Function._DarvasBox.DEFAULT_EPSILON;
 			m_darvasBox = new PowerLanguage.Function._DarvasBox(this);
 		}
 
 		protected override void StartCalc()
 		{
-			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
-			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
+			if (MinimumGrowthPercent <= 0) throw new ArgumentException("Minimum growth percent must be greater than zero.");
+			m_growthDays = parseLookbackList(GrowthDays);
+			if (m_growthDays.Length == 0) throw new ArgumentException("No growth days specified.");
+			foreach (var growthDays in m_growthDays)
+				if (growthDays <= 0) throw new ArgumentException("Growth days must be greater than zero.");
+			m_maxGrowthDays = m_growthDays.Max();
+
 			//Bars is used as the entry time frame criteria
-			m_scannerTimeFrame = BarsOfData(2);
-			m_darvasBox.Instrument = m_scannerTimeFrame;
-			m_darvasBox.Length = MinimumLength;
+			m_darvasBox.Instrument = BarsOfData(2);
+			m_darvasBox.Length = DarvasBoxLength;
 			m_darvasBox.Epsilon = AtrEpsilon;
-			MinimumGrowthPercent /= 100.0d;
-			MinimumGrowthPercent += 1.0d;
+
+			base.StartCalc();
 		}
 
-		protected override void CalcBar()
+		protected override bool calcEntry()
 		{
-			switch (Environment.CalcReason)
-			{
-				case CalculationReason.Default:
-					//scanner criteria
-					if (m_scannerTimeFrame.CurrentBar <= GrowthDays) return; //not enough data
-					if (m_scannerTimeFrame.Close[0] / m_scannerTimeFrame.Close[GrowthDays] < MinimumGrowthPercent) return;  //not enough growth
-					if (!m_darvasBox[0]) return; //no Darvas Box detection on daily timeframe
+			if (!base.calcEntry()) return false; //base class filtering not met
+			if (m_volumeInstrument.CurrentBar <= m_maxGrowthDays) return false; //not enough data
 
-					//entry criteria
-					base.CalcBar();
+			bool minimumGrowth = false;
+			foreach (var growthDays in m_growthDays)
+				if (growthPercent(m_volumeInstrument, growthDays) > MinimumGrowthPercent)
+				{
+					minimumGrowth = true;
 					break;
-			}
+				}
+
+			if (!minimumGrowth) return false; //not enough growth
+			if (!m_darvasBox[1]) return false; //no Darvas Box detection on daily timeframe one day back
+			if (!qullamaggieFilter()) return false; //Qullamaggie filter not met
+			if (Bars.Close[0] < m_darvasBox.High) return false; //not break out of the Darvas box
+
+			//allow base class filtering and potential entry
+			if (Debug) Output.WriteLine("Darvas Box detected on {0}, {1} at close {2}", Bars.Info.Name, Bars.Time[0], Bars.Close[0]);
+			return true;
 		}
 	}
 }

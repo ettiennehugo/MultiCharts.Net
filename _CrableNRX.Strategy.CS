@@ -28,7 +28,7 @@ namespace PowerLanguage.Strategy {
 		//inputs
 		//_OpeningRangeBarSignal inputs
 		[Input] public int VolumeLength { get; set; }           //volume length to use for opening bar volume detection
-		[Input] public double VolumeStdDevFactor { get; set; }  //volume standard deviation factor to use for high volume detection
+		[Input] public double EntryVolumePercent { get; set; }  //volume standard deviation factor to use for high volume detection
 		[Input] public double MaxVolumeBasedPosPercent { get; set; }  //maximum volume based position size as a percentage of equity
 
 		[Input] double MinimumGrowthPercent { get; set; }    //minimum required growth in the past x-days
@@ -62,8 +62,10 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc()
 		{
 			_VolumeLength = VolumeLength;
-			_VolumeStdDevFactor = VolumeStdDevFactor;
+			_EntryVolumePercent = EntryVolumePercent;
 			_MaxVolumeBasedPosPercent = MaxVolumeBasedPosPercent;
+			_EntryDataFeed = 1;
+			_VolumeDataFeed = 2;
 			base.StartCalc();
 			if (MinimumGrowthPercent <= 0) throw new Exception("Minimum growth percent must be greater than zero.");
 			if (GrowthDays <= 0) throw new Exception("Growth days must be greater than zero.");
