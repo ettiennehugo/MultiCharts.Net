@@ -108,7 +108,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		private EMarketPositionSide highVolumeOpeningBar()
 		{
-			if (!m_lastBarInSession[1]) return EMarketPositionSide.Flat; // previous bar was not the last bar in the session
+			if (!m_lastBarInSession[1]) return EMarketPositionSide.Flat; // previous bar was not the last bar in the session so this is not an opening bar
 
 			double range = m_entryInstrument.High[0] - m_entryInstrument.Low[0];
 			if (range == 0) return EMarketPositionSide.Flat; // avoid division by zero

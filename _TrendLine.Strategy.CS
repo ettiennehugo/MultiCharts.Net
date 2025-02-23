@@ -85,7 +85,13 @@ namespace PowerLanguage.Strategy
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
-	///		
+	///	
+	/// ExitDayLowHigh
+	/// • Instruction - "ExitDayLowHigh" 
+	///	• [optional] BufferPrice - buffer price to add/subtract from entry day extreme
+	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
+	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// 
 	/// Example JSON:
 	/// [
 	///	    {
@@ -117,7 +123,7 @@ namespace PowerLanguage.Strategy
 	///	        "Instruction" : "ExitProfit"
 	///			"Percent" : 0.5
 	///			"ProfitPrice": 5.0
-	///		}
+	///		},
 	///		{
 	///		    "Instruction" : "ExitEntryBarLowHigh",
 	///			"BufferPrice" : 0.05,
@@ -1311,6 +1317,9 @@ namespace PowerLanguage.Strategy
 
 		}
 
+		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
+		//      need to introduce a new boolean parameter, e.g. AdjustStopLossOnNewPosition, to recompute the stop-loss if a new position
+		//      is added to the existing position.
 		public class ExitEntryBarLowHigh : ExitPriced
 		{
 			public double BufferPrice { get; set; }
@@ -1378,6 +1387,104 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
+		//      need to introduce a new boolean parameter, e.g. AdjustStopLossOnNewPosition, to recompute the stop-loss if a new position
+		//      is added to the existing position.
+		public class ExitEntryDayLowHigh : ExitPriced
+		{
+			public double BufferPrice { get; set; }
+
+			private double m_stopLossPrice;
+
+			public ExitEntryDayLowHigh(_TrendLine control) : base(control)
+			{
+				BufferPrice = 0.0;
+			}
+
+			public override bool Parse(JProperty property)
+			{
+				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+				return base.Parse(property);
+			}
+
+			public override Tuple<bool, string> IsValid()
+			{
+				if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryDayLowHigh - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitEntryDayLowHigh - Market exit not supported");
+				return base.IsValid();
+			}
+
+			public override void StartCalc()
+			{
+				base.StartCalc();
+				m_stopLossPrice = -1.0;
+			}
+
+			public override void CalcBar()
+			{
+				if (m_studyControl.PositionSide == 0)
+					m_stopLossPrice = -1.0;     //reset stop-loss price when position went flat
+				else if (m_studyControl.Environment.CalcReason == CalculationReason.Default &&
+								 m_studyControl.Bars.Status == EBarState.Close &&
+								 m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
+				{
+					if (m_studyControl.PositionSide > 0)
+						m_stopLossPrice = getDayHigh() - BufferPrice;
+					else if (m_studyControl.PositionSide < 0)
+						m_stopLossPrice = getDayHigh() + BufferPrice;
+				}
+
+				base.CalcBar();
+			}
+
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			{
+				switch (direction)
+				{
+					case EEntryDirection.Long:
+						return getDayLow() - BufferPrice;
+					case EEntryDirection.Short:
+						return getDayHigh() + BufferPrice;
+				}
+
+				//should not be reached
+				return 0.0;
+			}
+			
+			public double getDayLow()
+			{
+				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
+				int index = 1;
+				double result = m_studyControl.Bars.Low[0];
+				while (m_studyControl.Bars.Time[index].Date == startBarDate && index < m_studyControl.Bars.CurrentBar)
+				{
+					result = m_studyControl.Bars.Low[index] < result ? m_studyControl.Bars.Low[index] : result;
+					index++;
+				}
+				
+				return result;
+			}
+			
+			public double getDayHigh()
+			{
+				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
+				int index = 1;
+				double result = m_studyControl.Bars.High[0];
+				while (m_studyControl.Bars.Time[index].Date == startBarDate && index < m_studyControl.Bars.CurrentBar)
+				{
+					result = m_studyControl.Bars.High[index] > result ? m_studyControl.Bars.High[index] : result;
+					index++;
+				}
+				
+				return result;
+			}
+
+			protected override double exitPrice()
+			{
+				return m_stopLossPrice;
+			}
+		}
+				
 		/// <summary>
 		/// InstructionFactory used to create instructions based on some specific instruction name and associated type.
 		/// </summary>
@@ -1391,7 +1498,8 @@ namespace PowerLanguage.Strategy
 								{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
 								{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
 								{ "exitdays", control => new _TrendLine.ExitDays(control) },
-								{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) }
+								{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
+								{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
 						};
 
 			public static Instruction CreateInstruction(string type, _TrendLine control)

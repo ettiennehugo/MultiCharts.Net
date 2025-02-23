@@ -16,7 +16,9 @@ namespace PowerLanguage.Strategy {
 /// 
 /// Entry:
 /// * Uses dialy scanners
-/// * Enter long/short using a limit order on the close of a strong opening bar (e.g. 9:35 would be the opening bar)
+/// * Look for stocks that are moving with at least a specific minimum ADR, e.g. Qullamagiie uses 5%
+/// * TODO - Revise this rule to look for any number of opening bars since a lot of the time the breakout would occur in the first half hour of the day.
+///   * Enter long/short using a limit order on the close of a strong opening bar (e.g. 9:35 would be the opening bar)
 /// * Risk of x-percent is used for entry size computed off the close of the opening bar and it's low/high based on entry direction plus/minus some buffer price.
 ///
 /// Exit:
@@ -36,6 +38,7 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_DARVAS_GROWTH_PERCENT = 0.3;
 		public const double DEFAULT_ENTRY_MINIMUM_PRICE = 1.0;
 		public const int DEFAULT_ENTRY_MINIMUM_AVERAGE_VOLUME = 4000000;
+		public const double DEFAULT_MINIMUM_ADR = 0.05;
 		public const double DEFAULT_ENTRY_MINIMUM_AVERAGE_DOLLAR_VOLUME = 15000000;
 		public const double DEFAULT_ENTRY_ACCOUNT_EQUITY_AT_RISK_PERCENT = 0.01;
 		public const double DEFAULT_ENTRY_BAR_CLOSE_PERCENTILE = 0.9;
@@ -179,7 +182,7 @@ namespace PowerLanguage.Strategy {
 			m_secondSx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "scs2SX", EOrderAction.BuyToCover));
 
 			ADRLength = PowerLanguage.Function._ADR.DEFAULT_LENGTH;
-			MinimumADR = 0.02;
+			MinimumADR = DEFAULT_MINIMUM_ADR;
 
 			BearishOverExtensionEnable = true;
 			BearishOverExtensionMinimumDropPercent = PowerLanguage.Function._BearishOverextension.DEFAULT_MINIMUM_DROP_PERCENT;

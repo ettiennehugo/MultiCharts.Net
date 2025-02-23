@@ -49,7 +49,6 @@ namespace PowerLanguage.Strategy {
 
 		protected override void StartCalc()
 		{
-			if (MinimumGrowthPercent <= 0) throw new ArgumentException("Minimum growth percent must be greater than zero.");
 			m_growthDays = parseLookbackList(GrowthDays);
 			if (m_growthDays.Length == 0) throw new ArgumentException("No growth days specified.");
 			foreach (var growthDays in m_growthDays)
@@ -71,19 +70,19 @@ namespace PowerLanguage.Strategy {
 
 			bool minimumGrowth = false;
 			foreach (var growthDays in m_growthDays)
-				if (growthPercent(m_volumeInstrument, growthDays) > MinimumGrowthPercent)
+				if (growthPercent(m_volumeInstrument, growthDays) > (MinimumGrowthPercent + 1))
 				{
 					minimumGrowth = true;
 					break;
 				}
 
+			if (!qullamaggieFilter()) return false; //Qullamaggie filter not met
 			if (!minimumGrowth) return false; //not enough growth
 			if (!m_darvasBox[1]) return false; //no Darvas Box detection on daily timeframe one day back
-			if (!qullamaggieFilter()) return false; //Qullamaggie filter not met
-			if (Bars.Close[0] < m_darvasBox.High) return false; //not break out of the Darvas box
+			if (Bars.Close[0] < m_darvasBox.High) return false; //no break out of the Darvas box
 
 			//allow base class filtering and potential entry
-			if (Debug) Output.WriteLine("Darvas Box detected on {0}, {1} at close {2}", Bars.Info.Name, Bars.Time[0], Bars.Close[0]);
+			if (Debug) Output.WriteLine("DarvasBox {0}, {1}, {2}", m_volumeInstrument.Info.Name, m_volumeInstrument.Time[0], Bars.Close[0]);
 			return true;
 		}
 	}

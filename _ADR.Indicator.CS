@@ -28,7 +28,7 @@ namespace PowerLanguage.Indicator{
 		
 		protected override void CalcBar()
 		{
-			if (Environment.CalcReason == CalculationReason.Default && Bars.CurrentBar > Length) plot.Set(adr.Value);
+			if (Environment.CalcReason == CalculationReason.Default && Bars.CurrentBar > Length) plot.Set(100 * adr.Value); //plot the ADR value as opercentage
 		}
 	}
 }

@@ -47,13 +47,13 @@ namespace PowerLanguage.Strategy {
 		[Input] public bool Debug { get; set; }                 //debug flag to print out debug information
 
 		//attribute
-		private PowerLanguage.Function._ADR m_adr;
-		private PowerLanguage.Function._VolumeWithSD m_volumeWithSD;
+		protected PowerLanguage.Function._ADR m_adr;
+		protected PowerLanguage.Function._VolumeWithSD m_volumeWithSD;
+		protected PowerLanguage.Function._SuperSmoother m_exitMovingAverage;
 		private IOrderMarket m_firstLx;
 		private IOrderMarket m_firstSx;
 		private IOrderMarket m_secondLx;
 		private IOrderMarket m_secondSx;
-		private PowerLanguage.Function._SuperSmoother m_exitMovingAverage;
 		private DateTime m_entryDateTime;
 		private int m_entrySize;
 		private TimeSpan m_exitSecondTimeSpan;
