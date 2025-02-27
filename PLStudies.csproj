@@ -515,7 +515,6 @@
     <Compile Include="_ScannerLowThresholdBreakout.Function.CS" />
     <Compile Include="_ScannerLowThresholdBreakout.Indicator.CS" />
     <Compile Include="_VolumeWithSD.Function.CS" />
-    <Compile Include="_QullamaggieBase.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
