@@ -55,6 +55,7 @@ namespace PowerLanguage.Strategy
 	/// • Instruction - "ExitMovingAverage" 
 	/// • Length - length of the moving average.
 	/// • MovingAverageType - enum Simple, Exponential, SuperSmoother
+	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
@@ -66,6 +67,7 @@ namespace PowerLanguage.Strategy
 	/// • MovingAverageType - enum Simple, Exponential, SuperSmoother
 	/// • AtrLength - length to compute the average true range
 	/// • AtrMultiplier - factor to multiply the average true range to get a price level above/below the moving average 
+	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average and ATR, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
@@ -942,6 +944,7 @@ namespace PowerLanguage.Strategy
 			public int Length { get; set; }
 			public EMovingAverageType MovingAverageType { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
+			public int DataFeed { get; set; }
 
 			protected PowerLanguage.Function.AverageFC m_averageSimple;
 			protected PowerLanguage.Function.XAverage m_averageExponential;
@@ -952,6 +955,7 @@ namespace PowerLanguage.Strategy
 				Criteria = EEntryExitCriteria.Close;
 				ExitPercent = 1.0;
 				OrderType = EOrderType.Stop;
+				DataFeed = 1;
 			}
 
 			public override bool Parse(JProperty property)
@@ -960,12 +964,14 @@ namespace PowerLanguage.Strategy
 				if (name == "length") { Length = property.Value.ToObject<int>(); return true; }
 				if (name == "movingaveragetype") { MovingAverageType = property.Value.ToObject<EMovingAverageType>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+				if (name == "datafeed") { DataFeed = property.Value.ToObject<int>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
 				if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
+				if (DataFeed <= 0) return Tuple.Create(false, "ExitMovingAverage - DataFeed must be greater than 0");
 				return base.IsValid();
 			}
 
@@ -980,14 +986,17 @@ namespace PowerLanguage.Strategy
 				{
 					case EMovingAverageType.Simple:
 						m_averageSimple = m_studyControl.AllocateSimpleAverage();
+						m_averageSimple.price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
 						m_averageSimple.length = Length;
 						break;
 					case EMovingAverageType.Exponential:
 						m_averageExponential = m_studyControl.AllocateExponentialAverage();
+						m_averageExponential.Price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
 						m_averageExponential.Length = Length;
 						break;
 					case EMovingAverageType.SuperSmoother:
 						m_averageSuperSmoother = m_studyControl.AllocateSuperSmoother();
+						m_averageSuperSmoother.Price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
 						m_averageSuperSmoother.Length = Length;
 						break;
 				}
@@ -1060,6 +1069,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 				m_atr = m_studyControl.AllocateAtr();
+				m_atr.Instrument = DataFeed == 1 ? m_studyControl.Bars : m_studyControl.BarsOfData(DataFeed);
 				m_atr.Length = AtrLength;
 			}
 
