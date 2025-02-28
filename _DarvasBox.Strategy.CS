@@ -20,13 +20,13 @@ namespace PowerLanguage.Strategy {
 	public class _DarvasBox : _QullamaggieBase {
 		//constants
 		public const double DEFAULT_MINIMUM_GROWTH_PERCENT = 0.3;
-		public const string DEFAULT_GROWTH_LOOKBACKS = "20,60,120"; //1, 3, 6 months trading days (20- trading days per month)
+		public const string DEFAULT_GROWTH_LOOKBACKS = "21,63,126"; //1, 3, 6 months trading days (21- trading days per month)
 
 		//inputs
 		[Input] public double MinimumGrowthPercent { get; set; }   //minimum required growth in the past x-days
-		[Input] public string GrowthDays { get; set; }          		//number of days to look back for the growth
-		[Input] public int DarvasBoxLength { get; set; }			  	//minimum required length of the Darvas box
-		[Input] public double AtrEpsilon { get; set; }  			//percentage of the ATR to use for the range close factor in Darvas box computations
+		[Input] public string GrowthDays { get; set; }             //number of days to look back for the growth
+		[Input] public int DarvasBoxLength { get; set; }		   //minimum required length of the Darvas box
+		[Input] public double AtrEpsilon { get; set; }  		   //percentage of the ATR to use for the range close factor in Darvas box computations
 
 		//attributes
 		private PowerLanguage.Function._DarvasBox m_darvasBox;

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Drawing;
 using System.Linq;
 using Newtonsoft.Json;
@@ -59,6 +60,17 @@ namespace PowerLanguage.Strategy
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
 	///
+	/// ExitOverextension
+	/// • Instruction - "ExitOverextension"
+	/// • Length - length of the moving average
+	/// • MovingAverageType - enum Simple, Exponential, SuperSmoother
+	/// • AtrLength - length to compute the average true range
+	/// • AtrMultiplier - factor to multiply the average true range to get a price level above/below the moving average 
+	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
+	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
+	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
+	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
 	///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
@@ -86,11 +98,13 @@ namespace PowerLanguage.Strategy
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	///	
-	/// ExitDayLowHigh
-	/// • Instruction - "ExitDayLowHigh" 
+	/// ExitEntryDayLowHigh
+	/// • Instruction - "ExitDayLowHigh"
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry day extreme
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	///	• [optional] IncludePreMarket - include pre-market data when computing the entry day high/low, default false
+	///	• [optional] IncludePostMarket - include post-market data when computing the entry day high/low, default false
 	/// 
 	/// Example JSON:
 	/// [
@@ -138,6 +152,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		public const int MAX_INSTRUCTIONS = 10;
 		public const int MAX_MOVINGAVERAGES = 5;
+		public const int MAX_ATR = 5;
 		public const int DEFAULT_VOLUME_PERIOD = 20;
 
 		//types
@@ -692,8 +707,8 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
 				if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
-				if (name == "starttime") { StartTime = property.Value.ToObject<DateTime>(); return true; }
-				if (name == "endtime") { EndTime = property.Value.ToObject<DateTime>(); return true; }
+				if (name == "starttime") { StartTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "endtime") { EndTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
 				return base.Parse(property);
 			}
 
@@ -928,9 +943,9 @@ namespace PowerLanguage.Strategy
 			public EMovingAverageType MovingAverageType { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
 
-			private PowerLanguage.Function.AverageFC m_averageSimple;
-			private PowerLanguage.Function.XAverage m_averageExponential;
-			private PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
+			protected PowerLanguage.Function.AverageFC m_averageSimple;
+			protected PowerLanguage.Function.XAverage m_averageExponential;
+			protected PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
 
 			public ExitMovingAverage(_TrendLine control) : base(control)
 			{
@@ -990,7 +1005,7 @@ namespace PowerLanguage.Strategy
 			{
 				return exitPrice();
 			}
-
+				
 			protected override double exitPrice()
 			{
 				double result = 0.0;
@@ -1011,6 +1026,69 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - exitPrice - could not determine exit price");
 				return result;
 			}
+		}
+
+		public class ExitOverextension : ExitMovingAverage
+		{
+			public int AtrLength { get; set; }
+			public double AtrMultiplier { get; set; }
+
+			protected PowerLanguage.Function._ATR m_atr;
+
+			public ExitOverextension(_TrendLine control) : base(control)
+			{
+				AtrLength = 20;
+				AtrMultiplier = 3.0;
+			}
+
+			public override bool Parse(JProperty property)
+			{
+				string name = property.Name.ToLower();
+				if (name == "atrlength") { AtrLength = property.Value.ToObject<int>(); return true; }
+				if (name == "atrmultiplier") { AtrMultiplier = property.Value.ToObject<double>(); return true; }
+				return base.Parse(property);
+			}
+
+			public override Tuple<bool, string> IsValid()
+			{
+				if (AtrLength <= 0) return Tuple.Create(false, "ExitOverextension - AtrLength must be greater than 0");
+				if (AtrMultiplier <= 0) return Tuple.Create(false, "ExitOverextension - AtrFactor must be greater than 0");
+				return base.IsValid();
+			}
+
+			public override void StartCalc()
+			{
+				base.StartCalc();
+				m_atr = m_studyControl.AllocateAtr();
+				m_atr.Length = AtrLength;
+			}
+
+			protected override double exitPrice()
+			{
+				double result = 0.0;
+				switch (MovingAverageType)
+				{
+					case EMovingAverageType.Simple:
+						result = m_averageSimple[0];
+						break;
+					case EMovingAverageType.Exponential:
+						result = m_averageExponential[0];
+						break;
+					case EMovingAverageType.SuperSmoother:
+						result = m_averageSuperSmoother[0];
+						break;
+				}
+
+				if (m_studyControl.PositionSide > 0)
+					result += m_atr[0] * AtrMultiplier;
+				else if (m_studyControl.PositionSide < 0)
+					result -= m_atr[0] * AtrMultiplier;
+
+				//should never be reached
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - exitPrice - could not determine exit price");
+				return result;
+			}
+
 		}
 
 		public class ExitStopLoss : ExitPriced
@@ -1392,18 +1470,27 @@ namespace PowerLanguage.Strategy
 		//      is added to the existing position.
 		public class ExitEntryDayLowHigh : ExitPriced
 		{
+			public static TimeSpan DEFAULT_MARKET_OPEN_TIME = new TimeSpan(9, 30, 0);
+			public static TimeSpan DEFAULT_MARKET_CLOSE_TIME = new TimeSpan(16, 0, 0);
 			public double BufferPrice { get; set; }
+			public bool IncludePreMarket { get; set; }
+			public bool IncludePostMarket { get; set; }
 
 			private double m_stopLossPrice;
 
 			public ExitEntryDayLowHigh(_TrendLine control) : base(control)
 			{
 				BufferPrice = 0.0;
+				IncludePreMarket = false;
+				IncludePostMarket = false;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+				if (property.Name.ToLower() == "includepremarket") { IncludePreMarket = property.Value.ToObject<bool>(); return true; }
+				if (property.Name.ToLower() == "includepostmarket") { IncludePostMarket = property.Value.ToObject<bool>(); return true; }
+
 				return base.Parse(property);
 			}
 
@@ -1429,7 +1516,7 @@ namespace PowerLanguage.Strategy
 								 m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
 				{
 					if (m_studyControl.PositionSide > 0)
-						m_stopLossPrice = getDayHigh() - BufferPrice;
+						m_stopLossPrice = getDayLow() - BufferPrice;
 					else if (m_studyControl.PositionSide < 0)
 						m_stopLossPrice = getDayHigh() + BufferPrice;
 				}
@@ -1456,8 +1543,14 @@ namespace PowerLanguage.Strategy
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
 				int index = 1;
 				double result = m_studyControl.Bars.Low[0];
-				while (m_studyControl.Bars.Time[index].Date == startBarDate && index < m_studyControl.Bars.CurrentBar)
+				while (m_studyControl.Bars.Time[index].Date == startBarDate.Date && index < m_studyControl.Bars.CurrentBar)
 				{
+					if (!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) break; //no more values to check
+					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME) 
+					{
+						index++;
+						continue; //skip values after market close
+					}
 					result = m_studyControl.Bars.Low[index] < result ? m_studyControl.Bars.Low[index] : result;
 					index++;
 				}
@@ -1470,8 +1563,14 @@ namespace PowerLanguage.Strategy
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
 				int index = 1;
 				double result = m_studyControl.Bars.High[0];
-				while (m_studyControl.Bars.Time[index].Date == startBarDate && index < m_studyControl.Bars.CurrentBar)
+				while (m_studyControl.Bars.Time[index].Date == startBarDate.Date && index < m_studyControl.Bars.CurrentBar)
 				{
+					if (!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) break; //no more values to check
+					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME)
+					{
+						index++;
+						continue; //skip values after market close
+					}
 					result = m_studyControl.Bars.High[index] > result ? m_studyControl.Bars.High[index] : result;
 					index++;
 				}
@@ -1495,6 +1594,7 @@ namespace PowerLanguage.Strategy
 								{ "entryline", control => new _TrendLine.EntryLine(control) },
 								{ "exitline", control => new _TrendLine.ExitLine(control) },
 								{ "exitmovingaverage", control => new _TrendLine.ExitMovingAverage(control) },
+								{ "exitoverextension", control => new _TrendLine.ExitOverextension(control) },
 								{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
 								{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
 								{ "exitdays", control => new _TrendLine.ExitDays(control) },
@@ -1559,6 +1659,8 @@ namespace PowerLanguage.Strategy
 		private int m_averageExponentialAllocated;
 		private List<PowerLanguage.Function._SuperSmoother> m_averageSuperSmoothers;
 		private int m_averageSuperSmoothersAllocated;
+		private List<PowerLanguage.Function._ATR> m_atr;
+		private int m_atrAllocated;
 
 		//interface methods
 		public _TrendLine(object _ctx) : base(_ctx) { }
@@ -1567,14 +1669,14 @@ namespace PowerLanguage.Strategy
 		{
 			Debug = false;
 			createOrders();
-			createMovingAverages();
+			createIndicators();
 			InstructionsList = new List<Instruction>();
 		}
 
 		protected override void StartCalc()
 		{
 			resetOrders();
-			resetMovingAverages();
+			resetIndicators();
 			parseInstructions();
 			foreach (var instruction in InstructionsList) instruction.StartCalc();
 			validateInstructions();
@@ -1742,6 +1844,14 @@ namespace PowerLanguage.Strategy
 			return result;
 		}
 
+		public PowerLanguage.Function._ATR AllocateAtr()
+		{
+			if (m_atrAllocated >= m_atr.Count) throw new InvalidOperationException("No more ATRs available");
+			PowerLanguage.Function._ATR result = m_atr[m_atrAllocated];
+			m_atrAllocated++;
+			return result;
+		}
+
 		//methods
 		private void createOrders()
 		{
@@ -1785,11 +1895,12 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private void createMovingAverages()
+		private void createIndicators()
 		{
 			m_averageSimple = new List<PowerLanguage.Function.AverageFC>();
 			m_averageExponential = new List<PowerLanguage.Function.XAverage>();
 			m_averageSuperSmoothers = new List<PowerLanguage.Function._SuperSmoother>();
+			m_atr = new List<PowerLanguage.Function._ATR>();
 
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
@@ -1797,6 +1908,9 @@ namespace PowerLanguage.Strategy
 				m_averageExponential.Add(new PowerLanguage.Function.XAverage(this));
 				m_averageSuperSmoothers.Add(new PowerLanguage.Function._SuperSmoother(this));
 			}
+
+			for (int i = 0; i < MAX_ATR; i++)
+				m_atr.Add(new PowerLanguage.Function._ATR(this));
 		}
 
 		private void resetOrders()
@@ -1820,11 +1934,12 @@ namespace PowerLanguage.Strategy
 			m_sxStpLmtAllocated = 0;
 		}
 
-		private void resetMovingAverages()
+		private void resetIndicators()
 		{
 			m_averageSimpleAllocated = 0;
 			m_averageExponentialAllocated = 0;
 			m_averageSuperSmoothersAllocated = 0;
+			m_atrAllocated = 0;
 
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
@@ -1832,6 +1947,9 @@ namespace PowerLanguage.Strategy
 				m_averageExponential[i].Price = Bars.Close;
 				m_averageSuperSmoothers[i].Price = Bars.Close;
 			}
+
+			for (int i = 0; i < MAX_ATR; i++)
+				m_atr[i].Instrument = Bars;
 		}
 
 		private void parseInstructions()
