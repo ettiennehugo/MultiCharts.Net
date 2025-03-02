@@ -29,6 +29,7 @@ namespace PowerLanguage.Strategy
 	///	• LineId - trend line id 
 	///	• Direction - enum of long, short, default long
 	///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
 	///	• [optional] MaxVolumeBasedPercent - percent of the average volume to use as the maximum position size, default 0.2 (20%), set to 0.0 to disable.
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -46,6 +47,7 @@ namespace PowerLanguage.Strategy
 	/// ExitLine
 	/// • Instruction - "ExitLine" 
 	/// • LineId - trend line id
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -54,7 +56,8 @@ namespace PowerLanguage.Strategy
 	/// ExitMovingAverage
 	/// • Instruction - "ExitMovingAverage" 
 	/// • Length - length of the moving average.
-	/// • MovingAverageType - enum Simple, Exponential, SuperSmoother
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
+	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
@@ -64,9 +67,10 @@ namespace PowerLanguage.Strategy
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
 	/// • Length - length of the moving average
-	/// • MovingAverageType - enum Simple, Exponential, SuperSmoother
 	/// • AtrLength - length to compute the average true range
 	/// • AtrMultiplier - factor to multiply the average true range to get a price level above/below the moving average 
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
+	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average and ATR, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
@@ -75,6 +79,7 @@ namespace PowerLanguage.Strategy
 	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
 	///	• [alternate] LossPrice - exit the position if the price moves against you by a specified amount. 
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
@@ -82,6 +87,7 @@ namespace PowerLanguage.Strategy
 	/// 
 	/// ExitProfit
 	/// • Instruction - "ExitProfit" 
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [alternate] ProfitPercent - exit the position one the price moved in your favor by this percentage
 	///	• [alternate] ProfitPrice - exit the position one the price moved in your favor by this amount
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
@@ -90,18 +96,21 @@ namespace PowerLanguage.Strategy
 	/// ExitDays
 	/// • Instruction - "ExitDays" 
 	/// • Count - number of days after which the position should be closed
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] Strategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	///	• [optional] ExitPercent - percent of INITIAL POSITION to exit, default 1.0 (100%) 
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// 
 	/// ExitEntryBarLowHigh
 	/// • Instruction - "ExitEntryBarLowHigh" 
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	///	
 	/// ExitEntryDayLowHigh
 	/// • Instruction - "ExitDayLowHigh"
+	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry day extreme
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
@@ -111,7 +120,7 @@ namespace PowerLanguage.Strategy
 	/// Example JSON:
 	/// [
 	///	    {
-	///	        "Instruction" : "EntryLine"
+	///     "Instruction" : "EntryLine"
 	///			"LineId" : 1,
 	///			"Direction" : "Long", 
 	///			"EquityPercent" : 0.01,
@@ -207,8 +216,15 @@ namespace PowerLanguage.Strategy
 
 			public string Name { get; set; }
 			public string Id { get; set; }
+			public int Index { get; }
 
-			public Instruction(_TrendLine control) { m_studyControl = control; }
+			public Instruction(_TrendLine control)
+			{
+				m_studyControl = control;
+				Name = string.Empty;
+				Index = m_studyControl.InstructionsList.Count + 1;
+				Id = Index.ToString();
+			}
 
 			public virtual bool Parse(JProperty property)
 			{
@@ -233,6 +249,7 @@ namespace PowerLanguage.Strategy
 
 			public virtual Tuple<bool, string> IsValid()
 			{
+				if (Name == string.Empty) throw new ArgumentException(string.Format("{0} - Instrument name not specified", this.GetType().Name));
 				return Tuple.Create(true, string.Empty);
 			}
 
@@ -364,10 +381,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "Entry - EquityPercent must be between 0 and 1");
-				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, "Entry - MaxVolumeBasedPercent must be between 0 and 1");
-				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, "Entry - ExitStopLossId priced exit not found");
-				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, "Entry - MaxRiskBasedEquityPercent must be between 0 and 1");
+				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EquityPercent must be between 0 and 1", this.GetType().Name));
+				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxVolumeBasedPercent must be between 0 and 1"));
+				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, string.Format("{0} - ExitStopLossId priced exit not found"));
+				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxRiskBasedEquityPercent must be between 0 and 1"));
 				return base.IsValid();
 			}
 
@@ -572,7 +589,7 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, "Exit - ExitPercent must be between 0 and 1");
+				if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, string.Format("{0} - ExitPercent must be between 0 and 1", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -611,7 +628,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_studyControl.PositionSide == 0) return 0;
 				if (ExitPercent == 1.0) return currentOpenPositionSize();
-				//NOTE: Since MC does not support partial order filling we need to round up to the nearest integer larger integer otherwise
+				//NOTE: Since MC does not support partial order filling we need to round up to the nearest larger integer otherwise
 				//      partial positions remain that are stopped out etc.
 				int size = (int)Math.Ceiling(currentTotalPositionSize() * ExitPercent);
 				return size;
@@ -663,7 +680,7 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitPriced - Market exit not supported");
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -716,10 +733,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (m_line == null) return Tuple.Create(false, string.Format("EntryLine - trendline with id {0} not found"));
-				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, "EntryLine - EntryPercent must be between 0 and 1");
-				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, "EntryLine - ClosePercentile must be between 0 and 1");
-				if (StartTime > EndTime) return Tuple.Create(false, "EntryLine - StartTime must be before EndTime");
+				if (m_line == null) return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EntryPercent must be between 0 and 1", this.GetType().Name));
+				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, string.Format("{0} - ClosePercentile must be between 0 and 1", this.GetType().Name));
+				if (StartTime > EndTime) return Tuple.Create(false, string.Format("{0} - StartTime must be before EndTime", this.GetType().Name) );
 				return base.IsValid();
 			}
 
@@ -868,8 +885,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (m_line == null) return Tuple.Create(false, string.Format("ExitLine - trendline with id {0} not found", LineId));
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitLine - Market exit not supported");
+				if (m_line == null) return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -952,6 +969,7 @@ namespace PowerLanguage.Strategy
 
 			public ExitMovingAverage(_TrendLine control) : base(control)
 			{
+				MovingAverageType = EMovingAverageType.Simple;
 				Criteria = EEntryExitCriteria.Close;
 				ExitPercent = 1.0;
 				OrderType = EOrderType.Stop;
@@ -970,8 +988,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (Length <= 0) return Tuple.Create(false, "ExitMovingAverage - Length must be greater than 0");
-				if (DataFeed <= 0) return Tuple.Create(false, "ExitMovingAverage - DataFeed must be greater than 0");
+				if (Length <= 0) return Tuple.Create(false, string.Format("{0} - Length must be greater than 0", this.GetType().Name));
+				if (DataFeed <= 0) return Tuple.Create(false, string.Format("{0} - DataFeed must be greater than 0", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1032,7 +1050,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - exitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine(string.Format("{0} - exitPrice - could not determine exit price", this.GetType().Name));
 				return result;
 			}
 		}
@@ -1060,8 +1078,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (AtrLength <= 0) return Tuple.Create(false, "ExitOverextension - AtrLength must be greater than 0");
-				if (AtrMultiplier <= 0) return Tuple.Create(false, "ExitOverextension - AtrFactor must be greater than 0");
+				if (AtrLength <= 0) return Tuple.Create(false, string.Format("{0} - AtrLength must be greater than 0", this.GetType().Name));
+				if (AtrMultiplier <= 0) return Tuple.Create(false, string.Format("{0} - AtrFactor must be greater than 0", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1075,27 +1093,14 @@ namespace PowerLanguage.Strategy
 
 			protected override double exitPrice()
 			{
-				double result = 0.0;
-				switch (MovingAverageType)
-				{
-					case EMovingAverageType.Simple:
-						result = m_averageSimple[0];
-						break;
-					case EMovingAverageType.Exponential:
-						result = m_averageExponential[0];
-						break;
-					case EMovingAverageType.SuperSmoother:
-						result = m_averageSuperSmoother[0];
-						break;
-				}
-
+				double result = base.exitPrice();
 				if (m_studyControl.PositionSide > 0)
 					result += m_atr[0] * AtrMultiplier;
 				else if (m_studyControl.PositionSide < 0)
 					result -= m_atr[0] * AtrMultiplier;
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitMovingAverage - exitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitOverextension - exitPrice - could not determine exit price");
 				return result;
 			}
 
@@ -1122,9 +1127,9 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (LossPercent == -1.0 && LossPrice == -1.0) return Tuple.Create(false, "ExitStopLoss - LossPercent or LossPrice must be specified");
-				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, "ExitStopLoss - LossPrice must be a positive number (will be negated by strategy)");
-				if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, "ExitStopLoss - LossPercent must be between 0 and 1");
+				if (LossPercent == -1.0 && LossPrice == -1.0) return Tuple.Create(false, string.Format("{0} - LossPercent or LossPrice must be specified", this.GetType().Name));
+				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, string.Format("{0} - LossPrice must be a positive number (will be negated by strategy)", this.GetType().Name));
+				if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, string.Format("{0} - LossPercent must be between 0 and 1", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1216,9 +1221,9 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Stop) return Tuple.Create(false, "ExitProfit - Stop exit not supported");
-				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, "ExitProfit - ProfitPercent or ProfitPrice must be specified");
-				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, "ExitProfit - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit");
+				if (OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("ExitProfit - Stop exit not supported", this.GetType().Name));
+				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, string.Format("ExitProfit - ProfitPercent or ProfitPrice must be specified", this.GetType().Name));
+				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, string.Format("ExitProfit - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1321,8 +1326,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType != EOrderType.Market) return Tuple.Create(false, "ExitDays - Exit only supports market orders");
-				if (Count <= 0) return Tuple.Create(false, "ExitDays - Count must be larger than 0");
+				if (OrderType != EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Exit only supports market orders", this.GetType().Name));
+				if (Count <= 0) return Tuple.Create(false, string.Format("{0} - Count must be larger than 0", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1427,8 +1432,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryBarLowHigh - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitEntryBarLowHigh - Market exit not supported");
+				if (BufferPrice < 0) return Tuple.Create(false, string.Format("{0} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)", this.GetType().Name));
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1506,8 +1511,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (BufferPrice < 0) return Tuple.Create(false, "ExitEntryDayLowHigh - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, "ExitEntryDayLowHigh - Market exit not supported");
+				if (BufferPrice < 0) return Tuple.Create(false, string.Format("{0} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)", this.GetType().Name));
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1932,7 +1937,7 @@ namespace PowerLanguage.Strategy
 			m_leLmtAllocated = 0;
 			m_seLmtAllocated = 0;
 			m_leStpLmtAllocated = 0;
-			m_seLmtAllocated = 0;
+			m_seStpLmtAllocated = 0;
 
 			m_lxMrkAllocated = 0;
 			m_sxMrkAllocated = 0;
@@ -1954,12 +1959,18 @@ namespace PowerLanguage.Strategy
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
 				m_averageSimple[i].price = Bars.Close;
+				m_averageSimple[i].length = 10;
 				m_averageExponential[i].Price = Bars.Close;
+				m_averageExponential[i].Length = 10;
 				m_averageSuperSmoothers[i].Price = Bars.Close;
+				m_averageSuperSmoothers[i].Length = 10;
 			}
 
 			for (int i = 0; i < MAX_ATR; i++)
+			{
 				m_atr[i].Instrument = Bars;
+				m_atr[i].Length = 14;
+			}
 		}
 
 		private void parseInstructions()
