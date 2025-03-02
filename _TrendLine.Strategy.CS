@@ -382,9 +382,9 @@ namespace PowerLanguage.Strategy
 			public override Tuple<bool, string> IsValid()
 			{
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EquityPercent must be between 0 and 1", this.GetType().Name));
-				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxVolumeBasedPercent must be between 0 and 1"));
-				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, string.Format("{0} - ExitStopLossId priced exit not found"));
-				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxRiskBasedEquityPercent must be between 0 and 1"));
+				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxVolumeBasedPercent must be between 0 and 1", this.GetType().Name));
+				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, string.Format("{0} - ExitStopLossId priced exit not found", this.GetType().Name));
+				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxRiskBasedEquityPercent must be between 0 and 1", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1221,9 +1221,9 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("ExitProfit - Stop exit not supported", this.GetType().Name));
-				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, string.Format("ExitProfit - ProfitPercent or ProfitPrice must be specified", this.GetType().Name));
-				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, string.Format("ExitProfit - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit", this.GetType().Name));
+				if (OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("{0} - Stop exit not supported", this.GetType().Name));
+				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, string.Format("{0} - ProfitPercent or ProfitPrice must be specified", this.GetType().Name));
+				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, string.Format("{0} - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit", this.GetType().Name));
 				return base.IsValid();
 			}
 
