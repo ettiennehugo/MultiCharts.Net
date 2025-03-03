@@ -88,13 +88,13 @@ namespace PowerLanguage.Strategy {
 			if (DeclinePeriod < 0) throw new Exception("DeclinePeriod should be zero (off) or more than zero.");
 			m_marketInstrument = BarsOfData(2);
 			m_instrumentFastSmoother.Length = FastPeriod;
-			m_instrumentFastSmoother.Price = Bars.Close;
+			m_instrumentFastSmoother.Instrument = Bars;
 			m_instrumentSlowSmoother.Length = SlowPeriod;
-			m_instrumentSlowSmoother.Price = Bars.Close;
+			m_instrumentSlowSmoother.Instrument = Bars;
 			m_instrumentVolume.Length = VolumePeriod;
 			m_instrumentVolume.Instrument = Bars;
 			m_marketSmoother.Length = MarketPeriod != 0 ? MarketPeriod : _SuperSmoother.DEFAULT_PERIOD;
-			m_marketSmoother.Price = m_marketInstrument.Close;
+			m_marketSmoother.Instrument = m_marketInstrument;
 			m_efficiencyRatio.Length = FastPeriod;
 			m_efficiencyRatio.Instrument = Bars;
 			m_instrumentVolume.Length = VolumePeriod;

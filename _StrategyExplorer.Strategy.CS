@@ -4764,12 +4764,12 @@ namespace PowerLanguage.Strategy
     protected int _ssmaFastLength;
     protected int _ssmaSlowLength;
     protected int _crossOverLength;
-    protected List<AverageFC> _smaFastAvgFC;
-    protected List<AverageFC> _smaSlowAvgFC;
+    protected List<_AverageSimple> _smaFastAvgFC;
+    protected List<_AverageSimple> _smaSlowAvgFC;
     protected List<VariableSeries<Double>> _smaFastAvg;
     protected List<VariableSeries<Double>> _smaSlowAvg;
-    protected List<XAverage> _emaFastAvgFC;
-    protected List<XAverage> _emaSlowAvgFC;
+    protected List<_AverageExponential> _emaFastAvgFC;
+    protected List<_AverageExponential> _emaSlowAvgFC;
     protected List<VariableSeries<Double>> _emaFastAvg;
     protected List<VariableSeries<Double>> _emaSlowAvg;
     protected List<LinearRegValue> _linRegFastFC;
@@ -4830,12 +4830,12 @@ namespace PowerLanguage.Strategy
       base.Create();
 
       // create the set of required moving average indicators
-      _smaFastAvgFC = new List<AverageFC>(Interpreter.MAX_DATA_STREAM);
-      _smaSlowAvgFC = new List<AverageFC>(Interpreter.MAX_DATA_STREAM);
+      _smaFastAvgFC = new List<_AverageSimple>(Interpreter.MAX_DATA_STREAM);
+      _smaSlowAvgFC = new List<_AverageSimple>(Interpreter.MAX_DATA_STREAM);
       _smaFastAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
       _smaSlowAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
-      _emaFastAvgFC = new List<XAverage>(Interpreter.MAX_DATA_STREAM);
-      _emaSlowAvgFC = new List<XAverage>(Interpreter.MAX_DATA_STREAM);
+      _emaFastAvgFC = new List<_AverageExponential>(Interpreter.MAX_DATA_STREAM);
+      _emaSlowAvgFC = new List<_AverageExponential>(Interpreter.MAX_DATA_STREAM);
       _emaFastAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
       _emaSlowAvg = new List<VariableSeries<Double>>(Interpreter.MAX_DATA_STREAM);
       _linRegFastFC = new List<LinearRegValue>(Interpreter.MAX_DATA_STREAM);
@@ -4850,12 +4850,12 @@ namespace PowerLanguage.Strategy
       //NOTE: The indicators must be created before the script is processed so we need to create the maximum number of time frames.
       for (int i = 0; i < Interpreter.MAX_DATA_STREAM; i++)
       {
-        _smaFastAvgFC.Add(new AverageFC(_interpreter.Strategy));
-        _smaSlowAvgFC.Add(new AverageFC(_interpreter.Strategy));
+        _smaFastAvgFC.Add(new _AverageSimple(_interpreter.Strategy));
+        _smaSlowAvgFC.Add(new _AverageSimple(_interpreter.Strategy));
         _smaFastAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
         _smaSlowAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
-        _emaFastAvgFC.Add(new XAverage(_interpreter.Strategy));
-        _emaSlowAvgFC.Add(new XAverage(_interpreter.Strategy));
+        _emaFastAvgFC.Add(new _AverageExponential(_interpreter.Strategy));
+        _emaSlowAvgFC.Add(new _AverageExponential(_interpreter.Strategy));
         _emaFastAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
         _emaSlowAvg.Add(new VariableSeries<Double>(_interpreter.Strategy));
         _linRegFastFC.Add(new LinearRegValue(_interpreter.Strategy));
@@ -4886,21 +4886,21 @@ namespace PowerLanguage.Strategy
         else
           dataFeed = _interpreter.Strategy.Bars;
 
-        _smaFastAvgFC[i].price = dataFeed.Close;
-        _smaFastAvgFC[i].length = _smaFastLength;
-        _smaSlowAvgFC[i].price = dataFeed.Close;
-        _smaSlowAvgFC[i].length = _smaSlowLength;
-        _emaFastAvgFC[i].Price = dataFeed.Close;
+        _smaFastAvgFC[i].Instrument = dataFeed;
+        _smaFastAvgFC[i].Length = _smaFastLength;
+        _smaSlowAvgFC[i].Instrument = dataFeed;
+        _smaSlowAvgFC[i].Length = _smaSlowLength;
+        _emaFastAvgFC[i].Instrument = dataFeed;
         _emaFastAvgFC[i].Length = _emaFastLength;
-        _emaSlowAvgFC[i].Price = dataFeed.Close;
+        _emaSlowAvgFC[i].Instrument = dataFeed;
         _emaSlowAvgFC[i].Length = _emaSlowLength;
-        _linRegFastFC[i].price = dataFeed.Close;
+        _linRegFastFC[i].price = dataFeed.Close;    //TODO - this most likely does not work correctly on multiple data feeds
         _linRegFastFC[i].length = _linRegFastLength;
-        _linRegSlowFC[i].price = dataFeed.Close;
-        _linRegSlowFC[i].length = _linRegSlowLength;
-        _ssmaFastAvgFC[i].Price = dataFeed.Close;
+        _linRegSlowFC[i].price = dataFeed.Close;    //TODO - this most likely does not work correctly on multiple data feeds
+				_linRegSlowFC[i].length = _linRegSlowLength;
+        _ssmaFastAvgFC[i].Instrument = dataFeed;
         _ssmaFastAvgFC[i].Length = _ssmaFastLength;
-        _ssmaSlowAvgFC[i].Price = dataFeed.Close;
+        _ssmaSlowAvgFC[i].Instrument = dataFeed;
         _ssmaSlowAvgFC[i].Length = _ssmaSlowLength;
       }
     }

@@ -18,7 +18,7 @@ namespace PowerLanguage
 
       //Properties:
       public int Length { get; set; }
-      public ISeries<double> Price { get; set; }
+      public IInstrument Instrument { get; set; }
       public double A1 { get { return m_a1; } }
       public double B1 { get { return m_b1; } }
       public double C1 { get { return m_c1; } }
@@ -58,9 +58,9 @@ namespace PowerLanguage
       protected override double CalcBar()
       {
       if (Bars.CurrentBar < 4)
-        m_result = Price[0];
+        m_result = Instrument.Close[0];
       else
-        m_result = m_c1 * (Price[0] + Price[1]) / 2.0d + m_c2 * this[1] + m_c3 * this[2];
+        m_result = m_c1 * (Instrument.Close[0] + Instrument.Close[1]) / 2.0d + m_c2 * this[1] + m_c3 * this[2];
 
         return m_result;
       }

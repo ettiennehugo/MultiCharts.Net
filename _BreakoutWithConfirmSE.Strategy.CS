@@ -57,12 +57,12 @@ namespace PowerLanguage.Strategy {
 			m_relativeStrength.Instrument1 = this.BarsOfData(1);
 			m_relativeStrength.Instrument2 = this.BarsOfData(2);
 			m_instrumentSmoother.Length = SuperSmootherPeriod;
-			m_instrumentSmoother.Price = Bars.Close;
+			m_instrumentSmoother.Instrument = Bars;
 			m_volumeWithSD.Length = VolumePeriod > 0 ? VolumePeriod : _VolumeWithSD.DEFAULT_LENGTH;
 			m_volumeWithSD.Instrument = Bars;
 			m_marketSmoother.Length = MarketPeriod;
 			m_marketBars = this.BarsOfData(2);
-			m_marketSmoother.Price = m_marketBars.Close;
+			m_marketSmoother.Instrument = m_marketBars;
 		}
 
 		protected override void CalcBar()

@@ -350,7 +350,7 @@ namespace PowerLanguage.Strategy {
 			m_vcp.MinimumRequiredLegs = VCPMinimumRequiredLegs;
 			m_vcp.MinimumPercentageContracingLegs = VCPMinimumPercentageContracingLegs;
 			
-			m_exitMovingAverage.Price = m_stock.Close;
+			m_exitMovingAverage.Instrument = m_stock;
 			m_exitMovingAverage.Length = ExitMovingAverageLength;
 
 			m_riskAmountPerContract = 0;

@@ -69,6 +69,7 @@ namespace PowerLanguage.Strategy
 	/// • Length - length of the moving average
 	/// • AtrLength - length to compute the average true range
 	/// • AtrMultiplier - factor to multiply the average true range to get a price level above/below the moving average 
+	/// • ActivationPriceDelta - minimum price delta required between the MA and MA + (Atr * AtrMultiplier) to start sending the exit order
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average and ATR, default is 1 
@@ -636,6 +637,7 @@ namespace PowerLanguage.Strategy
 
 			protected void sendOrder(double price = 0.0)
 			{
+				if (!active()) return;
 				if (m_studyControl.PositionSide > 0)
 				{
 					switch (OrderType)
@@ -668,6 +670,14 @@ namespace PowerLanguage.Strategy
 							break;
 					}
 				}
+			}
+
+			/// <summary>
+			/// Sub-classes can override this method to control when exit orders are sent to the broker.
+			/// </summary>
+			protected virtual bool active()
+			{
+				return true;
 			}
 		}
 
@@ -963,8 +973,8 @@ namespace PowerLanguage.Strategy
 			public EEntryExitCriteria Criteria { get; set; }
 			public int DataFeed { get; set; }
 
-			protected PowerLanguage.Function.AverageFC m_averageSimple;
-			protected PowerLanguage.Function.XAverage m_averageExponential;
+			protected PowerLanguage.Function._AverageSimple m_averageSimple;
+			protected PowerLanguage.Function._AverageExponential m_averageExponential;
 			protected PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
 
 			public ExitMovingAverage(_TrendLine control) : base(control)
@@ -990,6 +1000,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (Length <= 0) return Tuple.Create(false, string.Format("{0} - Length must be greater than 0", this.GetType().Name));
 				if (DataFeed <= 0) return Tuple.Create(false, string.Format("{0} - DataFeed must be greater than 0", this.GetType().Name));
+				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, string.Format("{0} - DataFeed must be less than {1}", this.GetType().Name, m_studyControl.MaxDataStream));
 				return base.IsValid();
 			}
 
@@ -1004,17 +1015,17 @@ namespace PowerLanguage.Strategy
 				{
 					case EMovingAverageType.Simple:
 						m_averageSimple = m_studyControl.AllocateSimpleAverage();
-						m_averageSimple.price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
-						m_averageSimple.length = Length;
+						m_averageSimple.Instrument = m_studyControl.BarsOfData(DataFeed);
+						m_averageSimple.Length = Length;
 						break;
 					case EMovingAverageType.Exponential:
 						m_averageExponential = m_studyControl.AllocateExponentialAverage();
-						m_averageExponential.Price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
+						m_averageExponential.Instrument = m_studyControl.BarsOfData(DataFeed);
 						m_averageExponential.Length = Length;
 						break;
 					case EMovingAverageType.SuperSmoother:
 						m_averageSuperSmoother = m_studyControl.AllocateSuperSmoother();
-						m_averageSuperSmoother.Price = DataFeed == 1 ? m_studyControl.Bars.Close : m_studyControl.BarsOfData(DataFeed).Close;
+						m_averageSuperSmoother.Instrument = m_studyControl.BarsOfData(DataFeed);
 						m_averageSuperSmoother.Length = Length;
 						break;
 				}
@@ -1055,10 +1066,20 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+
+
+
+		//TODO - the moving average values returned from the base class looks incorrect
+		// - getting average value on data feed 2 (D) of 10.52 while the indicator shows value of 9.40!!! SSRM M5 and D used to test around 2/19/2025 breakout
+
+
+
+
 		public class ExitOverextension : ExitMovingAverage
 		{
 			public int AtrLength { get; set; }
 			public double AtrMultiplier { get; set; }
+			public double ActivationPriceDelta { get; set; }
 
 			protected PowerLanguage.Function._ATR m_atr;
 
@@ -1066,6 +1087,8 @@ namespace PowerLanguage.Strategy
 			{
 				AtrLength = 20;
 				AtrMultiplier = 3.0;
+				ActivationPriceDelta = 0.0;
+				OrderType = EOrderType.Limit;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1073,13 +1096,16 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "atrlength") { AtrLength = property.Value.ToObject<int>(); return true; }
 				if (name == "atrmultiplier") { AtrMultiplier = property.Value.ToObject<double>(); return true; }
+				if (name == "activationpricedelta") { ActivationPriceDelta = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
+				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("{0} - Market/stop exit not supported, requires limit type orders", this.GetType().Name));
 				if (AtrLength <= 0) return Tuple.Create(false, string.Format("{0} - AtrLength must be greater than 0", this.GetType().Name));
 				if (AtrMultiplier <= 0) return Tuple.Create(false, string.Format("{0} - AtrFactor must be greater than 0", this.GetType().Name));
+				if (ActivationPriceDelta <= 0) return Tuple.Create(false, string.Format("{0} - ActivationPriceDelta must be greater than 0", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1104,6 +1130,14 @@ namespace PowerLanguage.Strategy
 				return result;
 			}
 
+			/// <summary>
+			/// Overextension is only active when there will be a substantial delta between the price and the moving average otherwise the overextension
+			/// would fire on very small of the ATR.
+			/// </summary>
+			protected override bool active()
+			{
+				return m_atr[0] * AtrMultiplier >= ActivationPriceDelta;
+			}
 		}
 
 		public class ExitStopLoss : ExitPriced
@@ -1668,9 +1702,9 @@ namespace PowerLanguage.Strategy
 		private List<IOrderStopLimit> m_lxStpLmt;
 		private int m_lxStpLmtAllocated;
 
-		private List<PowerLanguage.Function.AverageFC> m_averageSimple;
+		private List<PowerLanguage.Function._AverageSimple> m_averageSimple;
 		private int m_averageSimpleAllocated;
-		private List<PowerLanguage.Function.XAverage> m_averageExponential;
+		private List<PowerLanguage.Function._AverageExponential> m_averageExponential;
 		private int m_averageExponentialAllocated;
 		private List<PowerLanguage.Function._SuperSmoother> m_averageSuperSmoothers;
 		private int m_averageSuperSmoothersAllocated;
@@ -1682,6 +1716,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void Create()
 		{
+			base.Create();
 			Debug = false;
 			createOrders();
 			createIndicators();
@@ -1690,6 +1725,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			base.StartCalc();
 			resetOrders();
 			resetIndicators();
 			parseInstructions();
@@ -1700,6 +1736,7 @@ namespace PowerLanguage.Strategy
 		protected override void StopCalc()
 		{
 			foreach (var instruction in InstructionsList) instruction.StopCalc();
+			base.StopCalc();
 		}
 
 		protected override void CalcBar()
@@ -1835,18 +1872,18 @@ namespace PowerLanguage.Strategy
 			return result;
 		}
 
-		public PowerLanguage.Function.AverageFC AllocateSimpleAverage()
+		public PowerLanguage.Function._AverageSimple AllocateSimpleAverage()
 		{
 			if (m_averageSimpleAllocated >= m_averageSimple.Count) throw new InvalidOperationException("No more Simple Moving Averages available");
-			PowerLanguage.Function.AverageFC result = m_averageSimple[m_averageSimpleAllocated];
+			PowerLanguage.Function._AverageSimple result = m_averageSimple[m_averageSimpleAllocated];
 			m_averageSimpleAllocated++;
 			return result;
 		}
 
-		public PowerLanguage.Function.XAverage AllocateExponentialAverage()
+		public PowerLanguage.Function._AverageExponential AllocateExponentialAverage()
 		{
 			if (m_averageExponentialAllocated >= m_averageExponential.Count) throw new InvalidOperationException("No more Exponential Moving Averages available");
-			PowerLanguage.Function.XAverage result = m_averageExponential[m_averageExponentialAllocated];
+			PowerLanguage.Function._AverageExponential result = m_averageExponential[m_averageExponentialAllocated];
 			m_averageExponentialAllocated++;
 			return result;
 		}
@@ -1912,15 +1949,15 @@ namespace PowerLanguage.Strategy
 
 		private void createIndicators()
 		{
-			m_averageSimple = new List<PowerLanguage.Function.AverageFC>();
-			m_averageExponential = new List<PowerLanguage.Function.XAverage>();
+			m_averageSimple = new List<PowerLanguage.Function._AverageSimple>();
+			m_averageExponential = new List<PowerLanguage.Function._AverageExponential>();
 			m_averageSuperSmoothers = new List<PowerLanguage.Function._SuperSmoother>();
 			m_atr = new List<PowerLanguage.Function._ATR>();
 
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
-				m_averageSimple.Add(new PowerLanguage.Function.AverageFC(this));
-				m_averageExponential.Add(new PowerLanguage.Function.XAverage(this));
+				m_averageSimple.Add(new PowerLanguage.Function._AverageSimple(this));
+				m_averageExponential.Add(new PowerLanguage.Function._AverageExponential(this));
 				m_averageSuperSmoothers.Add(new PowerLanguage.Function._SuperSmoother(this));
 			}
 
@@ -1958,11 +1995,11 @@ namespace PowerLanguage.Strategy
 
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
-				m_averageSimple[i].price = Bars.Close;
-				m_averageSimple[i].length = 10;
-				m_averageExponential[i].Price = Bars.Close;
+				m_averageSimple[i].Instrument = Bars;
+				m_averageSimple[i].Length = 10;
+				m_averageExponential[i].Instrument = Bars;
 				m_averageExponential[i].Length = 10;
-				m_averageSuperSmoothers[i].Price = Bars.Close;
+				m_averageSuperSmoothers[i].Instrument = Bars;
 				m_averageSuperSmoothers[i].Length = 10;
 			}
 

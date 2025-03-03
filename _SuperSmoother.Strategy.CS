@@ -55,7 +55,7 @@ namespace PowerLanguage.Strategy
 		{
 			//initialize functions used
 			m_superSmoother.Length = Period;
-			m_superSmoother.Price = Bars.Close;
+			m_superSmoother.Instrument = Bars;
 			m_efficiencyRatio.Length = Period;
 			m_efficiencyRatio.Instrument = Bars;
 		}

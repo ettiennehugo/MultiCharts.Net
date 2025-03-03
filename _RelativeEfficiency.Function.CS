@@ -19,11 +19,9 @@ namespace PowerLanguage
 			public IInstrument Instrument2 { get; set; }
 
 			//attributes
-			private Function._SuperSmoother m_superSmoother;
 			private bool m_initRatios;
 			private List<Tuple<Double, Double, Double>> m_ratioTuples1;
 			private List<Tuple<Double, Double, Double>> m_ratioTuples2;
-
 			private VariableSeries<double> m_relativeEfficiency;   //relative efficiency without smoothing		
 
 			//interface methods
@@ -35,7 +33,6 @@ namespace PowerLanguage
 				Length = LENGTH;
 				SmoothingLength = 0;
 				m_relativeEfficiency = new VariableSeries<double>(this);
-				m_superSmoother = new _SuperSmoother(this);
 				m_ratioTuples1 = new List<Tuple<Double, Double, Double>>();
 				m_ratioTuples2 = new List<Tuple<Double, Double, Double>>();
 			}
@@ -43,8 +40,6 @@ namespace PowerLanguage
 			protected override void StartCalc()
 			{
 				if (Length <= 0) throw new Exception("Length must be positive.");
-				m_superSmoother.Length = SmoothingLength > 0 ? SmoothingLength : _SuperSmoother.DEFAULT_PERIOD;  //relative efficiency does allow no smoothing but supersmoother requires a smoothing larger than 0
-				m_superSmoother.Price = m_relativeEfficiency;
 				m_initRatios = true;
 				m_ratioTuples1.Clear();
 				m_ratioTuples2.Clear();
@@ -66,7 +61,7 @@ namespace PowerLanguage
 						m_relativeEfficiency.Value = efficiencyRatio1 / efficiencyRatio2;
 				}
 
-				return SmoothingLength > 0 ? m_superSmoother[0] : m_relativeEfficiency[0];
+				return SmoothingLength > 0 ? m_relativeEfficiency.Average(SmoothingLength, 0) : m_relativeEfficiency[0];
 			}
 
 			//methods

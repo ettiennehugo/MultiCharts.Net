@@ -518,6 +518,9 @@
     <Compile Include="_ScannerLowThresholdBreakout.Indicator.CS" />
     <Compile Include="_VolumeWithSD.Function.CS" />
     <Compile Include="_QullamaggieBase.Strategy.CS" />
+    <Compile Include="_AverageSimple.Function.CS" />
+    <Compile Include="_AverageExponential.Function.CS" />
+    <Compile Include="_AverageLinearRegression.Function.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

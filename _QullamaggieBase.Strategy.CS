@@ -112,7 +112,7 @@ namespace PowerLanguage.Strategy {
 			m_adr.Instrument = BarsOfData(2);
 			m_volumeWithSD.Length = EntryVolumeLength;
 			m_volumeWithSD.Instrument = BarsOfData(2);
-			m_exitMovingAverage.Price = m_volumeInstrument.Close;
+			m_exitMovingAverage.Instrument = m_volumeInstrument;
 			m_exitMovingAverage.Length = ExitMovingAverageLength;
 		}
 

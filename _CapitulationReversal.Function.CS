@@ -87,14 +87,14 @@ namespace PowerLanguage
 				//this case since the stock pullback can cause exactly the fast SS to go under the slow SS
 				if (Market == null)
 				{
-					m_fastSSMA.Price = Instrument.Close;
+					m_fastSSMA.Instrument = Instrument;
 					m_fastSSMA.Length = DEFAULT_FAST_SSMA;
-					m_slowSSMA.Price = Instrument.Close;
+					m_slowSSMA.Instrument = Instrument;
 					m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
 				} else {
-					m_fastSSMA.Price = Market.Close;
+					m_fastSSMA.Instrument = Market;
 					m_fastSSMA.Length = DEFAULT_FAST_SSMA;
-					m_slowSSMA.Price = Market.Close;
+					m_slowSSMA.Instrument = Market;
 					m_slowSSMA.Length = DEFAULT_SLOW_SSMA;
 				}
 			}

@@ -71,9 +71,9 @@ namespace PowerLanguage
 				if (SlowSmoothingLength <= 0) throw new System.ArgumentException("SlowSmoothingLength must be greater than zero", "SlowSmoothingLength");
    			m_atr.Instrument = Instrument;
 				m_atr.Length = ATRLength;
-				m_smootherFast.Price = Instrument.Close;
+				m_smootherFast.Instrument = Instrument;
 				m_smootherFast.Length = FastSmoothingLength;
-				m_smootherSlow.Price = Instrument.Close;
+				m_smootherSlow.Instrument = Instrument;
 				m_smootherSlow.Length = SlowSmoothingLength;
 			}
 

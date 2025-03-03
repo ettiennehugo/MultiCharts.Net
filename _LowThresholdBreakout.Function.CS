@@ -149,9 +149,9 @@ namespace PowerLanguage
 				m_bearishPreviousDayDecreasePercent = 1.0 - m_previousDayIncreasePercent;
 
 				//setup indicators
-				m_shortMA.Price = Bars.Close;
+				m_shortMA.Instrument = Bars;
 				m_shortMA.Length = TradeIntensityShortPeriod;
-				m_longMA.Price = Bars.Close;
+				m_longMA.Instrument = Bars;
 				m_longMA.Length = TradeIntensityLongPeriod;
 
 				//determine the first bar to check
