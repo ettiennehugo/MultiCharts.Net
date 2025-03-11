@@ -54,7 +54,7 @@ namespace PowerLanguage
 				}
 				else
 				{
-					//verage true range is a smoothed value of the true range using exponential smoothing
+					//average true range is a smoothed value of the true range using exponential smoothing
 					double tr = Math.Max(Instrument.High[0] - Instrument.Low[0], Math.Max(Math.Abs(Instrument.High[0] - Instrument.Close[1]), Math.Abs(Instrument.Low[0] - Instrument.Close[1])));
 					return (this[1] * (Length - 1) + tr) / Length;
 				}

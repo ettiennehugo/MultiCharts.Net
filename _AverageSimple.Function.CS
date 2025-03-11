@@ -8,7 +8,7 @@ namespace PowerLanguage.Function
 	/// <summary>
 	/// Simple Average calculation, the AverageFC function in MultiCharts do not work correctly on multiple data feeds.
 	/// </summary>
-	public sealed class _AverageSimple : FunctionSimple<System.Double>
+	public sealed class _AverageSimple : FunctionSeries<System.Double>
 	{
 		//constants
 		public const int DEFAULT_LENGTH = 10;
@@ -21,9 +21,7 @@ namespace PowerLanguage.Function
 		public int Length { get; set; }             //length of the average calculation
 
 		//attribute
-		private Queue<double> m_values;
-		private double m_result;
-		private double m_rollingSum;
+
 
 		//interface methods
 		public _AverageSimple(CStudyControl _master) : base(_master) { }
@@ -36,29 +34,19 @@ namespace PowerLanguage.Function
 
 		protected override void StartCalc()
 		{
+			if (Instrument == null) throw new ArgumentNullException("Instrument must be set");
 			if (Length <= 0) throw new ArgumentException("Length must be greater than zero");
-			m_values = new Queue<double>(Length);
-			m_rollingSum = 0.0;
-			m_result = 0.0;
 		}
 
 		protected override System.Double CalcBar()
 		{
-			if (m_values.Count <= Length)
-			{
-				m_values.Enqueue(Instrument.Close[0]);
-				m_rollingSum += Instrument.Close[0];
-				m_result = m_rollingSum / m_values.Count;
-			}
-			else
-			{
-				m_rollingSum -= m_values.Dequeue();
-				m_values.Enqueue(Instrument.Close[0]);
-				m_rollingSum += Instrument.Close[0];
-				m_result = m_rollingSum / Length;
-			}
+			double sum = 0;
+			int availableBars = Math.Min(Length, Bars.CurrentBar + 1);
 
-			return m_result;
+			for (int i = 0; i < availableBars; i++)
+				sum += Instrument.Close[i]; //instrument.Close[0] updates intrabar
+
+			return sum / availableBars;
 		}
 
 		//methods

@@ -8,7 +8,7 @@ namespace PowerLanguage.Function
 	/// <summary>
 	/// Corrected Average Exponential calculation, the XAverage function in MultiCharts do not work correctly on multiple data feeds.
 	/// </summary>
-	public sealed class _AverageExponential : FunctionSimple<System.Double>
+	public sealed class _AverageExponential : FunctionSeries<System.Double>
 	{
 		//constants
 		public const int DEFAULT_LENGTH = 10;
@@ -21,7 +21,6 @@ namespace PowerLanguage.Function
 		public int Length { get; set; }             //length of the average calculation
 
 		//attribute
-		private double m_result;
 		private double m_alpha;
 		private bool m_initialized;
 
@@ -36,25 +35,43 @@ namespace PowerLanguage.Function
 
 		protected override void StartCalc()
 		{
+			if (Instrument == null) throw new ArgumentNullException("Instrument must be set");
 			if (Length <= 0) throw new ArgumentException("Length must be greater than zero");
 			m_alpha = 2.0 / (Length + 1.0);
-			m_result = 0.0;
 			m_initialized = false;
 		}
 
 		protected override System.Double CalcBar()
 		{
-			if (m_initialized)
+			if (!m_initialized)
 			{
-				m_result = m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * m_result;
+				//use SMA for the first 'Length' bars to initialize the EMA correctly (not using this would cause the EMA longer to converge)
+				int availableBars = Math.Min(Length, Bars.CurrentBar + 1);
+				if (availableBars < Length)
+				{
+					double sum = 0;
+					for (int i = 0; i < availableBars; i++)
+					{
+						sum += Instrument.Close[i];
+					}
+					return sum / availableBars;
+				}
+				else
+				{
+					m_initialized = true; // Switch to EMA after Length bars
+					double sma = 0;
+					for (int i = 0; i < Length; i++)
+					{
+						sma += Instrument.Close[i];
+					}
+					return sma / Length;
+				}
 			}
 			else
 			{
-				m_result = Instrument.Close[0];
-				m_initialized = true;
+				// Standard EMA calculation
+				return m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * this[1];
 			}
-
-			return m_result;
 		}
 
 		//methods

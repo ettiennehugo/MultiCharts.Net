@@ -118,6 +118,12 @@ namespace PowerLanguage.Strategy
 	///	• [optional] IncludePreMarket - include pre-market data when computing the entry day high/low, default false
 	///	• [optional] IncludePostMarket - include post-market data when computing the entry day high/low, default false
 	/// 
+	/// ExitTrailingStop
+	/// • Instruction - "ExitDayLowHigh"
+	/// • TrailingType - enum of FixedAmount, Percentage, ATR - determines the type of trailing stop to use, default FixedAmount
+	/// • [alternate] TrailingValue - for FixedAmount type this is a dollar amount and for Percentage this is a percent value, e.g. 0.15 for 15%
+	/// • [alternate] AtrLength - for ATR type this is the length of the ATR to use with TrailingType is set to ATR
+	/// 
 	/// Example JSON:
 	/// [
 	///	    {
@@ -1066,15 +1072,6 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-
-
-
-		//TODO - the moving average values returned from the base class looks incorrect
-		// - getting average value on data feed 2 (D) of 10.52 while the indicator shows value of 9.40!!! SSRM M5 and D used to test around 2/19/2025 breakout
-
-
-
-
 		public class ExitOverextension : ExitMovingAverage
 		{
 			public int AtrLength { get; set; }
@@ -1113,7 +1110,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 				m_atr = m_studyControl.AllocateAtr();
-				m_atr.Instrument = DataFeed == 1 ? m_studyControl.Bars : m_studyControl.BarsOfData(DataFeed);
+				m_atr.Instrument = m_studyControl.BarsOfData(DataFeed);
 				m_atr.Length = AtrLength;
 			}
 
@@ -1632,7 +1629,90 @@ namespace PowerLanguage.Strategy
 				return m_stopLossPrice;
 			}
 		}
-				
+
+		public class ExitTrailingStop : ExitPriced
+		{
+			public enum ETrailingType { FixedAmount, Percentage, ATR }
+			public ETrailingType TrailingType { get; set; }
+			public double TrailingValue { get; set; }
+			public int AtrLength { get; set; }
+			private double m_trailPrice;
+			private PowerLanguage.Function._ATR m_atr;
+
+			public ExitTrailingStop(_TrendLine control) : base(control)
+			{
+				TrailingType = ETrailingType.FixedAmount;
+				TrailingValue = 1.0;
+				AtrLength = 14;
+				m_trailPrice = 0.0;
+			}
+
+			public override bool Parse(JProperty property)
+			{
+				string name = property.Name.ToLower();
+				if (name == "trailingtype") { TrailingType = property.Value.ToObject<ETrailingType>(); return true; }
+				if (name == "trailingvalue") { TrailingValue = property.Value.ToObject<double>(); return true; }
+				if (name == "atrlength") { AtrLength = property.Value.ToObject<int>(); return true; }
+				return base.Parse(property);
+			}
+
+			public override Tuple<bool, string> IsValid()
+			{
+				if (TrailingValue <= 0) return Tuple.Create(false, $"{this.GetType().Name} - TrailingValue must be positive");
+				if (TrailingType == ETrailingType.ATR && AtrLength <= 0) return Tuple.Create(false, $"{this.GetType().Name} - AtrLength must be positive");
+				return base.IsValid();
+			}
+
+			public override void StartCalc()
+			{
+				base.StartCalc();
+				m_trailPrice = 0.0;
+				if (TrailingType == ETrailingType.ATR)
+				{
+					m_atr = m_studyControl.AllocateAtr();
+					m_atr.Instrument = m_studyControl.Bars;
+					m_atr.Length = AtrLength;
+				}
+			}
+
+			public override void CalcBar()
+			{
+				if (m_studyControl.PositionSide == 0)
+				{
+					m_trailPrice = 0.0;
+					return;
+				}
+
+				double trailValue = TrailingValue;
+				if (TrailingType == ETrailingType.ATR) trailValue = m_atr[0] * TrailingValue;
+				else if (TrailingType == ETrailingType.Percentage) trailValue = currentPositionAverageEntryPrice() * TrailingValue;
+
+				if (m_studyControl.PositionSide > 0)
+				{
+					double newTrail = m_studyControl.Bars.High[0] - trailValue;
+					m_trailPrice = Math.Max(m_trailPrice, newTrail);
+				}
+				else if (m_studyControl.PositionSide < 0)
+				{
+					double newTrail = m_studyControl.Bars.Low[0] + trailValue;
+					m_trailPrice = m_trailPrice == 0.0 ? newTrail : Math.Min(m_trailPrice, newTrail);
+				}
+
+				base.CalcBar();
+			}
+
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			{
+				double entryPrice = criteria == EEntryExitCriteria.Close ? m_studyControl.Bars.Close[0] : m_studyControl.Bars.High[0];
+				return direction == EEntryDirection.Long ? entryPrice - TrailingValue : entryPrice + TrailingValue;
+			}
+
+			protected override double exitPrice()
+			{
+				return m_trailPrice;
+			}
+		}
+
 		/// <summary>
 		/// InstructionFactory used to create instructions based on some specific instruction name and associated type.
 		/// </summary>
@@ -1649,6 +1729,7 @@ namespace PowerLanguage.Strategy
 								{ "exitdays", control => new _TrendLine.ExitDays(control) },
 								{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
 								{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
+								{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
 						};
 
 			public static Instruction CreateInstruction(string type, _TrendLine control)
@@ -1741,6 +1822,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
+			evaluateIndicators();
 			foreach (var instruction in InstructionsList) instruction.CalcBar();
 		}
 
@@ -2008,6 +2090,25 @@ namespace PowerLanguage.Strategy
 				m_atr[i].Instrument = Bars;
 				m_atr[i].Length = 14;
 			}
+		}
+
+		//NOTE: Not all instructions access the values of the indicators, so we need to evaluate them all to ensure that the CalcBar is called for all
+		//      of them otherwise the initially computed values are incorrect.
+		private void evaluateIndicators()
+		{
+			if (Bars.Status != EBarState.Close) return;
+
+			for (int i = 0; i < m_averageSimpleAllocated; i++)
+				_ = m_averageSimple[i].Value;
+
+			for (int i = 0; i < m_averageExponentialAllocated; i++)
+				_ = m_averageExponential[i].Value;
+
+			for (int i = 0; i < m_averageSuperSmoothersAllocated; i++)
+				_ = m_averageSuperSmoothers[i].Value;
+
+			for (int i = 0; i < m_atrAllocated; i++)
+				_ = m_atr[i].Value;
 		}
 
 		private void parseInstructions()
