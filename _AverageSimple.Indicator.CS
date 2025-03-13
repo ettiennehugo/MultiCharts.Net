@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Drawing;
-using System.Linq;
-using PowerLanguage.Function;
 
 namespace PowerLanguage.Indicator{
 	[SameAsSymbol]

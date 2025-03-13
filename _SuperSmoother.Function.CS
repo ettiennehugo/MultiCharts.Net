@@ -39,8 +39,8 @@ namespace PowerLanguage.Function
 
 		protected override void StartCalc()
 		{
-			if (Length <= 0)
-				throw new Exception("Supersmoother requires a positive integer for Length.");
+			if (Instrument == null) throw new ArgumentNullException("Supersmoother instrument not set");
+			if (Length <= 0) throw new ArgumentException("Supersmoother requires a positive integer for Length.");
 
 			m_previous1 = 0;
 			m_previous2 = 0;

@@ -45,7 +45,7 @@ namespace PowerLanguage.Function
 
 		protected override System.Double CalcBar()
 		{
-			if (Instrument.Status != EBarState.Close) return this[1]; //only calculate on close bars
+			if (Instrument.Status != EBarState.Close) return m_previous; //only calculate on close bars
 
 			if (!m_initialized)
 			{

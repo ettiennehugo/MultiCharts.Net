@@ -521,6 +521,8 @@
     <Compile Include="_AverageSimple.Function.CS" />
     <Compile Include="_AverageExponential.Function.CS" />
     <Compile Include="_AverageLinearRegression.Function.CS" />
+    <Compile Include="_AverageExponential.Indicator.CS" />
+    <Compile Include="_AverageSimple.Indicator.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
