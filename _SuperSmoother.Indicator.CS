@@ -14,6 +14,7 @@ namespace PowerLanguage.Indicator
     //Attributes:
     private IPlotObject m_plot;
     private Function._SuperSmoother m_superSmoother;
+    private VariableSeries<Double> m_variableSeries;
 
     public _SuperSmoother(object _ctx) : base(_ctx) { }
 
@@ -21,7 +22,8 @@ namespace PowerLanguage.Indicator
     {
       Period = 10;
       m_superSmoother = new Function._SuperSmoother(this);
-      m_plot = AddPlot(new PlotAttributes("SS", EPlotShapes.Line, Color.Red));
+      m_variableSeries = new VariableSeries<Double>(this);
+			m_plot = AddPlot(new PlotAttributes("SS", EPlotShapes.Line, Color.Red));
     }
 
     protected override void StartCalc()
@@ -32,7 +34,8 @@ namespace PowerLanguage.Indicator
 
     protected override void CalcBar()
     {
-      m_plot.Set(m_superSmoother[0]);
+      m_variableSeries.Value = m_superSmoother[0];
+			m_plot.Set(m_variableSeries.Value);
     }
   }
 }

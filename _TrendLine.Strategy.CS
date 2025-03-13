@@ -1719,18 +1719,18 @@ namespace PowerLanguage.Strategy
 		public static class InstructionFactory
 		{
 			private static readonly Dictionary<string, Func<_TrendLine, Instruction>> m_instructionCreators = new Dictionary<string, Func<_TrendLine, Instruction>>
-						{
-								{ "entryline", control => new _TrendLine.EntryLine(control) },
-								{ "exitline", control => new _TrendLine.ExitLine(control) },
-								{ "exitmovingaverage", control => new _TrendLine.ExitMovingAverage(control) },
-								{ "exitoverextension", control => new _TrendLine.ExitOverextension(control) },
-								{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
-								{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
-								{ "exitdays", control => new _TrendLine.ExitDays(control) },
-								{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
-								{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
-								{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
-						};
+			{
+					{ "entryline", control => new _TrendLine.EntryLine(control) },
+					{ "exitline", control => new _TrendLine.ExitLine(control) },
+					{ "exitmovingaverage", control => new _TrendLine.ExitMovingAverage(control) },
+					{ "exitoverextension", control => new _TrendLine.ExitOverextension(control) },
+					{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
+					{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
+					{ "exitdays", control => new _TrendLine.ExitDays(control) },
+					{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
+					{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
+					{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
+			};
 
 			public static Instruction CreateInstruction(string type, _TrendLine control)
 			{
@@ -2096,8 +2096,6 @@ namespace PowerLanguage.Strategy
 		//      of them otherwise the initially computed values are incorrect.
 		private void evaluateIndicators()
 		{
-			if (Bars.Status != EBarState.Close) return;
-
 			for (int i = 0; i < m_averageSimpleAllocated; i++)
 				_ = m_averageSimple[i].Value;
 

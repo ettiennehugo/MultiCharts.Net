@@ -6,9 +6,9 @@ using System.Linq;
 namespace PowerLanguage.Function
 {
 	/// <summary>
-	/// Corrected Average Exponential calculation, the XAverage function in MultiCharts do not work correctly on multiple data feeds.
+	/// Average Exponential calculation, the XAverage function in MultiCharts do not work correctly on multiple data feeds.
 	/// </summary>
-	public sealed class _AverageExponential : FunctionSeries<System.Double>
+	public sealed class _AverageExponential : FunctionSimple<System.Double>
 	{
 		//constants
 		public const int DEFAULT_LENGTH = 10;
@@ -21,6 +21,7 @@ namespace PowerLanguage.Function
 		public int Length { get; set; }             //length of the average calculation
 
 		//attribute
+		private double m_previous;
 		private double m_alpha;
 		private bool m_initialized;
 
@@ -37,12 +38,15 @@ namespace PowerLanguage.Function
 		{
 			if (Instrument == null) throw new ArgumentNullException("Instrument must be set");
 			if (Length <= 0) throw new ArgumentException("Length must be greater than zero");
+			m_previous = 0;
 			m_alpha = 2.0 / (Length + 1.0);
 			m_initialized = false;
 		}
 
 		protected override System.Double CalcBar()
 		{
+			if (Instrument.Status != EBarState.Close) return this[1]; //only calculate on close bars
+
 			if (!m_initialized)
 			{
 				//use SMA for the first 'Length' bars to initialize the EMA correctly (not using this would cause the EMA longer to converge)
@@ -51,9 +55,7 @@ namespace PowerLanguage.Function
 				{
 					double sum = 0;
 					for (int i = 0; i < availableBars; i++)
-					{
 						sum += Instrument.Close[i];
-					}
 					return sum / availableBars;
 				}
 				else
@@ -61,16 +63,20 @@ namespace PowerLanguage.Function
 					m_initialized = true; // Switch to EMA after Length bars
 					double sma = 0;
 					for (int i = 0; i < Length; i++)
-					{
 						sma += Instrument.Close[i];
-					}
 					return sma / Length;
 				}
 			}
 			else
 			{
-				// Standard EMA calculation
-				return m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * this[1];
+				//standard EMA calculation
+				double result = m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * m_previous;
+
+				//only update the previous value on close bars
+				if (Instrument.Status == EBarState.Close)
+					m_previous = result;
+
+				return result;
 			}
 		}
 

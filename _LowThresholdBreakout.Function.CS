@@ -45,6 +45,11 @@ namespace PowerLanguage
 		/// TODO: TBD - watch video and see what else needs to be implemented for this.
 		/// 
 		/// </summary>
+		/// 
+		
+		//TODO Make the FunctionSimple a FunctionSeries<System.Boolean> since it would not work on multiple timeframes or going from
+		//     historical data to realtime data - see p 35 in the programming manual.
+		
 		public sealed class _LowThresholdBreakout : FunctionSimple<System.Boolean>
 		{
 			//constants
