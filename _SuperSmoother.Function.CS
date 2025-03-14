@@ -28,6 +28,7 @@ namespace PowerLanguage.Function
 		private double m_c1;
 		private double m_c2;
 		private double m_c3;
+		private int m_lastProcessedBar;
 
 		public _SuperSmoother(CStudyControl _master) : base(_master) { }
 		public _SuperSmoother(CStudyControl _master, int _ds) : base(_master, _ds) { }
@@ -44,6 +45,7 @@ namespace PowerLanguage.Function
 
 			m_previous1 = 0;
 			m_previous2 = 0;
+			m_lastProcessedBar = -1;
 
 			//compute the coefficients of the SuperSmoother based on given length
 			m_a1 = Math.Exp(-SQRT_2 * Math.PI / Length);
@@ -55,18 +57,21 @@ namespace PowerLanguage.Function
 
 		protected override double CalcBar()
 		{
-			double result = 0;
+			//if not a bar close or this bar was already processed, return the last value
+			if (Instrument.Status != EBarState.Close || Instrument.CurrentBar == m_lastProcessedBar) return m_previous1;
+
+			m_lastProcessedBar = Instrument.CurrentBar;
+
+			//this is a new daily bar close, so perform the calculation
+			double result;
 			if (Instrument.CurrentBar < 4)
 				result = Instrument.Close[0];
 			else
 				result = m_c1 * (Instrument.Close[0] + Instrument.Close[1]) / 2.0d + m_c2 * m_previous1 + m_c3 * m_previous2;
 
-			//only update the previous values on close bars
-			if (Instrument.Status == EBarState.Close)
-			{
-				m_previous2 = m_previous1;
-				m_previous1 = result;
-			}
+			//update state variables
+			m_previous2 = m_previous1;
+			m_previous1 = result;
 
 			return result;
 		}

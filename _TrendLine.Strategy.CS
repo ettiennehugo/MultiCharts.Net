@@ -1052,23 +1052,19 @@ namespace PowerLanguage.Strategy
 				
 			protected override double exitPrice()
 			{
-				double result = 0.0;
 				switch (MovingAverageType)
 				{
 					case EMovingAverageType.Simple:
-						result = m_averageSimple[0];
-						break;
+						return m_averageSimple[0];
 					case EMovingAverageType.Exponential:
-						result = m_averageExponential[0];
-						break;
+						return m_averageExponential[0];
 					case EMovingAverageType.SuperSmoother:
-						result = m_averageSuperSmoother[0];
-						break;
+						return m_averageSuperSmoother[0];
 				}
 
 				//should never be reached
 				if (m_studyControl.Debug) m_studyControl.Output.WriteLine(string.Format("{0} - exitPrice - could not determine exit price", this.GetType().Name));
-				return result;
+				return 0.0;
 			}
 		}
 
@@ -2097,16 +2093,16 @@ namespace PowerLanguage.Strategy
 		private void evaluateIndicators()
 		{
 			for (int i = 0; i < m_averageSimpleAllocated; i++)
-				_ = m_averageSimple[i].Value;
+				m_averageSimple[i].Call();
 
 			for (int i = 0; i < m_averageExponentialAllocated; i++)
-				_ = m_averageExponential[i].Value;
+				m_averageExponential[i].Call();
 
 			for (int i = 0; i < m_averageSuperSmoothersAllocated; i++)
-				_ = m_averageSuperSmoothers[i].Value;
+				m_averageSuperSmoothers[i].Call();
 
 			for (int i = 0; i < m_atrAllocated; i++)
-				_ = m_atr[i].Value;
+				m_atr[i].Call();
 		}
 
 		private void parseInstructions()

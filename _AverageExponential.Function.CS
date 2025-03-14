@@ -24,6 +24,7 @@ namespace PowerLanguage.Function
 		private double m_previous;
 		private double m_alpha;
 		private bool m_initialized;
+		private int m_lastProcessedBar;
 
 		//interface methods
 		public _AverageExponential(CStudyControl _master) : base(_master) { }
@@ -39,18 +40,22 @@ namespace PowerLanguage.Function
 			if (Instrument == null) throw new ArgumentNullException("Instrument must be set");
 			if (Length <= 0) throw new ArgumentException("Length must be greater than zero");
 			m_previous = 0;
+			m_lastProcessedBar = -1;
 			m_alpha = 2.0 / (Length + 1.0);
 			m_initialized = false;
 		}
 
 		protected override System.Double CalcBar()
 		{
-			if (Instrument.Status != EBarState.Close) return m_previous; //only calculate on close bars
+			//if (Instrument.Status != EBarState.Close) return m_previous; //only calculate on close bars
+			if (Instrument.Status != EBarState.Close || Instrument.CurrentBar == m_lastProcessedBar) return m_previous;
+
+			m_lastProcessedBar = Instrument.CurrentBar;
 
 			if (!m_initialized)
 			{
 				//use SMA for the first 'Length' bars to initialize the EMA correctly (not using this would cause the EMA longer to converge)
-				int availableBars = Math.Min(Length, Bars.CurrentBar + 1);
+				int availableBars = Math.Min(Length, Instrument.CurrentBar + 1);
 				if (availableBars < Length)
 				{
 					double sum = 0;
@@ -64,19 +69,14 @@ namespace PowerLanguage.Function
 					double sma = 0;
 					for (int i = 0; i < Length; i++)
 						sma += Instrument.Close[i];
-					return sma / Length;
+					m_previous = sma / Length;
+					return m_previous;
 				}
 			}
 			else
 			{
-				//standard EMA calculation
-				double result = m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * m_previous;
-
-				//only update the previous value on close bars
-				if (Instrument.Status == EBarState.Close)
-					m_previous = result;
-
-				return result;
+				m_previous = m_alpha * Instrument.Close[0] + (1.0 - m_alpha) * m_previous;
+				return m_previous;
 			}
 		}
 
