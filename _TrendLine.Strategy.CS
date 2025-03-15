@@ -16,7 +16,7 @@ using System.Runtime.Remoting.Messaging;
 namespace PowerLanguage.Strategy
 {
 	/// <summary>
-	/// Manages entry and exit signals based on a trendlines.
+	/// Manages entry and exit signals based on trendlines.
 	/// 
 	/// Supports the following:
 	/// - Takes a set of instructions defined in JSON tied to the trendlines defined on the chart to trade against the price levels defined by the trendlines.
@@ -69,7 +69,7 @@ namespace PowerLanguage.Strategy
 	/// • Length - length of the moving average
 	/// • AtrLength - length to compute the average true range
 	/// • AtrMultiplier - factor to multiply the average true range to get a price level above/below the moving average 
-	/// • ActivationPriceDelta - minimum price delta required between the MA and MA + (Atr * AtrMultiplier) to start sending the exit order
+	/// • ActivationPriceDelta - minimum (Atr * AtrMultiplier) delta required between the MA and price to start sending the exit order, used to make sure small ATR values do not inadvertently set off the exit
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average and ATR, default is 1 
@@ -119,10 +119,13 @@ namespace PowerLanguage.Strategy
 	///	• [optional] IncludePostMarket - include post-market data when computing the entry day high/low, default false
 	/// 
 	/// ExitTrailingStop
-	/// • Instruction - "ExitDayLowHigh"
+	/// • Instruction - "ExitTrailingStop"
 	/// • TrailingType - enum of FixedAmount, Percentage, ATR - determines the type of trailing stop to use, default FixedAmount
-	/// • [alternate] TrailingValue - for FixedAmount type this is a dollar amount and for Percentage this is a percent value, e.g. 0.15 for 15%
-	/// • [alternate] AtrLength - for ATR type this is the length of the ATR to use with TrailingType is set to ATR
+	/// • [alternate] ActivationProfitPercent - profit percentage to activate the trailing stop
+	/// • [alternate] ActivationProfitPrice - profit price to activate the trailing stop 
+	/// • [optional] Criteria - enum of Close, LowHigh - activate trailing stop based on bar close or bar low/high, defaults to Close.
+	/// • [alternate on TrailingType] TrailingValue - for FixedAmount type this is a dollar amount and for Percentage this is a percent value, e.g. 0.15 for 15%
+	/// • [alternate on TrailingType] AtrLength - for ATR type this is the length of the ATR to use with TrailingType is set to ATR
 	/// 
 	/// Example JSON:
 	/// [
@@ -752,7 +755,7 @@ namespace PowerLanguage.Strategy
 				if (m_line == null) return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EntryPercent must be between 0 and 1", this.GetType().Name));
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, string.Format("{0} - ClosePercentile must be between 0 and 1", this.GetType().Name));
-				if (StartTime > EndTime) return Tuple.Create(false, string.Format("{0} - StartTime must be before EndTime", this.GetType().Name) );
+				if (StartTime > EndTime) return Tuple.Create(false, string.Format("{0} - StartTime must be before EndTime", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -982,6 +985,7 @@ namespace PowerLanguage.Strategy
 			protected PowerLanguage.Function._AverageSimple m_averageSimple;
 			protected PowerLanguage.Function._AverageExponential m_averageExponential;
 			protected PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
+			protected IInstrument m_instrument;
 
 			public ExitMovingAverage(_TrendLine control) : base(control)
 			{
@@ -1016,22 +1020,23 @@ namespace PowerLanguage.Strategy
 				m_averageSimple = null;
 				m_averageExponential = null;
 				m_averageSuperSmoother = null;
+				m_instrument = m_studyControl.BarsOfData(DataFeed);
 
 				switch (MovingAverageType)
 				{
 					case EMovingAverageType.Simple:
 						m_averageSimple = m_studyControl.AllocateSimpleAverage();
-						m_averageSimple.Instrument = m_studyControl.BarsOfData(DataFeed);
+						m_averageSimple.Instrument = m_instrument;
 						m_averageSimple.Length = Length;
 						break;
 					case EMovingAverageType.Exponential:
 						m_averageExponential = m_studyControl.AllocateExponentialAverage();
-						m_averageExponential.Instrument = m_studyControl.BarsOfData(DataFeed);
+						m_averageExponential.Instrument = m_instrument;
 						m_averageExponential.Length = Length;
 						break;
 					case EMovingAverageType.SuperSmoother:
 						m_averageSuperSmoother = m_studyControl.AllocateSuperSmoother();
-						m_averageSuperSmoother.Instrument = m_studyControl.BarsOfData(DataFeed);
+						m_averageSuperSmoother.Instrument = m_instrument;
 						m_averageSuperSmoother.Length = Length;
 						break;
 				}
@@ -1041,7 +1046,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < Length) return;
-				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
+				if (Criteria == EEntryExitCriteria.Close && m_instrument.Status != EBarState.Close) return;
 				base.CalcBar();
 			}
 
@@ -1049,7 +1054,7 @@ namespace PowerLanguage.Strategy
 			{
 				return exitPrice();
 			}
-				
+
 			protected override double exitPrice()
 			{
 				switch (MovingAverageType)
@@ -1106,7 +1111,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 				m_atr = m_studyControl.AllocateAtr();
-				m_atr.Instrument = m_studyControl.BarsOfData(DataFeed);
+				m_atr.Instrument = m_instrument;
 				m_atr.Length = AtrLength;
 			}
 
@@ -1125,7 +1130,7 @@ namespace PowerLanguage.Strategy
 
 			/// <summary>
 			/// Overextension is only active when there will be a substantial delta between the price and the moving average otherwise the overextension
-			/// would fire on very small of the ATR.
+			/// would fire on very small values of the ATR.
 			/// </summary>
 			protected override bool active()
 			{
@@ -1579,7 +1584,7 @@ namespace PowerLanguage.Strategy
 				//should not be reached
 				return 0.0;
 			}
-			
+
 			public double getDayLow()
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
@@ -1588,7 +1593,7 @@ namespace PowerLanguage.Strategy
 				while (m_studyControl.Bars.Time[index].Date == startBarDate.Date && index < m_studyControl.Bars.CurrentBar)
 				{
 					if (!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) break; //no more values to check
-					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME) 
+					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME)
 					{
 						index++;
 						continue; //skip values after market close
@@ -1596,10 +1601,10 @@ namespace PowerLanguage.Strategy
 					result = m_studyControl.Bars.Low[index] < result ? m_studyControl.Bars.Low[index] : result;
 					index++;
 				}
-				
+
 				return result;
 			}
-			
+
 			public double getDayHigh()
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
@@ -1616,7 +1621,7 @@ namespace PowerLanguage.Strategy
 					result = m_studyControl.Bars.High[index] > result ? m_studyControl.Bars.High[index] : result;
 					index++;
 				}
-				
+
 				return result;
 			}
 
@@ -1630,22 +1635,32 @@ namespace PowerLanguage.Strategy
 		{
 			public enum ETrailingType { FixedAmount, Percentage, ATR }
 			public ETrailingType TrailingType { get; set; }
+			public EEntryExitCriteria Criteria { get; set; }
+			public double ActivationProfitPercent { get; set; }
+			public double ActivationProfitAmount { get; set; }
 			public double TrailingValue { get; set; }
 			public int AtrLength { get; set; }
 			private double m_trailPrice;
 			private PowerLanguage.Function._ATR m_atr;
+			private bool m_active;
 
 			public ExitTrailingStop(_TrendLine control) : base(control)
 			{
+				Criteria = EEntryExitCriteria.Close;
+				ActivationProfitPercent = 0.0;
+				ActivationProfitAmount = 0.0;
 				TrailingType = ETrailingType.FixedAmount;
 				TrailingValue = 1.0;
 				AtrLength = 14;
 				m_trailPrice = 0.0;
+				m_active = false;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
+				if (name == "activationprofitpercent") { ActivationProfitPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "activationprofitamount") { ActivationProfitAmount = property.Value.ToObject<double>(); return true; }
 				if (name == "trailingtype") { TrailingType = property.Value.ToObject<ETrailingType>(); return true; }
 				if (name == "trailingvalue") { TrailingValue = property.Value.ToObject<double>(); return true; }
 				if (name == "atrlength") { AtrLength = property.Value.ToObject<int>(); return true; }
@@ -1654,6 +1669,7 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
+				if (ActivationProfitPercent <= 0 && ActivationProfitAmount <= 0) return Tuple.Create(false, $"{this.GetType().Name} - ActivationProfitPercent or ActivationProfitAmount must be set to zero or a positive number");
 				if (TrailingValue <= 0) return Tuple.Create(false, $"{this.GetType().Name} - TrailingValue must be positive");
 				if (TrailingType == ETrailingType.ATR && AtrLength <= 0) return Tuple.Create(false, $"{this.GetType().Name} - AtrLength must be positive");
 				return base.IsValid();
@@ -1663,6 +1679,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 				m_trailPrice = 0.0;
+				m_active = false;
 				if (TrailingType == ETrailingType.ATR)
 				{
 					m_atr = m_studyControl.AllocateAtr();
@@ -1676,12 +1693,14 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.PositionSide == 0)
 				{
 					m_trailPrice = 0.0;
+					m_active = false;
 					return;
 				}
 
 				double trailValue = TrailingValue;
 				if (TrailingType == ETrailingType.ATR) trailValue = m_atr[0] * TrailingValue;
-				else if (TrailingType == ETrailingType.Percentage) trailValue = currentPositionAverageEntryPrice() * TrailingValue;
+				else
+					if (TrailingType == ETrailingType.Percentage) trailValue = currentPositionAverageEntryPrice() * TrailingValue;
 
 				if (m_studyControl.PositionSide > 0)
 				{
@@ -1707,6 +1726,28 @@ namespace PowerLanguage.Strategy
 			{
 				return m_trailPrice;
 			}
+
+			protected override bool active()
+			{
+				//update activation state if it was not activated before
+				if (!m_active)
+				{
+					double entryPrice = currentPositionAverageEntryPrice();
+					double activationPrice = entryPrice;
+					if (ActivationProfitAmount > 0)
+						activationPrice = m_studyControl.PositionSide > 0 ? entryPrice + ActivationProfitAmount : entryPrice - ActivationProfitAmount;
+					else
+						activationPrice = m_studyControl.PositionSide > 0 ? entryPrice * (1.0 + ActivationProfitPercent) : entryPrice * (1.0 - ActivationProfitPercent);
+
+					if (Criteria == EEntryExitCriteria.Close)
+						m_active = m_studyControl.PositionSide > 0 ? m_studyControl.Bars.Close[0] >= activationPrice : m_studyControl.Bars.Close[0] <= activationPrice;
+					else
+						m_active = m_studyControl.PositionSide > 0 ? m_studyControl.Bars.High[0] >= activationPrice : m_studyControl.Bars.Low[0] <= activationPrice;
+				}
+
+				return m_active;
+			}
+
 		}
 
 		/// <summary>

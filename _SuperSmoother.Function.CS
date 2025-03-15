@@ -57,9 +57,8 @@ namespace PowerLanguage.Function
 
 		protected override double CalcBar()
 		{
-			//if not a bar close or this bar was already processed, return the last value
+			//only calculate on a new bar
 			if (Instrument.Status != EBarState.Close || Instrument.CurrentBar == m_lastProcessedBar) return m_previous1;
-
 			m_lastProcessedBar = Instrument.CurrentBar;
 
 			//this is a new daily bar close, so perform the calculation
@@ -69,7 +68,7 @@ namespace PowerLanguage.Function
 			else
 				result = m_c1 * (Instrument.Close[0] + Instrument.Close[1]) / 2.0d + m_c2 * m_previous1 + m_c3 * m_previous2;
 
-			//update state variables
+			//update previous state variables
 			m_previous2 = m_previous1;
 			m_previous1 = result;
 
