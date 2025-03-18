@@ -83,6 +83,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
 	///	• [alternate] LossPrice - exit the position if the price moves against you by a specified amount. 
+	///	• [alternate] Price - exit the position at the specific price value.
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// 
@@ -1140,13 +1141,15 @@ namespace PowerLanguage.Strategy
 
 		public class ExitStopLoss : ExitPriced
 		{
-			public double LossPrice { get; set; }
 			public double LossPercent { get; set; }
+			public double LossPrice { get; set; }
+			public double Price { get; set; }
 
 			public ExitStopLoss(_TrendLine control) : base(control)
 			{
 				LossPercent = -1.0;
 				LossPrice = -1.0;
+				Price = -1.0;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1154,44 +1157,21 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "losspercent") { LossPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "lossprice") { LossPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "price") { Price = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (LossPercent == -1.0 && LossPrice == -1.0) return Tuple.Create(false, string.Format("{0} - LossPercent or LossPrice must be specified", this.GetType().Name));
-				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, string.Format("{0} - LossPrice must be a positive number (will be negated by strategy)", this.GetType().Name));
+				if (LossPercent == -1.0 && LossPrice == -1.0 && Price == -1.0) return Tuple.Create(false, string.Format("{0} - LossPercent, LossPrice or Price must be specified", this.GetType().Name));
 				if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, string.Format("{0} - LossPercent must be between 0 and 1", this.GetType().Name));
+				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, string.Format("{0} - LossPrice must be a positive number (will be negated by strategy)", this.GetType().Name));
+				if (Price != -1.0 && Price <= 0) return Tuple.Create(false, string.Format("{0} - Price must be a positive number (will be negated by strategy)", this.GetType().Name));
 				return base.IsValid();
 			}
 
 			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
 			{
-				if (LossPrice != -1)
-				{
-					switch (direction)
-					{
-						case EEntryDirection.Long:
-							switch (criteria)
-							{
-								case EEntryExitCriteria.Close:
-									return m_studyControl.Bars.Close[0] - LossPrice;
-								case EEntryExitCriteria.LowHigh:
-									return m_studyControl.Bars.High[0] - LossPrice;
-							}
-							break;
-						case EEntryDirection.Short:
-							switch (criteria)
-							{
-								case EEntryExitCriteria.Close:
-									return m_studyControl.Bars.Close[0] + LossPrice;
-								case EEntryExitCriteria.LowHigh:
-									return m_studyControl.Bars.Low[0] + LossPrice;
-							}
-							break;
-					}
-				}
-
 				if (LossPercent != -1)
 				{
 					switch (direction)
@@ -1217,6 +1197,33 @@ namespace PowerLanguage.Strategy
 					}
 				}
 
+				if (LossPrice != -1)
+				{
+					switch (direction)
+					{
+						case EEntryDirection.Long:
+							switch (criteria)
+							{
+								case EEntryExitCriteria.Close:
+									return m_studyControl.Bars.Close[0] - LossPrice;
+								case EEntryExitCriteria.LowHigh:
+									return m_studyControl.Bars.High[0] - LossPrice;
+							}
+							break;
+						case EEntryDirection.Short:
+							switch (criteria)
+							{
+								case EEntryExitCriteria.Close:
+									return m_studyControl.Bars.Close[0] + LossPrice;
+								case EEntryExitCriteria.LowHigh:
+									return m_studyControl.Bars.Low[0] + LossPrice;
+							}
+							break;
+					}
+				}
+
+				if (Price != -1) return Price;
+
 				//should never be reached
 				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitStopLoss - EstimateExitPrice - could not determine exit price");
 				return 0.0;
@@ -1225,9 +1232,9 @@ namespace PowerLanguage.Strategy
 			protected override double exitPrice()
 			{
 				double averageEntryPrice = currentPositionAverageEntryPrice();
+				if (LossPercent != -1.0) return m_studyControl.PositionSide > 0 ? averageEntryPrice - averageEntryPrice * LossPercent : averageEntryPrice + averageEntryPrice * LossPercent;
 				if (LossPrice != -1.0) return m_studyControl.PositionSide > 0 ? averageEntryPrice - LossPrice : averageEntryPrice + LossPrice;
-				double priceDelta = averageEntryPrice * LossPercent;
-				return m_studyControl.PositionSide > 0 ? averageEntryPrice - priceDelta : averageEntryPrice + priceDelta;
+				return Price;
 			}
 		}
 
