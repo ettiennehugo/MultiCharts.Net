@@ -26,7 +26,12 @@ namespace PowerLanguage.Strategy
 	/// Instructions:
 	/// EntryLine
 	/// • Instruction - "EntryLine" 
-	///	• LineId - trend line id 
+	///	• [alternate] Line start/end
+	///			LineStartTime - start date/time of the line
+	///			LineStartPrice - start price of the line
+	///			LineEndTime - end date/time of the line
+	///			LineEndPrice - end price of the line
+	///	• [alternate] LineId - trend line id 
 	///	• Direction - enum of long, short, default long
 	///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
@@ -43,10 +48,20 @@ namespace PowerLanguage.Strategy
 	///	                              of the account equity based on the entry price and the stop-loss price.
 	///	• [optional] MaxRiskBasedEquityPercent - When a risk based entry is used (see StopLossExitId) the maximum percent of the account equity to use for the position as risk based position entries can become really big,
 	///	                                         default is 1.0 (100%) of the account.
-	///  
+	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
+	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
+	///	• [optional] VolumeLevel - default -1.0 (negative to disable volume analysis), factor used to multiply against the volume standard deviation to determine a volume breakout, e.g. 2.0 would mean that if volume
+	///	                           is greater than (average volume + 2 * standard deviation) an entry would be allowed 
+	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false 
+	/// 
 	/// ExitLine
 	/// • Instruction - "ExitLine" 
-	/// • LineId - trend line id
+	///	• [alternate] Line start/end
+	///			LineStartTime - start date/time of the line
+	///			LineStartPrice - start price of the line
+	///			LineEndTime - end date/time of the line
+	///			LineEndPrice - end price of the line
+	///	• [alternate] LineId - trend line id 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
@@ -175,6 +190,7 @@ namespace PowerLanguage.Strategy
 		public const int MAX_INSTRUCTIONS = 10;
 		public const int MAX_MOVINGAVERAGES = 5;
 		public const int MAX_ATR = 5;
+		public const int MAX_VOLUME_WITH_SD = 5;
 		public const int DEFAULT_VOLUME_PERIOD = 20;
 
 		//types
@@ -219,6 +235,15 @@ namespace PowerLanguage.Strategy
 		{
 			CalendarDays,
 			TradingDays
+		};
+
+		public enum EVolumeLevel
+		{
+			Disable = -1,
+			AboveAverage,
+			AboveAverageSD1,
+			AboveAverageSD2,
+			AboveAverageSD3
 		};
 
 		public abstract class Instruction
@@ -348,6 +373,7 @@ namespace PowerLanguage.Strategy
 			public DateTime ValidUntil { get; set; }
 			public string StopLossExitId { get; set; }
 			public double MaxRiskBasedEquityPercent { get; set; }
+			public bool UseRoundLots { get; set; }
 
 			protected IOrderMarket m_orderLeMkt;
 			protected IOrderMarket m_orderSeMkt;
@@ -387,6 +413,7 @@ namespace PowerLanguage.Strategy
 				if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
 				if (name == "stoplossexitid") { StopLossExitId = property.Value.ToString().ToLower(); return true; }
 				if (name == "maxriskbasedequitypercent") { MaxRiskBasedEquityPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "useroundlots") { UseRoundLots = property.Value.ToObject<bool>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -521,6 +548,7 @@ namespace PowerLanguage.Strategy
 					size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
 				}
 
+				if (UseRoundLots) size = (int)(Math.Round(size / 100.0) * 100.0);
 				return size;
 			}
 
@@ -722,16 +750,55 @@ namespace PowerLanguage.Strategy
 			protected abstract double exitPrice();
 		}
 
+		protected class LineProxy
+		{
+			public DateTime StartTime { get; }
+			public double StartPrice { get; }
+			public DateTime EndTime { get; }
+			public double EndPrice { get; }
+
+			private ITrendLineObject m_line;
+			private double m_slope;
+
+			public LineProxy(DateTime startTime, double startPrice, DateTime endTime, double endPrice)
+			{
+				StartTime = startTime;
+				StartPrice = startPrice;
+				EndTime = endTime;
+				EndPrice = endPrice;
+				m_slope = (EndPrice - StartPrice) / (EndTime.Ticks - StartTime.Ticks);
+			}
+
+			public LineProxy(ITrendLineObject line) {
+				m_line = line;
+				StartTime = line.Begin.Time;
+				StartPrice = line.Begin.Price;
+				EndTime = line.End.Time;
+				EndPrice = line.End.Price;
+			}
+
+			public double PriceValue(DateTime time) { 
+				if (m_line != null) return m_line.PriceValue(time);
+				return StartPrice + m_slope * (time.Ticks - StartTime.Ticks);
+			}
+		}
+
 		public class EntryLine : Entry
 		{
 			public int LineId { get; set; }
+			public DateTime LineStartTime { get; set; }
+			public double LineStartPrice { get; set; }
+			public DateTime LineEndTime { get; set; }
+			public double LineEndPrice { get; set; }
 			public double ClosePercentile { get; set; }
 			public DateTime StartTime { get; set; }
 			public DateTime EndTime { get; set; }
-
-			private ITrendLineObject m_line;
-			private DateTime m_startDate;
-			private DateTime m_endDate;
+			public int VolumeDataFeed { get; set; }
+			public int VolumeLength { get; set; }
+			public EVolumeLevel VolumeLevel { get; set; }
+			private LineProxy m_line;
+			private PowerLanguage.Function._VolumeWithSD m_volume;
+			private IInstrument m_volumeInstrument;
 
 			public EntryLine(_TrendLine control) : base(control)
 			{
@@ -739,6 +806,16 @@ namespace PowerLanguage.Strategy
 				ClosePercentile = 0.5;
 				StartTime = DateTime.MinValue;
 				EndTime = DateTime.MaxValue;
+				LineStartTime = DateTime.MinValue;
+				LineStartPrice = 0.0;
+				LineEndTime = DateTime.MinValue;
+				LineEndPrice = 0.0;
+				VolumeDataFeed = 1;
+				VolumeLength = 20;
+				VolumeLevel = EVolumeLevel.Disable;
+				m_line = null;
+				m_volume = null;
+				m_volumeInstrument = null;
 			}
 
 			public override bool Parse(JProperty property)
@@ -748,30 +825,53 @@ namespace PowerLanguage.Strategy
 				if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
 				if (name == "starttime") { StartTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "endtime") { EndTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "linestarttime") { LineStartTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "volumedatafeed") { VolumeDataFeed = property.Value.ToObject<int>(); return true; }
+				if (name == "volumelength") { VolumeLength = property.Value.ToObject<int>(); return true; }
+				if (name == "volumelevel") { VolumeLevel = property.Value.ToObject<EVolumeLevel>(); return true; }
+
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (m_line == null) return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				if (LineId != 0 && m_line == null)
+					return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				else if (LineStartTime == DateTime.MinValue || LineEndTime == DateTime.MinValue || LineStartPrice == 0.0 || LineEndPrice == 0.0)
+					return Tuple.Create(false, string.Format("{0} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified", this.GetType().Name));
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EntryPercent must be between 0 and 1", this.GetType().Name));
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, string.Format("{0} - ClosePercentile must be between 0 and 1", this.GetType().Name));
 				if (StartTime > EndTime) return Tuple.Create(false, string.Format("{0} - StartTime must be before EndTime", this.GetType().Name));
+				if (VolumeLevel != EVolumeLevel.Disable && VolumeDataFeed < 1) return Tuple.Create(false, string.Format("{0} - VolumeDataFeed must be greater than 0", this.GetType().Name));
+				if (VolumeLevel != EVolumeLevel.Disable && VolumeLength < 1) return Tuple.Create(false, string.Format("{0} - VolumeLength must be greater than 0", this.GetType().Name));
 				return base.IsValid();
 			}
 
 			public override void StartCalc()
 			{
 				base.StartCalc();
-				m_line = getTrendLine(LineId);
-				m_startDate = DateTime.MinValue;
-				m_endDate = DateTime.MaxValue;
 
-				if (m_line != null)
-				{
-					m_startDate = m_line.Begin.Time;
-					m_endDate = m_line.End.Time;
+				if (VolumeLevel >= 0)
+				{					
+					m_volume = m_studyControl.AllocateVolumeWithSD();
+					m_volumeInstrument = m_studyControl.BarsOfData(VolumeDataFeed);
+					m_volume.Instrument = m_volumeInstrument;
+					m_volume.Length = VolumeLength;
 				}
+
+				if (LineId != 0)
+				{
+					m_line = new LineProxy(getTrendLine(LineId));
+					LineStartTime = m_line.StartTime;
+					LineStartPrice = m_line.StartPrice;
+					LineEndTime = m_line.EndTime;
+					LineEndPrice = m_line.EndPrice;
+				}
+				else
+					m_line = new LineProxy(LineStartTime, LineStartPrice, LineEndTime, LineEndPrice);
 			}
 
 			public override void CalcBar()
@@ -779,9 +879,26 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Bars.CurrentBar < 2) return;
 				if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
-				if (m_studyControl.Bars.Time[0].Date < m_startDate || m_studyControl.Bars.Time[0].Date > m_endDate) return;
+				if (m_studyControl.Bars.Time[0].Date < LineStartTime || m_studyControl.Bars.Time[0].Date > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0].TimeOfDay < StartTime.TimeOfDay || m_studyControl.Bars.Time[0].TimeOfDay > EndTime.TimeOfDay) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+				switch (VolumeLevel)
+				{
+					case EVolumeLevel.Disable:
+						break;  //nothing to do when disabled
+					case EVolumeLevel.AboveAverage:
+						if (m_volume.Average[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+					case EVolumeLevel.AboveAverageSD1:
+						if (m_volume.AvgPlusLevel1[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+					case EVolumeLevel.AboveAverageSD2:
+						if (m_volume.AvgPlusLevel2[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+					case EVolumeLevel.AboveAverageSD3:
+						if (m_volume.AvgPlusLevel3[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+				}
 
 				switch (Direction)
 				{
@@ -885,14 +1002,20 @@ namespace PowerLanguage.Strategy
 		{
 			public int LineId { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
-
-			private ITrendLineObject m_line;
-			private DateTime m_startDate;
-			private DateTime m_endDate;
+			public DateTime LineStartTime { get; set; }
+			public double LineStartPrice { get; set; }
+			public DateTime LineEndTime { get; set; }
+			public double LineEndPrice { get; set; }
+			private LineProxy m_line;
 
 			public ExitLine(_TrendLine control) : base(control)
 			{
 				Criteria = EEntryExitCriteria.Close;
+				LineStartTime = DateTime.MinValue;
+				LineStartPrice = 0.0;
+				LineEndTime = DateTime.MinValue;
+				LineEndPrice = 0.0;
+				m_line = null;
 			}
 
 			public override bool Parse(JProperty property)
@@ -900,12 +1023,20 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
+				if (name == "linestarttime") { LineStartTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
+
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (m_line == null) return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				if (LineId != 0 && m_line == null)
+					return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+				else if (LineStartTime == DateTime.MinValue || LineEndTime == DateTime.MinValue || LineStartPrice == 0.0 || LineEndPrice == 0.0)
+					return Tuple.Create(false, string.Format("{0} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified", this.GetType().Name));
 				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
 				return base.IsValid();
 			}
@@ -913,22 +1044,23 @@ namespace PowerLanguage.Strategy
 			public override void StartCalc()
 			{
 				base.StartCalc();
-				m_line = getTrendLine(LineId);
-				m_startDate = DateTime.MinValue;
-				m_endDate = DateTime.MaxValue;
-
-				if (m_line != null)
+				if (LineId != 0)
 				{
-					m_startDate = m_line.Begin.Time;
-					m_endDate = m_line.End.Time;
+					m_line = new LineProxy(getTrendLine(LineId));
+					LineStartTime = m_line.StartTime;
+					LineStartPrice = m_line.StartPrice;
+					LineEndTime = m_line.EndTime;
+					LineEndPrice = m_line.EndPrice;
 				}
+				else
+					m_line = new LineProxy(LineStartTime, LineStartPrice, LineEndTime, LineEndPrice);
 			}
 
 			public override void CalcBar()
 			{
 				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < 2) return;
-				if (m_studyControl.Bars.Time[0].Date < m_startDate || m_studyControl.Bars.Time[0].Date > m_endDate) return;
+				if (m_studyControl.Bars.Time[0].Date < LineStartTime || m_studyControl.Bars.Time[0].Date > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
 				if (m_studyControl.PositionSide > 0)
@@ -1835,6 +1967,8 @@ namespace PowerLanguage.Strategy
 		private int m_averageSuperSmoothersAllocated;
 		private List<PowerLanguage.Function._ATR> m_atr;
 		private int m_atrAllocated;
+		private List<PowerLanguage.Function._VolumeWithSD> m_volumeWithSD;
+		private int m_volumeWithSDAllocated;
 
 		//interface methods
 		public _TrendLine(object _ctx) : base(_ctx) { }
@@ -2030,6 +2164,14 @@ namespace PowerLanguage.Strategy
 			return result;
 		}
 
+		public PowerLanguage.Function._VolumeWithSD AllocateVolumeWithSD()
+		{
+			if (m_volumeWithSDAllocated >= m_volumeWithSD.Count) throw new InvalidOperationException("No more Volume with SDs available");
+			PowerLanguage.Function._VolumeWithSD result = m_volumeWithSD[m_volumeWithSDAllocated];
+			m_volumeWithSDAllocated++;
+			return result;
+		}
+
 		//methods
 		private void createOrders()
 		{
@@ -2089,6 +2231,9 @@ namespace PowerLanguage.Strategy
 
 			for (int i = 0; i < MAX_ATR; i++)
 				m_atr.Add(new PowerLanguage.Function._ATR(this));
+
+			for (int i = 0; i < MAX_VOLUME_WITH_SD; i++)
+				m_volumeWithSD.Add(new PowerLanguage.Function._VolumeWithSD(this));
 		}
 
 		private void resetOrders()
@@ -2118,6 +2263,7 @@ namespace PowerLanguage.Strategy
 			m_averageExponentialAllocated = 0;
 			m_averageSuperSmoothersAllocated = 0;
 			m_atrAllocated = 0;
+			m_volumeWithSDAllocated = 0;
 
 			for (int i = 0; i < MAX_MOVINGAVERAGES; i++)
 			{
@@ -2133,6 +2279,12 @@ namespace PowerLanguage.Strategy
 			{
 				m_atr[i].Instrument = Bars;
 				m_atr[i].Length = 14;
+			}
+
+			for (int i = 0; i < MAX_VOLUME_WITH_SD; i++)
+			{
+				m_volumeWithSD[i].Instrument = Bars;
+				m_volumeWithSD[i].Length = 20;
 			}
 		}
 

@@ -62,7 +62,7 @@ namespace PowerLanguage.Strategy
 
 					if (PositionSide == 0 && Bars.Close.CrossesOver(m_adaptiveSuperSmoother[0], 1))
 					{
-						int size = RiskBasedPositionSizing ? positionSize(Bars, m_adaptiveSuperSmoother[0], MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent);
+						int size = RiskBasedPositionSizing ? positionSize(Bars, m_adaptiveSuperSmoother[0], MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent, false);
 						m_le.Send(size);
 					}
 

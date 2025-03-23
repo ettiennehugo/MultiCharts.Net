@@ -101,7 +101,7 @@ namespace PowerLanguage.Strategy {
 			//determine whether we should send an entry order
 			if (m_marketBars.Close[0] > m_marketSmoother.Value &&	//market is bullish
 					Bars.Close[0] > Bars.High.Highest(HighBreakoutPeriod, 1))
-				m_le.Send(RiskBasedPositionSizing ? positionSize(Bars, m_instrumentSmoother[0]) : positionSize(Bars));
+				m_le.Send(RiskBasedPositionSizing ? positionSize(Bars, m_instrumentSmoother[0], false) : positionSize(Bars));
 		}
 
 		protected void calcBarExit()

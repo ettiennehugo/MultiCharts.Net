@@ -53,15 +53,20 @@ namespace PowerLanguage.Strategy {
 
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of equity,
-		/// if given maxRiskEquityPerPosPercent is zero the .
+		/// if given maxRiskEquityPerPosPercent is zero the risk based entry is ignored (default) and
+		/// the full equity is used to compute the position size.
+		/// ROUND LOT ORDERS - In order to facilitate good market fills for larger accounts you should use round lot orders
+		///                    (multiples of 100) to align with the instritutional traders and market makers. Odd lot orders
+		///                    can create slippage and poor fills.
 		/// </summary>
-		protected int positionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d)
+		protected int positionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
 			if (bars.Close[0] == 0.0d) return result;
 
 			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
 			result = (int)Math.Truncate(positionCash / bars.Close[0]);
+			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
 
 			return result;
 		}
@@ -69,19 +74,20 @@ namespace PowerLanguage.Strategy {
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of equity per position.
 		/// </summary>
-		protected int positionSize(double risk, double maxRiskEquityPerPosPercent)
+		protected int positionSize(double risk, double maxRiskEquityPerPosPercent, bool useRoundLots = false)
 		{
 			int result = 0;
 			if (risk == 0.0d) return result;
 			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
 			result = (int)Math.Truncate(positionCash / risk);
+			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
 			return result;
 		}
 
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price.
 		/// </summary>
-		protected int positionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d)
+		protected int positionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
 
@@ -97,6 +103,7 @@ namespace PowerLanguage.Strategy {
 				return 0;   //risk overflow exception occurred, ignore signal
 			}
 
+			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
 			return result;
 		}
 
@@ -105,7 +112,7 @@ namespace PowerLanguage.Strategy {
 		/// maximum average volume percentage. The ideal size can be computed with one of the above positionSize overloads
 		/// and then fed into this method to clip the size as a percentage of average volume.
 		/// </summary>
-		protected int positionSize(IInstrument bars, int size, int volumePeriod, double maxAvgVolumePercent)
+		protected int positionSize(IInstrument bars, int size, int volumePeriod, double maxAvgVolumePercent, bool useRoundLots = false)
 		{
 			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
 
@@ -123,6 +130,7 @@ namespace PowerLanguage.Strategy {
 				}
 			}
 
+			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
 			return result;
 		}
 
