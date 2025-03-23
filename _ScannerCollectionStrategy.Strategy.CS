@@ -68,6 +68,7 @@ namespace PowerLanguage.Strategy {
 		//properties
 		[Input] public int ADRLength { get; set; }
 		[Input] public double MinimumADR { get; set; }		//set to zero to switch the ADR filter off
+		[Input] public bool UseRoundLots { get; set; }    //use round lots for position size calculations
 
 		[Input] public bool BearishOverExtensionEnable { get; set; }								 //enable bearish over extension 
 		[Input] public double BearishOverExtensionMinimumDropPercent { get; set; }   //minimum required drop in the past x-days
@@ -183,6 +184,7 @@ namespace PowerLanguage.Strategy {
 
 			ADRLength = PowerLanguage.Function._ADR.DEFAULT_LENGTH;
 			MinimumADR = DEFAULT_MINIMUM_ADR;
+			UseRoundLots = false;
 
 			BearishOverExtensionEnable = true;
 			BearishOverExtensionMinimumDropPercent = PowerLanguage.Function._BearishOverextension.DEFAULT_MINIMUM_DROP_PERCENT;
@@ -443,9 +445,13 @@ namespace PowerLanguage.Strategy {
 						if (closePercentile >= EntryBarClosePercentile)
 						{
 							m_riskAmountPerContract = risk + EntryBufferStopLossPrice;
-							m_entrySize = entrySize(close, m_riskAmountPerContract);
-							if (Debug) Output.WriteLine("{0} - Long entry on {1}({2}) at close {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
-							m_le.Send(close, m_entrySize);
+							m_entrySize = entrySize(close, m_riskAmountPerContract, UseRoundLots);
+							if (m_entrySize > 0)
+							{
+								if (Debug) Output.WriteLine("{0} - Long entry on {1}({2}) at close {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
+								m_le.Send(close, m_entrySize);
+							}
+							else if (Debug) Output.WriteLine("{0} - Long SKIPPED entry on {1}({2}) at close {3}, {4} - entry size is zero due to round lots usage", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
 						}
 					}
 					break;
@@ -467,9 +473,13 @@ namespace PowerLanguage.Strategy {
 						if (closePercentile >= EntryBarClosePercentile)
 						{
 							m_riskAmountPerContract = risk + EntryBufferStopLossPrice;
-							m_entrySize = entrySize(close, m_riskAmountPerContract);
-							if (Debug) Output.WriteLine("{0} - Short entry on {1}({2}) at close {3}, {3}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
-							m_se.Send(close, m_entrySize);
+							m_entrySize = entrySize(close, m_riskAmountPerContract, UseRoundLots);
+							if (m_entrySize > 0)
+							{
+								if (Debug) Output.WriteLine("{0} - Short entry on {1}({2}) at close {3}, {4}", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
+								m_se.Send(close, m_entrySize);
+							}
+							else if (Debug) Output.WriteLine("{0} - Short SKIPPED entry on {1}({2}) at close {3}, {4} - entry size is zero due to round lots usage", m_scannerMatch.ToString(), m_stock.Info.Name, m_entrySize, Bars.Time[0], close);
 						}
 					}
 					break;
@@ -572,7 +582,7 @@ namespace PowerLanguage.Strategy {
 		/// <summary>
 		/// Computes the entry size based on the risk created by the entryPRice and stopLossPrice.
 		/// </summary>
-		private int entrySize(double entryPrice, double riskPerContract) {
+		private int entrySize(double entryPrice, double riskPerContract, bool useRoundLots) {
 			if (entryPrice == 0)
 			{
 				if (Debug) Output.WriteLine("Error: entryPrice is zero so no size to compute.");
@@ -588,6 +598,9 @@ namespace PowerLanguage.Strategy {
 				equity = equity * EntryMaxRiskBasedEquityPercent;
 			int equityClippedPositionSize = (int)Math.Truncate(equity / entryPrice);
 			size = size < equityClippedPositionSize ? size : equityClippedPositionSize;
+
+			//round lots
+			if (useRoundLots) size = (int)(Math.Truncate(size / 100d) * 100d);
 
 			return size;
 		}
