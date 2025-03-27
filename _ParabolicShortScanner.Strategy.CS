@@ -1,55 +1,52 @@
-﻿using System;
-using System.Drawing;
-using System.Linq;
-using PowerLanguage.Function;
-using ATCenterProxy.interop;
-using System.IO;
+﻿using System.IO;
 
-namespace PowerLanguage.Strategy {
+namespace PowerLanguage.Strategy
+{
 	/// <summary>
-	/// Short the Spike Scanner signal that works with the high-volume opening bar money management signal.
+	/// Parabolic short scanner signal that works with the high-volume opening bar money management signal.
 	/// </summary>
-	public class _ShortTheSpikeScanner : _CustomSignal {
+	public class _ParabolicShortScanner : _CustomSignal
+	{
 		//constants
 
 
-		//inputs
+		//types
+
+
+		//properties
 		[Input] public int Length { get; set; }             //length over which the spike is measured
 		[Input] public double GrowthPercent { get; set; }   //percentage growth over the length to be considered a spike
 		[Input] public bool Debug { get; set; }             //debug flag to print out the values
 
-		//properties
-
-
-		//attributes
-		private PowerLanguage.Function._ShortTheSpike m_shortTheSpike;
+		//attribute
+		private PowerLanguage.Function._ParabolicShort m_parabolicShort;
 
 		//interface methods
-		public _ShortTheSpikeScanner(object _ctx) : base(_ctx) { }
+		public _ParabolicShortScanner(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
-			Length = PowerLanguage.Function._ShortTheSpike.DEFAULT_LENGTH;
-			GrowthPercent = PowerLanguage.Function._ShortTheSpike.DEFAULT_GROWTH_PERCENT;
-			m_shortTheSpike = new PowerLanguage.Function._ShortTheSpike(this);
+			Length = PowerLanguage.Function._ParabolicShort.DEFAULT_LENGTH;
+			GrowthPercent = PowerLanguage.Function._ParabolicShort.DEFAULT_GROWTH_PERCENT;
+			m_parabolicShort = new PowerLanguage.Function._ParabolicShort(this);
 		}
 
 		protected override void StartCalc()
 		{
-			m_shortTheSpike.Instrument = Bars;
-			m_shortTheSpike.Length = Length;
-			m_shortTheSpike.GrowthPercent = GrowthPercent;
+			m_parabolicShort.Instrument = Bars;
+			m_parabolicShort.Length = Length;
+			m_parabolicShort.GrowthPercent = GrowthPercent;
 		}
 
 		protected override void CalcBar()
 		{
 			this.MyPortfolioData[_PMMS_HighVolumeOpeningRange.PARAMETER_SCAN_FOR_ENTRY] = false;
 
-			if (Environment.CalcReason == CalculationReason.Default && m_shortTheSpike[0])
+			if (Environment.CalcReason == CalculationReason.Default && m_parabolicShort[0])
 			{
 				if (Debug)
 				{
-					string trace = string.Format("ShortTheSpike, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
+					string trace = string.Format("ParabolicShort, {0}, {1}", Bars.Info.Name, Bars.Time[0]);
 					if (MyPortfolioData.ContainsKey(_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE))
 					{
 						StreamWriter debugTrace = (StreamWriter)MyPortfolioData[_PMMS_DebugTrace.PARAMETER_DEBUG_TRACE];
