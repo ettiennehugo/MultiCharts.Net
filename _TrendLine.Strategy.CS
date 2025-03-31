@@ -790,8 +790,8 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
 				if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
-				if (name == "starttime") { StartTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
-				if (name == "endtime") { EndTime = DateTime.ParseExact(property.Value.ToString(), "hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "starttime") { StartTime = DateTime.ParseExact(property.Value.ToString(), "HH:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "endtime") { EndTime = DateTime.ParseExact(property.Value.ToString(), "HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "linestarttime") { LineStartTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
 				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
@@ -948,11 +948,10 @@ namespace PowerLanguage.Strategy
 							double low = m_studyControl.Bars.Low[0];
 							double close = m_studyControl.Bars.Close[0];
 							double range = m_studyControl.Bars.High[0] - low;
-							//this will skip trades for bars with no range, for short trades 1 - closePercentile is used to invert the percentiles so that
-							//close prices closer to the bottom of the bar would be considered higher percentiles
+							//for short trades, invert the percentile so a close near the low = high percentile (e.g., bottom 25% close -> 0.75 or higher percentile)
 							double closePercentile = range != 0 ? 1 - (close - low) / range : 0;
 
-							if (closePercentile >= ClosePercentile)
+							if (closePercentile >= ClosePercentile)  // e.g., ClosePercentile = 0.75 means close in bottom 25% of range
 							{
 								if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
 								sendOrder(close);
