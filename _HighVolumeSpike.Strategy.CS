@@ -5,7 +5,7 @@ using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy {
-	public class _HighVolumeSpike : _OpeningRangeBarSignal {
+	public class _HighVolumeSpike : _TimeRangeSignal {
 		//constants
 
 

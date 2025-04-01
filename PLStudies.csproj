@@ -197,9 +197,7 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="_TPO_.Indicator.CS" />
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
@@ -447,7 +445,6 @@
     <Compile Include="_MMI.Indicator.CS" />
     <Compile Include="_ModifiedRSI.Indicator.CS" />
     <Compile Include="_ModifiedStochastic.Indicator.CS" />
-    <Compile Include="_OpeningRangeBarSignal.Strategy.CS" />
     <Compile Include="_PMMS_CANSLIM.Strategy.CS" />
     <Compile Include="_PMMS_DebugTrace.Strategy.CS" />
     <Compile Include="_PMMS_DynamicMoneyManagement.Strategy.CS" />
@@ -473,9 +470,6 @@
     <Compile Include="_ScannerPercentChangeOverTime.Indicator.CS" />
     <Compile Include="_ScannerPriceAction.Indicator.CS" />
     <Compile Include="_ScannerPullback.Indicator.CS" />
-    <Compile Include="_ShortTheSpike.Function.CS" />
-    <Compile Include="_ShortTheSpike.Indicator.CS" />
-    <Compile Include="_ShortTheSpikeScanner.Strategy.CS" />
     <Compile Include="_Simple.Strategy.CS" />
     <Compile Include="_SineWave.Indicator.CS" />
     <Compile Include="_SineWave.Strategy.CS" />
@@ -523,6 +517,13 @@
     <Compile Include="_AverageLinearRegression.Function.CS" />
     <Compile Include="_AverageExponential.Indicator.CS" />
     <Compile Include="_AverageSimple.Indicator.CS" />
+    <Compile Include="_SuperSmootherMulti.Indicator.CS" />
+    <Compile Include="_ParabolicShort.Strategy.CS" />
+    <Compile Include="_ParabolicShortScanner.Strategy.CS" />
+    <Compile Include="_ParabolicShort.Function.CS" />
+    <Compile Include="_ScannerParabolicShort.Indicator.CS" />
+    <Compile Include="_ParabolicShort.Indicator.CS" />
+    <Compile Include="_TimeRangeSignal.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

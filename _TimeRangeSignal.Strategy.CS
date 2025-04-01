@@ -1,19 +1,18 @@
 ﻿using System;
-using System.Drawing;
-using System.Linq;
-using PowerLanguage.Function;
-using ATCenterProxy.interop;
+using System.Globalization;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
-	/// Adds common logic to enter the market based on a high volume opening range bar computing the position
-	/// size based on the risk of the opening range bar and the account equity available.
+	/// Adds common logic to enter the market based on a high volume range bar within a specific time range.
+	/// Ensure that given times are aligned with the data feed time zone, e.g. local vs exchange.
 	/// Entry bars are typically 1/5/10/15-minute bars and volume bars are typically daily bars.
 	/// </summary>
-	public class _OpeningRangeBarSignal : _CustomSignal
+	public class _TimeRangeSignal : _CustomSignal
 	{
 		//constants
 		public const int DEFAULT_DATA_FEED = 1;
+		public const string DEFAULT_START_TIME = "9:30:00";
+		public const string DEFAULT_END_TIME = "16:00:00";
 		public const double DEFAULT_ENTRY_VOLUME_PERCENT = 0.15;
 		public const int DEFAULT_VOLUME_LENGTH = 20;
 		public const double DEFAULT_MAX_VOLUME_BASED_POS_PERCENT = 0.2;
@@ -24,6 +23,8 @@ namespace PowerLanguage.Strategy {
 
 		//inputs
 		public int _EntryDataFeed { get; set; }          //data feed around which entry calculations are made, typically a 1/5/10/15-minute data feed
+		public string _StartTime { get; set; }           //start time for the opening range bar in HH:mm:ss format, e.g. 13:30:00
+		public string _EndTime { get; set; }             //end time for the opening range bar in HH:mm:ss format, e.g. 13:45:00
 		public double _EntryVolumePercent { get; set; }  //entry volume percent of the average volume that would be considered a high volume bar, e.g. 0.25 means we want to see about 25% of the average volume to consider the bar a high volume bar
 		public int _VolumeDataFeed { get; set; }				 //data feed around which volume calculations are made, typically a daily data feed
 		public int _VolumeLength { get; set; }           //volume length to use for opening bar volume detection
@@ -34,20 +35,23 @@ namespace PowerLanguage.Strategy {
 		public double _MaxRiskEquityPerPosPercent { get; set; }  //maximum risk equity per position as a percentage of equity
 
 		//attributes
+		protected DateTime m_startTime;
+		protected DateTime m_endTime;
 		protected IOrderPriced m_le;
 		protected IOrderPriced m_se;
 		protected IInstrument m_entryInstrument;
 		protected IInstrument m_volumeInstrument;
-		protected VariableSeries<bool> m_lastBarInSession;
 		protected double m_riskAmountPerContract;
 
 		//interface methods
-		public _OpeningRangeBarSignal(object _ctx) : base(_ctx) { }
+		public _TimeRangeSignal(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
 			base.Create();
 			_EntryDataFeed = DEFAULT_DATA_FEED;
+			_StartTime = DEFAULT_START_TIME;
+			_EndTime = DEFAULT_END_TIME;
 			_EntryVolumePercent = DEFAULT_ENTRY_VOLUME_PERCENT;
 			_VolumeDataFeed = DEFAULT_DATA_FEED;
 			_VolumeLength = DEFAULT_VOLUME_LENGTH;
@@ -58,7 +62,6 @@ namespace PowerLanguage.Strategy {
 			_MaxRiskEquityPerPosPercent = DEFAULT_MAX_RISK_EQUITY_PER_POS_PERCENT;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.SellShort));
-			m_lastBarInSession = new VariableSeries<bool>(this);
 		}
 
 		protected override void StartCalc()
@@ -74,17 +77,17 @@ namespace PowerLanguage.Strategy {
 			if (_ClosePercentile <= 0 || _ClosePercentile > 1) throw new ArgumentException("_ClosePercentile must be between 0 and 1.");
 			if (_MaxRiskEquityPerPosPercent <= 0 || _MaxRiskEquityPerPosPercent > 1) throw new ArgumentException("_MaxRiskEquityPerPosPercent must be between 0 and 1.");
 
+			m_startTime = DateTime.ParseExact(_StartTime, "HH:mm:ss", CultureInfo.InvariantCulture);
+			m_endTime = DateTime.ParseExact(_EndTime, "HH:mm:ss", CultureInfo.InvariantCulture);
+
 			m_riskAmountPerContract = 0;
 
 			m_entryInstrument = BarsOfData(_EntryDataFeed);
 			m_volumeInstrument = BarsOfData(_VolumeDataFeed);
-			m_lastBarInSession.Value = false;
 		}
 
 		protected override void CalcBar()
 		{
-			m_lastBarInSession.Value = m_entryInstrument.LastBarInSession;
-
 			//only process entries on bar close when we're flat and we just have a high volume opening bar for the session
 			if (PositionSide == 0 && Environment.CalcReason == CalculationReason.Default && m_entryInstrument.Status == EBarState.Close)
 			{
@@ -108,7 +111,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		private EMarketPositionSide highVolumeOpeningBar()
 		{
-			if (!m_lastBarInSession[1]) return EMarketPositionSide.Flat; // previous bar was not the last bar in the session so this is not an opening bar
+			if (m_entryInstrument.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_entryInstrument.Time[0].TimeOfDay > m_endTime.TimeOfDay) return EMarketPositionSide.Flat;
 
 			double range = m_entryInstrument.High[0] - m_entryInstrument.Low[0];
 			if (range == 0) return EMarketPositionSide.Flat; // avoid division by zero

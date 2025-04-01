@@ -11,7 +11,7 @@ namespace PowerLanguage.Strategy {
 	///		1. Entry data feed - typically some minute data feed.
 	///		2. Scanner data feed - typically daily data feed for the same instrument.
 	/// </summary>
-	public class _CupAndHandle : _OpeningRangeBarSignal
+	public class _CupAndHandle : _TimeRangeSignal
 	{
 		//constants
 

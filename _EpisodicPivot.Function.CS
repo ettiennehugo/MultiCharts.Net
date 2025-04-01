@@ -35,8 +35,8 @@ namespace PowerLanguage
 			public IInstrument Instrument { get; set; }
 			public int GrowthDays { get; set; }
 			public double GrowthPercent { get; set; }
-			public double MinimumPercentageChange { get; set; } //gap up must be at least this minimum
-			public double MaximumPercentageChange { get; set; } //gap up clipped to this maximum to avoid pump-and-dump stocks
+			public double MinimumPercentageChange { get; set; } //gap up/down must be at least this minimum - this must always be a positive value, algoritm will flip it around if required
+			public double MaximumPercentageChange { get; set; } //gap up/down clipped to this maximum to avoid pump-and-dump stocks - this must always be a positive value, algorithm will flip it around if required
 
 			//properties
 
@@ -68,14 +68,42 @@ namespace PowerLanguage
 			protected override System.Boolean CalcBar()
 			{
 				if (Instrument.CurrentBar < GrowthDays) return false;
+
 				double lowest = Instrument.Close.Lowest(GrowthDays);
-				if (lowest == 0 || Instrument.High[1] == 0) return false;		//avoid divide by zero
-				if (((Instrument.Close[0] / lowest) - 1) < GrowthPercent) return false;
-				double instrumentGrowth = (Instrument.Low[0] / Instrument.High[1]) - 1;
-				if (instrumentGrowth < MinimumPercentageChange || instrumentGrowth > MaximumPercentageChange) return false;
+				double highest = Instrument.Close.Highest(GrowthDays);
+				if (lowest == 0 || highest == 0 || Instrument.High[1] == 0) return false;
+
+				//for long positions: growth should be >= GrowthPercent (positive value)
+				//for short positions: decline should be <= GrowthPercent (negative value)
+				bool validGrowthTrend = false;
+				if (GrowthPercent >= 0)
+					validGrowthTrend = (Instrument.Close[0] / lowest) - 1 >= GrowthPercent;
+				else
+					validGrowthTrend = (Instrument.Close[0] / highest) - 1 <= GrowthPercent;
+
+				if (!validGrowthTrend) return false;
+
+				// Calculate price change for potential entry
+				double priceChange;
+				if (GrowthPercent >= 0)
+					//for long positions - gap up (current low above previous high)
+					priceChange = (Instrument.Low[0] / Instrument.High[1]) - 1;
+				else
+					//for short positions - gap down (current high below previous low)
+					priceChange = (Instrument.High[0] / Instrument.Low[1]) - 1;
+
+
+				//for long positions: MinimumPercentageChange should be positive
+				//for short positions: MinimumPercentageChange should be negative
+				double effectiveMin = GrowthPercent >= 0 ? MinimumPercentageChange : -MaximumPercentageChange;
+				double effectiveMax = GrowthPercent >= 0 ? MaximumPercentageChange : -MinimumPercentageChange;
+
+				//check if the price change falls within our specified range
+				if (priceChange < effectiveMin || priceChange > effectiveMax) return false;
 
 				return true;
 			}
+
 
 			//methods
 

@@ -20,7 +20,7 @@ namespace PowerLanguage.Strategy {
 	///		* Waits for a high volume opening range bar to form on the entry data feed.
 	///		* IF the opening bar is a high volume bullish bar an entry is placed at the high of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
-	public class _CrableNRX : _OpeningRangeBarSignal 
+	public class _CrableNRX : _TimeRangeSignal 
 	{
 		//constants
 

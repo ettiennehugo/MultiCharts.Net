@@ -17,7 +17,7 @@ namespace PowerLanguage.Strategy {
 	///		* Waits for a high volume opening range bar to form on the entry data feed.
 	///		* IF the opening bar is a high volume bullish bar an entry is placed at the high of the opening bar for the breakout entry with risk based on the opening bar range
 	/// </summary>
-	public class _VCP : _OpeningRangeBarSignal {
+	public class _VCP : _TimeRangeSignal {
 		//constants
 		public const double DEFAULT_MINIMUM_GROWTH_PERCENT = 0.3;
 		public const int DEFAULT_GROWTH_DAYS = 60;

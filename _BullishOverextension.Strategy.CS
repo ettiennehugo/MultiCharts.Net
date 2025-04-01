@@ -18,7 +18,7 @@ namespace PowerLanguage.Strategy {
 	///	  * Stock price is becoming overextended to the upside, typically 3x the ATR or more.
 	///	  * IF the opening bar is a high volume bearish bar an entry is placed at the low/close of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
-	public class _BullishOverextension : _OpeningRangeBarSignal
+	public class _BullishOverextension : _TimeRangeSignal
 	{
 		//constants
 

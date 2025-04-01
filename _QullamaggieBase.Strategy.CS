@@ -16,7 +16,7 @@ namespace PowerLanguage.Strategy {
 	/// 1. Entry data feed - typically some minute data feed.
 	/// 2. Volume data feed - typically daily data feed for the same instrument.
 	/// </summary>
-	public abstract class _QullamaggieBase : _OpeningRangeBarSignal {
+	public abstract class _QullamaggieBase : _TimeRangeSignal {
 		//constants
 		public const double DEFAULT_MINIMUM_ADR = 0.02;
 		public const double DEFAULT_MINIMUM_PRICE = 1.0;

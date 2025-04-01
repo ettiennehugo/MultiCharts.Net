@@ -19,11 +19,13 @@ namespace PowerLanguage.Strategy {
 	///		* Waits for a high volume opening range bar to form on the entry data feed.
 	///		* IF the opening bar is a high volume bullish bar an entry is placed at the high of the opening bar for the breakout entry with risk based on the opening bar range.
 	/// </summary>
-	public class _EpisodicPivot : _OpeningRangeBarSignal {
+	public class _EpisodicPivot : _TimeRangeSignal {
 		//constants
-
+		public new const string DEFAULT_END_TIME = "10:00:00";
 
 		//inputs
+		[Input] public string StartTime { get; set; }
+		[Input] public string EndTime { get; set; }
 		[Input] public double MinimumPrice { get; set; }
 		[Input] public int GrowthDays { get; set; }
 		[Input] public double GrowthPercent { get; set; }
@@ -45,6 +47,9 @@ namespace PowerLanguage.Strategy {
 		//methods
 		protected override void Create()
 		{
+			base.Create();
+			StartTime = DEFAULT_START_TIME;
+			EndTime = DEFAULT_END_TIME;
 			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
 			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
 			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
@@ -54,11 +59,14 @@ namespace PowerLanguage.Strategy {
 
 		protected override void StartCalc()
 		{
+			_StartTime = StartTime;
+			_EndTime = EndTime;
 			m_episodicPivot.Instrument = BarsOfData(2);
 			m_episodicPivot.GrowthDays = GrowthDays;
 			m_episodicPivot.GrowthPercent = GrowthPercent;
 			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
 			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
+			base.StartCalc();
 		}
 
 		protected override void CalcBar()
