@@ -26,14 +26,14 @@ namespace PowerLanguage
 		/// </summary>
 		public sealed class _EpisodicPivot : FunctionSimple<System.Boolean>
 		{
-			public const int DEFAULT_GROWTH_DAYS = 120;
+			public const int DEFAULT_GROWTH_BARS = 120;
 			public const double DEFAULT_GROWTH_PERCENT = 0.3;
 			public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.07;
 			public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.15;
 
 			//inputs
 			public IInstrument Instrument { get; set; }
-			public int GrowthDays { get; set; }
+			public int GrowthBars { get; set; }
 			public double GrowthPercent { get; set; }
 			public double MinimumPercentageChange { get; set; } //gap up/down must be at least this minimum - this must always be a positive value, algoritm will flip it around if required
 			public double MaximumPercentageChange { get; set; } //gap up/down clipped to this maximum to avoid pump-and-dump stocks - this must always be a positive value, algorithm will flip it around if required
@@ -50,7 +50,7 @@ namespace PowerLanguage
 
 			protected override void Create()
 			{
-				GrowthDays = DEFAULT_GROWTH_DAYS;
+				GrowthBars = DEFAULT_GROWTH_BARS;
 				GrowthPercent = DEFAULT_GROWTH_PERCENT;
 				MinimumPercentageChange = DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 				MaximumPercentageChange = DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
@@ -58,7 +58,7 @@ namespace PowerLanguage
 
 			protected override void StartCalc()
 			{
-				if (GrowthDays <= 0) throw new Exception("Growth days must be larger than zero.");
+				if (GrowthBars <= 0) throw new Exception("Growth bars must be larger than zero.");
 				//growth percentage can be anything both positive and negative
 				if (MinimumPercentageChange <= 0) throw new Exception("MinimumPercentageChange must be larger than zero.");
 				if (MaximumPercentageChange <= 0) throw new Exception("MaximumPercentageChange must be larger than zero.");
@@ -67,10 +67,10 @@ namespace PowerLanguage
 
 			protected override System.Boolean CalcBar()
 			{
-				if (Instrument.CurrentBar < GrowthDays) return false;
+				if (Instrument.CurrentBar < GrowthBars) return false;
 
-				double lowest = Instrument.Close.Lowest(GrowthDays);
-				double highest = Instrument.Close.Highest(GrowthDays);
+				double lowest = Instrument.Close.Lowest(GrowthBars);
+				double highest = Instrument.Close.Highest(GrowthBars);
 				if (lowest == 0 || highest == 0 || Instrument.High[1] == 0) return false;
 
 				//for long positions: growth should be >= GrowthPercent (positive value)

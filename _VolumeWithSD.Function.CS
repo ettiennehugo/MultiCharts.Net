@@ -65,7 +65,9 @@ namespace PowerLanguage.Function
 
 		protected override void StartCalc()
 		{
-			if (Length < 1) throw new InvalidOperationException("Length must be greater than 0.");
+			if (Level1 > Level2) throw new ArgumentException("Level1 must be less than Level2.");
+			if (Level2 > Level3) throw new ArgumentException("Level2 must be less than Level3.");
+			if (Length < 1) throw new ArgumentException("Length must be greater than 0.");
 		}
 
 		protected override double CalcBar()

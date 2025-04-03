@@ -50,7 +50,7 @@ namespace PowerLanguage.Strategy {
 			base.Create();
 			StartTime = DEFAULT_START_TIME;
 			EndTime = DEFAULT_END_TIME;
-			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+			GrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_BARS;
 			GrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
 			MinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
@@ -62,7 +62,7 @@ namespace PowerLanguage.Strategy {
 			_StartTime = StartTime;
 			_EndTime = EndTime;
 			m_episodicPivot.Instrument = BarsOfData(2);
-			m_episodicPivot.GrowthDays = GrowthDays;
+			m_episodicPivot.GrowthBars = GrowthDays;
 			m_episodicPivot.GrowthPercent = GrowthPercent;
 			m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
 			m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;

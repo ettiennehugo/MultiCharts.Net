@@ -35,8 +35,9 @@ namespace PowerLanguage.Indicator
     public _EpisodicPivot(object _ctx) : base(_ctx) { }
 
     protected override void Create()
-    {      
-      GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+    {
+			ChartCustomDraw.Register(this);
+			GrowthDays = Function._EpisodicPivot.DEFAULT_GROWTH_BARS;
       GrowthPercent = Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
       MinimumPercentageChange = Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
       MaximumPercentageChange = Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
@@ -46,12 +47,19 @@ namespace PowerLanguage.Indicator
       m_episodicPivot = new Function._EpisodicPivot(this);
     }
 
-    protected override void StartCalc()
+		protected override void Destroy()
+		{
+			//request rerender of chart
+			ChartCustomDraw.Unregister(this);
+      ChartCustomDraw.ReDraw();
+			base.Destroy();
+		}
+
+		protected override void StartCalc()
     {
-			ChartCustomDraw.Register(this);   //TODO - custom drawing just remains on the chart.
 			//set inputs
 			m_episodicPivot.Instrument = Bars;
-      m_episodicPivot.GrowthDays = GrowthDays;
+      m_episodicPivot.GrowthBars = GrowthDays;
       m_episodicPivot.GrowthPercent = GrowthPercent;
       m_episodicPivot.MinimumPercentageChange = MinimumPercentageChange;
       m_episodicPivot.MaximumPercentageChange = MaximumPercentageChange;
@@ -59,12 +67,6 @@ namespace PowerLanguage.Indicator
       //clear set of criteria met areas
       m_criteriaMetAreas.Clear();
     }
-
-		protected override void StopCalc()
-		{
-			ChartCustomDraw.Unregister(this);
-			m_criteriaMetAreas.Clear();   //clear set of criteria met areas as indicator is being removed/disabled
-		}
 
 		protected override void CalcBar()
     {

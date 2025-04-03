@@ -224,7 +224,7 @@ namespace PowerLanguage.Strategy {
 			DarvasBoxMinimumGrowthPercent = DEFAULT_DARVAS_GROWTH_PERCENT;
 
 			EpisodicPivotEnable = true;
-			EpisodicPivotGrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_DAYS;
+			EpisodicPivotGrowthDays = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_BARS;
 			EpisodicPivotGrowthPercent = PowerLanguage.Function._EpisodicPivot.DEFAULT_GROWTH_PERCENT;
 			EpisodicPivotMinimumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			EpisodicPivotMaximumPercentageChange = PowerLanguage.Function._EpisodicPivot.DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
@@ -333,7 +333,7 @@ namespace PowerLanguage.Strategy {
 			m_darvasBox.Epsilon = DarvasBoxEpsilon;
 
 			m_episodicPivot.Instrument = m_stock;
-			m_episodicPivot.GrowthDays = EpisodicPivotGrowthDays;
+			m_episodicPivot.GrowthBars = EpisodicPivotGrowthDays;
 			m_episodicPivot.GrowthPercent = EpisodicPivotGrowthPercent;
 			m_episodicPivot.MinimumPercentageChange = EpisodicPivotMinimumPercentageChange;
 			m_episodicPivot.MaximumPercentageChange = EpisodicPivotMaximumPercentageChange;
