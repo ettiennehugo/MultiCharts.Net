@@ -77,6 +77,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+	///	• [optional] BufferPercent - buffer percentage to add/subtract from the moving average price, default 0.0
 	///
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
@@ -91,6 +92,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
+	///	• [optional] BufferPercent - buffer percentage to add/subtract from the moving average price, default 0.0
 	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
@@ -1084,6 +1086,7 @@ namespace PowerLanguage.Strategy
 			public EMovingAverageType MovingAverageType { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
 			public int DataFeed { get; set; }
+			public double BufferPercent { get; set; }
 
 			protected PowerLanguage.Function._AverageSimple m_averageSimple;
 			protected PowerLanguage.Function._AverageExponential m_averageExponential;
@@ -1097,6 +1100,7 @@ namespace PowerLanguage.Strategy
 				ExitPercent = 1.0;
 				OrderType = EOrderType.Stop;
 				DataFeed = 1;
+				BufferPercent = 0.0;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1106,6 +1110,7 @@ namespace PowerLanguage.Strategy
 				if (name == "movingaveragetype") { MovingAverageType = property.Value.ToObject<EMovingAverageType>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
 				if (name == "datafeed") { DataFeed = property.Value.ToObject<int>(); return true; }
+				if (name == "bufferpercent") { BufferPercent = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -1114,6 +1119,7 @@ namespace PowerLanguage.Strategy
 				if (Length <= 0) return Tuple.Create(false, string.Format("{0} - Length must be greater than 0", this.GetType().Name));
 				if (DataFeed <= 0) return Tuple.Create(false, string.Format("{0} - DataFeed must be greater than 0", this.GetType().Name));
 				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, string.Format("{0} - DataFeed must be less than {1}", this.GetType().Name, m_studyControl.MaxDataStream));
+				if (BufferPercent < 0.0 || BufferPercent > 1.0) return Tuple.Create(false, string.Format("{0} - BufferPercent must be between 0 and 1", this.GetType().Name));
 				return base.IsValid();
 			}
 
@@ -1160,19 +1166,29 @@ namespace PowerLanguage.Strategy
 
 			protected override double exitPrice()
 			{
+				double result = 0.0;
 				switch (MovingAverageType)
 				{
 					case EMovingAverageType.Simple:
-						return m_averageSimple[0];
+						result = m_averageSimple[0];
+						break;
 					case EMovingAverageType.Exponential:
-						return m_averageExponential[0];
+						result = m_averageExponential[0];
+						break;
 					case EMovingAverageType.SuperSmoother:
-						return m_averageSuperSmoother[0];
+						result = m_averageSuperSmoother[0];
+						break;
 				}
 
-				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine(string.Format("{0} - exitPrice - could not determine exit price", this.GetType().Name));
-				return 0.0;
+				if (BufferPercent > 0.0)
+				{
+					if (m_studyControl.PositionSide > 0)
+						result += result * BufferPercent;
+					else if (m_studyControl.PositionSide < 0)
+						result -= result * BufferPercent;
+				}
+
+				return result;
 			}
 		}
 
@@ -1221,13 +1237,12 @@ namespace PowerLanguage.Strategy
 			protected override double exitPrice()
 			{
 				double result = base.exitPrice();
+
 				if (m_studyControl.PositionSide > 0)
 					result += m_atr[0] * AtrMultiplier;
 				else if (m_studyControl.PositionSide < 0)
 					result -= m_atr[0] * AtrMultiplier;
 
-				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitOverextension - exitPrice - could not determine exit price");
 				return result;
 			}
 

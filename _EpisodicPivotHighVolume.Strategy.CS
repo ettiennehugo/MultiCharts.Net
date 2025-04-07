@@ -31,6 +31,12 @@ namespace PowerLanguage.Strategy {
 		}
 
 		protected override void CalcBar(){
+
+
+
+			//TODO - add entry, trade management and exit based on EP notes and self study.
+
+
 			// strategy logic 
 			m_le.Send();
 		}

@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Linq;
 
-
 namespace PowerLanguage.Function
 {
 	/// <summary>
