@@ -506,22 +506,24 @@ namespace PowerLanguage.Strategy
 			protected virtual int entrySize(double price = 0.0)
 			{
 				double equityAvailable = m_studyControl.equityAvailable();
-				double positionEquity = equityAvailable * EquityPercent;
+				double maxPositionEquity = equityAvailable * EquityPercent;
 				double entryPrice = price == 0.0 ? m_studyControl.Bars.Close[0] : price;
-				int size = (int)Math.Truncate(positionEquity / entryPrice);
+				int equityPercentSize = (int)Math.Truncate(maxPositionEquity / entryPrice);
+				int size = equityPercentSize;
 
 				if (price != 0.0 && m_stopLossExit != null)
 				{
 					double stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Strategy, Criteria);
 					if (stopLossPrice != 0.0)
 					{
-						if (positionEquity > 0)
+						if (maxPositionEquity > 0)
 						{
 							double risk;
 							try
 							{
 								risk = checked(Math.Round(Math.Abs(entryPrice - stopLossPrice), 2));
-								if (risk != 0.0d) size = checked((int)Math.Truncate(positionEquity / risk));
+								int riskAdjustedSize = equityPercentSize;
+								if (risk != 0.0d) riskAdjustedSize = checked((int)Math.Truncate(maxPositionEquity / risk));
 
 								//clip the available equity based on the maximum allowable risk based equity percent if required
 								if (MaxRiskBasedEquityPercent < 1.0)
@@ -531,9 +533,10 @@ namespace PowerLanguage.Strategy
 								}
 
 								//clip position size to the account equity available since risk based entries can
-								//result in very large position sizes
-								int maxPositionSize = (int)Math.Truncate(equityAvailable / entryPrice);
-								size = size > maxPositionSize ? maxPositionSize : size;
+								//result in very large position sizes, we pick the lowest number between the
+								//equityPercentSize, riskAdjustedSize and maxPositionSize
+								int maxPositionSize = (int)Math.Truncate(equityAvailable / risk);
+								size = equityPercentSize > riskAdjustedSize ? (maxPositionSize > riskAdjustedSize ? riskAdjustedSize : maxPositionSize) : (maxPositionSize > equityPercentSize ? equityPercentSize : maxPositionSize);
 							}
 							catch (OverflowException)
 							{
@@ -544,10 +547,11 @@ namespace PowerLanguage.Strategy
 					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine("Entry - StopLossPrice is zero, using equity based position size");
 				}
 
+				//clip position size to the available volume of the insturment being traded if required
 				if (MaxVolumeBasedPercent != 0.0)
 				{
 					int maximumPositionBasedOnVolume = (int)Math.Truncate(m_studyControl.Bars.Volume.Average(_TrendLine.DEFAULT_VOLUME_PERIOD) * MaxVolumeBasedPercent);
-					size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
+					equityPercentSize = maximumPositionBasedOnVolume < equityPercentSize ? maximumPositionBasedOnVolume : equityPercentSize;
 				}
 
 				if (UseRoundLots) size = (int)(Math.Round(size / 100.0) * 100.0);
