@@ -78,7 +78,6 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
-	///	• [optional] BufferPercent - buffer percentage to add/subtract from the moving average price, default 0.0
 	///
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
@@ -93,7 +92,6 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
-	///	• [optional] BufferPercent - buffer percentage to add/subtract from the moving average price, default 0.0
 	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
@@ -1093,7 +1091,6 @@ namespace PowerLanguage.Strategy
 			public EMovingAverageType MovingAverageType { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
 			public int DataFeed { get; set; }
-			public double BufferPercent { get; set; }
 
 			protected PowerLanguage.Function._AverageSimple m_averageSimple;
 			protected PowerLanguage.Function._AverageExponential m_averageExponential;
@@ -1107,7 +1104,6 @@ namespace PowerLanguage.Strategy
 				ExitPercent = 1.0;
 				OrderType = EOrderType.Stop;
 				DataFeed = 1;
-				BufferPercent = 0.0;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1117,7 +1113,6 @@ namespace PowerLanguage.Strategy
 				if (name == "movingaveragetype") { MovingAverageType = property.Value.ToObject<EMovingAverageType>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
 				if (name == "datafeed") { DataFeed = property.Value.ToObject<int>(); return true; }
-				if (name == "bufferpercent") { BufferPercent = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -1173,29 +1168,19 @@ namespace PowerLanguage.Strategy
 
 			protected override double exitPrice()
 			{
-				double result = 0.0;
 				switch (MovingAverageType)
 				{
 					case EMovingAverageType.Simple:
-						result = m_averageSimple[0];
-						break;
+						return m_averageSimple[0];
 					case EMovingAverageType.Exponential:
-						result = m_averageExponential[0];
-						break;
+						return m_averageExponential[0];
 					case EMovingAverageType.SuperSmoother:
-						result = m_averageSuperSmoother[0];
-						break;
+						return m_averageSuperSmoother[0];
 				}
 
-				if (BufferPercent > 0.0)
-				{
-					if (m_studyControl.PositionSide > 0)
-						result += result * BufferPercent;
-					else if (m_studyControl.PositionSide < 0)
-						result -= result * BufferPercent;
-				}
-
-				return result;
+				//should never be reached
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine(string.Format("{0} - exitPrice - could not determine exit price", this.GetType().Name));
+				return 0.0;
 			}
 		}
 
@@ -1244,12 +1229,13 @@ namespace PowerLanguage.Strategy
 			protected override double exitPrice()
 			{
 				double result = base.exitPrice();
-
 				if (m_studyControl.PositionSide > 0)
 					result += m_atr[0] * AtrMultiplier;
 				else if (m_studyControl.PositionSide < 0)
 					result -= m_atr[0] * AtrMultiplier;
 
+				//should never be reached
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitOverextension - exitPrice - could not determine exit price");
 				return result;
 			}
 
