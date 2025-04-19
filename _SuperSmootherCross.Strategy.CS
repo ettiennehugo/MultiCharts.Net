@@ -130,13 +130,13 @@ namespace PowerLanguage.Strategy
 			if (EnableLong && m_fast.CrossesOver(m_slow, CROSS_LOOKBACK))
       {
 		    double ssDelta = m_fastSuperSmoother[0] - m_slowSuperSmoother[0];
-				int size = RiskBasedPositionSizing ? positionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent, false);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent, false);
 				m_le.Send(size);
 			}
 			else if (EnableShort && m_fast.CrossesUnder(m_slow, CROSS_LOOKBACK))
       {
 		    double ssDelta = m_fastSuperSmoother[0] - m_slowSuperSmoother[0];
-				int size = RiskBasedPositionSizing ? positionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent, false);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, Bars.Close[0] - ssDelta, MaxRiskEquityPerPosPercent) : positionSize(Bars, MaxRiskEquityPerPosPercent, false);
 				m_se.Send(size);
 			}
 		}

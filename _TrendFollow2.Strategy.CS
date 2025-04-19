@@ -119,7 +119,7 @@ namespace PowerLanguage.Strategy {
 				m_instrumentFastSmoother[0] > m_instrumentSlowSmoother[0] &&  //instrument is bullish
 				Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, stopLossBasedPositionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_le.Send(size);
 			}
 			else if (EnableShort && 
@@ -127,7 +127,7 @@ namespace PowerLanguage.Strategy {
 						 m_instrumentFastSmoother[0] < m_instrumentSlowSmoother[0] &&  //instrument is bearish
 						 Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, stopLossBasedPositionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_se.Send(size);
 			}
 		}

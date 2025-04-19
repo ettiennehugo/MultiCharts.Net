@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-
 
 namespace PowerLanguage
 {
@@ -40,7 +37,14 @@ namespace PowerLanguage
 			protected override int CalcBar()
 			{
 				//refresh the set of holidays if it's empty or the year changes
-				if (_holidays.Count == 0 || (Bars.CurrentBar > 2 && Bars.Time[1].Year != Bars.Time[0].Year)) refreshHolidays(Bars.Time[0].Year);
+				//NOTE: We actually need to keep track of holidays for the current and previous year since when we get close to
+				//      year boundaries the calculations might need the holidays for both years.
+				if (_holidays.Count == 0 || (Bars.CurrentBar > 2 && Bars.Time[1].Year != Bars.Time[0].Year))
+				{
+					_holidays.Clear();
+					if (Bars.Time[1].Year != Bars.Time[0].Year) refreshHolidays(Bars.Time[1].Year);
+					refreshHolidays(Bars.Time[0].Year);
+				}
 
 				//nothing to do, get holidays using Holidays get property
 				return 0;
@@ -53,8 +57,6 @@ namespace PowerLanguage
 			// http://archive.opm.gov/operating_status_schedules/fedhol/2013.asp
 			private void refreshHolidays(int year)
 			{
-				_holidays.Clear();
-
 				//omit new years if it falls on a Saturday in which case it would be moved to the previous year
 				//(see code below that add's that), if it falls on a Sunday it will be moved to the Monda
 				DateTime newYears = new DateTime(year, 1, 1);

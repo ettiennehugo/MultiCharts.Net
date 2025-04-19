@@ -1,12 +1,12 @@
-﻿using PriceAction;
+﻿using System;
+using System.Drawing;
+using System.Linq;
+using PowerLanguage.Function;
+using ATCenterProxy.interop;
+using PriceAction;
 
-namespace PowerLanguage.Strategy
-{
-	/// <summary>
-	/// Parabolic short signal to detect when to enter a short trade on a parabolic price move.
-	/// </summary>
-	public class _ParabolicShort : _CustomSignal
-	{
+namespace PowerLanguage.Strategy {
+	public class _ParabolicShortSE : SignalObject {
 		//constants
 
 
@@ -21,22 +21,17 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_se;
 
 		//interface methods
-		public _ParabolicShort(object _ctx) : base(_ctx) { }
+		public _ParabolicShortSE(object _ctx):base(_ctx){}
 
-		protected override void Create()
-		{
+		protected override void Create() {
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.SellShort));
-
 		}
 
-		protected override void StartCalc()
-		{
+		protected override void StartCalc() {
 			m_priceAction = new PriceActionAnalysis(FractalLayers);
 		}
 
-		protected override void CalcBar()
-		{
-			// strategy logic 
+		protected override void CalcBar(){
 			m_se.Send();
 		}
 

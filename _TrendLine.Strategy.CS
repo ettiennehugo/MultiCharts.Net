@@ -12,6 +12,7 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
 using System.Runtime.Remoting.Messaging;
+using System.Diagnostics;
 
 namespace PowerLanguage.Strategy
 {
@@ -254,6 +255,8 @@ namespace PowerLanguage.Strategy
 			public string Name { get; set; }
 			public string Id { get; set; }
 			public int Index { get; }
+			public string Symbol { get { return m_studyControl.Bars.Info.Name; } }
+			public string InstructionTypeName { get { return this.GetType().Name; } }
 
 			public Instruction(_TrendLine control)
 			{
@@ -280,13 +283,13 @@ namespace PowerLanguage.Strategy
 					//be caught due to parameter defaults provided, e.g. an entry has parameter EquityPercent that defaults to 1.0, if the
 					//user has a typo on the entry property EqutyPercent set to 0.05 without strict validation the entry would enter at 1.0 (100%)
 					//and not the intended 0.05 (5%)
-					if (!Parse((JProperty)child)) throw new ArgumentException(string.Format("Failed to process property - {0}", child.Path));
+					if (!Parse((JProperty)child)) throw new ArgumentException($"Failed to process property - {child.Path}");
 				}
 			}
 
 			public virtual Tuple<bool, string> IsValid()
 			{
-				if (Name == string.Empty) throw new ArgumentException(string.Format("{0} - Instrument name not specified", this.GetType().Name));
+				if (Name == string.Empty) throw new ArgumentException($"{InstructionTypeName} - Instrument name not specified");
 				return Tuple.Create(true, string.Empty);
 			}
 
@@ -421,10 +424,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EquityPercent must be between 0 and 1", this.GetType().Name));
-				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxVolumeBasedPercent must be between 0 and 1", this.GetType().Name));
-				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, string.Format("{0} - ExitStopLossId priced exit not found", this.GetType().Name));
-				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - MaxRiskBasedEquityPercent must be between 0 and 1", this.GetType().Name));
+				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EquityPercent must be between 0 and 1");
+				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - MaxVolumeBasedPercent must be between 0 and 1");
+				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, $"{InstructionTypeName} - ExitStopLossId priced exit not found");
+				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - MaxRiskBasedEquityPercent must be between 0 and 1");
 				return base.IsValid();
 			}
 
@@ -540,11 +543,11 @@ namespace PowerLanguage.Strategy
 							}
 							catch (OverflowException)
 							{
-								m_studyControl.Output.WriteLine("Entry - entrySize positionSize based on stop-loss raised an overflow exception");
+								m_studyControl.Output.WriteLine($"{Symbol} - Entry - entrySize positionSize based on stop-loss raised an overflow exception: EntryPrice({entryPrice})");
 							}
 						}
 					}
-					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine("Entry - StopLossPrice is zero, using equity based position size");
+					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - Entry - StopLossPrice is zero, using equity based position size");
 				}
 
 				//clip position size to the available volume of the insturment being traded if required
@@ -634,7 +637,7 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, string.Format("{0} - ExitPercent must be between 0 and 1", this.GetType().Name));
+				if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ExitPercent must be between 0 and 1");
 				return base.IsValid();
 			}
 
@@ -734,7 +737,7 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
 
@@ -812,16 +815,16 @@ namespace PowerLanguage.Strategy
 			public override Tuple<bool, string> IsValid()
 			{
 				if (LineId != 0 && m_line == null)
-					return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+					return Tuple.Create(false, $"{InstructionTypeName} - trendline with id {LineId} not found");
 				else if (LineStartTime == DateTime.MinValue || LineEndTime == DateTime.MinValue || LineStartPrice == 0.0 || LineEndPrice == 0.0)
-					return Tuple.Create(false, string.Format("{0} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified", this.GetType().Name));
+					return Tuple.Create(false, $"{InstructionTypeName} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified");
 				if (LineStartTime != DateTime.MinValue && LineEndTime != DateTime.MinValue && LineStartTime == LineEndTime)
-					return Tuple.Create(false, string.Format("{0} - LineStartTime and LineEndTime can not be the same", this.GetType().Name));
-				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, string.Format("{0} - EntryPercent must be between 0 and 1", this.GetType().Name));
-				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, string.Format("{0} - ClosePercentile must be between 0 and 1", this.GetType().Name));
-				if (StartTime > EndTime) return Tuple.Create(false, string.Format("{0} - StartTime must be before EndTime", this.GetType().Name));
-				if (VolumeRequired != EVolumeRequired.Disable && VolumeDataFeed < 1) return Tuple.Create(false, string.Format("{0} - VolumeDataFeed must be greater than 0", this.GetType().Name));
-				if (VolumeRequired != EVolumeRequired.Disable && VolumeLength < 1) return Tuple.Create(false, string.Format("{0} - VolumeLength must be greater than 0", this.GetType().Name));
+					return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime and LineEndTime can not be the same");
+				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EntryPercent must be between 0 and 1");
+				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ClosePercentile must be between 0 and 1");
+				if (StartTime > EndTime) return Tuple.Create(false, $"{InstructionTypeName} - StartTime must be before EndTime");
+				if (VolumeRequired != EVolumeRequired.Disable && VolumeDataFeed < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0");
+				if (VolumeRequired != EVolumeRequired.Disable && VolumeLength < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeLength must be greater than 0");
 				return base.IsValid();
 			}
 
@@ -917,13 +920,13 @@ namespace PowerLanguage.Strategy
 
 							if (closePercentile >= ClosePercentile)
 							{
-								if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
+								if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long entry at close {m_studyControl.Bars.Time[0]}, {close}");
 								sendOrder(close);
 							}
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long entry at low/high {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -959,13 +962,13 @@ namespace PowerLanguage.Strategy
 
 							if (closePercentile >= ClosePercentile)  // e.g., ClosePercentile = 0.75 means close in bottom 25% of range
 							{
-								if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at close {1}, {2}", Name, m_studyControl.Bars.Time[0], close);
+								if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short entry at close {m_studyControl.Bars.Time[0]}, {close}");
 								sendOrder(close);
 							}
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short entry at low/high {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1008,12 +1011,12 @@ namespace PowerLanguage.Strategy
 			public override Tuple<bool, string> IsValid()
 			{
 				if (LineId != 0 && m_line == null)
-					return Tuple.Create(false, string.Format("{0} - trendline with id {1} not found", this.GetType().Name, LineId));
+					return Tuple.Create(false, $"{InstructionTypeName} - trendline with id {LineId} not found");
 				else if (LineStartTime == DateTime.MinValue || LineEndTime == DateTime.MinValue || LineStartPrice == 0.0 || LineEndPrice == 0.0)
-					return Tuple.Create(false, string.Format("{0} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified", this.GetType().Name));
+					return Tuple.Create(false, $"{InstructionTypeName} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified");
 				if (LineStartTime != DateTime.MinValue && LineEndTime != DateTime.MinValue && LineStartTime == LineEndTime)
-					return Tuple.Create(false, string.Format("{0} - LineStartTime and LineEndTime can not be the same", this.GetType().Name));
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
+					return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime and LineEndTime can not be the same");
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
 
@@ -1053,12 +1056,12 @@ namespace PowerLanguage.Strategy
 					case EEntryExitCriteria.Close:
 						if (m_studyControl.Bars.Close[0] < linePrice)
 						{
-							if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long exit on close at {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+							if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
 							sendOrder(m_studyControl.Bars.Close[0]);
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Long exit on low at {1}, {2}", Name, m_studyControl.Bars.Time[0], linePrice);
+						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long exit on low at {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1072,12 +1075,12 @@ namespace PowerLanguage.Strategy
 					case EEntryExitCriteria.Close:
 						if (m_studyControl.Bars.Close[0] > linePrice)
 						{
-							if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short exit on close at {0}, {1}", Name, m_studyControl.Bars.Time[0], linePrice);
+							if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
 							sendOrder(m_studyControl.Bars.Close[0]);
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine("{0} - Short exit on high at {0}, {1}", Name, m_studyControl.Bars.Time[0], linePrice);
+						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short exit on high at {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1120,10 +1123,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (Length <= 0) return Tuple.Create(false, string.Format("{0} - Length must be greater than 0", this.GetType().Name));
-				if (DataFeed <= 0) return Tuple.Create(false, string.Format("{0} - DataFeed must be greater than 0", this.GetType().Name));
-				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, string.Format("{0} - DataFeed must be less than {1}", this.GetType().Name, m_studyControl.MaxDataStream));
-				if (BufferPercent < 0.0 || BufferPercent > 1.0) return Tuple.Create(false, string.Format("{0} - BufferPercent must be between 0 and 1", this.GetType().Name));
+				if (Length <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Length must be greater than 0");
+				if (DataFeed <= 0) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be greater than 0");
+				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be less than {m_studyControl.MaxDataStream}");
+				if (BufferPercent < 0.0 || BufferPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPercent must be between 0 and 1");
 				return base.IsValid();
 			}
 
@@ -1223,10 +1226,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("{0} - Market/stop exit not supported, requires limit type orders", this.GetType().Name));
-				if (AtrLength <= 0) return Tuple.Create(false, string.Format("{0} - AtrLength must be greater than 0", this.GetType().Name));
-				if (AtrMultiplier <= 0) return Tuple.Create(false, string.Format("{0} - AtrFactor must be greater than 0", this.GetType().Name));
-				if (ActivationPriceDelta <= 0) return Tuple.Create(false, string.Format("{0} - ActivationPriceDelta must be greater than 0", this.GetType().Name));
+				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Market/stop exit not supported, requires limit type orders");
+				if (AtrLength <= 0) return Tuple.Create(false, $"{InstructionTypeName} - AtrLength must be greater than 0");
+				if (AtrMultiplier <= 0) return Tuple.Create(false, $"{InstructionTypeName} - AtrFactor must be greater than 0");
+				if (ActivationPriceDelta <= 0) return Tuple.Create(false, $"{InstructionTypeName} - ActivationPriceDelta must be greater than 0");
 				return base.IsValid();
 			}
 
@@ -1284,10 +1287,10 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (LossPercent == -1.0 && LossPrice == -1.0 && Price == -1.0) return Tuple.Create(false, string.Format("{0} - LossPercent, LossPrice or Price must be specified", this.GetType().Name));
-				if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, string.Format("{0} - LossPercent must be between 0 and 1", this.GetType().Name));
-				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, string.Format("{0} - LossPrice must be a positive number (will be negated by strategy)", this.GetType().Name));
-				if (Price != -1.0 && Price <= 0) return Tuple.Create(false, string.Format("{0} - Price must be a positive number (will be negated by strategy)", this.GetType().Name));
+				if (LossPercent == -1.0 && LossPrice == -1.0 && Price == -1.0) return Tuple.Create(false, $"{InstructionTypeName} - LossPercent, LossPrice or Price must be specified");
+				if (LossPercent != -1.0 && (LossPercent <= 0.0 || LossPercent > 1.0)) return Tuple.Create(false, $"{InstructionTypeName} - LossPercent must be between 0 and 1");
+				if (LossPrice != -1.0 && LossPrice <= 0) return Tuple.Create(false, $"{InstructionTypeName} - LossPrice must be a positive number (will be negated by strategy)");
+				if (Price != -1.0 && Price <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Price must be a positive number (will be negated by strategy)");
 				return base.IsValid();
 			}
 
@@ -1346,7 +1349,7 @@ namespace PowerLanguage.Strategy
 				if (Price != -1) return Price;
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitStopLoss - EstimateExitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - ExitStopLoss - EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1381,9 +1384,9 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType == EOrderType.Stop) return Tuple.Create(false, string.Format("{0} - Stop exit not supported", this.GetType().Name));
-				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, string.Format("{0} - ProfitPercent or ProfitPrice must be specified", this.GetType().Name));
-				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, string.Format("{0} - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit", this.GetType().Name));
+				if (OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Stop exit not supported");
+				if (ProfitPercent == -1.0 && ProfitPrice == -1.0) return Tuple.Create(false, $"{InstructionTypeName} - ProfitPercent or ProfitPrice must be specified");
+				if (ProfitPercent != -1.0 && ProfitPercent <= 0.0) return Tuple.Create(false, $"{InstructionTypeName} - ProfitPercent must be a positive integer, e.g. 1.2 would mean 120% profit");
 				return base.IsValid();
 			}
 
@@ -1439,7 +1442,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitProfit - EstimateExitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - ExitProfit - EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1464,16 +1467,12 @@ namespace PowerLanguage.Strategy
 			public EExitDaysCountStrategy Strategy { get; set; }
 
 			private bool m_exitOrderFilled;
-			private int m_tradingDaysCount;
-			private DateTime m_lastCheckedDate;
 
 			public ExitDays(_TrendLine control) : base(control)
 			{
 				OrderType = EOrderType.Market;
 				Strategy = EExitDaysCountStrategy.TradingDays;
 				m_exitOrderFilled = false;
-				m_tradingDaysCount = 0;
-				m_lastCheckedDate = DateTime.MinValue;
 				Count = 1;
 			}
 
@@ -1486,8 +1485,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (OrderType != EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Exit only supports market orders", this.GetType().Name));
-				if (Count <= 0) return Tuple.Create(false, string.Format("{0} - Count must be larger than 0", this.GetType().Name));
+				if (OrderType != EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Exit only supports market orders");
+				if (Count <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Count must be larger than 0");
 				return base.IsValid();
 			}
 
@@ -1495,8 +1494,6 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 				m_exitOrderFilled = false;
-				m_tradingDaysCount = 0;
-				m_lastCheckedDate = DateTime.MinValue;
 			}
 
 			public override void CalcBar()
@@ -1505,10 +1502,9 @@ namespace PowerLanguage.Strategy
 				{
 					//reset exit order state when position goes flat
 					m_exitOrderFilled = false;
-					m_tradingDaysCount = 0;
-					m_lastCheckedDate = DateTime.MinValue;
 					return;
 				}
+
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
 				switch (m_studyControl.Environment.CalcReason)
@@ -1528,35 +1524,39 @@ namespace PowerLanguage.Strategy
 						switch (Strategy)
 						{
 							case EExitDaysCountStrategy.CalendarDays:
-								TimeSpan days = m_studyControl.Bars.Time[0] - entryDate;
-								if (days.Days >= Count && !m_exitOrderFilled) sendOrder();
+								if (calendarDayCount(entryDate, m_studyControl.Bars.Time[0]) >= Count && !m_exitOrderFilled) sendOrder();
 								break;
 							case EExitDaysCountStrategy.TradingDays:
-								//TBD - need to make sure this will work correctly when a position is adopted from the broker, if the strategy is not calculated
-								//      all the way up to the current bar the trading days count will be off
-								// https://www.multicharts.com/trading-software/index.php?title=Advanced._AutoTrading
-								// https://www.multicharts.com/trading-software/index.php/Auto_Trading#Recalculate_on_Broker_Events
-								if (m_lastCheckedDate == DateTime.MinValue)
-								{
-									m_tradingDaysCount = 1;
-									m_lastCheckedDate = m_studyControl.Bars.Time[0];
-									return;
-								}
-
-								if (m_studyControl.Bars.Time[0].Date != m_lastCheckedDate.Date)
-								{
-									m_lastCheckedDate = m_studyControl.Bars.Time[0];
-									m_tradingDaysCount++;
-								}
-
-								if (m_tradingDaysCount >= Count && !m_exitOrderFilled) sendOrder();
+								if (tradingDayCount(entryDate, m_studyControl.Bars.Time[0]) >= Count && !m_exitOrderFilled) sendOrder();
 								break;
 						}
 
 						break;
 				}
+			}
 
+			private int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
+			{
+				TimeSpan days = currentDateTime - entryDate;
+				return days.Days;
+			}
 
+			private int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
+			{
+				DateTime date = currentDateTime;
+				int count = 0;
+
+				if (m_studyControl.Debug && m_studyControl.Bars.Info.Category != ESymbolCategory.Stock)
+					m_studyControl.Output.WriteLine("WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
+
+				while (date.Date > entryDate.Date)
+				{
+					//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
+					if (!m_studyControl.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
+					date = date.AddDays(-1);					
+				}
+
+				return count;
 			}
 
 			private int getOrderId()
@@ -1567,7 +1567,6 @@ namespace PowerLanguage.Strategy
 					return m_orderSxMkt.ID;
 				return -1;
 			}
-
 		}
 
 		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
@@ -1592,8 +1591,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (BufferPrice < 0) return Tuple.Create(false, string.Format("{0} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)", this.GetType().Name));
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
+				if (BufferPrice < 0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
 
@@ -1671,8 +1670,8 @@ namespace PowerLanguage.Strategy
 
 			public override Tuple<bool, string> IsValid()
 			{
-				if (BufferPrice < 0) return Tuple.Create(false, string.Format("{0} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)", this.GetType().Name));
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, string.Format("{0} - Market exit not supported", this.GetType().Name));
+				if (BufferPrice < 0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
+				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
 
@@ -1902,7 +1901,7 @@ namespace PowerLanguage.Strategy
 				Func<_TrendLine, Instruction> creator;
 				if (m_instructionCreators.TryGetValue(type.ToLower(), out creator))
 					return creator(control);
-				throw new ArgumentException(string.Format("Unsupported instruction type: {0}", type));
+				throw new ArgumentException($"Unsupported instruction type: {type}");
 			}
 		}
 
@@ -1912,6 +1911,7 @@ namespace PowerLanguage.Strategy
 
 		//properties
 		public List<Instruction> InstructionsList { get; private set; }
+		public List<DateTime> Holidays { get { return m_holidays.Holidays; } }
 
 		//attributes
 		private List<IOrderMarket> m_leMrk;
@@ -1958,6 +1958,7 @@ namespace PowerLanguage.Strategy
 		private int m_atrAllocated;
 		private List<PowerLanguage.Function._VolumeWithSD> m_volumeWithSD;
 		private int m_volumeWithSDAllocated;
+		private PowerLanguage.Function.USHolidays m_holidays;
 
 		//interface methods
 		public _TrendLine(object _ctx) : base(_ctx) { }
@@ -1969,6 +1970,7 @@ namespace PowerLanguage.Strategy
 			createOrders();
 			createIndicators();
 			InstructionsList = new List<Instruction>();
+			m_holidays = new PowerLanguage.Function.USHolidays(this);
 		}
 
 		protected override void StartCalc()

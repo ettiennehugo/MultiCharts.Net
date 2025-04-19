@@ -125,7 +125,7 @@ namespace PowerLanguage.Strategy {
 				Bars.Close.CrossesOver(m_instrumentFastSmoother[0], 1) &&
 				(GrowthPercent == 0.0d || GrowthPeriod == 0.0d || (Bars.CurrentBar > GrowthPeriod && Bars.Close[GrowthPeriod] != 0.0d && (Bars.Close[0] / Bars.Close[GrowthPeriod]) - 1 >= GrowthPercent)))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, stopLossBasedPositionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_le.Send(Bars.Close[0], size);
 			}
 			else if (EnableShort && 
@@ -134,7 +134,7 @@ namespace PowerLanguage.Strategy {
 					 Bars.Close.CrossesUnder(m_instrumentFastSmoother[0], 1) &&
 					 (DeclinePercent == 0.0d || DeclinePeriod == 0.0d || (Bars.CurrentBar > DeclinePeriod && Bars.Close[DeclinePeriod] != 0.0d && 1 - (Bars.Close[0] / Bars.Close[DeclinePeriod]) <= DeclinePercent)))
 			{
-				int size = RiskBasedPositionSizing ? positionSize(Bars, positionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
+				int size = RiskBasedPositionSizing ? stopLossBasedPositionSize(Bars, stopLossBasedPositionSize(Bars, m_instrumentFastSmoother[0], MaxVolumeBasedPosPercent), VolumePeriod) : positionSize(Bars);
 				m_se.Send(Bars.Close[0], size);
 			}
 		}

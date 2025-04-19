@@ -44,6 +44,7 @@
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\PriceAction.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\RiskManagement.dll" />
     <Reference Include="C:\Users\ettie\.nuget\packages\newtonsoft.json\13.0.3\lib\net45\Newtonsoft.Json.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\PriceAction\PriceAction\bin\Release\PriceAction.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.CSharp.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll" />
@@ -520,7 +521,6 @@
     <Compile Include="_AverageExponential.Indicator.CS" />
     <Compile Include="_AverageSimple.Indicator.CS" />
     <Compile Include="_SuperSmootherMulti.Indicator.CS" />
-    <Compile Include="_ParabolicShort.Strategy.CS" />
     <Compile Include="_ParabolicShortScanner.Strategy.CS" />
     <Compile Include="_ParabolicShort.Function.CS" />
     <Compile Include="_ScannerParabolicShort.Indicator.CS" />
@@ -529,6 +529,12 @@
     <Compile Include="_EpisodicPivotHighVolume.Function.CS" />
     <Compile Include="_EpisodicPivotHighVolume.Indicator.CS" />
     <Compile Include="_EpisodicPivotHighVolume.Strategy.CS" />
+    <Compile Include="_EpisodicPivotLE.Strategy.CS" />
+    <Compile Include="_EpisodicPivotLX.Strategy.CS" />
+    <Compile Include="_EpisodicPivotHighVolumeLE.Strategy.CS" />
+    <Compile Include="_EpisodicPivotHighVolumeLX.Strategy.CS" />
+    <Compile Include="_ParabolicShortSE.Strategy.CS" />
+    <Compile Include="_ParabolicShortSX.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
