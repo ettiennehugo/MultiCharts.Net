@@ -4,6 +4,7 @@ using System.Linq;
 using PowerLanguage.Function;
 
 namespace PowerLanguage.Indicator{
+	[SameAsSymbol]
 	public class _SuperSmootherMulti : IndicatorObject {
 		//constants
 
@@ -47,11 +48,11 @@ namespace PowerLanguage.Indicator{
 			m_ss4 = new Function._SuperSmoother(this);
 			m_ss5 = new Function._SuperSmoother(this);
 
-			m_plot1 = AddPlot(new PlotAttributes("SS1", EPlotShapes.Line, Color.Green));
-			m_plot2 = AddPlot(new PlotAttributes("SS2", EPlotShapes.Line, Color.Yellow));
-			m_plot3 = AddPlot(new PlotAttributes("SS3", EPlotShapes.Line, Color.Orange));
-			m_plot4 = AddPlot(new PlotAttributes("SS4", EPlotShapes.Line, Color.Red));
-			m_plot5 = AddPlot(new PlotAttributes("SS5", EPlotShapes.Line, Color.DarkRed));
+			m_plot1 = AddPlot(new PlotAttributes("SS1", EPlotShapes.Line, Color.LightGray, Color.LightGreen, 3, 0, true));
+			m_plot2 = AddPlot(new PlotAttributes("SS2", EPlotShapes.Line, Color.LightGray, Color.Yellow, 3, 0, true));
+			m_plot3 = AddPlot(new PlotAttributes("SS3", EPlotShapes.Line, Color.LightGray, Color.Orange, 3, 0, true));
+			m_plot4 = AddPlot(new PlotAttributes("SS4", EPlotShapes.Line, Color.LightGray, Color.Red, 3, 0, true));
+			m_plot5 = AddPlot(new PlotAttributes("SS5", EPlotShapes.Line, Color.LightGray, Color.DarkRed, 3, 0, true));
 		}
 
 		protected override void StartCalc() 

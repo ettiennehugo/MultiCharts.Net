@@ -49,6 +49,7 @@ namespace PowerLanguage.Strategy
 	///	                              of the account equity based on the entry price and the stop-loss price.
 	///	• [optional] MaxRiskBasedEquityPercent - When a risk based entry is used (see StopLossExitId) the maximum percent of the account equity to use for the position as risk based position entries can become really big,
 	///	                                         default is 1.0 (100%) of the account.
+	///	• [optional] RequireCrossover - Require previous close to be on the opposite side of the line than the current close before an entry is considered, does NOT apply to the BreakoutOrFade strategy, default true. 
 	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
 	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
 	///	• [optional] VolumeRequired - current volume required above the average volume to consider for a high volume entry, default is Disable
@@ -541,11 +542,11 @@ namespace PowerLanguage.Strategy
 							}
 							catch (OverflowException)
 							{
-								m_studyControl.Output.WriteLine($"{Symbol} - Entry - entrySize positionSize based on stop-loss raised an overflow exception: EntryPrice({entryPrice})");
+								m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - entrySize positionSize based on stop-loss raised an overflow exception: EntryPrice({entryPrice})");
 							}
 						}
 					}
-					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - Entry - StopLossPrice is zero, using equity based position size");
+					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - StopLossPrice is zero, using equity based position size");
 				}
 
 				//clip position size to the available volume of the insturment being traded if required
@@ -767,6 +768,7 @@ namespace PowerLanguage.Strategy
 			public double ClosePercentile { get; set; }
 			public DateTime StartTime { get; set; }
 			public DateTime EndTime { get; set; }
+			public bool RequireCrossover { get; set; }
 			public int VolumeDataFeed { get; set; }
 			public int VolumeLength { get; set; }
 			public EVolumeRequired VolumeRequired { get; set; }
@@ -784,6 +786,7 @@ namespace PowerLanguage.Strategy
 				LineStartPrice = 0.0;
 				LineEndTime = DateTime.MinValue;
 				LineEndPrice = 0.0;
+				RequireCrossover = true;
 				VolumeDataFeed = 1;
 				VolumeLength = 20;
 				VolumeRequired = EVolumeRequired.Disable;
@@ -803,6 +806,7 @@ namespace PowerLanguage.Strategy
 				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
 				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "requirecrossover") { RequireCrossover = property.Value.ToObject<bool>(); return true; };
 				if (name == "volumedatafeed") { VolumeDataFeed = property.Value.ToObject<int>(); return true; }
 				if (name == "volumelength") { VolumeLength = property.Value.ToObject<int>(); return true; }
 				if (name == "volumerequired") { VolumeRequired = property.Value.ToObject<EVolumeRequired>(); return true; }
@@ -899,12 +903,13 @@ namespace PowerLanguage.Strategy
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
-								entryCriteriaMet = m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								entryCriteriaMet = RequireCrossover ? m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice : m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								entryCriteriaMet = RequireCrossover ? m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice : m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
+								//NOTE: RequireCrossover is always required to determine to proper crossover for the breakout or fade strategy.
 								entryCriteriaMet = (m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice);
 								break;
 						}
@@ -940,12 +945,13 @@ namespace PowerLanguage.Strategy
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
-								entryCriteriaMet = m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								entryCriteriaMet = RequireCrossover ? m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice : m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								entryCriteriaMet = RequireCrossover ? m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice : m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
+								//NOTE: RequireCrossover is always required to determine to proper crossover for the breakout or fade strategy.
 								entryCriteriaMet = (m_studyControl.Bars.Close[1] < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (m_studyControl.Bars.Close[1] > linePrice && m_studyControl.Bars.Close[0] < linePrice);
 								break;
 						}
@@ -1121,7 +1127,6 @@ namespace PowerLanguage.Strategy
 				if (Length <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Length must be greater than 0");
 				if (DataFeed <= 0) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be greater than 0");
 				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be less than {m_studyControl.MaxDataStream}");
-				if (BufferPercent < 0.0 || BufferPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPercent must be between 0 and 1");
 				return base.IsValid();
 			}
 
@@ -1179,7 +1184,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine(string.Format("{0} - exitPrice - could not determine exit price", this.GetType().Name));
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{InstructionTypeName} - exitPrice - could not determine exit price");
 				return 0.0;
 			}
 		}
@@ -1235,7 +1240,7 @@ namespace PowerLanguage.Strategy
 					result -= m_atr[0] * AtrMultiplier;
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine("ExitOverextension - exitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{InstructionTypeName} - exitPrice - could not determine exit price");
 				return result;
 			}
 
@@ -1335,7 +1340,7 @@ namespace PowerLanguage.Strategy
 				if (Price != -1) return Price;
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - ExitStopLoss - EstimateExitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1428,7 +1433,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - ExitProfit - EstimateExitPrice - could not determine exit price");
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1533,7 +1538,7 @@ namespace PowerLanguage.Strategy
 				int count = 0;
 
 				if (m_studyControl.Debug && m_studyControl.Bars.Info.Category != ESymbolCategory.Stock)
-					m_studyControl.Output.WriteLine("WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
+					m_studyControl.Output.WriteLine($"WARNING - {InstructionTypeName} used with non-stock object using TradingDays specification calculated around stock market calendar.");
 
 				while (date.Date > entryDate.Date)
 				{
@@ -2300,7 +2305,7 @@ namespace PowerLanguage.Strategy
 						break;
 					}
 				}
-				if (instructionStr == "") throw new ArgumentException(string.Format("Instruction type not found - {0}", property.ToString()));
+				if (instructionStr == "") throw new ArgumentException($"Instruction type not found - {property.ToString()}");
 				var instruction = InstructionFactory.CreateInstruction(instructionStr, this);
 				instruction.Parse(property);
 				InstructionsList.Add(instruction);

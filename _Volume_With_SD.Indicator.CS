@@ -42,7 +42,7 @@ namespace PowerLanguage.Indicator {
       avgPlus3SD = AddPlot(new PlotAttributes("+3SD", EPlotShapes.Line, Color.FromArgb(128, 196, 128)));
       avgPlus2SD = AddPlot(new PlotAttributes("+2SD", EPlotShapes.Line, Color.FromArgb(64, 196, 64)));
       avgPlus1SD = AddPlot(new PlotAttributes("+1SD", EPlotShapes.Line, Color.FromArgb(32, 255, 32)));
-      avg = AddPlot(new PlotAttributes("Avg", EPlotShapes.Line, Color.LightGray, Color.LightGray, 2, 0, true));
+      avg = AddPlot(new PlotAttributes("Avg", EPlotShapes.Line, Color.LightGray, Color.LightGray, 3, 0, true));
       avgMinus1SD = AddPlot(new PlotAttributes("-1SD", EPlotShapes.Line, Color.FromArgb(196, 128, 128)));
       avgMinus2SD = AddPlot(new PlotAttributes("-2SD", EPlotShapes.Line, Color.FromArgb(196, 64, 64)));
       avgMinus3SD = AddPlot(new PlotAttributes("-3SD", EPlotShapes.Line, Color.FromArgb(255, 32, 32)));

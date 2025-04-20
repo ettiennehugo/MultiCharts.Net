@@ -128,7 +128,7 @@ namespace PowerLanguage.Strategy
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			if (size == 0) return; //do not enter if the size is zero
 
-			if (Debug) Output.WriteLine($"{GetType().Name}: Sending entry order - Price={m_minuteTimeFrame.Close[0]}, Size={size}, Gap={gap}, ClosePercentile={closePercentile}");
+			if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Sending entry order - Price={m_minuteTimeFrame.Close[0]}, Size={size}, Gap={gap}, ClosePercentile={closePercentile}");
 			m_le.Send(m_minuteTimeFrame.Close[0], size);
 		}
 
