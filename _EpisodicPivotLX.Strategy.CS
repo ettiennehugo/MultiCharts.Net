@@ -112,7 +112,7 @@ namespace PowerLanguage.Strategy
 			if (FirstExitDaysCount <= 0) throw new Exception("FirstExitDaysCount must be larger than zero.");
 			if (EPDayPercentLimit <= 0) throw new Exception("EPDayPercentLimit must be larger than zero.");
 			if (FastMATightStopRiskReward <= 1) throw new Exception("FastMATightStopRiskReward must be larger than one.");
-			m_minuteTimeFrame = Bars;
+			m_minuteTimeFrame = BarsOfData(1);
 			m_dailyTimeFrame = BarsOfData(2);
 			m_fastMA.Instrument = m_dailyTimeFrame;
 			m_fastMA.Length = FastMA;
@@ -128,14 +128,14 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-
 			if (PositionSide == 0) return; //do not exit if there is no position  
 
 			//determine the entry date of the trade  
 			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
 			if (CurrentPosition.ClosedTrades.Count > 0) entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
-			if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Entry date={entryDate.ToString("yyyy-MM-dd")}, DaysCount={daysCount}, CurrentTime={Bars.Time[0].ToString("yyyy-MM-dd HH:mm:ss")}");
+			if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Entry date({entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
+
 
 			//determine the entry day risk that was taken
 			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 			//move stop-loss to breakeven after the first exit days
 			if (daysCount >= FirstExitDaysCount)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Moving stop-loss to breakeven after first exit days.");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Moving stop-loss to breakeven after first exit days.");
 				GenerateBreakEven(0); //0 to force the stop-loss to breakeven
 			}
 
@@ -164,7 +164,7 @@ namespace PowerLanguage.Strategy
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
 				m_lxAll.Send();
 			}
 
@@ -172,26 +172,26 @@ namespace PowerLanguage.Strategy
 			//      few days of the trade.
 			if (daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > m_fastMA[0] + (m_atr[0] * ATRFactor) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Exiting position based on bullish overextension.");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on bullish overextension.");
 				m_lxAll.Send();
 			}
 
 			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.Open[0] != 0 && (m_minuteTimeFrame.Close[0] / m_dailyTimeFrame.Open[0]) > m_epDayPercentLimit) //c.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Exiting position based on EP day percentage limit.");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on EP day percentage limit.");
 				m_lxAll.Send();
 			}
 
 			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Exiting position based on risk reward ratio.");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on risk reward ratio.");
 				m_lxTightStopAll.Send(m_fastMA[0]);
 			}
 
 			//close position when we're back testing and this is the last bar
 			if (!Environment.IsRealTimeCalc && m_dailyTimeFrame.LastBarOnChart)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name} - {Bars.Info.Name}: Exiting position on last bar during back testing");
+				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position on last bar during back testing");
 				m_lxAll.Send();
 			}
 		}
