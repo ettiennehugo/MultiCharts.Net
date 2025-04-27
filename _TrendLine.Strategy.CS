@@ -247,7 +247,7 @@ namespace PowerLanguage.Strategy
 		public enum EVolumeRequired
 		{
 			Disable,
-			AboveAverage,			//volume required should be above average
+			AboveAverage,     //volume required should be above average
 			AboveAverageSD1,  //volume required should be above average + 1 standard deviation
 			AboveAverageSD2,  //volume required should be above average + 2 standard deviations
 			AboveAverageSD3   //volume required should be above average + 3 standard deviations
@@ -301,6 +301,10 @@ namespace PowerLanguage.Strategy
 			public virtual void StartCalc() { }
 			public virtual void StopCalc() { }
 			public abstract void CalcBar();
+
+			protected void debugTrace(string message) {
+				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol}, {m_studyControl.Bars.Time[0]}, {InstructionTypeName}, {message}");
+			}
 
 			protected ITrendLineObject getTrendLine(int id)
 			{
@@ -367,6 +371,62 @@ namespace PowerLanguage.Strategy
 				double costBasis = currentPositionCostBasis();
 				double pl = currentPositionPL();
 				return costBasis != 0 ? pl / costBasis : 0;
+			}
+
+			/// <summary>
+			/// Scans back from the current bar to the previous day and returns the lowest low including the previous day.
+			/// </summary>
+			protected double recentLow(int daysBack = 1)
+			{
+				double low = m_studyControl.IntradayLow;
+				int daysProcessed = 0;
+				DateTime startDate = m_studyControl.Bars.Time[0].Date;
+				DateTime lastDate = startDate;
+
+				for (int i = 0; i < m_studyControl.Bars.CurrentBar; i++)
+				{
+					if (m_studyControl.Bars.Time[i].Date != lastDate)
+					{
+						daysProcessed++;
+						lastDate = m_studyControl.Bars.Time[i].Date;
+					}
+
+					if (m_studyControl.Bars.Time[i].Date != startDate)
+						low = Math.Min(low, m_studyControl.Bars.Low[i]);
+
+					if (daysProcessed > daysBack)
+						break;
+				}
+
+				return low;
+			}
+
+			/// <summary>
+			/// Scan back from the current bar to the previous day and returns the highest high including the previous day.
+			/// </summary>
+			protected double recentHigh(int daysBack = 1)
+			{
+				double high = m_studyControl.IntradayHigh;
+				int daysProcessed = 0;
+				DateTime startDate = m_studyControl.Bars.Time[0].Date;
+				DateTime lastDate = startDate;
+
+				for (int i = 0; i < m_studyControl.Bars.CurrentBar; i++)
+				{
+					if (m_studyControl.Bars.Time[i].Date != lastDate)
+					{
+						daysProcessed++;
+						lastDate = m_studyControl.Bars.Time[i].Date;
+					}
+
+					if (m_studyControl.Bars.Time[i].Date != startDate)
+						high = Math.Max(high, m_studyControl.Bars.High[i]);
+
+					if (daysProcessed > daysBack)
+						break;
+				}
+
+				return high;
 			}
 		}
 
@@ -552,7 +612,7 @@ namespace PowerLanguage.Strategy
 							}
 						}
 					}
-					else if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - StopLossPrice is zero, using equity based position size");
+					else debugTrace("StopLossPrice is zero, using equity based position size");
 				}
 
 				//clip position size to the available volume of the insturment being traded if required
@@ -679,7 +739,6 @@ namespace PowerLanguage.Strategy
 
 			protected int exitSize()
 			{
-				if (m_studyControl.PositionSide == 0) return 0;
 				if (ExitPercent == 1.0) return currentOpenPositionSize();
 				//NOTE: Since MC does not support partial order filling we need to round up to the nearest larger integer otherwise
 				//      partial positions remain that are stopped out etc.
@@ -690,19 +749,23 @@ namespace PowerLanguage.Strategy
 			protected void sendOrder(double price = 0.0)
 			{
 				if (!Active) return;
+				int size = exitSize();
 				if (m_studyControl.PositionSide > 0)
 				{
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							m_orderLxMkt.Send(exitSize());
+							debugTrace($"long - sending exit market order for {size} contracts");
+							m_orderLxMkt.Send(size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
-							m_orderLxPriced.Send(price, exitSize());
+							debugTrace($"long - sending exit {OrderType} order for {size} contracts at price {price}");
+							m_orderLxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
-							m_orderLxSL.Send(price, price, exitSize());
+							debugTrace($"long - sending exit stop-limit order for {size} contracts at price {price}");
+							m_orderLxSL.Send(price, price, size);
 							break;
 					}
 				}
@@ -711,14 +774,17 @@ namespace PowerLanguage.Strategy
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							m_orderSxMkt.Send(exitSize());
+							debugTrace($"short - sending exit market order for {size} contracts");
+							m_orderSxMkt.Send(size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
-							m_orderSxPriced.Send(price, exitSize());
+							debugTrace($"short - sending exit {OrderType} order for {size} contracts at price {price}");
+							m_orderSxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
-							m_orderSxSL.Send(price, price, exitSize());
+							debugTrace($"short - sending exit stop-limit order for {size} contracts at price {price}");
+							m_orderSxSL.Send(price, price, size);
 							break;
 					}
 				}
@@ -726,11 +792,10 @@ namespace PowerLanguage.Strategy
 
 			/// <summary>
 			/// Controls when exit orders are sent to the broker.
-			/// Sub-classes can override this property.
 			/// </summary>
 			protected virtual bool Active
 			{
-				get { return true; }
+				get { return m_studyControl.PositionSide != 0; }
 			}
 		}
 
@@ -749,7 +814,6 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
-				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				sendOrder(exitPrice());
 			}
@@ -872,7 +936,7 @@ namespace PowerLanguage.Strategy
 				base.StartCalc();
 
 				if (VolumeRequired >= 0)
-				{					
+				{
 					m_volume = m_studyControl.AllocateVolumeWithSD();
 					m_volumeInstrument = m_studyControl.BarsOfData(VolumeDataFeed);
 					m_volume.Instrument = m_volumeInstrument;
@@ -941,62 +1005,6 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			/// <summary>
-			/// Scans back from the current bar to the previous day and returns the lowest low including the previous day.
-			/// </summary>
-			private double recentLow(int daysBack = 1)
-			{
-				double low = m_studyControl.IntradayLow;
-				int daysProcessed = 0;
-				DateTime startDate = m_studyControl.Bars.Time[0].Date;
-				DateTime lastDate = startDate;
-
-				for (int i = 0; i < m_studyControl.Bars.CurrentBar; i++)
-				{
-					if (m_studyControl.Bars.Time[i].Date != lastDate)
-					{
-						daysProcessed++;
-						lastDate = m_studyControl.Bars.Time[i].Date;
-					}
-
-					if (m_studyControl.Bars.Time[i].Date != startDate)
-						low = Math.Min(low, m_studyControl.Bars.Low[i]);
-
-					if (daysProcessed > daysBack)
-						break;
-				}
-
-				return low;
-			}
-
-			/// <summary>
-			/// Scan back from the current bar to the previous day and returns the highest high including the previous day.
-			/// </summary>
-			private double recentHigh(int daysBack = 1)
-			{
-				double high = m_studyControl.IntradayHigh;
-				int daysProcessed = 0;
-				DateTime startDate = m_studyControl.Bars.Time[0].Date;
-				DateTime lastDate = startDate;
-
-				for (int i = 0; i < m_studyControl.Bars.CurrentBar; i++)
-				{
-					if (m_studyControl.Bars.Time[i].Date != lastDate)
-					{
-						daysProcessed++;
-						lastDate = m_studyControl.Bars.Time[i].Date;
-					}
-
-					if (m_studyControl.Bars.Time[i].Date != startDate)
-						high = Math.Max(high, m_studyControl.Bars.High[i]);
-
-					if (daysProcessed > daysBack)
-						break;
-				}
-
-				return high;
-			}
-
 			private void longEntry()
 			{
 				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
@@ -1029,13 +1037,13 @@ namespace PowerLanguage.Strategy
 
 							if (closePercentile >= ClosePercentile)
 							{
-								if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long entry at close {m_studyControl.Bars.Time[0]}, {close}");
+								debugTrace($"Long entry at close {m_studyControl.Bars.Time[0]}, {close}");
 								sendOrder(close);
 							}
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
+						debugTrace($"Long entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1072,13 +1080,13 @@ namespace PowerLanguage.Strategy
 
 							if (closePercentile >= ClosePercentile)  // e.g., ClosePercentile = 0.75 means close in bottom 25% of range
 							{
-								if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short entry at close {m_studyControl.Bars.Time[0]}, {close}");
+								debugTrace($"Short entry at close {m_studyControl.Bars.Time[0]}, {close}");
 								sendOrder(close);
 							}
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
+						debugTrace($"Short entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1166,12 +1174,12 @@ namespace PowerLanguage.Strategy
 					case EEntryExitCriteria.Close:
 						if (m_studyControl.Bars.Close[0] < linePrice)
 						{
-							if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
+							debugTrace($"Long exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
 							sendOrder(m_studyControl.Bars.Close[0]);
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Long exit on low at {m_studyControl.Bars.Time[0]}, {linePrice}");
+						debugTrace($"Long exit on low at {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1185,12 +1193,12 @@ namespace PowerLanguage.Strategy
 					case EEntryExitCriteria.Close:
 						if (m_studyControl.Bars.Close[0] > linePrice)
 						{
-							if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
+							debugTrace($"Short exit on close at {m_studyControl.Bars.Time[0]}, {linePrice}");
 							sendOrder(m_studyControl.Bars.Close[0]);
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {Name} - Short exit on high at {m_studyControl.Bars.Time[0]}, {linePrice}");
+						debugTrace($"Short exit on high at {m_studyControl.Bars.Time[0]}, {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1266,9 +1274,7 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
-				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < Length) return;
-				if (Criteria == EEntryExitCriteria.Close && m_instrument.Status != EBarState.Close) return;
 				base.CalcBar();
 			}
 
@@ -1290,9 +1296,26 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{InstructionTypeName} - exitPrice - could not determine exit price");
+				debugTrace("exitPrice - could not determine exit price");
 				return 0.0;
 			}
+
+			protected override bool Active
+			{
+				get
+				{
+					if (base.Active)
+					{
+						if (Criteria == EEntryExitCriteria.LowHigh) return true;
+						//otherwise criteria == close
+						if (m_studyControl.PositionSide > 0 && m_studyControl.Bars.Close[0] < exitPrice()) return true;
+						if (m_studyControl.PositionSide < 0 && m_studyControl.Bars.Close[0] > exitPrice()) return true;
+					}
+
+					return false;
+				}
+			}
+
 		}
 
 		internal class ExitOverextension : ExitMovingAverage
@@ -1332,9 +1355,9 @@ namespace PowerLanguage.Strategy
 					return m_studyControl.Bars.Close[0];
 				else if (m_studyControl.PositionSide < 0 && zScore < -ZScoreThreshold)
 					return m_studyControl.Bars.Close[0];
-				
+
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{InstructionTypeName} - exitPrice - could not determine exit price");
+				debugTrace("exitPrice - could not determine exit price");
 				return ma;
 			}
 		}
@@ -1425,7 +1448,7 @@ namespace PowerLanguage.Strategy
 				if (Price != -1) return Price;
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - EstimateExitPrice - could not determine exit price");
+				debugTrace("EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1518,7 +1541,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				if (m_studyControl.Debug) m_studyControl.Output.WriteLine($"{Symbol} - {InstructionTypeName} - EstimateExitPrice - could not determine exit price");
+				debugTrace("EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -1629,7 +1652,7 @@ namespace PowerLanguage.Strategy
 				{
 					//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
 					if (!m_studyControl.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
-					date = date.AddDays(-1);					
+					date = date.AddDays(-1);
 				}
 
 				return count;
