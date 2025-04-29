@@ -519,6 +519,9 @@
     <Compile Include="_ParabolicShortSE.Strategy.CS" />
     <Compile Include="_ParabolicShortSX.Strategy.CS" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include=".editorconfig" />
+  </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

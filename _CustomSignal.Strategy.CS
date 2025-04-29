@@ -25,9 +25,19 @@ namespace PowerLanguage.Strategy {
 			get { return m_intradayLow; }
 		}
 
+		public DateTime IntradayLowTime
+		{
+			get { return m_intradayLowTime; }
+		}
+
 		public double IntradayHigh
 		{
 			get { return m_intradayHigh; }
+		}
+
+		public DateTime IntradayHighTime
+		{
+			get { return m_intradayHighTime; }
 		}
 
 		public double IntradayClose
@@ -35,9 +45,19 @@ namespace PowerLanguage.Strategy {
 			get { return m_intradayClose; }
 		}
 
+		public DateTime IntradayCloseTime
+		{
+			get { return m_intradayCloseTime; }
+		}
+
 		public double IntradayOpen
 		{
 			get { return m_intradayOpen; }
+		}
+
+		public DateTime IntradayOpenTime
+		{
+			get { return m_intradayOpenTime; }
 		}
 
 		public double IntradayVolume
@@ -50,6 +70,10 @@ namespace PowerLanguage.Strategy {
 		private double m_intradayHigh;
 		private double m_intradayClose;
 		private double m_intradayOpen;
+		private DateTime m_intradayLowTime;
+		private DateTime m_intradayHighTime;
+		private DateTime m_intradayCloseTime;
+		private DateTime m_intradayOpenTime;
 		private double m_intradayVolume;
 		private DateTime m_currentDay;
 		private PowerLanguage.Function.USHolidays m_holidays;
@@ -68,6 +92,10 @@ namespace PowerLanguage.Strategy {
 		{
 			base.StartCalc();
 			m_currentDay = DateTime.Now.Date;
+			m_intradayLowTime = DateTime.Now;
+			m_intradayHighTime = DateTime.Now;
+			m_intradayCloseTime = DateTime.Now;
+			m_intradayOpenTime = DateTime.Now;
 			m_intradayLow = double.MaxValue;
 			m_intradayHigh = double.MinValue;
 			m_intradayClose = 0.0d;
@@ -89,16 +117,30 @@ namespace PowerLanguage.Strategy {
 				m_currentDay = Bars.Time[0].Date;
 				m_intradayVolume = Bars.Volume[0];
 				m_currentDay = Bars.Time[0];
+				m_intradayLowTime = Bars.Time[0];
+				m_intradayHighTime = Bars.Time[0];
+				m_intradayCloseTime = Bars.Time[0];
+				m_intradayOpenTime = Bars.Time[0];
 			}
 			else
 			{
-				m_intradayLow = Math.Min(m_intradayLow, Bars.Low[0]);
-				m_intradayHigh = Math.Max(m_intradayHigh, Bars.High[0]);
+				if (m_intradayLow > Bars.Low[0])
+				{
+					m_intradayLow = Bars.Low[0];
+					m_intradayLowTime = Bars.Time[0];
+				}
+
+				if (m_intradayHigh < Bars.High[0])
+				{
+					m_intradayHighTime = Bars.Time[0];
+					m_intradayHigh = Bars.High[0];
+				}
 			}
 
 			if (Bars.Status == EBarState.Close)
 			{
 				m_intradayClose = Bars.Close[0];
+				m_intradayCloseTime = Bars.Time[0];
 				m_intradayVolume += Bars.Volume[0];
 			}
 		}

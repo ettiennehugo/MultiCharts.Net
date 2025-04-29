@@ -13,6 +13,7 @@ using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
 using System.Runtime.Remoting.Messaging;
 using System.Diagnostics;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace PowerLanguage.Strategy
 {
@@ -379,6 +380,7 @@ namespace PowerLanguage.Strategy
 			protected double recentLow(int daysBack = 1)
 			{
 				double low = m_studyControl.IntradayLow;
+				DateTime lowDate = m_studyControl.IntradayLowTime;
 				int daysProcessed = 0;
 				DateTime startDate = m_studyControl.Bars.Time[0].Date;
 				DateTime lastDate = startDate;
@@ -391,7 +393,7 @@ namespace PowerLanguage.Strategy
 						lastDate = m_studyControl.Bars.Time[i].Date;
 					}
 
-					if (m_studyControl.Bars.Time[i].Date != startDate)
+					if (m_studyControl.Bars.Time[i].Date != startDate && low > m_studyControl.Bars.Low[i])					
 						low = Math.Min(low, m_studyControl.Bars.Low[i]);
 
 					if (daysProcessed > daysBack)
@@ -760,10 +762,20 @@ namespace PowerLanguage.Strategy
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
+							if (price == 0.0)
+							{
+								debugTrace($"long - price is zero for stop/limit order exiting");
+								return;
+							}
 							debugTrace($"long - sending exit {OrderType} order for {size} contracts at price {price}");
 							m_orderLxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
+							if (price == 0.0)
+							{
+								debugTrace($"long - price is zero for stop-limit order exiting");
+								return;
+							}
 							debugTrace($"long - sending exit stop-limit order for {size} contracts at price {price}");
 							m_orderLxSL.Send(price, price, size);
 							break;
@@ -779,10 +791,20 @@ namespace PowerLanguage.Strategy
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
+							if (price == 0.0)
+							{
+								debugTrace($"short - price is zero for stop/limit order exiting");
+								return;
+							}
 							debugTrace($"short - sending exit {OrderType} order for {size} contracts at price {price}");
 							m_orderSxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
+							if (price == 0.0)
+							{
+								debugTrace($"short - price is zero for stop-limit order exiting");
+								return;
+							}
 							debugTrace($"short - sending exit stop-limit order for {size} contracts at price {price}");
 							m_orderSxSL.Send(price, price, size);
 							break;
@@ -844,6 +866,7 @@ namespace PowerLanguage.Strategy
 			private ITrendLineObject m_line;
 			private PowerLanguage.Function._VolumeWithSD m_volume;
 			private IInstrument m_volumeInstrument;
+			private bool m_previousBarPositionWasFlat;
 			private int m_entryCount;
 
 			public EntryLine(_TrendLine control) : base(control)
@@ -862,6 +885,7 @@ namespace PowerLanguage.Strategy
 				m_volume = null;
 				m_volumeInstrument = null;
 				m_entryCount = 0;
+				m_previousBarPositionWasFlat = true;
 			}
 
 			public override bool Parse(JProperty property)
@@ -958,10 +982,11 @@ namespace PowerLanguage.Strategy
 			public override void CalcBar()
 			{
 				if (m_studyControl.Bars.CurrentBar < 2) return;
-				if (m_studyControl.Environment.CalcReason == CalculationReason.OrderFilled && m_studyControl.PositionSide != 0) m_entryCount++;
+				if (m_studyControl.PositionSide != 0 && m_previousBarPositionWasFlat) m_entryCount++;
+				m_previousBarPositionWasFlat = m_studyControl.PositionSide == 0;
 				if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
-				if (m_studyControl.Bars.Time[0].Date < LineStartTime || m_studyControl.Bars.Time[0].Date > LineEndTime) return;
+				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
 
 				bool timeFilterValid = TimeFilters.Count == 0;  //if no time filters specified the entry is valid all the time
 				bool timeFilterMatch = false;
@@ -1005,6 +1030,35 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			/// <summary>
+			/// Given the set of defined exits, check if the current price will be stopped out.
+			/// </summary>
+			private bool willBeStoppedOut(EEntryDirection direction, double price)
+			{
+				bool willBeStoppedOut = false;
+				foreach (var instruction in m_studyControl.InstructionsList)
+				{
+					if (instruction is ExitPriced)
+					{
+						ExitPriced exitPriced = (ExitPriced)instruction;
+						switch (direction)
+						{
+							case EEntryDirection.Long:
+								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Strategy, Criteria) >= price;
+								break;
+							case EEntryDirection.Short:
+								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Strategy, Criteria) <= price;
+								break;
+						}
+
+						if (willBeStoppedOut) break;
+					}
+				}
+
+				if (willBeStoppedOut) debugTrace($"Entry will be stopped out at {price}");
+				return willBeStoppedOut;
+			}
+
 			private void longEntry()
 			{
 				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
@@ -1014,17 +1068,18 @@ namespace PowerLanguage.Strategy
 						//need to consider both breakout and fade entries
 						//NOTE: We use the previous day low for breakout and fade entries since gap ups can cause all bars for the current day to be above the line.
 						bool entryCriteriaMet = false;
-						double previousDayLow = this.recentLow();
+						double recentLow = this.recentLow();
+
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
-								entryCriteriaMet = previousDayLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = previousDayLow > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
-								entryCriteriaMet = (previousDayLow < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (previousDayLow > linePrice && m_studyControl.Bars.Close[0] < linePrice);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && ((recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (recentLow > linePrice && m_studyControl.Bars.Close[0] < linePrice));
 								break;
 						}
 
@@ -1043,12 +1098,19 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						debugTrace($"Long entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
-						sendOrder(linePrice);
+						if (!willBeStoppedOut(EEntryDirection.Long, linePrice))
+						{
+							debugTrace($"Long entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
+							sendOrder(linePrice);
+						}
 						break;
 				}
 			}
 
+			/// <summary>
+			/// Enter a short entry based on the trendline and most recent high, if the last position was held after the most recent high a new
+			/// high needs to be made before a new entry is allowed.
+			/// </summary>
 			private void shortEntry()
 			{
 				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
@@ -1056,17 +1118,18 @@ namespace PowerLanguage.Strategy
 				{
 					case EEntryExitCriteria.Close:
 						bool entryCriteriaMet = false;
-						double previousDayHigh = this.recentHigh();
+						double recentHigh = this.recentHigh();
+
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
-								entryCriteriaMet = previousDayHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = previousDayHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
-								entryCriteriaMet = (previousDayHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (previousDayHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && ((recentHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice));
 								break;
 						}
 
@@ -1086,8 +1149,11 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case EEntryExitCriteria.LowHigh:
-						debugTrace($"Short entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
-						sendOrder(linePrice);
+						if (!willBeStoppedOut(EEntryDirection.Short, linePrice))
+						{
+							debugTrace($"Short entry at low/high {m_studyControl.Bars.Time[0]}, {linePrice}");
+							sendOrder(linePrice);
+						}
 						break;
 				}
 			}
@@ -1350,6 +1416,7 @@ namespace PowerLanguage.Strategy
 			{
 				double ma = base.exitPrice();
 				double stdDev = m_studyControl.Bars.Close.StandardDeviationCustom(StdDevLength, DataFeed);
+				if (stdDev == 0.0) return 0.0; //this will skip the exit and log a warning, most likely not enough data to compute the exit
 				double zScore = (m_studyControl.Bars.Close[0] - ma) / stdDev;
 				if (m_studyControl.PositionSide > 0 && zScore > ZScoreThreshold)
 					return m_studyControl.Bars.Close[0];
