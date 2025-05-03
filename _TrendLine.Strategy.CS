@@ -576,7 +576,11 @@ namespace PowerLanguage.Strategy
 			protected virtual int entrySize(double price = 0.0)
 			{
 				double equityAvailable = m_studyControl.equityAvailable();
+				
 				double maxPositionEquity = equityAvailable * EquityPercent;
+				foreach (var openPosition in m_studyControl.Positions[0].OpenTrades)
+					maxPositionEquity -= openPosition.EntryOrder.Price * openPosition.EntryOrder.Contracts; //adjust the available equity for the position based upon the current open position cost basis
+
 				double entryPrice = price == 0.0 ? m_studyControl.Bars.Close[0] : price;
 				int equityPercentSize = (int)Math.Truncate(maxPositionEquity / entryPrice);
 				int size = equityPercentSize;
@@ -1362,7 +1366,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				debugTrace("exitPrice - could not determine exit price");
+				debugTrace($"exitPrice - could not determine exit price {MovingAverageType}");
 				return 0.0;
 			}
 
@@ -1412,6 +1416,22 @@ namespace PowerLanguage.Strategy
 				return base.IsValid();
 			}
 
+			protected override bool Active
+			{
+				get
+				{
+					if (base.Active)
+					{
+						double stdDev = m_studyControl.Bars.Close.StandardDeviationCustom(StdDevLength, DataFeed);
+						if (stdDev == 0.0) return false; //no standard deviation, disable exit
+						double zScore = (m_studyControl.Bars.Close[0] - base.exitPrice() /* ma */) / stdDev;
+						if (m_studyControl.PositionSide > 0 && zScore > ZScoreThreshold) return true;
+						if (m_studyControl.PositionSide < 0 && zScore < -ZScoreThreshold) return true;
+					}
+					return false;
+				}
+			}
+
 			protected override double exitPrice()
 			{
 				double ma = base.exitPrice();
@@ -1422,10 +1442,7 @@ namespace PowerLanguage.Strategy
 					return m_studyControl.Bars.Close[0];
 				else if (m_studyControl.PositionSide < 0 && zScore < -ZScoreThreshold)
 					return m_studyControl.Bars.Close[0];
-
-				//should never be reached
-				debugTrace("exitPrice - could not determine exit price");
-				return ma;
+				return 0.0; //this will skip the exit and log a warning, since the price is not overextended
 			}
 		}
 
