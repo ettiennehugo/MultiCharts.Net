@@ -5,6 +5,7 @@ using PowerLanguage.Function;
 using ATCenterProxy.interop;
 using PowerLanguage.Indicator;
 using System.Diagnostics;
+using System.Runtime.Remoting.Messaging;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -15,6 +16,19 @@ namespace PowerLanguage.Strategy {
 	{
 		//constants
 
+
+		//types
+		/// <summary>
+		/// Trace level to use for debugging and logging.
+		/// </summary>
+		public enum ETraceLevel
+		{
+			None = 0,   //no trace
+			Info,
+			Warning,
+			Error,
+			Verbose,    //trace all messages
+		}
 
 		//inputs
 
@@ -65,6 +79,8 @@ namespace PowerLanguage.Strategy {
 			get { return m_intradayVolume; }
 		}
 
+		[Input] public ETraceLevel TraceLevel { get; set; }
+
 		//attributes
 		private double m_intradayLow;
 		private double m_intradayHigh;
@@ -82,6 +98,11 @@ namespace PowerLanguage.Strategy {
 		public _CustomSignal(object _ctx) : base(_ctx) { }
 
 		//methods
+		public void trace(ETraceLevel traceLevel, string message)
+		{
+			if (TraceLevel >= traceLevel) Output.WriteLine(message);
+		}
+
 		protected override void Create()
 		{
 			base.Create();
