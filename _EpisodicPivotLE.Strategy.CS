@@ -45,7 +45,6 @@ namespace PowerLanguage.Strategy
 		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
-		[Input] public bool Debug { get; set; } //debug mode - this will print debug information to the output window
 
 		//attribute
 		private IOrderPriced m_le;
@@ -121,7 +120,7 @@ namespace PowerLanguage.Strategy
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			if (size == 0) return; //do not enter if the size is zero
 
-			if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Entry order at Price({m_minuteTimeFrame.Close[0]}), Size({size}), Gap({gap}), ClosePercentile({closePercentile})");
+			trace(ETraceLevel.Info, $"Entry order at Price({m_minuteTimeFrame.Close[0]}), Size({size}), Gap({gap}), ClosePercentile({closePercentile})");
 			m_le.Send(m_minuteTimeFrame.Close[0], size);
 		}
 

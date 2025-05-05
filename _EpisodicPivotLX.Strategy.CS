@@ -1,15 +1,7 @@
 ﻿using System;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Windows.Forms;
-using Microsoft.Scripting.Interpreter;
 using PowerLanguage.Function;
-using PowerLanguage.Indicator;
-using PowerLanguage.TradeManager;
-using static IronPython.Modules._ast;
-using static PowerLanguage.Strategy._TrendLine;
-using static System.Net.Mime.MediaTypeNames;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
+
 namespace PowerLanguage.Strategy
 {
 	///Episodic Pivot trade management for instruments that have gapped up on earnings or some other catalyst.
@@ -59,7 +51,6 @@ namespace PowerLanguage.Strategy
 		[Input] public int FirstExitDaysCount { get; set; } //first exit days count - this is used to determine the first exit days count based on the entry date
 		[Input] public double EPDayPercentLimit { get; set; } //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		[Input] public double FastMATightStopRiskReward { get; set; } //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
-		[Input] public bool Debug { get; set; }       //debug mode - this will print debug information to the output window
 
 		//attribute
 		private IOrderMarket m_lxPartial;
@@ -93,11 +84,10 @@ namespace PowerLanguage.Strategy
 			FirstExitDaysCount = DEFAULT_FIRST_EXIT_DAYS_COUNT;
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
 			FastMATightStopRiskReward = DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD;
-			Debug = false;
-			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell));
-			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
-			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
-			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell));
+			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell, OrderExit.Total));
+			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell, OrderExit.Total));
+			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell, OrderExit.Total));
+			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell, OrderExit.Total));
 		}
 
 		protected override void StartCalc()
@@ -134,7 +124,7 @@ namespace PowerLanguage.Strategy
 			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
 			if (CurrentPosition.ClosedTrades.Count > 0) entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
-			if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Entry date({entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
+			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
 
 
 			//determine the entry day risk that was taken
@@ -152,7 +142,7 @@ namespace PowerLanguage.Strategy
 			//move stop-loss to breakeven after the first exit days
 			if (daysCount >= FirstExitDaysCount)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Moving stop-loss to breakeven after first exit days.");
+				trace(ETraceLevel.Info, $"Moving stop-loss to breakeven after first exit days.");
 				GenerateBreakEven(0); //0 to force the stop-loss to breakeven
 			}
 
@@ -164,7 +154,7 @@ namespace PowerLanguage.Strategy
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
+				trace(ETraceLevel.Info, $"Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
 				m_lxAll.Send();
 			}
 
@@ -172,26 +162,26 @@ namespace PowerLanguage.Strategy
 			//      few days of the trade.
 			if (daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > m_fastMA[0] + (m_atr[0] * ATRFactor) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on bullish overextension.");
+				trace(ETraceLevel.Info, $"Exiting position based on bullish overextension.");
 				m_lxAll.Send();
 			}
 
 			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.Open[0] != 0 && (m_minuteTimeFrame.Close[0] / m_dailyTimeFrame.Open[0]) > m_epDayPercentLimit) //c.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on EP day percentage limit.");
+				trace(ETraceLevel.Info, $"Exiting position based on EP day percentage limit.");
 				m_lxAll.Send();
 			}
 
 			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position based on risk reward ratio.");
+				trace(ETraceLevel.Info, $"Exiting position based on risk reward ratio.");
 				m_lxTightStopAll.Send(m_fastMA[0]);
 			}
 
 			//close position when we're back testing and this is the last bar
 			if (!Environment.IsRealTimeCalc && m_dailyTimeFrame.LastBarOnChart)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exiting position on last bar during back testing");
+				trace(ETraceLevel.Info, $"Exiting position on last bar during back testing");
 				m_lxAll.Send();
 			}
 		}

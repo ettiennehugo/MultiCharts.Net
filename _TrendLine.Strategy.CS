@@ -133,6 +133,11 @@ namespace PowerLanguage.Strategy
 	/// • [alternate on TrailingType] TrailingValue - for FixedAmount type this is a dollar amount and for Percentage this is a percent value, e.g. 0.15 for 15%
 	/// • [alternate on TrailingType] AtrLength - for ATR type this is the length of the ATR to use with TrailingType is set to ATR
 	/// 
+	/// ExitBreakeven
+	/// • Instruction - "ExitBreakeven", always exits the whole position.
+	/// • [alternate] ActivationProfitPercent - profit percentage to activate the trailing stop
+	/// • [alternate] ActivationProfitAmount - profit amount to activate the trailing stop 
+	/// 
 	/// Example JSON:
 	/// [
 	///	    {
@@ -1717,13 +1722,18 @@ namespace PowerLanguage.Strategy
 						//check whether order was filled to ensure exit is only triggered once
 						foreach (var item in m_studyControl.TradeManager.TradingData.Orders.Items)
 						{
-							if (item.OrderID == getOrderId() && item.LeftContracts == 0) m_exitOrderFilled = true;
-							break;
+							if (item.OrderID == getOrderId() && item.LeftContracts == 0)
+							{
+								m_exitOrderFilled = true;
+								m_studyControl.trace(ETraceLevel.Verbose, $"exitOrderFilled - OrderId {item.OrderID} - LeftContracts {item.LeftContracts}");
+								break;
+							}
 						}
 						break;
 					case CalculationReason.Default:
 						DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
 						if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+						m_studyControl.trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - exitOrderFilled {m_exitOrderFilled}");
 
 						switch (Strategy)
 						{
@@ -2079,8 +2089,44 @@ namespace PowerLanguage.Strategy
 					return base.Active && m_active;
 				}
 			}
+		}
 
+		internal class ExitBreakeven : Instruction
+		{
+			public double ActivationProfitPercent { get; set; }
+			public double ActivationProfitAmount { get; set; }
 
+			public ExitBreakeven(_TrendLine control) : base(control)
+			{
+				ActivationProfitPercent = 0.0;
+				ActivationProfitAmount = 0.0;
+			}
+
+			public override bool Parse(JProperty property)
+			{
+				string name = property.Name.ToLower();
+				if (name == "activationprofitpercent") { ActivationProfitPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "activationprofitamount") { ActivationProfitAmount = property.Value.ToObject<double>(); return true; }
+				return base.Parse(property);
+			}
+
+			public override Tuple<bool, string> IsValid()
+			{
+				if (ActivationProfitPercent <= 0 && ActivationProfitAmount <= 0) return Tuple.Create(false, $"{this.GetType().Name} - ActivationProfitPercent or ActivationProfitPrice must be set to zero or a positive number");
+				return base.IsValid();
+			}
+
+			public override void CalcBar()
+			{
+				base.CalcBar();
+				if (m_studyControl.PositionSide == 0) return;
+				m_studyControl.CurSpecOrdersMode = ESpecOrdersMode.PerContract;
+				double profit = ActivationProfitAmount;
+				if (ActivationProfitPercent > 0)
+					profit = m_studyControl.StrategyInfo.AvgEntryPrice * ActivationProfitPercent;
+				m_studyControl.trace(ETraceLevel.Verbose, $"avgEntryPrice {m_studyControl.StrategyInfo.AvgEntryPrice} - profit {profit}");
+				m_studyControl.GenerateBreakEven(profit);
+			}
 		}
 
 		/// <summary>
@@ -2100,6 +2146,7 @@ namespace PowerLanguage.Strategy
 					{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
 					{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
 					{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
+					{ "exitbreakeven", control => new _TrendLine.ExitBreakeven(control) },
 			};
 
 			public static Instruction CreateInstruction(string type, _TrendLine control)
