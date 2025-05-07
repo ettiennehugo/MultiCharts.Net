@@ -100,7 +100,7 @@ namespace PowerLanguage.Strategy {
 		//methods
 		public void trace(ETraceLevel traceLevel, string message)
 		{
-			if (TraceLevel >= traceLevel) Output.WriteLine(message);
+			if (TraceLevel <= traceLevel) Output.WriteLine(message);
 		}
 
 		protected override void Create()
