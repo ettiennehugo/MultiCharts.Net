@@ -249,7 +249,7 @@ namespace PowerLanguage.Strategy {
 			}
 			catch (OverflowException)
 			{
-				Output.WriteLine("WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
+				trace(ETraceLevel.Warning,"WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
 				return 0;   //risk overflow exception occurred, ignore signal
 			}
 
@@ -275,7 +275,7 @@ namespace PowerLanguage.Strategy {
 				}
 				catch (OverflowException)
 				{
-					Output.WriteLine("WARNING - positionSize based on VOLUME raised an overflow exception, signal ignored.");
+					trace(ETraceLevel.Warning, "WARNING - positionSize based on VOLUME raised an overflow exception, signal ignored.");
 					return 0;   //risk overflow exception occurred, ignore signal
 				}
 			}
@@ -329,7 +329,7 @@ namespace PowerLanguage.Strategy {
 			int count = 0;
 
 			if (Bars.Info.Category != ESymbolCategory.Stock)
-				Output.WriteLine("WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
+				trace(ETraceLevel.Warning, "WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
 
 			while (date.Date > entryDate.Date)
 			{

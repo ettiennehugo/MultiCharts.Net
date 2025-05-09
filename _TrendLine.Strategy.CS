@@ -1752,15 +1752,24 @@ namespace PowerLanguage.Strategy
 					case CalculationReason.Default:
 						DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
 						if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-						trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - exitOrderFilled {m_exitOrderFilled}");
 
 						switch (Strategy)
 						{
 							case EExitDaysCountStrategy.CalendarDays:
-								if (calendarDayCount(entryDate, m_studyControl.Bars.Time[0]) >= Count && !m_exitOrderFilled) sendOrder();
+								int daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
+								if (daysSinceEntry >= Count && !m_exitOrderFilled)
+								{
+									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									sendOrder();
+								}
 								break;
 							case EExitDaysCountStrategy.TradingDays:
-								if (tradingDayCount(entryDate, m_studyControl.Bars.Time[0]) >= Count && !m_exitOrderFilled) sendOrder();
+								daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
+								if (daysSinceEntry >= Count && !m_exitOrderFilled)
+								{
+									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									sendOrder();
+								}
 								break;
 						}
 
