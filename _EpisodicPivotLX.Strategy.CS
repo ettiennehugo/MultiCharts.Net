@@ -33,6 +33,7 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_FIRST_EXIT_DAYS_COUNT = 5; //first exit days count - this is used to determine the first exit days count based on the entry date
 		public const double DEFAULT_EP_DAY_PERCENT_LIMIT = 0.3; //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		public const double DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
+		public const double DEFAULT_PROFIT_PERCENT_BREAKEVEN = 0.05; //move stop-loss to breakeven after this percentage of profit - this is used to determine the first exit days count based on the entry date
 
 		//types
 		public enum EExitDaysCountStrategy
@@ -51,6 +52,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int FirstExitDaysCount { get; set; } //first exit days count - this is used to determine the first exit days count based on the entry date
 		[Input] public double EPDayPercentLimit { get; set; } //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		[Input] public double FastMATightStopRiskReward { get; set; } //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
+		[Input] public double ProfitPercentBreakeven { get; set; } //move stop-loss to breakeven after this percentage of profit - this is used to determine the first exit days count based on the entry date
 
 		//attribute
 		private IOrderMarket m_lxPartial;
@@ -64,6 +66,7 @@ namespace PowerLanguage.Strategy
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
 		private double m_epDayPercentLimit;
+		private bool m_enableBreakeven;
 
 		//interface methods
 		public _EpisodicPivotLX(object _ctx) : base(_ctx) { }
@@ -84,6 +87,7 @@ namespace PowerLanguage.Strategy
 			FirstExitDaysCount = DEFAULT_FIRST_EXIT_DAYS_COUNT;
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
 			FastMATightStopRiskReward = DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD;
+			ProfitPercentBreakeven = DEFAULT_PROFIT_PERCENT_BREAKEVEN;
 			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell, OrderExit.Total));
 			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
 			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
@@ -113,12 +117,17 @@ namespace PowerLanguage.Strategy
 			m_atr.Instrument = m_dailyTimeFrame;
 			m_atr.Length = ATRLength;
 			m_epDayPercentLimit = 1 + EPDayPercentLimit;
+			m_enableBreakeven = false;
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (PositionSide == 0) return; //do not exit if there is no position  
+			if (PositionSide == 0)
+			{
+				m_enableBreakeven = false;
+				return;
+			}
 
 			//determine the entry date of the trade  
 			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
@@ -126,25 +135,25 @@ namespace PowerLanguage.Strategy
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
 			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
 
-
 			//determine the entry day risk that was taken
 			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
 
 			//maintain stop-loss based on the current price and the average entry price
 			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
-			//GenerateStopLoss(entryRisk);
 			m_lxStopLoss.Send(daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]);
 			
 			//exit half position on first exit days after the entry and we have not exited anything out of the current position
 			if (daysCount >= FirstExitDaysCount && CurrentPosition.ClosedTrades.Count == 0)
 				m_lxPartial.Send((int)Math.Truncate((double)this.StrategyInfo.MarketPosition / 2));
 
-			//move stop-loss to breakeven after the first exit days
-			if (daysCount >= FirstExitDaysCount)
+			//determine whether we need to enable the breakeven stop-loss			
+			if (!m_enableBreakeven && (daysCount >= FirstExitDaysCount || CurrentPosition.Profit > (StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven)))
 			{
-				trace(ETraceLevel.Info, $"Moving stop-loss to breakeven after first exit days.");
-				GenerateBreakEven(0); //0 to force the stop-loss to breakeven
+				m_enableBreakeven = true;
+				trace(ETraceLevel.Info, $"Enabling breakeven stop-loss after {daysCount} days or at minimum profit {StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven}.");
 			}
+
+			if (m_enableBreakeven) GenerateBreakEven(0); //0 to force the stop-loss to breakeven
 
 			//exit the rest of the position based on general exit rules
 			///	2. Exit full position

@@ -10,7 +10,7 @@ namespace PowerLanguage.Strategy
 	///	• Larger cap stocks(>10B) tend to move sideways to up, so you might need different trade management for them.
 	///		○ 84% of large cap stocks tend to move sideways to upward for at least 5 days - this strategy just works on the inputs, any partitioning on fundamental factors need to be made in the portfolio manager
 	///		○ Maybe user a slightly less percentage since these stocks do not necessarily move as quickly as smaller cap stocks.
-	///		
+	///
 	///		1. Scan - stocks with upcoming earnings and stocks that are up pre-market (around 8am) 8%
 	///			a.Check 8 to 10% gap up
 	///		2. Big volume on open and bar closes in the upper 10% to 25% - this is if you enter around the opening bars

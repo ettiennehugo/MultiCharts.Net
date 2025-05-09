@@ -1759,7 +1759,7 @@ namespace PowerLanguage.Strategy
 								int daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
 								if (daysSinceEntry >= Count && !m_exitOrderFilled)
 								{
-									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
 									sendOrder();
 								}
 								break;
@@ -1767,7 +1767,7 @@ namespace PowerLanguage.Strategy
 								daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
 								if (daysSinceEntry >= Count && !m_exitOrderFilled)
 								{
-									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
 									sendOrder();
 								}
 								break;
