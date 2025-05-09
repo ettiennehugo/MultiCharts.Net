@@ -115,19 +115,12 @@ namespace PowerLanguage.Strategy
 	///	• [optional] ExitPercent - percent of INITIAL POSITION to exit, default 1.0 (100%) 
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// 
-	/// ExitEntryBarLowHigh
-	/// • Instruction - "ExitEntryBarLowHigh" 
+	/// ExitLowHigh
+	/// • Instruction - "ExitLowHigh"
+	/// • Lookback - number of days to look back to find the low/high price, -1 would use entry bar low, 0 would use current day low/high, > 0 would use the number of days specified
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
-	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
-	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
-	///	
-	/// ExitEntryDayLowHigh
-	/// • Instruction - "ExitDayLowHigh"
-	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
-	///	• [optional] BufferPrice - buffer price to add/subtract from entry day extreme
 	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	///	• [optional] IncludePreMarket - include pre-market data when computing the entry day high/low, default false
@@ -237,6 +230,14 @@ namespace PowerLanguage.Strategy
 		{
 			Close,
 			LowHigh
+		};
+
+		public enum EExitLowHighType
+		{
+			EntryBar,
+			Day,
+			Week,
+			Month
 		};
 
 		public enum EMovingAverageType
@@ -1803,25 +1804,34 @@ namespace PowerLanguage.Strategy
 		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
 		//      need to introduce a new boolean parameter, e.g. AdjustStopLossOnNewPosition, to recompute the stop-loss if a new position
 		//      is added to the existing position.
-		internal class ExitEntryBarLowHigh : ExitPriced
+		internal class ExitLowHigh : ExitPriced
 		{
+			public static TimeSpan DEFAULT_MARKET_OPEN_TIME = new TimeSpan(9, 30, 0);
+			public static TimeSpan DEFAULT_MARKET_CLOSE_TIME = new TimeSpan(16, 0, 0);
 			public double BufferPrice { get; set; }
+			public int Lookback { get; set; }
+			public bool IncludePreMarket { get; set; }
+			public bool IncludePostMarket { get; set; }
 			private double m_stopLossPrice;
 
-			public ExitEntryBarLowHigh(_TrendLine control) : base(control)
+			public ExitLowHigh(_TrendLine control) : base(control)
 			{
 				BufferPrice = 0.0;
+				IncludePreMarket = false;
+				IncludePostMarket = false;
 			}
 
 			public override bool Parse(JProperty property)
-			{
+			{				
 				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+				if (property.Name.ToLower() == "lookback") { Lookback = property.Value.ToObject<int>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
 				if (BufferPrice < 0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
+				if (Lookback < -1) return Tuple.Create(false, $"{InstructionTypeName} - Lookback must be greater than or equal to -1 (-1 = entry bar low/high, 0 = current day low/high, > 0 = specified days lookback");
 				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
@@ -1840,10 +1850,20 @@ namespace PowerLanguage.Strategy
 								 m_studyControl.Bars.Status == EBarState.Close &&
 								 m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
 				{
-					if (m_studyControl.PositionSide > 0)
-						m_stopLossPrice = m_studyControl.Bars.Low[0] - BufferPrice;
-					else if (m_studyControl.PositionSide < 0)
-						m_stopLossPrice = m_studyControl.Bars.High[0] + BufferPrice;
+					if (Lookback == -1)
+					{
+						if (m_studyControl.PositionSide > 0)
+							m_stopLossPrice = m_studyControl.Bars.Low[0] - BufferPrice;
+						else if (m_studyControl.PositionSide < 0)
+							m_stopLossPrice = m_studyControl.Bars.High[0] + BufferPrice;
+					}
+					else
+					{
+						if (m_studyControl.PositionSide > 0)
+							m_stopLossPrice = getDayLow(Lookback) - BufferPrice;
+						else if (m_studyControl.PositionSide < 0)
+							m_stopLossPrice = getDayHigh(Lookback) + BufferPrice;
+					}
 				}
 
 				base.CalcBar();
@@ -1860,96 +1880,20 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should not be reached
+				m_studyControl.trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
-			protected override double exitPrice()
-			{
-				return m_stopLossPrice;
-			}
-		}
-
-		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
-		//      need to introduce a new boolean parameter, e.g. AdjustStopLossOnNewPosition, to recompute the stop-loss if a new position
-		//      is added to the existing position.
-		internal class ExitEntryDayLowHigh : ExitPriced
-		{
-			public static TimeSpan DEFAULT_MARKET_OPEN_TIME = new TimeSpan(9, 30, 0);
-			public static TimeSpan DEFAULT_MARKET_CLOSE_TIME = new TimeSpan(16, 0, 0);
-			public double BufferPrice { get; set; }
-			public bool IncludePreMarket { get; set; }
-			public bool IncludePostMarket { get; set; }
-			private double m_stopLossPrice;
-
-			public ExitEntryDayLowHigh(_TrendLine control) : base(control)
-			{
-				BufferPrice = 0.0;
-				IncludePreMarket = false;
-				IncludePostMarket = false;
-			}
-
-			public override bool Parse(JProperty property)
-			{
-				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
-				if (property.Name.ToLower() == "includepremarket") { IncludePreMarket = property.Value.ToObject<bool>(); return true; }
-				if (property.Name.ToLower() == "includepostmarket") { IncludePostMarket = property.Value.ToObject<bool>(); return true; }
-
-				return base.Parse(property);
-			}
-
-			public override Tuple<bool, string> IsValid()
-			{
-				if (BufferPrice < 0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
-				return base.IsValid();
-			}
-
-			public override void StartCalc()
-			{
-				base.StartCalc();
-				m_stopLossPrice = -1.0;
-			}
-
-			public override void CalcBar()
-			{
-				if (m_studyControl.PositionSide == 0)
-					m_stopLossPrice = -1.0;     //reset stop-loss price when position went flat
-				else if (m_studyControl.Environment.CalcReason == CalculationReason.Default &&
-								 m_studyControl.Bars.Status == EBarState.Close &&
-								 m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
-				{
-					if (m_studyControl.PositionSide > 0)
-						m_stopLossPrice = getDayLow() - BufferPrice;
-					else if (m_studyControl.PositionSide < 0)
-						m_stopLossPrice = getDayHigh() + BufferPrice;
-				}
-
-				base.CalcBar();
-			}
-
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
-			{
-				switch (direction)
-				{
-					case EEntryDirection.Long:
-						return getDayLow() - BufferPrice;
-					case EEntryDirection.Short:
-						return getDayHigh() + BufferPrice;
-				}
-
-				//should not be reached
-				return 0.0;
-			}
-
-			public double getDayLow()
+			public double getDayLow(int lookback)
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
+				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.Low[0];
-				while (m_studyControl.Bars.Time[index].Date == startBarDate.Date && index < m_studyControl.Bars.CurrentBar)
+				while (m_studyControl.tradingDayCount(startBarDate, m_studyControl.Bars.Time[index]) <= lookback)
 				{
-					if (!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) break; //no more values to check
-					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME)
+					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
+					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
 					{
 						index++;
 						continue; //skip values after market close
@@ -1961,15 +1905,16 @@ namespace PowerLanguage.Strategy
 				return result;
 			}
 
-			public double getDayHigh()
+			public double getDayHigh(int lookback)
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
+				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.High[0];
-				while (m_studyControl.Bars.Time[index].Date == startBarDate.Date && index < m_studyControl.Bars.CurrentBar)
+				while (m_studyControl.tradingDayCount(startBarDate, m_studyControl.Bars.Time[index]) <= lookback)
 				{
-					if (!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) break; //no more values to check
-					if (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME)
+					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
+					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
 					{
 						index++;
 						continue; //skip values after market close
@@ -2162,8 +2107,7 @@ namespace PowerLanguage.Strategy
 					{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
 					{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
 					{ "exitdays", control => new _TrendLine.ExitDays(control) },
-					{ "exitentrybarlowhigh", control => new _TrendLine.ExitEntryBarLowHigh(control) },
-					{ "exitentrydaylowhigh", control => new _TrendLine.ExitEntryDayLowHigh(control) },
+					{ "exitlowhigh", control => new _TrendLine.ExitLowHigh(control) },
 					{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
 					{ "exitbreakeven", control => new _TrendLine.ExitBreakeven(control) },
 			};

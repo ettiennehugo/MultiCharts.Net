@@ -198,9 +198,7 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="_TPO_.Indicator.CS" />
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
@@ -518,6 +516,8 @@
     <Compile Include="_EpisodicPivotHighVolumeLX.Strategy.CS" />
     <Compile Include="_ParabolicShortSE.Strategy.CS" />
     <Compile Include="_ParabolicShortSX.Strategy.CS" />
+    <Compile Include="_OKBullishReversalLE.Strategy.CS" />
+    <Compile Include="_OKWedgePopLE.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

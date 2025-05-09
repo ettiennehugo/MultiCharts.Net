@@ -85,9 +85,9 @@ namespace PowerLanguage.Strategy
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
 			FastMATightStopRiskReward = DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD;
 			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell, OrderExit.Total));
-			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell, OrderExit.Total));
-			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell, OrderExit.Total));
-			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell, OrderExit.Total));
+			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
+			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
+			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell));
 		}
 
 		protected override void StartCalc()
