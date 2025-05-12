@@ -117,7 +117,7 @@ namespace PowerLanguage.Strategy
 	/// 
 	/// ExitLowHigh
 	/// • Instruction - "ExitLowHigh"
-	/// • Lookback - number of days to look back to find the low/high price, -1 would use entry bar low, 0 would use current day low/high, > 0 would use the number of days specified
+	/// • Length - number of days to look back to find the low/high price, -1 would use entry bar low, 0 would use current day low/high, > 0 would use the number of days specified
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
@@ -1818,7 +1818,7 @@ namespace PowerLanguage.Strategy
 			public static TimeSpan DEFAULT_MARKET_OPEN_TIME = new TimeSpan(9, 30, 0);
 			public static TimeSpan DEFAULT_MARKET_CLOSE_TIME = new TimeSpan(16, 0, 0);
 			public double BufferPrice { get; set; }
-			public int Lookback { get; set; }
+			public int Length { get; set; }
 			public bool IncludePreMarket { get; set; }
 			public bool IncludePostMarket { get; set; }
 			private double m_stopLossPrice;
@@ -1833,14 +1833,14 @@ namespace PowerLanguage.Strategy
 			public override bool Parse(JProperty property)
 			{				
 				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
-				if (property.Name.ToLower() == "lookback") { Lookback = property.Value.ToObject<int>(); return true; }
+				if (property.Name.ToLower() == "length") { Length = property.Value.ToObject<int>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
 				if (BufferPrice < 0) return Tuple.Create(false, $"{InstructionTypeName} - BufferPrice must be greater than or equal to 0 (instruction will invert the sign if required)");
-				if (Lookback < -1) return Tuple.Create(false, $"{InstructionTypeName} - Lookback must be greater than or equal to -1 (-1 = entry bar low/high, 0 = current day low/high, > 0 = specified days lookback");
+				if (Length < -1) return Tuple.Create(false, $"{InstructionTypeName} - Length must be greater than or equal to -1 (-1 = entry bar low/high, 0 = current day low/high, > 0 = specified days lookback");
 				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
@@ -1859,7 +1859,7 @@ namespace PowerLanguage.Strategy
 								 m_studyControl.Bars.Status == EBarState.Close &&
 								 m_stopLossPrice == -1.0)   //only calculate stop-loss price on close bars otherwise we could set the value incorrectly on internal bar price lows
 				{
-					if (Lookback == -1)
+					if (Length == -1)
 					{
 						if (m_studyControl.PositionSide > 0)
 							m_stopLossPrice = m_studyControl.Bars.Low[0] - BufferPrice;
@@ -1869,9 +1869,9 @@ namespace PowerLanguage.Strategy
 					else
 					{
 						if (m_studyControl.PositionSide > 0)
-							m_stopLossPrice = getDayLow(Lookback) - BufferPrice;
+							m_stopLossPrice = getDayLow(Length) - BufferPrice;
 						else if (m_studyControl.PositionSide < 0)
-							m_stopLossPrice = getDayHigh(Lookback) + BufferPrice;
+							m_stopLossPrice = getDayHigh(Length) + BufferPrice;
 					}
 				}
 
