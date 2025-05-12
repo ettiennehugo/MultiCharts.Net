@@ -2,20 +2,20 @@
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
-	/// High volume episodic pivot long entry, use this with stocks that are already in a strong uptrend it will wait for a high volume bullish bar to enter a long position.
+	/// High volume episodic pivot long entry, use this with stocks that are already in a strong uptrend it will wait for a high volume bullish DAILY bar to enter a long position.
 	/// Use the EpisodicPivotLX strategy to exit the long position.
 	/// Data Feeds:
 	///		1 Something like the 5-minute chart for the entry
-	///		2 Daily chart for determining the moving averages used
+	///		2 Daily chart for determining episodic pivot and the moving averages used
 	///	Entry Rules:
-	///	• Larger cap stocks(>10B) tend to move sideways to up, so you might need different trade management for them.
+	///	• Larger cap stocks(>10B) tend to move sideways to up and can have a delayed reaction, so you might need different trade management for them.
 	///		○ 84% of large cap stocks tend to move sideways to upward for at least 5 days - this strategy just works on the inputs, any partitioning on fundamental factors need to be made in the portfolio manager
 	///		○ Maybe user a slightly less percentage since these stocks do not necessarily move as quickly as smaller cap stocks.
 	///
 	///		1. Scan - stocks that are up 30%+ over the last 1 to 3 months.
-	///		2. Big volume move on a bar at least a specific minimum move on very high volume - this is considered an episodic pivot move, this could be an earnings call or some other catalyst.
+	///		2. Big volume move on the daily timeframe at least a specific minimum move on very high volume - this is considered an episodic pivot move with volume catalyst, this could be an earnings call or some other catalyst.
 	///		3. Best if stock comes out of base without being overextended to the up side
-	///		4. Initial risk is the entry-bar or -day low .
+	///		4. Initial risk is the episodic pivot bar low.
 	/// </summary>
 	public class _EpisodicPivotHighVolumeLE : _CustomSignal {
 		//constants
@@ -44,6 +44,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
 		[Input] public int VolumeLength { get; set; } //length of the volume for the entry size - this is used to determine the entry size based on the average trading volume
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
+		[Input] public bool UseOpeningRangeBreak { get; set; } //use opening range break for entry - the entry will wait for a solid bullish bar that forms a new high for the day.
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
 
 		//attribute
@@ -72,6 +73,7 @@ namespace PowerLanguage.Strategy {
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
 			VolumeLength = DEFAULT_VOLUME_LENGTH;
 			RequiredClosePercentile = DEFAULT_REQUIRED_CLOSE_PERCENTILE;
+			UseOpeningRangeBreak = false;
 			UseRoundLots = false;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Le", EOrderAction.Buy));
 			m_volumeWithSD = new PowerLanguage.Function._VolumeWithSD(this);
@@ -107,14 +109,14 @@ namespace PowerLanguage.Strategy {
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return;
 
 			//check if previous bar met the specific percentage change
-			if (m_minuteTimeFrame.Low[0] == 0) return; //avoid division by zero
-			double closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
-			double percentageChange = closeLowDelta / m_minuteTimeFrame.Low[0];
+			if (m_dailyTimeFrame.Low[1] == 0) return; //avoid division by zero
+			double closeLowDelta = m_dailyTimeFrame.Close[1] - m_dailyTimeFrame.Low[1];
+			double percentageChange = closeLowDelta / m_dailyTimeFrame.Low[1];
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
 
-			//check required volume traded
-			double requiredMiniumAboveAverageVolume = m_minimumAboveAveragePctVolume * m_dailyTimeFrame.Volume[0];
-			if (m_minuteTimeFrame.Volume[0] < requiredMiniumAboveAverageVolume) return; //ignore stocks that do not meet the volume criteria
+			//check required volume traded on the previous bar
+			double requiredMiniumAboveAverageVolume = m_minimumAboveAveragePctVolume * m_volumeWithSD.Average.Value;
+			if (m_dailyTimeFrame.Volume[1] < requiredMiniumAboveAverageVolume) return; //ignore stocks that did not meet the volume criteria
 
 			//required close percentile
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
@@ -122,6 +124,9 @@ namespace PowerLanguage.Strategy {
 			double closePercentile = closeLowDelta / range;
 			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
+			//check for an opening range break
+			if (UseOpeningRangeBreak && m_minuteTimeFrame.High[0] != IntradayHigh) return; //ignore stocks that do not meet the opening range break criteria
+			
 			//determine the risk based on the entry day low
 			double risk = m_minuteTimeFrame.Close[0] - IntradayLow;
 
