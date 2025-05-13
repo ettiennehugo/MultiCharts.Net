@@ -1889,7 +1889,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should not be reached
-				m_studyControl.trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
+				trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
 				return 0.0;
 			}
 
@@ -2085,7 +2085,7 @@ namespace PowerLanguage.Strategy
 			public override Tuple<bool, string> IsValid()
 			{
 				if (ProfitPercent <= 0 && ProfitAmount <= 0) return Tuple.Create(false, $"{this.GetType().Name} - ProfitPercent or ProfitPrice must be set to zero or a positive number");
-				if (ProfitAmount > 1) return Tuple.Create(false, $"{this.GetType().Name} - ProfitPercent must be between 0 and 1");
+				if (ProfitPercent > 1) return Tuple.Create(false, $"{this.GetType().Name} - ProfitPercent must be between 0 and 1");
 				return base.IsValid();
 			}
 

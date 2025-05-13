@@ -133,7 +133,7 @@ namespace PowerLanguage.Strategy
 			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
 			if (CurrentPosition.ClosedTrades.Count > 0) entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
-			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
+			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 
 			//determine the entry day risk that was taken
 			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy
 			if (!m_enableBreakeven && (daysCount >= FirstExitDaysCount || CurrentPosition.Profit > (StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven)))
 			{
 				m_enableBreakeven = true;
-				trace(ETraceLevel.Info, $"Enabling breakeven stop-loss after {daysCount} days or at minimum profit {StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven}.");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Enabling breakeven stop-loss after {daysCount} days or at minimum profit {StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven}.");
 			}
 
 			if (m_enableBreakeven) GenerateBreakEven(0); //0 to force the stop-loss to breakeven
@@ -163,7 +163,7 @@ namespace PowerLanguage.Strategy
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
 			{
-				trace(ETraceLevel.Info, $"Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
 				m_lxAll.Send();
 			}
 
@@ -171,26 +171,26 @@ namespace PowerLanguage.Strategy
 			//      few days of the trade.
 			if (daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > m_fastMA[0] + (m_atr[0] * ATRFactor) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
-				trace(ETraceLevel.Info, $"Exiting position based on bullish overextension.");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on bullish overextension.");
 				m_lxAll.Send();
 			}
 
 			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.Open[0] != 0 && (m_minuteTimeFrame.Close[0] / m_dailyTimeFrame.Open[0]) > m_epDayPercentLimit) //c.
 			{
-				trace(ETraceLevel.Info, $"Exiting position based on EP day percentage limit.");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on EP day percentage limit.");
 				m_lxAll.Send();
 			}
 
 			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
 			{
-				trace(ETraceLevel.Info, $"Exiting position based on risk reward ratio.");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on risk reward ratio.");
 				m_lxTightStopAll.Send(m_fastMA[0]);
 			}
 
 			//close position when we're back testing and this is the last bar
 			if (!Environment.IsRealTimeCalc && m_dailyTimeFrame.LastBarOnChart)
 			{
-				trace(ETraceLevel.Info, $"Exiting position on last bar during back testing");
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position on last bar during back testing");
 				m_lxAll.Send();
 			}
 		}

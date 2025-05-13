@@ -38,7 +38,6 @@ namespace PowerLanguage.Strategy
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool AddToPosition { get; set; } //add to position - this will add to the position if the price action analysis returns a lower high
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
-		[Input] public bool Debug { get; set; } //debug mode - this will print debug information to the output window
 
 		//attribute
 		private PriceActionAnalysis m_priceAction;
@@ -66,7 +65,6 @@ namespace PowerLanguage.Strategy
 			PostLowerHighLookback = DEFAULT_POST_LOWER_HIGH_LOOKBACK;
 			AddToPosition = false;
 			UseRoundLots = false;
-			Debug = false;
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Se", EOrderAction.SellShort));
 		}
 
@@ -108,7 +106,7 @@ namespace PowerLanguage.Strategy
 
 			if (lowerHighBar == null)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, PriceAction analysis returned that a lower high was found but could find the lower high bar");
+				trace(ETraceLevel.Error, $"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, PriceAction analysis returned that a lower high was found but could find the lower high bar");
 				return; //do not enter if a lower high did not form yet
 			}
 
@@ -130,6 +128,7 @@ namespace PowerLanguage.Strategy
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			if (size == 0) return; //do not enter if the size is zero
 
+			trace(ETraceLevel.Info, $"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Short entry at {entryBar.close} with size {size}");
 			m_se.Send(entryBar.close, size);
 		}
 
