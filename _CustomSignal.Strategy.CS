@@ -316,6 +316,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
+			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always smaller than currentDateTime");
 			TimeSpan days = currentDateTime - entryDate;
 			return days.Days;
 		}
@@ -325,6 +326,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
+			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always smaller than currentDateTime");
 			DateTime date = currentDateTime;
 			int count = 0;
 
