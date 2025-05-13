@@ -517,7 +517,7 @@ namespace PowerLanguage.Strategy
 
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
 			{
-				trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Time[0]}, {message}");
+				m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Time[0]}, {message}");
 			}
 		}
 
@@ -1033,7 +1033,7 @@ namespace PowerLanguage.Strategy
 					return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime and LineEndTime can not be the same");
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EntryPercent must be between 0 and 1");
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ClosePercentile must be between 0 and 1");
-				if (VolumeRequired != EVolumeRequired.Disable && VolumeDataFeed < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0");
+				if (VolumeRequired != EVolumeRequired.Disable && (VolumeDataFeed < 1 || VolumeDataFeed > m_studyControl.MaxDataStream)) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0 and less or equal to {m_studyControl.MaxDataStream}");
 				if (VolumeRequired != EVolumeRequired.Disable && VolumeLength < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeLength must be greater than 0");
 				return base.IsValid();
 			}
@@ -1899,7 +1899,7 @@ namespace PowerLanguage.Strategy
 				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.Low[0];
-				while (m_studyControl.tradingDayCount(startBarDate, m_studyControl.Bars.Time[index]) <= lookback)
+				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
 				{
 					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
 					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
@@ -1920,7 +1920,7 @@ namespace PowerLanguage.Strategy
 				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.High[0];
-				while (m_studyControl.tradingDayCount(startBarDate, m_studyControl.Bars.Time[index]) <= lookback)
+				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
 				{
 					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
 					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
