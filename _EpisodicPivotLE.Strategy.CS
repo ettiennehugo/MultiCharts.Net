@@ -24,6 +24,7 @@ namespace PowerLanguage.Strategy
 		//constants
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
+		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;			//ignore stocks that have massive gap ups as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.3; //per default don't enter positions larger than 30% of available equity
@@ -38,6 +39,7 @@ namespace PowerLanguage.Strategy
 		//properties
 		[Input] public string StartTime { get; set; } //start time for the entry
 		[Input] public string EndTime { get; set; } //end time for the entry
+		[Input] public int EntriesPerTimeFilter { get; set; } //number of entries per time filter - this is used to determine the number of entries per time filter
 		[Input] public double MinimumPercentageChange { get; set; } //gap up/down must be at least this minimum - this must always be a positive value, algoritm will flip it around if required
 		[Input] public double MaximumPercentageChange { get; set; } //gap up/down clipped to this maximum to avoid pump-and-dump stocks - this must always be a positive value, algorithm will flip it around if required
 		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
@@ -50,8 +52,11 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_le;
 		private DateTime m_startTime;
 		private DateTime m_endTime;
+		private DateTime m_previousDayFilter;
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
+		private int m_entriesPerTimeFilter;
+		private int m_previousPositionSide;
 
 		//interface methods
 		public _EpisodicPivotLE(object _ctx) : base(_ctx) { }
@@ -63,6 +68,8 @@ namespace PowerLanguage.Strategy
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			EndTime = DEFAULT_END_TIME;
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
+			EntriesPerTimeFilter = DEFAULT_ENTRIES_PER_TIME_FILTER;
+			m_previousDayFilter = DateTime.MinValue;
 			MinimumPercentageChange = DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
@@ -78,6 +85,8 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
+			m_entriesPerTimeFilter = 0;
+			m_previousPositionSide = 0;
 			if (MinimumPercentageChange <= 0) throw new Exception("MinimumPercentageChange must be larger than zero.");
 			if (MaximumPercentageChange <= 0) throw new Exception("MaximumPercentageChange must be larger than zero.");
 			if (MaximumEquityPerPosPercent <= 0 || MaximumEquityPerPosPercent > 1) throw new Exception("MaximumEquityPerPosPercent must be larger than zero and less then one.");
@@ -91,13 +100,22 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;  //backtester do not send order filled messages to we need to compare position sizes between bars
+			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 
 			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
 
 			//check for enough data and implement time filter
 			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
-			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return;
+			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
+			{
+				m_entriesPerTimeFilter = 0;
+				return;
+			}
+			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
+			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
+			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 
 			//check if the stock has gapped up
 			if (m_dailyTimeFrame.High[0] == 0) return; //avoid division by zero

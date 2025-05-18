@@ -28,8 +28,7 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_FAST_MA = 10;
 		public const int DEFAULT_MEDIUM_MA = 20;
 		public const int DEFAULT_SLOW_MA = 50;
-		public const int DEFAULT_ATR_LENGTH = 14;
-		public const double DEFAULT_ATR_FACTOR = 4.0;
+		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.08;	//exit position if the stock is overextended above the fast MA
 		public const int DEFAULT_FIRST_EXIT_DAYS_COUNT = 5; //first exit days count - this is used to determine the first exit days count based on the entry date
 		public const double DEFAULT_EP_DAY_PERCENT_LIMIT = 0.3; //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		public const double DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
@@ -46,8 +45,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int FastMA { get; set; }       //fast moving average for the exit calculations
 		[Input] public int MediumMA { get; set; }     //medium moving average for the exit calculations
 		[Input] public int SlowMA { get; set; }       //slow moving average for the exit calculations
-		[Input] public int ATRLength { get; set; }    //length of the ATR for the exit calculations
-		[Input] public double ATRFactor { get; set; } //factor for the ATR for the exit calculations
+		[Input] public double OverextensionPercent { get; set; }
 		[Input] public EExitDaysCountStrategy ExitDaysCountStrategy { get; set; } //exit days count strategy - this is used to determine the exit days count based on the entry date
 		[Input] public int FirstExitDaysCount { get; set; } //first exit days count - this is used to determine the first exit days count based on the entry date
 		[Input] public double EPDayPercentLimit { get; set; } //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
@@ -59,10 +57,10 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_lxAll;
 		private IOrderPriced m_lxStopLoss;
 		private IOrderPriced m_lxTightStopAll;
-		private PowerLanguage.Function._AverageSimple m_fastMA;
-		private PowerLanguage.Function._AverageSimple m_mediumMA;
-		private PowerLanguage.Function._AverageSimple m_slowMA;
-		private _ATR m_atr;
+		private PowerLanguage.Function._SuperSmoother m_fastMA;
+		private PowerLanguage.Function._SuperSmoother m_mediumMA;
+		private PowerLanguage.Function._SuperSmoother m_slowMA;
+		private double m_overextensionPercent;
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
 		private double m_epDayPercentLimit;
@@ -74,15 +72,14 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			m_fastMA = new PowerLanguage.Function._AverageSimple(this);
-			m_mediumMA = new PowerLanguage.Function._AverageSimple(this);
-			m_slowMA = new PowerLanguage.Function._AverageSimple(this);
-			m_atr = new _ATR(this);
+			m_fastMA = new PowerLanguage.Function._SuperSmoother(this);
+			m_mediumMA = new PowerLanguage.Function._SuperSmoother(this);
+			m_slowMA = new PowerLanguage.Function._SuperSmoother(this);
 			FastMA = DEFAULT_FAST_MA;
 			MediumMA = DEFAULT_MEDIUM_MA;
 			SlowMA = DEFAULT_SLOW_MA;
-			ATRLength = DEFAULT_ATR_LENGTH;
-			ATRFactor = DEFAULT_ATR_FACTOR;
+			OverextensionPercent = DEFAULT_OVEREXTENSION_PERCENT;
+
 			ExitDaysCountStrategy = EExitDaysCountStrategy.TradingDays;
 			FirstExitDaysCount = DEFAULT_FIRST_EXIT_DAYS_COUNT;
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
@@ -102,7 +99,7 @@ namespace PowerLanguage.Strategy
 			if (FastMA > MediumMA) throw new Exception("FastMA must be less than MediumMA.");
 			if (SlowMA <= 0) throw new Exception("SlowMA must be larger than zero.");
 			if (MediumMA > SlowMA) throw new Exception("MediumMA must be less than SlowMA.");
-			if (ATRLength <= 0) throw new Exception("ATRLength must be larger than zero.");
+			if (OverextensionPercent < 0) throw new Exception("Overextension percent must be larger than zero, e.g. 0.08 would imply 8% above the fast MA");
 			if (FirstExitDaysCount <= 0) throw new Exception("FirstExitDaysCount must be larger than zero.");
 			if (EPDayPercentLimit <= 0) throw new Exception("EPDayPercentLimit must be larger than zero.");
 			if (FastMATightStopRiskReward <= 1) throw new Exception("FastMATightStopRiskReward must be larger than one.");
@@ -114,8 +111,7 @@ namespace PowerLanguage.Strategy
 			m_mediumMA.Length = MediumMA;
 			m_slowMA.Instrument = m_dailyTimeFrame;
 			m_slowMA.Length = SlowMA;
-			m_atr.Instrument = m_dailyTimeFrame;
-			m_atr.Length = ATRLength;
+			m_overextensionPercent = OverextensionPercent + 1.0;
 			m_epDayPercentLimit = 1 + EPDayPercentLimit;
 			m_enableBreakeven = false;
 		}
@@ -169,13 +165,13 @@ namespace PowerLanguage.Strategy
 
 			//NOTE: We need to disable the bullish overextension initially since on an episodic pivot the stock will almost certainly be overextended for the first
 			//      few days of the trade.
-			if (daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > m_fastMA[0] + (m_atr[0] * ATRFactor) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
+			if (m_fastMA[0] != 0.0 && daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > (m_fastMA[0] * m_overextensionPercent) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on bullish overextension.");
 				m_lxAll.Send();
 			}
 
-			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.Open[0] != 0 && (m_minuteTimeFrame.Close[0] / m_dailyTimeFrame.Open[0]) > m_epDayPercentLimit) //c.
+			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && IntradayOpen != 0 && (m_minuteTimeFrame.Close[0] / IntradayOpen) > m_epDayPercentLimit) //c.
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on EP day percentage limit.");
 				m_lxAll.Send();

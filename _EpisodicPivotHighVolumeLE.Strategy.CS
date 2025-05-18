@@ -22,9 +22,9 @@ namespace PowerLanguage.Strategy {
 		//constants
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
-
-		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.05;      //ignore stocks that fall below this minimum percentage change
-		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.15;      //ignore stocks that have massive overextended moves as to avoid parabolic moves that will just reverse
+		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
+		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
+		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;      //ignore stocks that have massive overextended moves as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MINIMUM_ABOVE_AVERAGE_PCT_VOLUME = -1; //[disable == -1] minimum above average DAILY volume percentage for the entry - this is used for volume confirmation, e.g. 0.1 means 10% of the daily volume needs to be traded on the entry bar \
 		public const int DEFAULT_ABSOLUTE_ABOVE_AVERAGE_VOLUME = 9000000; //[disable == -1] absolute above average volume for the entry - this is used for volume confirmation of the number of shares traded above the volume average
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.3; //per default don't enter positions larger than 30% of available equity
@@ -56,6 +56,7 @@ namespace PowerLanguage.Strategy {
 		private IOrderPriced m_le;
 		private DateTime m_startTime;
 		private DateTime m_endTime;
+		private DateTime m_previousDayFilter;
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
 		private double m_minimumAboveAveragePctVolume;
@@ -72,6 +73,8 @@ namespace PowerLanguage.Strategy {
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			EndTime = DEFAULT_END_TIME;
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
+			EntriesPerTimeFilter = DEFAULT_ENTRIES_PER_TIME_FILTER;
+			m_previousDayFilter = DateTime.MinValue;
 			MinimumPercentageChange = DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 			MinimumAboveAveragePctVolume = DEFAULT_MINIMUM_ABOVE_AVERAGE_PCT_VOLUME;
@@ -125,6 +128,8 @@ namespace PowerLanguage.Strategy {
 				return;
 			}
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
+			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
+			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 
 			//check if previous bar met the specific percentage change based on the daily time frame
 			if (m_dailyTimeFrame.Low[0] == 0) return; //avoid division by zero
