@@ -517,7 +517,7 @@ namespace PowerLanguage.Strategy
 
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
 			{
-				m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Time[0]}, {message}");
+				m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Info.Name}, {m_studyControl.Bars.Time[0]}, {message}");
 			}
 		}
 
