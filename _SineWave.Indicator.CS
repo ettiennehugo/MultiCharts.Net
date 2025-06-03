@@ -19,7 +19,7 @@ namespace PowerLanguage.Indicator{
     [Input] public double ShortLevel { get; set; }
 
     //Attributes:
-    private SineWave sineWave;
+    private Function._SineWave sineWave;
     private IPlotObject PlotSinewave;
     private IPlotObject PlotLongLevel;
     private IPlotObject PlotShortLevel;
@@ -27,10 +27,10 @@ namespace PowerLanguage.Indicator{
     public _SineWave(object _ctx):base(_ctx){}
 
 	protected override void Create() {
-      Duration = SineWave.DEFAULT_DURATION;
+      Duration = PowerLanguage.Function._SineWave.DEFAULT_DURATION;
       LongLevel = DEFAULT_LONG_LEVEL;
       ShortLevel = DEFAULT_SHORT_LEVEL;
-      sineWave = new SineWave(this);
+      sineWave = new PowerLanguage.Function._SineWave(this);
       PlotSinewave = AddPlot(new PlotAttributes("SW", EPlotShapes.Line, Color.White));
       PlotLongLevel = AddPlot(new PlotAttributes("LL", EPlotShapes.RightTick, Color.Green));
       PlotShortLevel = AddPlot(new PlotAttributes("SL", EPlotShapes.RightTick, Color.Red));

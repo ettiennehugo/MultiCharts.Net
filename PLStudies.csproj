@@ -348,7 +348,6 @@
     <Compile Include="ModifiedRSI.Function.CS" />
     <Compile Include="ModifiedStochastic.Function.CS" />
     <Compile Include="RoofingFilter.Function.CS" />
-    <Compile Include="SineWave.Function.CS" />
     <Compile Include="USHolidays.Function.CS" />
     <Compile Include="VWAP.Function.CS" />
     <Compile Include="_AdaptiveSuperSmoother.Function.CS" />
@@ -520,6 +519,11 @@
     <Compile Include="_ParabolicShortSX.Strategy.CS" />
     <Compile Include="_OKBullishReversalLE.Strategy.CS" />
     <Compile Include="_OKWedgePopLE.Strategy.CS" />
+    <Compile Include="_Sinewave.Function.CS" />
+    <Compile Include="_AdaptiveRSIWithIFT.Function.CS" />
+    <Compile Include="_AdaptiveRSIWithIFT.Indicator.CS" />
+    <Compile Include="_AdaptiveRSI.Function.CS" />
+    <Compile Include="_AdaptiveRSI.Indicator.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

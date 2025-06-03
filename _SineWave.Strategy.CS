@@ -86,7 +86,7 @@ namespace PowerLanguage.Strategy
     [Input] public bool Debug { get; set; }           //debug the strategy
 
     //Attributes:
-    private SineWave _sineWave;
+    private PowerLanguage.Function._SineWave _sineWave;
     private VariableSeries<Double> _sineWaveSeries;
     private SortedList _entrySeries;
     private IOrderPriced _LE;
@@ -108,7 +108,7 @@ namespace PowerLanguage.Strategy
       ProfitEndPercent = DEFAULT_PROFIT_END_PERCENT;
       PercentAccountToTrade = DEFAULT_PERCENT_ACCOUNT_TO_TRADE;
       MaxDaysPerTrade = DEFAULT_MAX_DAYS_PER_TRADE;
-      _sineWave = new SineWave(this);
+      _sineWave = new PowerLanguage.Function._SineWave(this);
       _sineWaveSeries = new VariableSeries<Double>(this);
       _entrySeries = new SortedList();
 

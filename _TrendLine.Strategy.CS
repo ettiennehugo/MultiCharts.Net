@@ -76,8 +76,9 @@ namespace PowerLanguage.Strategy
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
 	/// • Length - length of the moving average
-	/// • [optional] ZScoreThreshold - Standard deviation threshold to use for the overextension, default 2.0, e.g. 2.0 would mean that the price is 2 standard deviations away from the moving average
-	/// • [optional] StdDevLength - Standard deviation length to use for the overextension, default 100 (assuming 5-minute bars)
+	/// • Percent - percent above/below the moving average to consider the price overextended, e.g. 0.05 for 5% above the moving average
+	/// • DisableDays - number of days to disable the exit after the entry, e.g. 1 would disable the exit for the first day after the entry, default is 0 (no days disabled) 
+	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
@@ -111,7 +112,7 @@ namespace PowerLanguage.Strategy
 	/// • Count - number of days after which the position should be closed
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
-	/// • [optional] Strategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
+	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	///	• [optional] ExitPercent - percent of INITIAL POSITION to exit, default 1.0 (100%) 
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// 
@@ -247,7 +248,7 @@ namespace PowerLanguage.Strategy
 			SuperSmoother,
 		};
 
-		public enum EExitDaysCountStrategy
+		public enum EDaysCountStrategy
 		{
 			CalendarDays,
 			TradingDays
@@ -256,10 +257,13 @@ namespace PowerLanguage.Strategy
 		public enum EVolumeRequired
 		{
 			Disable,
-			AboveAverage,     //volume required should be above average
-			AboveAverageSD1,  //volume required should be above average + 1 standard deviation
-			AboveAverageSD2,  //volume required should be above average + 2 standard deviations
-			AboveAverageSD3   //volume required should be above average + 3 standard deviations
+			AboveAverageMinusSD3,		//volume required should be below average - 3 standard deviation
+			AboveAverageMinusSD2,		//volume required should be below average - 2 standard deviation
+			AboveAverageMinusSD1,		//volume required should be below average - 1 standard deviation
+			AboveAverage,						//volume required should be above average
+			AboveAveragePlusSD1,		//volume required should be above average + 1 standard deviation
+			AboveAveragePlusSD2,		//volume required should be above average + 2 standard deviations
+			AboveAveragePlusSD3			//volume required should be above average + 3 standard deviations
 		};
 
 		internal abstract class Instruction
@@ -672,7 +676,7 @@ namespace PowerLanguage.Strategy
 
 				if (price != 0.0 && m_stopLossExit != null)
 				{
-					double stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Strategy, Criteria);
+					double stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Criteria);
 					if (stopLossPrice != 0.0)
 					{
 						if (maxPositionEquity > 0)
@@ -779,10 +783,10 @@ namespace PowerLanguage.Strategy
 						switch (direction)
 						{
 							case EEntryDirection.Long:
-								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Strategy, Criteria) >= price;
+								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Criteria) >= price;
 								break;
 							case EEntryDirection.Short:
-								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Strategy, Criteria) <= price;
+								willBeStoppedOut = exitPriced.EstimateExitPrice(direction, Criteria) <= price;
 								break;
 						}
 
@@ -943,6 +947,31 @@ namespace PowerLanguage.Strategy
 			{
 				get { return base.Active && m_studyControl.PositionSide != 0; }
 			}
+
+			protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
+			{
+				TimeSpan days = currentDateTime - entryDate;
+				return days.Days;
+			}
+
+			protected int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
+			{
+				DateTime date = currentDateTime;
+				int count = 0;
+
+				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"WARNING - {InstructionTypeName} used with non-stock object using TradingDays specification calculated around stock market calendar.");
+
+				while (date.Date > entryDate.Date)
+				{
+					//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
+					if (!m_studyControl.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
+					date = date.AddDays(-1);
+				}
+
+				return count;
+			}
+
+
 		}
 
 		/// <summary>
@@ -968,7 +997,7 @@ namespace PowerLanguage.Strategy
 			/// <summary>
 			/// Estimate the exit price per contract for the exit if an entry is made based on direction and strategy.
 			/// </summary>
-			public abstract double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria);
+			public abstract double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria);
 
 			/// <summary>
 			/// Subclasses need to calculate the exit price per contract to exit the position.
@@ -1075,16 +1104,25 @@ namespace PowerLanguage.Strategy
 				{
 					case EVolumeRequired.Disable:
 						break;  //nothing to do when disabled
+					case EVolumeRequired.AboveAverageMinusSD3:
+						if (m_volume.AvgMinusLevel3[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+					case EVolumeRequired.AboveAverageMinusSD2:
+						if (m_volume.AvgMinusLevel2[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
+					case EVolumeRequired.AboveAverageMinusSD1:
+						if (m_volume.AvgMinusLevel1[0] >= m_volumeInstrument.Volume[0]) return;
+						break;
 					case EVolumeRequired.AboveAverage:
 						if (m_volume.Average[0] >= m_volumeInstrument.Volume[0]) return;
 						break;
-					case EVolumeRequired.AboveAverageSD1:
+					case EVolumeRequired.AboveAveragePlusSD1:
 						if (m_volume.AvgPlusLevel1[0] >= m_volumeInstrument.Volume[0]) return;
 						break;
-					case EVolumeRequired.AboveAverageSD2:
+					case EVolumeRequired.AboveAveragePlusSD2:
 						if (m_volume.AvgPlusLevel2[0] >= m_volumeInstrument.Volume[0]) return;
 						break;
-					case EVolumeRequired.AboveAverageSD3:
+					case EVolumeRequired.AboveAveragePlusSD3:
 						if (m_volume.AvgPlusLevel3[0] >= m_volumeInstrument.Volume[0]) return;
 						break;
 				}
@@ -1351,7 +1389,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (Length <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Length must be greater than 0");
 				if (DataFeed <= 0) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be greater than 0");
-				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be less than {m_studyControl.MaxDataStream}");
+				if (DataFeed > m_studyControl.MaxDataStream) return Tuple.Create(false, $"{InstructionTypeName} - DataFeed must be less or equal to {m_studyControl.MaxDataStream}");
 				return base.IsValid();
 			}
 
@@ -1396,7 +1434,7 @@ namespace PowerLanguage.Strategy
 				base.CalcBar();
 			}
 
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
 			{
 				return exitPrice();
 			}
@@ -1421,72 +1459,63 @@ namespace PowerLanguage.Strategy
 
 		internal class ExitOverextension : ExitMovingAverage
 		{
-			public double ZScoreThreshold { get; set; }
-			public int StdDevLength { get; set; }
+			public double Percent { get; set; }
+			public int DisableDays { get; set; }
+			public EDaysCountStrategy DayCountStrategy { get; set; }
 
 			public ExitOverextension(_TrendLine control) : base(control)
 			{
-				ZScoreThreshold = 3.0;
-				StdDevLength = 200;
+				Percent = 0.0;
 				OrderType = EOrderType.Limit;
+				DayCountStrategy = EDaysCountStrategy.TradingDays;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
-				if (name == "zscorethreshold") { ZScoreThreshold = property.Value.ToObject<double>(); return true; }
-				if (name == "stddevlength") { StdDevLength = property.Value.ToObject<int>(); return true; }
+				if (name == "percent") { Percent = property.Value.ToObject<double>(); return true; }
+				if (name == "disabledays") { DisableDays = property.Value.ToObject<int>(); return true; }
+				if (property.Name.ToLower() == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
 				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Market/stop exit not supported, requires limit type orders");
-				if (ZScoreThreshold <= 0) return Tuple.Create(false, $"{InstructionTypeName} - ZScoreThreshold must be greater than 0");
-				if (StdDevLength <= 0) return Tuple.Create(false, $"{InstructionTypeName} - StdDevLength must be greater than 0");
+				if (Percent <= 0.0 || Percent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - Percent must be between 0 and 1");
+				if (DisableDays < 0) return Tuple.Create(false, $"{InstructionTypeName} - DisableDays must be greater than or equal to 0");
 				return base.IsValid();
 			}
 
-			protected override bool Active
-			{
-				get
-				{
-					//NOTE: We completely override the base implementation as it only activates when the price starts falling on the wrong side
-					//      of the moving average.
-					if (base.Active) 
+			protected override bool Active {
+				get {
+					if (m_studyControl.PositionSide == 0) return false;
+					if (DisableDays == 0) return true;
+
+					DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+					if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+					int daysSinceEntry = 0;
+					switch (DayCountStrategy)
 					{
-						double stdDev = m_studyControl.Bars.Close.StandardDeviationCustom(StdDevLength, DataFeed);
-						if (stdDev == 0.0) return false; //no standard deviation, disable exit
-						double ma = base.exitPrice();
-						double zScore = (m_studyControl.Bars.Close[0] - ma) / stdDev;
-						trace(ETraceLevel.Info, $"overextension values - MA {ma} - StdDev {stdDev} - zScore {zScore} - zThreshold {ZScoreThreshold}");
-						if (m_studyControl.PositionSide > 0 && zScore > ZScoreThreshold)
-						{
-							trace(ETraceLevel.Info, $"long position overextension detected");
-							return true;
-						}
-						if (m_studyControl.PositionSide < 0 && zScore < -ZScoreThreshold)
-						{
-							trace(ETraceLevel.Info, $"short position overextension detected");
-							return true;
-						}
+						case EDaysCountStrategy.CalendarDays:
+							daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
+							break;
+						case EDaysCountStrategy.TradingDays:
+							daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
+							break;
 					}
 
-					return false;
+					return daysSinceEntry >= DisableDays;
 				}
 			}
 
 			protected override double exitPrice()
 			{
 				double ma = base.exitPrice();
-				double stdDev = m_studyControl.Bars.Close.StandardDeviationCustom(StdDevLength, DataFeed);
-				if (stdDev == 0.0) return 0.0; //this will skip the exit and log a warning, most likely not enough data to compute the exit
-				double zScore = (m_studyControl.Bars.Close[0] - ma) / stdDev;
-				if (m_studyControl.PositionSide > 0 && zScore > ZScoreThreshold)
-					return m_studyControl.Bars.Close[0];
-				else if (m_studyControl.PositionSide < 0 && zScore < -ZScoreThreshold)
-					return m_studyControl.Bars.Close[0];
-				return 0.0; //this will skip the exit and log a warning, since the price is not overextended
+				double percent = m_studyControl.PositionSide > 0 ? 1.0 + Percent : 1.0 - Percent;
+				double result = ma * percent;
+				if (result <= 0.0) trace(ETraceLevel.Error, $"Exit price {result} is not valid");
+				return result;
 			}
 		}
 
@@ -1521,7 +1550,7 @@ namespace PowerLanguage.Strategy
 				return base.IsValid();
 			}
 
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
 			{
 				if (LossPercent != -1)
 				{
@@ -1617,7 +1646,7 @@ namespace PowerLanguage.Strategy
 				return base.IsValid();
 			}
 
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
 			{
 				if (ProfitPrice != -1.0)
 				{
@@ -1691,14 +1720,14 @@ namespace PowerLanguage.Strategy
 		internal class ExitDays : Exit
 		{
 			public int Count { get; set; }
-			public EExitDaysCountStrategy Strategy { get; set; }
+			public EDaysCountStrategy DayCountStrategy { get; set; }
 
 			private bool m_exitOrderFilled;
 
 			public ExitDays(_TrendLine control) : base(control)
 			{
 				OrderType = EOrderType.Market;
-				Strategy = EExitDaysCountStrategy.TradingDays;
+				DayCountStrategy = EDaysCountStrategy.TradingDays;
 				m_exitOrderFilled = false;
 				Count = 1;
 			}
@@ -1706,7 +1735,7 @@ namespace PowerLanguage.Strategy
 			public override bool Parse(JProperty property)
 			{
 				if (property.Name.ToLower() == "count") { Count = property.Value.ToObject<int>(); return true; }
-				if (property.Name.ToLower() == "strategy") { Strategy = property.Value.ToObject<EExitDaysCountStrategy>(); return true; }
+				if (property.Name.ToLower() == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -1753,21 +1782,21 @@ namespace PowerLanguage.Strategy
 						DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
 						if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
-						switch (Strategy)
+						switch (DayCountStrategy)
 						{
-							case EExitDaysCountStrategy.CalendarDays:
+							case EDaysCountStrategy.CalendarDays:
 								int daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
 								if (daysSinceEntry >= Count && !m_exitOrderFilled)
 								{
-									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {DayCountStrategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
 									sendOrder();
 								}
 								break;
-							case EExitDaysCountStrategy.TradingDays:
+							case EDaysCountStrategy.TradingDays:
 								daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
 								if (daysSinceEntry >= Count && !m_exitOrderFilled)
 								{
-									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {Strategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
+									trace(ETraceLevel.Info, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {DayCountStrategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
 									sendOrder();
 								}
 								break;
@@ -1775,29 +1804,6 @@ namespace PowerLanguage.Strategy
 
 						break;
 				}
-			}
-
-			private int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
-			{
-				TimeSpan days = currentDateTime - entryDate;
-				return days.Days;
-			}
-
-			private int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
-			{
-				DateTime date = currentDateTime;
-				int count = 0;
-
-				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"WARNING - {InstructionTypeName} used with non-stock object using TradingDays specification calculated around stock market calendar.");
-
-				while (date.Date > entryDate.Date)
-				{
-					//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
-					if (!m_studyControl.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
-					date = date.AddDays(-1);
-				}
-
-				return count;
 			}
 
 			private int getOrderId()
@@ -1878,14 +1884,14 @@ namespace PowerLanguage.Strategy
 				base.CalcBar();
 			}
 
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria /* ignored, we always use the low/high */)
 			{
 				switch (direction)
 				{
 					case EEntryDirection.Long:
-						return m_studyControl.Bars.Low[0] - BufferPrice;
+						return getDayLow(Length) - BufferPrice;
 					case EEntryDirection.Short:
-						return m_studyControl.Bars.High[0] + BufferPrice;
+						return getDayHigh(Length) + BufferPrice;
 				}
 
 				//should not be reached
@@ -1896,7 +1902,6 @@ namespace PowerLanguage.Strategy
 			public double getDayLow(int lookback)
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
-				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.Low[0];
 				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
@@ -1917,7 +1922,6 @@ namespace PowerLanguage.Strategy
 			public double getDayHigh(int lookback)
 			{
 				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
-				if (lookback == 0) lookback = 1; //lookback of 0 means current day
 				int index = 1;
 				double result = m_studyControl.Bars.High[0];
 				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
@@ -1981,6 +1985,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (ActivationProfitPercent <= 0 && ActivationProfitAmount <= 0) return Tuple.Create(false, $"{this.GetType().Name} - ActivationProfitPercent or ActivationProfitAmount must be set to zero or a positive number");
 				if (TrailingValue <= 0) return Tuple.Create(false, $"{this.GetType().Name} - TrailingValue must be positive");
+				if (TrailingType == ETrailingType.Percentage && TrailingValue > 1.0) return Tuple.Create(false, $"{this.GetType().Name} - TrailingValue must be between 0 and 1 for percentage trailing");
 				if (TrailingType == ETrailingType.ATR && AtrLength <= 0) return Tuple.Create(false, $"{this.GetType().Name} - AtrLength must be positive");
 				return base.IsValid();
 			}
@@ -2027,10 +2032,21 @@ namespace PowerLanguage.Strategy
 				base.CalcBar();
 			}
 
-			public override double EstimateExitPrice(EEntryDirection direction, EEntryStrategy strategy, EEntryExitCriteria criteria)
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
 			{
-				double entryPrice = criteria == EEntryExitCriteria.Close ? m_studyControl.Bars.Close[0] : m_studyControl.Bars.High[0];
-				return direction == EEntryDirection.Long ? entryPrice - TrailingValue : entryPrice + TrailingValue;
+				double price;
+				if (criteria == EEntryExitCriteria.Close)
+					price = m_studyControl.Bars.Close[0];
+				else
+					price = direction == EEntryDirection.Long ? m_studyControl.Bars.High[0] : m_studyControl.Bars.Low[0];
+
+				double trailValue = TrailingValue;
+				if (TrailingType == ETrailingType.ATR)
+					trailValue = m_atr[0] * TrailingValue;
+				else if (TrailingType == ETrailingType.Percentage)
+					trailValue = price * TrailingValue;
+
+				return direction == EEntryDirection.Long ? price - trailValue : price + trailValue;
 			}
 
 			protected override double exitPrice()

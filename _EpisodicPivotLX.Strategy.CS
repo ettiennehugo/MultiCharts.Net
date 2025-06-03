@@ -154,7 +154,7 @@ namespace PowerLanguage.Strategy
 			//exit the rest of the position based on general exit rules
 			///	2. Exit full position
 			///		a.If the stock did not break the HIGH of the EP entry day after 5-days (EP day is day 0, next day 1 etc.)
-			///		b.If the stock is in a bullish overextension - use an ATR factor above the 10MA
+			///		b.If the stock is in a bullish overextension - use a specific percentage above the 10MA as overextension measure
 			///		c.If the stock shoot up on the EP day they tend to reverse course, e.g. 20%+ exit full position on EP day
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
