@@ -28,7 +28,10 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_FAST_MA = 10;
 		public const int DEFAULT_MEDIUM_MA = 20;
 		public const int DEFAULT_SLOW_MA = 50;
+		public const double DEFAULT_INITIAL_STOP_LOSS_PERCENT = 0.01; //initial stop-loss percent - this is used to determine the initial stop-loss based on the entry date
 		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.08;	//exit position if the stock is overextended above the fast MA
+		public const double DEFAULT_TRAILING_PERCENT_ACTIVATION = 0.1; //activate trailing stop at this percentage
+		public const double DEFAULT_TRAILING_PERCENT = 0.02; //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
 		public const int DEFAULT_FIRST_EXIT_DAYS_COUNT = 5; //first exit days count - this is used to determine the first exit days count based on the entry date
 		public const double DEFAULT_EP_DAY_PERCENT_LIMIT = 0.3; //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		public const double DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
@@ -45,7 +48,10 @@ namespace PowerLanguage.Strategy
 		[Input] public int FastMA { get; set; }       //fast moving average for the exit calculations
 		[Input] public int MediumMA { get; set; }     //medium moving average for the exit calculations
 		[Input] public int SlowMA { get; set; }       //slow moving average for the exit calculations
-		[Input] public double OverextensionPercent { get; set; }
+		[Input] public double InitialStopLossPercent { get; set; } //initial stop-loss percent - this is used to determine the initial stop-loss based on the entry date
+		[Input] public double OverextensionPercent { get; set; }	//overextension percent above the fast MA that would trigger an exit
+		[Input] public double TrailingPercentActivation { get; set; } //activate trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
+		[Input] public double TrailingPercent { get; set; } //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
 		[Input] public EExitDaysCountStrategy ExitDaysCountStrategy { get; set; } //exit days count strategy - this is used to determine the exit days count based on the entry date
 		[Input] public int FirstExitDaysCount { get; set; } //first exit days count - this is used to determine the first exit days count based on the entry date
 		[Input] public double EPDayPercentLimit { get; set; } //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
@@ -55,7 +61,6 @@ namespace PowerLanguage.Strategy
 		//attribute
 		private IOrderMarket m_lxPartial;
 		private IOrderMarket m_lxAll;
-		private IOrderPriced m_lxStopLoss;
 		private IOrderPriced m_lxTightStopAll;
 		private PowerLanguage.Function._SuperSmoother m_fastMA;
 		private PowerLanguage.Function._SuperSmoother m_mediumMA;
@@ -64,7 +69,6 @@ namespace PowerLanguage.Strategy
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
 		private double m_epDayPercentLimit;
-		private bool m_enableBreakeven;
 
 		//interface methods
 		public _EpisodicPivotLX(object _ctx) : base(_ctx) { }
@@ -78,7 +82,10 @@ namespace PowerLanguage.Strategy
 			FastMA = DEFAULT_FAST_MA;
 			MediumMA = DEFAULT_MEDIUM_MA;
 			SlowMA = DEFAULT_SLOW_MA;
+			InitialStopLossPercent = DEFAULT_INITIAL_STOP_LOSS_PERCENT;
 			OverextensionPercent = DEFAULT_OVEREXTENSION_PERCENT;
+			TrailingPercentActivation = DEFAULT_TRAILING_PERCENT_ACTIVATION;
+			TrailingPercent = DEFAULT_TRAILING_PERCENT;
 
 			ExitDaysCountStrategy = EExitDaysCountStrategy.TradingDays;
 			FirstExitDaysCount = DEFAULT_FIRST_EXIT_DAYS_COUNT;
@@ -87,7 +94,6 @@ namespace PowerLanguage.Strategy
 			ProfitPercentBreakeven = DEFAULT_PROFIT_PERCENT_BREAKEVEN;
 			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell, OrderExit.Total));
 			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
-			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
 			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell));
 		}
 
@@ -99,7 +105,10 @@ namespace PowerLanguage.Strategy
 			if (FastMA > MediumMA) throw new Exception("FastMA must be less than MediumMA.");
 			if (SlowMA <= 0) throw new Exception("SlowMA must be larger than zero.");
 			if (MediumMA > SlowMA) throw new Exception("MediumMA must be less than SlowMA.");
+			if (InitialStopLossPercent < 0 || InitialStopLossPercent > 1) throw new Exception("InitialStopLossPercent must be larger than zero and less than or equal to one, e.g. 0.01 would imply 1% below the entry price.");
 			if (OverextensionPercent < 0) throw new Exception("Overextension percent must be larger than zero, e.g. 0.08 would imply 8% above the fast MA");
+			if (TrailingPercentActivation < 0 || TrailingPercentActivation > 1) throw new Exception("TrailingPercentActivation must be larger than zero and less than or equal to one, e.g. 0.1 would imply 10% above the entry price.");
+			if (TrailingPercent < 0 || TrailingPercent > 1) throw new Exception("TrailingPercent must be larger than zero and less than or equal to one, e.g. 0.02 would imply 2% below the entry price.");
 			if (FirstExitDaysCount <= 0) throw new Exception("FirstExitDaysCount must be larger than zero.");
 			if (EPDayPercentLimit <= 0) throw new Exception("EPDayPercentLimit must be larger than zero.");
 			if (FastMATightStopRiskReward <= 1) throw new Exception("FastMATightStopRiskReward must be larger than one.");
@@ -113,17 +122,13 @@ namespace PowerLanguage.Strategy
 			m_slowMA.Length = SlowMA;
 			m_overextensionPercent = OverextensionPercent + 1.0;
 			m_epDayPercentLimit = 1 + EPDayPercentLimit;
-			m_enableBreakeven = false;
 		}
 
 		protected override void CalcBar()
 		{
+			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 			base.CalcBar();
-			if (PositionSide == 0)
-			{
-				m_enableBreakeven = false;
-				return;
-			}
+			if (PositionSide == 0) return;
 
 			//determine the entry date of the trade  
 			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
@@ -133,23 +138,34 @@ namespace PowerLanguage.Strategy
 
 			//determine the entry day risk that was taken
 			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
-
-			//maintain stop-loss based on the current price and the average entry price
-			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
-			m_lxStopLoss.Send(daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]);
 			
 			//exit half position on first exit days after the entry and we have not exited anything out of the current position
 			if (daysCount >= FirstExitDaysCount && CurrentPosition.ClosedTrades.Count == 0)
 				m_lxPartial.Send((int)Math.Truncate((double)this.StrategyInfo.MarketPosition / 2));
 
-			//determine whether we need to enable the breakeven stop-loss			
-			if (!m_enableBreakeven && (daysCount >= FirstExitDaysCount || CurrentPosition.Profit > (StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven)))
+			//generate the initial stop-loss based on the entry date
+			if (InitialStopLossPercent != 0)
 			{
-				m_enableBreakeven = true;
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Enabling breakeven stop-loss after {daysCount} days or at minimum profit {StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven}.");
+				double stopLossAmount = this.StrategyInfo.AvgEntryPrice * InitialStopLossPercent;
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating initial stop-loss at {stopLossAmount} based on InitialStopLossPercent({InitialStopLossPercent}) and AvgEntryPrice({this.StrategyInfo.AvgEntryPrice}).");
+				GenerateStopLoss(stopLossAmount);
 			}
 
-			if (m_enableBreakeven) GenerateBreakEven(0); //0 to force the stop-loss to breakeven
+			//generate the breakeven stop-loss if the position is up by a certain percentage
+			if (ProfitPercentBreakeven != 0)
+			{
+				double breakEvenStopAmount = this.StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven;
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating breakeven stop-loss if profit is up by {breakEvenStopAmount} based on {ProfitPercentBreakeven} percentage breakeven.");
+				GenerateBreakEven(breakEvenStopAmount);
+			}
+
+			//generate trailing stop-loss
+			if (TrailingPercentActivation != 0 && TrailingPercent != 0)
+			{
+				double trailingActivationAmount = this.StrategyInfo.AvgEntryPrice * TrailingPercentActivation;
+				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating trailing stop-loss at {trailingActivationAmount} based on TrailingPercentActivation({TrailingPercentActivation}) and AvgEntryPrice({this.StrategyInfo.AvgEntryPrice}).");
+				GeneratePercentTrailing(trailingActivationAmount, TrailingPercent);
+			}
 
 			//exit the rest of the position based on general exit rules
 			///	2. Exit full position
