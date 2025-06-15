@@ -19,6 +19,8 @@ namespace PowerLanguage.Strategy {
 	///		2. Big volume move on the daily timeframe at least a specific minimum move on very high volume - this is considered an episodic pivot move with volume catalyst, this could be an earnings call or some other catalyst.
 	///		3. Best if stock comes out of base without being overextended to the up side
 	///		4. Initial risk is the episodic pivot bar low.
+	/// Notes:
+	///	• Can use the standard EpisodicPivotLX with this strategy. 
 	/// </summary>
 	public class _EpisodicPivotHighVolumeLE : _CustomSignal {
 		//constants
