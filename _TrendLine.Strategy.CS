@@ -482,6 +482,12 @@ namespace PowerLanguage.Strategy
 
 					if (daysProcessed > daysBack)
 						break;
+
+					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
+					{
+						trace(ETraceLevel.Warning, $"recentLow: Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
+						break;
+					}
 				}
 
 				return low;
@@ -510,6 +516,12 @@ namespace PowerLanguage.Strategy
 
 					if (daysProcessed > daysBack)
 						break;
+
+					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
+					{
+						trace(ETraceLevel.Warning, $"recentHigh: Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
+						break;
+					}
 				}
 
 				return high;
