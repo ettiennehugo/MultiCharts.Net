@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 	/// 
 	/// Example JSON:
 	/// [
-	///	    {
+	///	  {
 	///     "Instruction" : "EntryLine"
 	///			"LineId" : 1,
 	///			"Direction" : "Long", 
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 	///			"EndTime" : "9:35 AM"
 	///		},
 	///		{
-	///	        "Instruction" : "EntryLine"
+	///	    "Instruction" : "EntryLine"
 	///			"LineId" : 2,
 	///			"Direction" : "Short", 
 	///			"EquityPercent" : 0.01,
@@ -168,19 +168,15 @@ namespace PowerLanguage.Strategy
 	///			"EndTime" : "9:35 AM"
 	///		},
 	///		{
-	///	        "Instruction" : "EntryLine"
+	///	    "Instruction" : "EntryLine"
 	///			"LineId" : 3,
-	///			"PositionPercent" : 0.5,
+	///			"ExitPercent" : 0.5,
 	///		},
 	///		{
-	///	        "Instruction" : "ExitProfit"
+	///	    "Instruction" : "ExitProfit"
 	///			"Percent" : 0.5
 	///			"ProfitPrice": 5.0
 	///		},
-	///		{
-	///		    "Instruction" : "ExitEntryBarLowHigh",
-	///			"BufferPrice" : 0.05,
-	///		}
 	/// ]
 	/// </summary>
 	public class _TrendLine : _CustomSignal
