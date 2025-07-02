@@ -200,7 +200,7 @@ namespace PowerLanguage.Strategy
 		{
 			public DateTime StartTime;
 			public DateTime EndTime;
-			public int Count; //homw many times can the entry/exit occur during the time filter
+			public int Count; //how many times can the entry/exit occur during the time filter
 		};
 
 		public enum EEntryDirection
@@ -971,7 +971,21 @@ namespace PowerLanguage.Strategy
 				return count;
 			}
 
+			protected DateTime currentPositionEntryDate() {
+				DateTime entryDate;
+				if (m_studyControl.Positions[0].OpenTrades.Count > 0 && m_studyControl.Positions[0].ClosedTrades.Count > 0)
+				{
+					DateTime openTradesEarliestDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+					DateTime closedTradesEarliestDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+					entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
+				}
+				else if (m_studyControl.Positions[0].OpenTrades.Count > 0)
+					entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+				else
+					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
+				return entryDate;
+			}
 		}
 
 		/// <summary>
@@ -1423,7 +1437,7 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
-				if (m_studyControl.Bars.CurrentBar < Length) return;
+				if (m_instrument.CurrentBar < Length) return;
 
 				if (Criteria == EEntryExitCriteria.Close) {
 					if (m_studyControl.Bars.Status != EBarState.Close) return;
@@ -1492,8 +1506,7 @@ namespace PowerLanguage.Strategy
 					if (m_studyControl.PositionSide == 0) return false;
 					if (DisableDays == 0) return true;
 
-					DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-					if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+					DateTime entryDate = currentPositionEntryDate();
 					int daysSinceEntry = 0;
 					switch (DayCountStrategy)
 					{
@@ -1779,8 +1792,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case CalculationReason.Default:
-						DateTime entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-						if (m_studyControl.Positions[0].ClosedTrades.Count > 0) entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+						DateTime entryDate = currentPositionEntryDate();
 
 						switch (DayCountStrategy)
 						{
@@ -2108,7 +2120,9 @@ namespace PowerLanguage.Strategy
 			public override void CalcBar()
 			{
 				base.CalcBar();
-				if (m_studyControl.PositionSide == 0) return;
+				//NOTE: If we don't check for the calculation reason, the breakeven order is generated and sent for other things like order filled, etc.
+				//      has the unintended consequence of creating short positions.
+				if (m_studyControl.PositionSide == 0 || m_studyControl.Environment.CalcReason != CalculationReason.Default) return;
 				m_studyControl.CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 				double profit = ProfitAmount;
 				if (ProfitPercent > 0)

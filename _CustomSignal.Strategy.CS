@@ -174,16 +174,31 @@ namespace PowerLanguage.Strategy {
 		protected double equityAvailable(double maxCustomRiskEquityPerPosPercent = 0.0d)
 		{
 			double equityAvailable = 0.0d;
+			//get equity available from account for trading if we are auto trading
+			foreach (var account in this.TradeManager.TradingData.Accounts.Items)
+			{
+				if (account.ID == this.Account)
+				{
+					equityAvailable = account.AvailableToTrade ?? 0;
+					break;
+				}
+			}
 
 			//NOTE: This only works for single entries, need to see how this will work for multiple entries.
 			switch (Environment.ApplicationCode)
 			{
 				case EApplicationCode.Charting:
-					equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? (this.InitialCapital + this.NetProfit) * maxCustomRiskEquityPerPosPercent : this.InitialCapital + this.NetProfit;
+					if (equityAvailable != 0.0d)
+						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
+					else
+						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? (this.InitialCapital + this.NetProfit) * maxCustomRiskEquityPerPosPercent : this.InitialCapital + this.NetProfit;
 					break;
 				case EApplicationCode.Portfolio:
 					double percentEquity = maxCustomRiskEquityPerPosPercent > 0.0d ? maxCustomRiskEquityPerPosPercent : this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d;
-					equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * percentEquity;
+					if (equityAvailable != 0.0d)
+						equityAvailable *= percentEquity;
+					else
+						equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * percentEquity;
 					break;
 			}
 

@@ -139,7 +139,14 @@ namespace PowerLanguage.Strategy {
 			if (!marketBullish()) return;
 
 			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
-
+			//TEST CODE
+//			if (m_dailyTimeFrame.CurrentBar < 126) return;
+//			if ((m_dailyTimeFrame.Close[21] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[21] < 1.3) &&
+//				(m_dailyTimeFrame.Close[63] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[63] < 1.3) &&
+//				(m_dailyTimeFrame.Close[126] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[126] < 1.3)) return;
+			//TEST CODE
+			
+			
 			//check for enough data and implement time filter
 			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
