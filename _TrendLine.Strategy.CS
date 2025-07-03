@@ -1895,9 +1895,9 @@ namespace PowerLanguage.Strategy
 					else
 					{
 						if (m_studyControl.PositionSide > 0)
-							m_stopLossPrice = getDayLow(Length) - BufferPrice;
+							m_stopLossPrice = recentLow(Length) - BufferPrice;
 						else if (m_studyControl.PositionSide < 0)
-							m_stopLossPrice = getDayHigh(Length) + BufferPrice;
+							m_stopLossPrice = recentHigh(Length) + BufferPrice;
 					}
 				}
 
@@ -1909,54 +1909,14 @@ namespace PowerLanguage.Strategy
 				switch (direction)
 				{
 					case EEntryDirection.Long:
-						return getDayLow(Length) - BufferPrice;
+						return recentLow(Length) - BufferPrice;
 					case EEntryDirection.Short:
-						return getDayHigh(Length) + BufferPrice;
+						return recentHigh(Length) + BufferPrice;
 				}
 
 				//should not be reached
 				trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
 				return 0.0;
-			}
-
-			public double getDayLow(int lookback)
-			{
-				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
-				int index = 1;
-				double result = m_studyControl.Bars.Low[0];
-				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
-				{
-					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
-					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
-					{
-						index++;
-						continue; //skip values after market close
-					}
-					result = m_studyControl.Bars.Low[index] < result ? m_studyControl.Bars.Low[index] : result;
-					index++;
-				}
-
-				return result;
-			}
-
-			public double getDayHigh(int lookback)
-			{
-				DateTime startBarDate = m_studyControl.Bars.Time[0].Date;
-				int index = 1;
-				double result = m_studyControl.Bars.High[0];
-				while (m_studyControl.tradingDayCount(m_studyControl.Bars.Time[index], startBarDate) <= lookback)
-				{
-					if ((!IncludePreMarket && m_studyControl.Bars.Time[index].TimeOfDay <= DEFAULT_MARKET_OPEN_TIME) ||
-					    (!IncludePostMarket && m_studyControl.Bars.Time[index].TimeOfDay >= DEFAULT_MARKET_CLOSE_TIME))
-					{
-						index++;
-						continue; //skip values after market close
-					}
-					result = m_studyControl.Bars.High[index] > result ? m_studyControl.Bars.High[index] : result;
-					index++;
-				}
-
-				return result;
 			}
 
 			protected override double exitPrice()
