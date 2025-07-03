@@ -459,9 +459,10 @@ namespace PowerLanguage.Strategy
 			}
 
 			/// <summary>
-			/// Scans back from the current bar to the previous day and returns the lowest low including the previous day.
+			/// Scans back from the current bar the given number of days back and returns the lowest low found.
+			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 			/// </summary>
-			protected double recentLow(int daysBack = 1)
+			protected double recentLow(int daysBack)
 			{
 				double low = m_studyControl.IntradayLow;
 				DateTime lowDate = m_studyControl.IntradayLowTime;
@@ -494,9 +495,10 @@ namespace PowerLanguage.Strategy
 			}
 
 			/// <summary>
-			/// Scan back from the current bar to the previous day and returns the highest high including the previous day.
+			/// Scans back from the current bar the given number of days back and returns the highest high found.
+			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 			/// </summary>
-			protected double recentHigh(int daysBack = 1)
+			protected double recentHigh(int daysBack)
 			{
 				double high = m_studyControl.IntradayHigh;
 				int daysProcessed = 0;
@@ -1169,7 +1171,7 @@ namespace PowerLanguage.Strategy
 						//need to consider both breakout and fade entries
 						//NOTE: We use the previous day low for breakout and fade entries since gap ups can cause all bars for the current day to be above the line.
 						bool entryCriteriaMet = false;
-						double recentLow = this.recentLow();
+						double recentLow = this.recentLow(1);
 
 						switch (Strategy)
 						{
@@ -1220,7 +1222,7 @@ namespace PowerLanguage.Strategy
 				{
 					case EEntryExitCriteria.Close:
 						bool entryCriteriaMet = false;
-						double recentHigh = this.recentHigh();
+						double recentHigh = this.recentHigh(1);
 
 						switch (Strategy)
 						{
