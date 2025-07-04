@@ -583,11 +583,11 @@ namespace PowerLanguage.Strategy
 				if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); return true; }
 				if (name == "equitypercent") { EquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "maxvolumebasedpercent") { MaxVolumeBasedPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "maxriskbasedequitypercent") { MaxRiskBasedEquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
 				if (name == "addtoposition") { AddToPosition = property.Value.ToObject<bool>(); return true; }
 				if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
 				if (name == "stoplossexitid") { StopLossExitId = property.Value.ToString().ToLower(); return true; }
-				if (name == "maxriskbasedequitypercent") { MaxRiskBasedEquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "useroundlots") { UseRoundLots = property.Value.ToObject<bool>(); return true; }
 				return base.Parse(property);
 			}
@@ -683,10 +683,11 @@ namespace PowerLanguage.Strategy
 				double entryPrice = price == 0.0 ? m_studyControl.Bars.Close[0] : price;
 				int equityPercentSize = (int)Math.Truncate(maxPositionEquity / entryPrice);
 				int size = equityPercentSize;
+				double stopLossPrice = 0.0;
 
 				if (price != 0.0 && m_stopLossExit != null)
 				{
-					double stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Criteria);
+					stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Criteria);
 					if (stopLossPrice != 0.0)
 					{
 						if (maxPositionEquity > 0)
@@ -728,6 +729,8 @@ namespace PowerLanguage.Strategy
 				}
 
 				if (UseRoundLots) size = (int)(Math.Round(size / 100.0) * 100.0);
+				if (size == 0) trace(ETraceLevel.Warning, $"entrySize: computed position size is zero EquityAvailable({equityAvailable}) EquityPercent({EquityPercent}) MaxVolumeBasedPercent({MaxVolumeBasedPercent}) UseRoundLots({UseRoundLots}) EntryPrice({entryPrice}) StopLossPrice({stopLossPrice})");
+				
 				return size;
 			}
 

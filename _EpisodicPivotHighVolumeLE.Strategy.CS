@@ -133,7 +133,7 @@ namespace PowerLanguage.Strategy {
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;	//backtester do not send order filled messages to we need to compare position sizes between bars
+			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;	//backtester do not send order filled messages so we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 			if (!marketBullish()) return;
@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy {
 			//TEST CODE
 			
 			
-			//check for enough data and implement time filter
+			//check for enough data and implement strategy rules
 			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
 			{
@@ -155,23 +155,23 @@ namespace PowerLanguage.Strategy {
 				return;
 			}
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
-			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
+			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;  //reset entries per time filter daily
 			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 
-			//check if previous bar met the specific percentage change based on the daily time frame
+			//check if PREVIOUS DAILY bar met the specific percentage change to be considered an episodic pivot
 			if (m_dailyTimeFrame.Low[0] == 0) return; //avoid division by zero
-			double closeLowDelta = m_dailyTimeFrame.Close[0] - m_dailyTimeFrame.Low[0];
-			double percentageChange = closeLowDelta / m_dailyTimeFrame.Low[0];
+			double closeLowDelta = m_dailyTimeFrame.Close[1] - m_dailyTimeFrame.Low[1];
+			double percentageChange = closeLowDelta / m_dailyTimeFrame.Low[1];
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
 
-			//check required volume traded on the previous bar
+			//check required volume traded on the PREVIOUS DAILY bar to be considered an episodic pivot
 			double requiredMiniumAboveAverageVolume = -1;
 			if (m_minimumAboveAveragePctVolume > 0)
-				requiredMiniumAboveAverageVolume = m_minimumAboveAveragePctVolume * m_volumeWithSD.Average.Value;
+				requiredMiniumAboveAverageVolume = m_minimumAboveAveragePctVolume * m_volumeWithSD.Average[1];
 			else
-				requiredMiniumAboveAverageVolume = AbsoluteAboveAverageVolume + m_volumeWithSD.Average.Value;
+				requiredMiniumAboveAverageVolume = AbsoluteAboveAverageVolume + m_volumeWithSD.Average[1];
 
-			if (m_dailyTimeFrame.Volume[0] < requiredMiniumAboveAverageVolume) return; //ignore stocks that did not meet the volume criteria
+			if (m_dailyTimeFrame.Volume[1] < requiredMiniumAboveAverageVolume) return; //ignore stocks that did not meet the volume criteria
 
 			//required close percentile on minute time frame
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
@@ -190,9 +190,13 @@ namespace PowerLanguage.Strategy {
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, VolumeLength, MaximumVolumeBasedPercent, UseRoundLots);
-			if (size == 0) return; //do not enter if the size is zero
+			if (size == 0)
+			{
+				trace(ETraceLevel.Warning, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {m_minuteTimeFrame.Time[0]} - Position size calculated as zero - EquityBasedSize {equityBasedSize} - RiskBasedSize {riskBasedSize} - VolumeBasedSize {size} - UseRoundLots {UseRoundLots}");
+				return;
+			}
 
-			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry order at Price {m_minuteTimeFrame.Close[0]} - Size {size} - PctChange {percentageChange} - RequiredMinAvgPctVolume {requiredMiniumAboveAverageVolume} - ClosePercentile {closePercentile}");
+			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {m_minuteTimeFrame.Time[0]} - Entry order at Price {m_minuteTimeFrame.Close[0]} - Size {size} - PctChange {percentageChange} - RequiredMinAvgPctVolume {requiredMiniumAboveAverageVolume} - ClosePercentile {closePercentile}");
 			m_le.Send(m_minuteTimeFrame.Close[0], size);
 		}
 
