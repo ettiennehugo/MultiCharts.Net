@@ -542,6 +542,8 @@ namespace PowerLanguage.Strategy
 			public EOrderType OrderType { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
 			public double EquityPercent { get; set; }
+			public int VolumeDataFeed { get; set; }
+			public int VolumeLength { get; set; }
 			public double MaxVolumeBasedPercent { get; set; }
 			public bool AddToPosition { get; set; }
 			public DateTime ValidUntil { get; set; }
@@ -557,6 +559,7 @@ namespace PowerLanguage.Strategy
 			protected IOrderStopLimit m_orderSeStpLmt;
 			protected EEntryDirection m_autoTradeDirection;   //direction to take when the entry direction is set to auto, subclasses need to fill this in and it should never be auto since it will result in a noop
 			protected ExitPriced m_stopLossExit;
+			protected IInstrument m_volumeInstrument;
 
 			public Entry(_TrendLine control) : base(control)
 			{
@@ -565,6 +568,8 @@ namespace PowerLanguage.Strategy
 				m_autoTradeDirection = EEntryDirection.Long;
 				OrderType = EOrderType.Market;
 				EquityPercent = 1.0;
+				VolumeDataFeed = 1;
+				VolumeLength = DEFAULT_VOLUME_PERIOD;
 				MaxVolumeBasedPercent = 0.2;
 				Criteria = EEntryExitCriteria.Close;
 				AddToPosition = false;
@@ -582,6 +587,8 @@ namespace PowerLanguage.Strategy
 				if (name == "strategy") { Strategy = property.Value.ToObject<EEntryStrategy>(); return true; }
 				if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); return true; }
 				if (name == "equitypercent") { EquityPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "volumedatafeed") { VolumeDataFeed = property.Value.ToObject<int>(); return true; }
+				if (name == "volumelength") { VolumeLength = property.Value.ToObject<int>(); return true; }
 				if (name == "maxvolumebasedpercent") { MaxVolumeBasedPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "maxriskbasedequitypercent") { MaxRiskBasedEquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
@@ -597,6 +604,9 @@ namespace PowerLanguage.Strategy
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EquityPercent must be between 0 and 1");
 				if (MaxVolumeBasedPercent < 0 || MaxVolumeBasedPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - MaxVolumeBasedPercent must be between 0 and 1");
 				if (StopLossExitId != string.Empty && m_stopLossExit == null) return Tuple.Create(false, $"{InstructionTypeName} - ExitStopLossId priced exit not found");
+				if (VolumeDataFeed < 1 || VolumeDataFeed > m_studyControl.MaxDataStream)
+					return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be between 1 and {m_studyControl.MaxDataStream}");
+				if (VolumeLength < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeLength must be greater than 0");
 				if (MaxRiskBasedEquityPercent <= 0 || MaxRiskBasedEquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - MaxRiskBasedEquityPercent must be between 0 and 1");
 				return base.IsValid();
 			}
@@ -611,6 +621,7 @@ namespace PowerLanguage.Strategy
 				m_orderLeStpLmt = null;
 				m_orderSeStpLmt = null;
 				m_stopLossExit = null;
+				m_volumeInstrument = m_studyControl.BarsOfData(VolumeDataFeed);
 
 				//allocate orders
 				switch (OrderType)
@@ -724,7 +735,7 @@ namespace PowerLanguage.Strategy
 				//clip position size to the available volume of the insturment being traded if required
 				if (MaxVolumeBasedPercent != 0.0)
 				{
-					int maximumPositionBasedOnVolume = (int)Math.Truncate(m_studyControl.Bars.Volume.Average(_TrendLine.DEFAULT_VOLUME_PERIOD) * MaxVolumeBasedPercent);
+					int maximumPositionBasedOnVolume = (int)Math.Truncate(m_volumeInstrument.Volume.Average(VolumeLength) * MaxVolumeBasedPercent);
 					size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
 				}
 
@@ -1040,12 +1051,9 @@ namespace PowerLanguage.Strategy
 			public DateTime LineEndTime { get; set; }
 			public double LineEndPrice { get; set; }
 			public double ClosePercentile { get; set; }
-			public int VolumeDataFeed { get; set; }
-			public int VolumeLength { get; set; }
 			public EVolumeRequired VolumeRequired { get; set; }
 			private ITrendLineObject m_line;
 			private PowerLanguage.Function._VolumeWithSD m_volume;
-			private IInstrument m_volumeInstrument;
 
 			public EntryLine(_TrendLine control) : base(control)
 			{
@@ -1072,8 +1080,6 @@ namespace PowerLanguage.Strategy
 				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
 				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
-				if (name == "volumedatafeed") { VolumeDataFeed = property.Value.ToObject<int>(); return true; }
-				if (name == "volumelength") { VolumeLength = property.Value.ToObject<int>(); return true; }
 				if (name == "volumerequired") { VolumeRequired = property.Value.ToObject<EVolumeRequired>(); return true; }
 
 				return base.Parse(property);
@@ -1087,6 +1093,7 @@ namespace PowerLanguage.Strategy
 					return Tuple.Create(false, $"{InstructionTypeName} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified");
 				if (LineStartTime != DateTime.MinValue && LineEndTime != DateTime.MinValue && LineStartTime == LineEndTime)
 					return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime and LineEndTime can not be the same");
+				if (LineStartTime > LineEndTime) return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime must be before LineEndTime");
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EntryPercent must be between 0 and 1");
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ClosePercentile must be between 0 and 1");
 				if (VolumeRequired != EVolumeRequired.Disable && (VolumeDataFeed < 1 || VolumeDataFeed > m_studyControl.MaxDataStream)) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0 and less or equal to {m_studyControl.MaxDataStream}");
@@ -2138,7 +2145,6 @@ namespace PowerLanguage.Strategy
 
 		//properties
 		internal List<Instruction> InstructionsList { get; private set; }
-		public List<DateTime> Holidays { get { return m_holidays.Holidays; } }
 
 		//attributes
 		private List<IOrderMarket> m_leMrk;
@@ -2185,7 +2191,6 @@ namespace PowerLanguage.Strategy
 		private int m_atrAllocated;
 		private List<PowerLanguage.Function._VolumeWithSD> m_volumeWithSD;
 		private int m_volumeWithSDAllocated;
-		private PowerLanguage.Function.USHolidays m_holidays;
 
 		//interface methods
 		public _TrendLine(object _ctx) : base(_ctx) { }
@@ -2197,7 +2202,6 @@ namespace PowerLanguage.Strategy
 			createOrders();
 			createIndicators();
 			InstructionsList = new List<Instruction>();
-			m_holidays = new PowerLanguage.Function.USHolidays(this);
 		}
 
 		protected override void StartCalc()
