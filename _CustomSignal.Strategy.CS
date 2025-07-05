@@ -6,6 +6,7 @@ using ATCenterProxy.interop;
 using PowerLanguage.Indicator;
 using System.Diagnostics;
 using System.Runtime.Remoting.Messaging;
+using System.Collections.Generic;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -78,6 +79,8 @@ namespace PowerLanguage.Strategy {
 		{
 			get { return m_intradayVolume; }
 		}
+
+		public List<DateTime> Holidays { get { return m_holidays.Holidays; } }
 
 		[Input] public ETraceLevel TraceLevel { get; set; }
 
