@@ -138,28 +138,34 @@ namespace PowerLanguage.Strategy {
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 			if (!marketBullish()) return;
 
+
 			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
 			//TEST CODE
-//			if (m_dailyTimeFrame.CurrentBar < 126) return;
-//			if ((m_dailyTimeFrame.Close[21] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[21] < 1.3) &&
-//				(m_dailyTimeFrame.Close[63] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[63] < 1.3) &&
-//				(m_dailyTimeFrame.Close[126] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[126] < 1.3)) return;
+			//			if (m_dailyTimeFrame.CurrentBar < 126) return;
+			//			if ((m_dailyTimeFrame.Close[21] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[21] < 1.3) &&
+			//				(m_dailyTimeFrame.Close[63] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[63] < 1.3) &&
+			//				(m_dailyTimeFrame.Close[126] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[126] < 1.3)) return;
 			//TEST CODE
-			
-			
+
+
 			//check for enough data and implement strategy rules
-			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
+			if (PositionSide != 0) return;
+			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength)) return;
+			if (m_marketTimeFrame.CurrentBar < Math.Max(BarsAboveMarketAverage, MarketAverageLength)) return;
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
 			{
 				m_entriesPerTimeFilter = 0;
 				return;
 			}
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
-			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;  //reset entries per time filter daily
-			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
+			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date)
+			{
+				m_entriesPerTimeFilter = 0;
+				m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
+			}
 
 			//check if PREVIOUS DAILY bar met the specific percentage change to be considered an episodic pivot
-			if (m_dailyTimeFrame.Low[0] == 0) return; //avoid division by zero
+			if (m_dailyTimeFrame.Low[1] == 0) return; //avoid division by zero
 			double closeLowDelta = m_dailyTimeFrame.Close[1] - m_dailyTimeFrame.Low[1];
 			double percentageChange = closeLowDelta / m_dailyTimeFrame.Low[1];
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
