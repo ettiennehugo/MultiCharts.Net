@@ -735,7 +735,9 @@ namespace PowerLanguage.Strategy
 				//clip position size to the available volume of the insturment being traded if required
 				if (MaxVolumeBasedPercent != 0.0)
 				{
-					int maximumPositionBasedOnVolume = (int)Math.Truncate(m_volumeInstrument.Volume.Average(VolumeLength) * MaxVolumeBasedPercent);
+					double averageVolume = m_volumeInstrument.Volume.Average(VolumeLength);
+					int maximumPositionBasedOnVolume = (int)Math.Truncate(averageVolume * MaxVolumeBasedPercent);
+					trace(ETraceLevel.Verbose, $"Using VolumeDataFeed {VolumeDataFeed} for sizing - AvgVolume {averageVolume} - MaxPositionBasedVolume {maximumPositionBasedOnVolume}");
 					size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
 				}
 
@@ -1803,10 +1805,10 @@ namespace PowerLanguage.Strategy
 						//check whether order was filled to ensure exit is only triggered once
 						foreach (var item in m_studyControl.TradeManager.TradingData.Orders.Items)
 						{
-							if (item.OrderID == getOrderId() && item.LeftContracts == 0)
+							if (item.OrderID == getOrderId())
 							{
-								m_exitOrderFilled = true;
-								trace(ETraceLevel.Verbose, $"exitOrderFilled - OrderId {item.OrderID} - LeftContracts {item.LeftContracts}");
+								m_exitOrderFilled = item.LeftContracts == 0;
+								trace(ETraceLevel.Verbose, $"exitOrderFilled - OrderId {item.OrderID} - LeftContracts {item.LeftContracts} - FilledContracts {item.FilledContracts}");
 								break;
 							}
 						}
