@@ -18,7 +18,7 @@ namespace PowerLanguage.Strategy {
 	///		1. Scan - stocks that are up 30%+ over the last 1 to 3 months.
 	///		2. Big volume move on the daily timeframe at least a specific minimum move on very high volume - this is considered an episodic pivot move with volume catalyst, this could be an earnings call or some other catalyst.
 	///		3. Best if stock comes out of base without being overextended to the up side
-	///		4. Initial risk is the episodic pivot bar low.
+	///		4. Initial risk is the entry day low.
 	/// Notes:
 	///	• Can use the standard EpisodicPivotLX with this strategy. 
 	/// </summary>
@@ -133,20 +133,10 @@ namespace PowerLanguage.Strategy {
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;	//backtester do not send order filled messages so we need to compare position sizes between bars
+			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;	//backtester do not send order filled messages so we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 			if (!marketBullish()) return;
-
-
-			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
-			//TEST CODE
-			//			if (m_dailyTimeFrame.CurrentBar < 126) return;
-			//			if ((m_dailyTimeFrame.Close[21] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[21] < 1.3) &&
-			//				(m_dailyTimeFrame.Close[63] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[63] < 1.3) &&
-			//				(m_dailyTimeFrame.Close[126] != 0 && m_dailyTimeFrame.Close[0]/m_dailyTimeFrame.Close[126] < 1.3)) return;
-			//TEST CODE
-
 
 			//check for enough data and implement strategy rules
 			if (PositionSide != 0) return;
@@ -182,7 +172,11 @@ namespace PowerLanguage.Strategy {
 			//required close percentile on minute time frame
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
 			closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
-			if (range == 0) return; //avoid division by zero
+			if (range == 0)
+			{
+				trace(ETraceLevel.Warning, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {m_minuteTimeFrame.Time[0]} - Range is zero, cannot calculate close percentile - Close {m_minuteTimeFrame.Close[0]} - Low {m_minuteTimeFrame.Low[0]} - High {m_minuteTimeFrame.High[0]}");
+				return;
+			}
 			double closePercentile = closeLowDelta / range;
 			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
