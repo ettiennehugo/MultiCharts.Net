@@ -43,7 +43,7 @@ namespace PowerLanguage.Strategy
 	///	                                         default is 1.0 (100%) of the account.
 	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
 	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
-	///	• [optional] VolumeRequired - current volume required above the average volume to consider for a high volume entry, default is Disable
+	///	• [optional] PercentAverageVolumeRequired - percentage of average volume required intraday to enter the position, zero to disable, default is 0.0 (disabled)
 	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false 
 	/// 
 	/// ExitLine
@@ -248,18 +248,6 @@ namespace PowerLanguage.Strategy
 		{
 			CalendarDays,
 			TradingDays
-		};
-
-		public enum EVolumeRequired
-		{
-			Disable,
-			AboveAverageMinusSD3,		//volume required should be below average - 3 standard deviation
-			AboveAverageMinusSD2,		//volume required should be below average - 2 standard deviation
-			AboveAverageMinusSD1,		//volume required should be below average - 1 standard deviation
-			AboveAverage,						//volume required should be above average
-			AboveAveragePlusSD1,		//volume required should be above average + 1 standard deviation
-			AboveAveragePlusSD2,		//volume required should be above average + 2 standard deviations
-			AboveAveragePlusSD3			//volume required should be above average + 3 standard deviations
 		};
 
 		internal abstract class Instruction
@@ -1053,7 +1041,7 @@ namespace PowerLanguage.Strategy
 			public DateTime LineEndTime { get; set; }
 			public double LineEndPrice { get; set; }
 			public double ClosePercentile { get; set; }
-			public EVolumeRequired VolumeRequired { get; set; }
+			public double PercentAverageVolumeRequired { get; set; }
 			private ITrendLineObject m_line;
 			private PowerLanguage.Function._VolumeWithSD m_volume;
 
@@ -1067,7 +1055,7 @@ namespace PowerLanguage.Strategy
 				LineEndPrice = 0.0;
 				VolumeDataFeed = 1;
 				VolumeLength = 20;
-				VolumeRequired = EVolumeRequired.Disable;
+				PercentAverageVolumeRequired = 0;
 				m_line = null;
 				m_volume = null;
 				m_volumeInstrument = null;
@@ -1082,7 +1070,7 @@ namespace PowerLanguage.Strategy
 				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
 				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
-				if (name == "volumerequired") { VolumeRequired = property.Value.ToObject<EVolumeRequired>(); return true; }
+				if (name == "percentaveragevolumerequired") { PercentAverageVolumeRequired = property.Value.ToObject<double>(); return true; }
 
 				return base.Parse(property);
 			}
@@ -1098,8 +1086,7 @@ namespace PowerLanguage.Strategy
 				if (LineStartTime > LineEndTime) return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime must be before LineEndTime");
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EntryPercent must be between 0 and 1");
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ClosePercentile must be between 0 and 1");
-				if (VolumeRequired != EVolumeRequired.Disable && (VolumeDataFeed < 1 || VolumeDataFeed > m_studyControl.MaxDataStream)) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0 and less or equal to {m_studyControl.MaxDataStream}");
-				if (VolumeRequired != EVolumeRequired.Disable && VolumeLength < 1) return Tuple.Create(false, $"{InstructionTypeName} - VolumeLength must be greater than 0");
+				if (PercentAverageVolumeRequired != 0 && (VolumeDataFeed < 1 || VolumeDataFeed > m_studyControl.MaxDataStream)) return Tuple.Create(false, $"{InstructionTypeName} - VolumeDataFeed must be greater than 0 and less or equal to {m_studyControl.MaxDataStream}");
 				return base.IsValid();
 			}
 
@@ -1107,7 +1094,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.StartCalc();
 
-				if (VolumeRequired >= 0)
+				if (PercentAverageVolumeRequired > 0)
 				{
 					m_volume = m_studyControl.AllocateVolumeWithSD();
 					m_volumeInstrument = m_studyControl.BarsOfData(VolumeDataFeed);
@@ -1136,31 +1123,10 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 
-				switch (VolumeRequired)
+				if (PercentAverageVolumeRequired > 0)
 				{
-					case EVolumeRequired.Disable:
-						break;  //nothing to do when disabled
-					case EVolumeRequired.AboveAverageMinusSD3:
-						if (m_volume.AvgMinusLevel3[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAverageMinusSD2:
-						if (m_volume.AvgMinusLevel2[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAverageMinusSD1:
-						if (m_volume.AvgMinusLevel1[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAverage:
-						if (m_volume.Average[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAveragePlusSD1:
-						if (m_volume.AvgPlusLevel1[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAveragePlusSD2:
-						if (m_volume.AvgPlusLevel2[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
-					case EVolumeRequired.AboveAveragePlusSD3:
-						if (m_volume.AvgPlusLevel3[0] >= m_volumeInstrument.Volume[0]) return;
-						break;
+					double requiredVolume = m_volume.Average[0] * PercentAverageVolumeRequired;
+					if (m_volumeInstrument.Volume[0] < requiredVolume) return;
 				}
 
 				switch (Direction)
