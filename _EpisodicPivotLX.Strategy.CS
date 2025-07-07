@@ -143,7 +143,7 @@ namespace PowerLanguage.Strategy
 			if (daysCount >= FirstExitDaysCount && CurrentPosition.ClosedTrades.Count == 0)
 				m_lxPartial.Send((int)Math.Truncate((double)this.StrategyInfo.MarketPosition / 2));
 
-			//generate the initial stop-loss based on the entry date
+			//generate the initial stop-loss based on the entry date - this should align roughly with the low of the entry day
 			if (InitialStopLossPercent != 0)
 			{
 				double stopLossAmount = this.StrategyInfo.AvgEntryPrice * InitialStopLossPercent;
