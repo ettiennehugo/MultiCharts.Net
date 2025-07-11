@@ -7,6 +7,7 @@ using PowerLanguage.Indicator;
 using System.Diagnostics;
 using System.Runtime.Remoting.Messaging;
 using System.Collections.Generic;
+using System.IO;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
@@ -31,8 +32,88 @@ namespace PowerLanguage.Strategy {
 			Verbose,    //trace all messages
 		}
 
-		//inputs
+		/// <summary>
+		/// Singleton log file manager for internal use only.
+		/// </summary>
+		private sealed class LogFileSingleton
+		{
+			private static LogFileSingleton s_instance;
+			private static readonly object s_lock = new object();
+			private static int s_referenceCount = 0;
+			
+			private StreamWriter m_logWriter;
+			private readonly object m_writeLock = new object();
 
+			private LogFileSingleton()
+			{
+				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss.fff}.log";
+				try
+				{
+					string logPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
+					m_logWriter = new StreamWriter(logPath, true);
+					WriteTrace(ETraceLevel.Info, this.GetType().Name, "", "LogFileSingleton initialized");
+				}
+				catch (Exception ex)
+				{
+					//fallback to temp directory if AppData is not accessible
+					string tempPath = Path.Combine(Path.GetTempPath(), logFilename);
+					m_logWriter = new StreamWriter(tempPath, true);
+					WriteTrace(ETraceLevel.Error, this.GetType().Name, "", $"LogFileSingleton initialized (fallback location): {ex.Message}");
+				}
+			}
+
+			public static LogFileSingleton GetInstance()
+			{
+				lock (s_lock)
+				{
+					if (s_instance == null)
+					{
+						s_instance = new LogFileSingleton();
+					}
+					s_referenceCount++;
+					return s_instance;
+				}
+			}
+
+			public void ReleaseInstance()
+			{
+				lock (s_lock)
+				{
+					s_referenceCount--;
+					if (s_referenceCount <= 0)
+					{
+						WriteTrace(ETraceLevel.Verbose, this.GetType().Name, "", "LogFileSingleton shutting down");
+						lock (m_writeLock)
+						{
+							m_logWriter?.Close();
+							m_logWriter?.Dispose();
+							m_logWriter = null;
+						}
+						s_instance = null;
+					}
+				}
+			}
+
+			public void WriteTrace(ETraceLevel level, string signalName, string symbol, string message)
+			{
+				if (m_logWriter == null) return;
+
+				lock (m_writeLock)
+				{
+					try
+					{
+						m_logWriter.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{level},{message}");
+						m_logWriter.Flush();
+					}
+					catch (Exception) 
+					{ 
+						/* ignore write errors to prevent infinite loops */
+					}
+				}
+			}
+		}
+
+		//inputs
 
 		//properties
 		public double IntradayLow
@@ -96,14 +177,27 @@ namespace PowerLanguage.Strategy {
 		private double m_intradayVolume;
 		private DateTime m_currentDay;
 		private PowerLanguage.Function.USHolidays m_holidays;
+		private LogFileSingleton m_logger;
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
+		~_CustomSignal()
+		{
+			if (m_logger != null)
+			{
+				m_logger.ReleaseInstance();
+				m_logger = null;
+			}
+		}
 
 		//methods
 		public void trace(ETraceLevel traceLevel, string message)
 		{
-			if (TraceLevel <= traceLevel) Output.WriteLine(message);
+			if (TraceLevel >= traceLevel)
+			{
+				if (m_logger == null) m_logger = LogFileSingleton.GetInstance();
+				m_logger.WriteTrace(traceLevel, this.GetType().Name, this.Bars.Info.Name, message);
+			}
 		}
 
 		protected override void Create()
