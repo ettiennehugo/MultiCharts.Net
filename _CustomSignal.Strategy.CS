@@ -26,9 +26,9 @@ namespace PowerLanguage.Strategy {
 		public enum ETraceLevel
 		{
 			None = 0,   //no trace
-			Info,
-			Warning,
 			Error,
+			Warning,
+			Info,
 			Verbose,    //trace all messages
 		}
 
@@ -37,12 +37,14 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		private sealed class LogFileSingleton
 		{
+			const int FlushInterval = 5000; //flush every 5 seconds
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
 			private static int s_referenceCount = 0;
 			
 			private StreamWriter m_logWriter;
 			private readonly object m_writeLock = new object();
+			private DateTime m_lastFlushTime;
 
 			private LogFileSingleton()
 			{
@@ -51,6 +53,7 @@ namespace PowerLanguage.Strategy {
 				{
 					string logPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
 					m_logWriter = new StreamWriter(logPath, true);
+					m_lastFlushTime = DateTime.Now;
 					WriteTrace(ETraceLevel.Info, this.GetType().Name, "", "LogFileSingleton initialized");
 				}
 				catch (Exception ex)
@@ -58,6 +61,7 @@ namespace PowerLanguage.Strategy {
 					//fallback to temp directory if AppData is not accessible
 					string tempPath = Path.Combine(Path.GetTempPath(), logFilename);
 					m_logWriter = new StreamWriter(tempPath, true);
+					m_lastFlushTime = DateTime.Now;
 					WriteTrace(ETraceLevel.Error, this.GetType().Name, "", $"LogFileSingleton initialized (fallback location): {ex.Message}");
 				}
 			}
@@ -102,8 +106,13 @@ namespace PowerLanguage.Strategy {
 				{
 					try
 					{
-						m_logWriter.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{level},{message}");
-						m_logWriter.Flush();
+						m_logWriter.WriteLine($"{level} {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}");
+						TimeSpan timeSinceLastFlush = DateTime.Now - m_lastFlushTime;
+						if (timeSinceLastFlush.TotalMilliseconds >= FlushInterval)
+						{
+							m_logWriter.Flush();
+							m_lastFlushTime = DateTime.Now;
+						}
 					}
 					catch (Exception) 
 					{ 
@@ -163,7 +172,7 @@ namespace PowerLanguage.Strategy {
 
 		public List<DateTime> Holidays { get { return m_holidays.Holidays; } }
 
-		[Input] public ETraceLevel TraceLevel { get; set; }
+		[Input] public virtual ETraceLevel TraceLevel { get; set; }
 
 		//attributes
 		private double m_intradayLow;
@@ -204,6 +213,7 @@ namespace PowerLanguage.Strategy {
 		{
 			base.Create();
 			m_holidays = new PowerLanguage.Function.USHolidays(this);
+			TraceLevel = ETraceLevel.None;
 		}
 
 		protected override void StartCalc()
