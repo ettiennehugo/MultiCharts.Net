@@ -45,16 +45,18 @@ namespace PowerLanguage.Strategy {
 			private StreamWriter m_logWriter;
 			private readonly object m_writeLock = new object();
 			private DateTime m_lastFlushTime;
+			private IOutput m_output;	//MC main output window
 
-			private LogFileSingleton()
+			private LogFileSingleton(IOutput output)
 			{
+				m_output = output;
 				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss.fff}.log";
 				try
 				{
 					string logPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
 					m_logWriter = new StreamWriter(logPath, true);
 					m_lastFlushTime = DateTime.Now;
-					WriteTrace(ETraceLevel.Info, this.GetType().Name, "", "LogFileSingleton initialized");
+					m_output.WriteLine($"Log file created {logFilename}");
 				}
 				catch (Exception ex)
 				{
@@ -62,17 +64,19 @@ namespace PowerLanguage.Strategy {
 					string tempPath = Path.Combine(Path.GetTempPath(), logFilename);
 					m_logWriter = new StreamWriter(tempPath, true);
 					m_lastFlushTime = DateTime.Now;
-					WriteTrace(ETraceLevel.Error, this.GetType().Name, "", $"LogFileSingleton initialized (fallback location): {ex.Message}");
+					m_output.WriteLine($"Fallback log file created {logFilename} - Exception: {ex.Message}");
 				}
+
+				m_output = output;
 			}
 
-			public static LogFileSingleton GetInstance()
+			public static LogFileSingleton GetInstance(IOutput output)
 			{
 				lock (s_lock)
 				{
 					if (s_instance == null)
 					{
-						s_instance = new LogFileSingleton();
+						s_instance = new LogFileSingleton(output);
 					}
 					s_referenceCount++;
 					return s_instance;
@@ -204,7 +208,7 @@ namespace PowerLanguage.Strategy {
 		{
 			if (TraceLevel >= traceLevel)
 			{
-				if (m_logger == null) m_logger = LogFileSingleton.GetInstance();
+				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
 				m_logger.WriteTrace(traceLevel, this.GetType().Name, this.Bars.Info.Name, message);
 			}
 		}
