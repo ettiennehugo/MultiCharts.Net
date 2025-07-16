@@ -44,7 +44,8 @@ namespace PowerLanguage.Strategy
 	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
 	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
 	///	• [optional] PercentAverageVolumeRequired - percentage of average volume required intraday to enter the position, zero to disable, default is 0.0 (disabled)
-	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false 
+	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitLine
 	/// • Instruction - "ExitLine" 
@@ -60,6 +61,7 @@ namespace PowerLanguage.Strategy
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitMovingAverage
 	/// • Instruction - "ExitMovingAverage" 
@@ -72,6 +74,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitBreakeven
 	/// • Instruction - "ExitBreakeven", always exits the whole position.
@@ -79,6 +82,7 @@ namespace PowerLanguage.Strategy
 	/// • [alternate] ProfitPercent - profit percentage to activate the trailing stop
 	/// • [alternate] ProfitAmount - profit amount to activate the trailing stop 
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	///
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
@@ -94,6 +98,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] ExitPercent - percent of position to close, default 1.0 (100%)
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
@@ -104,6 +109,7 @@ namespace PowerLanguage.Strategy
 	///	• [alternate] Price - exit the position at the specific price value.
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitProfit
 	/// • Instruction - "ExitProfit" 
@@ -111,8 +117,10 @@ namespace PowerLanguage.Strategy
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [alternate] ProfitPercent - exit the position one the price moved in your favor by this percentage
 	///	• [alternate] ProfitPrice - exit the position one the price moved in your favor by this amount
+	///	• [alternate] Price - exit the position at the specific price value.
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitDays
 	/// • Instruction - "ExitDays" 
@@ -122,6 +130,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	///	• [optional] ExitPercent - percent of INITIAL POSITION to exit, default 1.0 (100%) 
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitLowHigh
 	/// • Instruction - "ExitLowHigh"
@@ -133,6 +142,7 @@ namespace PowerLanguage.Strategy
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	///	• [optional] IncludePreMarket - include pre-market data when computing the entry day high/low, default false
 	///	• [optional] IncludePostMarket - include post-market data when computing the entry day high/low, default false
+	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitTrailingStop
 	/// • Instruction - "ExitTrailingStop"
@@ -144,6 +154,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Criteria - enum of Close, LowHigh - activate trailing stop based on bar close or bar low/high, defaults to Close.
 	/// • [alternate on TrailingType] TrailingValue - for FixedAmount type this is a dollar amount and for Percentage this is a percent value, e.g. 0.15 for 15%
 	/// • [alternate on TrailingType] AtrLength - for ATR type this is the length of the ATR to use with TrailingType is set to ATR
+	/// • [optional] TraceLevel - trace level for instruction, default is None
 	/// 
 	/// Example JSON:
 	/// [
@@ -258,6 +269,7 @@ namespace PowerLanguage.Strategy
 			public string Name { get; private set; }
 			public string Code { get; private set; }	//snippet of code that created the instruction (mainly for debugging purposes)
 			public string Id { get; private set; }
+			public ETraceLevel TraceLevel { get; private set; }
 			public int Index { get; }
 			public string Symbol { get { return m_studyControl.Bars.Info.Name; } }			
 			public string InstructionTypeName { get { return this.GetType().Name; } }
@@ -275,6 +287,7 @@ namespace PowerLanguage.Strategy
 				Code = string.Empty;
 				m_entryCount = 0;
 				m_previousBarPositionWasFlat = true;
+				TraceLevel = ETraceLevel.None;
 			}
 
 			public virtual bool Parse(JProperty property)
@@ -282,6 +295,7 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "instruction") { Name = property.Value.ToString().ToLower(); return true; }
 				if (name == "id") { Id = property.Value.ToString().ToLower(); return true; }
+				if (name == "tracelevel") { TraceLevel = property.Value.ToObject<ETraceLevel>(); return true; }
 
 				if (name == "timefilters")
 				{
@@ -520,7 +534,8 @@ namespace PowerLanguage.Strategy
 
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
 			{
-				m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Info.Name}, {m_studyControl.Bars.Time[0]}, {message}");
+				//_TrendLine class sets the _CustomSignal TraceLevel to Verbose to log everything but this method filters on the instruction level
+				if (TraceLevel >= traceLevel) m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Info.Name}, {m_studyControl.Bars.Time[0]}, {message}");
 			}
 		}
 
@@ -766,24 +781,28 @@ namespace PowerLanguage.Strategy
 			{
 				if (!Active)
 				{
-					trace(ETraceLevel.Verbose, $"Entry {InstructionTypeName} id {Id} is not active");
+					trace(ETraceLevel.Verbose, $"Entry id {Id} is not active");
 					return;
 				}
 
+				int size = entrySize(price);
 				switch (Direction)
 				{
 					case EEntryDirection.Long:
 						switch (OrderType)
 						{
 							case EOrderType.Market:
-								m_orderLeMkt.Send(entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderLeMkt.Info.Name} of size {size}");
+								m_orderLeMkt.Send(size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
-								m_orderLePriced.Send(price, entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderLePriced.Info.Name} of size {size} at price {price}");
+								m_orderLePriced.Send(price, size);
 								break;
 							case EOrderType.StopLimit:
-								m_orderLeStpLmt.Send(price, price, entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderLeStpLmt.Info.Name} of size {size} at price {price}");
+								m_orderLeStpLmt.Send(price, price, size);
 								break;
 						}
 						break;
@@ -791,14 +810,17 @@ namespace PowerLanguage.Strategy
 						switch (OrderType)
 						{
 							case EOrderType.Market:
-								m_orderSeMkt.Send(entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderSeMkt.Info.Name} of size {size}");
+								m_orderSeMkt.Send(size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
-								m_orderSePriced.Send(price, entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderSePriced.Info.Name} of size {size} at price {price}");
+								m_orderSePriced.Send(price, size);
 								break;
 							case EOrderType.StopLimit:
-								m_orderSeStpLmt.Send(price, price, entrySize(price));
+								trace(ETraceLevel.Verbose, $"Sending {m_orderSeStpLmt.Info.Name} of size {size} at price {price}");
+								m_orderSeStpLmt.Send(price, price, size);
 								break;
 						}
 						break;
@@ -807,8 +829,14 @@ namespace PowerLanguage.Strategy
 
 			protected bool volumePercentileValid()
 			{
-				if (VolumePercentile > 0 && m_volumePercentile[0] < VolumePercentile) return false;
-				return true;
+				if (VolumePercentile > 0)
+				{
+					bool volumePercentileValid = m_volumePercentile[0] >= VolumePercentile;
+					trace(ETraceLevel.Verbose, $"VolumePercentile {m_volumePercentile[0]} >= {VolumePercentile} " + (volumePercentileValid ? "valid" : "not valid"));
+					return volumePercentileValid;
+				}
+
+				return true;	//no volume percentile specified, always valid
 			}
 
 			protected bool closePercentileValid()
@@ -830,7 +858,9 @@ namespace PowerLanguage.Strategy
 					closePercentile = range != 0 ? (high - close) / range : 0;
 				}
 
-				return closePercentile >= ClosePercentile;
+				bool closePercentileValid = closePercentile >= ClosePercentile;
+				trace(ETraceLevel.Verbose, $"ClosePercentile {closePercentile} >= {ClosePercentile} " + (closePercentileValid ? "valid" : "not valid"));
+				return closePercentileValid;
 			}
 
 			/// <summary>
@@ -900,8 +930,8 @@ namespace PowerLanguage.Strategy
 			protected IOrderMarket m_orderSxMkt;
 			protected IOrderPriced m_orderLxPriced;
 			protected IOrderPriced m_orderSxPriced;
-			protected IOrderStopLimit m_orderLxSL;
-			protected IOrderStopLimit m_orderSxSL;
+			protected IOrderStopLimit m_orderLxStpLmt;
+			protected IOrderStopLimit m_orderSxStpLmt;
 
 			public Exit(_TrendLine control) : base(control)
 			{
@@ -932,8 +962,8 @@ namespace PowerLanguage.Strategy
 				m_orderSxMkt = null;
 				m_orderLxPriced = null;
 				m_orderSxPriced = null;
-				m_orderLxSL = null;
-				m_orderSxSL = null;
+				m_orderLxStpLmt = null;
+				m_orderSxStpLmt = null;
 
 				switch (OrderType)
 				{
@@ -950,8 +980,8 @@ namespace PowerLanguage.Strategy
 						m_orderSxPriced = m_studyControl.AllocateSxLmt();
 						break;
 					case EOrderType.StopLimit:
-						m_orderLxSL = m_studyControl.AllocateLxStpLmt();
-						m_orderSxSL = m_studyControl.AllocateSxStpLmt();
+						m_orderLxStpLmt = m_studyControl.AllocateLxStpLmt();
+						m_orderSxStpLmt = m_studyControl.AllocateSxStpLmt();
 						break;
 				}
 			}
@@ -975,27 +1005,27 @@ namespace PowerLanguage.Strategy
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							trace(ETraceLevel.Verbose, $"long - sending exit market order for {size} contracts");
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxMkt.Info.Name} for {size} contracts");
 							m_orderLxMkt.Send(size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
 							if (price == 0.0)
 							{
-								trace(ETraceLevel.Error, $"long - price is zero for stop/limit order exiting");
+								trace(ETraceLevel.Error, $"Price is zero for long stop/limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"long - sending exit {OrderType} order for {size} contracts at price {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxPriced.Info.Name} for {size} contracts at {price}");
 							m_orderLxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
 							if (price == 0.0)
 							{
-								trace(ETraceLevel.Error, $"long - price is zero for stop-limit order exiting");
+								trace(ETraceLevel.Error, $"Price is zero for long stop-limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"long - sending exit stop-limit order for {size} contracts at price {price}");
-							m_orderLxSL.Send(price, price, size);
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxStpLmt.Info.Name} for {size} contracts at {price}");
+							m_orderLxStpLmt.Send(price, price, size);
 							break;
 					}
 				}
@@ -1004,17 +1034,17 @@ namespace PowerLanguage.Strategy
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							trace(ETraceLevel.Verbose, $"short - sending exit market order for {size} contracts");
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxMkt.Info.Name} for {size} contracts");
 							m_orderSxMkt.Send(size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
 							if (price == 0.0)
 							{
-								trace(ETraceLevel.Error, $"short - price is zero for stop/limit order exiting");
+								trace(ETraceLevel.Error, $"Price is zero for short stop/limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"short - sending exit {OrderType} order for {size} contracts at price {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxPriced.Info.Name} for {size} contracts at {price}");
 							m_orderSxPriced.Send(price, size);
 							break;
 						case EOrderType.StopLimit:
@@ -1023,8 +1053,8 @@ namespace PowerLanguage.Strategy
 								trace(ETraceLevel.Error, $"short - price is zero for stop-limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"short - sending exit stop-limit order for {size} contracts at price {price}");
-							m_orderSxSL.Send(price, price, size);
+							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxStpLmt.Info.Name} for {size} contracts at {price}");
+							m_orderSxStpLmt.Send(price, price, size);
 							break;
 					}
 				}
@@ -1038,6 +1068,7 @@ namespace PowerLanguage.Strategy
 			protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
 			{
 				TimeSpan days = currentDateTime - entryDate;
+				trace(ETraceLevel.Verbose, $"Calendar day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDateTime.ToString("yyyyMMdd hh:mm:ss")} calculated as {days.Days} days");
 				return days.Days;
 			}
 
@@ -1046,7 +1077,7 @@ namespace PowerLanguage.Strategy
 				DateTime date = currentDateTime;
 				int count = 0;
 
-				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"{InstructionTypeName} used with non-stock object using TradingDays specification calculated around stock market calendar.");
+				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"Used with non-stock object using TradingDays specification calculated around stock market calendar.");
 
 				while (date.Date > entryDate.Date)
 				{
@@ -1055,6 +1086,7 @@ namespace PowerLanguage.Strategy
 					date = date.AddDays(-1);
 				}
 
+				trace(ETraceLevel.Verbose, $"Trading day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDateTime.ToString("yyyyMMdd hh:mm:ss")} calculated as {count} days");
 				return count;
 			}
 
@@ -1071,6 +1103,7 @@ namespace PowerLanguage.Strategy
 				else
 					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
+				trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
 				return entryDate;
 			}
 		}
@@ -1216,11 +1249,7 @@ namespace PowerLanguage.Strategy
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (!willBeStoppedOut(EEntryDirection.Long, linePrice))
-						{
-							trace(ETraceLevel.Verbose, $"Long entry at low/high linePrice {linePrice}");
-							sendOrder(linePrice);
-						}
+						if (!willBeStoppedOut(EEntryDirection.Long, linePrice))	sendOrder(linePrice);
 						break;
 				}
 			}
@@ -1255,11 +1284,7 @@ namespace PowerLanguage.Strategy
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
-						if (!willBeStoppedOut(EEntryDirection.Short, linePrice))
-						{
-							trace(ETraceLevel.Verbose, $"Short entry at low/high linePrice {linePrice}");
-							sendOrder(linePrice);
-						}
+						if (!willBeStoppedOut(EEntryDirection.Short, linePrice)) sendOrder(linePrice);
 						break;
 				}
 			}
@@ -1347,14 +1372,9 @@ namespace PowerLanguage.Strategy
 				switch (Criteria)
 				{
 					case EEntryExitCriteria.Close:
-						if (m_studyControl.Bars.Close[0] < linePrice)
-						{
-							trace(ETraceLevel.Verbose, $"Long exit on close at close {m_studyControl.Bars.Close[0]} above linePrice {linePrice}");
-							sendOrder(m_studyControl.Bars.Close[0]);
-						}
+						if (m_studyControl.Bars.Close[0] < linePrice) sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
-						trace(ETraceLevel.Verbose, $"Long exit on low at low/high on linePrice {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1366,14 +1386,9 @@ namespace PowerLanguage.Strategy
 				switch (Criteria)
 				{
 					case EEntryExitCriteria.Close:
-						if (m_studyControl.Bars.Close[0] > linePrice)
-						{
-							trace(ETraceLevel.Verbose, $"Short exit on close at close {m_studyControl.Bars.Close[0]} below linePrice {linePrice}");
-							sendOrder(m_studyControl.Bars.Close[0]);
-						}
+						if (m_studyControl.Bars.Close[0] > linePrice) sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
-						trace(ETraceLevel.Verbose, $"Short exit on high at low/high on linePrice {linePrice}");
 						sendOrder(linePrice);
 						break;
 				}
@@ -1477,7 +1492,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should never be reached
-				trace(ETraceLevel.Error, $"exitPrice - could not determine exit price {MovingAverageType}");
+				trace(ETraceLevel.Error, $"exitPrice - could not determine exit price for moving averge of type {MovingAverageType}");
 				return 0.0;
 			}
 		}
@@ -1629,7 +1644,7 @@ namespace PowerLanguage.Strategy
 				if (Price != -1) return Price;
 
 				//should never be reached
-				trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
+				trace(ETraceLevel.Error, "Could not determine exit price");
 				return 0.0;
 			}
 
@@ -1730,7 +1745,7 @@ namespace PowerLanguage.Strategy
 				if (Price != -1) return Price;
 
 				//should never be reached
-				trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
+				trace(ETraceLevel.Error, "Could not determine exit price");
 				return 0.0;
 			}
 
@@ -1758,12 +1773,12 @@ namespace PowerLanguage.Strategy
 					else if (m_orderSxMkt != null) orderId = m_orderSxMkt.ID;
 					else if (m_orderLxPriced != null) orderId = m_orderLxPriced.ID;
 					else if (m_orderSxPriced != null) orderId = m_orderSxPriced.ID;
-					else if (m_orderLxSL != null) orderId = m_orderLxSL.ID;
-					else if (m_orderSxSL != null) orderId = m_orderSxSL.ID;
+					else if (m_orderLxStpLmt != null) orderId = m_orderLxStpLmt.ID;
+					else if (m_orderSxStpLmt != null) orderId = m_orderSxStpLmt.ID;
 
 					if (orderId == -1)
 					{
-						trace(ETraceLevel.Error, "CalcBar - No exit order found for exit profit calculation");
+						trace(ETraceLevel.Error, "No exit order found for exit profit calculation");
 						return;
 					}
 
@@ -1970,7 +1985,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//should not be reached
-				trace(ETraceLevel.Error, "EstimateExitPrice - could not determine exit price");
+				trace(ETraceLevel.Error, "Could not determine exit price");
 				return 0.0;
 			}
 
@@ -2107,6 +2122,7 @@ namespace PowerLanguage.Strategy
 							m_active = m_studyControl.PositionSide > 0 ? m_studyControl.Bars.Close[0] >= activationPrice : m_studyControl.Bars.Close[0] <= activationPrice;
 						else
 							m_active = m_studyControl.PositionSide > 0 ? m_studyControl.Bars.High[0] >= activationPrice : m_studyControl.Bars.Low[0] <= activationPrice;
+						trace(ETraceLevel.Verbose, $"Active state - entryPrice {entryPrice} - activationPrice {activationPrice} - active {m_active} - activationProfitAmount {ActivationProfitAmount} - activationProfitPercent {ActivationProfitPercent}");
 					}
 
 					return base.Active && m_active;
@@ -2165,7 +2181,7 @@ namespace PowerLanguage.Strategy
 
 				if (!m_breakEvenActive)
 				{
-					double profit = ProfitAmount;
+					double profit = (int)Math.Abs(m_studyControl.StrategyInfo.MarketPosition) * ProfitAmount;
 					if (ProfitPercent > 0)
 						profit = (int)Math.Abs(m_studyControl.StrategyInfo.MarketPosition) * m_studyControl.StrategyInfo.AvgEntryPrice * ProfitPercent;
 
@@ -2216,6 +2232,7 @@ namespace PowerLanguage.Strategy
 
 		//inputs
 		[Input] public string Instructions { get; set; }
+		public override ETraceLevel TraceLevel { get; set; }		//hide base class TraceLevel so we can override it to verbose and control tracing on an instruction level
 
 		//properties
 		internal List<Instruction> InstructionsList { get; private set; }
@@ -2281,6 +2298,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			base.TraceLevel = ETraceLevel.Verbose;  // log everything when trace is called, tracing level is overridden in the Instruction base class above
 			resetOrders();
 			resetIndicators();
 			parseInstructions();
