@@ -28,7 +28,7 @@ namespace PowerLanguage.Indicator{
 
 		protected override void Create() {
 			Percentile = 50;
-			m_plot = AddPlot(new PlotAttributes("", EPlotShapes.Point, Color.Red, Color.Empty, 10, 0, true));
+			m_plot = AddPlot(new PlotAttributes("", EPlotShapes.Point, Color.Purple, Color.Empty, 10, 0, true));
 			m_volumePercentile = new Function._VolumePercentile(this);			
 		}
 
