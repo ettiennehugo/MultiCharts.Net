@@ -20,9 +20,10 @@ namespace PowerLanguage.Strategy
 		public int DEFAULT_FRACTAL_LAYERS = 3; //number of fractal layers to use for the price action analysis`
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.15; //per default don't enter positions larger than 15% of available equity
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.0075; //use 0.75% of equity for risk based entry
-		public const double DEFAULT_REQUIRED_CLOSE_PERCENTILE = 0.5; //required close percentile - this is used to determine the entry size based on the average trading volume 
-		public const int DEFAULT_VOLUME_LENGTH = 20; //length of the volume for the entry size
-		public const double DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT = 0.2; //do not exceed 20% of the average trading volume for the entry size
+		public const double DEFAULT_CLOSE_PERCENTILE = 0.5; //required close percentile - this is used to determine the entry size based on the average trading volume 
+		public const double DEFAULT_VOLUME_PERCENTILE = 0.5; //required volume percentile - this is used to determine the entry size based on the average trading volume
+		public const int DEFAULT_VOLUME_LENGTH = 20; //length of the volume period to use for the volume based entry size
+		public const double DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT = 0.2; //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
 
 		//types
 
@@ -34,13 +35,15 @@ namespace PowerLanguage.Strategy
 		[Input] public int FractalLayers { get; set; } //number of fractal layers to use for the price action analysis
 		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
 		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
-		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
-		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
+		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
+		[Input] public double ClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
+		[Input] public double VolumePercentile { get; set; } //required volume percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool AddToPosition { get; set; } //add to position - this will add to the position if the price action analysis returns a lower high
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
 
 		//attribute
 		private PriceActionAnalysis m_priceAction;
+		private PowerLanguage.Function._VolumePercentile m_volumePercentile;
 		private DateTime m_startTime;
 		private DateTime m_endTime;
 		private IOrderPriced m_se;
@@ -61,10 +64,12 @@ namespace PowerLanguage.Strategy
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
 			FractalLayers = DEFAULT_FRACTAL_LAYERS;
-			RequiredClosePercentile = DEFAULT_REQUIRED_CLOSE_PERCENTILE;
+			ClosePercentile = DEFAULT_CLOSE_PERCENTILE;
+			VolumePercentile = DEFAULT_VOLUME_PERCENTILE;
 			PostLowerHighLookback = DEFAULT_POST_LOWER_HIGH_LOOKBACK;
 			AddToPosition = false;
 			UseRoundLots = false;
+			m_volumePercentile = new _VolumePercentile(this);
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Se", EOrderAction.SellShort));
 		}
 
@@ -77,7 +82,7 @@ namespace PowerLanguage.Strategy
 			if (MaximumEquityPerPosPercent <= 0 || MaximumEquityPerPosPercent > 1) throw new Exception("MaximumEquityPerPosPercent must be larger than zero and less then one.");
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumVolumeBasedPercent <= 0 || MaximumVolumeBasedPercent > 1) throw new Exception("MaximumVolumeBasedPercent must be larger than zero and less than one.");
-			if (RequiredClosePercentile < 0 || RequiredClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
+			if (ClosePercentile < 0 || ClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
 			m_priceAction = new PriceActionAnalysis(FractalLayers);
 			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
@@ -112,12 +117,19 @@ namespace PowerLanguage.Strategy
 
 			if (entryBar.index - lowerHighBar.index > PostLowerHighLookback) return; //do not enter when when the post lower high lookback period is not met
 
+			//determine volume percentile
+			if (VolumePercentile > 0 && m_volumePercentile[0] < VolumePercentile)
+			{
+				trace(ETraceLevel.Verbose, $"Volume percentile {m_volumePercentile[0]} is below the required volume percentile {VolumePercentile}, not entering.");
+				return;
+			}
+
 			//determine the close percentile of the entry bar
 			double range = entryBar.high - entryBar.low;
 			if (range == 0) return; //avoid division by zero
 			double closeLowDelta = entryBar.close - entryBar.low;
 			double closePercentile = closeLowDelta / range;
-			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
+			if (closePercentile < ClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
 			//determine the risk based on the entry bar close and the day high
 			double risk = IntradayHigh - entryBar.close;
