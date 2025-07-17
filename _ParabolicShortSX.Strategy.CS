@@ -36,7 +36,6 @@ namespace PowerLanguage.Strategy
 		[Input] public int ExitDaysCount { get; set; } //full exit days count - this is used to determine the full exit days count based on the entry date
 		[Input] public bool ExitFriday { get; set; } //exit on Fridays - this will exit the position on Fridays if required
 		[Input] public string ExitTime { get; set; } //exit time - this will exit the position at the specified time
-		[Input] public bool Debug { get; set; }      //debug mode - this will print debug information to the output window
 
 		//attribute
 		private PriceActionAnalysis m_priceAction;
@@ -63,7 +62,6 @@ namespace PowerLanguage.Strategy
 			ExitTime = DEFAULT_EXIT_TIME;
 			m_exitTime = DateTime.ParseExact(DEFAULT_EXIT_TIME, "HH:mm", null);
 			ExitFriday = true;
-			Debug = false;
 			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell));
 			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
 			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
@@ -89,7 +87,7 @@ namespace PowerLanguage.Strategy
 
 			if (Environment.CalcReason == CalculationReason.OrderFilled)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Retracement Order filled({CurrentPosition.OpenTrades.Count})");
+				trace(ETraceLevel.Info, $"Retracement Order filled {CurrentPosition.OpenTrades.Count}");
 				m_retracementExitFilled = true;
 			}
 
@@ -107,7 +105,7 @@ namespace PowerLanguage.Strategy
 			//exit on Fridays if required
 			if (ExitFriday && m_primaryTimeFrame.Time[0].DayOfWeek == DayOfWeek.Friday && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exit Friday({m_exitTime.ToString("HH:mm")})");
+				trace(ETraceLevel.Info, $"Exit Friday {m_exitTime.ToString("HH:mm")}");
 				m_sxAll.Send();
 				return;
 			}
@@ -119,12 +117,12 @@ namespace PowerLanguage.Strategy
 				if (CurrentPosition.ClosedTrades.Count > 0) m_entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
 			}
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, Bars.Time[0]) : tradingDayCount(m_entryDate, Bars.Time[0]);
-			if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Entry date({m_entryDate.ToString("yyyy-MM-dd")}), DaysCount({daysCount})");
+			trace(ETraceLevel.Info, $"Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
 
 			//exit after a specific number of days
 			if (m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay && daysCount >= ExitDaysCount)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exit time({m_exitTime.ToString("HH:mm")})");
+				trace(ETraceLevel.Info, $"Exit time {m_exitTime.ToString("HH:mm")}");
 				m_sxAll.Send();
 				return;
 			}
@@ -147,7 +145,7 @@ namespace PowerLanguage.Strategy
 			//exit partial position if we reach the specific retracement of the spike
 			if (!m_retracementExitFilled && entryDayHigh * RetracementExitPercent > m_primaryTimeFrame.Close[0])
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Partial exit({m_primaryTimeFrame.Close[0]}), EntryDayHigh({entryDayHigh}), RetracementExitPercent({RetracementExitPercent})");
+				trace(ETraceLevel.Info, $"Partial exit {m_primaryTimeFrame.Close[0]} EntryDayHigh {entryDayHigh} RetracementExitPercent {RetracementExitPercent}");
 				m_sxPartial.Send((int)Math.Ceiling(Math.Abs(StrategyInfo.MarketPosition) / (double)2));
 				return;
 			}
@@ -155,13 +153,10 @@ namespace PowerLanguage.Strategy
 			//exit full position if the price action starts making higher lows
 			if (priceActionChanged && m_priceAction.AnalysisState.higherLow)
 			{
-				if (Debug) Output.WriteLine($"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Exit higher low({m_primaryTimeFrame.Close[0]})");
+				trace(ETraceLevel.Info, $"Exit higher low({m_primaryTimeFrame.Close[0]})");
 				m_sxAll.Send();
 				return;
 			}
-
-			//TBD: Check if you add a parabolic SAR to trace the exit level. Think the tracking using the lower high and exit on specific days should be sufficient.
-
 		}
 
 		//methods

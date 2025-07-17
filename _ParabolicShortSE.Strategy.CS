@@ -106,7 +106,7 @@ namespace PowerLanguage.Strategy
 
 			if (lowerHighBar == null)
 			{
-				trace(ETraceLevel.Error, $"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, PriceAction analysis returned that a lower high was found but could find the lower high bar");
+				trace(ETraceLevel.Error, $"PriceAction analysis returned that a lower high was found but could find the lower high bar");
 				return; //do not enter if a lower high did not form yet
 			}
 
@@ -128,7 +128,7 @@ namespace PowerLanguage.Strategy
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			if (size == 0) return; //do not enter if the size is zero
 
-			trace(ETraceLevel.Info, $"{GetType().Name}, {Bars.Info.Name}, {Bars.Time[0]}, Short entry at {entryBar.close} with size {size}");
+			trace(ETraceLevel.Info, $"Short entry at {entryBar.close} with size {size}");
 			m_se.Send(entryBar.close, size);
 		}
 
