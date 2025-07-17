@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Linq;
 using PowerLanguage.Function;
-using ATCenterProxy.interop;
 using PriceAction;
 
 namespace PowerLanguage.Strategy
@@ -69,7 +68,7 @@ namespace PowerLanguage.Strategy
 			PostLowerHighLookback = DEFAULT_POST_LOWER_HIGH_LOOKBACK;
 			AddToPosition = false;
 			UseRoundLots = false;
-			m_volumePercentile = new _VolumePercentile(this);
+			m_volumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Se", EOrderAction.SellShort));
 		}
 
@@ -86,6 +85,7 @@ namespace PowerLanguage.Strategy
 			m_priceAction = new PriceActionAnalysis(FractalLayers);
 			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
+			m_volumePercentile.Instrument = m_minuteTimeFrame;
 		}
 
 		protected override void CalcBar()
