@@ -56,7 +56,7 @@ namespace PowerLanguage.Strategy {
 					string logPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
 					m_logWriter = new StreamWriter(logPath, true);
 					m_lastFlushTime = DateTime.Now;
-					m_output.WriteLine($"Log file created {logFilename}");
+					m_output.WriteLine($"Log file created {logPath}");
 				}
 				catch (Exception ex)
 				{
@@ -64,7 +64,7 @@ namespace PowerLanguage.Strategy {
 					string tempPath = Path.Combine(Path.GetTempPath(), logFilename);
 					m_logWriter = new StreamWriter(tempPath, true);
 					m_lastFlushTime = DateTime.Now;
-					m_output.WriteLine($"Fallback log file created {logFilename} - Exception: {ex.Message}");
+					m_output.WriteLine($"Fallback log file created {tempPath} - Exception: {ex.Message}");
 				}
 
 				m_output = output;
