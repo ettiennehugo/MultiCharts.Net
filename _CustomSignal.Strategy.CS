@@ -1,11 +1,4 @@
 ﻿using System;
-using System.Drawing;
-using System.Linq;
-using PowerLanguage.Function;
-using ATCenterProxy.interop;
-using PowerLanguage.Indicator;
-using System.Diagnostics;
-using System.Runtime.Remoting.Messaging;
 using System.Collections.Generic;
 using System.IO;
 
