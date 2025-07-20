@@ -1065,18 +1065,23 @@ namespace PowerLanguage.Strategy
 				get { return base.Active && m_studyControl.PositionSide != 0; }
 			}
 
-			protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
+			protected int calendarDayCount(DateTime entryDate, DateTime currentDate)
 			{
-				TimeSpan days = currentDateTime - entryDate;
-				trace(ETraceLevel.Verbose, $"Calendar day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDateTime.ToString("yyyyMMdd hh:mm:ss")} calculated as {days.Days} days");
+				TimeSpan days = currentDate.Date - entryDate.Date;
+				trace(ETraceLevel.Verbose, $"Calendar day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDate.ToString("yyyyMMdd hh:mm:ss")} calculated as {days.Days} days");
 				return days.Days;
 			}
 
-			protected int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
+			protected int tradingDayCount(DateTime entryDate, DateTime currentDate)
 			{
-				DateTime date = currentDateTime;
+				DateTime date = currentDate;
 				int count = 0;
 
+				if (currentDate.Date < entryDate.Date)
+				{
+					trace(ETraceLevel.Error, $"Trading day count can not be computed around currentDate {currentDate.ToString("yyyyMMdd")} and entryDate {entryDate.ToString("yyyyMMdd")}, entryDate must be less than currentDate");
+					return 0;
+				}
 				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"Used with non-stock object using TradingDays specification calculated around stock market calendar.");
 
 				while (date.Date > entryDate.Date)
@@ -1086,12 +1091,12 @@ namespace PowerLanguage.Strategy
 					date = date.AddDays(-1);
 				}
 
-				trace(ETraceLevel.Verbose, $"Trading day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDateTime.ToString("yyyyMMdd hh:mm:ss")} calculated as {count} days");
+				trace(ETraceLevel.Verbose, $"Trading day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDate.ToString("yyyyMMdd hh:mm:ss")} calculated as {count} days");
 				return count;
 			}
 
 			protected DateTime currentPositionEntryDate() {
-				DateTime entryDate;
+				DateTime entryDate = DateTime.MaxValue;
 				if (m_studyControl.Positions[0].OpenTrades.Count > 0 && m_studyControl.Positions[0].ClosedTrades.Count > 0)
 				{
 					DateTime openTradesEarliestDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
@@ -1100,10 +1105,13 @@ namespace PowerLanguage.Strategy
 				}
 				else if (m_studyControl.Positions[0].OpenTrades.Count > 0)
 					entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-				else
+				else if (m_studyControl.Positions[0].ClosedTrades.Count > 0)
 					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
-				trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
+				if (entryDate == DateTime.MaxValue)
+					trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
+				else
+					trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
 				return entryDate;
 			}
 		}
