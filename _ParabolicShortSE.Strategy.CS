@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Drawing;
 using System.Linq;
-using PowerLanguage.Function;
 using PriceAction;
 
 namespace PowerLanguage.Strategy
@@ -9,13 +7,16 @@ namespace PowerLanguage.Strategy
 	/// <summary>
 	/// Parabolic Short SE - this strategy is used to enter a short position when a lower high is formed after a parabolic move up.
 	/// The strategy uses the price action analysis to determine the entry point and the exit point.
+	/// Timeframes used:
+	///		Primary: 1/5 minute chart for the entry
+	///		Secondary: 15-minute/30-minutes/hourly - used for price action analysis
+	///		Dialy timeframe
 	/// </summary>
 	public class _ParabolicShortSE : _CustomSignal
 	{
 		//constants
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
-		public const int DEFAULT_POST_LOWER_HIGH_LOOKBACK = 1; //lookback period for the high
 		public int DEFAULT_FRACTAL_LAYERS = 3; //number of fractal layers to use for the price action analysis`
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.15; //per default don't enter positions larger than 15% of available equity
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.0075; //use 0.75% of equity for risk based entry
@@ -30,7 +31,6 @@ namespace PowerLanguage.Strategy
 		//properties
 		[Input] public string StartTime { get; set; } //start time for the entry
 		[Input] public string EndTime { get; set; } //end time for the entry
-		[Input] public int PostLowerHighLookback { get; set; }  //number of bars to look back after the lower high to determine the entry bar - this is used to determine the entry bar for the entry
 		[Input] public int FractalLayers { get; set; } //number of fractal layers to use for the price action analysis
 		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
 		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
@@ -46,7 +46,8 @@ namespace PowerLanguage.Strategy
 		private DateTime m_startTime;
 		private DateTime m_endTime;
 		private IOrderPriced m_se;
-		private IInstrument m_minuteTimeFrame;
+		private IInstrument m_primaryTimeFrame;
+		private IInstrument m_secondaryTimeFrame;
 		private IInstrument m_dailyTimeFrame;
 
 		//interface methods
@@ -65,7 +66,6 @@ namespace PowerLanguage.Strategy
 			FractalLayers = DEFAULT_FRACTAL_LAYERS;
 			ClosePercentile = DEFAULT_CLOSE_PERCENTILE;
 			VolumePercentile = DEFAULT_VOLUME_PERCENTILE;
-			PostLowerHighLookback = DEFAULT_POST_LOWER_HIGH_LOOKBACK;
 			AddToPosition = false;
 			UseRoundLots = false;
 			m_volumePercentile = new PowerLanguage.Function._VolumePercentile(this);
@@ -83,31 +83,31 @@ namespace PowerLanguage.Strategy
 			if (MaximumVolumeBasedPercent <= 0 || MaximumVolumeBasedPercent > 1) throw new Exception("MaximumVolumeBasedPercent must be larger than zero and less than one.");
 			if (ClosePercentile < 0 || ClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
 			m_priceAction = new PriceActionAnalysis(FractalLayers);
-			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
-			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
-			m_volumePercentile.Instrument = m_minuteTimeFrame;
+			m_primaryTimeFrame = BarsOfData(1);
+			m_secondaryTimeFrame = BarsOfData(2);
+			m_dailyTimeFrame = BarsOfData(3);
+			m_volumePercentile.Instrument = m_primaryTimeFrame;
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close || m_minuteTimeFrame.CurrentBar < 2) return;
-			bool priceActionChanged = m_priceAction.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+			if (Environment.CalcReason != CalculationReason.Default || m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 			if (PositionSide != 0 && !AddToPosition) return; //do not enter if there is already a position
-			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
-			if (!priceActionChanged || !m_priceAction.AnalysisState.lowerHigh) return; //do not enter if a lower high did not form yet
+			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
-			//find the lower high bar and the last bar that would be the entry bar
-			PriceActionBar entryBar = m_priceAction.Bars.Last().Value;
+			//perform price action analysis on secondary timeframe close 
+			if (m_secondaryTimeFrame.Status == EBarState.Close) m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
+			if (!m_priceAction.AnalysisState.lowerHigh) return; //only enter when lower high is formed on secondary timeframe
+
+			//find the lower high bar - we need to reverse iterate to find the most recent lower high for analysis
 			PriceActionBar lowerHighBar = null;
-			foreach (var bar in m_priceAction.ChangedBars)
-			{
+			foreach (var bar in m_priceAction.ChangedBars.Reverse())
 				if (bar.Value.state.lowerHigh)
 				{
 					lowerHighBar = bar.Value;
 					break;
 				}
-			}
 
 			if (lowerHighBar == null)
 			{
@@ -115,33 +115,38 @@ namespace PowerLanguage.Strategy
 				return; //do not enter if a lower high did not form yet
 			}
 
-			if (entryBar.index - lowerHighBar.index > PostLowerHighLookback) return; //do not enter when when the post lower high lookback period is not met
-
-			//determine volume percentile
+			//exit if bar does not have significant volume
 			if (VolumePercentile > 0 && m_volumePercentile[0] < VolumePercentile)
 			{
-				trace(ETraceLevel.Verbose, $"Volume percentile {m_volumePercentile[0]} is below the required volume percentile {VolumePercentile}, not entering.");
+				trace(ETraceLevel.Verbose, $"Volume percentile {m_volumePercentile[0]} is below the required volume percentile {VolumePercentile} not entering.");
+				return;
+			}
+
+			//compare the current entry timeframe bar against the secondary timeframe used for price action analysis
+			if (m_primaryTimeFrame.High[0] > lowerHighBar.high) 
+			{
+				trace(ETraceLevel.Verbose, $"Entry timeframe high {m_primaryTimeFrame.High[0]} breaking above lower high {lowerHighBar.high} at {m_primaryTimeFrame.Time[0].ToString("yyyyMMdd-HHmmss.fff")} skipping short entry");
 				return;
 			}
 
 			//determine the close percentile of the entry bar
-			double range = entryBar.high - entryBar.low;
+			double range = m_primaryTimeFrame.High[0] - m_primaryTimeFrame.Low[0];
 			if (range == 0) return; //avoid division by zero
-			double closeLowDelta = entryBar.close - entryBar.low;
-			double closePercentile = closeLowDelta / range;
+			double closeHighDelta = m_primaryTimeFrame.High[0] - m_primaryTimeFrame.Close[0];	//we need bearish bars to close "far" from the high to get a solid closing percentile
+			double closePercentile = closeHighDelta / range;
 			if (closePercentile < ClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
 			//determine the risk based on the entry bar close and the day high
-			double risk = IntradayHigh - entryBar.close;
+			double risk = IntradayHigh - m_primaryTimeFrame.Close[0];
 
 			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
+			int equityBasedSize = positionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			if (size == 0) return; //do not enter if the size is zero
 
-			trace(ETraceLevel.Info, $"Short entry at {entryBar.close} with size {size}");
-			m_se.Send(entryBar.close, size);
+			trace(ETraceLevel.Info, $"Short entry at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
 		//methods

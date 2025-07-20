@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Drawing;
 using System.Linq;
-using PowerLanguage.Function;
-using ATCenterProxy.interop;
 using PriceAction;
 
 namespace PowerLanguage.Strategy
@@ -12,7 +9,7 @@ namespace PowerLanguage.Strategy
 	/// and exits the position as soon as a higher low forms indicating signs of a reversal.
 	/// Timeframes used:
 	///		Primary: 1/5 minute chart for the entry
-	///		Secondary: 30-minutes/hourly
+	///		Secondary: 15-minute/30-minute/hourly
 	///		Dialy timeframe
 	/// </summary>
 	public class _ParabolicShortSX : _CustomSignal
@@ -62,9 +59,9 @@ namespace PowerLanguage.Strategy
 			ExitTime = DEFAULT_EXIT_TIME;
 			m_exitTime = DateTime.ParseExact(DEFAULT_EXIT_TIME, "HH:mm", null);
 			ExitFriday = true;
-			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell));
-			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
-			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
+			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.BuyToCover));
+			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.BuyToCover));
+			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.BuyToCover));
 		}
 
 		protected override void StartCalc()
@@ -93,7 +90,8 @@ namespace PowerLanguage.Strategy
 
 			bool priceActionChanged = false;
 			if (Environment.CalcReason == CalculationReason.Default && m_secondaryTimeFrame.Status == EBarState.Close)
-				priceActionChanged = m_priceAction.Analyse(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+				priceActionChanged = m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
+
 			if (PositionSide == 0)
 			{
 				m_retracementExitFilled = false;
@@ -113,16 +111,24 @@ namespace PowerLanguage.Strategy
 			//determine the entry date of the trade
 			if (m_entryDate == DateTime.MinValue)
 			{
-				if (CurrentPosition.OpenTrades.Count > 0) m_entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
-				if (CurrentPosition.ClosedTrades.Count > 0) m_entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
+				DateTime openEntryDate = DateTime.MaxValue;
+				DateTime closeEntryDate = DateTime.MaxValue;
+				
+				if (CurrentPosition.OpenTrades.Count > 0) openEntryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
+				if (CurrentPosition.ClosedTrades.Count > 0) closeEntryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
+				
+				if (openEntryDate != DateTime.MaxValue && openEntryDate < closeEntryDate)
+					m_entryDate = openEntryDate;
+				else if (closeEntryDate != DateTime.MaxValue && closeEntryDate < openEntryDate) 
+					m_entryDate = closeEntryDate;
 			}
-			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, Bars.Time[0]) : tradingDayCount(m_entryDate, Bars.Time[0]);
+			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, m_primaryTimeFrame.Time[0]) : tradingDayCount(m_entryDate, m_primaryTimeFrame.Time[0]);
 			trace(ETraceLevel.Info, $"Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
 
 			//exit after a specific number of days
-			if (m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay && daysCount >= ExitDaysCount)
+			if (ExitDaysCount > 0 && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay && daysCount >= ExitDaysCount)
 			{
-				trace(ETraceLevel.Info, $"Exit time {m_exitTime.ToString("HH:mm")}");
+				trace(ETraceLevel.Info, $"Exit after {ExitDaysCount} days");
 				m_sxAll.Send();
 				return;
 			}
@@ -131,7 +137,7 @@ namespace PowerLanguage.Strategy
 			double entryDayHigh = daysCount == 0 ? IntradayHigh : m_dailyTimeFrame.High[daysCount - 1];
 			if (m_stopLoss == -1) m_stopLoss = entryDayHigh;
 			if (priceActionChanged)
-				foreach (var bar in m_priceAction.ChangedBars)
+				foreach (var bar in m_priceAction.ChangedBars.Reverse())	//we need to reverse iterate the changed bars to find the most recent higher low
 				{
 					if (bar.Value.state.lowerHigh)
 					{
@@ -153,7 +159,7 @@ namespace PowerLanguage.Strategy
 			//exit full position if the price action starts making higher lows
 			if (priceActionChanged && m_priceAction.AnalysisState.higherLow)
 			{
-				trace(ETraceLevel.Info, $"Exit higher low({m_primaryTimeFrame.Close[0]})");
+				trace(ETraceLevel.Info, $"Exit higher low at {m_primaryTimeFrame.Close[0]}");
 				m_sxAll.Send();
 				return;
 			}
