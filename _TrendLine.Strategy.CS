@@ -535,7 +535,7 @@ namespace PowerLanguage.Strategy
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
 			{
 				//_TrendLine class sets the _CustomSignal TraceLevel to Verbose to log everything but this method filters on the instruction level
-				if (TraceLevel >= traceLevel) m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {m_studyControl.Bars.Info.Name}, {m_studyControl.Bars.Time[0]}, {message}");
+				if (TraceLevel >= traceLevel) m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {message}");
 			}
 		}
 

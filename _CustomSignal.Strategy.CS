@@ -90,7 +90,7 @@ namespace PowerLanguage.Strategy {
 					s_referenceCount--;
 					if (s_referenceCount <= 0)
 					{
-						WriteTrace(ETraceLevel.Verbose, this.GetType().Name, "", "LogFileSingleton shutting down");
+						WriteTrace(ETraceLevel.Verbose, DateTime.Now, this.GetType().Name, "", "LogFileSingleton shutting down");
 						lock (m_writeLock)
 						{
 							m_logWriter?.Close();
@@ -102,7 +102,7 @@ namespace PowerLanguage.Strategy {
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, string signalName, string symbol, string message)
+			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string message)
 			{
 				if (m_logWriter == null) return;
 
@@ -110,11 +110,11 @@ namespace PowerLanguage.Strategy {
 				{
 					try
 					{
-						m_logWriter.WriteLine($"{level} {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}");
+						m_logWriter.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}");
 						TimeSpan timeSinceLastFlush = DateTime.Now - m_lastFlushTime;
 						if (timeSinceLastFlush.TotalMilliseconds >= FlushInterval)
 						{
-							m_logWriter.Flush();
+							m_logWriter.BaseStream.Flush();
 							m_lastFlushTime = DateTime.Now;
 						}
 					}
@@ -209,7 +209,7 @@ namespace PowerLanguage.Strategy {
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, this.GetType().Name, this.Bars.Info.Name, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, message);
 			}
 		}
 
