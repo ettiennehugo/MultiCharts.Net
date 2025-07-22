@@ -481,11 +481,11 @@ namespace PowerLanguage.Strategy
 						lastDate = m_studyControl.Bars.Time[i].Date;
 					}
 
-					if (m_studyControl.Bars.Time[i].Date != startDate && low > m_studyControl.Bars.Low[i])					
-						low = Math.Min(low, m_studyControl.Bars.Low[i]);
-
 					if (daysProcessed > daysBack)
 						break;
+
+					if (m_studyControl.Bars.Time[i].Date != startDate && low > m_studyControl.Bars.Low[i])
+						low = Math.Min(low, m_studyControl.Bars.Low[i]);
 
 					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
 					{
@@ -516,11 +516,11 @@ namespace PowerLanguage.Strategy
 						lastDate = m_studyControl.Bars.Time[i].Date;
 					}
 
-					if (m_studyControl.Bars.Time[i].Date != startDate)
-						high = Math.Max(high, m_studyControl.Bars.High[i]);
-
 					if (daysProcessed > daysBack)
 						break;
+
+					if (m_studyControl.Bars.Time[i].Date != startDate)
+						high = Math.Max(high, m_studyControl.Bars.High[i]);
 
 					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
 					{
