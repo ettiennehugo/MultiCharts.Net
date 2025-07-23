@@ -29,6 +29,7 @@ namespace PowerLanguage.Strategy
 	///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
+	///	• [optional] OrderType - enum of Market, Stop, Limit, StopLimit - whether to use a market order, stop order, limit order or stop-limit order for the entry, defaults to Market.
 	///	• [optional] MaxVolumeBasedPercent - percent of the average volume to use as the maximum position size, default 0.2 (20%), set to 0.0 to disable.
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean that for a long trade the close price must be within 5% of the high of the bar
@@ -465,9 +466,10 @@ namespace PowerLanguage.Strategy
 			/// Scans back from the current bar the given number of days back and returns the lowest low found.
 			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 			/// </summary>
-			protected double recentLow(int daysBack)
+			protected Tuple<DateTime, double> recentLow(int daysBack)
 			{
 				double low = m_studyControl.IntradayLow;
+				DateTime lowBarTime = m_studyControl.IntradayLowTime;
 				DateTime lowDate = m_studyControl.IntradayLowTime;
 				int daysProcessed = 0;
 				DateTime startDate = m_studyControl.Bars.Time[0].Date;
@@ -485,7 +487,10 @@ namespace PowerLanguage.Strategy
 						break;
 
 					if (m_studyControl.Bars.Time[i].Date != startDate && low > m_studyControl.Bars.Low[i])
-						low = Math.Min(low, m_studyControl.Bars.Low[i]);
+					{
+						low = m_studyControl.Bars.Low[i];
+						lowBarTime = m_studyControl.Bars.Time[i];
+					}
 
 					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
 					{
@@ -494,16 +499,17 @@ namespace PowerLanguage.Strategy
 					}
 				}
 
-				return low;
+				return new Tuple<DateTime, double>(lowBarTime, low);
 			}
 
 			/// <summary>
 			/// Scans back from the current bar the given number of days back and returns the highest high found.
 			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 			/// </summary>
-			protected double recentHigh(int daysBack)
+			protected Tuple<DateTime, double> recentHigh(int daysBack)
 			{
 				double high = m_studyControl.IntradayHigh;
+				DateTime highBarTime = m_studyControl.IntradayHighTime;
 				int daysProcessed = 0;
 				DateTime startDate = m_studyControl.Bars.Time[0].Date;
 				DateTime lastDate = startDate;
@@ -519,8 +525,11 @@ namespace PowerLanguage.Strategy
 					if (daysProcessed > daysBack)
 						break;
 
-					if (m_studyControl.Bars.Time[i].Date != startDate)
-						high = Math.Max(high, m_studyControl.Bars.High[i]);
+					if (m_studyControl.Bars.Time[i].Date != startDate && high < m_studyControl.Bars.High[i])
+					{
+						high = m_studyControl.Bars.High[i];
+						highBarTime = m_studyControl.Bars.Time[i];
+					}
 
 					if (i == m_studyControl.ExecInfo.MaxBarsBack - 1)
 					{
@@ -529,7 +538,7 @@ namespace PowerLanguage.Strategy
 					}
 				}
 
-				return high;
+				return new Tuple<DateTime, double>(highBarTime,high);
 			}
 
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
@@ -1238,7 +1247,7 @@ namespace PowerLanguage.Strategy
 						//need to consider both breakout and fade entries
 						//NOTE: We use the previous day low for breakout and fade entries since gap ups can cause all bars for the current day to be above the line.
 						bool entryCriteriaMet = false;
-						double recentLow = this.recentLow(1);
+						var (recentLowTime, recentLow) = this.recentLow(1);
 
 						switch (Strategy)
 						{
@@ -1253,7 +1262,7 @@ namespace PowerLanguage.Strategy
 								break;
 						}
 
-						if (entryCriteriaMet && closePercentileValid())
+						if (entryCriteriaMet && closePercentileValid() && recentLowTime >= LineStartTime && recentLowTime <= LineEndTime)
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
@@ -1273,7 +1282,7 @@ namespace PowerLanguage.Strategy
 				{
 					case EEntryExitCriteria.Close:
 						bool entryCriteriaMet = false;
-						double recentHigh = this.recentHigh(1);
+						var (recentHighTime, recentHigh) = this.recentHigh(1);
 
 						switch (Strategy)
 						{
@@ -1288,7 +1297,7 @@ namespace PowerLanguage.Strategy
 								break;
 						}
 
-						if (entryCriteriaMet && closePercentileValid())
+						if (entryCriteriaMet && closePercentileValid() && recentHighTime >= LineStartTime && recentHighTime <= LineEndTime)
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
@@ -1973,9 +1982,9 @@ namespace PowerLanguage.Strategy
 					else
 					{
 						if (m_studyControl.PositionSide > 0)
-							m_stopLossPrice = recentLow(Length) - BufferPrice;
+							m_stopLossPrice = recentLow(Length).Item2 - BufferPrice;
 						else if (m_studyControl.PositionSide < 0)
-							m_stopLossPrice = recentHigh(Length) + BufferPrice;
+							m_stopLossPrice = recentHigh(Length).Item2 + BufferPrice;
 					}
 				}
 
@@ -1987,9 +1996,9 @@ namespace PowerLanguage.Strategy
 				switch (direction)
 				{
 					case EEntryDirection.Long:
-						return recentLow(Length) - BufferPrice;
+						return recentLow(Length).Item2 - BufferPrice;
 					case EEntryDirection.Short:
-						return recentHigh(Length) + BufferPrice;
+						return recentHigh(Length).Item2 + BufferPrice;
 				}
 
 				//should not be reached
