@@ -1262,7 +1262,13 @@ namespace PowerLanguage.Strategy
 								break;
 						}
 
-						if (entryCriteriaMet && closePercentileValid() && recentLowTime >= LineStartTime && recentLowTime <= LineEndTime)
+						if (recentLowTime <= LineStartTime || recentLowTime >= LineEndTime)
+						{
+							trace(ETraceLevel.Verbose, $"Recent low at time {recentLowTime.ToString("yyyyMMdd hh:mm:ss.fff")} is not within the start/end time of the line {LineStartTime.ToString("yyyyMMdd hh:mm:ss.fff")}/{LineEndTime.ToString("yyyyMMdd hh:mm:ss.fff")}");
+							break;
+						}
+
+						if (entryCriteriaMet && closePercentileValid())
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
@@ -1297,7 +1303,13 @@ namespace PowerLanguage.Strategy
 								break;
 						}
 
-						if (entryCriteriaMet && closePercentileValid() && recentHighTime >= LineStartTime && recentHighTime <= LineEndTime)
+						if (recentHighTime <= LineStartTime || recentHighTime >= LineEndTime)
+						{
+							trace(ETraceLevel.Verbose, $"Recent high at time {recentHighTime.ToString("yyyyMMdd hh:mm:ss.fff")} is not within the start/end time of the line {LineStartTime.ToString("yyyyMMdd hh:mm:ss.fff")}/{LineEndTime.ToString("yyyyMMdd hh:mm:ss.fff")}");
+							break;
+						}
+
+						if (entryCriteriaMet && closePercentileValid())
 							sendOrder(m_studyControl.Bars.Close[0]);
 						break;
 					case EEntryExitCriteria.LowHigh:
