@@ -466,7 +466,7 @@ namespace PowerLanguage.Strategy
 			/// Scans back from the current bar the given number of days back and returns the lowest low found.
 			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 			/// </summary>
-			protected Tuple<DateTime, double> recentLow(int daysBack)
+			protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
 			{
 				double low = m_studyControl.IntradayLow;
 				DateTime lowBarTime = m_studyControl.IntradayLowTime;
@@ -483,7 +483,7 @@ namespace PowerLanguage.Strategy
 						lastDate = m_studyControl.Bars.Time[i].Date;
 					}
 
-					if (daysProcessed > daysBack)
+					if (daysProcessed > daysBack || earliestDateTime?.CompareTo(m_studyControl.Bars.Time[i]) > 0)
 						break;
 
 					if (m_studyControl.Bars.Time[i].Date != startDate && low > m_studyControl.Bars.Low[i])
@@ -506,7 +506,7 @@ namespace PowerLanguage.Strategy
 			/// Scans back from the current bar the given number of days back and returns the highest high found.
 			/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 			/// </summary>
-			protected Tuple<DateTime, double> recentHigh(int daysBack)
+			protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null)
 			{
 				double high = m_studyControl.IntradayHigh;
 				DateTime highBarTime = m_studyControl.IntradayHighTime;
@@ -522,7 +522,7 @@ namespace PowerLanguage.Strategy
 						lastDate = m_studyControl.Bars.Time[i].Date;
 					}
 
-					if (daysProcessed > daysBack)
+					if (daysProcessed > daysBack || earliestDateTime?.CompareTo(m_studyControl.Bars.Time[i]) > 0)
 						break;
 
 					if (m_studyControl.Bars.Time[i].Date != startDate && high < m_studyControl.Bars.High[i])
@@ -1247,25 +1247,29 @@ namespace PowerLanguage.Strategy
 						//need to consider both breakout and fade entries
 						//NOTE: We use the previous day low for breakout and fade entries since gap ups can cause all bars for the current day to be above the line.
 						bool entryCriteriaMet = false;
-						var (recentLowTime, recentLow) = this.recentLow(1);
 
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
+								var (recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
 								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								var (recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
-								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && ((recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (recentLow > linePrice && m_studyControl.Bars.Close[0] < linePrice));
-								break;
-						}
+								//check for breakout
+								(recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 
-						if (recentLowTime <= LineStartTime || recentLowTime >= LineEndTime)
-						{
-							trace(ETraceLevel.Verbose, $"Recent low at time {recentLowTime.ToString("yyyyMMdd hh:mm:ss.fff")} is not within the start/end time of the line {LineStartTime.ToString("yyyyMMdd hh:mm:ss.fff")}/{LineEndTime.ToString("yyyyMMdd hh:mm:ss.fff")}");
-							break;
+								//check for fade if breakout did not occur
+								if (entryCriteriaMet)
+								{
+									(recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
+									entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+								}
+								break;
 						}
 
 						if (entryCriteriaMet && closePercentileValid())
@@ -1288,25 +1292,29 @@ namespace PowerLanguage.Strategy
 				{
 					case EEntryExitCriteria.Close:
 						bool entryCriteriaMet = false;
-						var (recentHighTime, recentHigh) = this.recentHigh(1);
 
 						switch (Strategy)
 						{
 							case EEntryStrategy.Breakout:
+								var (recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
 								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 								break;
 							case EEntryStrategy.Fade:
-								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								var (recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 								break;
 							case EEntryStrategy.BreakoutOrFade:
-								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && ((recentHigh < linePrice && m_studyControl.Bars.Close[0] > linePrice) || (recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice));
-								break;
-						}
+								//check for breakout
+								(recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
+								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 
-						if (recentHighTime <= LineStartTime || recentHighTime >= LineEndTime)
-						{
-							trace(ETraceLevel.Verbose, $"Recent high at time {recentHighTime.ToString("yyyyMMdd hh:mm:ss.fff")} is not within the start/end time of the line {LineStartTime.ToString("yyyyMMdd hh:mm:ss.fff")}/{LineEndTime.ToString("yyyyMMdd hh:mm:ss.fff")}");
-							break;
+								//check for fade if breakout did not occur
+								if (entryCriteriaMet)
+								{
+									(recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
+									entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+								}
+								break;
 						}
 
 						if (entryCriteriaMet && closePercentileValid())
