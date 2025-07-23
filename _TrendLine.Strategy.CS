@@ -1264,7 +1264,7 @@ namespace PowerLanguage.Strategy
 								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
 
 								//check for fade if breakout did not occur
-								if (entryCriteriaMet)
+								if (!entryCriteriaMet)
 								{
 									(recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
 									entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Long, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
@@ -1309,7 +1309,7 @@ namespace PowerLanguage.Strategy
 								entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
 
 								//check for fade if breakout did not occur
-								if (entryCriteriaMet)
+								if (!entryCriteriaMet)
 								{
 									(recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
 									entryCriteriaMet = !willBeStoppedOut(EEntryDirection.Short, m_studyControl.Bars.Close[0]) && recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
