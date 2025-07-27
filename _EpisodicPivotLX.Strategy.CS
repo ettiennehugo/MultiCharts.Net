@@ -131,8 +131,7 @@ namespace PowerLanguage.Strategy
 			if (PositionSide == 0) return;
 
 			//determine the entry date of the trade  
-			DateTime entryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
-			if (CurrentPosition.ClosedTrades.Count > 0) entryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
+			DateTime entryDate = currentPositionEntryDate();
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
 			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 
