@@ -358,17 +358,15 @@ namespace PowerLanguage.Strategy
 
 			protected virtual bool Active
 			{
-				get {
-					bool timeFilterValid = TimeFilters.Count == 0;  //if no time filters specified the entry is valid all the time
+				get
+				{
 					bool timeFilterMatch = false;
 					foreach (TimeFilter timeFilter in TimeFilters)
 						if (m_studyControl.Bars.Time[0].TimeOfDay >= timeFilter.StartTime.TimeOfDay && m_studyControl.Bars.Time[0].TimeOfDay <= timeFilter.EndTime.TimeOfDay)
 						{
-							timeFilterMatch = true; //time filter is valid if the time of day is between the start and end time
-							timeFilterValid = m_entryCount < timeFilter.Count; //time filter is only valid if the number of entries for the time filter is not exceeded
+							timeFilterMatch = m_entryCount < timeFilter.Count; //time filter is only valid if the number of entries for the time filter is not exceeded
 							break;
 						}
-					if (!timeFilterMatch) m_entryCount = 0;
 
 					return TimeFilters.Count == 0 || timeFilterMatch;
 				}
@@ -381,6 +379,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_studyControl.PositionSide != 0 && m_previousBarPositionWasFlat) m_entryCount++;
 				m_previousBarPositionWasFlat = m_studyControl.PositionSide == 0;
+				if (m_previousBarPositionWasFlat) m_entryCount = 0; //reset entry count when the position is flat
 			}
 
 			protected ITrendLineObject getTrendLine(int id)
@@ -460,6 +459,27 @@ namespace PowerLanguage.Strategy
 				double costBasis = currentPositionCostBasis();
 				double pl = currentPositionPL();
 				return costBasis != 0 ? pl / costBasis : 0;
+			}
+
+			protected DateTime currentPositionEntryDate()
+			{
+				DateTime entryDate = DateTime.MaxValue;
+				if (m_studyControl.Positions[0].OpenTrades.Count > 0 && m_studyControl.Positions[0].ClosedTrades.Count > 0)
+				{
+					DateTime openTradesEarliestDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+					DateTime closedTradesEarliestDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+					entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
+				}
+				else if (m_studyControl.Positions[0].OpenTrades.Count > 0)
+					entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+				else if (m_studyControl.Positions[0].ClosedTrades.Count > 0)
+					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+
+				if (entryDate == DateTime.MaxValue)
+					trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
+				else
+					trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
+				return entryDate;
 			}
 
 			/// <summary>
@@ -574,7 +594,7 @@ namespace PowerLanguage.Strategy
 			protected IOrderStopLimit m_orderLeStpLmt;
 			protected IOrderStopLimit m_orderSeStpLmt;
 			protected EEntryDirection m_autoTradeDirection;   //direction to take when the entry direction is set to auto, subclasses need to fill this in and it should never be auto since it will result in a noop
-			protected ExitPriced m_stopLossExit;
+			protected Exit m_stopLossExit;
 			protected IInstrument m_volumeInstrument;
 			private PowerLanguage.Function._VolumePercentile m_volumePercentile;
 
@@ -710,9 +730,9 @@ namespace PowerLanguage.Strategy
 				if (StopLossExitId != string.Empty)
 				{
 					foreach (Instruction instruction in m_studyControl.InstructionsList)
-						if (instruction is ExitPriced && instruction.Id == StopLossExitId)
+						if (instruction is Exit && instruction.Id == StopLossExitId)
 						{
-							m_stopLossExit = (ExitPriced)instruction;
+							m_stopLossExit = (Exit)instruction;
 							break;
 						}
 				}
@@ -995,6 +1015,11 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			/// <summary>
+			/// Estimate the exit price per contract for the exit if an entry is made based on direction and strategy.
+			/// </summary>
+			public abstract double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria);
+
 			protected int exitSize()
 			{
 				if (ExitPercent == 1.0) return currentOpenPositionSize();
@@ -1103,26 +1128,6 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Verbose, $"Trading day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDate.ToString("yyyyMMdd hh:mm:ss")} calculated as {count} days");
 				return count;
 			}
-
-			protected DateTime currentPositionEntryDate() {
-				DateTime entryDate = DateTime.MaxValue;
-				if (m_studyControl.Positions[0].OpenTrades.Count > 0 && m_studyControl.Positions[0].ClosedTrades.Count > 0)
-				{
-					DateTime openTradesEarliestDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-					DateTime closedTradesEarliestDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-					entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
-				}
-				else if (m_studyControl.Positions[0].OpenTrades.Count > 0)
-					entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-				else if (m_studyControl.Positions[0].ClosedTrades.Count > 0)
-					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-
-				if (entryDate == DateTime.MaxValue)
-					trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
-				else
-					trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
-				return entryDate;
-			}
 		}
 
 		/// <summary>
@@ -1144,11 +1149,6 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				sendOrder(exitPrice());
 			}
-
-			/// <summary>
-			/// Estimate the exit price per contract for the exit if an entry is made based on direction and strategy.
-			/// </summary>
-			public abstract double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria);
 
 			/// <summary>
 			/// Subclasses need to calculate the exit price per contract to exit the position.
@@ -1429,6 +1429,11 @@ namespace PowerLanguage.Strategy
 						sendOrder(linePrice);
 						break;
 				}
+			}
+
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
+			{
+				return m_line.PriceValue(m_studyControl.Bars.Time[0]);
 			}
 		}
 
@@ -1941,6 +1946,11 @@ namespace PowerLanguage.Strategy
 					return m_orderSxMkt.ID;
 				return -1;
 			}
+
+			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
+			{
+				return m_studyControl.Bars.Close[0];
+			}
 		}
 
 		//TBD - Check whether this should also support moving the stop-loss if new positions are added to an existing position. This will
@@ -2268,7 +2278,15 @@ namespace PowerLanguage.Strategy
 		}
 
 		//inputs
-		[Input] public string Instructions { get; set; }
+		[Input] public string Entry1 { get; set; }
+		[Input] public string Entry2 { get; set; }
+		[Input] public string Entry3 { get; set; }
+		[Input] public string Entry4 { get; set; }
+		[Input] public string Exit1 { get; set; }
+		[Input] public string Exit2 { get; set; }
+		[Input] public string Exit3 { get; set; }
+		[Input] public string Exit4 { get; set; }
+		[Input] public string Other { get; set; } //comma separated list of other instructions
 		public override ETraceLevel TraceLevel { get; set; }		//hide base class TraceLevel so we can override it to verbose and control tracing on an instruction level
 
 		//properties
@@ -2659,10 +2677,26 @@ namespace PowerLanguage.Strategy
 				m_atr[i].Call();
 		}
 
+		private string concatenateInstructions()
+		{
+			string instructionsStr = "";
+			if (Entry1 != null && Entry1.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry1.Trim();
+			if (Entry2 != null && Entry2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry2.Trim();
+			if (Entry3 != null && Entry3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry3.Trim();
+			if (Entry4 != null && Entry4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry4.Trim();
+			if (Exit1 != null && Exit1.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit1.Trim();
+			if (Exit2 != null && Exit2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit2.Trim();
+			if (Exit3 != null && Exit3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit3.Trim();
+			if (Exit4 != null && Exit4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit4.Trim();
+			if (Other != null && Other.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Other.Trim();
+			instructionsStr = "[" + instructionsStr + "]";
+			return instructionsStr;
+		}
+
 		private void parseInstructions()
 		{
 			InstructionsList.Clear();
-			JArray instructions = (JArray)JToken.Parse(Instructions);
+			JArray instructions = (JArray)JToken.Parse(concatenateInstructions());
 
 			foreach (var property in instructions)
 			{
