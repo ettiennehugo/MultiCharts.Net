@@ -2340,10 +2340,22 @@ namespace PowerLanguage.Strategy
 		[Input] public string Entry2 { get; set; }
 		[Input] public string Entry3 { get; set; }
 		[Input] public string Entry4 { get; set; }
+		[Input] public string Entry5 { get; set; }
+		[Input] public string Entry6 { get; set; }
+		[Input] public string Entry7 { get; set; }
+		[Input] public string Entry8 { get; set; }
+		[Input] public string Entry9 { get; set; }
+		[Input] public string Entry10 { get; set; }
 		[Input] public string Exit1 { get; set; }
 		[Input] public string Exit2 { get; set; }
 		[Input] public string Exit3 { get; set; }
 		[Input] public string Exit4 { get; set; }
+		[Input] public string Exit5 { get; set; }
+		[Input] public string Exit6 { get; set; }
+		[Input] public string Exit7 { get; set; }
+		[Input] public string Exit8 { get; set; }
+		[Input] public string Exit9 { get; set; }
+		[Input] public string Exit10 { get; set; }
 		[Input] public string Other { get; set; } //comma separated list of other instructions
 		public override ETraceLevel TraceLevel { get; set; }		//hide base class TraceLevel so we can override it to verbose and control tracing on an instruction level
 
@@ -2742,10 +2754,22 @@ namespace PowerLanguage.Strategy
 			if (Entry2 != null && Entry2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry2.Trim();
 			if (Entry3 != null && Entry3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry3.Trim();
 			if (Entry4 != null && Entry4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry4.Trim();
+			if (Entry5 != null && Entry5.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry5.Trim();
+			if (Entry6 != null && Entry6.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry6.Trim();
+			if (Entry7 != null && Entry7.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry7.Trim();
+			if (Entry8 != null && Entry8.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry8.Trim();
+			if (Entry9 != null && Entry9.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry9.Trim();
+			if (Entry10 != null && Entry10.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry10.Trim();
 			if (Exit1 != null && Exit1.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit1.Trim();
 			if (Exit2 != null && Exit2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit2.Trim();
 			if (Exit3 != null && Exit3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit3.Trim();
 			if (Exit4 != null && Exit4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit4.Trim();
+			if (Exit5 != null && Exit5.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit5.Trim();
+			if (Exit6 != null && Exit6.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit6.Trim();
+			if (Exit7 != null && Exit7.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit7.Trim();
+			if (Exit8 != null && Exit8.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit8.Trim();
+			if (Exit9 != null && Exit9.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit9.Trim();
+			if (Exit10 != null && Exit10.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit10.Trim();
 			if (Other != null && Other.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Other.Trim();
 			instructionsStr = "[" + instructionsStr + "]";
 			return instructionsStr;
