@@ -3,8 +3,6 @@ using System.Globalization;
 using System.Linq;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
-using System.Drawing;
-using System.Windows.Forms;
 
 namespace PowerLanguage.Strategy
 {
@@ -275,8 +273,6 @@ namespace PowerLanguage.Strategy
 			public string Symbol { get { return m_studyControl.Bars.Info.Name; } }			
 			public string InstructionTypeName { get { return this.GetType().Name; } }
 			public List<TimeFilter> TimeFilters { get; set; }
-			private bool m_previousBarPositionWasFlat;
-			private int m_entryCount;
 
 			public Instruction(_TrendLine control)
 			{
@@ -286,8 +282,6 @@ namespace PowerLanguage.Strategy
 				Id = Index.ToString();
 				TimeFilters = new List<TimeFilter>();
 				Code = string.Empty;
-				m_entryCount = 0;
-				m_previousBarPositionWasFlat = true;
 				TraceLevel = ETraceLevel.None;
 			}
 
@@ -356,31 +350,10 @@ namespace PowerLanguage.Strategy
 				return Tuple.Create(true, string.Empty);
 			}
 
-			protected virtual bool Active
-			{
-				get
-				{
-					bool timeFilterMatch = false;
-					foreach (TimeFilter timeFilter in TimeFilters)
-						if (m_studyControl.Bars.Time[0].TimeOfDay >= timeFilter.StartTime.TimeOfDay && m_studyControl.Bars.Time[0].TimeOfDay <= timeFilter.EndTime.TimeOfDay)
-						{
-							timeFilterMatch = m_entryCount < timeFilter.Count; //time filter is only valid if the number of entries for the time filter is not exceeded
-							break;
-						}
-
-					return TimeFilters.Count == 0 || timeFilterMatch;
-				}
-			}
-
+			public abstract bool Active { get; }
 			public virtual void StartCalc() { }
 			public virtual void StopCalc() { }
-
-			public virtual void CalcBar()
-			{
-				if (m_studyControl.PositionSide != 0 && m_previousBarPositionWasFlat) m_entryCount++;
-				m_previousBarPositionWasFlat = m_studyControl.PositionSide == 0;
-				if (m_previousBarPositionWasFlat) m_entryCount = 0; //reset entry count when the position is flat
-			}
+			public virtual void CalcBar() { }
 
 			protected ITrendLineObject getTrendLine(int id)
 			{
@@ -597,6 +570,9 @@ namespace PowerLanguage.Strategy
 			protected Exit m_stopLossExit;
 			protected IInstrument m_volumeInstrument;
 			private PowerLanguage.Function._VolumePercentile m_volumePercentile;
+			private int m_entryCount;
+			private bool m_previousBarPositionWasFlat;
+			private DateTime m_previousCloseDateTime;
 
 			public Entry(_TrendLine control) : base(control)
 			{
@@ -620,6 +596,9 @@ namespace PowerLanguage.Strategy
 				ClosePercentile = 0.5;
 				VolumePercentile = 0;
 				m_volumePercentile = null;
+				m_entryCount = 0;
+				m_previousBarPositionWasFlat = true;
+				m_previousCloseDateTime = DateTime.MinValue;
 			}
 
 			public override bool Parse(JProperty property)
@@ -655,6 +634,42 @@ namespace PowerLanguage.Strategy
 				if (ClosePercentile < 0 || ClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ClosePercentile must be between 0 and 1");
 				if (VolumePercentile < 0 || VolumePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - VolumePercentile must be between 0 and 1");
 				return base.IsValid();
+			}
+
+			public override bool Active
+			{
+				get
+				{
+					//trivial case when we are not flat and AddToPosition is false
+					if (m_studyControl.PositionSide != 0 && !AddToPosition) return false;
+
+					//check whether we have an entry time filter that matches
+					bool timeFilterMatch = false;
+					bool timeFilterFound = false;
+					foreach (TimeFilter timeFilter in TimeFilters)
+						if (m_studyControl.Bars.Time[0].TimeOfDay >= timeFilter.StartTime.TimeOfDay && m_studyControl.Bars.Time[0].TimeOfDay <= timeFilter.EndTime.TimeOfDay)
+						{
+							timeFilterFound = true;
+							timeFilterMatch = m_entryCount < timeFilter.Count; //time filter is only valid if the number of entries for the time filter is not exceeded
+							break;
+						}
+
+					if (!timeFilterFound) m_entryCount = 0;
+					return TimeFilters.Count == 0 || timeFilterMatch;
+				}
+			}
+
+			public override void CalcBar()
+			{
+				base.CalcBar();
+				if (m_studyControl.Environment.CalcReason == CalculationReason.Default && m_studyControl.Bars.Status == EBarState.Close)
+				{
+					//since time filters work over days we reset the entry count once we're in a new day
+					if (m_studyControl.Bars.Time[0].Date != m_previousCloseDateTime.Date) m_entryCount = 0;
+					if (m_studyControl.PositionSide != 0 && m_previousBarPositionWasFlat) m_entryCount++;
+					m_previousBarPositionWasFlat = m_studyControl.PositionSide == 0;
+					m_previousCloseDateTime = m_studyControl.Bars.Time[0];
+				}
 			}
 
 			public override void StartCalc()
@@ -961,12 +976,18 @@ namespace PowerLanguage.Strategy
 			protected IOrderPriced m_orderSxPriced;
 			protected IOrderStopLimit m_orderLxStpLmt;
 			protected IOrderStopLimit m_orderSxStpLmt;
+			private int m_exitCount;
+			private bool m_previousBarPositionWasLongShort;
+			private DateTime m_previousCloseDateTime;
 
 			public Exit(_TrendLine control) : base(control)
 			{
 				OrderType = EOrderType.Stop;
 				ExitPercent = 1.0;
 				ValidUntil = DateTime.MaxValue;
+				m_exitCount = 0;
+				m_previousBarPositionWasLongShort = false;
+				m_previousCloseDateTime = DateTime.MinValue;
 			}
 
 			public override bool Parse(JProperty property)
@@ -982,6 +1003,27 @@ namespace PowerLanguage.Strategy
 			{
 				if (ExitPercent <= 0 || ExitPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - ExitPercent must be between 0 and 1");
 				return base.IsValid();
+			}
+
+			public override bool Active
+			{
+				get
+				{
+					if (m_studyControl.PositionSide == 0) return false;	//exits are not active when the strategy is flat
+
+					bool timeFilterMatch = false;
+					bool timeFilterFound = false;
+					foreach (TimeFilter timeFilter in TimeFilters)
+						if (m_studyControl.Bars.Time[0].TimeOfDay >= timeFilter.StartTime.TimeOfDay && m_studyControl.Bars.Time[0].TimeOfDay <= timeFilter.EndTime.TimeOfDay)
+						{
+							timeFilterFound = true;
+							timeFilterMatch = m_exitCount < timeFilter.Count; //time filter is only valid if the number of exits for the time filter is not exceeded
+							break;
+						}
+
+					if (!timeFilterFound) m_exitCount = 0;
+					return TimeFilters.Count == 0 || timeFilterMatch;
+				}
 			}
 
 			public override void StartCalc()
@@ -1012,6 +1054,18 @@ namespace PowerLanguage.Strategy
 						m_orderLxStpLmt = m_studyControl.AllocateLxStpLmt();
 						m_orderSxStpLmt = m_studyControl.AllocateSxStpLmt();
 						break;
+				}
+			}
+
+			public override void CalcBar()
+			{
+				base.CalcBar();
+				if (m_studyControl.Environment.CalcReason == CalculationReason.Default && m_studyControl.Bars.Status == EBarState.Close)
+				{
+					if (m_studyControl.Bars.Time[0].Date != m_previousCloseDateTime.Date) m_exitCount = 0;
+					if (m_studyControl.PositionSide == 0 && m_previousBarPositionWasLongShort) m_exitCount++;
+					m_previousBarPositionWasLongShort = m_studyControl.PositionSide != 0;
+					m_previousCloseDateTime = m_studyControl.Bars.Time[0];
 				}
 			}
 
@@ -1092,11 +1146,6 @@ namespace PowerLanguage.Strategy
 							break;
 					}
 				}
-			}
-
-			protected override bool Active
-			{
-				get { return base.Active && m_studyControl.PositionSide != 0; }
 			}
 
 			protected int calendarDayCount(DateTime entryDate, DateTime currentDate)
@@ -1219,6 +1268,10 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
+
+				if (m_studyControl.Bars.Time[0].Month == 7 && m_studyControl.Bars.Time[0].Day == 21)
+					m_studyControl.Output.WriteLine("Debug: EntryLine.CalcBar called on July 21st");
+
 				base.CalcBar();
 				if (m_studyControl.Bars.CurrentBar < 2) return;
 				if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
@@ -1569,9 +1622,10 @@ namespace PowerLanguage.Strategy
 				return base.IsValid();
 			}
 
-			protected override bool Active {
+			public override bool Active {
 				get {
-					if (m_studyControl.PositionSide == 0) return false;
+					if (!base.Active) return false;
+
 					if (DisableDays == 0) return true;
 
 					DateTime entryDate = currentPositionEntryDate();
@@ -2151,7 +2205,7 @@ namespace PowerLanguage.Strategy
 				return m_trailPrice;
 			}
 
-			protected override bool Active
+			public override bool Active
 			{
 				get
 				{
@@ -2205,6 +2259,10 @@ namespace PowerLanguage.Strategy
 				if (ProfitPercent <= 0 && ProfitAmount <= 0) return Tuple.Create(false, $"{this.GetType().Name} - ProfitPercent or ProfitPrice must be set to zero or a positive number");
 				if (ProfitPercent > 1) return Tuple.Create(false, $"{this.GetType().Name} - ProfitPercent must be between 0 and 1");
 				return base.IsValid();
+			}
+
+			public override bool Active {
+				get { return m_studyControl.PositionSide != 0; }
 			}
 
 			public override void StartCalc()
