@@ -14,6 +14,9 @@ namespace PowerLanguage.Strategy
 	/// - Allows using two trendlines together to define entry/exit zones.
 	/// - Allows stop-loss and take-profit orders for trade management.
 	/// 
+	/// Notes:
+	/// - To make multiple entries (e.g. scaling in) you need to set it up on the strategy properties otherwise only the first entry would be taken.
+	/// 
 	/// Instructions:
 	/// EntryLine
 	/// • Instruction - "EntryLine" 
@@ -571,8 +574,9 @@ namespace PowerLanguage.Strategy
 			protected IInstrument m_volumeInstrument;
 			private PowerLanguage.Function._VolumePercentile m_volumePercentile;
 			private int m_entryCount;
-			private bool m_previousBarPositionWasFlat;
+			private int m_previousOpenLots;
 			private DateTime m_previousCloseDateTime;
+			private HashSet<int> m_entryBars;
 
 			public Entry(_TrendLine control) : base(control)
 			{
@@ -597,8 +601,9 @@ namespace PowerLanguage.Strategy
 				VolumePercentile = 0;
 				m_volumePercentile = null;
 				m_entryCount = 0;
-				m_previousBarPositionWasFlat = true;
+				m_previousOpenLots = 0;
 				m_previousCloseDateTime = DateTime.MinValue;
+				m_entryBars = new HashSet<int>();
 			}
 
 			public override bool Parse(JProperty property)
@@ -654,7 +659,11 @@ namespace PowerLanguage.Strategy
 							break;
 						}
 
-					if (!timeFilterFound) m_entryCount = 0;
+					if (!timeFilterFound)
+					{
+						m_entryCount = 0;
+						m_entryBars.Clear();
+					}
 					return TimeFilters.Count == 0 || timeFilterMatch;
 				}
 			}
@@ -665,11 +674,28 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Environment.CalcReason == CalculationReason.Default && m_studyControl.Bars.Status == EBarState.Close)
 				{
 					//since time filters work over days we reset the entry count once we're in a new day
-					if (m_studyControl.Bars.Time[0].Date != m_previousCloseDateTime.Date) m_entryCount = 0;
-					if (m_studyControl.PositionSide != 0 && m_previousBarPositionWasFlat) m_entryCount++;
-					m_previousBarPositionWasFlat = m_studyControl.PositionSide == 0;
-					m_previousCloseDateTime = m_studyControl.Bars.Time[0];
+					if (m_studyControl.Bars.Time[0].Date != m_previousCloseDateTime.Date)
+					{
+						m_entryCount = 0;
+						m_entryBars.Clear();
+					}
 				}
+
+				if (m_studyControl.CurrentPosition.Value != 0 && m_studyControl.CurrentPosition.Value != m_previousOpenLots) {
+					string orderName = entryOrderName();
+					//get deep copy of the open trades to avoid crash if collection is modified when new open trades are filled
+					foreach (var trade in m_studyControl.CurrentPosition.OpenTrades.ToList())
+					{
+						if (trade.EntryOrder.Name != orderName) continue;
+						if (m_entryBars.Contains(trade.EntryOrder.BarNumber)) continue;
+						m_entryBars.Add(trade.EntryOrder.BarNumber);
+						m_entryCount++;
+						trace(ETraceLevel.Verbose, $"EntryCount change EntryCount {m_entryCount} OrderName {orderName} Time {trade.EntryOrder.Time} PreviousOpenLots {m_previousOpenLots} OpenLots {m_studyControl.CurrentPosition.OpenLots}");
+					}
+				}
+
+				m_previousOpenLots = m_studyControl.CurrentPosition.OpenLots;
+				m_previousCloseDateTime = m_studyControl.Bars.Time[0];				
 			}
 
 			public override void StartCalc()
@@ -805,7 +831,7 @@ namespace PowerLanguage.Strategy
 				if (MaxVolumeBasedPercent != 0.0)
 				{
 					double averageVolume = m_volumeInstrument.Volume.Average(VolumeLength);
-					int maximumPositionBasedOnVolume = (int)Math.Truncate(averageVolume * MaxVolumeBasedPercent);
+					int maximumPositionBasedOnVolume = (int)Math.Truncate(averageVolume * MaxVolumeBasedPercent) - currentOpenPositionSize();
 					trace(ETraceLevel.Verbose, $"Using VolumeDataFeed {VolumeDataFeed} for sizing - AvgVolume {averageVolume} - MaxPositionBasedVolume {maximumPositionBasedOnVolume}");
 					size = maximumPositionBasedOnVolume < size ? maximumPositionBasedOnVolume : size;
 				}
@@ -905,6 +931,16 @@ namespace PowerLanguage.Strategy
 				bool closePercentileValid = closePercentile >= ClosePercentile;
 				trace(ETraceLevel.Verbose, $"ClosePercentile {closePercentile} >= {ClosePercentile} " + (closePercentileValid ? "valid" : "not valid"));
 				return closePercentileValid;
+			}
+
+			protected string entryOrderName() {
+				if (m_orderLeMkt != null) return m_orderLeMkt.Info.Name;
+				if (m_orderSeMkt != null) return m_orderSeMkt.Info.Name;
+				if (m_orderLePriced != null) return m_orderLePriced.Info.Name;
+				if (m_orderSePriced != null) return m_orderSePriced.Info.Name;
+				if (m_orderLeStpLmt != null) return m_orderLeStpLmt.Info.Name;
+				if (m_orderSeStpLmt != null) return m_orderSeStpLmt.Info.Name;
+				return string.Empty;
 			}
 
 			/// <summary>
@@ -1081,6 +1117,17 @@ namespace PowerLanguage.Strategy
 				//      partial positions remain that are stopped out etc.
 				int size = (int)Math.Ceiling(currentOpenPositionSize() * ExitPercent);
 				return size;
+			}
+
+			protected string exitOrderName()
+			{
+				if (m_orderLxMkt != null) return m_orderLxMkt.Info.Name;
+				if (m_orderSxMkt != null) return m_orderSxMkt.Info.Name;
+				if (m_orderLxPriced != null) return m_orderLxPriced.Info.Name;
+				if (m_orderSxPriced != null) return m_orderSxPriced.Info.Name;
+				if (m_orderLxStpLmt != null) return m_orderLxStpLmt.Info.Name;
+				if (m_orderSxStpLmt != null) return m_orderSxStpLmt.Info.Name;
+				return string.Empty;
 			}
 
 			protected void sendOrder(double price = 0.0)
@@ -1268,10 +1315,6 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
-
-				if (m_studyControl.Bars.Time[0].Month == 7 && m_studyControl.Bars.Time[0].Day == 21)
-					m_studyControl.Output.WriteLine("Debug: EntryLine.CalcBar called on July 21st");
-
 				base.CalcBar();
 				if (m_studyControl.Bars.CurrentBar < 2) return;
 				if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
@@ -2423,7 +2466,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			base.TraceLevel = ETraceLevel.Verbose;  // log everything when trace is called, tracing level is overridden in the Instruction base class above
+			base.TraceLevel = TraceLevel = ETraceLevel.Verbose;  // log everything when trace is called, tracing level is overridden in the Instruction base class above
 			resetOrders();
 			resetIndicators();
 			parseInstructions();

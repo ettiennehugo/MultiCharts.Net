@@ -108,13 +108,13 @@ namespace PowerLanguage.Strategy {
 						TimeSpan timeSinceLastFlush = DateTime.Now - m_lastFlushTime;
 						if (timeSinceLastFlush.TotalMilliseconds >= FlushInterval)
 						{
-							m_logWriter.BaseStream.Flush();
+							m_logWriter.Flush();
 							m_lastFlushTime = DateTime.Now;
 						}
 					}
-					catch (Exception) 
+					catch (Exception ex) 
 					{ 
-						/* ignore write errors to prevent infinite loops */
+						m_output.WriteLine($"Error writing to log file: {ex.Message}");
 					}
 				}
 			}
