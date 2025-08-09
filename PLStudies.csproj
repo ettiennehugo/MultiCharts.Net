@@ -526,6 +526,8 @@
     <Compile Include="_VolumePercentile.Function.CS" />
     <Compile Include="_VolumePercentile.Indicator.CS" />
     <Compile Include="_EMA.Indicator.CS" />
+    <Compile Include="_EMA3.Indicator.CS" />
+    <Compile Include="_EMA5.Indicator.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
