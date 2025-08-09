@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
 
 namespace PowerLanguage.Strategy
 {
@@ -297,7 +298,7 @@ namespace PowerLanguage.Strategy
 
 				if (name == "timefilters")
 				{
-					TimeFilters = property.Value.ToObject<List<TimeFilter>>();
+					TimeFilters = JsonConvert.DeserializeObject<List<TimeFilter>>(property.Value.ToString(), new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error });
 					for (int i = 0; i < TimeFilters.Count; i++)
 					{
 						var tempFilter = TimeFilters[i];
