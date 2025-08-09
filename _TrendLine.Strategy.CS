@@ -57,11 +57,11 @@ namespace PowerLanguage.Strategy
 	///			LineStartPrice - start price of the line
 	///			LineEndTime - end date/time of the line
 	///			LineEndPrice - end price of the line
-	///	• [alternate] LineId - trend line id 
+	///	• [alternate] LineId - trend line id on the chart 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] ExitPercent - percent of INITIAL POSITION to close, default 1.0 (100%)
-	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	///	• [optional] OrderType - enumv Limit, Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
@@ -951,6 +951,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool willBeStoppedOut = false;
 				double exitPrice = 0.0;
+				EOrderType exitOrderType = EOrderType.Market;
 				string exitId = string.Empty;
 				string instructionName = string.Empty;
 				foreach (var instruction in m_studyControl.InstructionsList)
@@ -959,6 +960,7 @@ namespace PowerLanguage.Strategy
 					{
 						ExitPriced exitPriced = (ExitPriced)instruction;
 						exitPrice = exitPriced.EstimateExitPrice(direction, Criteria);
+						exitOrderType = exitPriced.OrderType;
 
 						//profit exit instructions should always be above the entry price for long entries and below the entry price for short entries
 						//and stop loss instructions should always be below the entry price for long entries and above the entry price for short entries
@@ -979,10 +981,10 @@ namespace PowerLanguage.Strategy
 							switch (direction)
 							{
 								case EEntryDirection.Long:
-									willBeStoppedOut = exitPrice >= price;
+									willBeStoppedOut = exitPrice >= price && exitOrderType == EOrderType.Market;
 									break;
 								case EEntryDirection.Short:
-									willBeStoppedOut = exitPrice <= price;
+									willBeStoppedOut = exitPrice <= price && exitOrderType == EOrderType.Market;
 									break;
 							}
 						}
@@ -996,7 +998,7 @@ namespace PowerLanguage.Strategy
 					}
 				}
 
-				if (willBeStoppedOut) trace(ETraceLevel.Verbose, $"Entry will be stopped out at {price} due to exit price {exitPrice} by {instructionName} id {exitId}");
+				if (willBeStoppedOut) trace(ETraceLevel.Verbose, $"Entry will be stopped out at {price} due to exit price {exitPrice} with order type {exitOrderType} by {instructionName} id {exitId}");
 				return willBeStoppedOut;
 			}
 		}
@@ -1424,7 +1426,7 @@ namespace PowerLanguage.Strategy
 			}
 		};
 
-		internal class ExitLine : Exit
+		internal class ExitLine : ExitPriced
 		{
 			public int LineId { get; set; }
 			public EEntryExitCriteria Criteria { get; set; }
@@ -1490,45 +1492,18 @@ namespace PowerLanguage.Strategy
 
 				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < 2) return;
-				if (m_studyControl.Bars.Time[0].Date < LineStartTime || m_studyControl.Bars.Time[0].Date > LineEndTime) return;
+				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
-
-				if (m_studyControl.PositionSide > 0)
-					exitLong();
-				else if (m_studyControl.PositionSide < 0)
-					exitShort();
-			}
-
-			private void exitLong()
-			{
-				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-				switch (Criteria)
-				{
-					case EEntryExitCriteria.Close:
-						if (m_studyControl.Bars.Close[0] < linePrice) sendOrder(m_studyControl.Bars.Close[0]);
-						break;
-					case EEntryExitCriteria.LowHigh:
-						sendOrder(linePrice);
-						break;
-				}
-			}
-
-			private void exitShort()
-			{
-				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
-				switch (Criteria)
-				{
-					case EEntryExitCriteria.Close:
-						if (m_studyControl.Bars.Close[0] > linePrice) sendOrder(m_studyControl.Bars.Close[0]);
-						break;
-					case EEntryExitCriteria.LowHigh:
-						sendOrder(linePrice);
-						break;
-				}
+				sendOrder(m_line.PriceValue(m_studyControl.Bars.Time[0]));
 			}
 
 			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
+			{
+				return m_line.PriceValue(m_studyControl.Bars.Time[0]);
+			}
+
+			protected override double exitPrice()
 			{
 				return m_line.PriceValue(m_studyControl.Bars.Time[0]);
 			}
