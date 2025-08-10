@@ -123,6 +123,11 @@ namespace PowerLanguage.Strategy {
 		//inputs
 
 		//properties
+		public int IntradayBarCount
+		{
+			get { return m_intradayBarCount; }
+		}
+
 		public double IntradayLow
 		{
 			get { return m_intradayLow; }
@@ -183,6 +188,7 @@ namespace PowerLanguage.Strategy {
 		private DateTime m_intradayOpenTime;
 		private double m_intradayVolume;
 		private DateTime m_currentDay;
+		private int m_intradayBarCount;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -222,6 +228,7 @@ namespace PowerLanguage.Strategy {
 			m_intradayHighTime = DateTime.Now;
 			m_intradayCloseTime = DateTime.Now;
 			m_intradayOpenTime = DateTime.Now;
+			m_intradayBarCount = 0;
 			m_intradayLow = double.MaxValue;
 			m_intradayHigh = double.MinValue;
 			m_intradayClose = 0.0d;
@@ -236,6 +243,7 @@ namespace PowerLanguage.Strategy {
 		{
 			if (Bars.Time[0].Date != m_currentDay.Date)
 			{
+				m_intradayBarCount = 0;
 				m_intradayOpen = Bars.Open[0];
 				m_intradayClose = Bars.Close[0];
 				m_intradayLow = Bars.Low[0];
@@ -265,6 +273,7 @@ namespace PowerLanguage.Strategy {
 
 			if (Bars.Status == EBarState.Close)
 			{
+				m_intradayBarCount++;
 				m_intradayClose = Bars.Close[0];
 				m_intradayCloseTime = Bars.Time[0];
 				m_intradayVolume += Bars.Volume[0];
