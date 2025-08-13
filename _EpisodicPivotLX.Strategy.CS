@@ -28,7 +28,7 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_FAST_MA = 10;
 		public const int DEFAULT_MEDIUM_MA = 20;
 		public const int DEFAULT_SLOW_MA = 50;
-		public const double DEFAULT_INITIAL_STOP_LOSS_PERCENT = 0.01; //initial stop-loss percent - this is used to determine the initial stop-loss based on the entry date
+		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.08;	//exit position if the stock is overextended above the fast MA
 		public const double DEFAULT_TRAILING_PERCENT_ACTIVATION = 0.1; //activate trailing stop at this percentage
 		public const double DEFAULT_TRAILING_PERCENT = 0.02; //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
@@ -48,7 +48,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int FastMA { get; set; }       //fast moving average for the exit calculations
 		[Input] public int MediumMA { get; set; }     //medium moving average for the exit calculations
 		[Input] public int SlowMA { get; set; }       //slow moving average for the exit calculations
-		[Input] public double InitialStopLossPercent { get; set; } //initial stop-loss percent - this is used to determine the initial stop-loss based on the entry date
+		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		[Input] public double OverextensionPercent { get; set; }	//overextension percent above the fast MA that would trigger an exit
 		[Input] public double TrailingPercentActivation { get; set; } //activate trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
 		[Input] public double TrailingPercent { get; set; } //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
@@ -61,6 +61,7 @@ namespace PowerLanguage.Strategy
 		//attribute
 		private IOrderMarket m_lxPartial;
 		private IOrderMarket m_lxAll;
+		private IOrderPriced m_lxStopLoss;
 		private IOrderPriced m_lxTightStopAll;
 		private PowerLanguage.Function._SuperSmoother m_fastMA;
 		private PowerLanguage.Function._SuperSmoother m_mediumMA;
@@ -82,7 +83,7 @@ namespace PowerLanguage.Strategy
 			FastMA = DEFAULT_FAST_MA;
 			MediumMA = DEFAULT_MEDIUM_MA;
 			SlowMA = DEFAULT_SLOW_MA;
-			InitialStopLossPercent = DEFAULT_INITIAL_STOP_LOSS_PERCENT;
+			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
 			OverextensionPercent = DEFAULT_OVEREXTENSION_PERCENT;
 			TrailingPercentActivation = DEFAULT_TRAILING_PERCENT_ACTIVATION;
 			TrailingPercent = DEFAULT_TRAILING_PERCENT;
@@ -94,6 +95,7 @@ namespace PowerLanguage.Strategy
 			ProfitPercentBreakeven = DEFAULT_PROFIT_PERCENT_BREAKEVEN;
 			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.Sell, OrderExit.Total));
 			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.Sell));
+			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.Sell));
 			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxTSL", EOrderAction.Sell));
 		}
 
@@ -105,7 +107,7 @@ namespace PowerLanguage.Strategy
 			if (FastMA > MediumMA) throw new Exception("FastMA must be less than MediumMA.");
 			if (SlowMA <= 0) throw new Exception("SlowMA must be larger than zero.");
 			if (MediumMA > SlowMA) throw new Exception("MediumMA must be less than SlowMA.");
-			if (InitialStopLossPercent < 0 || InitialStopLossPercent > 1) throw new Exception("InitialStopLossPercent must be larger than zero and less than or equal to one, e.g. 0.01 would imply 1% below the entry price.");
+			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero, e.g. 0.01 would imply 1% below the entry price.");
 			if (OverextensionPercent < 0) throw new Exception("Overextension percent must be larger than zero, e.g. 0.08 would imply 8% above the fast MA");
 			if (TrailingPercentActivation < 0 || TrailingPercentActivation > 1) throw new Exception("TrailingPercentActivation must be larger than zero and less than or equal to one, e.g. 0.1 would imply 10% above the entry price.");
 			if (TrailingPercent < 0 || TrailingPercent > 1) throw new Exception("TrailingPercent must be larger than zero and less than or equal to one, e.g. 0.02 would imply 2% below the entry price.");
@@ -142,13 +144,9 @@ namespace PowerLanguage.Strategy
 			if (daysCount >= FirstExitDaysCount && CurrentPosition.ClosedTrades.Count == 0)
 				m_lxPartial.Send((int)Math.Truncate((double)this.StrategyInfo.MarketPosition / 2));
 
-			//generate the initial stop-loss based on the entry date - this should align roughly with the low of the entry day
-			if (InitialStopLossPercent != 0)
-			{
-				double stopLossAmount = this.StrategyInfo.AvgEntryPrice * InitialStopLossPercent;
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating initial stop-loss at {stopLossAmount} based on InitialStopLossPercent({InitialStopLossPercent}) and AvgEntryPrice({this.StrategyInfo.AvgEntryPrice}).");
-				GenerateStopLoss(stopLossAmount);
-			}
+			//generate entry day stop-loss
+			Tuple<DateTime, double> low = recentLow(daysCount);
+			m_lxStopLoss.Send(low.Item2 - StopLossBuffer);
 
 			//generate the breakeven stop-loss if the position is up by a certain percentage
 			if (ProfitPercentBreakeven != 0)

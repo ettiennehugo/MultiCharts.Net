@@ -492,5 +492,85 @@ namespace PowerLanguage.Strategy {
 				trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
 			return entryDate;
 		}
+
+		/// <summary>
+		/// Scans back from the current bar the given number of days back and returns the lowest low found.
+		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
+		/// </summary>
+		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
+		{
+			double low = IntradayLow;
+			DateTime lowBarTime = IntradayLowTime;
+			DateTime lowDate = IntradayLowTime;
+			int daysProcessed = 0;
+			DateTime startDate = Bars.Time[0].Date;
+			DateTime lastDate = startDate;
+
+			for (int i = 0; i < Bars.CurrentBar; i++)
+			{
+				if (Bars.Time[i].Date != lastDate)
+				{
+					daysProcessed++;
+					lastDate = Bars.Time[i].Date;
+				}
+
+				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
+					break;
+
+				if (Bars.Time[i].Date != startDate && low > Bars.Low[i])
+				{
+					low = Bars.Low[i];
+					lowBarTime = Bars.Time[i];
+				}
+
+				if (i == ExecInfo.MaxBarsBack - 1)
+				{
+					trace(ETraceLevel.Warning, $"recentLow: Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
+					break;
+				}
+			}
+
+			return new Tuple<DateTime, double>(lowBarTime, low);
+		}
+
+		/// <summary>
+		/// Scans back from the current bar the given number of days back and returns the highest high found.
+		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
+		/// </summary>
+		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null)
+		{
+			double high = IntradayHigh;
+			DateTime highBarTime = IntradayHighTime;
+			int daysProcessed = 0;
+			DateTime startDate = Bars.Time[0].Date;
+			DateTime lastDate = startDate;
+
+			for (int i = 0; i < Bars.CurrentBar; i++)
+			{
+				if (Bars.Time[i].Date != lastDate)
+				{
+					daysProcessed++;
+					lastDate = Bars.Time[i].Date;
+				}
+
+				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
+					break;
+
+				if (Bars.Time[i].Date != startDate && high < Bars.High[i])
+				{
+					high = Bars.High[i];
+					highBarTime = Bars.Time[i];
+				}
+
+				if (i == ExecInfo.MaxBarsBack - 1)
+				{
+					trace(ETraceLevel.Warning, $"recentHigh: Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
+					break;
+				}
+			}
+
+			return new Tuple<DateTime, double>(highBarTime, high);
+		}
+
 	}
 }
