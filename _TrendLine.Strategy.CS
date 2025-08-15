@@ -8,15 +8,14 @@ using Newtonsoft.Json;
 namespace PowerLanguage.Strategy
 {
 	/// <summary>
-	/// Manages entry and exit signals based on trendlines.
+	/// Manages entry/exit instructions based on trend lines on the chart and allows trade management through various exit instructions.
 	/// 
 	/// Supports the following:
-	/// - Takes a set of instructions defined in JSON tied to the trendlines defined on the chart to trade against the price levels defined by the trendlines.
-	/// - Allows using two trendlines together to define entry/exit zones.
-	/// - Allows stop-loss and take-profit orders for trade management.
+	/// - Takes a set of instructions defined in JSON tied to the trend lines defined on the chart to trade against the price levels defined by the trend lines.
+	/// - Allows trade management via various exit instructions - stop loss, profit taking, trailing stops, breakeven exits, overextension exits, etc.
 	/// 
 	/// Notes:
-	/// - To make multiple entries (e.g. scaling in) you need to set it up on the strategy properties otherwise only the first entry would be taken.
+	/// - To make multiple entries (e.g. scaling in) you need to set it up in the strategy properties otherwise only the first entry would be taken which is the default.
 	/// 
 	/// Instructions:
 	/// EntryLine
@@ -28,25 +27,25 @@ namespace PowerLanguage.Strategy
 	///			LineEndPrice - end price of the line
 	///	• [alternate] LineId - trend line id 
 	///	• Direction - enum of long, short, default long
-	///	• EquityPercent - percent of the ACCOUNT equity to enter into the position
+	///	• EquityPercent - percent of the account equity available to enter into the position, value between 0.0 and 1.0, e.g. 0.3 would mean that at most 30% of the account equity can be used for the position
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
 	///	• [optional] OrderType - enum of Market, Stop, Limit, StopLimit - whether to use a market order, stop order, limit order or stop-limit order for the entry, defaults to Market.
-	///	• [optional] MaxVolumeBasedPercent - percent of the average volume to use as the maximum position size, default 0.2 (20%), set to 0.0 to disable.
+	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
+	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ClosePercentile - (only used when Criteria == Close) double value between 0.0 and 1.0, e.g. 0.05 would mean that for a long trade the close price must be within 5% of the high of the bar
 	///	                               while for short trades it would mean the close price must be within 5% of the low of the bar - default value is 0.5 (50%) meaning for long trades the close price must be
 	///	                               in the top half of the bar and for short trades the close price must be in the bottom half of the bar
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] VolumePercentile - double value between 0.0 and 1.0, only enter when a bar's volume is above the specified percentile among the bars on the chart, e.g. 0.75 would mean that the bar's volume must be in the top 25% of the bars' volume
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the entry should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [optional] ValidUntil - date/time until which the entry should hold, defaults to DateTime.Max (if this field is specified with the EndDate/EndTime fields the entry would become disabled which ever date/time comes first)
 	///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
 	///	• [optional] StopLossExitId - Creates a risk based entry in conjunction with the given exit stop loss Id (blank to disable risk based entry), e.g. when EquityPercent is 0.01 (1%) the position size would risk 1%
 	///	                              of the account equity based on the entry price and the stop-loss price.
 	///	• [optional] MaxRiskBasedEquityPercent - When a risk based entry is used (see StopLossExitId) the maximum percent of the account equity to use for the position as risk based position entries can become really big,
-	///	                                         default is 1.0 (100%) of the account.
-	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
-	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
-	///	• [optional] PercentAverageVolumeRequired - percentage of average volume required intraday to enter the position, zero to disable, default is 0.0 (disabled)
+	///	                                         the output value is clipped by the EquityPercent and MaxVolumeBasedPercent output values.
+	///	• [optional] MaxVolumeBasedPercent - percent of the average volume (see VolumeDataFeed/VolumeLength) to use as the maximum position size to ensure liquidity on exit, default 0.2 (20%), set to 0.0 to disable.
 	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
@@ -59,9 +58,9 @@ namespace PowerLanguage.Strategy
 	///			LineEndPrice - end price of the line
 	///	• [alternate] LineId - trend line id on the chart 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
-	///	• [optional] OrderType - enumv Limit, Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop
+	///	• [optional] OrderType - enum Limit, Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
@@ -71,7 +70,7 @@ namespace PowerLanguage.Strategy
 	/// • Instruction - "ExitMovingAverage" 
 	/// • Length - length of the moving average.
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -86,17 +85,17 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [alternate] ProfitPercent - profit percentage to activate the trailing stop
 	/// • [alternate] ProfitAmount - profit amount to activate the trailing stop 
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	///
 	/// ExitOverextension
 	/// • Instruction - "ExitOverextension"
 	/// • Length - length of the moving average
 	/// • Percent - percent above/below the moving average to consider the price overextended, e.g. 0.05 for 5% above the moving average
-	/// • DisableDays - number of days to disable the exit after the entry, e.g. 1 would disable the exit for the first day after the entry, default is 0 (no days disabled) 
+	/// • DisableDays - number of days to disable the exit after the entry, e.g. 1 would disable the exit for the first day after the entry since on breakouts your entry could occur when the price is already overextended, default is 0 (no days disabled) 
 	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
 	/// • [optional] DataFeed - integer for the data feed to use to compute the moving average and ATR, default is 1 
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -109,7 +108,7 @@ namespace PowerLanguage.Strategy
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [alternate] LossPercent - exit the position if the price moves against you by the specified percentage.
 	///	• [alternate] LossPrice - exit the position if the price moves against you by a specified amount. 
 	///	• [alternate] Price - exit the position at the specific price value.
@@ -121,7 +120,7 @@ namespace PowerLanguage.Strategy
 	/// ExitProfit
 	/// • Instruction - "ExitProfit" 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [alternate] ProfitPercent - exit the position one the price moved in your favor by this percentage
 	///	• [alternate] ProfitPrice - exit the position one the price moved in your favor by this amount
 	///	• [alternate] Price - exit the position at the specific price value.
@@ -134,7 +133,7 @@ namespace PowerLanguage.Strategy
 	/// • Instruction - "ExitDays" 
 	/// • Count - number of days after which the position should be closed
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
@@ -145,21 +144,18 @@ namespace PowerLanguage.Strategy
 	/// • Instruction - "ExitLowHigh"
 	/// • Length - number of days to look back to find the low/high price, -1 would use entry bar low, 0 would use current day low/high, > 0 would use the number of days specified
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	///	• [optional] BufferPrice - buffer price to add/subtract from entry bar extreme
-	///	• [optional] PositionPercent - percent of INITIAL POSITION to exit, default 1.0 (100%)
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
-	///	• [optional] IncludePreMarket - include pre-market data when computing the entry day high/low, default false
-	///	• [optional] IncludePostMarket - include post-market data when computing the entry day high/low, default false
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitTrailingStop
 	/// • Instruction - "ExitTrailingStop"
 	/// • TrailingType - enum of FixedAmount, Percentage, ATR - determines the type of trailing stop to use, default FixedAmount
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
-	///	• [optional] TimeFilters - Set of start/end time/entry count filters on which the entry should be checked, e.g. 9:35 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
+	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [alternate] ActivationProfitPercent - profit percentage to activate the trailing stop
 	/// • [alternate] ActivationProfitPrice - profit price to activate the trailing stop 
 	/// • [optional] Criteria - enum of Close, LowHigh - activate trailing stop based on bar close or bar low/high, defaults to Close.
@@ -169,40 +165,77 @@ namespace PowerLanguage.Strategy
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
 	/// • [optional] TraceLevel - trace level for instruction, default is None
 	/// 
-	/// Example JSON:
-	/// [
-	///	  {
-	///     "Instruction" : "EntryLine"
-	///			"LineId" : 1,
-	///			"Direction" : "Long", 
-	///			"EquityPercent" : 0.01,
-	///			"BufferPrice" : 0.05,
-	///			"ClosePercentile" : 0.75,
-	///			"VolumePercentile": 0.85,
-	///			"StartTime" : "9:35 AM",
-	///			"EndTime" : "9:35 AM"
-	///		},
+	/// Example Instructions:
+	///		Enter long on a breakout of trend line with id 1 using at most 30% of account equity with a position size computed on the lesser of 1% account equity at risk based off
+	///		stop-loss exit with id SL1 and 20% of the average volume computed off data feed 2. Only enter on a bar with volume in the 80%+ percentiles that closes in the top 70%+
+	///		percentiles, only a single entry can be taken between 9:30AM and 4:00PM:
+	///   {
+	///			"Instruction":"EntryLine",
+	///			"Id":"EL1",
+	///			"LineId":1,
+	///			"Direction":"Long",
+	///			"Strategy":"Breakout",
+	///			"EquityPercent":0.3,
+	///			"MaxRiskBasedEquityPercent":0.01,
+	///			"MaxVolumeBasedPercent":0.2,
+	///			"VolumeDataFeed":2,
+	///			"Criteria": "Close",
+	///			"ClosePercentile":0.7,
+	///			"VolumePercentile":0.8,
+	///			"AddToPosition": "false",
+	///			"StopLossExitId":"SL1",
+	///			"TimeFilters":[{"StartTime":"09:30:00","EndTime":"16:00:00","EntryCount":1}]
+	///		}
+	///
+	///		Exit on trend line with id 4, only exit the position established by entry line with id EL1:
 	///		{
-	///	    "Instruction" : "EntryLine"
-	///			"LineId" : 2,
-	///			"Direction" : "Short", 
-	///			"EquityPercent" : 0.01,
-	///			"BufferPrice" : 0.05,
-	///			"ClosePercentile" : 0.75,
-	///			"StartTime" : "9:35 AM",
-	///			"EndTime" : "9:35 AM"
-	///		},
+	///			"Instruction":"ExitLine",
+	///			"Id":"SL1",
+	///			"LineId":4,
+	///			"EntryId":"EL1"
+	///		}
+	///
+	///		Exit on length 20 exponential moving average computed form the 2nd data feed:
 	///		{
-	///	    "Instruction" : "EntryLine"
-	///			"LineId" : 3,
-	///			"ExitPercent" : 0.5,
-	///		},
+	///			"Instruction":"ExitMovingAverage",
+	///			"Id":"MASL",
+	///			"DataFeed":2,
+	///			"MovingAverageType":"Exponential",
+	///			"Length":20,
+	///			"Criteria":"Close"
+	///		}
+	///		
+	///		Insert a breakeven stop exit once the position is up 5%:
 	///		{
-	///	    "Instruction" : "ExitProfit"
-	///			"Percent" : 0.5
-	///			"ProfitPrice": 5.0
-	///		},
-	/// ]
+	///			"Instruction":"ExitBreakeven",
+	///			"Id":"BE",
+	///			"ProfitPercent":0.05
+	///		}
+	///		
+	///		Insert a trailing stop exit by 3% once the position is up 10%:
+	///		{
+	///			"Instruction":"ExitTrailingStop",
+	///			"Id":"ETS",
+	///			"TrailingType":"Percentage",
+	///			"ActivationProfitPercent":0.1,
+	///			"TrailingValue":0.03
+	///		}
+	///		
+	///		Exit the full position if the price becomes overextended by 10% above the 10 exponential moving average computed from the 2nd data feed,
+	///		disable this exit for the first 5 trading days after entry since a breakout entry could occur when the price is already overextended (allowing
+	///		price normalization after breakout entries):
+	///		{
+	///			"Instruction":"ExitOverextension",
+	///			"Id":"OEPT",
+	///			"ExitPercent":1.0,
+	///			"DisableDays":5,
+	///			"DayCountStrategy":"TradingDays",
+	///			"DataFeed":2,
+	///			"MovingAverageType":"Exponential",
+	///			"Length":10,
+	///			"Percent":0.1
+	///		}
+	///		
 	/// </summary>
 	public class _TrendLine : _CustomSignal
 	{
@@ -217,7 +250,7 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_VOLUME_PERIOD = 20;
 
 		//types
-		public struct TimeFilter
+		public class TimeFilter
 		{
 			public DateTime StartTime;
 			public DateTime EndTime;
@@ -252,14 +285,6 @@ namespace PowerLanguage.Strategy
 		{
 			Close,
 			LowHigh
-		};
-
-		public enum EExitLowHighType
-		{
-			EntryBar,
-			Day,
-			Week,
-			Month
 		};
 
 		public enum EMovingAverageType
@@ -311,14 +336,7 @@ namespace PowerLanguage.Strategy
 				{
 					TimeFilters = JsonConvert.DeserializeObject<List<TimeFilter>>(property.Value.ToString(), new JsonSerializerSettings { MissingMemberHandling = MissingMemberHandling.Error });
 					for (int i = 0; i < TimeFilters.Count; i++)
-					{
-						var tempFilter = TimeFilters[i];
-						if (tempFilter.Count == 0)
-						{
-							tempFilter.Count = 1;
-							TimeFilters[i] = tempFilter;
-						}
-					}
+						if (TimeFilters[i].Count == 0) TimeFilters[i].Count = 1; //default to 1 entry if not specified
 					return true;
 				}
 
@@ -449,6 +467,7 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.StrategyInfo.MarketPosition == 0) return 0.0;
 				double costBasis = currentPositionCostBasis();
 				double pl = currentPositionPL();
+				if (costBasis == 0.0) trace(ETraceLevel.Warning, $"currentPositionPLPercent: Cost basis is 0, returning 0% profit/loss");
 				return costBasis != 0 ? pl / costBasis : 0;
 			}
 
@@ -479,6 +498,7 @@ namespace PowerLanguage.Strategy
 			/// </summary>
 			protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
 			{
+				if (daysBack == 0) return new Tuple<DateTime, double>(m_studyControl.IntradayLowTime, m_studyControl.IntradayLow);
 				double low = m_studyControl.IntradayLow;
 				DateTime lowBarTime = m_studyControl.IntradayLowTime;
 				DateTime lowDate = m_studyControl.IntradayLowTime;
@@ -519,6 +539,7 @@ namespace PowerLanguage.Strategy
 			/// </summary>
 			protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null)
 			{
+				if (daysBack == 0) return new Tuple<DateTime, double>(m_studyControl.IntradayHighTime, m_studyControl.IntradayHigh);
 				double high = m_studyControl.IntradayHigh;
 				DateTime highBarTime = m_studyControl.IntradayHighTime;
 				int daysProcessed = 0;
@@ -554,7 +575,7 @@ namespace PowerLanguage.Strategy
 
 			protected void trace(_CustomSignal.ETraceLevel traceLevel, string message)
 			{
-				//_TrendLine class sets the _CustomSignal TraceLevel to Verbose to log everything but this method filters on the instruction level
+				//_TrendLine class sets the _CustomSignal TraceLevel to Verbose to log everything but this method filters based on the instruction TraceLevel parameter
 				if (TraceLevel >= traceLevel) m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {message}");
 			}
 		}
@@ -981,7 +1002,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			/// <summary>
-			/// Given the set of defined exits, check if the current price will be stopped out.
+			/// Given the set of defined exits, check if the current entry price for the given market direction will be stopped out immediately.
 			/// </summary>
 			protected bool willBeStoppedOut(EEntryDirection direction, double price)
 			{
@@ -2170,15 +2191,11 @@ namespace PowerLanguage.Strategy
 			public static TimeSpan DEFAULT_MARKET_CLOSE_TIME = new TimeSpan(16, 0, 0);
 			public double BufferPrice { get; set; }
 			public int Length { get; set; }
-			public bool IncludePreMarket { get; set; }
-			public bool IncludePostMarket { get; set; }
 			private double m_stopLossPrice;
 
 			public ExitLowHigh(_TrendLine control) : base(control)
 			{
 				BufferPrice = 0.0;
-				IncludePreMarket = false;
-				IncludePostMarket = false;
 			}
 
 			public override bool Parse(JProperty property)
@@ -2820,7 +2837,6 @@ namespace PowerLanguage.Strategy
 			return result;
 		}
 
-
 		public PowerLanguage.Function._AverageSimple AllocateSimpleAverage()
 		{
 			if (m_averageSimpleAllocated >= m_averageSimple.Count) throw new InvalidOperationException("No more Simple Moving Averages available");
@@ -3077,8 +3093,12 @@ namespace PowerLanguage.Strategy
 
 		private void validateInstructions()
 		{
+			HashSet<string> instructionIds = new HashSet<string>();
 			foreach (var instruction in Instructions)
 			{
+				if (instructionIds.Contains(instruction.Id)) throw new ArgumentException($"Duplicate instruction Id found - {instruction.Id}");
+				instructionIds.Add(instruction.Id);
+
 				var result = instruction.IsValid();
 				if (!result.Item1) throw new ArgumentException(result.Item2);
 			}
