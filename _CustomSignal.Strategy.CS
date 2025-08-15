@@ -499,6 +499,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
 		{
+			if (daysBack == 0 ) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
 			double low = IntradayLow;
 			DateTime lowBarTime = IntradayLowTime;
 			DateTime lowDate = IntradayLowTime;
@@ -539,6 +540,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null)
 		{
+			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayHighTime, IntradayHigh);
 			double high = IntradayHigh;
 			DateTime highBarTime = IntradayHighTime;
 			int daysProcessed = 0;
