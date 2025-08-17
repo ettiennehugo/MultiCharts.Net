@@ -9,7 +9,7 @@ namespace PowerLanguage.Strategy
 	/// and exits the position as soon as a higher low forms indicating signs of a reversal.
 	/// Timeframes used:
 	///		Primary: 1/5 minute chart for the entry
-	///		Secondary: 15-minute/30-minute/hourly
+	///		Secondary: 15-minute
 	///		Dialy timeframe
 	/// </summary>
 	public class _ParabolicShortSX : _CustomSignal
@@ -45,7 +45,8 @@ namespace PowerLanguage.Strategy
 		private DateTime m_exitTime;
 		private DateTime m_entryDate;
 		private double m_stopLoss;
-		private bool m_retracementExitFilled = false;
+		private bool m_retracementExitFilled;
+		private bool m_priceActionChanged;
 
 		//interface methods
 		public _ParabolicShortSX(object _ctx) : base(_ctx) { }
@@ -76,6 +77,8 @@ namespace PowerLanguage.Strategy
 			m_dailyTimeFrame = BarsOfData(3);
 			m_entryDate = DateTime.MinValue;
 			m_stopLoss = -1;
+			m_retracementExitFilled = false;
+			m_priceActionChanged = false;
 		}
 
 		protected override void CalcBar()
@@ -88,9 +91,8 @@ namespace PowerLanguage.Strategy
 				m_retracementExitFilled = true;
 			}
 
-			bool priceActionChanged = false;
 			if (Environment.CalcReason == CalculationReason.Default && m_secondaryTimeFrame.Status == EBarState.Close)
-				priceActionChanged = m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
+				m_priceActionChanged = m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
 
 			if (PositionSide == 0)
 			{
@@ -136,7 +138,7 @@ namespace PowerLanguage.Strategy
 			//maintain stop-loss based on the entry day and the formation of new lower highs
 			double entryDayHigh = daysCount == 0 ? IntradayHigh : m_dailyTimeFrame.High[daysCount - 1];
 			if (m_stopLoss == -1) m_stopLoss = entryDayHigh;
-			if (priceActionChanged)
+			if (m_priceActionChanged)
 				foreach (var bar in m_priceAction.ChangedBars.Reverse())	//we need to reverse iterate the changed bars to find the most recent higher low
 				{
 					if (bar.Value.state.lowerHigh)
@@ -157,7 +159,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//exit full position if the price action starts making higher lows
-			if (priceActionChanged && m_priceAction.AnalysisState.higherLow)
+			if (m_priceActionChanged && m_priceAction.AnalysisState.higherLow)
 			{
 				trace(ETraceLevel.Info, $"Exit higher low at {m_primaryTimeFrame.Close[0]}");
 				m_sxAll.Send();

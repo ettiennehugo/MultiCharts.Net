@@ -163,12 +163,6 @@ namespace PowerLanguage.Strategy {
 
 		protected void entry() {
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
-
-			//daily timeframe filter - TBD determine whether this is truly required
-			
-			if (m_primaryTimeFrame.Time[0].Date == testDate.Date)
-				Output.WriteLine($"Test date detected: {testDate.ToString("yyyy-MM-dd")}, skipping daily timeframe filter check.");
-
 			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to calculate the volume percentile
 			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 2.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 2.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
 

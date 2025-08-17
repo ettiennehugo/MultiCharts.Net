@@ -9,7 +9,7 @@ namespace PowerLanguage.Strategy
 	/// The strategy uses the price action analysis to determine the entry point and the exit point.
 	/// Timeframes used:
 	///		Primary: 1/5 minute chart for the entry
-	///		Secondary: 15-minute/30-minutes/hourly - used for price action analysis
+	///		Secondary: 15-minute - used for price action analysis (longer timeframes would cause too make late entries)
 	///		Dialy timeframe
 	/// </summary>
 	public class _ParabolicShortSE : _CustomSignal
@@ -49,6 +49,7 @@ namespace PowerLanguage.Strategy
 		private IInstrument m_primaryTimeFrame;
 		private IInstrument m_secondaryTimeFrame;
 		private IInstrument m_dailyTimeFrame;
+		private bool m_lowerHighDetected;
 
 		//interface methods
 		public _ParabolicShortSE(object _ctx) : base(_ctx) { }
@@ -86,6 +87,7 @@ namespace PowerLanguage.Strategy
 			m_secondaryTimeFrame = BarsOfData(2);
 			m_dailyTimeFrame = BarsOfData(3);
 			m_volumePercentile.Instrument = m_primaryTimeFrame;
+			m_lowerHighDetected = false;
 		}
 
 		protected override void CalcBar()
@@ -93,11 +95,10 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 
 			//always perform price action analsis on the secondary timeframe close
-			bool lowerHighDetected = false;
 			if (m_secondaryTimeFrame.Status == EBarState.Close)
 			{
 				m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
-				lowerHighDetected = m_priceAction.AnalysisState.lowerHigh;
+				m_lowerHighDetected = m_priceAction.AnalysisState.lowerHigh;
 			}
 
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
@@ -105,7 +106,7 @@ namespace PowerLanguage.Strategy
 			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
 			//perform price action analysis on secondary timeframe close 
-			if (!lowerHighDetected) return; //only enter when lower high is formed on secondary timeframe
+			if (!m_lowerHighDetected) return; //only enter when lower high is formed on secondary timeframe
 
 			//find the lower high bar - we need to reverse iterate to find the most recent lower high for analysis
 			PriceActionBar lowerHighBar = null;
