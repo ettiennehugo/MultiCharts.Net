@@ -158,9 +158,6 @@ namespace PowerLanguage.Strategy {
 		}
 
 		//methods
-
-		static DateTime testDate = new DateTime(2025, 5, 12, 0, 0, 0);
-
 		protected void entry() {
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to calculate the volume percentile
