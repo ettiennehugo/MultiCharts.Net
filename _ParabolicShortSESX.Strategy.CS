@@ -74,7 +74,9 @@ namespace PowerLanguage.Strategy {
 		private IOrderMarket m_sxPartial;
 		private IOrderMarket m_sxAll;
 		private IOrderPriced m_sxStopLoss;
-		private bool m_retracementExitFilled = false;
+		private bool m_retracementExitFilled;
+		private bool m_priceActionChanged;
+		private bool m_lowerHighDetected;
 
 		//interface methods
 		public _ParabolicShortSESX(object _ctx) : base(_ctx) { }
@@ -128,18 +130,20 @@ namespace PowerLanguage.Strategy {
 			m_volumePercentile.Instrument = m_primaryTimeFrame;
 			m_entryDate = DateTime.MinValue;
 			m_stopLoss = -1;
+
+			m_retracementExitFilled = false;
+			m_priceActionChanged = false;
+			m_lowerHighDetected = false;
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 
-			bool lowerHighDetected = false;
-			bool priceActionChanged = false;
 			if (m_secondaryTimeFrame.Status == EBarState.Close)
 			{
-				priceActionChanged = m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
-				lowerHighDetected = m_priceAction.AnalysisState.lowerHigh;
+				m_priceActionChanged = m_priceAction.Analyse(m_secondaryTimeFrame.Time[0], m_secondaryTimeFrame.Open[0], m_secondaryTimeFrame.High[0], m_secondaryTimeFrame.Low[0], m_secondaryTimeFrame.Close[0], m_secondaryTimeFrame.Volume[0]);
+				m_lowerHighDetected = m_priceAction.AnalysisState.lowerHigh;
 			}
 
 			if (PositionSide == 0)
@@ -147,20 +151,32 @@ namespace PowerLanguage.Strategy {
 				m_retracementExitFilled = false;
 				m_entryDate = DateTime.MinValue;
 				m_stopLoss = -1;
-				entry(lowerHighDetected);
+				entry();
 			}
 			else
-				exit(priceActionChanged);
+				exit();
 		}
 
 		//methods
-		protected void entry(bool lowerHighDetected) {
+
+		static DateTime testDate = new DateTime(2025, 5, 12, 0, 0, 0);
+
+		protected void entry() {
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
+
+			//daily timeframe filter - TBD determine whether this is truly required
+			
+			if (m_primaryTimeFrame.Time[0].Date == testDate.Date)
+				Output.WriteLine($"Test date detected: {testDate.ToString("yyyy-MM-dd")}, skipping daily timeframe filter check.");
+
+			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to calculate the volume percentile
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 2.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 2.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+
 			if (PositionSide != 0 && !AddToPosition) return; //do not enter if there is already a position
 			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
 			//perform price action analysis on secondary timeframe close 
-			if (!lowerHighDetected) return; //only enter when lower high is formed on secondary timeframe
+			if (!m_lowerHighDetected) return; //only enter when lower high is formed on secondary timeframe
 
 			//find the lower high bar - we need to reverse iterate to find the most recent lower high for analysis
 			PriceActionBar lowerHighBar = null;
@@ -211,7 +227,7 @@ namespace PowerLanguage.Strategy {
 			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
-		protected void exit(bool priceActionChanged) {
+		protected void exit() {
 			//exit on Fridays if required
 			if (ExitFriday && m_primaryTimeFrame.Time[0].DayOfWeek == DayOfWeek.Friday && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay)
 			{
@@ -248,7 +264,7 @@ namespace PowerLanguage.Strategy {
 			//maintain stop-loss based on the entry day and the formation of new lower highs
 			double entryDayHigh = daysCount == 0 ? IntradayHigh : m_dailyTimeFrame.High[daysCount - 1];
 			if (m_stopLoss == -1) m_stopLoss = entryDayHigh;
-			if (priceActionChanged)
+			if (m_priceActionChanged)
 				foreach (var bar in m_priceAction.ChangedBars.Reverse())  //we need to reverse iterate the changed bars to find the most recent higher low
 				{
 					if (bar.Value.state.lowerHigh)
