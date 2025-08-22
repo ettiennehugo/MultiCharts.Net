@@ -27,6 +27,7 @@ namespace PowerLanguage.Strategy {
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
 		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
+		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;      //ignore stocks that have massive overextended moves as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MINIMUM_DAILY_VOLUME_PERCENTILE = -1; //[disable == -1] minimum above average DAILY volume percentage for the entry - this is used for volume confirmation, e.g. 0.1 means 10% of the daily volume needs to be traded on the entry bar \
@@ -60,6 +61,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public int BarsAboveMarketAverage { get; set; } //number of bars above the market moving average to determine whether to enter a position or not, this is used to determine the general market direction, set to zero (0) to disable market filter
 		[Input] public int MarketAverageLength {  get; set; } //length of the market moving average used to determine general market direction
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
+		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 
 		//attribute
 		private IOrderPriced m_le;
@@ -99,6 +101,7 @@ namespace PowerLanguage.Strategy {
 			BarsAboveMarketAverage = DEFAULT_BARS_ABOVE_MARKET_AVERAGE;
 			MarketAverageLength = DEFAULT_MARKET_LENGTH;
 			UseRoundLots = false;
+			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Le", EOrderAction.Buy));
 			m_dailyVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_minuteVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
@@ -123,6 +126,7 @@ namespace PowerLanguage.Strategy {
 			if (MarketAverageLength < 1) throw new Exception("MarketAverageLength must be at least 1.");
 			if (RequiredClosePercentile < 0 || RequiredClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
 			if (RequiredVolumePercentile < 0 || RequiredVolumePercentile > 1) throw new Exception("RequiredVolumePercentile must be larger than or equal to zero and less than one.");
+			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero.");
 			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
 			m_marketTimeFrame = BarsOfData(3); //get the market time frame for the stock, e.g. SPY, QQQ, IWM, etc.
@@ -181,7 +185,7 @@ namespace PowerLanguage.Strategy {
 			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
 			//determine the risk based on the entry day low
-			double risk = m_minuteTimeFrame.Close[0] - IntradayLow;
+			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
 
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);

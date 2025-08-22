@@ -25,6 +25,7 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
 		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
+		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;			//ignore stocks that have massive gap ups as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.3; //per default don't enter positions larger than 30% of available equity
@@ -47,6 +48,7 @@ namespace PowerLanguage.Strategy
 		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
+		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 
 		//attribute
 		private IOrderPriced m_le;
@@ -77,6 +79,7 @@ namespace PowerLanguage.Strategy
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
 			RequiredClosePercentile = DEFAULT_REQUIRED_CLOSE_PERCENTILE;
 			UseRoundLots = false;
+			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Le", EOrderAction.Buy));
 		}
 
@@ -93,6 +96,7 @@ namespace PowerLanguage.Strategy
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumVolumeBasedPercent <= 0 || MaximumVolumeBasedPercent > 1) throw new Exception("MaximumVolumeBasedPercent must be larger than zero and less than one.");
 			if (RequiredClosePercentile < 0 || RequiredClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
+			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero.");
 			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
 		}
@@ -130,7 +134,7 @@ namespace PowerLanguage.Strategy
 			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
 			//determine the risk based on the entry day low
-			double risk = m_minuteTimeFrame.Close[0] - IntradayLow;
+			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
 			
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
