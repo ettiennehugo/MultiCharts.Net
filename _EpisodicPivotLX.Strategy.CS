@@ -29,9 +29,9 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_MEDIUM_MA = 20;
 		public const int DEFAULT_SLOW_MA = 50;
 		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
-		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.08;	//exit position if the stock is overextended above the fast MA
-		public const double DEFAULT_TRAILING_PERCENT_ACTIVATION = 0.1; //activate trailing stop at this percentage
-		public const double DEFAULT_TRAILING_PERCENT = 0.02; //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
+		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.1;	//exit position if the stock is overextended above the fast MA
+		public const double DEFAULT_TRAILING_PERCENT_ACTIVATION = 0.2; //activate trailing stop at this percentage
+		public const double DEFAULT_TRAILING_PERCENT = 0.05; //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
 		public const int DEFAULT_FIRST_EXIT_DAYS_COUNT = 5; //first exit days count - this is used to determine the first exit days count based on the entry date
 		public const double DEFAULT_EP_DAY_PERCENT_LIMIT = 0.3; //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
 		public const double DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
