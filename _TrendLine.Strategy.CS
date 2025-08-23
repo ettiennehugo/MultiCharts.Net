@@ -248,6 +248,7 @@ namespace PowerLanguage.Strategy
 		public const int MAX_ATR = 5;
 		public const int MAX_VOLUME_PERCENTILE = 5;
 		public const int DEFAULT_VOLUME_PERIOD = 20;
+		public const string DEFAULT_COMMENT_DELIMITER = "//";
 
 		//types
 		public class TimeFilter
@@ -469,27 +470,6 @@ namespace PowerLanguage.Strategy
 				double pl = currentPositionPL();
 				if (costBasis == 0.0) trace(ETraceLevel.Warning, $"currentPositionPLPercent: Cost basis is 0, returning 0% profit/loss");
 				return costBasis != 0 ? pl / costBasis : 0;
-			}
-
-			protected DateTime currentPositionEntryDate()
-			{
-				DateTime entryDate = DateTime.MaxValue;
-				if (m_studyControl.Positions[0].OpenTrades.Count > 0 && m_studyControl.Positions[0].ClosedTrades.Count > 0)
-				{
-					DateTime openTradesEarliestDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-					DateTime closedTradesEarliestDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-					entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
-				}
-				else if (m_studyControl.Positions[0].OpenTrades.Count > 0)
-					entryDate = m_studyControl.Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-				else if (m_studyControl.Positions[0].ClosedTrades.Count > 0)
-					entryDate = m_studyControl.Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-
-				if (entryDate == DateTime.MaxValue)
-					trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
-				else
-					trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {m_studyControl.Positions[0].OpenTrades.Count} open trades and {m_studyControl.Positions[0].ClosedTrades.Count} closed trades");
-				return entryDate;
 			}
 
 			/// <summary>
@@ -1803,7 +1783,7 @@ namespace PowerLanguage.Strategy
 
 					if (DisableDays == 0) return true;
 
-					DateTime entryDate = currentPositionEntryDate();
+					DateTime entryDate = m_studyControl.EntryTime(0);
 					int daysSinceEntry = 0;
 					switch (DayCountStrategy)
 					{
@@ -2141,7 +2121,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case CalculationReason.Default:
-						DateTime entryDate = currentPositionEntryDate();
+						DateTime entryDate = m_studyControl.EntryTime(0);
 
 						switch (DayCountStrategy)
 						{
@@ -3039,32 +3019,41 @@ namespace PowerLanguage.Strategy
 				m_atr[i].Call();
 		}
 
+		private void concatenateInstruction(string instruction, ref string instructions) {
+			if (instruction == null) return;
+			string trimmedInstruction = instruction;
+			int commentDelimiterIndex = trimmedInstruction.IndexOf(DEFAULT_COMMENT_DELIMITER);
+			if (commentDelimiterIndex != 0) trimmedInstruction = trimmedInstruction.Substring(0, commentDelimiterIndex);
+			trimmedInstruction = trimmedInstruction.Trim();
+			if (trimmedInstruction.Length > 0) instructions += (instructions.Length > 0 ? "," : "") + trimmedInstruction;
+		}
+
 		private string concatenateInstructions()
 		{
-			string instructionsStr = "";
-			if (Entry1 != null && Entry1.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry1.Trim();
-			if (Entry2 != null && Entry2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry2.Trim();
-			if (Entry3 != null && Entry3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry3.Trim();
-			if (Entry4 != null && Entry4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry4.Trim();
-			if (Entry5 != null && Entry5.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry5.Trim();
-			if (Entry6 != null && Entry6.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry6.Trim();
-			if (Entry7 != null && Entry7.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry7.Trim();
-			if (Entry8 != null && Entry8.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry8.Trim();
-			if (Entry9 != null && Entry9.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry9.Trim();
-			if (Entry10 != null && Entry10.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Entry10.Trim();
-			if (Exit1 != null && Exit1.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit1.Trim();
-			if (Exit2 != null && Exit2.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit2.Trim();
-			if (Exit3 != null && Exit3.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit3.Trim();
-			if (Exit4 != null && Exit4.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit4.Trim();
-			if (Exit5 != null && Exit5.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit5.Trim();
-			if (Exit6 != null && Exit6.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit6.Trim();
-			if (Exit7 != null && Exit7.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit7.Trim();
-			if (Exit8 != null && Exit8.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit8.Trim();
-			if (Exit9 != null && Exit9.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit9.Trim();
-			if (Exit10 != null && Exit10.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Exit10.Trim();
-			if (Other != null && Other.Trim().Length > 0) instructionsStr += (instructionsStr.Length > 0 ? "," : "") + Other.Trim();
-			instructionsStr = "[" + instructionsStr + "]";
-			return instructionsStr;
+			string instructions = "";
+			concatenateInstruction(Entry1, ref instructions);
+			concatenateInstruction(Entry2, ref instructions);
+			concatenateInstruction(Entry3, ref instructions);
+			concatenateInstruction(Entry4, ref instructions);
+			concatenateInstruction(Entry5, ref instructions);
+			concatenateInstruction(Entry6, ref instructions);
+			concatenateInstruction(Entry7, ref instructions);
+			concatenateInstruction(Entry8, ref instructions);
+			concatenateInstruction(Entry9, ref instructions);
+			concatenateInstruction(Entry10, ref instructions);
+			concatenateInstruction(Exit1, ref instructions);
+			concatenateInstruction(Exit2, ref instructions);
+			concatenateInstruction(Exit3, ref instructions);
+			concatenateInstruction(Exit4, ref instructions);
+			concatenateInstruction(Exit5, ref instructions);
+			concatenateInstruction(Exit6, ref instructions);
+			concatenateInstruction(Exit7, ref instructions);
+			concatenateInstruction(Exit8, ref instructions);
+			concatenateInstruction(Exit9, ref instructions);
+			concatenateInstruction(Exit10, ref instructions);
+			concatenateInstruction(Other, ref instructions);
+			instructions = "[" + instructions + "]";
+			return instructions;
 		}
 
 		private void parseInstructions()
