@@ -94,6 +94,7 @@ namespace PowerLanguage.Strategy
 	/// • Percent - percent above/below the moving average to consider the price overextended, e.g. 0.05 for 5% above the moving average
 	/// • DisableDays - number of days to disable the exit after the entry, e.g. 1 would disable the exit for the first day after the entry since on breakouts your entry could occur when the price is already overextended, default is 0 (no days disabled) 
 	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
+	/// • [optional] UseFill - enum First, Last - if there are multiple entry fills which entry fill needs to be used to count days, default is Last 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] MovingAverageType - enum Simple, Exponential, SuperSmoother, default is Simple
@@ -135,6 +136,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
+	/// • [optional] UseFill - enum First, Last - if there are multiple entry fills which entry fill needs to be used to count days, default is Last 
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
@@ -1749,6 +1751,7 @@ namespace PowerLanguage.Strategy
 		{
 			public double Percent { get; set; }
 			public int DisableDays { get; set; }
+			public EUseFill UseFill { get; set; }
 			public EDaysCountStrategy DayCountStrategy { get; set; }
 
 			public ExitOverextension(_TrendLine control) : base(control)
@@ -1756,6 +1759,7 @@ namespace PowerLanguage.Strategy
 				Percent = 0.0;
 				OrderType = EOrderType.Limit;
 				DayCountStrategy = EDaysCountStrategy.TradingDays;
+				UseFill = EUseFill.Last;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1763,7 +1767,7 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "percent") { Percent = property.Value.ToObject<double>(); return true; }
 				if (name == "disabledays") { DisableDays = property.Value.ToObject<int>(); return true; }
-				if (property.Name.ToLower() == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
+				if (name == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -1783,7 +1787,7 @@ namespace PowerLanguage.Strategy
 
 					if (DisableDays == 0) return true;
 
-					DateTime entryDate = m_studyControl.EntryTime(0);
+					DateTime entryDate = m_studyControl.EntryTime(0, UseFill);
 					int daysSinceEntry = 0;
 					switch (DayCountStrategy)
 					{
@@ -2062,6 +2066,7 @@ namespace PowerLanguage.Strategy
 		internal class ExitDays : Exit
 		{
 			public int Count { get; set; }
+			public EUseFill UseFill { get; set; }
 			public EDaysCountStrategy DayCountStrategy { get; set; }
 
 			private bool m_exitOrderFilled;
@@ -2070,14 +2075,17 @@ namespace PowerLanguage.Strategy
 			{
 				OrderType = EOrderType.Market;
 				DayCountStrategy = EDaysCountStrategy.TradingDays;
+				UseFill = EUseFill.Last;
 				m_exitOrderFilled = false;
 				Count = 1;
 			}
 
 			public override bool Parse(JProperty property)
 			{
-				if (property.Name.ToLower() == "count") { Count = property.Value.ToObject<int>(); return true; }
-				if (property.Name.ToLower() == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
+				string name = property.Name.ToLower();
+				if (name == "count") { Count = property.Value.ToObject<int>(); return true; }
+				if (name == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
+				if (name == "usefill") { UseFill = property.Value.ToObject<EUseFill>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -2121,7 +2129,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case CalculationReason.Default:
-						DateTime entryDate = m_studyControl.EntryTime(0);
+						DateTime entryDate = m_studyControl.EntryTime(0, UseFill);
 
 						switch (DayCountStrategy)
 						{
@@ -2180,8 +2188,9 @@ namespace PowerLanguage.Strategy
 
 			public override bool Parse(JProperty property)
 			{
-				if (property.Name.ToLower() == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
-				if (property.Name.ToLower() == "length") { Length = property.Value.ToObject<int>(); return true; }
+				string name = property.Name.ToLower();
+				if (name == "bufferprice") { BufferPrice = property.Value.ToObject<double>(); return true; }
+				if (name == "length") { Length = property.Value.ToObject<int>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -2384,8 +2393,10 @@ namespace PowerLanguage.Strategy
 
 		internal class ExitBreakeven : Instruction
 		{
-			public override string OrderName {
-				get {
+			public override string OrderName
+			{
+				get
+				{
 					if (m_studyControl.PositionSide > 0) return m_orderLxStp.Info.Name;
 					if (m_studyControl.PositionSide < 0) return m_orderSxStp.Info.Name;
 					trace(ETraceLevel.Error, "ExitBreakeven - No position found, cannot determine order name");
@@ -3019,11 +3030,12 @@ namespace PowerLanguage.Strategy
 				m_atr[i].Call();
 		}
 
-		private void concatenateInstruction(string instruction, ref string instructions) {
-			if (instruction == null) return;
+		private void concatenateInstruction(string instruction, ref string instructions)
+		{
+			if (instruction == null || instruction.Length == 0) return;
 			string trimmedInstruction = instruction;
 			int commentDelimiterIndex = trimmedInstruction.IndexOf(DEFAULT_COMMENT_DELIMITER);
-			if (commentDelimiterIndex != 0) trimmedInstruction = trimmedInstruction.Substring(0, commentDelimiterIndex);
+			if (commentDelimiterIndex != -1) trimmedInstruction = trimmedInstruction.Substring(0, commentDelimiterIndex);
 			trimmedInstruction = trimmedInstruction.Trim();
 			if (trimmedInstruction.Length > 0) instructions += (instructions.Length > 0 ? "," : "") + trimmedInstruction;
 		}
