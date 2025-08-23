@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-namespace PowerLanguage.Strategy {
+namespace PowerLanguage.Strategy
+{
 	/// <summary>
 	/// Implements common utility functions used by signals and calculation of intraday high, low, open and close
 	/// if the signal uses minute bars in conjunction with daily/weekly/monthly bars.
@@ -27,6 +28,16 @@ namespace PowerLanguage.Strategy {
 		}
 
 		/// <summary>
+		///	Fill to use when querying the entry time for a position, this is especially important when
+		///	scaling into and out of positions.
+		/// </summary>
+		public enum EUseFill
+		{
+			First,
+			Last,
+		}
+
+		/// <summary>
 		/// Singleton log file manager for internal use only.
 		/// </summary>
 		private sealed class LogFileSingleton
@@ -35,11 +46,11 @@ namespace PowerLanguage.Strategy {
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
 			private static int s_referenceCount = 0;
-			
+
 			private StreamWriter m_logWriter;
 			private readonly object m_writeLock = new object();
 			private DateTime m_lastFlushTime;
-			private IOutput m_output;	//MC main output window
+			private IOutput m_output; //MC main output window
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -112,8 +123,8 @@ namespace PowerLanguage.Strategy {
 							m_lastFlushTime = DateTime.Now;
 						}
 					}
-					catch (Exception ex) 
-					{ 
+					catch (Exception ex)
+					{
 						m_output.WriteLine($"Error writing to log file: {ex.Message}");
 					}
 				}
@@ -374,11 +385,11 @@ namespace PowerLanguage.Strategy {
 			try
 			{
 				risk = checked(Math.Round(Math.Abs(bars.Close[0] - stopLossPrice), 2));
-				result = riskBasedPositionSize(risk, maxRiskEquityPerPosPercent);					
+				result = riskBasedPositionSize(risk, maxRiskEquityPerPosPercent);
 			}
 			catch (OverflowException)
 			{
-				trace(ETraceLevel.Warning,"WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
+				trace(ETraceLevel.Warning, "WARNING - positionSize based on STOP-LOSS raised an overflow exception, signal ignored.");
 				return 0;   //risk overflow exception occurred, ignore signal
 			}
 
@@ -478,7 +489,7 @@ namespace PowerLanguage.Strategy {
 		/// </summary>
 		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
 		{
-			if (daysBack == 0 ) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
+			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
 			double low = IntradayLow;
 			DateTime lowBarTime = IntradayLowTime;
 			DateTime lowDate = IntradayLowTime;
@@ -553,5 +564,27 @@ namespace PowerLanguage.Strategy {
 			return new Tuple<DateTime, double>(highBarTime, high);
 		}
 
+		public DateTime EntryTime(int posAgo, EUseFill useFill)
+		{
+			if (useFill == EUseFill.Last) return this.EntryTime(posAgo);
+
+			DateTime entryDate = DateTime.MaxValue;
+			if (Positions[0].OpenTrades.Count > 0 && Positions[0].ClosedTrades.Count > 0)
+			{
+				DateTime openTradesEarliestDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+				DateTime closedTradesEarliestDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+				entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
+			}
+			else if (Positions[0].OpenTrades.Count > 0)
+				entryDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
+			else if (Positions[0].ClosedTrades.Count > 0)
+				entryDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
+
+			if (entryDate == DateTime.MaxValue)
+				trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
+			else
+				trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
+			return entryDate;
+		}
 	}
 }
