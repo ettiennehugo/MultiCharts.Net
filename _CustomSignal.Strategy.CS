@@ -472,27 +472,6 @@ namespace PowerLanguage.Strategy {
 			return count;
 		}
 
-		protected DateTime currentPositionEntryDate()
-		{
-			DateTime entryDate = DateTime.MaxValue;
-			if (Positions[0].OpenTrades.Count > 0 && Positions[0].ClosedTrades.Count > 0)
-			{
-				DateTime openTradesEarliestDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-				DateTime closedTradesEarliestDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-				entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
-			}
-			else if (Positions[0].OpenTrades.Count > 0)
-				entryDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-			else if (Positions[0].ClosedTrades.Count > 0)
-				entryDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-
-			if (entryDate == DateTime.MaxValue)
-				trace(ETraceLevel.Verbose, $"Unable to compute position entry date with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
-			else
-				trace(ETraceLevel.Verbose, $"Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
-			return entryDate;
-		}
-
 		/// <summary>
 		/// Scans back from the current bar the given number of days back and returns the lowest low found.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
