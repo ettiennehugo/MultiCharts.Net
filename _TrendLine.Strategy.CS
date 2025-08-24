@@ -1733,19 +1733,8 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < 2) return;
 				if (m_studyControl.Environment.CalcReason != CalculationReason.Default) return;
-
-				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime)
-				{
-					cancelOrder();
-					return;
-				}
-
-				if (m_studyControl.Bars.Time[0] > ValidUntil)
-				{
-					cancelOrder();
-					return;
-				}
-
+				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
+				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
 				sendOrder(m_line.PriceValue(m_studyControl.Bars.Time[0]));
 			}
