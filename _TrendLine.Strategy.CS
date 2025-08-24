@@ -93,7 +93,6 @@ namespace PowerLanguage.Strategy
 	/// • Length - length of the moving average
 	/// • Percent - percent above/below the moving average to consider the price overextended, e.g. 0.05 for 5% above the moving average
 	/// • DisableDays - number of days to disable the exit after the entry, e.g. 1 would disable the exit for the first day after the entry since on breakouts your entry could occur when the price is already overextended, default is 0 (no days disabled) 
-	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	/// • [optional] UseFill - enum First, Last - if there are multiple entry fills which entry fill needs to be used to count days, default is Last 
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
@@ -104,6 +103,8 @@ namespace PowerLanguage.Strategy
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
+	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days for DisableDays, defaults to TradingDays
+	/// • [optional] UseFill - enum First, Last - which entry fill is used to determine the days for DisableDays, default Last 
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	///
 	/// ExitStopLoss
@@ -135,11 +136,12 @@ namespace PowerLanguage.Strategy
 	/// • Count - number of days after which the position should be closed
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
-	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
 	/// • [optional] UseFill - enum First, Last - if there are multiple entry fills which entry fill needs to be used to count days, default is Last 
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
 	///	• [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
+	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days, defaults to TradingDays
+	/// • [optional] UseFill - enum First, Last - which entry fill is used to determine the days for DisableDays, default Last 
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitLowHigh
