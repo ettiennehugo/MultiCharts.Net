@@ -2520,6 +2520,11 @@ namespace PowerLanguage.Strategy
 		[Input] public string Entry8 { get; set; }
 		[Input] public string Entry9 { get; set; }
 		[Input] public string Entry10 { get; set; }
+		[Input] public string Entry11 { get; set; }
+		[Input] public string Entry12 { get; set; }
+		[Input] public string Entry13 { get; set; }
+		[Input] public string Entry14 { get; set; }
+		[Input] public string Entry15 { get; set; }
 		[Input] public string Exit1 { get; set; }
 		[Input] public string Exit2 { get; set; }
 		[Input] public string Exit3 { get; set; }
@@ -2530,6 +2535,11 @@ namespace PowerLanguage.Strategy
 		[Input] public string Exit8 { get; set; }
 		[Input] public string Exit9 { get; set; }
 		[Input] public string Exit10 { get; set; }
+		[Input] public string Exit11 { get; set; }
+		[Input] public string Exit12 { get; set; }
+		[Input] public string Exit13 { get; set; }
+		[Input] public string Exit14 { get; set; }
+		[Input] public string Exit15 { get; set; }
 		[Input] public string Other { get; set; } //comma separated list of other instructions
 		public override ETraceLevel TraceLevel { get; set; }    //hide base class TraceLevel so we can override it to verbose and control tracing on an instruction level
 
@@ -3055,6 +3065,11 @@ namespace PowerLanguage.Strategy
 			concatenateInstruction(Entry8, ref instructions);
 			concatenateInstruction(Entry9, ref instructions);
 			concatenateInstruction(Entry10, ref instructions);
+			concatenateInstruction(Entry11, ref instructions);
+			concatenateInstruction(Entry12, ref instructions);
+			concatenateInstruction(Entry13, ref instructions);
+			concatenateInstruction(Entry14, ref instructions);
+			concatenateInstruction(Entry15, ref instructions);
 			concatenateInstruction(Exit1, ref instructions);
 			concatenateInstruction(Exit2, ref instructions);
 			concatenateInstruction(Exit3, ref instructions);
@@ -3065,6 +3080,11 @@ namespace PowerLanguage.Strategy
 			concatenateInstruction(Exit8, ref instructions);
 			concatenateInstruction(Exit9, ref instructions);
 			concatenateInstruction(Exit10, ref instructions);
+			concatenateInstruction(Exit11, ref instructions);
+			concatenateInstruction(Exit12, ref instructions);
+			concatenateInstruction(Exit13, ref instructions);
+			concatenateInstruction(Exit14, ref instructions);
+			concatenateInstruction(Exit15, ref instructions);
 			concatenateInstruction(Other, ref instructions);
 			instructions = "[" + instructions + "]";
 			return instructions;
