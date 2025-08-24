@@ -564,6 +564,9 @@ namespace PowerLanguage.Strategy
 				//_TrendLine class sets the _CustomSignal TraceLevel to Verbose to log everything but this method filters based on the instruction TraceLevel parameter
 				if (TraceLevel >= traceLevel) m_studyControl.trace(traceLevel, $"{InstructionTypeName}, {message}");
 			}
+
+			protected abstract void sendOrder(double price = 0.0);
+			protected abstract void cancelOrder();
 		}
 
 		internal abstract class Entry : Instruction
@@ -901,7 +904,7 @@ namespace PowerLanguage.Strategy
 			/// For market orders the order is sent immediately so subclasses needs to make sure they send market
 			/// orders only when required.
 			/// </summary>
-			protected void sendOrder(double price = 0.0)
+			protected override void sendOrder(double price = 0.0)
 			{
 				if (!Active)
 				{
@@ -948,6 +951,53 @@ namespace PowerLanguage.Strategy
 								break;
 						}
 						break;
+				}
+			}
+
+			protected override void cancelOrder()
+			{
+				ITradingProfile profile = m_studyControl.TradeManager.TradingProfiles.First(item => item.Name == m_studyControl.Profile);
+
+				if (profile == null)
+				{
+					trace(ETraceLevel.Error, $"Failed to find trading profile {m_studyControl.Profile} for strategy");
+					return;
+				}
+
+				if (m_orderLeMkt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLeMkt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLeMkt.ID);
+				}
+
+				if (m_orderSeMkt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSeMkt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSeMkt.ID);
+				}
+
+				if (m_orderLePriced != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLePriced.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLePriced.ID);
+				}
+
+				if (m_orderSePriced != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSePriced.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSePriced.ID);
+				}
+
+				if (m_orderLeStpLmt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLeStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLeStpLmt.ID);
+				}
+
+				if (m_orderSeStpLmt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSeStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSeStpLmt.ID);
 				}
 			}
 
@@ -1250,7 +1300,7 @@ namespace PowerLanguage.Strategy
 				return size;
 			}
 
-			protected void sendOrder(double price = 0.0)
+			protected override void sendOrder(double price = 0.0)
 			{
 				if (!Active)
 				{
@@ -1337,7 +1387,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			protected void CancelOrder()
+			protected override void cancelOrder()
 			{
 				ITradingProfile profile = m_studyControl.TradeManager.TradingProfiles.First(item => item.Name == m_studyControl.Profile);
 
@@ -1682,13 +1732,13 @@ namespace PowerLanguage.Strategy
 
 				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime)
 				{
-					CancelOrder();
+					cancelOrder();
 					return;
 				}
 
 				if (m_studyControl.Bars.Time[0] > ValidUntil)
 				{
-					CancelOrder();
+					cancelOrder();
 					return;
 				}
 
@@ -2558,6 +2608,16 @@ namespace PowerLanguage.Strategy
 					else
 						m_orderSxStp.Send(m_studyControl.StrategyInfo.AvgEntryPrice, (int)Math.Abs(m_studyControl.StrategyInfo.MarketPosition));
 				}
+			}
+
+			protected override void sendOrder(double price = 0)
+			{
+				throw new NotImplementedException();
+			}
+
+			protected override void cancelOrder()
+			{
+				throw new NotImplementedException();
 			}
 		}
 
