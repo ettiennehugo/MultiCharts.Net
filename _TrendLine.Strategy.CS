@@ -607,9 +607,11 @@ namespace PowerLanguage.Strategy
 			private DateTime m_previousCloseDateTime;
 			private HashSet<int> m_entryBars;
 			private string m_orderName;
+			private string m_orderPostfix;
 
-			public Entry(_TrendLine control) : base(control)
+			public Entry(_TrendLine control, string orderPostfix) : base(control)
 			{
+				m_orderPostfix = orderPostfix;
 				Direction = EEntryDirection.Long;
 				Strategy = EEntryStrategy.Breakout;
 				m_autoTradeDirection = EEntryDirection.Long;
@@ -775,11 +777,11 @@ namespace PowerLanguage.Strategy
 						{
 							case EEntryDirection.Long:
 								m_orderLeMkt = m_studyControl.AllocateLeMrk();
-								m_orderName = m_orderLeMkt.Info.Name;
+								m_orderName = m_orderLeMkt.Info.Name + m_orderPostfix;
 								break;
 							case EEntryDirection.Short:
 								m_orderSeMkt = m_studyControl.AllocateSeMrk();
-								m_orderName = m_orderSeMkt.Info.Name;
+								m_orderName = m_orderSeMkt.Info.Name + m_orderPostfix;
 								break;
 						}
 						break;
@@ -788,11 +790,11 @@ namespace PowerLanguage.Strategy
 						{
 							case EEntryDirection.Long:
 								m_orderLePriced = m_studyControl.AllocateLeStp();
-								m_orderName = m_orderLePriced.Info.Name;
+								m_orderName = m_orderLePriced.Info.Name + m_orderPostfix;
 								break;
 							case EEntryDirection.Short:
 								m_orderSePriced = m_studyControl.AllocateSeStp();
-								m_orderName = m_orderSePriced.Info.Name;
+								m_orderName = m_orderSePriced.Info.Name + m_orderPostfix;
 								break;
 						}
 						break;
@@ -801,11 +803,11 @@ namespace PowerLanguage.Strategy
 						{
 							case EEntryDirection.Long:
 								m_orderLePriced = m_studyControl.AllocateLeLmt();
-								m_orderName = m_orderLePriced.Info.Name;
+								m_orderName = m_orderLePriced.Info.Name + m_orderPostfix;
 								break;
 							case EEntryDirection.Short:
 								m_orderSePriced = m_studyControl.AllocateSeLmt();
-								m_orderName = m_orderSePriced.Info.Name;
+								m_orderName = m_orderSePriced.Info.Name + m_orderPostfix;
 								break;
 						}
 						break;
@@ -814,11 +816,11 @@ namespace PowerLanguage.Strategy
 						{
 							case EEntryDirection.Long:
 								m_orderLeStpLmt = m_studyControl.AllocateLeStpLmt();
-								m_orderName = m_orderLeStpLmt.Info.Name;
+								m_orderName = m_orderLeStpLmt.Info.Name + m_orderPostfix;
 								break;
 							case EEntryDirection.Short:
 								m_orderSeStpLmt = m_studyControl.AllocateSeStpLmt();
-								m_orderName = m_orderSeStpLmt.Info.Name;
+								m_orderName = m_orderSeStpLmt.Info.Name + m_orderPostfix;
 								break;
 						}
 						break;
@@ -920,16 +922,16 @@ namespace PowerLanguage.Strategy
 						{
 							case EOrderType.Market:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderLeMkt.Info.Name} of size {size}");
-								m_orderLeMkt.Send(size);
+								m_orderLeMkt.Send(OrderName, size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderLePriced.Info.Name} of size {size} at price {price}");
-								m_orderLePriced.Send(price, size);
+								m_orderLePriced.Send(OrderName, price, size);
 								break;
 							case EOrderType.StopLimit:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderLeStpLmt.Info.Name} of size {size} at price {price}");
-								m_orderLeStpLmt.Send(price, price, size);
+								m_orderLeStpLmt.Send(OrderName, price, price, size);
 								break;
 						}
 						break;
@@ -938,16 +940,16 @@ namespace PowerLanguage.Strategy
 						{
 							case EOrderType.Market:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderSeMkt.Info.Name} of size {size}");
-								m_orderSeMkt.Send(size);
+								m_orderSeMkt.Send(OrderName, size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderSePriced.Info.Name} of size {size} at price {price}");
-								m_orderSePriced.Send(price, size);
+								m_orderSePriced.Send(OrderName, price, size);
 								break;
 							case EOrderType.StopLimit:
 								trace(ETraceLevel.Verbose, $"Sending {m_orderSeStpLmt.Info.Name} of size {size} at price {price}");
-								m_orderSeStpLmt.Send(price, price, size);
+								m_orderSeStpLmt.Send(OrderName, price, price, size);
 								break;
 						}
 						break;
@@ -1104,16 +1106,16 @@ namespace PowerLanguage.Strategy
 				{
 					if (m_studyControl.PositionSide > 0)
 					{
-						if (m_orderLxMkt != null) return m_orderLxMkt.Info.Name;
-						if (m_orderLxPriced != null) return m_orderLxPriced.Info.Name;
-						if (m_orderLxStpLmt != null) return m_orderLxStpLmt.Info.Name;
+						if (m_orderLxMkt != null) return m_orderLxMkt.Info.Name + m_orderPostfix;
+						if (m_orderLxPriced != null) return m_orderLxPriced.Info.Name + m_orderPostfix;
+						if (m_orderLxStpLmt != null) return m_orderLxStpLmt.Info.Name + m_orderPostfix;
 					}
 
 					if (m_studyControl.PositionSide < 0)
 					{
-						if (m_orderSxMkt != null) return m_orderSxMkt.Info.Name;
-						if (m_orderSxPriced != null) return m_orderSxPriced.Info.Name;
-						if (m_orderSxStpLmt != null) return m_orderSxStpLmt.Info.Name;
+						if (m_orderSxMkt != null) return m_orderSxMkt.Info.Name + m_orderPostfix;
+						if (m_orderSxPriced != null) return m_orderSxPriced.Info.Name + m_orderPostfix;
+						if (m_orderSxStpLmt != null) return m_orderSxStpLmt.Info.Name + m_orderPostfix;
 					}
 
 					trace(ETraceLevel.Error, $"Failed to determine exit order name for exit id {Id}");
@@ -1136,8 +1138,9 @@ namespace PowerLanguage.Strategy
 			private bool m_previousBarPositionWasLongShort;
 			private DateTime m_previousCloseDateTime;
 			protected Entry m_entry;
+			private string m_orderPostfix;
 
-			public Exit(_TrendLine control) : base(control)
+			public Exit(_TrendLine control, string orderPostfix) : base(control)
 			{
 				OrderType = EOrderType.Stop;
 				ExitPercent = 1.0;
@@ -1147,6 +1150,7 @@ namespace PowerLanguage.Strategy
 				m_previousBarPositionWasLongShort = false;
 				m_previousCloseDateTime = DateTime.MinValue;
 				m_entry = null;
+				m_orderPostfix = orderPostfix;
 			}
 
 			public override bool Parse(JProperty property)
@@ -1316,9 +1320,9 @@ namespace PowerLanguage.Strategy
 						case EOrderType.Market:
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxMkt.Info.Name} for {size} contracts");
 							if (m_entry != null)
-								m_orderLxMkt.SendFromEntry(size, m_entry.OrderName);
+								m_orderLxMkt.SendFromEntry(OrderName, size, m_entry.OrderName);
 							else
-								m_orderLxMkt.Send(size);
+								m_orderLxMkt.Send(OrderName, size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
@@ -1329,9 +1333,9 @@ namespace PowerLanguage.Strategy
 							}
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxPriced.Info.Name} for {size} contracts at {price}");
 							if (m_entry != null)
-								m_orderLxPriced.SendFromEntry(price, size, m_entry.OrderName);
+								m_orderLxPriced.SendFromEntry(OrderName, price, size, m_entry.OrderName);
 							else
-								m_orderLxPriced.Send(price, size);
+								m_orderLxPriced.Send(OrderName, price, size);
 							break;
 						case EOrderType.StopLimit:
 							if (price == 0.0)
@@ -1341,9 +1345,9 @@ namespace PowerLanguage.Strategy
 							}
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxStpLmt.Info.Name} for {size} contracts at {price}");
 							if (m_entry != null)
-								m_orderLxStpLmt.SendFromEntry(price, price, size, m_entry.OrderName);
+								m_orderLxStpLmt.SendFromEntry(OrderName, price, price, size, m_entry.OrderName);
 							else
-								m_orderLxStpLmt.Send(price, price, size);
+								m_orderLxStpLmt.Send(OrderName, price, price, size);
 							break;
 					}
 				}
@@ -1354,9 +1358,9 @@ namespace PowerLanguage.Strategy
 						case EOrderType.Market:
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxMkt.Info.Name} for {size} contracts");
 							if (m_entry != null)
-								m_orderSxMkt.SendFromEntry(size, m_entry.OrderName);
+								m_orderSxMkt.SendFromEntry(OrderName, size, m_entry.OrderName);
 							else
-								m_orderSxMkt.Send(size);
+								m_orderSxMkt.Send(OrderName, size);
 							break;
 						case EOrderType.Stop:
 						case EOrderType.Limit:
@@ -1367,9 +1371,9 @@ namespace PowerLanguage.Strategy
 							}
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxPriced.Info.Name} for {size} contracts at {price}");
 							if (m_entry != null)
-								m_orderSxPriced.SendFromEntry(price, size, m_entry.OrderName);
+								m_orderSxPriced.SendFromEntry(OrderName, price, size, m_entry.OrderName);
 							else
-								m_orderSxPriced.Send(price, size);
+								m_orderSxPriced.Send(OrderName, price, size);
 							break;
 						case EOrderType.StopLimit:
 							if (price == 0.0)
@@ -1379,9 +1383,9 @@ namespace PowerLanguage.Strategy
 							}
 							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxStpLmt.Info.Name} for {size} contracts at {price}");
 							if (m_entry != null)
-								m_orderSxStpLmt.SendFromEntry(price, price, size, m_entry.OrderName);
+								m_orderSxStpLmt.SendFromEntry(OrderName, price, price, size, m_entry.OrderName);
 							else
-								m_orderSxStpLmt.Send(price, price, size);
+								m_orderSxStpLmt.Send(OrderName, price, price, size);
 							break;
 					}
 				}
@@ -1470,7 +1474,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		internal abstract class ExitPriced : Exit
 		{
-			public ExitPriced(_TrendLine control) : base(control) { }
+			public ExitPriced(_TrendLine control, string orderPostfix) : base(control, orderPostfix) { }
 
 			public override Tuple<bool, string> IsValid()
 			{
@@ -1500,7 +1504,7 @@ namespace PowerLanguage.Strategy
 			public double LineEndPrice { get; set; }
 			private ITrendLineObject m_line;
 
-			public EntryLine(_TrendLine control) : base(control)
+			public EntryLine(_TrendLine control) : base(control,"EnL")
 			{
 				LineId = -1;
 				LineStartTime = DateTime.MinValue;
@@ -1672,7 +1676,7 @@ namespace PowerLanguage.Strategy
 			public double LineEndPrice { get; set; }
 			private ITrendLineObject m_line;
 
-			public ExitLine(_TrendLine control) : base(control)
+			public ExitLine(_TrendLine control) : base(control,"ExL")
 			{
 				Criteria = EEntryExitCriteria.Close;
 				LineStartTime = DateTime.MinValue;
@@ -1769,7 +1773,7 @@ namespace PowerLanguage.Strategy
 			protected PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
 			protected IInstrument m_instrument;
 
-			public ExitMovingAverage(_TrendLine control) : base(control)
+			public ExitMovingAverage(_TrendLine control, string orderPostfix = "EMA") : base(control,orderPostfix)
 			{
 				MovingAverageType = EMovingAverageType.Simple;
 				Criteria = EEntryExitCriteria.Close;
@@ -1867,7 +1871,7 @@ namespace PowerLanguage.Strategy
 			public EUseFill UseFill { get; set; }
 			public EDaysCountStrategy DayCountStrategy { get; set; }
 
-			public ExitOverextension(_TrendLine control) : base(control)
+			public ExitOverextension(_TrendLine control) : base(control,"EOE")
 			{
 				Percent = 0.0;
 				OrderType = EOrderType.Limit;
@@ -1932,7 +1936,7 @@ namespace PowerLanguage.Strategy
 			public double LossPrice { get; set; }     //loss price above/below the entry price to exit
 			public double Price { get; set; }         //explicit price to exit at (does not take into account entry price)
 
-			public ExitStopLoss(_TrendLine control) : base(control)
+			public ExitStopLoss(_TrendLine control) : base(control,"ESL")
 			{
 				LossPercent = -1.0;
 				LossPrice = -1.0;
@@ -2033,7 +2037,7 @@ namespace PowerLanguage.Strategy
 
 			protected bool m_exitOrderFilled;
 
-			public ExitProfit(_TrendLine control) : base(control)
+			public ExitProfit(_TrendLine control) : base(control,"EPT")
 			{
 				ProfitPercent = -1.0;
 				ProfitPrice = -1.0;
@@ -2184,7 +2188,7 @@ namespace PowerLanguage.Strategy
 
 			private bool m_exitOrderFilled;
 
-			public ExitDays(_TrendLine control) : base(control)
+			public ExitDays(_TrendLine control) : base(control,"ED")
 			{
 				OrderType = EOrderType.Market;
 				DayCountStrategy = EDaysCountStrategy.TradingDays;
@@ -2294,7 +2298,7 @@ namespace PowerLanguage.Strategy
 			public int Length { get; set; }
 			private double m_stopLossPrice;
 
-			public ExitLowHigh(_TrendLine control) : base(control)
+			public ExitLowHigh(_TrendLine control) : base(control,"ELH")
 			{
 				BufferPrice = 0.0;
 			}
@@ -2401,7 +2405,7 @@ namespace PowerLanguage.Strategy
 			private PowerLanguage.Function._ATR m_atr;
 			private bool m_active;
 
-			public ExitTrailingStop(_TrendLine control) : base(control)
+			public ExitTrailingStop(_TrendLine control) : base(control,"ETS")
 			{
 				Criteria = EEntryExitCriteria.Close;
 				ActivationProfitPercent = 0.0;
