@@ -2256,6 +2256,25 @@ namespace PowerLanguage.Strategy
 			{
 				return m_stopLossPrice;
 			}
+
+			/// <summary>
+			/// For low/high entry associated with an EntryLine instruction only make the low/high work on the exact timeframe of the
+			/// entry line, this will enable us to use low/high exits for the entry day in conjunction with other exits that would manage
+			/// the trade over longer timeframes, e.g. days and weeks.
+			/// </summary>
+			public override bool Active
+			{
+				get
+				{
+					if (!base.Active) return false;
+
+					if (m_entry != null && m_entry is EntryLine entryLine &&
+							(m_studyControl.Bars.Time[0] < entryLine.LineStartTime || m_studyControl.Bars.Time[0] > entryLine.LineEndTime))
+						return false;	//price move is no longer in the range of the specific entry line, disable associated high-low exit
+
+					return true;
+				}
+			}
 		}
 
 		internal class ExitTrailingStop : ExitPriced
