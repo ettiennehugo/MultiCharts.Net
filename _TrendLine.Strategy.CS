@@ -4,6 +4,8 @@ using System.Linq;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
+using PowerLanguage.TradeManager;
+using PowerLanguage.Function;
 
 namespace PowerLanguage.Strategy
 {
@@ -1335,6 +1337,53 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			protected void CancelOrder()
+			{
+				ITradingProfile profile = m_studyControl.TradeManager.TradingProfiles.First(item => item.Name == m_studyControl.Profile);
+
+				if (profile == null)
+				{
+					trace(ETraceLevel.Error, $"Failed to find trading profile {m_studyControl.Profile} for strategy");
+					return;
+				}
+
+				if (m_orderLxMkt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxMkt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLxMkt.ID);
+				}
+
+				if (m_orderSxMkt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxMkt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSxMkt.ID);
+				}
+
+				if (m_orderLxPriced != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxPriced.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLxPriced.ID);
+				}
+
+				if (m_orderSxPriced != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxPriced.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSxPriced.ID);
+				}
+
+				if (m_orderLxStpLmt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderLxStpLmt.ID);
+				}
+
+				if (m_orderSxStpLmt != null)
+				{
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					profile.CancelOrder(m_orderSxStpLmt.ID);
+				}
+			}
+
 			protected int calendarDayCount(DateTime entryDate, DateTime currentDate)
 			{
 				TimeSpan days = currentDate.Date - entryDate.Date;
@@ -1629,8 +1678,20 @@ namespace PowerLanguage.Strategy
 
 				if (m_studyControl.PositionSide == 0) return;
 				if (m_studyControl.Bars.CurrentBar < 2) return;
-				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
-				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+				if (m_studyControl.Environment.CalcReason != CalculationReason.Default) return;
+
+				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime)
+				{
+					CancelOrder();
+					return;
+				}
+
+				if (m_studyControl.Bars.Time[0] > ValidUntil)
+				{
+					CancelOrder();
+					return;
+				}
+
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
 				sendOrder(m_line.PriceValue(m_studyControl.Bars.Time[0]));
 			}
