@@ -301,12 +301,6 @@ namespace PowerLanguage.Strategy
 			SuperSmoother,
 		};
 
-		public enum EDaysCountStrategy
-		{
-			CalendarDays,
-			TradingDays
-		};
-
 		internal abstract class Instruction
 		{
 			public _TrendLine m_studyControl;
@@ -608,10 +602,12 @@ namespace PowerLanguage.Strategy
 			private HashSet<int> m_entryBars;
 			private string m_orderName;
 			private string m_orderPostfix;
+			private bool m_idSupplied;
 
 			public Entry(_TrendLine control, string orderPostfix) : base(control)
 			{
 				m_orderPostfix = orderPostfix;
+				m_idSupplied = false;
 				Direction = EEntryDirection.Long;
 				Strategy = EEntryStrategy.Breakout;
 				m_autoTradeDirection = EEntryDirection.Long;
@@ -643,6 +639,7 @@ namespace PowerLanguage.Strategy
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
+				if (name == "id") m_idSupplied = true;
 				if (name == "direction") { Direction = property.Value.ToObject<EEntryDirection>(); return true; }
 				if (name == "strategy") { Strategy = property.Value.ToObject<EEntryStrategy>(); return true; }
 				if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); return true; }
@@ -768,6 +765,9 @@ namespace PowerLanguage.Strategy
 					//NOTE: Below is correct since the entry volume is we always want to use the volume of the instrument being traded.
 					m_volumePercentile.Instrument = m_studyControl.Bars;
 				}
+
+				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
+				if (m_idSupplied) m_orderPostfix = Id;
 
 				//allocate orders
 				switch (OrderType)
@@ -1139,6 +1139,7 @@ namespace PowerLanguage.Strategy
 			private DateTime m_previousCloseDateTime;
 			protected Entry m_entry;
 			private string m_orderPostfix;
+			private bool m_idSupplied;
 
 			public Exit(_TrendLine control, string orderPostfix) : base(control)
 			{
@@ -1151,11 +1152,13 @@ namespace PowerLanguage.Strategy
 				m_previousCloseDateTime = DateTime.MinValue;
 				m_entry = null;
 				m_orderPostfix = orderPostfix;
+				m_idSupplied = false;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
+				if (name == "id") m_idSupplied = true;
 				if (name == "ordertype") { OrderType = property.Value.ToObject<EOrderType>(); return true; }
 				if (name == "exitpercent") { ExitPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
@@ -1204,6 +1207,9 @@ namespace PowerLanguage.Strategy
 				m_orderSxPriced = null;
 				m_orderLxStpLmt = null;
 				m_orderSxStpLmt = null;
+
+				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
+				if (m_idSupplied) m_orderPostfix = Id;
 
 				//try to find the associated entry instruction and allocate the order required
 				if (EntryId != string.Empty)
@@ -1504,7 +1510,7 @@ namespace PowerLanguage.Strategy
 			public double LineEndPrice { get; set; }
 			private ITrendLineObject m_line;
 
-			public EntryLine(_TrendLine control) : base(control,"EnL")
+			public EntryLine(_TrendLine control) : base(control, "EnL")
 			{
 				LineId = -1;
 				LineStartTime = DateTime.MinValue;
@@ -1676,7 +1682,7 @@ namespace PowerLanguage.Strategy
 			public double LineEndPrice { get; set; }
 			private ITrendLineObject m_line;
 
-			public ExitLine(_TrendLine control) : base(control,"ExL")
+			public ExitLine(_TrendLine control) : base(control, "ExL")
 			{
 				Criteria = EEntryExitCriteria.Close;
 				LineStartTime = DateTime.MinValue;
@@ -1762,7 +1768,7 @@ namespace PowerLanguage.Strategy
 			protected PowerLanguage.Function._SuperSmoother m_averageSuperSmoother;
 			protected IInstrument m_instrument;
 
-			public ExitMovingAverage(_TrendLine control, string orderPostfix = "EMA") : base(control,orderPostfix)
+			public ExitMovingAverage(_TrendLine control, string orderPostfix = "EMA") : base(control, orderPostfix)
 			{
 				MovingAverageType = EMovingAverageType.Simple;
 				Criteria = EEntryExitCriteria.Close;
@@ -1856,24 +1862,20 @@ namespace PowerLanguage.Strategy
 		internal class ExitOverextension : ExitMovingAverage
 		{
 			public double Percent { get; set; }
-			public int DisableDays { get; set; }
-			public EUseFill UseFill { get; set; }
-			public EDaysCountStrategy DayCountStrategy { get; set; }
+			public DateTime ActivationDateTime { get; set; }
 
-			public ExitOverextension(_TrendLine control) : base(control,"EOE")
+			public ExitOverextension(_TrendLine control) : base(control, "EOE")
 			{
 				Percent = 0.0;
 				OrderType = EOrderType.Limit;
-				DayCountStrategy = EDaysCountStrategy.TradingDays;
-				UseFill = EUseFill.Last;
+				ActivationDateTime = DateTime.MaxValue;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
 				if (name == "percent") { Percent = property.Value.ToObject<double>(); return true; }
-				if (name == "disabledays") { DisableDays = property.Value.ToObject<int>(); return true; }
-				if (name == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
+				if (name == "activationdatetime") { ActivationDateTime = property.Value.ToObject<DateTime>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -1881,7 +1883,6 @@ namespace PowerLanguage.Strategy
 			{
 				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Market/stop exit not supported, requires limit type orders");
 				if (Percent <= 0.0 || Percent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - Percent must be between 0 and 1");
-				if (DisableDays < 0) return Tuple.Create(false, $"{InstructionTypeName} - DisableDays must be greater than or equal to 0");
 				return base.IsValid();
 			}
 
@@ -1890,22 +1891,8 @@ namespace PowerLanguage.Strategy
 				get
 				{
 					if (!base.Active) return false;
-
-					if (DisableDays == 0) return true;
-
-					DateTime entryDate = m_studyControl.EntryTime(0, UseFill);
-					int daysSinceEntry = 0;
-					switch (DayCountStrategy)
-					{
-						case EDaysCountStrategy.CalendarDays:
-							daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
-							break;
-						case EDaysCountStrategy.TradingDays:
-							daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
-							break;
-					}
-
-					return daysSinceEntry >= DisableDays;
+					if (m_studyControl.Bars.Time[0] < ActivationDateTime) return false;
+					return true;
 				}
 			}
 
@@ -1925,7 +1912,7 @@ namespace PowerLanguage.Strategy
 			public double LossPrice { get; set; }     //loss price above/below the entry price to exit
 			public double Price { get; set; }         //explicit price to exit at (does not take into account entry price)
 
-			public ExitStopLoss(_TrendLine control) : base(control,"ESL")
+			public ExitStopLoss(_TrendLine control) : base(control, "ESL")
 			{
 				LossPercent = -1.0;
 				LossPrice = -1.0;
@@ -2026,7 +2013,7 @@ namespace PowerLanguage.Strategy
 
 			protected bool m_exitOrderFilled;
 
-			public ExitProfit(_TrendLine control) : base(control,"EPT")
+			public ExitProfit(_TrendLine control) : base(control, "EPT")
 			{
 				ProfitPercent = -1.0;
 				ProfitPrice = -1.0;
@@ -2167,38 +2154,31 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Exit at the market close after a certain number of days.
+		/// Exit at the market close after the given date/time.
 		/// </summary>
-		internal class ExitDays : Exit
+		internal class ExitDateTime : Exit
 		{
-			public int Count { get; set; }
-			public EUseFill UseFill { get; set; }
-			public EDaysCountStrategy DayCountStrategy { get; set; }
+			public DateTime DateTime { get; set; }
 
 			private bool m_exitOrderFilled;
 
-			public ExitDays(_TrendLine control) : base(control,"ED")
+			public ExitDateTime(_TrendLine control) : base(control, "ED")
 			{
 				OrderType = EOrderType.Market;
-				DayCountStrategy = EDaysCountStrategy.TradingDays;
-				UseFill = EUseFill.Last;
+				DateTime = DateTime.MaxValue;
 				m_exitOrderFilled = false;
-				Count = 1;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
-				if (name == "count") { Count = property.Value.ToObject<int>(); return true; }
-				if (name == "daycountstrategy") { DayCountStrategy = property.Value.ToObject<EDaysCountStrategy>(); return true; }
-				if (name == "usefill") { UseFill = property.Value.ToObject<EUseFill>(); return true; }
+				if (name == "datetime") { DateTime = property.Value.ToObject<DateTime>(); return true; }
 				return base.Parse(property);
 			}
 
 			public override Tuple<bool, string> IsValid()
 			{
 				if (OrderType != EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Exit only supports market orders");
-				if (Count <= 0) return Tuple.Create(false, $"{InstructionTypeName} - Count must be larger than 0");
 				return base.IsValid();
 			}
 
@@ -2235,28 +2215,11 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case CalculationReason.Default:
-						DateTime entryDate = m_studyControl.EntryTime(0, UseFill);
-
-						switch (DayCountStrategy)
+						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Time[0] >= DateTime)
 						{
-							case EDaysCountStrategy.CalendarDays:
-								int daysSinceEntry = calendarDayCount(entryDate, m_studyControl.Bars.Time[0]);
-								if (daysSinceEntry >= Count && !m_exitOrderFilled)
-								{
-									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {DayCountStrategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
-									sendOrder();
-								}
-								break;
-							case EDaysCountStrategy.TradingDays:
-								daysSinceEntry = tradingDayCount(entryDate, m_studyControl.Bars.Time[0]);
-								if (daysSinceEntry >= Count && !m_exitOrderFilled)
-								{
-									trace(ETraceLevel.Verbose, $"entryDate {entryDate} - currentDateTime {m_studyControl.Bars.Time[0]} - Count {Count} - Strategy {DayCountStrategy} - DaysSinceEntry {daysSinceEntry} - exitOrderFilled {m_exitOrderFilled}");
-									sendOrder();
-								}
-								break;
+							trace(ETraceLevel.Verbose, $"currentDateTime {m_studyControl.Bars.Time[0]} - DateTime {DateTime} - exitOrderFilled {m_exitOrderFilled}");
+							sendOrder();
 						}
-
 						break;
 				}
 			}
@@ -2287,7 +2250,7 @@ namespace PowerLanguage.Strategy
 			public int Length { get; set; }
 			private double m_stopLossPrice;
 
-			public ExitLowHigh(_TrendLine control) : base(control,"ELH")
+			public ExitLowHigh(_TrendLine control) : base(control, "ELH")
 			{
 				BufferPrice = 0.0;
 			}
@@ -2374,7 +2337,7 @@ namespace PowerLanguage.Strategy
 
 					if (m_entry != null && m_entry is EntryLine entryLine &&
 							(m_studyControl.Bars.Time[0] < entryLine.LineStartTime || m_studyControl.Bars.Time[0] > entryLine.LineEndTime))
-						return false;	//price move is no longer in the range of the specific entry line, disable associated high-low exit
+						return false; //price move is no longer in the range of the specific entry line, disable associated high-low exit
 
 					return true;
 				}
@@ -2394,7 +2357,7 @@ namespace PowerLanguage.Strategy
 			private PowerLanguage.Function._ATR m_atr;
 			private bool m_active;
 
-			public ExitTrailingStop(_TrendLine control) : base(control,"ETS")
+			public ExitTrailingStop(_TrendLine control) : base(control, "ETS")
 			{
 				Criteria = EEntryExitCriteria.Close;
 				ActivationProfitPercent = 0.0;
@@ -2627,7 +2590,7 @@ namespace PowerLanguage.Strategy
 					{ "exitoverextension", control => new _TrendLine.ExitOverextension(control) },
 					{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
 					{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
-					{ "exitdays", control => new _TrendLine.ExitDays(control) },
+					{ "exitdays", control => new _TrendLine.ExitDateTime(control) },
 					{ "exitlowhigh", control => new _TrendLine.ExitLowHigh(control) },
 					{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
 					{ "exitbreakeven", control => new _TrendLine.ExitBreakeven(control) },
