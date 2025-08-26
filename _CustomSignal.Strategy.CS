@@ -368,8 +368,18 @@ namespace PowerLanguage.Strategy
 		{
 			int result = 0;
 			if (risk == 0.0d) return result;
-			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
-			result = (int)Math.Truncate(positionCash / risk);
+
+			double positionCash = 0.0;
+			try
+			{
+				positionCash = equityAvailable(maxRiskEquityPerPosPercent);
+				result = (int)Math.Truncate(positionCash / risk);
+			}
+			catch (Exception e)
+			{
+				trace(ETraceLevel.Error, $"Exception raised computing risk based position size risk {risk} positionCash {positionCash} - message {e.Message}");
+			}
+
 			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
 			return result;
 		}
