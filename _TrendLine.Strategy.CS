@@ -2590,7 +2590,7 @@ namespace PowerLanguage.Strategy
 					{ "exitoverextension", control => new _TrendLine.ExitOverextension(control) },
 					{ "exitstoploss", control => new _TrendLine.ExitStopLoss(control) },
 					{ "exitprofit", control => new _TrendLine.ExitProfit(control) },
-					{ "exitdays", control => new _TrendLine.ExitDateTime(control) },
+					{ "exitdatetime", control => new _TrendLine.ExitDateTime(control) },
 					{ "exitlowhigh", control => new _TrendLine.ExitLowHigh(control) },
 					{ "exittrailingstop", control => new _TrendLine.ExitTrailingStop(control) },
 					{ "exitbreakeven", control => new _TrendLine.ExitBreakeven(control) },
