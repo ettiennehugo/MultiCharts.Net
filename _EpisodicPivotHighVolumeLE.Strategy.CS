@@ -35,7 +35,7 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.3; //per default don't enter positions larger than 30% of available equity
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.01;    //use 1% of equity for risk based entry
 		public const double DEFAULT_REQUIRED_CLOSE_PERCENTILE = 0.75;
-		public const double DEFAULT_REQUIRED_VOLUME_PERCENTILE = 0.9;
+		public const double DEFAULT_REQUIRED_VOLUME_PERCENTILE = 0.8;
 		public const int DEFAULT_VOLUME_LENGTH = 20;        //length of the volume for the entry size
 		public const int DEFAULT_BARS_ABOVE_MARKET_AVERAGE = 5; //number of bars above the market moving average to determine whether to enter a position or not, this is used to determine the general market direction
 		public const int DEFAULT_MARKET_LENGTH = 50;				//length of the market moving average used to determine general market direction
