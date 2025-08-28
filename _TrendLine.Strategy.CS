@@ -767,7 +767,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
-				if (m_idSupplied) m_orderPostfix = Id;
+				if (m_idSupplied) m_orderPostfix = string.ToUpper(Id);
 
 				//allocate orders
 				switch (OrderType)
@@ -1209,7 +1209,7 @@ namespace PowerLanguage.Strategy
 				m_orderSxStpLmt = null;
 
 				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
-				if (m_idSupplied) m_orderPostfix = Id;
+				if (m_idSupplied) m_orderPostfix = string.ToUpper(Id);
 
 				//try to find the associated entry instruction and allocate the order required
 				if (EntryId != string.Empty)
