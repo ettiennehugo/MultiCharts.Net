@@ -109,11 +109,6 @@ namespace PowerLanguage.Strategy
 
 			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string message)
 			{
-				if (m_logWriter == null) {
-					m_output.WriteLine($"Error: Log writer is null, no trace written");
-					return;
-				}
-
 				lock (m_writeLock)
 				{
 					try
