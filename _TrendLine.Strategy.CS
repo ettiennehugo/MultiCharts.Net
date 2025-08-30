@@ -32,7 +32,7 @@ namespace PowerLanguage.Strategy
 	///	• EquityPercent - percent of the account equity available to enter into the position, value between 0.0 and 1.0, e.g. 0.3 would mean that at most 30% of the account equity can be used for the position
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	/// • [optional] Stategy - enum of Breakout, Fade, BreakoutOrFade - determines the strategy to use for the entry, defaults to Breakout
-	///	• [optional] OrderType - enum of Market, Stop, Limit, StopLimit - whether to use a market order, stop order, limit order or stop-limit order for the entry, defaults to Market.
+	///	• [optional] OrderType - enum of Market, Stop, Limit, MarketLimit, StopLimit, MarketStopLimit - whether to use a market order, stop order, limit order or stop-limit order for the entry, defaults to Market.
 	///	• [optional] VolumeDataFeed - integer for the data feed to use to compute the volume, default is 1
 	///	• [optional] VolumeLength - length of the volume moving average, default is 20	
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
@@ -62,7 +62,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Id - identifier for the instruction to reference it in other instructions	
 	///	• [optional] TimeFilters - Set of start time/end time/entry count filters on which the exit should be checked, e.g. 9:30 AM start to 10:00 AM end would look for a single entry (when EntryCount is 1 the default value) the first half hour of the regular stock trading day
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
-	///	• [optional] OrderType - enum Limit, Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop
+	///	• [optional] OrderType - enum Limit, MarketLimit, Stop, StopLimit, MarketStopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop
 	///	• [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	///	• [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
@@ -78,7 +78,7 @@ namespace PowerLanguage.Strategy
 	/// • [optional] Criteria - enum of Close, LowHigh - count the criteria met only if the bar closes over the trend line vs price just moving over the trend line, defaults to Close.
 	/// • [optional] ExitPercent - percent of current position to close or the position established by the EntryId entry, default 1.0 (100%)
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
-	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
+	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop (TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
@@ -282,7 +282,9 @@ namespace PowerLanguage.Strategy
 			Market,
 			Stop,
 			Limit,
-			StopLimit
+			MarketLimit,			//use for after hours trading to latch onto bid/ask using a limit order
+			StopLimit,
+			MarketStopLimit,	//use for after hours trading to activate at a stop price with a limit price that latches onto the bid/ask 
 		};
 
 		/// <summary>
@@ -767,7 +769,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
-				if (m_idSupplied) m_orderPostfix = string.ToUpper(Id);
+				if (m_idSupplied) m_orderPostfix = Id.ToUpper();
 
 				//allocate orders
 				switch (OrderType)
@@ -799,6 +801,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case EOrderType.Limit:
+					case EOrderType.MarketLimit:
 						switch (Direction)
 						{
 							case EEntryDirection.Long:
@@ -812,6 +815,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case EOrderType.StopLimit:
+					case EOrderType.MarketStopLimit:
 						switch (Direction)
 						{
 							case EEntryDirection.Long:
@@ -921,17 +925,42 @@ namespace PowerLanguage.Strategy
 						switch (OrderType)
 						{
 							case EOrderType.Market:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderLeMkt.Info.Name} of size {size}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size}");
 								m_orderLeMkt.Send(OrderName, size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderLePriced.Info.Name} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
 								m_orderLePriced.Send(OrderName, price, size);
 								break;
+							case EOrderType.MarketLimit:
+								double limitPrice = m_studyControl.Bars.StatusLine.Ask;
+								if (limitPrice == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Ask price is zero for long market limit order entry, reverting to closing price");
+									limitPrice = m_studyControl.Bars.Close[0];
+								}
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {limitPrice}");
+								m_orderLePriced.Send(OrderName, limitPrice, size);
+								break;
 							case EOrderType.StopLimit:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderLeStpLmt.Info.Name} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
 								m_orderLeStpLmt.Send(OrderName, price, price, size);
+								break;
+							case EOrderType.MarketStopLimit:
+								if (price == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Price is zero for long market stop-limit order entry");
+									return;
+								}
+								limitPrice = m_studyControl.Bars.StatusLine.Ask;
+								if (limitPrice == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Ask price is zero for long market stop-limit order entry, reverting to closing price");
+									limitPrice = m_studyControl.Bars.Close[0];
+								}
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {limitPrice}");
+								m_orderLeStpLmt.Send(OrderName, price, limitPrice, size);
 								break;
 						}
 						break;
@@ -939,17 +968,42 @@ namespace PowerLanguage.Strategy
 						switch (OrderType)
 						{
 							case EOrderType.Market:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderSeMkt.Info.Name} of size {size}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size}");
 								m_orderSeMkt.Send(OrderName, size);
 								break;
 							case EOrderType.Stop:
 							case EOrderType.Limit:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderSePriced.Info.Name} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
 								m_orderSePriced.Send(OrderName, price, size);
 								break;
+							case EOrderType.MarketLimit:
+								double limitPrice = m_studyControl.Bars.StatusLine.Bid;
+								if (limitPrice == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Bid price is zero for short market stop-limit order entry, reverting to closing price");
+									limitPrice = m_studyControl.Bars.Close[0];
+								}
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {limitPrice}");
+								m_orderSePriced.Send(OrderName, limitPrice, size);
+								break;
 							case EOrderType.StopLimit:
-								trace(ETraceLevel.Verbose, $"Sending {m_orderSeStpLmt.Info.Name} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
 								m_orderSeStpLmt.Send(OrderName, price, price, size);
+								break;
+							case EOrderType.MarketStopLimit:
+								if (price == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Price is zero for short market stop-limit order entry");
+									return;
+								}
+								limitPrice = m_studyControl.Bars.StatusLine.Bid;
+								if (limitPrice == 0.0)
+								{
+									trace(ETraceLevel.Error, $"Bid price is zero for long market stop-limit order entry, reverting to closing price");
+									limitPrice = m_studyControl.Bars.Close[0];
+								}
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {limitPrice}");
+								m_orderSeStpLmt.Send(OrderName, price, limitPrice, size);
 								break;
 						}
 						break;
@@ -1209,7 +1263,7 @@ namespace PowerLanguage.Strategy
 				m_orderSxStpLmt = null;
 
 				//if user gave a unique Id set the order postfix so user can see which instructions raised which orders
-				if (m_idSupplied) m_orderPostfix = string.ToUpper(Id);
+				if (m_idSupplied) m_orderPostfix = Id.ToUpper();
 
 				//try to find the associated entry instruction and allocate the order required
 				if (EntryId != string.Empty)
@@ -1234,10 +1288,12 @@ namespace PowerLanguage.Strategy
 							m_orderSxPriced = m_studyControl.AllocateSxStpFE();
 							break;
 						case EOrderType.Limit:
+						case EOrderType.MarketLimit:
 							m_orderLxPriced = m_studyControl.AllocateLxLmtFE();
 							m_orderSxPriced = m_studyControl.AllocateSxLmtFE();
 							break;
 						case EOrderType.StopLimit:
+						case EOrderType.MarketStopLimit:
 							m_orderLxStpLmt = m_studyControl.AllocateLxStpLmtFE();
 							m_orderSxStpLmt = m_studyControl.AllocateSxStpLmtFE();
 							break;
@@ -1256,10 +1312,12 @@ namespace PowerLanguage.Strategy
 							m_orderSxPriced = m_studyControl.AllocateSxStp();
 							break;
 						case EOrderType.Limit:
+						case EOrderType.MarketLimit:
 							m_orderLxPriced = m_studyControl.AllocateLxLmt();
 							m_orderSxPriced = m_studyControl.AllocateSxLmt();
 							break;
 						case EOrderType.StopLimit:
+						case EOrderType.MarketStopLimit:
 							m_orderLxStpLmt = m_studyControl.AllocateLxStpLmt();
 							m_orderSxStpLmt = m_studyControl.AllocateSxStpLmt();
 							break;
@@ -1324,7 +1382,7 @@ namespace PowerLanguage.Strategy
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxMkt.Info.Name} for {size} contracts");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts");
 							if (m_entry != null)
 								m_orderLxMkt.SendFromEntry(OrderName, size, m_entry.OrderName);
 							else
@@ -1337,11 +1395,24 @@ namespace PowerLanguage.Strategy
 								trace(ETraceLevel.Error, $"Price is zero for long stop/limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxPriced.Info.Name} for {size} contracts at {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {price}");
 							if (m_entry != null)
 								m_orderLxPriced.SendFromEntry(OrderName, price, size, m_entry.OrderName);
 							else
 								m_orderLxPriced.Send(OrderName, price, size);
+							break;
+						case EOrderType.MarketLimit:
+							double limitPrice = m_studyControl.Bars.StatusLine.Bid;
+							if (limitPrice == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Bid price is zero for long market limit order exiting, reverting to closing price");
+								limitPrice = m_studyControl.Bars.Close[0];
+							}
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {limitPrice}");
+							if (m_entry != null)
+								m_orderLxPriced.SendFromEntry(OrderName, limitPrice, size, m_entry.OrderName);
+							else
+								m_orderLxPriced.Send(OrderName, limitPrice, size);
 							break;
 						case EOrderType.StopLimit:
 							if (price == 0.0)
@@ -1349,11 +1420,29 @@ namespace PowerLanguage.Strategy
 								trace(ETraceLevel.Error, $"Price is zero for long stop-limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderLxStpLmt.Info.Name} for {size} contracts at {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {price}");
 							if (m_entry != null)
 								m_orderLxStpLmt.SendFromEntry(OrderName, price, price, size, m_entry.OrderName);
 							else
 								m_orderLxStpLmt.Send(OrderName, price, price, size);
+							break;
+						case EOrderType.MarketStopLimit:
+							if (price == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Price is zero for long stop-limit order exiting");
+								return;
+							}
+							limitPrice = m_studyControl.Bars.StatusLine.Bid;
+							if (limitPrice == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Bid price is zero for long market stop-limit order exiting, reverting to closing price");
+								limitPrice = m_studyControl.Bars.Close[0];
+							}
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts with stop price {price} and limit price {limitPrice}");
+							if (m_entry != null)
+								m_orderLxStpLmt.SendFromEntry(OrderName, price, limitPrice, size, m_entry.OrderName);
+							else
+								m_orderLxStpLmt.Send(OrderName, price, limitPrice, size);
 							break;
 					}
 				}
@@ -1362,7 +1451,7 @@ namespace PowerLanguage.Strategy
 					switch (OrderType)
 					{
 						case EOrderType.Market:
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxMkt.Info.Name} for {size} contracts");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts");
 							if (m_entry != null)
 								m_orderSxMkt.SendFromEntry(OrderName, size, m_entry.OrderName);
 							else
@@ -1375,11 +1464,24 @@ namespace PowerLanguage.Strategy
 								trace(ETraceLevel.Error, $"Price is zero for short stop/limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxPriced.Info.Name} for {size} contracts at {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {price}");
 							if (m_entry != null)
 								m_orderSxPriced.SendFromEntry(OrderName, price, size, m_entry.OrderName);
 							else
 								m_orderSxPriced.Send(OrderName, price, size);
+							break;
+						case EOrderType.MarketLimit:
+							double limitPrice = m_studyControl.Bars.StatusLine.Ask;
+							if (limitPrice == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Ask price is zero for short market limit order exiting, reverting to closing price");
+								limitPrice = m_studyControl.Bars.Close[0];
+							}
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {limitPrice}");
+							if (m_entry != null)
+								m_orderSxPriced.SendFromEntry(OrderName, limitPrice, size, m_entry.OrderName);
+							else
+								m_orderSxPriced.Send(OrderName, limitPrice, size);
 							break;
 						case EOrderType.StopLimit:
 							if (price == 0.0)
@@ -1387,11 +1489,29 @@ namespace PowerLanguage.Strategy
 								trace(ETraceLevel.Error, $"short - price is zero for stop-limit order exiting");
 								return;
 							}
-							trace(ETraceLevel.Verbose, $"Sending exit order {m_orderSxStpLmt.Info.Name} for {size} contracts at {price}");
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts at {price}");
 							if (m_entry != null)
 								m_orderSxStpLmt.SendFromEntry(OrderName, price, price, size, m_entry.OrderName);
 							else
 								m_orderSxStpLmt.Send(OrderName, price, price, size);
+							break;
+						case EOrderType.MarketStopLimit:
+							if (price == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Price is zero for short market stop-limit order exiting");
+								return;
+							}
+							limitPrice = m_studyControl.Bars.StatusLine.Ask;
+							if (limitPrice == 0.0)
+							{
+								trace(ETraceLevel.Error, $"Ask price is zero for short market stop-limit order exiting, reverting to close");
+								limitPrice = m_studyControl.Bars.StatusLine.Ask;
+							}
+							trace(ETraceLevel.Verbose, $"Sending exit order {OrderName} for {size} contracts with stop price {price} and limit price {limitPrice}");
+							if (m_entry != null)
+								m_orderSxStpLmt.SendFromEntry(OrderName, price, limitPrice, size, m_entry.OrderName);
+							else
+								m_orderSxStpLmt.Send(OrderName, price, limitPrice, size);
 							break;
 					}
 				}
@@ -2485,8 +2605,8 @@ namespace PowerLanguage.Strategy
 			{
 				get
 				{
-					if (m_studyControl.PositionSide > 0) return m_orderLxStp.Info.Name;
-					if (m_studyControl.PositionSide < 0) return m_orderSxStp.Info.Name;
+					if (m_studyControl.PositionSide > 0) return m_orderLxStp.Info.Name + m_orderPostfix;
+					if (m_studyControl.PositionSide < 0) return m_orderSxStp.Info.Name + m_orderPostfix;
 					trace(ETraceLevel.Error, "ExitBreakeven - No position found, cannot determine order name");
 					return string.Empty; // No position, no order name
 				}
@@ -2497,17 +2617,22 @@ namespace PowerLanguage.Strategy
 			protected IOrderPriced m_orderLxStp;
 			protected IOrderPriced m_orderSxStp;
 			protected bool m_breakEvenActive;
+			private bool m_idSupplied;
+			private string m_orderPostfix;
 
 			public ExitBreakeven(_TrendLine control) : base(control)
 			{
 				ProfitPercent = 0.0;
 				ProfitAmount = 0.0;
 				m_breakEvenActive = false;
+				m_idSupplied = false;
+				m_orderPostfix = string.Empty;
 			}
 
 			public override bool Parse(JProperty property)
 			{
 				string name = property.Name.ToLower();
+				if (name == "id") m_idSupplied = true;
 				if (name == "profitpercent") { ProfitPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "profitamount") { ProfitAmount = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
@@ -2531,6 +2656,7 @@ namespace PowerLanguage.Strategy
 				m_breakEvenActive = false;
 				m_orderLxStp = m_studyControl.AllocateLxStp();
 				m_orderSxStp = m_studyControl.AllocateSxStp();
+				if (m_idSupplied) m_orderPostfix = Id.ToUpper();
 			}
 
 			public override void CalcBar()
