@@ -302,7 +302,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (account.ID == this.Account)
 				{
-					equityAvailable = account.AvailableToTrade ?? 0;
+					equityAvailable = account.Equity ?? 0;
 					break;
 				}
 			}
@@ -576,6 +576,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (useFill == EUseFill.Last) return this.EntryTime(posAgo);
 
+			//useFill == EUseFill.First
 			DateTime entryDate = DateTime.MaxValue;
 			if (Positions[0].OpenTrades.Count > 0 && Positions[0].ClosedTrades.Count > 0)
 			{
