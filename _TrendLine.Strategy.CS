@@ -848,9 +848,9 @@ namespace PowerLanguage.Strategy
 			protected virtual int entrySize(double price = 0.0)
 			{
 				double equityAvailable = m_studyControl.equityAvailable();
-				double maxPositionEquity = equityAvailable * EquityPercent - currentOpenCostBasis();
+				double positionSizeByEquityPercent = equityAvailable * EquityPercent;
 				double entryPrice = price == 0.0 ? m_studyControl.Bars.Close[0] : price;
-				int equityPercentSize = (int)Math.Truncate(maxPositionEquity / entryPrice);
+				int equityPercentSize = (int)Math.Truncate(positionSizeByEquityPercent / entryPrice);
 				int size = equityPercentSize;
 				double stopLossPrice = 0.0;
 
@@ -859,14 +859,14 @@ namespace PowerLanguage.Strategy
 					stopLossPrice = m_stopLossExit.EstimateExitPrice(Direction, Criteria);
 					if (stopLossPrice != 0.0)
 					{
-						if (maxPositionEquity > 0)
+						if (positionSizeByEquityPercent > 0)
 						{
 							double risk;
 							try
 							{
 								risk = checked(Math.Round(Math.Abs(entryPrice - stopLossPrice), 2));
 								int riskAdjustedSize = equityPercentSize;
-								if (risk != 0.0d) riskAdjustedSize = checked((int)Math.Truncate(maxPositionEquity / risk));
+								if (risk != 0.0d) riskAdjustedSize = checked((int)Math.Truncate(positionSizeByEquityPercent / risk));
 
 								//clip the available equity based on the maximum allowable risk based equity percent if required
 								if (MaxRiskBasedEquityPercent < 1.0)
@@ -1833,7 +1833,6 @@ namespace PowerLanguage.Strategy
 					return Tuple.Create(false, $"{InstructionTypeName} - LineId is not specified and LineStartTime/LineStartPrice and LineEndTime/LineEndPrice is not specified");
 				if (LineStartTime != DateTime.MinValue && LineEndTime != DateTime.MinValue && LineStartTime == LineEndTime)
 					return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime and LineEndTime can not be the same");
-				if (OrderType == EOrderType.Market) return Tuple.Create(false, $"{InstructionTypeName} - Market exit not supported");
 				return base.IsValid();
 			}
 
@@ -1862,7 +1861,11 @@ namespace PowerLanguage.Strategy
 				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
-				sendOrder(m_line.PriceValue(m_studyControl.Bars.Time[0]));
+
+				if (m_studyControl.PositionSide > 0)
+					longExit();
+				else
+					shortExit();
 			}
 
 			public override double EstimateExitPrice(EEntryDirection direction, EEntryExitCriteria criteria)
@@ -1873,6 +1876,52 @@ namespace PowerLanguage.Strategy
 			protected override double exitPrice()
 			{
 				return m_line.PriceValue(m_studyControl.Bars.Time[0]);
+			}
+
+			protected void longExit()
+			{
+				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+
+				switch (OrderType)
+				{
+					case EOrderType.Market:
+					case EOrderType.MarketLimit:
+						//detect cross over of the exit line before sending market exit orders
+						var (recentHighTime, recentHigh) = this.recentHigh(1, LineStartTime);
+						bool exitCriteriaMet = false;
+						if (Criteria == EEntryExitCriteria.Close)
+							exitCriteriaMet = recentHigh > linePrice && m_studyControl.Bars.Close[0] < linePrice;
+						else
+							exitCriteriaMet = recentHigh > linePrice && m_studyControl.Bars.Low[0] < linePrice;
+						if (exitCriteriaMet) sendOrder(linePrice);
+						break;
+					default:
+						sendOrder(linePrice);
+						break;
+				}
+			}
+
+			protected void shortExit()
+			{
+				double linePrice = m_line.PriceValue(m_studyControl.Bars.Time[0]);
+
+				switch (OrderType)
+				{
+					case EOrderType.Market:
+					case EOrderType.MarketLimit:
+						//detect cross over of the exit line before sending market exit orders
+						var (recentLowTime, recentLow) = this.recentLow(1, LineStartTime);
+						bool exitCriteriaMet = false;
+						if (Criteria == EEntryExitCriteria.Close)
+							exitCriteriaMet = recentLow < linePrice && m_studyControl.Bars.Close[0] > linePrice;
+						else
+							exitCriteriaMet = recentLow < linePrice && m_studyControl.Bars.High[0] > linePrice;
+						if (exitCriteriaMet) sendOrder(linePrice);
+						break;
+					default:
+						sendOrder(linePrice);
+						break;
+				}
 			}
 		}
 
