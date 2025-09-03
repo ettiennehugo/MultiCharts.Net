@@ -48,6 +48,7 @@ namespace PowerLanguage.Strategy
 			private static int s_referenceCount = 0;
 
 			private StreamWriter m_logWriter;
+			private string m_logFilePath;
 			private readonly object m_writeLock = new object();
 			private DateTime m_lastFlushTime;
 			private IOutput m_output; //MC main output window
@@ -58,18 +59,18 @@ namespace PowerLanguage.Strategy
 				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss.fff}.log";
 				try
 				{
-					string logPath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
-					m_logWriter = new StreamWriter(logPath, true);
+					m_logFilePath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
+					m_logWriter = new StreamWriter(m_logFilePath, true);
 					m_lastFlushTime = DateTime.Now;
-					m_output.WriteLine($"Log file created {logPath}");
+					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
 				{
 					//fallback to temp directory if AppData is not accessible
-					string tempPath = Path.Combine(Path.GetTempPath(), logFilename);
-					m_logWriter = new StreamWriter(tempPath, true);
+					m_logFilePath = Path.Combine(Path.GetTempPath(), logFilename);
+					m_logWriter = new StreamWriter(m_logFilePath, true);
 					m_lastFlushTime = DateTime.Now;
-					m_output.WriteLine($"Fallback log file created {tempPath} - Exception: {ex.Message}");
+					m_output.WriteLine($"Fallback log file created {m_logFilePath} - Exception: {ex.Message}");
 				}
 
 				m_output = output;
@@ -95,13 +96,10 @@ namespace PowerLanguage.Strategy
 					s_referenceCount--;
 					if (s_referenceCount <= 0)
 					{
-						WriteTrace(ETraceLevel.Verbose, DateTime.Now, this.GetType().Name, "", "LogFileSingleton shutting down");
-						lock (m_writeLock)
-						{
-							m_logWriter?.Close();
-							m_logWriter?.Dispose();
-							m_logWriter = null;
-						}
+						m_output.WriteLine($"Closing log file {m_logFilePath}.");
+						m_logWriter?.Close();
+						m_logWriter?.Dispose();
+						m_logWriter = null;
 						s_instance = null;
 					}
 				}
@@ -203,14 +201,6 @@ namespace PowerLanguage.Strategy
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
-		~_CustomSignal()
-		{
-			if (m_logger != null)
-			{
-				m_logger.ReleaseInstance();
-				m_logger = null;
-			}
-		}
 
 		//methods
 		public void trace(ETraceLevel traceLevel, string message)
@@ -227,6 +217,13 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			m_holidays = new PowerLanguage.Function.USHolidays(this);
 			TraceLevel = ETraceLevel.None;
+		}
+
+		protected override void Destroy()
+		{
+			m_logger?.ReleaseInstance();
+			m_logger = null;
+			base.Destroy();
 		}
 
 		protected override void StartCalc()
