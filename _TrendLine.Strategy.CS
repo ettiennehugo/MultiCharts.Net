@@ -912,11 +912,7 @@ namespace PowerLanguage.Strategy
 			/// </summary>
 			protected override void sendOrder(double price = 0.0)
 			{
-				if (!Active)
-				{
-					trace(ETraceLevel.Verbose, $"Entry id {Id} is not active");
-					return;
-				}
+				if (!Active) return;
 
 				int size = entrySize(price);
 				switch (Direction)
@@ -1370,11 +1366,7 @@ namespace PowerLanguage.Strategy
 
 			protected override void sendOrder(double price = 0.0)
 			{
-				if (!Active)
-				{
-					trace(ETraceLevel.Verbose, $"Exit id {Id} is not active");
-					return;
-				}
+				if (!Active) return;
 
 				int size = exitSize();
 				if (m_studyControl.PositionSide > 0)
