@@ -2376,7 +2376,7 @@ namespace PowerLanguage.Strategy
 						}
 						break;
 					case CalculationReason.Default:
-						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Time[0] >= DateTime && !m_exitOrderFilled)
+						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Time[0] == DateTime && !m_exitOrderFilled)
 						{
 							trace(ETraceLevel.Verbose, $"currentDateTime {m_studyControl.Bars.Time[0]} - DateTime {DateTime} - exitOrderFilled {m_exitOrderFilled}");
 							sendOrder();
