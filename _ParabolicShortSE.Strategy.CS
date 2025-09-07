@@ -150,7 +150,9 @@ namespace PowerLanguage.Strategy
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
+			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
+			size = size < volumeBasedSize ? size : volumeBasedSize;			
 			if (size == 0) return; //do not enter if the size is zero
 
 			trace(ETraceLevel.Info, $"Short entry at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");

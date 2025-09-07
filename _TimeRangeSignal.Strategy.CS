@@ -95,12 +95,18 @@ namespace PowerLanguage.Strategy {
 				if (entrySide == EMarketPositionSide.Long)
 				{
 					m_riskAmountPerContract = m_entryInstrument.Close[0] - m_entryInstrument.Low[0] + _EntryStopLossBufferPrice;
-					m_le.Send(m_entryInstrument.Close[0], volumeBasedPositionSize(m_volumeInstrument, stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.Low[0] - _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent), _VolumeLength, _MaxVolumeBasedPosPercent));
+					int slSize = stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.Low[0] - _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent);
+					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, _MaxVolumeBasedPosPercent);
+					int size = slSize < volumeSize ? slSize : volumeSize;
+					m_le.Send(m_entryInstrument.Close[0], size);
 				}
 				else if (entrySide == EMarketPositionSide.Short)
 				{
 					m_riskAmountPerContract = m_entryInstrument.High[0] - m_entryInstrument.Close[0] + _EntryStopLossBufferPrice;
-					m_se.Send(m_entryInstrument.Close[0], volumeBasedPositionSize(m_volumeInstrument, stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.High[0] + _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent), _VolumeLength, _MaxVolumeBasedPosPercent));
+					int slSize = stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.High[0] + _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent);
+					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, _MaxVolumeBasedPosPercent);
+					int size = slSize < volumeSize ? slSize : volumeSize;					
+					m_se.Send(m_entryInstrument.Close[0], size);
 				}
 			}
 		}
