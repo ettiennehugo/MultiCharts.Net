@@ -407,7 +407,7 @@ namespace PowerLanguage.Strategy
 		/// maximum average volume percentage. The ideal size can be computed with one of the above positionSize overloads and then
 		/// fed into this method to clip the size as a percentage of average volume.
 		/// </summary>
-		protected int volumeBasedPositionSize(IInstrument bars, int size, int volumePeriod, double maxAvgVolumePercent, bool useRoundLots = false)
+		protected int volumeBasedPositionSize(IInstrument bars, int volumePeriod, double maxAvgVolumePercent, bool useRoundLots = false)
 		{
 			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
 
@@ -415,8 +415,7 @@ namespace PowerLanguage.Strategy
 			{
 				try
 				{
-					int clippedSize = (int)checked(Math.Round(bars.Volume.Average(volumePeriod) * maxAvgVolumePercent, 0));
-					result = clippedSize < size ? clippedSize : size;
+					result = (int)checked(Math.Round(bars.Volume.Average(volumePeriod) * maxAvgVolumePercent, 0));
 				}
 				catch (OverflowException)
 				{
