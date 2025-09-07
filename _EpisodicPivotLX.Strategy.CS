@@ -173,7 +173,7 @@ namespace PowerLanguage.Strategy
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
-				m_lxAll.Send();
+				m_lxAll.Send(m_lxAll.Info.Name + "NBH"); // NBH = no break high
 			}
 
 			//NOTE: We need to disable the bullish overextension initially since on an episodic pivot the stock will almost certainly be overextended for the first
@@ -181,13 +181,13 @@ namespace PowerLanguage.Strategy
 			if (m_fastMA[0] != 0.0 && daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > (m_fastMA[0] * m_overextensionPercent) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on bullish overextension.");
-				m_lxAll.Send();
+				m_lxAll.Send(m_lxAll.Info.Name + "OE"); // OE = overextension
 			}
 
 			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && IntradayOpen != 0 && (m_minuteTimeFrame.Close[0] / IntradayOpen) > m_epDayPercentLimit) //c.
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on EP day percentage limit.");
-				m_lxAll.Send();
+				m_lxAll.Send(m_lxAll.Info.Name + "EPL"); // EPL = EP day percent limit
 			}
 
 			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
@@ -200,7 +200,7 @@ namespace PowerLanguage.Strategy
 			if (!Environment.IsRealTimeCalc && m_dailyTimeFrame.LastBarOnChart)
 			{
 				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position on last bar during back testing");
-				m_lxAll.Send();
+				m_lxAll.Send(m_lxAll.Info.Name + "LBOC"); // LBOC = last bar on chart
 			}
 		}
 
