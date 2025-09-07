@@ -111,15 +111,15 @@ namespace PowerLanguage.Strategy
 			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
 
 			//check for enough data and implement time filter
-			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
 			{
 				m_entriesPerTimeFilter = 0;
 				return;
 			}
-			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
 			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
 			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
+			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
+			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
 
 			//check if the stock has gapped up
 			if (m_dailyTimeFrame.High[0] == 0) return; //avoid division by zero
@@ -139,7 +139,9 @@ namespace PowerLanguage.Strategy
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
+			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
+			size = size < volumeBasedSize ? size : volumeBasedSize;			
 			if (size == 0) return; //do not enter if the size is zero
 
 			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry order at Price({m_minuteTimeFrame.Close[0]}), Size({size}), Gap({gap}), ClosePercentile({closePercentile})");
