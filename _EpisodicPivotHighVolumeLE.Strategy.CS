@@ -8,7 +8,6 @@ namespace PowerLanguage.Strategy {
 	/// Data Feeds:
 	///		1 Something like the 5-minute chart for the entry
 	///		2 Daily chart for determining episodic pivot and the moving averages used
-	///		3 Market daily time frame that is used to determine whether to enter a position or not, e.g. SPY, QQQ, IWM, etc.
 	///	Entry Rules:
 	///	• Larger cap stocks(>10B) tend to move sideways to up and can have a delayed reaction, so you might need different trade management for them.
 	///		○ 84% of large cap stocks tend to move sideways to upward for at least 5 days - this strategy just works on the inputs, any partitioning on fundamental factors need to be made in the portfolio manager
@@ -16,8 +15,11 @@ namespace PowerLanguage.Strategy {
 	///
 	///		1. Scan - stocks that are up 30%+ over the last 1 to 3 months.
 	///		2. Big volume move on the daily timeframe at least a specific minimum move on very high volume - this is considered an episodic pivot move with volume catalyst, this could be an earnings call or some other catalyst.
+	///			2.1 Stocks under 10 Billion (nano, micro, small, meduim cap) market cap use an 8% move as the minimum move.
+	///			2.2 Stocks above 10 billion (large and mega) market cap use a 3-5% move as the minimum move.
 	///		3. Best if stock comes out of base without being overextended to the up side
-	///		4. Wait for solid volume bullish bar on the minute time frame that is above the previous day high, this is the entry bar. 
+	///		4. Wait for solid volume bullish bar on the minute time frame that is above the previous day high, this is the entry bar.
+	///			4.1 IMPORTANT - ensure the market is bullish (e.g. above the 50EMA) as well since an episodic pivot would most likely fade quicker under bearish market conditions.
 	///		5. Initial risk is the entry day low.
 	/// Notes:
 	///	• Can use the standard EpisodicPivotLX with this strategy. 
@@ -37,8 +39,6 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_REQUIRED_CLOSE_PERCENTILE = 0.75;
 		public const double DEFAULT_REQUIRED_VOLUME_PERCENTILE = 0.8;
 		public const int DEFAULT_VOLUME_LENGTH = 20;        //length of the volume for the entry size
-		public const int DEFAULT_BARS_ABOVE_MARKET_AVERAGE = 5; //number of bars above the market moving average to determine whether to enter a position or not, this is used to determine the general market direction
-		public const int DEFAULT_MARKET_LENGTH = 50;				//length of the market moving average used to determine general market direction
 		public const double DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT = 0.2; //do not exceed 20% of the average trading volume for the entry size
 
 		//types
@@ -58,8 +58,6 @@ namespace PowerLanguage.Strategy {
 		[Input] public int VolumeLength { get; set; } //length of the volume for the entry size - this is used to determine the entry size based on the average trading volume
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile on the minute timeframe for entry - bar needs to close above this percentile for an entry to be considered, set to zero (0) to disable close percentile filter
 		[Input] public double RequiredVolumePercentile { get; set; } //required volume percentile on the minute timeframe for entry - volume on bar need to be above this percentile for an entry to be considered, set to zero (0) to disable volume percentile filter
-		[Input] public int BarsAboveMarketAverage { get; set; } //number of bars above the market moving average to determine whether to enter a position or not, this is used to determine the general market direction, set to zero (0) to disable market filter
-		[Input] public int MarketAverageLength {  get; set; } //length of the market moving average used to determine general market direction
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
 		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 
@@ -70,12 +68,10 @@ namespace PowerLanguage.Strategy {
 		private DateTime m_previousDayFilter;
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
-		private IInstrument m_marketTimeFrame;
 		private int m_entriesPerTimeFilter;
 		private int m_previousPositionSide;
 		private PowerLanguage.Function._VolumePercentile m_dailyVolumePercentile;
 		private PowerLanguage.Function._VolumePercentile m_minuteVolumePercentile;
-		private PowerLanguage.Function._AverageSimple m_marketMovingAverage;
 
 		//interface methods
 		public _EpisodicPivotHighVolumeLE(object _ctx):base(_ctx){}
@@ -98,14 +94,11 @@ namespace PowerLanguage.Strategy {
 			VolumeLength = DEFAULT_VOLUME_LENGTH;
 			RequiredClosePercentile = DEFAULT_REQUIRED_CLOSE_PERCENTILE;
 			RequiredVolumePercentile = DEFAULT_REQUIRED_VOLUME_PERCENTILE;
-			BarsAboveMarketAverage = DEFAULT_BARS_ABOVE_MARKET_AVERAGE;
-			MarketAverageLength = DEFAULT_MARKET_LENGTH;
 			UseRoundLots = false;
 			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Le", EOrderAction.Buy));
 			m_dailyVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_minuteVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
-			m_marketMovingAverage = new PowerLanguage.Function._AverageSimple(this);
 		}
 
 		protected override void StartCalc() {
@@ -122,60 +115,60 @@ namespace PowerLanguage.Strategy {
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumVolumeBasedPercent <= 0 || MaximumVolumeBasedPercent > 1) throw new Exception("MaximumVolumeBasedPercent must be larger than zero and less than one.");
 			if (VolumeLength < 1) throw new Exception("VolumeLength must be at least 1.");
-			if (BarsAboveMarketAverage < 0) throw new Exception("BarsAboveMarketAverage must be larger than or equal to zero.");
-			if (MarketAverageLength < 1) throw new Exception("MarketAverageLength must be at least 1.");
 			if (RequiredClosePercentile < 0 || RequiredClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
 			if (RequiredVolumePercentile < 0 || RequiredVolumePercentile > 1) throw new Exception("RequiredVolumePercentile must be larger than or equal to zero and less than one.");
 			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero.");
 			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
-			m_marketTimeFrame = BarsOfData(3); //get the market time frame for the stock, e.g. SPY, QQQ, IWM, etc.
 			m_dailyVolumePercentile.Instrument = m_dailyTimeFrame;
 			m_minuteVolumePercentile.Instrument = m_minuteTimeFrame;
-			m_marketMovingAverage.Length = MarketAverageLength;
-			m_marketMovingAverage.Instrument = m_marketTimeFrame;
 		}
+
+		static DateTime testDate = DateTime.Parse("11/29/2023");
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+
+			if (Bars.Time[0].Date == testDate.Date)
+				Output.WriteLine("Test");
+
 			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;	//backtester do not send order filled messages so we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
-			if (!marketBullish()) return;
 
 			//check for enough data and implement strategy rules
-			if (PositionSide != 0) return;
-			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength)) return;
-			if (m_marketTimeFrame.CurrentBar < Math.Max(BarsAboveMarketAverage, MarketAverageLength)) return;
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
 			{
 				m_entriesPerTimeFilter = 0;
 				return;
 			}
-			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
 			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date)
 			{
 				m_entriesPerTimeFilter = 0;
 				m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 			}
+			if (PositionSide != 0) return;
+			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength)) return;
+			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
+			if (m_minuteTimeFrame.Close[0] < m_dailyTimeFrame.High[0]) return;	//only enter if the stock still has momentum from the previous day otherwise you get entries on sideways to down moving stocks
 
 			//check if PREVIOUS DAILY bar met the specific percentage change to be considered an episodic pivot
 			if (m_dailyTimeFrame.Low[1] == 0) return; //avoid division by zero
-			double closeLowDelta = m_dailyTimeFrame.Close[1] - m_dailyTimeFrame.Low[1];
-			double percentageChange = closeLowDelta / m_dailyTimeFrame.Low[1];
+			double percentageChange = (m_dailyTimeFrame.Close[0] / m_dailyTimeFrame.Low[0]) - 1.0;  //on daily index 0 is the previous day's values, we also need to ensure the previous day was a bullish day
+			if (m_dailyTimeFrame.Open[0] > m_dailyTimeFrame.Close[0]) return;	//we only take bullish entries to ensure there are preexisting momentum
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
 
 			//check required volume traded on the PREVIOUS DAILY bar to be considered an episodic pivot
-			if (MinimumDailyVolumePercentile > 0 && m_dailyVolumePercentile[1] < MinimumDailyVolumePercentile) return;
-			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[1] < (m_dailyTimeFrame.Volume.Average(VolumeLength, 1) + AbsoluteAboveAverageVolume)) return;
+			if (MinimumDailyVolumePercentile > 0 && m_dailyVolumePercentile[0] < MinimumDailyVolumePercentile) return;
+			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[0] < (m_dailyTimeFrame.Volume.Average(VolumeLength) + AbsoluteAboveAverageVolume)) return;
 
 			//required volume percentile on minute time frame
 			if (RequiredVolumePercentile > 0 && m_minuteVolumePercentile[0] < RequiredVolumePercentile) return; //ignore stocks that do not meet the volume percentile criteria
 
 			//required close percentile on minute time frame
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
-			closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
+			double closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
 			if (range == 0)
 			{
 				trace(ETraceLevel.Warning, $"{m_minuteTimeFrame.Time[0]} - Range is zero, cannot calculate close percentile - Close {m_minuteTimeFrame.Close[0]} - Low {m_minuteTimeFrame.Low[0]} - High {m_minuteTimeFrame.High[0]}");
@@ -190,7 +183,10 @@ namespace PowerLanguage.Strategy {
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int size = volumeBasedPositionSize(m_dailyTimeFrame, equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize, VolumeLength, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, MaximumVolumeBasedPercent, UseRoundLots);
+			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
+			size = size < volumeBasedSize ? size : volumeBasedSize;
+
 			if (size == 0)
 			{
 				trace(ETraceLevel.Warning, $"{m_minuteTimeFrame.Time[0]} - Position size calculated as zero - EquityBasedSize {equityBasedSize} - RiskBasedSize {riskBasedSize} - VolumeBasedSize {size} - UseRoundLots {UseRoundLots}");
@@ -199,17 +195,6 @@ namespace PowerLanguage.Strategy {
 
 			trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Entry order at Price {m_minuteTimeFrame.Close[0]} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
 			m_le.Send(m_minuteTimeFrame.Close[0], size);
-		}
-
-		//methods
-		/// <summary>
-		/// Require a specific number of bars of the market to be above the moving average to determine whether to enter a position or not.
-		/// </summary>
-		private bool marketBullish()
-		{
-			for (int i = 0; i < BarsAboveMarketAverage; i++)
-				if (m_marketTimeFrame.Close[i] < m_marketMovingAverage[i]) return false; 
-			return true;
 		}
 	}
 }
