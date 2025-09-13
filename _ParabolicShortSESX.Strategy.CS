@@ -14,10 +14,14 @@ namespace PowerLanguage.Strategy {
 	///		Secondary: 15-minute/30-minutes/hourly - used for price action analysis
 	///		Dialy timeframe
 	///	Entry:
-	///	
-	/// 
+	///	 * If EntryStrategy is set to FirstBearishBar the entry is made on the 5-minute bearish bar
+	///	 * If EntryStrategy is set to FirstLowerHigh the entry is made on the 15-minute timeframe when a lower high forms.
+	///	 
 	/// Exit:
-	/// 
+	///  * Initial stop loss is at the high of the day.
+	///  * Trailing stop is placed at every lower high that forms on the 15-minute timeframe.
+	///	 * First exit is when the retracement percentage from the high of the day is reached. 
+	///	 * Complete exit is on the trailing stop - break of the most recent lower high.
 	/// </summary>
 	public class _ParabolicShortSESX : _CustomSignal
 	{
@@ -30,6 +34,7 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.0075; //use 0.75% of equity for risk based entry
 		public const double DEFAULT_CLOSE_PERCENTILE = 0.5; //required close percentile - this is used to determine the entry size based on the average trading volume 
 		public const double DEFAULT_VOLUME_PERCENTILE = 0.5; //required volume percentile - this is used to determine the entry size based on the average trading volume
+		public const int DEFAULT_REENTRY_COUNT = 1;	//reentry count to use if the strategy get stopped out
 		public const int DEFAULT_VOLUME_LENGTH = 20; //length of the volume period to use for the volume based entry size
 		public const double DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT = 0.2; //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
 		public const double DEFAULT_RETRACEMENT_EXIT_PERCENT = 0.5; //exit percentage - this is used to determine the exit percentage based on the entry date
@@ -37,6 +42,12 @@ namespace PowerLanguage.Strategy {
 		public const string DEFAULT_EXIT_TIME = "15:35"; //exit time for the full position
 
 		//types
+		public enum EEntryStrategy
+		{
+			FirstBearishBar,		//enter on the close of the first bearish bar, this will be an early entry with higher risk to be stopped out with a larger trade size since it would be a tight entry from the day high
+			FirstLowerHigh,			//enter on the first lower high that formed, this will be a later entry with lower risk to be stopped out but smaller trade size
+		}
+
 		public enum EExitDaysCountStrategy
 		{
 			CalendarDays,
@@ -46,13 +57,14 @@ namespace PowerLanguage.Strategy {
 		//properties
 		[Input] public string StartTime { get; set; } //start time for the entry
 		[Input] public string EndTime { get; set; } //end time for the entry
+		[Input] public EEntryStrategy EntryStrategy { get; set; }	//entry strategy to use for the short entry
 		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
 		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
 		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
 		[Input] public double ClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public double VolumePercentile { get; set; } //required volume percentile - this is used to determine the entry size based on the average trading volume
-		[Input] public bool AddToPosition { get; set; } //add to position - this will add to the position if the price action analysis returns a lower high
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
+		[Input] public int ReentryCount { get; set; }	//reentry count if the strategy gets stopped out 
 		[Input] public double RetracementExitPercent { get; set; } //exit percentage - this is used to determine the exit percentage based on the entry date
 		[Input] public EExitDaysCountStrategy ExitDaysCountStrategy { get; set; } //exit days count strategy - this is used to determine the exit days count based on the entry date
 		[Input] public int ExitDaysCount { get; set; } //full exit days count - this is used to determine the full exit days count based on the entry date
@@ -77,6 +89,9 @@ namespace PowerLanguage.Strategy {
 		private bool m_retracementExitFilled;
 		private bool m_priceActionChanged;
 		private bool m_lowerHighDetected;
+		private int m_entryCount;
+		private DateTime m_previousDateTime;
+		private int m_previousPositionSide;
 
 		//interface methods
 		public _ParabolicShortSESX(object _ctx) : base(_ctx) { }
@@ -88,13 +103,14 @@ namespace PowerLanguage.Strategy {
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			EndTime = DEFAULT_END_TIME;
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
+			EntryStrategy = EEntryStrategy.FirstBearishBar;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
 			ClosePercentile = DEFAULT_CLOSE_PERCENTILE;
 			VolumePercentile = DEFAULT_VOLUME_PERCENTILE;
-			AddToPosition = false;
 			UseRoundLots = false;
+			ReentryCount = DEFAULT_REENTRY_COUNT;
 			m_volumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Se", EOrderAction.SellShort));
 
@@ -104,9 +120,12 @@ namespace PowerLanguage.Strategy {
 			ExitTime = DEFAULT_EXIT_TIME;
 			m_exitTime = DateTime.ParseExact(DEFAULT_EXIT_TIME, "HH:mm", null);
 			ExitFriday = true;
+			m_entryCount = 0;
+			m_previousPositionSide = 0;
 			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.BuyToCover));
 			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.BuyToCover));
 			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.BuyToCover));
+			m_previousDateTime = DateTime.MinValue;
 		}
 
 		protected override void StartCalc()
@@ -151,19 +170,48 @@ namespace PowerLanguage.Strategy {
 				m_retracementExitFilled = false;
 				m_entryDate = DateTime.MinValue;
 				m_stopLoss = -1;
-				entry();
+				if (EntryStrategy == EEntryStrategy.FirstBearishBar)
+					entryFirstBearishBar();
+				else
+					entryFirstLowerHigh();
 			}
 			else
 				exit();
+
+			if (PositionSide != 0 && m_previousPositionSide == 0) m_entryCount++;
+			m_previousPositionSide = PositionSide;
+			if (m_primaryTimeFrame.Time[0].Date != m_previousDateTime.Date) m_entryCount = 0;
+			m_previousDateTime = m_primaryTimeFrame.Time[0].Date;
 		}
 
 		//methods
-		protected void entry() {
+		protected void entryFirstBearishBar() {
+			if (m_entryCount >= ReentryCount) return;
+			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 3.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 3.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+			if (m_primaryTimeFrame.Open[0] < m_primaryTimeFrame.Close[0]) return; //ignore bullish bars, we only enter on the first bearish bar
+
+			//determine the risk based on the entry bar close and the day high
+			double risk = IntradayHigh - m_primaryTimeFrame.Close[0];
+
+			//determine the entry size based on the available equity, risk and volume
+			int size = entryPositionSize(risk);
+			if (size == 0)
+			{
+				trace(ETraceLevel.Error, $"Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+				return;
+			}
+
+			trace(ETraceLevel.Info, $"Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			m_se.Send(m_primaryTimeFrame.Close[0], size);
+		}
+
+		protected void entryFirstLowerHigh() {
+			if (m_entryCount >= ReentryCount) return;
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to calculate the volume percentile
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 2.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 2.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 3.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 3.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
 
-			if (PositionSide != 0 && !AddToPosition) return; //do not enter if there is already a position
 			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
 			//perform price action analysis on secondary timeframe close 
@@ -209,15 +257,24 @@ namespace PowerLanguage.Strategy {
 			double risk = IntradayHigh - m_primaryTimeFrame.Close[0];
 
 			//determine the entry size based on the available equity, risk and volume
+			int size = entryPositionSize(risk);
+			if (size == 0)
+			{
+				trace(ETraceLevel.Error, $"Short entry on lower high at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+				return;
+			}
+
+			trace(ETraceLevel.Info, $"Short entry on lower high at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			m_se.Send(m_primaryTimeFrame.Close[0], size);
+		}
+
+		protected int entryPositionSize(double risk) {
+			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-			size = size < volumeBasedSize ? size : volumeBasedSize;
-			if (size == 0) return; //do not enter if the size is zero
-
-			trace(ETraceLevel.Info, $"Short entry at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
-			m_se.Send(m_primaryTimeFrame.Close[0], size);
+			return size < volumeBasedSize ? size : volumeBasedSize;
 		}
 
 		protected void exit() {
