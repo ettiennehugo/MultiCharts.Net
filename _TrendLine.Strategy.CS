@@ -256,6 +256,42 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_VOLUME_PERIOD = 20;
 		public const string DEFAULT_COMMENT_DELIMITER = "//";
 
+		/// <summary>
+		/// Default values for entry/exit parameters used commonly for phased entry/exit.
+		/// </summary>
+		public const string DEFAULT_ENTRY1 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL1\",\"LineId\":1,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.3,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL1\",\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY2 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL2\",\"LineId\":2,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.3,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL2\",\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY3 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL3\",\"LineId\":3,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.3,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL3\",\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY4 = "";
+		public const string DEFAULT_ENTRY5 = "";
+		public const string DEFAULT_ENTRY6 = "";
+		public const string DEFAULT_ENTRY7 = "";
+		public const string DEFAULT_ENTRY8 = "";
+		public const string DEFAULT_ENTRY9 = "";
+		public const string DEFAULT_ENTRY10 = "";
+		public const string DEFAULT_ENTRY11 = "";
+		public const string DEFAULT_ENTRY12 = "";
+		public const string DEFAULT_ENTRY13 = "";
+		public const string DEFAULT_ENTRY14 = "";
+		public const string DEFAULT_ENTRY15 = "";
+		public const string DEFAULT_EXIT1 = "{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL1\",\"Length\":0,\"EntryId\":\"EL1\"}";	//using day low/high as default stop loss exit
+		public const string DEFAULT_EXIT2 = "{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL2\",\"Length\":0,\"EntryId\":\"EL2\"}";
+		public const string DEFAULT_EXIT3 = "{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL3\",\"Length\":0,\"EntryId\":\"EL3\"}";
+		public const string DEFAULT_EXIT4 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL1\",\"LineId\":4,\"EntryId\":\"EL1\"}";
+		public const string DEFAULT_EXIT5 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL2\",\"LineId\":4,\"EntryId\":\"EL2\"}";
+		public const string DEFAULT_EXIT6 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL3\",\"LineId\":4,\"EntryId\":\"EL3\"}";
+		public const string DEFAULT_EXIT7 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"PT1\",\"LineId\":5,\"ExitPercent\":0.5,\"OrderType\":\"Limit\"}";	//profit target exits
+		public const string DEFAULT_EXIT8 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"PT2\",\"LineId\":6,\"ExitPercent\":0.25,\"OrderType\":\"Limit\"}";
+		public const string DEFAULT_EXIT9 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"PT3\",\"LineId\":7,\"OrderType\":\"Limit\"}";
+		public const string DEFAULT_EXIT10 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL\",\"LineId\":4,\"OrderType\":\"Stop\"}";	//general trade management instructions
+		public const string DEFAULT_EXIT11 = "//{\"Instruction\":\"ExitMovingAverage\",\"Id\":\"MASL\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":20,\"Criteria\":\"Close\"}";
+		public const string DEFAULT_EXIT12 = "//{\"Instruction\":\"ExitOverextension\",\"Id\":\"OEPT\",\"ActivationDateTime\":\"MM/DD/YYYY\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":10,\"Percent\":0.1}";
+		public const string DEFAULT_EXIT13 = "//{\"Instruction\":\"ExitDateTime\",\"Id\":\"EDT\", \"DateTime\":\"MM/DD/YYYY\",\"ExitPercent\":0.5}";
+		public const string DEFAULT_EXIT14 = "//{\"Instruction\":\"ExitBreakEven\",\"Id\":\"EBE\", \"ProfitPercent\":0.15}";
+		public const string DEFAULT_EXIT15 = "";
+		public const string DEFAULT_OTHER = "";
+
+
 		//types
 		public class TimeFilter
 		{
@@ -2899,6 +2935,7 @@ namespace PowerLanguage.Strategy
 			createOrders();
 			createIndicators();
 			Instructions = new List<Instruction>();
+			setInputDefaults();
 		}
 
 		protected override void StartCalc()
@@ -3241,6 +3278,40 @@ namespace PowerLanguage.Strategy
 
 			for (int i = 0; i < MAX_VOLUME_PERCENTILE; i++)
 				m_volumePercentile.Add(new PowerLanguage.Function._VolumePercentile(this));
+		}
+
+		private void setInputDefaults() {
+			Entry1 = DEFAULT_ENTRY1;			
+			Entry2 = DEFAULT_ENTRY2;
+			Entry3 = DEFAULT_ENTRY3;
+			Entry4 = DEFAULT_ENTRY4;
+			Entry5 = DEFAULT_ENTRY5;
+			Entry6 = DEFAULT_ENTRY6;
+			Entry7 = DEFAULT_ENTRY7;
+			Entry8 = DEFAULT_ENTRY8;
+			Entry9 = DEFAULT_ENTRY9;
+			Entry10 = DEFAULT_ENTRY10;
+			Entry11 = DEFAULT_ENTRY11;
+			Entry12 = DEFAULT_ENTRY12;
+			Entry13 = DEFAULT_ENTRY13;
+			Entry14 = DEFAULT_ENTRY14;
+			Entry15 = DEFAULT_ENTRY15;
+			Exit1 = DEFAULT_EXIT1;
+			Exit2 = DEFAULT_EXIT2;
+			Exit3 = DEFAULT_EXIT3;
+			Exit4 = DEFAULT_EXIT4;
+			Exit5 = DEFAULT_EXIT5;
+			Exit6 = DEFAULT_EXIT6;
+			Exit7 = DEFAULT_EXIT7;
+			Exit8 = DEFAULT_EXIT8;
+			Exit9 = DEFAULT_EXIT9;
+			Exit10 = DEFAULT_EXIT10;
+			Exit11 = DEFAULT_EXIT11;
+			Exit12 = DEFAULT_EXIT12;
+			Exit13 = DEFAULT_EXIT13;
+			Exit14 = DEFAULT_EXIT14;
+			Exit15 = DEFAULT_EXIT15;
+			Other = DEFAULT_OTHER;
 		}
 
 		private void resetOrders()
