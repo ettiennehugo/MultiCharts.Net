@@ -288,6 +288,15 @@ namespace PowerLanguage.Strategy
 		};
 
 		/// <summary>
+		/// Entry add to position specification to determine how entries will be handled if allowed by the time filter.
+		/// </summary>
+		public enum EAddToPosition {
+			NoAdd,		//don't add to the position if already in a position
+			Add,			//add if the time filter still allows another entry
+			Reentry,	//add to position on the first entry on the second entry only enter when the position is flat
+		};
+
+		/// <summary>
 		/// Determines when the entry/exit should execute based on the price crossing the trendline.
 		/// </summary>
 		public enum EEntryExitCriteria
@@ -579,7 +588,7 @@ namespace PowerLanguage.Strategy
 			public double ClosePercentile { get; set; }
 			public double VolumePercentile { get; set; }
 
-			public bool AddToPosition { get; set; }
+			public EAddToPosition AddToPosition { get; set; }
 			public DateTime ValidUntil { get; set; }
 			public string StopLossExitId { get; set; }
 			public double MaxRiskBasedEquityPercent { get; set; }
@@ -619,7 +628,7 @@ namespace PowerLanguage.Strategy
 				VolumeLength = DEFAULT_VOLUME_PERIOD;
 				MaxVolumeBasedPercent = 0.2;
 				Criteria = EEntryExitCriteria.Close;
-				AddToPosition = false;
+				AddToPosition = EAddToPosition.NoAdd;
 				ValidUntil = DateTime.MaxValue;
 				StopLossExitId = string.Empty;
 				m_stopLossExit = null;
@@ -653,7 +662,7 @@ namespace PowerLanguage.Strategy
 				if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
 				if (name == "volumepercentile") { VolumePercentile = property.Value.ToObject<double>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
-				if (name == "addtoposition") { AddToPosition = property.Value.ToObject<bool>(); return true; }
+				if (name == "addtoposition") { AddToPosition = property.Value.ToObject<EAddToPosition>(); return true; }
 				if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
 				if (name == "stoplossexitid") { StopLossExitId = property.Value.ToString().ToLower(); return true; }
 				if (name == "useroundlots") { UseRoundLots = property.Value.ToObject<bool>(); return true; }
@@ -678,8 +687,8 @@ namespace PowerLanguage.Strategy
 			{
 				get
 				{
-					//trivial case when we are not flat and AddToPosition is false
-					if (m_studyControl.PositionSide != 0 && !AddToPosition) return false;
+					//trivial case when we are not flat and AddToPosition should only allow adding to the position when flat
+					if (m_studyControl.PositionSide != 0 && AddToPosition == EAddToPosition.NoAdd) return false;
 
 					//check whether we have an entry time filter that matches
 					bool timeFilterMatch = false;
@@ -688,7 +697,13 @@ namespace PowerLanguage.Strategy
 						if (m_studyControl.Bars.Time[0].TimeOfDay >= timeFilter.StartTime.TimeOfDay && m_studyControl.Bars.Time[0].TimeOfDay <= timeFilter.EndTime.TimeOfDay)
 						{
 							timeFilterFound = true;
-							timeFilterMatch = m_entryCount < timeFilter.Count; //time filter is only valid if the number of entries for the time filter is not exceeded
+
+							if (AddToPosition == EAddToPosition.Reentry)
+								//time filter entries is zero for first entry or time filter entry count is not exceeded and the position is flat so we have a reentry
+								timeFilterMatch = m_entryCount == 0 || (m_entryCount < timeFilter.Count && m_studyControl.PositionSide == 0);
+							else //AddToPostion == EAddToPosition.Add
+								//time filter is only valid if the number of entries for the time filter is not exceeded and will add more to the position
+								timeFilterMatch = m_entryCount < timeFilter.Count;
 							break;
 						}
 
@@ -1521,37 +1536,37 @@ namespace PowerLanguage.Strategy
 
 				if (m_orderLxMkt != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxMkt.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxMkt.Info.Name}/{m_orderLxMkt.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderLxMkt.ID);
 				}
 
 				if (m_orderSxMkt != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxMkt.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxMkt.Info.Name}/{m_orderSxMkt.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderSxMkt.ID);
 				}
 
 				if (m_orderLxPriced != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxPriced.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxPriced.Info.Name}/{m_orderLxPriced.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderLxPriced.ID);
 				}
 
 				if (m_orderSxPriced != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxPriced.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxPriced.Info.Name}/{m_orderSxPriced.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderSxPriced.ID);
 				}
 
 				if (m_orderLxStpLmt != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderLxStpLmt.Info.Name}/{m_orderLxStpLmt.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderLxStpLmt.ID);
 				}
 
 				if (m_orderSxStpLmt != null)
 				{
-					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxStpLmt.ID} on trading profile {m_studyControl.Profile}");
+					trace(ETraceLevel.Verbose, $"Cancelling order {m_orderSxStpLmt.Info.Name}/{m_orderSxStpLmt.ID} on trading profile {m_studyControl.Profile}");
 					profile.CancelOrder(m_orderSxStpLmt.ID);
 				}
 			}
@@ -1678,7 +1693,7 @@ namespace PowerLanguage.Strategy
 			{
 				base.CalcBar();
 				if (m_studyControl.Bars.CurrentBar < 2) return;
-				if (m_studyControl.PositionSide != 0 && !AddToPosition) return;
+				if (m_studyControl.PositionSide != 0 && AddToPosition == EAddToPosition.NoAdd) return;
 				if (Criteria == EEntryExitCriteria.Close && m_studyControl.Bars.Status != EBarState.Close) return;
 				if (m_studyControl.Bars.Time[0] < LineStartTime || m_studyControl.Bars.Time[0] > LineEndTime) return;
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
