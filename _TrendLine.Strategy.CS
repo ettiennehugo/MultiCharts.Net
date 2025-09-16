@@ -647,6 +647,7 @@ namespace PowerLanguage.Strategy
 			private int m_previousOpenLots;
 			private DateTime m_previousCloseDateTime;
 			private HashSet<int> m_entryBars;
+			private HashSet<int> m_exitBars;
 			private string m_orderName;
 			private string m_orderPostfix;
 			private bool m_idSupplied;
@@ -681,6 +682,7 @@ namespace PowerLanguage.Strategy
 				m_previousOpenLots = 0;
 				m_previousCloseDateTime = DateTime.MinValue;
 				m_entryBars = new HashSet<int>();
+				m_exitBars = new HashSet<int>();
 			}
 
 			public override bool Parse(JProperty property)
@@ -735,8 +737,8 @@ namespace PowerLanguage.Strategy
 							timeFilterFound = true;
 
 							if (AddToPosition == EAddToPosition.Reentry)
-								//time filter entries is zero for first entry or time filter entry count is not exceeded and the position is flat so we have a reentry
-								timeFilterMatch = m_entryCount == 0 || (m_entryCount < timeFilter.Count && m_studyControl.PositionSide == 0);
+								//time filter entries left and our last position is no longer open
+								timeFilterMatch = m_entryCount < timeFilter.Count && !IsLastPositionOpen;
 							else //AddToPostion == EAddToPosition.Add
 								//time filter is only valid if the number of entries for the time filter is not exceeded and will add more to the position
 								timeFilterMatch = m_entryCount < timeFilter.Count;
@@ -779,21 +781,28 @@ namespace PowerLanguage.Strategy
 						LastPositionSize = trade.EntryOrder.Contracts;
 						trace(ETraceLevel.Verbose, $"EntryCount change EntryCount {m_entryCount} OrderName {OrderName} Time {trade.EntryOrder.Time} PreviousOpenLots {m_previousOpenLots} OpenLots {m_studyControl.CurrentPosition.OpenLots}");
 					}
+				}
 
-					//update last position open state if entry order is part of the closed trades for the current position
-					if (m_studyControl.CurrentPosition.ClosedTrades.Count > 0 && IsLastPositionOpen)
-					{
-						foreach (var trade in m_studyControl.CurrentPosition.ClosedTrades)
+				//update last position open state if set
+				if (IsLastPositionOpen)
+				{
+					if (m_studyControl.PositionSide == 0)
+						IsLastPositionOpen = false;   //if we're totally flat our last position can be open
+					else
+						//we might be partially open and this specific entry line has been stopped out (that is when phased entries are used)
+						//get deep copy of the closed trades to avoid crash if collection is modified when trades are closed
+						foreach (var trade in m_studyControl.CurrentPosition.ClosedTrades.ToList())
 						{
 							if (trade.EntryOrder.Name != OrderName) continue;
-							if (m_entryBars.Contains(trade.EntryOrder.BarNumber)) continue;
-							m_entryBars.Add(trade.EntryOrder.BarNumber);
+							if (m_exitBars.Contains(trade.ExitOrder.BarNumber)) continue;
+							m_exitBars.Add(trade.ExitOrder.BarNumber);
 							IsLastPositionOpen = false;
 							LastPositionSize = trade.EntryOrder.Contracts;
 							trace(ETraceLevel.Verbose, $"EntryOrder was closed OrderName {OrderName} Time {trade.EntryOrder.Time} PreviousOpenLots {m_previousOpenLots} OpenLots {m_studyControl.CurrentPosition.OpenLots}");
 						}
-					}
 				}
+
+				if (m_studyControl.PositionSide == 0 && m_exitBars.Count > 0) m_exitBars.Clear();
 
 				m_previousOpenLots = m_studyControl.CurrentPosition.OpenLots;
 				m_previousCloseDateTime = m_studyControl.Bars.Time[0];
