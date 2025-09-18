@@ -294,13 +294,18 @@ namespace PowerLanguage.Strategy
 		protected double equityAvailable(double maxCustomRiskEquityPerPosPercent = 0.0d)
 		{
 			double equityAvailable = 0.0d;
+
 			//get equity available from account for trading if we are auto trading
-			foreach (var account in this.TradeManager.TradingData.Accounts.Items)
+			if (Environment.IsAutoTradingMode)
 			{
-				if (account.ID == this.Account)
+				TradeManager.ProcessEvents(); //ensure latest account equity is available
+				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
 				{
-					equityAvailable = account.Equity ?? 0;
-					break;
+					if (account.ID == this.Account)
+					{
+						equityAvailable = account.Equity ?? 0;
+						break;
+					}
 				}
 			}
 
@@ -309,16 +314,30 @@ namespace PowerLanguage.Strategy
 			{
 				case EApplicationCode.Charting:
 					if (equityAvailable != 0.0d)
+					{
+						trace(ETraceLevel.Verbose, $"Equity determined from account - {equityAvailable}");
 						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
+					}
 					else
-						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? (this.InitialCapital + this.NetProfit) * maxCustomRiskEquityPerPosPercent : this.InitialCapital + this.NetProfit;
+					{
+						equityAvailable = this.InitialCapital + this.NetProfit;
+						trace(ETraceLevel.Verbose, $"No equity determined from account, using equity from strategy settings - {equityAvailable}");
+						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
+					}
 					break;
 				case EApplicationCode.Portfolio:
 					double percentEquity = maxCustomRiskEquityPerPosPercent > 0.0d ? maxCustomRiskEquityPerPosPercent : this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d;
 					if (equityAvailable != 0.0d)
+					{
+						trace(ETraceLevel.Verbose, $"Equity determined from account - {equityAvailable}");
 						equityAvailable *= percentEquity;
+					}
 					else
-						equityAvailable = (this.InitialCapital + this.Portfolio.NetProfit) * percentEquity;
+					{
+						equityAvailable = this.InitialCapital + this.Portfolio.NetProfit;
+						trace(ETraceLevel.Verbose, $"No equity determined from account, using equity from portfolio settings {equityAvailable}");
+						equityAvailable *= percentEquity;
+					}
 					break;
 			}
 
