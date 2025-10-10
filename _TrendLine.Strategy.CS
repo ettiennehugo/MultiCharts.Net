@@ -2665,28 +2665,22 @@ namespace PowerLanguage.Strategy
 				}
 
 				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+				if (m_studyControl.Bars.Time[0].Date != DateTime.Date) return;
 
-				switch (m_studyControl.Environment.CalcReason)
+				foreach (var item in m_studyControl.TradeManager.TradingData.Orders.Items)
 				{
-					case CalculationReason.OrderFilled:
-						//check whether order was filled to ensure exit is only triggered once
-						foreach (var item in m_studyControl.TradeManager.TradingData.Orders.Items)
-						{
-							if (item.OrderID == getOrderId())
-							{
-								m_exitOrderFilled = item.LeftContracts == 0;
-								trace(ETraceLevel.Verbose, $"exitOrderFilled - OrderId {item.OrderID} - LeftContracts {item.LeftContracts} - FilledContracts {item.FilledContracts}");
-								break;
-							}
-						}
+					if (item.OrderID == getOrderId())
+					{
+						m_exitOrderFilled = item.LeftContracts == 0;
+						trace(ETraceLevel.Verbose, $"exitOrderFilled - OrderId {item.OrderID} - LeftContracts {item.LeftContracts} - FilledContracts {item.FilledContracts}");
 						break;
-					case CalculationReason.Default:
-						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Time[0].Date == DateTime.Date && !m_exitOrderFilled)
-						{
-							trace(ETraceLevel.Verbose, $"currentDateTime {m_studyControl.Bars.Time[0]} - DateTime {DateTime} - exitOrderFilled {m_exitOrderFilled}");
-							sendOrder();
-						}
-						break;
+					}
+				}
+
+				if (m_studyControl.Bars.Status == EBarState.Close && !m_exitOrderFilled)
+				{
+					trace(ETraceLevel.Verbose, $"currentDateTime {m_studyControl.Bars.Time[0]} - DateTime {DateTime} - exitOrderFilled {m_exitOrderFilled}");
+					sendOrder();
 				}
 			}
 
