@@ -107,9 +107,7 @@ namespace PowerLanguage.Strategy
 	///	• [optional] EntryId - associate the exit with a specific entry instruction, when specified ExitPercent applies to the position established by the entry instruction
 	/// • [optional] OrderType - enum Stop, StopLimit - whether to use a stop order or a stop-limit order for the exit, defaults to Stop(TBD this could cause slippage)
 	/// • [optional] ValidUntil - date/time until which the exit should hold, defaults to DateTime.Max 
-	/// • [optional] DayCountStrategy - enum CalendarDays, TradingDays - whether to count calendar days or trading days for DisableDays, defaults to TradingDays
-	/// • [optional] UseFill - enum First, Last - which entry fill is used to determine the days for DisableDays, default Last 
-	/// • [optional] TraceLevel - trace level for instruction, default is None 
+	/// • [optional] TraceLevel - trace level for instruction, default is None
 	///
 	/// ExitStopLoss
 	/// • Instruction - "ExitStopLoss" 
@@ -287,7 +285,7 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_EXIT9 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"PT3\",\"LineId\":7,\"OrderType\":\"Limit\"}";
 		public const string DEFAULT_EXIT10 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL\",\"LineId\":4,\"OrderType\":\"Stop\"}";	//general trade management instructions
 		public const string DEFAULT_EXIT11 = "//{\"Instruction\":\"ExitMovingAverage\",\"Id\":\"MASL\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":20,\"Criteria\":\"Close\"}";
-		public const string DEFAULT_EXIT12 = "//{\"Instruction\":\"ExitOverextension\",\"Id\":\"OEPT\",\"ActivationDateTime\":\"MM/DD/YYYY\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":10,\"Percent\":0.20}";  //overextension geared toward SmallCap stocks that can move a lot
+		public const string DEFAULT_EXIT12 = "//{\"Instruction\":\"ExitOverextension\",\"Id\":\"OEPT\",\"ActivationDateTime\":\"MM/DD/YYYY\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":10,\"Percent\":0.20,\"HardPercent\":0.35,\"HardExitPercent\":1.0}";  //overextension geared toward SmallCap stocks that can move a lot
 		public const string DEFAULT_EXIT13 = "//{\"Instruction\":\"ExitDateTime\",\"Id\":\"EDT\", \"DateTime\":\"MM/DD/YYYY\",\"ExitPercent\":0.5}";
 		public const string DEFAULT_EXIT14 = "//{\"Instruction\":\"ExitBreakEven\",\"Id\":\"EBE\", \"ProfitPercent\":0.15}";
 		public const string DEFAULT_EXIT15 = "";
@@ -1250,7 +1248,7 @@ namespace PowerLanguage.Strategy
 			private bool m_previousBarPositionWasLongShort;
 			private DateTime m_previousCloseDateTime;
 			protected Entry m_entry;
-			private string m_orderPostfix;
+			protected string m_orderPostfix;
 			private bool m_idSupplied;
 
 			public Exit(_TrendLine control, string orderPostfix) : base(control)
@@ -2123,12 +2121,41 @@ namespace PowerLanguage.Strategy
 		{
 			public double Percent { get; set; }
 			public DateTime ActivationDateTime { get; set; }
+			public double HardPercent { get; set; }
+			public double HardExitPercent { get; set; }
+
+			public virtual string HardOrderName
+			{
+				get
+				{
+					if (m_studyControl.PositionSide > 0)
+					{
+						if (m_orderHardLxPriced != null) return m_orderHardLxPriced.Info.Name + "Hrd" + m_orderPostfix;
+						if (m_orderHardLxStpLmt != null) return m_orderHardLxStpLmt.Info.Name + "Hrd" + m_orderPostfix;
+					}
+
+					if (m_studyControl.PositionSide < 0)
+					{
+						if (m_orderHardSxPriced != null) return m_orderHardSxPriced.Info.Name + "Hrd" + m_orderPostfix;
+						if (m_orderHardSxStpLmt != null) return m_orderHardSxStpLmt.Info.Name + "Hrd" + m_orderPostfix;
+					}
+
+					return string.Empty;
+				}
+			}
+
+			protected IOrderPriced m_orderHardLxPriced;
+			protected IOrderPriced m_orderHardSxPriced;
+			protected IOrderStopLimit m_orderHardLxStpLmt;
+			protected IOrderStopLimit m_orderHardSxStpLmt;
 
 			public ExitOverextension(_TrendLine control) : base(control, "EOE")
 			{
 				Percent = 0.0;
 				OrderType = EOrderType.Limit;
 				ActivationDateTime = DateTime.MaxValue;
+				HardPercent = 0.0;
+				HardExitPercent = 1.0;
 			}
 
 			public override bool Parse(JProperty property)
@@ -2136,6 +2163,8 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "percent") { Percent = property.Value.ToObject<double>(); return true; }
 				if (name == "activationdatetime") { ActivationDateTime = property.Value.ToObject<DateTime>(); return true; }
+				if (name == "hardpercent") { HardPercent = property.Value.ToObject<double>(); return true; }
+				if (name == "hardexitpercent") { HardExitPercent = property.Value.ToObject<double>(); return true; }
 				return base.Parse(property);
 			}
 
@@ -2143,6 +2172,9 @@ namespace PowerLanguage.Strategy
 			{
 				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Market/stop exit not supported, requires limit type orders");
 				if (Percent <= 0.0 || Percent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - Percent must be between 0 and 1");
+				if (HardPercent < 0.0 || HardPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - HardPercent must be between 0 and 1");
+				if (HardExitPercent <= 0.0 || HardExitPercent > 1.0) return Tuple.Create(false,$"{InstructionTypeName} - HardExitPercent must be greater than 0 and less or equal to 1.0");
+				if (HardPercent != 0.0 && HardPercent <= Percent) return Tuple.Create(false, $"{InstructionTypeName} - HardPercent must be greater than Percent");
 				return base.IsValid();
 			}
 
@@ -2153,6 +2185,180 @@ namespace PowerLanguage.Strategy
 					if (!base.Active) return false;
 					if (m_studyControl.Bars.Time[0] < ActivationDateTime) return false;
 					return true;
+				}
+			}
+
+			public override void StartCalc()
+			{
+				base.StartCalc();
+				m_orderHardLxPriced = null;
+				m_orderHardLxStpLmt = null;
+				m_orderHardSxPriced = null;
+				m_orderHardSxStpLmt = null;
+
+				if (HardPercent != 0.0)
+				{
+					if (m_entry != null)
+					{
+						switch (OrderType)
+						{
+							case EOrderType.Stop:
+								m_orderHardLxPriced = m_studyControl.AllocateLxStpFE();
+								m_orderHardSxPriced = m_studyControl.AllocateSxStpFE();
+								break;
+							case EOrderType.Limit:
+							case EOrderType.MarketLimit:
+								m_orderHardLxPriced = m_studyControl.AllocateLxLmtFE();
+								m_orderHardSxPriced = m_studyControl.AllocateSxLmtFE();
+								break;
+							case EOrderType.StopLimit:
+							case EOrderType.MarketStopLimit:
+								m_orderHardLxStpLmt = m_studyControl.AllocateLxStpLmtFE();
+								m_orderHardSxStpLmt = m_studyControl.AllocateSxStpLmtFE();
+								break;
+						}
+					}
+					else
+					{
+						switch (OrderType)
+						{
+							case EOrderType.Stop:
+								m_orderHardLxPriced = m_studyControl.AllocateLxStp();
+								m_orderHardSxPriced = m_studyControl.AllocateSxStp();
+								break;
+							case EOrderType.Limit:
+							case EOrderType.MarketLimit:
+								m_orderHardLxPriced = m_studyControl.AllocateLxLmt();
+								m_orderHardSxPriced = m_studyControl.AllocateSxLmt();
+								break;
+							case EOrderType.StopLimit:
+							case EOrderType.MarketStopLimit:
+								m_orderHardLxStpLmt = m_studyControl.AllocateLxStpLmt();
+								m_orderHardSxStpLmt = m_studyControl.AllocateSxStpLmt();
+								break;
+						}
+					}
+				}
+			}
+
+			public override void CalcBar()
+			{
+				base.CalcBar();	
+
+				if (m_studyControl.PositionSide == 0) return;
+				if (HardPercent == 0.0) return;
+				if (m_studyControl.Bars.Time[0] > ValidUntil) return;
+
+				double ma = base.exitPrice();
+				if (ma == 0.0) return;
+
+				bool trigger = false;
+				double hardExitPrice = 0.0;
+
+				if (m_studyControl.PositionSide > 0)
+				{
+					double longThreshold = ma * (1.0 + HardPercent);
+					if (Criteria == EEntryExitCriteria.Close)
+					{
+						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] > longThreshold) trigger = true;
+					}
+					else
+					{
+						if (m_studyControl.Bars.High[0] > longThreshold) trigger = true;
+					}
+					hardExitPrice = longThreshold;
+				}
+				else
+				{
+					double shortThreshold = ma * (1.0 - HardPercent);
+					if (Criteria == EEntryExitCriteria.Close)
+					{
+						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] < shortThreshold) trigger = true;
+					}
+					else
+					{
+						if (m_studyControl.Bars.Low[0] < shortThreshold) trigger = true;
+					}
+					hardExitPrice = shortThreshold;
+				}
+
+				if (!trigger) return;
+				if (hardExitPrice <= 0.0) { trace(ETraceLevel.Error, $"Hard exit price {hardExitPrice} is not valid"); return; }
+
+				// Compute exit size using HardExitPercent
+				int size = 0;
+				if (m_entry != null && m_entry.IsLastPositionOpen)
+				{
+					size = HardExitPercent == 1.0 ? m_entry.LastPositionSize : (int)Math.Ceiling(m_entry.LastPositionSize * HardExitPercent);
+					trace(ETraceLevel.Verbose, $"Hard exit id {Id} exiting {HardExitPercent} percent of entry id {m_entry.Id} that entered size {m_entry.LastPositionSize} resulting in {size} exit size");
+				}
+				else
+				{
+					int positionSize = currentOpenPositionSize();
+					size = HardExitPercent == 1.0 ? positionSize : (int)Math.Ceiling(positionSize * HardExitPercent);
+					trace(ETraceLevel.Verbose, $"Hard exit id {Id} exiting {HardExitPercent} percent of position size {positionSize} resulting in {size} exit size");
+				}
+
+				if (size == 0) { trace(ETraceLevel.Warning, $"Computed exit size is zero HardExitPercent {HardExitPercent} CurrentOpenPositionSize {currentOpenPositionSize()}"); return; }
+
+				// Send hard orders using the dedicated m_orderHard* handles and HardOrderName
+				if (m_studyControl.PositionSide > 0)
+				{
+					switch (OrderType)
+					{
+						case EOrderType.Limit:
+							if (m_entry != null) m_orderHardLxPriced.SendFromEntry(HardOrderName, hardExitPrice, size, m_entry.OrderName);
+							else m_orderHardLxPriced.Send(HardOrderName, hardExitPrice, size);
+							break;
+						case EOrderType.MarketLimit:
+							double limitBid = m_studyControl.Bars.StatusLine.Bid;
+							if (limitBid == 0.0) { trace(ETraceLevel.Error, $"Bid price is zero for long hard market limit order exiting, reverting to closing price"); limitBid = m_studyControl.Bars.Close[0]; }
+							if (m_entry != null) m_orderHardLxPriced.SendFromEntry(HardOrderName, limitBid, size, m_entry.OrderName);
+							else m_orderHardLxPriced.Send(HardOrderName, limitBid, size);
+							break;
+						case EOrderType.StopLimit:
+							if (m_entry != null) m_orderHardLxStpLmt.SendFromEntry(HardOrderName, hardExitPrice, hardExitPrice, size, m_entry.OrderName);
+							else m_orderHardLxStpLmt.Send(HardOrderName, hardExitPrice, hardExitPrice, size);
+							break;
+						case EOrderType.MarketStopLimit:
+							double mlLimitBid = m_studyControl.Bars.StatusLine.Bid;
+							if (mlLimitBid == 0.0) { trace(ETraceLevel.Error, $"Bid price is zero for long hard market stop-limit order exiting, reverting to closing price"); mlLimitBid = m_studyControl.Bars.Close[0]; }
+							if (m_entry != null) m_orderHardLxStpLmt.SendFromEntry(HardOrderName, hardExitPrice, mlLimitBid, size, m_entry.OrderName);
+							else m_orderHardLxStpLmt.Send(HardOrderName, hardExitPrice, mlLimitBid, size);
+							break;
+						default:
+							trace(ETraceLevel.Error, $"Hard exit does not support order type {OrderType}");
+							break;
+					}
+				}
+				else
+				{
+					switch (OrderType)
+					{
+						case EOrderType.Limit:
+							if (m_entry != null) m_orderHardSxPriced.SendFromEntry(HardOrderName, hardExitPrice, size, m_entry.OrderName);
+							else m_orderHardSxPriced.Send(HardOrderName, hardExitPrice, size);
+							break;
+						case EOrderType.MarketLimit:
+							double limitAsk = m_studyControl.Bars.StatusLine.Ask;
+							if (limitAsk == 0.0) { trace(ETraceLevel.Error, $"Ask price is zero for short hard market limit order exiting, reverting to closing price"); limitAsk = m_studyControl.Bars.Close[0]; }
+							if (m_entry != null) m_orderHardSxPriced.SendFromEntry(HardOrderName, limitAsk, size, m_entry.OrderName);
+							else m_orderHardSxPriced.Send(HardOrderName, limitAsk, size);
+							break;
+						case EOrderType.StopLimit:
+							if (m_entry != null) m_orderHardSxStpLmt.SendFromEntry(HardOrderName, hardExitPrice, hardExitPrice, size, m_entry.OrderName);
+							else m_orderHardSxStpLmt.Send(HardOrderName, hardExitPrice, hardExitPrice, size);
+							break;
+						case EOrderType.MarketStopLimit:
+							double mlLimitAsk = m_studyControl.Bars.StatusLine.Ask;
+							if (mlLimitAsk == 0.0) { trace(ETraceLevel.Error, $"Ask price is zero for short hard market stop-limit order exiting, reverting to close"); mlLimitAsk = m_studyControl.Bars.Close[0]; }
+							if (m_entry != null) m_orderHardSxStpLmt.SendFromEntry(HardOrderName, hardExitPrice, mlLimitAsk, size, m_entry.OrderName);
+							else m_orderHardSxStpLmt.Send(HardOrderName, hardExitPrice, mlLimitAsk, size);
+							break;
+						default:
+							trace(ETraceLevel.Error, $"Hard exit does not support order type {OrderType}");
+							break;
+					}
 				}
 			}
 
