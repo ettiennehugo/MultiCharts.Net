@@ -285,7 +285,7 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_EXIT9 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"PT3\",\"LineId\":7,\"OrderType\":\"Limit\"}";
 		public const string DEFAULT_EXIT10 = "//{\"Instruction\":\"ExitLine\",\"Id\":\"SL\",\"LineId\":4,\"OrderType\":\"Stop\"}";	//general trade management instructions
 		public const string DEFAULT_EXIT11 = "//{\"Instruction\":\"ExitMovingAverage\",\"Id\":\"MASL\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":20,\"Criteria\":\"Close\"}";
-		public const string DEFAULT_EXIT12 = "//{\"Instruction\":\"ExitOverextension\",\"Id\":\"OEPT\",\"ActivationDateTime\":\"MM/DD/YYYY\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":10,\"Percent\":0.20,\"HardPercent\":0.35,\"HardExitPercent\":1.0}";  //overextension geared toward SmallCap stocks that can move a lot
+		public const string DEFAULT_EXIT12 = "//{\"Instruction\":\"ExitOverextension\",\"Id\":\"OEPT\",\"ActivationDateTime\":\"MM/DD/YYYY\",\"DataFeed\":2,\"MovingAverageType\":\"Exponential\",\"Length\":10,\"Percent\":0.20,\"HardPercent\":0.75,\"HardExitPercent\":1.0}";  //overextension geared toward SmallCap stocks that can move a lot
 		public const string DEFAULT_EXIT13 = "//{\"Instruction\":\"ExitDateTime\",\"Id\":\"EDT\", \"DateTime\":\"MM/DD/YYYY\",\"ExitPercent\":0.5}";
 		public const string DEFAULT_EXIT14 = "//{\"Instruction\":\"ExitBreakEven\",\"Id\":\"EBE\", \"ProfitPercent\":0.15}";
 		public const string DEFAULT_EXIT15 = "";
@@ -2243,7 +2243,7 @@ namespace PowerLanguage.Strategy
 
 			public override void CalcBar()
 			{
-				base.CalcBar();	
+				base.CalcBar();
 
 				if (m_studyControl.PositionSide == 0) return;
 				if (HardPercent == 0.0) return;
