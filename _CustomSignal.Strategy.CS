@@ -301,7 +301,7 @@ namespace PowerLanguage.Strategy
 				TradeManager.ProcessEvents(); //ensure latest account equity is available
 				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
 				{
-					if (account.ID == this.Account)
+					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
 						break;
