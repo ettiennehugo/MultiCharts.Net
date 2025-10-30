@@ -823,7 +823,6 @@ namespace PowerLanguage.Strategy
 				if (VolumePercentile > 0)
 				{
 					m_volumePercentile = m_studyControl.AllocateVolumePercentile();
-					m_volumeInstrument = m_studyControl.BarsOfData(VolumeDataFeed);
 					//NOTE: Below is correct since the entry volume is we always want to use the volume of the instrument being traded.
 					m_volumePercentile.Instrument = m_studyControl.Bars;
 				}
@@ -2172,7 +2171,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (OrderType == EOrderType.Market || OrderType == EOrderType.Stop) return Tuple.Create(false, $"{InstructionTypeName} - Market/stop exit not supported, requires limit type orders");
 				if (Percent <= 0.0 || Percent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - Percent must be between 0 and 1");
-				if (HardPercent < 0.0 || HardPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - HardPercent must be between 0 and 1");
+				if (HardPercent < 0.0) return Tuple.Create(false, $"{InstructionTypeName} - HardPercent must be 0 or positive");
 				if (HardExitPercent <= 0.0 || HardExitPercent > 1.0) return Tuple.Create(false,$"{InstructionTypeName} - HardExitPercent must be greater than 0 and less or equal to 1.0");
 				if (HardPercent != 0.0 && HardPercent <= Percent) return Tuple.Create(false, $"{InstructionTypeName} - HardPercent must be greater than Percent");
 				return base.IsValid();
@@ -2255,31 +2254,34 @@ namespace PowerLanguage.Strategy
 				bool trigger = false;
 				double hardExitPrice = 0.0;
 
-				if (m_studyControl.PositionSide > 0)
+				if (HardPercent > 0)
 				{
-					double longThreshold = ma * (1.0 + HardPercent);
-					if (Criteria == EEntryExitCriteria.Close)
+					if (m_studyControl.PositionSide > 0)
 					{
-						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] > longThreshold) trigger = true;
+						double longThreshold = ma * (1.0 + HardPercent);
+						if (Criteria == EEntryExitCriteria.Close)
+						{
+							if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] > longThreshold) trigger = true;
+						}
+						else
+						{
+							if (m_studyControl.Bars.High[0] > longThreshold) trigger = true;
+						}
+						hardExitPrice = longThreshold;
 					}
 					else
 					{
-						if (m_studyControl.Bars.High[0] > longThreshold) trigger = true;
+						double shortThreshold = ma * (1.0 - HardPercent);
+						if (Criteria == EEntryExitCriteria.Close)
+						{
+							if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] < shortThreshold) trigger = true;
+						}
+						else
+						{
+							if (m_studyControl.Bars.Low[0] < shortThreshold) trigger = true;
+						}
+						hardExitPrice = shortThreshold;
 					}
-					hardExitPrice = longThreshold;
-				}
-				else
-				{
-					double shortThreshold = ma * (1.0 - HardPercent);
-					if (Criteria == EEntryExitCriteria.Close)
-					{
-						if (m_studyControl.Bars.Status == EBarState.Close && m_studyControl.Bars.Close[0] < shortThreshold) trigger = true;
-					}
-					else
-					{
-						if (m_studyControl.Bars.Low[0] < shortThreshold) trigger = true;
-					}
-					hardExitPrice = shortThreshold;
 				}
 
 				if (!trigger) return;
