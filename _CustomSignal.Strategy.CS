@@ -247,6 +247,12 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void CalcBar()
 		{
+			//ensure latest account equity is available, this method seems to kick off async internal processes
+			//to update interface elements like the Accounts etc, this can be deduced from how the interface looks
+			//with callbacks like OnRefreshComplete etc. If you call it right before accessing the account data
+			//those accounts would not be set and your results would be incorrect.
+			if (Environment.IsAutoTradingMode) TradeManager.ProcessEvents();
+
 			if (Bars.Time[0].Date != m_currentDay.Date)
 			{
 				m_intradayBarCount = 0;
@@ -298,7 +304,6 @@ namespace PowerLanguage.Strategy
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
 			{
-				TradeManager.ProcessEvents(); //ensure latest account equity is available
 				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
 				{
 					if (account.Name == this.Account)
