@@ -304,8 +304,10 @@ namespace PowerLanguage.Strategy
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
 			{
+				trace(ETraceLevel.Verbose, $"Checking {this.TradeManager.TradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
 				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
 				{
+					trace(ETraceLevel.Verbose, $"Found account {account.Name} with equity {account.Equity ?? 0}.");
 					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
