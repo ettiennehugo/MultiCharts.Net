@@ -12,7 +12,7 @@ namespace PowerLanguage.Strategy
 	public abstract class _CustomSignal : PortfolioSignalObject
 	{
 		//constants
-
+		public double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;	//number of seconds after which account info would be recalculated if accounts are not yet loaded
 
 		//types
 		/// <summary>
@@ -196,6 +196,7 @@ namespace PowerLanguage.Strategy
 		private double m_intradayVolume;
 		private DateTime m_currentDay;
 		private int m_intradayBarCount;
+		private bool m_loadAccounts;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -240,6 +241,7 @@ namespace PowerLanguage.Strategy
 			m_intradayClose = 0.0d;
 			m_intradayOpen = 0.0d;
 			m_intradayVolume = 0.0d;
+			m_loadAccounts = true;
 		}
 
 		/// <summary>
@@ -250,45 +252,62 @@ namespace PowerLanguage.Strategy
 			//ensure latest account equity is available, this method seems to kick off async internal processes
 			//to update interface elements like the Accounts etc, this can be deduced from how the interface looks
 			//with callbacks like OnRefreshComplete etc. If you call it right before accessing the account data
-			//those accounts would not be set and your results would be incorrect.
-			if (Environment.IsAutoTradingMode) TradeManager.ProcessEvents();
+			//those accounts would not be set and your results would be incorrect so initially we keep on calling
+			//the CalcBar method until we have accounts loaded
+			if (Environment.IsAutoTradingMode) {
+				TradeManager.ProcessEvents();
 
-			if (Bars.Time[0].Date != m_currentDay.Date)
-			{
-				m_intradayBarCount = 0;
-				m_intradayOpen = Bars.Open[0];
-				m_intradayClose = Bars.Close[0];
-				m_intradayLow = Bars.Low[0];
-				m_intradayHigh = Bars.High[0];
-				m_currentDay = Bars.Time[0].Date;
-				m_intradayVolume = Bars.Volume[0];
-				m_currentDay = Bars.Time[0];
-				m_intradayLowTime = Bars.Time[0];
-				m_intradayHighTime = Bars.Time[0];
-				m_intradayCloseTime = Bars.Time[0];
-				m_intradayOpenTime = Bars.Time[0];
-			}
-			else
-			{
-				if (m_intradayLow > Bars.Low[0])
+				//force recalculation after a specific interval if account information is not yet loaded from the above ProcessEvents call
+				if (m_loadAccounts)
 				{
+					if (TradeManager.TradingData.Accounts.Items.Length == 0) {
+						trace(ETraceLevel.Warning,"ProcessEvents failed to load account queuing recalculation.");
+						ExecControl.RecalcLastBarAfter(TimeSpan.FromSeconds(DEFAULT_ACCOUNT_RECALC_INTERVAL));
+					} else {
+						trace(ETraceLevel.Info,$"Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
+						m_loadAccounts = false;
+					}
+				}
+			}
+			
+			if (Environment.CalcReason == CalculationReason.Default) {
+				if (Bars.Time[0].Date != m_currentDay.Date)
+				{
+					m_intradayBarCount = 0;
+					m_intradayOpen = Bars.Open[0];
+					m_intradayClose = Bars.Close[0];
 					m_intradayLow = Bars.Low[0];
-					m_intradayLowTime = Bars.Time[0];
-				}
-
-				if (m_intradayHigh < Bars.High[0])
-				{
-					m_intradayHighTime = Bars.Time[0];
 					m_intradayHigh = Bars.High[0];
+					m_currentDay = Bars.Time[0].Date;
+					m_intradayVolume = Bars.Volume[0];
+					m_currentDay = Bars.Time[0];
+					m_intradayLowTime = Bars.Time[0];
+					m_intradayHighTime = Bars.Time[0];
+					m_intradayCloseTime = Bars.Time[0];
+					m_intradayOpenTime = Bars.Time[0];
 				}
-			}
-
-			if (Bars.Status == EBarState.Close)
-			{
-				m_intradayBarCount++;
-				m_intradayClose = Bars.Close[0];
-				m_intradayCloseTime = Bars.Time[0];
-				m_intradayVolume += Bars.Volume[0];
+				else
+				{
+					if (m_intradayLow > Bars.Low[0])
+					{
+						m_intradayLow = Bars.Low[0];
+						m_intradayLowTime = Bars.Time[0];
+					}
+	
+					if (m_intradayHigh < Bars.High[0])
+					{
+						m_intradayHighTime = Bars.Time[0];
+						m_intradayHigh = Bars.High[0];
+					}
+				}
+	
+				if (Bars.Status == EBarState.Close)
+				{
+					m_intradayBarCount++;
+					m_intradayClose = Bars.Close[0];
+					m_intradayCloseTime = Bars.Time[0];
+					m_intradayVolume += Bars.Volume[0];
+				}
 			}
 		}
 
