@@ -4,10 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
-using IronPython.Compiler;
 using PowerLanguage.TradeManager;
 using System.Windows.Forms;
-using Microsoft.Scripting.Metadata;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>

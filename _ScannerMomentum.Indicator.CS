@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Linq;
 using System.Runtime.InteropServices;
-using IronPython.Compiler.Ast;
 using System.Windows.Forms;
 using PowerLanguage.Function;
 using PowerLanguage.TradeManager;

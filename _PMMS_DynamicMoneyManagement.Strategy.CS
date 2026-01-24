@@ -6,8 +6,6 @@ using ATCenterProxy.interop;
 using PowerLanguage.Indicator;
 using System.Windows.Forms.VisualStyles;
 using PowerLanguage.Strategy.implementation;
-using IronPython.Compiler.Ast;
-
 namespace PowerLanguage.Strategy
 {
   public abstract class _PMMS_SignalObject : SignalObject {

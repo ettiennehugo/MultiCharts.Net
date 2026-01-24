@@ -43,18 +43,30 @@
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.CSharp.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLStudiesProxy.dll" />
+    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLStudiesProxyPython.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLBuiltInFunctions.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLTradeManager.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\ATCenterProxy.interop.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\PLDataLoader.dll" />
-    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\IronPython.dll" />
-    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\IronPython.Modules.dll" />
-    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Dynamic.dll" />
-    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.dll" />
-    <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.Scripting.Metadata.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\netstandard.dll" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <EmbeddedResource Include="PY_ADX.Indicator.PY" />
+    <EmbeddedResource Include="PY_Bollinger_Bands.Indicator.PY" />
+    <EmbeddedResource Include="PY_MACD.Indicator.PY" />
+    <EmbeddedResource Include="PY_Mov_Avg_1_Line.Indicator.PY" />
+    <EmbeddedResource Include="PY_RSI.Indicator.PY" />
+    <EmbeddedResource Include="PY_Bollinger_Bands_LE.Strategy.PY" />
+    <EmbeddedResource Include="PY_Bollinger_Bands_SE.Strategy.PY" />
+    <EmbeddedResource Include="PY_Channel_Breakout_LE.Strategy.PY" />
+    <EmbeddedResource Include="PY_Channel_Breakout_SE.Strategy.PY" />
+    <EmbeddedResource Include="PY_MACD_LE.Strategy.PY" />
+    <EmbeddedResource Include="PY_MACD_SE.Strategy.PY" />
+    <EmbeddedResource Include="PY_Pivot_Extension_LE.Strategy.PY" />
+    <EmbeddedResource Include="PY_Pivot_Extension_SE.Strategy.PY" />
+    <EmbeddedResource Include="PY_RSI_LE.Strategy.PY" />
+    <EmbeddedResource Include="PY_RSI_SE.Strategy.PY" />
+  </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
