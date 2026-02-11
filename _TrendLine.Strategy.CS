@@ -259,21 +259,26 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Default values for entry/exit parameters used commonly for phased entry/exit.
 		/// </summary>
-		public const string DEFAULT_ENTRY1 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL1\",\"LineId\":1,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL1\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
-		public const string DEFAULT_ENTRY2 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL2\",\"LineId\":2,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL2\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
-		public const string DEFAULT_ENTRY3 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL3\",\"LineId\":3,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL3\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY1 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL1\",\"LineId\":1,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.003,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL1\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY2 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL2\",\"LineId\":2,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.006,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL2\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY3 = "{\"Instruction\":\"EntryLine\",\"Id\":\"EL3\",\"LineId\":3,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.009,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL3\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
 		public const string DEFAULT_ENTRY4 = "";
 		public const string DEFAULT_ENTRY5 = "";
 		public const string DEFAULT_ENTRY6 = "";
 		public const string DEFAULT_ENTRY7 = "";
 		public const string DEFAULT_ENTRY8 = "";
-		public const string DEFAULT_ENTRY9 = "";
+		public const string DEFAULT_ENTRY9 =  "";
 		public const string DEFAULT_ENTRY10 = "";
-		public const string DEFAULT_ENTRY11 = "";
-		public const string DEFAULT_ENTRY12 = "";
-		public const string DEFAULT_ENTRY13 = "";
+		public const string DEFAULT_ENTRY11 = "//{\"Instruction\":\"EntryLine\",\"Id\":\"EL1\",\"LineId\":1,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL1\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY12 = "//{\"Instruction\":\"EntryLine\",\"Id\":\"EL2\",\"LineId\":2,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL2\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
+		public const string DEFAULT_ENTRY13 = "//{\"Instruction\":\"EntryLine\",\"Id\":\"EL3\",\"LineId\":3,\"Direction\":\"Long\",\"Strategy\":\"Breakout\",\"EquityPercent\":0.03,\"MaxRiskBasedEquityPercent\":0.005,\"MaxVolumeBasedPercent\":0.2,\"VolumeDataFeed\":2,\"Criteria\": \"Close\",\"ClosePercentile\":0.7,\"VolumePercentile\":0.8,\"AddToPosition\": \"Reentry\",\"StopLossExitId\":\"SL3\",\"RequireDailyDirection\":\"true\",\"RequireDailyClosePercentile\":0.25,\"TimeFilters\":[{\"StartTime\": \"09:30:00\",\"EndTime\": \"16:00:00\",\"Count\":2}]}";
 		public const string DEFAULT_ENTRY14 = "";
 		public const string DEFAULT_ENTRY15 = "";
+		public const string DEFAULT_ENTRY16 = "";
+		public const string DEFAULT_ENTRY17 = "";
+		public const string DEFAULT_ENTRY18 = "";
+		public const string DEFAULT_ENTRY19 = "";
+		public const string DEFAULT_ENTRY20 = "";
 		public const string DEFAULT_EXIT1 = "//{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL1\",\"Length\":0,\"EntryId\":\"EL1\"}";	//using day low/high as default stop loss exit
 		public const string DEFAULT_EXIT2 = "//{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL2\",\"Length\":0,\"EntryId\":\"EL2\"}";
 		public const string DEFAULT_EXIT3 = "//{\"Instruction\":\"ExitLowHigh\",\"Id\":\"SL3\",\"Length\":0,\"EntryId\":\"EL3\"}";
@@ -289,6 +294,11 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_EXIT13 = "//{\"Instruction\":\"ExitDateTime\",\"Id\":\"EDT\", \"DateTime\":\"MM/DD/YYYY\",\"ExitPercent\":0.5}";
 		public const string DEFAULT_EXIT14 = "//{\"Instruction\":\"ExitBreakEven\",\"Id\":\"EBE\", \"ProfitPercent\":0.15}";
 		public const string DEFAULT_EXIT15 = "";
+		public const string DEFAULT_EXIT16 = "";
+		public const string DEFAULT_EXIT17 = "";
+		public const string DEFAULT_EXIT18 = "";
+		public const string DEFAULT_EXIT19 = "";
+		public const string DEFAULT_EXIT20 = "";
 		public const string DEFAULT_OTHER = "";
 
 
@@ -3089,6 +3099,11 @@ namespace PowerLanguage.Strategy
 		[Input] public string Entry13 { get; set; }
 		[Input] public string Entry14 { get; set; }
 		[Input] public string Entry15 { get; set; }
+		[Input] public string Entry16 { get; set; }
+		[Input] public string Entry17 { get; set; }
+		[Input] public string Entry18 { get; set; }
+		[Input] public string Entry19 { get; set; }
+		[Input] public string Entry20 { get; set; }
 		[Input] public string Exit1 { get; set; }
 		[Input] public string Exit2 { get; set; }
 		[Input] public string Exit3 { get; set; }
@@ -3104,6 +3119,11 @@ namespace PowerLanguage.Strategy
 		[Input] public string Exit13 { get; set; }
 		[Input] public string Exit14 { get; set; }
 		[Input] public string Exit15 { get; set; }
+		[Input] public string Exit16 { get; set; }
+		[Input] public string Exit17 { get; set; }
+		[Input] public string Exit18 { get; set; }
+		[Input] public string Exit19 { get; set; }
+		[Input] public string Exit20 { get; set; }
 		[Input] public string Other { get; set; } //comma separated list of other instructions
 		public override ETraceLevel TraceLevel { get; set; }    //hide base class TraceLevel so we can override it to verbose and control tracing on an instruction level
 
@@ -3546,6 +3566,11 @@ namespace PowerLanguage.Strategy
 			Entry13 = DEFAULT_ENTRY13;
 			Entry14 = DEFAULT_ENTRY14;
 			Entry15 = DEFAULT_ENTRY15;
+			Entry16 = DEFAULT_ENTRY16;
+			Entry17 = DEFAULT_ENTRY17;
+			Entry18 = DEFAULT_ENTRY18;
+			Entry19 = DEFAULT_ENTRY19;
+			Entry20 = DEFAULT_ENTRY20;
 			Exit1 = DEFAULT_EXIT1;
 			Exit2 = DEFAULT_EXIT2;
 			Exit3 = DEFAULT_EXIT3;
@@ -3561,6 +3586,11 @@ namespace PowerLanguage.Strategy
 			Exit13 = DEFAULT_EXIT13;
 			Exit14 = DEFAULT_EXIT14;
 			Exit15 = DEFAULT_EXIT15;
+			Exit16 = DEFAULT_EXIT16;
+			Exit17 = DEFAULT_EXIT17;
+			Exit18 = DEFAULT_EXIT18;
+			Exit19 = DEFAULT_EXIT19;
+			Exit20 = DEFAULT_EXIT20;
 			Other = DEFAULT_OTHER;
 		}
 
@@ -3669,6 +3699,11 @@ namespace PowerLanguage.Strategy
 			concatenateInstruction(Entry13, ref instructions);
 			concatenateInstruction(Entry14, ref instructions);
 			concatenateInstruction(Entry15, ref instructions);
+			concatenateInstruction(Entry16, ref instructions);
+			concatenateInstruction(Entry17, ref instructions);
+			concatenateInstruction(Entry18, ref instructions);
+			concatenateInstruction(Entry19, ref instructions);
+			concatenateInstruction(Entry20, ref instructions);
 			concatenateInstruction(Exit1, ref instructions);
 			concatenateInstruction(Exit2, ref instructions);
 			concatenateInstruction(Exit3, ref instructions);
@@ -3684,6 +3719,11 @@ namespace PowerLanguage.Strategy
 			concatenateInstruction(Exit13, ref instructions);
 			concatenateInstruction(Exit14, ref instructions);
 			concatenateInstruction(Exit15, ref instructions);
+			concatenateInstruction(Exit16, ref instructions);
+			concatenateInstruction(Exit17, ref instructions);
+			concatenateInstruction(Exit18, ref instructions);
+			concatenateInstruction(Exit19, ref instructions);
+			concatenateInstruction(Exit20, ref instructions);
 			concatenateInstruction(Other, ref instructions);
 			instructions = "[" + instructions + "]";
 			return instructions;
