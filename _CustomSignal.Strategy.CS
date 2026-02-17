@@ -42,7 +42,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		private sealed class LogFileSingleton
 		{
-			const int FlushInterval = 5000; //flush every 5 seconds
+			const int FlushInterval = 10000; //flush every 10 seconds
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
 			private static int s_referenceCount = 0;
@@ -50,8 +50,9 @@ namespace PowerLanguage.Strategy
 			private StreamWriter m_logWriter;
 			private string m_logFilePath;
 			private readonly object m_writeLock = new object();
-			private DateTime m_lastFlushTime;
 			private IOutput m_output; //MC main output window
+
+			private System.Timers.Timer m_flushTimer;
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -61,7 +62,6 @@ namespace PowerLanguage.Strategy
 				{
 					m_logFilePath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
 					m_logWriter = new StreamWriter(m_logFilePath, true);
-					m_lastFlushTime = DateTime.Now;
 					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
@@ -69,11 +69,16 @@ namespace PowerLanguage.Strategy
 					//fallback to temp directory if AppData is not accessible
 					m_logFilePath = Path.Combine(Path.GetTempPath(), logFilename);
 					m_logWriter = new StreamWriter(m_logFilePath, true);
-					m_lastFlushTime = DateTime.Now;
 					m_output.WriteLine($"Fallback log file created {m_logFilePath} - Exception: {ex.Message}");
 				}
 
 				m_output = output;
+
+				//start flush timer (runs on thread pool)
+				m_flushTimer = new System.Timers.Timer(FlushInterval);
+				m_flushTimer.Elapsed += OnFlushTimerElapsed;
+				m_flushTimer.AutoReset = true;
+				m_flushTimer.Start();
 			}
 
 			public static LogFileSingleton GetInstance(IOutput output)
@@ -112,12 +117,6 @@ namespace PowerLanguage.Strategy
 					try
 					{
 						m_logWriter.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}");
-						TimeSpan timeSinceLastFlush = DateTime.Now - m_lastFlushTime;
-						if (timeSinceLastFlush.TotalMilliseconds >= FlushInterval)
-						{
-							m_logWriter.Flush();
-							m_lastFlushTime = DateTime.Now;
-						}
 					}
 					catch (Exception ex)
 					{
@@ -125,6 +124,26 @@ namespace PowerLanguage.Strategy
 					}
 				}
 			}
+
+			private void OnFlushTimerElapsed(object sender, System.Timers.ElapsedEventArgs e)
+			{
+				lock (m_writeLock)
+				{
+					try
+					{
+						if (m_logWriter != null)
+						{
+							m_logWriter.Flush();
+							m_logWriter.BaseStream.Flush(); //ensure underlying FileStream hits disk
+						}
+					}
+					catch (Exception ex)
+					{
+						m_output.WriteLine($"Error flushing log: {ex.Message}");
+					}
+				}
+			}
+
 		}
 
 		//inputs
