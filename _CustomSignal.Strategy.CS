@@ -42,17 +42,11 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		private sealed class LogFileSingleton
 		{
-			const int FlushInterval = 10000; //flush every 10 seconds
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
-			private static int s_referenceCount = 0;
 
-			private StreamWriter m_logWriter;
 			private string m_logFilePath;
-			private readonly object m_writeLock = new object();
 			private IOutput m_output; //MC main output window
-
-			private System.Timers.Timer m_flushTimer;
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -61,24 +55,14 @@ namespace PowerLanguage.Strategy
 				try
 				{
 					m_logFilePath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
-					m_logWriter = new StreamWriter(m_logFilePath, true);
 					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
 				{
 					//fallback to temp directory if AppData is not accessible
 					m_logFilePath = Path.Combine(Path.GetTempPath(), logFilename);
-					m_logWriter = new StreamWriter(m_logFilePath, true);
 					m_output.WriteLine($"Fallback log file created {m_logFilePath} - Exception: {ex.Message}");
 				}
-
-				m_output = output;
-
-				//start flush timer (runs on thread pool)
-				m_flushTimer = new System.Timers.Timer(FlushInterval);
-				m_flushTimer.Elapsed += OnFlushTimerElapsed;
-				m_flushTimer.AutoReset = true;
-				m_flushTimer.Start();
 			}
 
 			public static LogFileSingleton GetInstance(IOutput output)
@@ -89,34 +73,18 @@ namespace PowerLanguage.Strategy
 					{
 						s_instance = new LogFileSingleton(output);
 					}
-					s_referenceCount++;
-					return s_instance;
-				}
-			}
 
-			public void ReleaseInstance()
-			{
-				lock (s_lock)
-				{
-					s_referenceCount--;
-					if (s_referenceCount <= 0)
-					{
-						m_output.WriteLine($"Closing log file {m_logFilePath}.");
-						m_logWriter?.Close();
-						m_logWriter?.Dispose();
-						m_logWriter = null;
-						s_instance = null;
-					}
+					return s_instance;
 				}
 			}
 
 			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string message)
 			{
-				lock (m_writeLock)
+				lock (s_lock)
 				{
 					try
 					{
-						m_logWriter.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}");
+						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}{System.Environment.NewLine}");
 					}
 					catch (Exception ex)
 					{
@@ -124,26 +92,6 @@ namespace PowerLanguage.Strategy
 					}
 				}
 			}
-
-			private void OnFlushTimerElapsed(object sender, System.Timers.ElapsedEventArgs e)
-			{
-				lock (m_writeLock)
-				{
-					try
-					{
-						if (m_logWriter != null)
-						{
-							m_logWriter.Flush();
-							m_logWriter.BaseStream.Flush(); //ensure underlying FileStream hits disk
-						}
-					}
-					catch (Exception ex)
-					{
-						m_output.WriteLine($"Error flushing log: {ex.Message}");
-					}
-				}
-			}
-
 		}
 
 		//inputs
@@ -237,13 +185,6 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			m_holidays = new PowerLanguage.Function.USHolidays(this);
 			TraceLevel = ETraceLevel.None;
-		}
-
-		protected override void Destroy()
-		{
-			m_logger?.ReleaseInstance();
-			m_logger = null;
-			base.Destroy();
 		}
 
 		protected override void StartCalc()
