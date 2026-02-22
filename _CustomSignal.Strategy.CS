@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -84,13 +85,41 @@ namespace PowerLanguage.Strategy
 				{
 					try
 					{
-						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{message}{System.Environment.NewLine}");
+						string csvMessage = escapeCsv(message);
+						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{csvMessage}{System.Environment.NewLine}");
 					}
 					catch (Exception ex)
 					{
 						m_output.WriteLine($"Error writing to log file: {ex.Message}");
 					}
 				}
+			}
+
+			private string escapeCsv(string input)
+			{
+				if (string.IsNullOrEmpty(input))
+					return input;
+
+				//check if escaping is needed
+				bool needsQuotes = input.IndexOfAny(new char[] { ',', '"', '\n', '\r' }) >= 0;
+
+				if (!needsQuotes)
+					return input;
+
+				//build escaped version
+				StringBuilder sb = new StringBuilder();
+				sb.Append('"'); //start quote
+
+				foreach (char c in input)
+				{
+					if (c == '"')
+						sb.Append("\"\""); //escape quote
+					else
+						sb.Append(c);
+				}
+
+				sb.Append('"'); //end quote
+				return sb.ToString();
 			}
 		}
 
@@ -176,7 +205,7 @@ namespace PowerLanguage.Strategy
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0].ToLocalTime(), this.GetType().Name, this.Bars.Info.Name, message);
 			}
 		}
 
@@ -307,7 +336,6 @@ namespace PowerLanguage.Strategy
 					else
 					{
 						equityAvailable = this.InitialCapital + this.NetProfit;
-						trace(ETraceLevel.Verbose, $"No equity determined from account, using equity from strategy settings - {equityAvailable}");
 						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
 					}
 					break;
@@ -321,7 +349,6 @@ namespace PowerLanguage.Strategy
 					else
 					{
 						equityAvailable = this.InitialCapital + this.Portfolio.NetProfit;
-						trace(ETraceLevel.Verbose, $"No equity determined from account, using equity from portfolio settings {equityAvailable}");
 						equityAvailable *= percentEquity;
 					}
 					break;
