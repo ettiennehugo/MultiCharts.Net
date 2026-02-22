@@ -19,6 +19,9 @@ namespace PowerLanguage.Strategy
 	///		5. Initial risk
 	///			a.If you're trading the opening range then it would be the day low + 0.01 buffer price
 	///			b.If you're entering on the premarket initial risk is the entry bar low.
+	///		Notes
+	///		○ IMPORTANT: Make sure that you have enough lookback bars to allow entries to be made, that includes any exit strategies paired with this entry strategy otherwise MC will not evaluate this strategy
+	///		             for entry.
 	public class _EpisodicPivotLE : _CustomSignal
 	{
 		//constants
@@ -108,8 +111,6 @@ namespace PowerLanguage.Strategy
 			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 
-			//Debug - if (m_minuteTimeFrame.Time[0].Month != 2 || m_minuteTimeFrame.Time[0].Year != 2025 || m_minuteTimeFrame.Time[0].Day != 14) return;
-
 			//check for enough data and implement time filter
 			if (m_minuteTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_minuteTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay)
 			{
@@ -128,10 +129,19 @@ namespace PowerLanguage.Strategy
 
 			//required close percentile
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
-			if (range == 0) return; //avoid division by zero
+			if (range == 0)
+			{
+				trace(ETraceLevel.Verbose, "Unable to compute close percentile due to zero bar range.");
+				return; //avoid division by zero
+			}
+
 			double closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
 			double closePercentile = closeLowDelta / range;
-			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
+			if (closePercentile < RequiredClosePercentile)
+			{
+				trace(ETraceLevel.Info, $"Entry close percentile {closePercentile} is less than required percentile {RequiredClosePercentile}, skipping entry.");
+				return; //ignore stocks that do not meet the close percentile criteria
+			}
 
 			//determine the risk based on the entry day low
 			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
@@ -141,10 +151,13 @@ namespace PowerLanguage.Strategy
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-			size = size < volumeBasedSize ? size : volumeBasedSize;			
-			if (size == 0) return; //do not enter if the size is zero
+			size = size < volumeBasedSize ? size : volumeBasedSize;
+			if (size == 0)
+			{
+				trace(ETraceLevel.Info,$"Entry size is zero so no entry would be take, EquityBasedSize({equityBasedSize}), RiskBasedSize({riskBasedSize}), VolumeBasedSize({volumeBasedSize})");
+				return; //do not enter if the size is zero
+			}
 
-			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry order at Price({m_minuteTimeFrame.Close[0]}), Size({size}), Gap({gap}), ClosePercentile({closePercentile})");
 			m_le.Send(m_minuteTimeFrame.Close[0], size);
 		}
 
