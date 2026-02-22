@@ -135,7 +135,7 @@ namespace PowerLanguage.Strategy
 			//determine the entry date of the trade  
 			DateTime entryDate = this.EntryTime(0);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
-			trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
+			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 
 			//determine the entry day risk that was taken
 			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 			if (ProfitPercentBreakeven != 0)
 			{
 				double breakEvenStopAmount = this.StrategyInfo.AvgEntryPrice * ProfitPercentBreakeven;
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating breakeven stop-loss if profit is up by {breakEvenStopAmount} based on {ProfitPercentBreakeven} percentage breakeven.");
+				trace(ETraceLevel.Info, $"Generating breakeven stop-loss if profit is up by {breakEvenStopAmount} based on {ProfitPercentBreakeven} percentage breakeven.");
 				GenerateBreakEven(breakEvenStopAmount);
 			}
 
@@ -160,7 +160,7 @@ namespace PowerLanguage.Strategy
 			if (TrailingPercentActivation != 0 && TrailingPercent != 0)
 			{
 				double trailingActivationAmount = this.StrategyInfo.AvgEntryPrice * TrailingPercentActivation;
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Generating trailing stop-loss at {trailingActivationAmount} based on TrailingPercentActivation({TrailingPercentActivation}) and AvgEntryPrice({this.StrategyInfo.AvgEntryPrice}).");
+				trace(ETraceLevel.Info, $"Generating trailing stop-loss at {trailingActivationAmount} based on TrailingPercentActivation({TrailingPercentActivation}) and AvgEntryPrice({this.StrategyInfo.AvgEntryPrice}).");
 				GeneratePercentTrailing(trailingActivationAmount, TrailingPercent);
 			}
 
@@ -172,7 +172,7 @@ namespace PowerLanguage.Strategy
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])	//a.
 			{
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
+				trace(ETraceLevel.Info, $"Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
 				m_lxAll.Send(m_lxAll.Info.Name + "NBH"); // NBH = no break high
 			}
 
@@ -180,26 +180,26 @@ namespace PowerLanguage.Strategy
 			//      few days of the trade.
 			if (m_fastMA[0] != 0.0 && daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > (m_fastMA[0] * m_overextensionPercent) && m_minuteTimeFrame.Status == EBarState.Close)	//b.
 			{
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on bullish overextension.");
+				trace(ETraceLevel.Info, $"Exiting position based on bullish overextension.");
 				m_lxAll.Send(m_lxAll.Info.Name + "OE"); // OE = overextension
 			}
 
 			if (daysCount == 0 && m_minuteTimeFrame.Status == EBarState.Close && IntradayOpen != 0 && (m_minuteTimeFrame.Close[0] / IntradayOpen) > m_epDayPercentLimit) //c.
 			{
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on EP day percentage limit.");
+				trace(ETraceLevel.Info, $"Exiting position based on EP day percentage limit.");
 				m_lxAll.Send(m_lxAll.Info.Name + "EPL"); // EPL = EP day percent limit
 			}
 
 			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
 			{
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position based on risk reward ratio.");
+				trace(ETraceLevel.Info, $"Exiting position based on risk reward ratio.");
 				m_lxTightStopAll.Send(m_fastMA[0]);
 			}
 
 			//close position when we're back testing and this is the last bar
 			if (!Environment.IsRealTimeCalc && m_dailyTimeFrame.LastBarOnChart)
 			{
-				trace(ETraceLevel.Info, $"{GetType().ToString()}, {Bars.Info.ASymbolInfo2.SymbolName}, {Bars.Time[0]} - Exiting position on last bar during back testing");
+				trace(ETraceLevel.Info, $"Exiting position on last bar during back testing");
 				m_lxAll.Send(m_lxAll.Info.Name + "LBOC"); // LBOC = last bar on chart
 			}
 		}
