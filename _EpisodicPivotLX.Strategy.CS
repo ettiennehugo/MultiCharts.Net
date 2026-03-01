@@ -146,6 +146,7 @@ namespace PowerLanguage.Strategy
 
 			//generate entry day stop-loss
 			Tuple<DateTime, double> low = recentLow(daysCount);
+			trace(ETraceLevel.Info, $"Generating entry day ({low.Item1.ToString("yyyy-MM-dd HH:mm")}) stop-loss at {low.Item2 - StopLossBuffer}.");
 			m_lxStopLoss.Send(low.Item2 - StopLossBuffer);
 
 			//generate the breakeven stop-loss if the position is up by a certain percentage

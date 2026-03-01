@@ -86,7 +86,7 @@ namespace PowerLanguage.Strategy
 					try
 					{
 						string csvMessage = escapeCsv(message);
-						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss.fff},{signalName},{symbol},{csvMessage}{System.Environment.NewLine}");
+						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss},{signalName},{symbol},{csvMessage}{System.Environment.NewLine}");
 					}
 					catch (Exception ex)
 					{
