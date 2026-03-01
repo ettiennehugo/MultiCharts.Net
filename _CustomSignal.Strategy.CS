@@ -52,7 +52,7 @@ namespace PowerLanguage.Strategy
 			private LogFileSingleton(IOutput output)
 			{
 				m_output = output;
-				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss.fff}.log";
+				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmm}.log";
 				try
 				{
 					m_logFilePath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
