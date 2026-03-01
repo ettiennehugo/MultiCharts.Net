@@ -12,7 +12,7 @@ namespace PowerLanguage.Strategy
 	///		○ Maybe user a slightly less percentage since these stocks do not necessarily move as quickly as smaller cap stocks.
 	///
 	///		1. Scan - stocks with upcoming earnings and stocks that are up pre-market (around 8am) 8%
-	///			a.Check 8 to 10% gap up
+	///			a.Check 8 to 10% gap up (defined as previous day's close vs current day open).
 	///		2. Big volume on open and bar closes in the upper 10% to 25% - this is if you enter around the opening bars
 	///		3. If earnings gap preferable high double and triple digit returns
 	///		4. Best if stock comes out of base without being overextended to the up side
@@ -120,13 +120,24 @@ namespace PowerLanguage.Strategy
 			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
 			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
-			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
+			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter)
+            {
+				trace(ETraceLevel.Verbose, $"Entries per time filter reached, not taking entry.");                
+                return; //do not enter if the number of entries per time filter is reached
+            }
 
 			//check if the stock has gapped up
-			if (m_dailyTimeFrame.High[0] == 0) return; //avoid division by zero
-			double gap = (IntradayLow - m_dailyTimeFrame.High[0]) / m_dailyTimeFrame.High[0];
+			if (m_dailyTimeFrame.Close[0] == 0) return; //avoid division by zero
+			double gap = (IntradayOpen - m_dailyTimeFrame.Close[0]) / m_dailyTimeFrame.Close[0]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
 			if (gap < MinimumPercentageChange || gap > MaximumPercentageChange) return; //ignore stocks that do not meet the gap up criteria
 
+            //current bar low must be above the open, we don't want to enter on a down day as the stock is moving lower
+            if (m_minuteTimeFrame.Close[0] < IntradayOpen)
+            {
+				trace(ETraceLevel.Verbose, $"Current bar close ({m_minuteTimeFrame.Close[0]}) is below intraday open ({IntradayOpen}), don't take entry on a down day.");
+				return;
+            }
+                        
 			//required close percentile
 			double range = m_minuteTimeFrame.High[0] - m_minuteTimeFrame.Low[0];
 			if (range == 0)
@@ -136,7 +147,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			double closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
-			double closePercentile = closeLowDelta / range;
+			double closePercentile = closeLowDelta / range; 
 			if (closePercentile < RequiredClosePercentile)
 			{
 				trace(ETraceLevel.Info, $"Entry close percentile {closePercentile} is less than required percentile {RequiredClosePercentile}, skipping entry.");
@@ -144,7 +155,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//determine the risk based on the entry day low
-			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
+			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;    //NOTE: Here we use the LOW and not the open as this might be a reentry.
 			
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
