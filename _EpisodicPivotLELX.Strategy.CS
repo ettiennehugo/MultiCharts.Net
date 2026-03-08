@@ -34,7 +34,6 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
 		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
-		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;      //ignore stocks that have massive gap ups as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.3; //per default don't enter positions larger than 30% of available equity
@@ -57,7 +56,6 @@ namespace PowerLanguage.Strategy
 		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
-		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 
 		//attribute
 		private IOrderPriced m_le;
@@ -110,9 +108,15 @@ namespace PowerLanguage.Strategy
 			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
 		}
 
+		static DateTime s_testDate = DateTime.Parse("11/29/2023");
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+
+			if (Bars.Time[0].Date == s_testDate.Date)
+				Output.WriteLine("TestPoint");
+
 			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;  //backtester do not send order filled messages to we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;

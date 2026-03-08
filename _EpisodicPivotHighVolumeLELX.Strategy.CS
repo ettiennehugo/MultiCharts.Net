@@ -35,7 +35,6 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
 		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
-		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;      //ignore stocks that have massive overextended moves as to avoid parabolic moves that will just reverse
 		public const double DEFAULT_MINIMUM_DAILY_VOLUME_PERCENTILE = -1; //[disable == -1] minimum above average DAILY volume percentage for the entry - this is used for volume confirmation, e.g. 0.1 means 10% of the daily volume needs to be traded on the entry bar \
@@ -65,7 +64,6 @@ namespace PowerLanguage.Strategy
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile on the minute timeframe for entry - bar needs to close above this percentile for an entry to be considered, set to zero (0) to disable close percentile filter
 		[Input] public double RequiredVolumePercentile { get; set; } //required volume percentile on the minute timeframe for entry - volume on bar need to be above this percentile for an entry to be considered, set to zero (0) to disable volume percentile filter
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
-		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 
 		//attribute
 		private IOrderPriced m_le;
@@ -132,14 +130,14 @@ namespace PowerLanguage.Strategy
 			m_minuteVolumePercentile.Instrument = m_minuteTimeFrame;
 		}
 
-		static DateTime testDate = DateTime.Parse("11/29/2023");
+		static DateTime s_testDate = DateTime.Parse("11/29/2023");
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 
-			if (Bars.Time[0].Date == testDate.Date)
-				Output.WriteLine("Test");
+			if (Bars.Time[0].Date == s_testDate.Date)
+				Output.WriteLine("TestPoint");
 
 			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++; //backtester do not send order filled messages so we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;

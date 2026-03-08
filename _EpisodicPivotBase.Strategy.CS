@@ -97,10 +97,10 @@ namespace PowerLanguage.Strategy
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
 			FastMATightStopRiskReward = DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD;
 			ProfitPercentBreakeven = DEFAULT_PROFIT_PERCENT_BREAKEVEN;
-			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "EPLxP", EOrderAction.Sell, OrderExit.Total));
-			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "EPLxA", EOrderAction.Sell));
-			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLxSL", EOrderAction.Sell));
-			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLxTSL", EOrderAction.Sell));
+			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "EPLXP", EOrderAction.Sell, OrderExit.Total));
+			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "EPLXA", EOrderAction.Sell));
+			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLXSL", EOrderAction.Sell));
+			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLXTSL", EOrderAction.Sell));
 		}
 
 		protected override void StartCalc()
@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 			//   entry day low since we always want to enforce an exit that is right at the low of the entry day at least.
 			// * Given the above two invariants we will keep our stop-loss based on those calculations with the stop-loss buffer.
 
-			double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1);	//1 is used to exclude the current day's bar and low
+			double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
 			double stopLoss = dayLow - StopLossBuffer;
 			trace(ETraceLevel.Info, $"Generating entry day ({entryDate.ToString("yyyy-MM-dd")}) stop-loss at {stopLoss}.");
 			m_lxStopLoss.Send(stopLoss);
