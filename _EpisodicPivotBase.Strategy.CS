@@ -70,6 +70,7 @@ namespace PowerLanguage.Strategy
 		private PowerLanguage.Function._SuperSmoother m_fastMA;
 		private PowerLanguage.Function._SuperSmoother m_mediumMA;
 		private PowerLanguage.Function._SuperSmoother m_slowMA;
+		private double m_stopLoss;
 		private double m_overextensionPercent;
 		private IInstrument m_minuteTimeFrame;
 		private IInstrument m_dailyTimeFrame;
@@ -134,7 +135,11 @@ namespace PowerLanguage.Strategy
 		{
 			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 			base.CalcBar();
-			if (PositionSide == 0) return;
+			if (PositionSide == 0)
+			{
+				m_stopLoss = double.MinValue;	//reset stop-loss for next position computation
+				return;
+			}
 
 			//determine the entry date of the trade  
 			DateTime entryDate = this.EntryTime(0);
@@ -155,11 +160,12 @@ namespace PowerLanguage.Strategy
 			// * If we are still in a position after a few days it would also mean that a lookback on the low of the n-days since entry would also reflect the
 			//   entry day low since we always want to enforce an exit that is right at the low of the entry day at least.
 			// * Given the above two invariants we will keep our stop-loss based on those calculations with the stop-loss buffer.
-
+			// * We NEVER allow the stop-loss to go lower since that would increase our risk, it can only go up.
 			double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
 			double stopLoss = dayLow - StopLossBuffer;
-			trace(ETraceLevel.Info, $"Generating entry day ({entryDate.ToString("yyyy-MM-dd")}) stop-loss at {stopLoss}.");
-			m_lxStopLoss.Send(stopLoss);
+			m_stopLoss = m_stopLoss == double.MinValue || m_stopLoss < stopLoss ? stopLoss : m_stopLoss;	//stop-loss can only be initialized or move up (it can never move down)
+			trace(ETraceLevel.Info, $"Generating entry day ({entryDate.ToString("yyyy-MM-dd")}) stop-loss at {m_stopLoss} (computed stop-loss based on day low {stopLoss}).");
+			m_lxStopLoss.Send(m_stopLoss);
 
 			//generate the breakeven stop-loss if the position is up by a certain percentage
 			if (ProfitPercentBreakeven != 0)
