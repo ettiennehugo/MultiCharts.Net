@@ -168,7 +168,7 @@ namespace PowerLanguage.Strategy
 			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;    //NOTE: Here we use the LOW and not the open as this might be a reentry.
 
 			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
+			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0] + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);	//+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
