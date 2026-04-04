@@ -47,6 +47,7 @@ namespace PowerLanguage.Strategy
 	///	• [optional] AddToPosition - if the trend line is crossed and we are already in a position add to the position
 	///	• [optional] StopLossExitId - Creates a risk based entry in conjunction with the given exit stop loss Id (blank to disable risk based entry), e.g. when EquityPercent is 0.01 (1%) the position size would risk 1%
 	///	                              of the account equity based on the entry price and the stop-loss price.
+	///	• [optional] AbsoluteSize - Overrides size computations (MaxRiskBasedEquityPercent, MaxVolumeBasedPercent, EquityPercent) to enter with the absolute size, only enabled when value is > 0.	                              
 	///	• [optional] MaxRiskBasedEquityPercent - When a risk based entry is used (see StopLossExitId) the maximum percent of the account equity to use for the position as risk based position entries can become really big,
 	///	                                         the output value is clipped by the EquityPercent and MaxVolumeBasedPercent output values.
 	///	• [optional] MaxVolumeBasedPercent - percent of the average volume (see VolumeDataFeed/VolumeLength) to use as the maximum position size to ensure liquidity on exit, default 0.2 (20%), set to 0.0 to disable.
@@ -630,6 +631,7 @@ namespace PowerLanguage.Strategy
 			public double EquityPercent { get; set; }
 			public int VolumeDataFeed { get; set; }
 			public int VolumeLength { get; set; }
+			public int AbsoluteSize { get; set; }
 			public double MaxVolumeBasedPercent { get; set; }
 			public double ClosePercentile { get; set; }
 			public double VolumePercentile { get; set; }
@@ -673,6 +675,7 @@ namespace PowerLanguage.Strategy
 				EquityPercent = 1.0;
 				VolumeDataFeed = 1;
 				VolumeLength = DEFAULT_VOLUME_PERIOD;
+				AbsoluteSize = 0;
 				MaxVolumeBasedPercent = 0.2;
 				Criteria = EEntryExitCriteria.Close;
 				AddToPosition = EAddToPosition.NoAdd;
@@ -705,6 +708,7 @@ namespace PowerLanguage.Strategy
 				if (name == "equitypercent") { EquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "volumedatafeed") { VolumeDataFeed = property.Value.ToObject<int>(); return true; }
 				if (name == "volumelength") { VolumeLength = property.Value.ToObject<int>(); return true; }
+				if (name == "absolutesize") { AbsoluteSize = property.Value.ToObject<int>(); return true; } 
 				if (name == "maxvolumebasedpercent") { MaxVolumeBasedPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "maxriskbasedequitypercent") { MaxRiskBasedEquityPercent = property.Value.ToObject<double>(); return true; }
 				if (name == "closepercentile") { ClosePercentile = property.Value.ToObject<double>(); return true; }
@@ -913,9 +917,16 @@ namespace PowerLanguage.Strategy
 
 			/// <summary>
 			/// Computes the size of the position based on the equity available, equity percent per position, entry price and exit stop-loss price (if specified).
+			/// Note that AbsoluteSize overrides any size computations and enter with whichever size is specified.
 			/// </summary>
 			protected virtual int entrySize(double price = 0.0)
 			{
+				if (AbsoluteSize > 0)
+				{
+					trace(ETraceLevel.Info, $"Using absolute size {AbsoluteSize}.");
+					return AbsoluteSize;
+				}
+
 				double equityAvailable = m_studyControl.equityAvailable();
 				double positionSizeByEquityPercent = equityAvailable * EquityPercent;
 				double entryPrice = price == 0.0 ? m_studyControl.Bars.Close[0] : price;

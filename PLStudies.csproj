@@ -39,6 +39,10 @@
     <Reference Include="System.Drawing.dll" />
     <Reference Include="System.Windows.Forms.dll" />
     <Reference Include="System.Runtime.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\FileHelpers.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\Ichimoku.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\PriceAction.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\RiskManagement.dll" />
     <Reference Include="C:\Users\ettie\.nuget\packages\newtonsoft.json\13.0.3\lib\net45\Newtonsoft.Json.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\PriceAction\PriceAction\bin\Release\PriceAction.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.dll" />
