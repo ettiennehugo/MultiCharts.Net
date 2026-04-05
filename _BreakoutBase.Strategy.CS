@@ -151,6 +151,15 @@ namespace PowerLanguage.Strategy
 			m_projectedStopLossPrice = 0.0;
 			m_tradingTimeframe = Bars;
 			m_dailyTimeframe = BarsOfData(2);
+
+			//ensure trading timeframe is higher resolution (shorter) than the daily timeframe
+			if (m_tradingTimeframe.Info.Resolution.Duration() >= m_dailyTimeframe.Info.Resolution.Duration())
+			{
+				throw new ArgumentException(
+						$"Trading timeframe ({m_tradingTimeframe.Info.Resolution.Duration()}) " +
+						$"must be strictly shorter than daily timeframe ({m_dailyTimeframe.Info.Resolution.Duration()}). " +
+						"The primary chart, Data1, must use a lower timeframe than Data2.");
+			}
 		}
 
 		protected override void CalcBar()
@@ -263,7 +272,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(IntradayClose - m_projectedStopLossPrice);
 			int equitySize = m_tradingTimeframe.CloseValue != 0 ? (int)Math.Truncate((equityAvailable() * MaxEquityPercent) / m_tradingTimeframe.CloseValue) : 0;
 			int riskSize = riskBasedPositionSize(risk, MaxRiskBasedPercent, UseRoundLots);
-			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, MaxVolumePercent, UseRoundLots);
+			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, 1, MaxVolumePercent, UseRoundLots);
 			size = (int)Math.Min(equitySize ,Math.Min(riskSize, volumeSize));
 			trace(ETraceLevel.Verbose, $"Size {size} from risk {risk} - EquitySize({equitySize}) RiskSize({riskSize}) VolumeSize({volumeSize}).");
 

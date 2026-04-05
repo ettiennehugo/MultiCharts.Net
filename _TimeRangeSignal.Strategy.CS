@@ -96,7 +96,7 @@ namespace PowerLanguage.Strategy {
 				{
 					m_riskAmountPerContract = m_entryInstrument.Close[0] - m_entryInstrument.Low[0] + _EntryStopLossBufferPrice;
 					int slSize = stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.Low[0] - _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent);
-					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, _MaxVolumeBasedPosPercent);
+					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, 1, _MaxVolumeBasedPosPercent);
 					int size = slSize < volumeSize ? slSize : volumeSize;
 					m_le.Send(m_entryInstrument.Close[0], size);
 				}
@@ -104,7 +104,7 @@ namespace PowerLanguage.Strategy {
 				{
 					m_riskAmountPerContract = m_entryInstrument.High[0] - m_entryInstrument.Close[0] + _EntryStopLossBufferPrice;
 					int slSize = stopLossBasedPositionSize(m_entryInstrument, m_entryInstrument.High[0] + _EntryStopLossBufferPrice, _MaxRiskEquityPerPosPercent);
-					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, _MaxVolumeBasedPosPercent);
+					int volumeSize = volumeBasedPositionSize(m_volumeInstrument, _VolumeLength, 1, _MaxVolumeBasedPosPercent);
 					int size = slSize < volumeSize ? slSize : volumeSize;					
 					m_se.Send(m_entryInstrument.Close[0], size);
 				}

@@ -40,11 +40,11 @@ namespace PowerLanguage.Strategy
 
 		//constants
 		public const string DEFAULT_START_TIME = "09:30";
-		public const string DEFAULT_END_TIME = "16:00";
+		public const string DEFAULT_END_TIME = "10:00";
 
 		//properties
 		[Input] public string StartTime { get; set; }           // Start time for the entries to be taken, default to 09:30 (assuming stock exchange local time)
-		[Input] public string EndTime { get; set; }             // End time for entries to be taken, defaul to 16:00 (assuming stock exchange local time)
+		[Input] public string EndTime { get; set; }             // End time for entries to be taken, defaul to 10:00 (assuming stock exchange local time)
 
 		//attribute
 		private DateTime m_startTime;
