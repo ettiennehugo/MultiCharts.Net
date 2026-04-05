@@ -31,6 +31,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_SECOND_PROFIT_EXIT = 0.15;
 		public const double DEFAULT_SECOND_PROFIT_POSITION = 0.25;
 		public const double DEFAULT_MAX_PROFIT_PERCENT = 0.2;
+		public const int DEFAULT_MAX_HOLD_PERIOD = 6;
 		public const double DEFAULT_BREAK_EVEN_PROFIT = 0.0;
 		public const int DEFAULT_ENTRY_DAY_EXTREME_CHECK = 2;
 		public const int DEFAULT_FLATTEN_IF_NOT_PROFITABLE = 2;
@@ -56,6 +57,7 @@ namespace PowerLanguage.Strategy
 		[Input] public double SecondProfitExit { get; set; }        // Percentage profit to exit second partial position, 0.15 for 15% profit, 0 to disable (let it run).
 		[Input] public double SecondProfitPosition { get; set; }    // Percentage of initial position size to exit when second profit target is hit, 0.25 for 25%/quarter position.
 		[Input] public double MaxProfitPercent { get; set; }        // Maximum profit to take if reached, default 0.2 for 20%, 0 to disable (let it run), will exit full position.
+		[Input] public int MaxHoldPeriod { get; set; }							// Maximum holding period based off Data2 timeframe, default 6 bars.
 		[Input] public double BreakEvenProfit { get; set; }         // Move stop-loss to breakeven once a certain profit percentage is hit, default is 0 to disable it, e.g. 0.05 would move the stop-loss to breakeven once a 5% profit is shown
 		[Input] public int EntryDayExtremeCheck { get; set; }       // Require move beyond entry day extreme (low/high) if not moved beyond that position will be flattened, default 2 will check each subsequent after entry day to remain above the entry day close.
 		[Input] public int FlattenIfNotProfitable { get; set; }     // Flatten position on this trade day if not profitable, default 2 meaning will flatten position two days after entry if not profitable.
@@ -73,6 +75,9 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_secondExit;
 		private IOrderPriced m_exitMax;
 		private IOrderMarket m_exitAll;
+		private String m_entryDayExtremeOrderName;
+		private String m_flattenIfNotProfitableOrderName;
+		private String m_maxHoldPeriodOrderName;
 
 		//interface methods
 		public _BreakoutBase(object _ctx, bool longPosition) : base(_ctx) { m_longPosition = longPosition; }
@@ -97,6 +102,7 @@ namespace PowerLanguage.Strategy
 			SecondProfitExit = DEFAULT_SECOND_PROFIT_EXIT;
 			SecondProfitPosition = DEFAULT_SECOND_PROFIT_POSITION;
 			MaxProfitPercent = DEFAULT_MAX_PROFIT_PERCENT;
+			MaxHoldPeriod = DEFAULT_MAX_HOLD_PERIOD;
 			BreakEvenProfit = DEFAULT_BREAK_EVEN_PROFIT;
 			EntryDayExtremeCheck = DEFAULT_ENTRY_DAY_EXTREME_CHECK;
 			FlattenIfNotProfitable = DEFAULT_FLATTEN_IF_NOT_PROFITABLE;
@@ -110,6 +116,9 @@ namespace PowerLanguage.Strategy
 				m_secondExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LXBo2", EOrderAction.Sell, OrderExit.FromAll));
 				m_exitMax = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "LXBoMax", EOrderAction.Sell, OrderExit.FromAll));
 				m_exitAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LXBoAll", EOrderAction.Sell, OrderExit.FromAll));
+				m_entryDayExtremeOrderName = "LXBoNoExtrBrk";
+				m_flattenIfNotProfitableOrderName = "LXBoNoPrft";
+				m_maxHoldPeriodOrderName = "LXBoMxHld";
 			}
 			else
 			{
@@ -119,6 +128,9 @@ namespace PowerLanguage.Strategy
 				m_secondExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SXBo2", EOrderAction.BuyToCover, OrderExit.FromAll));
 				m_exitMax = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "SXBoMax", EOrderAction.BuyToCover, OrderExit.FromAll));
 				m_exitAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SXBoAll", EOrderAction.BuyToCover, OrderExit.FromAll));
+				m_entryDayExtremeOrderName = "SXBoNoExtrBrk";
+				m_flattenIfNotProfitableOrderName = "SXBoNoPrft";
+				m_maxHoldPeriodOrderName = "SXBoMxHld";
 			}
 		}
 
@@ -193,6 +205,7 @@ namespace PowerLanguage.Strategy
 				processExit(MaxProfitPercent, 1.0, m_exitMax);
 				processEntryDayExtremeExit();
 				flattenIfNotProfitable();
+				flattenIfMaxPeriodReached();
 			}
 		}
 
@@ -315,7 +328,7 @@ namespace PowerLanguage.Strategy
 			double targetPrice = (position.Value > 0) ? entryPrice * (1 + profitPercent) : entryPrice * (1 - profitPercent);
 			bool targetAchieved = (position.Value > 0 && m_tradingTimeframe.CloseValue >= targetPrice) ||
 														(position.Value < 0 && m_tradingTimeframe.CloseValue <= targetPrice);
-			trace(ETraceLevel.Verbose, $" Profit target {targetPrice} for order {order.ID} achieved at price {IntradayClose}? {targetAchieved}");
+			trace(ETraceLevel.Verbose, $" Profit target {targetPrice} for order {order.Info.Name} achieved at price {IntradayClose}? {targetAchieved}");
 
 			if (targetAchieved)
 			{
@@ -374,7 +387,7 @@ namespace PowerLanguage.Strategy
 				if (exitPosition)
 				{
 					trace(ETraceLevel.Info, $"processEntryDayExtremeExit closing position with size {position.Value}");
-					m_exitAll.Send();
+					m_exitAll.Send(m_entryDayExtremeOrderName);
 				}
 			}
 		}
@@ -391,7 +404,23 @@ namespace PowerLanguage.Strategy
 			if (daysCount >= FlattenIfNotProfitable && position.Profit < 0.0)
 			{
 				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position with size {position.Value} and P/L {position.Profit}");
-				m_exitAll.Send();
+				m_exitAll.Send(m_flattenIfNotProfitableOrderName);
+			}
+		}
+
+		private void flattenIfMaxPeriodReached()
+		{
+			IMarketPosition position = Positions[0];
+			if (position.Value == 0 || MaxHoldPeriod <= 0) return;
+
+			DateTime entryDate = this.EntryTime(0);
+			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
+			trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
+
+			if (daysCount >= MaxHoldPeriod)
+			{
+				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position with size {position.Value} and P/L {position.Profit}");
+				m_exitAll.Send(m_maxHoldPeriodOrderName);
 			}
 		}
 	}
