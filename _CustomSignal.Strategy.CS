@@ -205,7 +205,7 @@ namespace PowerLanguage.Strategy
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0].ToLocalTime(), this.GetType().Name, this.Bars.Info.Name, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, message);
 			}
 		}
 
