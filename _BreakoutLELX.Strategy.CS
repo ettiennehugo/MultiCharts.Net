@@ -79,7 +79,7 @@ namespace PowerLanguage.Strategy
 				double rangePct = (IntradayOpen != 0.0) ? Math.Abs(range) / IntradayOpen : 0.0;
 				if (range > 0.0 && m_averageRange.Value < rangePct)
 				{
-					trace(ETraceLevel.Info, $"Bullish range expansion detected - Range({range})  AvgRange({m_averageRange.Value})");
+					trace(ETraceLevel.Info, $"sendEntry bullish range expansion detected → Range({range}) AvgRange({m_averageRange.Value})");
 					m_entry.Send(positionSize());
 				}		
 			}
