@@ -250,10 +250,10 @@ namespace PowerLanguage.Strategy
 				if (m_loadAccounts)
 				{
 					if (TradeManager.TradingData.Accounts.Items.Length == 0) {
-						trace(ETraceLevel.Warning, "CalcBar → ProcessEvents failed to load account queuing recalculation.");
+						trace(ETraceLevel.Warning, "CalcBar - ProcessEvents failed to load account queuing recalculation.");
 						ExecControl.RecalcLastBarAfter(TimeSpan.FromSeconds(DEFAULT_ACCOUNT_RECALC_INTERVAL));
 					} else {
-						trace(ETraceLevel.Info,$"CalcBar → Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
+						trace(ETraceLevel.Info,$"CalcBar - Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
 						m_loadAccounts = false;
 					}
 				}
@@ -312,10 +312,10 @@ namespace PowerLanguage.Strategy
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
 			{
-				trace(ETraceLevel.Verbose, $"equityAvailable → Checking {this.TradeManager.TradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
+				trace(ETraceLevel.Verbose, $"equityAvailable - Checking {this.TradeManager.TradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
 				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
 				{
-					trace(ETraceLevel.Verbose, $"equityAvailable → Found account {account.Name} with equity {account.Equity ?? 0}.");
+					trace(ETraceLevel.Verbose, $"equityAvailable - Found account {account.Name} with equity {account.Equity ?? 0}.");
 					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
@@ -330,7 +330,7 @@ namespace PowerLanguage.Strategy
 				case EApplicationCode.Charting:
 					if (equityAvailable != 0.0d)
 					{
-						trace(ETraceLevel.Verbose, $"equityAvailable → Equity determined from account - {equityAvailable}");
+						trace(ETraceLevel.Verbose, $"equityAvailable - Equity determined from account - {equityAvailable}");
 						equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
 					}
 					else
@@ -343,7 +343,7 @@ namespace PowerLanguage.Strategy
 					double percentEquity = maxCustomRiskEquityPerPosPercent > 0.0d ? maxCustomRiskEquityPerPosPercent : this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d;
 					if (equityAvailable != 0.0d)
 					{
-						trace(ETraceLevel.Verbose, $"equityAvailable → Equity determined from account - {equityAvailable}");
+						trace(ETraceLevel.Verbose, $"equityAvailable - Equity determined from account - {equityAvailable}");
 						equityAvailable *= percentEquity;
 					}
 					else
@@ -395,7 +395,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (risk <= 0 || maxRiskEquityPerPosPercent <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"riskBasedPositionSize risk or maxRiskEquityPerPosPercent not correct → Risk({risk}) MaxRiskEquityPerPosPercent({maxRiskEquityPerPosPercent})");
+				trace(ETraceLevel.Verbose, $"riskBasedPositionSize risk or maxRiskEquityPerPosPercent not correct - Risk({risk}) MaxRiskEquityPerPosPercent({maxRiskEquityPerPosPercent})");
 				return 0;
 			}
 
@@ -409,13 +409,13 @@ namespace PowerLanguage.Strategy
 			double shares = positionCash / risk;
 			if (double.IsInfinity(shares) || double.IsNaN(shares))
 			{
-				trace(ETraceLevel.Warning, $"riskBasedPositionSize resulted in overflow (possible data issue or very small risk) returning zero → Risk({risk}) PositionCash({positionCash})");
+				trace(ETraceLevel.Warning, $"riskBasedPositionSize resulted in overflow (possible data issue or very small risk) returning zero - Risk({risk}) PositionCash({positionCash})");
 				return 0;
 			}
 
 			int result = (int)Math.Floor(shares);
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Verbose, $"riskBasedPositionSize → Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
+			trace(ETraceLevel.Verbose, $"riskBasedPositionSize - Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
 			return result;
 		}
 
@@ -448,7 +448,7 @@ namespace PowerLanguage.Strategy
 
 			int beforeRoundLots = result;
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Verbose, $"volumeBasedPositionSize → Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
+			trace(ETraceLevel.Verbose, $"volumeBasedPositionSize - Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
 			return result;
 		}
 
@@ -499,7 +499,7 @@ namespace PowerLanguage.Strategy
 			int count = 0;
 
 			if (Bars.Info.Category != ESymbolCategory.Stock)
-				trace(ETraceLevel.Warning, "tradingDayCount → WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
+				trace(ETraceLevel.Warning, "tradingDayCount - WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
 
 			while (date.Date > entryDate.Date)
 			{
@@ -544,7 +544,7 @@ namespace PowerLanguage.Strategy
 
 				if (i == ExecInfo.MaxBarsBack - 1)
 				{
-					trace(ETraceLevel.Warning, $"recentLow → Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
+					trace(ETraceLevel.Warning, $"recentLow - Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
 					break;
 				}
 			}
@@ -584,7 +584,7 @@ namespace PowerLanguage.Strategy
 
 				if (i == ExecInfo.MaxBarsBack - 1)
 				{
-					trace(ETraceLevel.Warning, $"recentHigh → Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
+					trace(ETraceLevel.Warning, $"recentHigh - Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
 					break;
 				}
 			}
@@ -610,9 +610,9 @@ namespace PowerLanguage.Strategy
 				entryDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
 			if (entryDate == DateTime.MaxValue)
-				trace(ETraceLevel.Verbose, $"EntryTime → Unable to compute position entry date with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
+				trace(ETraceLevel.Verbose, $"EntryTime - Unable to compute position entry date with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
 			else
-				trace(ETraceLevel.Verbose, $"EntryTime → Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
+				trace(ETraceLevel.Verbose, $"EntryTime - Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
 			return entryDate;
 		}
 	}
