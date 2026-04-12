@@ -44,7 +44,7 @@ namespace PowerLanguage.Strategy
 
 		//properties
 		[Input] public string StartTime { get; set; }           // Start time for the entries to be taken, default to 09:30 (assuming stock exchange local time)
-		[Input] public string EndTime { get; set; }             // End time for entries to be taken, defaul to 10:00 (assuming stock exchange local time)
+		[Input] public string EndTime { get; set; }             // End time for entries to be taken, default to 10:00 (assuming stock exchange local time)
 
 		//attribute
 		private DateTime m_startTime;
