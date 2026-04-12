@@ -176,7 +176,7 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
-		public List<DateTime> Holidays { get { return m_holidays.Holidays; } }
+		public Function.USHolidays Holidays { get { return m_holidays; } }
 
 		[Input] public virtual ETraceLevel TraceLevel { get; set; }
 
@@ -507,7 +507,7 @@ namespace PowerLanguage.Strategy
 
 			while (date.Date > entryDate.Date)
 			{
-				if (!m_holidays.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
+				if (!m_holidays.isHoliday(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
 				date = date.AddDays(-1);
 			}
 

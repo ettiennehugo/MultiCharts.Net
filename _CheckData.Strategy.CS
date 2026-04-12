@@ -215,7 +215,7 @@ namespace PowerLanguage.Strategy
       while (expectedBarTime == DateTime.MinValue)
       {
         nextBarTime += _barDuration;
-        if (isInTradingSession(ref nextBarTime) && !_usHolidays.Holidays.Contains(nextBarTime.Date))
+        if (isInTradingSession(ref nextBarTime) && !_usHolidays.isHoliday(nextBarTime))
           expectedBarTime = nextBarTime;
       }
 

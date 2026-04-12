@@ -1638,32 +1638,12 @@ namespace PowerLanguage.Strategy
 
 			protected int calendarDayCount(DateTime entryDate, DateTime currentDate)
 			{
-				TimeSpan days = currentDate.Date - entryDate.Date;
-				trace(ETraceLevel.Verbose, $"Calendar day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDate.ToString("yyyyMMdd hh:mm:ss")} calculated as {days.Days} days");
-				return days.Days;
+				return m_studyControl.calendarDayCount(entryDate, currentDate);
 			}
 
 			protected int tradingDayCount(DateTime entryDate, DateTime currentDate)
 			{
-				DateTime date = currentDate;
-				int count = 0;
-
-				if (currentDate.Date < entryDate.Date)
-				{
-					trace(ETraceLevel.Error, $"Trading day count can not be computed around currentDate {currentDate.ToString("yyyyMMdd")} and entryDate {entryDate.ToString("yyyyMMdd")}, entryDate must be less than currentDate");
-					return 0;
-				}
-				if (m_studyControl.Bars.Info.Category != ESymbolCategory.Stock) trace(ETraceLevel.Warning, $"Used with non-stock object using TradingDays specification calculated around stock market calendar.");
-
-				while (date.Date > entryDate.Date)
-				{
-					//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
-					if (!m_studyControl.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
-					date = date.AddDays(-1);
-				}
-
-				trace(ETraceLevel.Verbose, $"Trading day count for position entered {entryDate.ToString("yyyyMMdd hh:mm:ss")} to current date {currentDate.ToString("yyyyMMdd hh:mm:ss")} calculated as {count} days");
-				return count;
+				return m_studyControl.tradingDayCount(entryDate, currentDate);
 			}
 		}
 

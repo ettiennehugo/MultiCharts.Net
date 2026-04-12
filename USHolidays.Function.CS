@@ -8,11 +8,12 @@ namespace PowerLanguage
 		/// <summary>
 		/// Computes the set of US holidays for the calendar and keeps the holiday list updated.
 		/// 
-		/// IMPORTANT NOTES:
+		/// NOTES:
 		/// * You must call the function at least once in your calling signal/indicator to ensure the holiday list remains updated
 		///   e.g. int _ = m_holidays.Value; - this forces CalcBar to be called.
-		/// * The Holidays list store DateTime objects with a zero date, so you need to compare using Holidays.Contains(SomeDate.Date) - if you
-		///   call the function with a full DateTime the time comparison will cause the date never to be found.
+		/// * Even though we store the list of holidays the function isHoliday makes sure that the list of holidays are accessed
+		///   correctly via the DateOnly part of the DateTime since the holidays are stored with only the date part set (time part
+		///   is zeroed, so comparing on it against a bar DateTime would never get a match).
 		/// </summary>
 		public sealed class USHolidays : FunctionSimple<int>
 		{
@@ -27,7 +28,7 @@ namespace PowerLanguage
 			}
 
 			//Properties
-			public List<DateTime> Holidays { get { return _holidays; } }
+
 
 			//Attributes
 			private List<DateTime> _holidays;
@@ -35,6 +36,12 @@ namespace PowerLanguage
 			//Methods
 			public USHolidays(CStudyControl _master) : base(_master) { }
 			public USHolidays(CStudyControl _master, int _ds) : base(_master, _ds) { }
+
+			public bool isHoliday(DateTime dateTime)
+			{
+				//holidays are stored as DateOnly with zeroed time, so we only compare using the Date
+				return _holidays.Contains(dateTime.Date);
+			}
 
 			protected override void Create() { }
 
