@@ -258,7 +258,10 @@ namespace PowerLanguage.Strategy
 					}
 				}
 			}
-			
+
+			//force call to CalcBar of holidays to ensure refresh happens
+			int _ = m_holidays.Value;
+
 			if (Environment.CalcReason == CalculationReason.Default) {
 				if (Bars.Time[0].Date != m_currentDay.Date)
 				{
