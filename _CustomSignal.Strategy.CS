@@ -487,18 +487,19 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
-			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always smaller than currentDateTime");
+			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always be smaller than currentDateTime");
 			TimeSpan days = currentDateTime - entryDate;
 			return days.Days;
 		}
 
 		/// <summary>
 		/// Calculates the number of trading days between two dates using the US stock market calendar.
+		/// NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
 		/// </summary>
 		protected int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
-			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always smaller than currentDateTime");
-			DateTime date = currentDateTime;
+			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always be smaller than currentDateTime");
+			DateTime date = currentDateTime.Date;	//IMPORTANT: Holidays below ignore the Time component so we must use DateOnly component.
 			int count = 0;
 
 			if (Bars.Info.Category != ESymbolCategory.Stock)
@@ -506,7 +507,6 @@ namespace PowerLanguage.Strategy
 
 			while (date.Date > entryDate.Date)
 			{
-				//NOTE: This will not work correctly for non-US markets and non-equities that trade over the weekends, e.g. Forex.
 				if (!m_holidays.Holidays.Contains(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
 				date = date.AddDays(-1);
 			}

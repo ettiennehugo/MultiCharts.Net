@@ -314,7 +314,7 @@ namespace PowerLanguage.Strategy
 				this.CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 				IMarketPosition position = Positions[0];
 				double profit = StrategyInfo.AvgEntryPrice * BreakEvenProfit;
-				trace(ETraceLevel.Info, $"sendBreakEvenStop sending breakeven stop - ProfitPerPos({profit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit})");
+				trace(ETraceLevel.Info, $"sendBreakEvenStop sending breakeven stop - ProfitPerPos({profit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 				GenerateBreakEven(profit);
 			}
 		}
@@ -364,11 +364,11 @@ namespace PowerLanguage.Strategy
 				//never exit more than we currently have open
 				int currentOpen = (int)Math.Abs(position.OpenLots);
 				qtyToExit = Math.Max(0, Math.Min(qtyToExit, currentOpen));
-				trace(ETraceLevel.Verbose, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit})");
+				trace(ETraceLevel.Verbose, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 
 				if (qtyToExit > 0)
 				{
-					trace(ETraceLevel.Info, $"processExit sending exit order - ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit})");
+					trace(ETraceLevel.Info, $"processExit sending exit order - ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 					order.Send(targetPrice, qtyToExit);
 				}
 			}
@@ -404,11 +404,12 @@ namespace PowerLanguage.Strategy
 
 			DateTime entryDate = this.EntryTime(0);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit})");
+			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit} NetProfit({position.Profit + position.OpenProfit}))");
 
-			if (daysCount >= FlattenIfNotProfitable && position.OpenProfit < 0.0)
+			//NOTE: We take into account both realized profit (Profit) and open profit into account to determine position profitability 
+			if (daysCount >= FlattenIfNotProfitable && (position.Profit + position.OpenProfit) < 0.0)
 			{
-				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position - Size({position.Value}) OpenProfit({position.OpenProfit})");
+				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position - Size({position.Value}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 				m_exitAll.Send(m_flattenIfNotProfitableOrderName);
 			}
 		}
@@ -424,7 +425,7 @@ namespace PowerLanguage.Strategy
 
 			if (daysCount >= MaxHoldPeriod)
 			{
-				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position - Size({position.Value}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit})");
+				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position - Size({position.Value}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 				m_exitAll.Send(m_maxHoldPeriodOrderName);
 			}
 		}

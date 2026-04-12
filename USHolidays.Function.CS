@@ -5,6 +5,15 @@ namespace PowerLanguage
 {
 	namespace Function
 	{
+		/// <summary>
+		/// Computes the set of US holidays for the calendar and keeps the holiday list updated.
+		/// 
+		/// IMPORTANT NOTES:
+		/// * You must call the function at least once in your calling signal/indicator to ensure the holiday list remains updated
+		///   e.g. int _ = m_holidays.Value; - this forces CalcBar to be called.
+		/// * The Holidays list store DateTime objects with a zero date, so you need to compare using Holidays.Contains(SomeDate.Date) - if you
+		///   call the function with a full DateTime the time comparison will cause the date never to be found.
+		/// </summary>
 		public sealed class USHolidays : FunctionSimple<int>
 		{
 			//Types
