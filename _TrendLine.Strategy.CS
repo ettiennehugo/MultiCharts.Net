@@ -1,11 +1,13 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using PowerLanguage.Function;
+using PowerLanguage.TradeManager;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
 using System.Globalization;
 using System.Linq;
-using System.Collections.Generic;
-using Newtonsoft.Json.Linq;
-using Newtonsoft.Json;
-using PowerLanguage.TradeManager;
-using PowerLanguage.Function;
 
 namespace PowerLanguage.Strategy
 {
@@ -52,6 +54,8 @@ namespace PowerLanguage.Strategy
 	///	                                         the output value is clipped by the EquityPercent and MaxVolumeBasedPercent output values.
 	///	• [optional] MaxVolumeBasedPercent - percent of the average volume (see VolumeDataFeed/VolumeLength) to use as the maximum position size to ensure liquidity on exit, default 0.2 (20%), set to 0.0 to disable.
 	/// • [optional] UseRoundLots - use round lot orders (multiples of 100) to facilitate better market fills for larger accounts, default false
+	/// • [optional/alternate] LimitOrderOffset - when using a stop-limit order use the given price offset for the limit price - NOTE: Value is used as-is so for SHORT positions specify a negative value if the limit entry should be BELOW the stop price specified by the line.
+	/// • [optional/alternate] LimitOrderLineId - when using a stop-limit order use the given line as the limit price
 	/// • [optional] TraceLevel - trace level for instruction, default is None 
 	/// 
 	/// ExitLine
@@ -641,7 +645,7 @@ namespace PowerLanguage.Strategy
 			public string StopLossExitId { get; set; }
 			public double MaxRiskBasedEquityPercent { get; set; }
 			public bool UseRoundLots { get; set; }
-
+			public double LimitOrderOffset { get; set; }
 			public bool IsLastPositionOpen { get; protected set; }
 			public int LastPositionSize { get; protected set; }
 
@@ -696,6 +700,7 @@ namespace PowerLanguage.Strategy
 				m_previousCloseDateTime = DateTime.MinValue;
 				m_entryBars = new HashSet<int>();
 				m_exitBars = new HashSet<int>();
+				LimitOrderOffset = double.PositiveInfinity;
 			}
 
 			public override bool Parse(JProperty property)
@@ -717,6 +722,7 @@ namespace PowerLanguage.Strategy
 				if (name == "addtoposition") { AddToPosition = property.Value.ToObject<EAddToPosition>(); return true; }
 				if (name == "validuntil") { ValidUntil = property.Value.ToObject<DateTime>(); return true; }
 				if (name == "stoplossexitid") { StopLossExitId = property.Value.ToString().ToLower(); return true; }
+				if (name == "limitorderoffset") { LimitOrderOffset = property.Value.ToObject<double>(); return true; }
 				if (name == "useroundlots") { UseRoundLots = property.Value.ToObject<bool>(); return true; }
 				return base.Parse(property);
 			}
@@ -1010,17 +1016,17 @@ namespace PowerLanguage.Strategy
 								m_orderLePriced.Send(OrderName, price, size);
 								break;
 							case EOrderType.MarketLimit:
-								double limitPrice = m_studyControl.Bars.StatusLine.Ask;
-								if (limitPrice == 0.0)
+								double marketLimitPrice = m_studyControl.Bars.StatusLine.Ask;
+								if (marketLimitPrice == 0.0)
 								{
 									trace(ETraceLevel.Error, $"Ask price is zero for long market limit order entry, reverting to closing price");
-									limitPrice = m_studyControl.Bars.Close[0];
+									marketLimitPrice = m_studyControl.Bars.Close[0];
 								}
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {limitPrice}");
-								m_orderLePriced.Send(OrderName, limitPrice, size);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {marketLimitPrice}");
+								m_orderLePriced.Send(OrderName, marketLimitPrice, size);
 								break;
 							case EOrderType.StopLimit:
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at stop price {price} and limit price {price}");
 								m_orderLeStpLmt.Send(OrderName, price, price, size);
 								break;
 							case EOrderType.MarketStopLimit:
@@ -1029,14 +1035,14 @@ namespace PowerLanguage.Strategy
 									trace(ETraceLevel.Error, $"Price is zero for long market stop-limit order entry");
 									return;
 								}
-								limitPrice = m_studyControl.Bars.StatusLine.Ask;
-								if (limitPrice == 0.0)
+								marketLimitPrice = m_studyControl.Bars.StatusLine.Ask;
+								if (marketLimitPrice == 0.0)
 								{
 									trace(ETraceLevel.Error, $"Ask price is zero for long market stop-limit order entry, reverting to closing price");
-									limitPrice = m_studyControl.Bars.Close[0];
+									marketLimitPrice = m_studyControl.Bars.Close[0];
 								}
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {limitPrice}");
-								m_orderLeStpLmt.Send(OrderName, price, limitPrice, size);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {marketLimitPrice}");
+								m_orderLeStpLmt.Send(OrderName, price, marketLimitPrice, size);
 								break;
 						}
 						break;
@@ -1053,17 +1059,17 @@ namespace PowerLanguage.Strategy
 								m_orderSePriced.Send(OrderName, price, size);
 								break;
 							case EOrderType.MarketLimit:
-								double limitPrice = m_studyControl.Bars.StatusLine.Bid;
-								if (limitPrice == 0.0)
+								double marketLimitPrice = m_studyControl.Bars.StatusLine.Bid;
+								if (marketLimitPrice == 0.0)
 								{
 									trace(ETraceLevel.Error, $"Bid price is zero for short market stop-limit order entry, reverting to closing price");
-									limitPrice = m_studyControl.Bars.Close[0];
+									marketLimitPrice = m_studyControl.Bars.Close[0];
 								}
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {limitPrice}");
-								m_orderSePriced.Send(OrderName, limitPrice, size);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market limit) of size {size} at price {marketLimitPrice}");
+								m_orderSePriced.Send(OrderName, marketLimitPrice, size);
 								break;
 							case EOrderType.StopLimit:
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at price {price}");
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at stop price {price} and limit price {price}");
 								m_orderSeStpLmt.Send(OrderName, price, price, size);
 								break;
 							case EOrderType.MarketStopLimit:
@@ -1072,14 +1078,14 @@ namespace PowerLanguage.Strategy
 									trace(ETraceLevel.Error, $"Price is zero for short market stop-limit order entry");
 									return;
 								}
-								limitPrice = m_studyControl.Bars.StatusLine.Bid;
-								if (limitPrice == 0.0)
+								marketLimitPrice = m_studyControl.Bars.StatusLine.Bid;
+								if (marketLimitPrice == 0.0)
 								{
 									trace(ETraceLevel.Error, $"Bid price is zero for long market stop-limit order entry, reverting to closing price");
-									limitPrice = m_studyControl.Bars.Close[0];
+									marketLimitPrice = m_studyControl.Bars.Close[0];
 								}
-								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {limitPrice}");
-								m_orderSeStpLmt.Send(OrderName, price, limitPrice, size);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} (market stop-limit) of size {size} with stop price {price} and limit price {marketLimitPrice}");
+								m_orderSeStpLmt.Send(OrderName, price, marketLimitPrice, size);
 								break;
 						}
 						break;
@@ -1682,7 +1688,9 @@ namespace PowerLanguage.Strategy
 			public double LineEndPrice { get; set; }
 			public bool RequireDailyDirection { get; set; }
 			public double RequireDailyClosePercentile { get; set; }
+			public int LimitOrderLineId { get; set; }
 			private ITrendLineObject m_line;
+			private ITrendLineObject m_limitOrderLine;
 
 			public EntryLine(_TrendLine control) : base(control, "EnL")
 			{
@@ -1691,9 +1699,11 @@ namespace PowerLanguage.Strategy
 				LineStartPrice = 0.0;
 				LineEndTime = DateTime.MinValue;
 				LineEndPrice = 0.0;
+				LimitOrderLineId = -1;
 				RequireDailyDirection = true;
 				RequireDailyClosePercentile = 0.0;
 				m_line = null;
+				m_limitOrderLine = null;
 				m_volumeInstrument = null;
 			}
 
@@ -1707,6 +1717,7 @@ namespace PowerLanguage.Strategy
 				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
 				if (name == "requiredailydirection") { RequireDailyDirection = property.Value.ToObject<bool>(); return true; }
 				if (name == "requiredailyclosepercentile") { RequireDailyClosePercentile = property.Value.ToObject<double>(); return true; }
+				if (name == "limitorderlineid") { LimitOrderLineId = property.Value.ToObject<int>(); return true; }
 
 				return base.Parse(property);
 			}
@@ -1722,6 +1733,8 @@ namespace PowerLanguage.Strategy
 				if (LineStartTime > LineEndTime) return Tuple.Create(false, $"{InstructionTypeName} - LineStartTime must be before LineEndTime");
 				if (EquityPercent <= 0 || EquityPercent > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - EntryPercent must be between 0 and 1");
 				if (RequireDailyClosePercentile < 0 || RequireDailyClosePercentile > 1.0) return Tuple.Create(false, $"{InstructionTypeName} - RequireDailyClosePercentile must be between 0 and 1");
+				if (LimitOrderLineId > 0 && m_limitOrderLine == null)
+					return Tuple.Create(false, $"{InstructionTypeName} - trendline with id {LimitOrderLineId} not found for limit order {OrderName}");
 				return base.IsValid();
 			}
 
@@ -1739,6 +1752,14 @@ namespace PowerLanguage.Strategy
 				}
 				else
 					m_line = m_studyControl.DrwTrendLine.Create(new ChartPoint(LineStartTime, LineStartPrice), new ChartPoint(LineEndTime, LineEndPrice), 1);
+
+				if (LimitOrderLineId > 0)
+				{
+					m_limitOrderLine = getTrendLine(LimitOrderLineId);
+				}
+
+				if ((LimitOrderLineId > 0 || !double.IsInfinity(LimitOrderOffset)) && OrderType != EOrderType.StopLimit)
+					trace(ETraceLevel.Warning, "LimitOrderOffset/LimitOrderLineId only apply to StopLimit orders");
 			}
 
 			public override void CalcBar()
@@ -1800,7 +1821,19 @@ namespace PowerLanguage.Strategy
 						}
 
 						if (entryCriteriaMet && closePercentileValid())
-							sendOrder(m_studyControl.Bars.Close[0]);
+						{
+							if (OrderType == EOrderType.StopLimit &&
+									(!double.IsInfinity(LimitOrderOffset) || m_limitOrderLine != null))
+							{
+								double stopPrice = m_studyControl.Bars.Close[0];
+								double limitPrice = m_limitOrderLine != null ? m_limitOrderLine.PriceValue(m_studyControl.Bars.Time[0]) : stopPrice + LimitOrderOffset;
+								int size = entrySize(limitPrice);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at stop price {stopPrice} and limit price {limitPrice}");
+								m_orderLeStpLmt.Send(OrderName, stopPrice, limitPrice, size);
+							}
+							else
+								sendOrder(m_studyControl.Bars.Close[0]);
+						}
 						break;
 					case EEntryExitCriteria.LowHigh:
 						if (!willBeStoppedOut(EEntryDirection.Long, linePrice)) sendOrder(linePrice);
@@ -1845,7 +1878,19 @@ namespace PowerLanguage.Strategy
 						}
 
 						if (entryCriteriaMet && closePercentileValid())
-							sendOrder(m_studyControl.Bars.Close[0]);
+						{
+							if (OrderType == EOrderType.StopLimit &&
+									(!double.IsInfinity(LimitOrderOffset) || m_limitOrderLine != null))
+							{
+								double stopPrice = m_studyControl.Bars.Close[0];
+								double limitPrice = m_limitOrderLine != null ? m_limitOrderLine.PriceValue(m_studyControl.Bars.Time[0]) : stopPrice + LimitOrderOffset;
+								int size = entrySize(limitPrice);
+								trace(ETraceLevel.Verbose, $"Sending {OrderName} of size {size} at stop price {stopPrice} and limit price {limitPrice}");
+								m_orderSeStpLmt.Send(OrderName, stopPrice, limitPrice, size);
+							}
+							else
+								sendOrder(m_studyControl.Bars.Close[0]);
+						}
 						break;
 					case EEntryExitCriteria.LowHigh:
 						if (!willBeStoppedOut(EEntryDirection.Short, linePrice)) sendOrder(linePrice);
@@ -1906,9 +1951,9 @@ namespace PowerLanguage.Strategy
 				string name = property.Name.ToLower();
 				if (name == "lineid") { LineId = property.Value.ToObject<int>(); return true; }
 				if (name == "criteria") { Criteria = property.Value.ToObject<EEntryExitCriteria>(); return true; }
-				if (name == "linestarttime") { LineStartTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "linestarttime") { LineStartTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "linestartprice") { LineStartPrice = property.Value.ToObject<double>(); return true; }
-				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd hh:mm:ss", CultureInfo.InvariantCulture); return true; }
+				if (name == "lineendtime") { LineEndTime = DateTime.ParseExact(property.Value.ToString(), "yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture); return true; }
 				if (name == "lineendprice") { LineEndPrice = property.Value.ToObject<double>(); return true; }
 
 				return base.Parse(property);
