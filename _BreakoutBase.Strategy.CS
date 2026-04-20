@@ -1,5 +1,6 @@
 ﻿using PowerLanguage.TradeManager;
 using System;
+using System.Drawing;
 
 namespace PowerLanguage.Strategy
 {
@@ -282,7 +283,11 @@ namespace PowerLanguage.Strategy
 
 		protected int positionSize()
 		{
-			if (AbsoluteSize != 0) return AbsoluteSize;
+			if (AbsoluteSize != 0)
+			{
+				trace(ETraceLevel.Verbose, $"positionSize - AbsoluteSize({AbsoluteSize})");
+				return AbsoluteSize;
+			}
 
 			int size = 0;
 			double risk = Math.Abs(IntradayClose - m_projectedStopLossPrice);
@@ -301,7 +306,10 @@ namespace PowerLanguage.Strategy
 			if (PositionSide != 0)
 			{
 				if (m_stopLossPrice >= 0)
+				{
+					trace(ETraceLevel.Verbose, $"sendStopLoss - StopLossPrice({m_stopLossPrice})");
 					m_stopLossExit.Send(m_stopLossPrice);
+				}
 				else
 					trace(ETraceLevel.Warning, $"sendStopLoss position is being held without a stop-loss price - StopLossPrice({m_stopLossPrice})");
 			}
@@ -321,13 +329,25 @@ namespace PowerLanguage.Strategy
 
 		private void processExit(double profitPercent, double positionSize, IOrderPriced order)
 		{
-			if (profitPercent == 0.0 || positionSize == 0.0) return;
+			if (profitPercent == 0.0 || positionSize == 0.0)
+			{
+				trace(ETraceLevel.Verbose, $"processExit - early exit OrderId({order.Info.Name}) ProfitPercent({profitPercent}) PositionSize({positionSize})");
+				return;
+			}
 
 			IMarketPosition position = Positions[0];
-			if (position.Value == 0) return;
+			if (position.Value == 0)
+			{
+				trace(ETraceLevel.Verbose, $"processExit - early exit OrderId({order.Info.Name}) Position.Value({position.Value})");
+				return;
+			}
 
 			double entryPrice = StrategyInfo.AvgEntryPrice;
-			if (entryPrice <= 0.0) return;
+			if (entryPrice <= 0.0)
+			{
+				trace(ETraceLevel.Verbose, $"processExit - early exit EntryPrice({entryPrice})");
+				return;
+			}
 
 			//determine target price for long/short position and whether it was achieved
 			double targetPrice = (position.Value > 0) ? entryPrice * (1 + profitPercent) : entryPrice * (1 - profitPercent);
@@ -377,8 +397,11 @@ namespace PowerLanguage.Strategy
 		private void processEntryDayExtremeExit()
 		{
 			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || EntryDayExtremeCheck <= 0) return;
-
+			if (position.Value == 0 || EntryDayExtremeCheck <= 0)
+			{
+				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({position.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
+				return;
+			}
 			DateTime entryDate = this.EntryTime(0);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
 			trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
@@ -400,7 +423,11 @@ namespace PowerLanguage.Strategy
 		private void flattenIfNotProfitable()
 		{
 			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || FlattenIfNotProfitable <= 0) return;
+			if (position.Value == 0 || FlattenIfNotProfitable <= 0)
+			{
+				trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - early exit Position.Value({position.Value}) FlattenIfNotProfitable({FlattenIfNotProfitable})");
+				return;
+			}
 
 			DateTime entryDate = this.EntryTime(0);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
@@ -417,7 +444,11 @@ namespace PowerLanguage.Strategy
 		private void flattenIfMaxPeriodReached()
 		{
 			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || MaxHoldPeriod <= 0) return;
+			if (position.Value == 0 || MaxHoldPeriod <= 0)
+			{
+				trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - early exit Position.Value({position.Value}) MaxHoldPeriod({MaxHoldPeriod})");
+				return;
+			}
 
 			DateTime entryDate = this.EntryTime(0);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
