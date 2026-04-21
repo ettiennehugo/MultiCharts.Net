@@ -32,15 +32,10 @@ namespace PowerLanguage.Strategy {
         }        
 
         protected override void CalcBar(){
-            switch (CurrentPosition.Side)
-            {
-                case EMarketPositionSide.Long:
-                    m_lx.Send();
-                    break;
-                case EMarketPositionSide.Short:
-                    m_lx.Send();
-                    break;
-            }            
+            if (PositionSide > 0)
+                m_lx.Send();
+            else if (PositionSide < 0)
+                m_sx.Send();
         }
 
         //methods
