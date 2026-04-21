@@ -183,7 +183,7 @@ namespace PowerLanguage.Strategy
 			//update general indicators
 			updatePercentChange();
 
-			if (this.PositionSide == 0)
+			if (StrategyInfo.MarketPosition == 0)
 			{
 				//reset the stop-loss price
 				m_stopLossPrice = 0.0;
@@ -303,7 +303,7 @@ namespace PowerLanguage.Strategy
 
 		private void sendStopLoss()
 		{
-			if (PositionSide != 0)
+			if (StrategyInfo.MarketPosition != 0)
 			{
 				if (m_stopLossPrice >= 0)
 				{
