@@ -32,9 +32,9 @@ namespace PowerLanguage.Strategy {
         }        
 
         protected override void CalcBar(){
-            if (PositionSide > 0)
+            if (StrategyInfo.MarketPosition > 0)
                 m_lx.Send();
-            else if (PositionSide < 0)
+            else if (StrategyInfo.MarketPosition < 0)
                 m_sx.Send();
         }
 
