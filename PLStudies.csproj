@@ -484,6 +484,7 @@
     <Compile Include="_VCP.Strategy.CS" />
     <Compile Include="_VCPScanner.Strategy.CS" />
     <Compile Include="_FlattenPosition.Strategy.CS" />
+    <Compile Include="_TradeManagerTest.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
