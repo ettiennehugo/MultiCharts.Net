@@ -34,8 +34,6 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_START_TIME = "09:30";		//stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";			//stock market regular close time
 		public const int DEFAULT_FAST_MA = 10;
-		public const int DEFAULT_MEDIUM_MA = 20;
-		public const int DEFAULT_SLOW_MA = 50;
 		public const double DEFAULT_STOP_LOSS_BUFFER = 0.01; //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		public const double DEFAULT_OVEREXTENSION_PERCENT = 0.1;  //exit position if the stock is overextended above the fast MA
 		public const double DEFAULT_TRAILING_PERCENT_ACTIVATION = 0.2; //activate trailing stop at this percentage
@@ -53,9 +51,6 @@ namespace PowerLanguage.Strategy
 		};
 
 		//properties
-		[Input] public int FastMA { get; set; }       //fast moving average for the exit calculations
-		[Input] public int MediumMA { get; set; }     //medium moving average for the exit calculations
-		[Input] public int SlowMA { get; set; }       //slow moving average for the exit calculations
 		[Input] public double StopLossBuffer { get; set; } //stop-loss buffer - this is used to determine the stop-loss based on the entry date
 		[Input] public double OverextensionPercent { get; set; }  //overextension percent above the fast MA that would trigger an exit
 		[Input] public double TrailingPercentActivation { get; set; } //activate trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
@@ -72,8 +67,6 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_lxStopLoss;
 		private IOrderPriced m_lxTightStopAll;
 		private PowerLanguage.Function._SuperSmoother m_fastMA;
-		private PowerLanguage.Function._SuperSmoother m_mediumMA;
-		private PowerLanguage.Function._SuperSmoother m_slowMA;
 		private double m_stopLoss;
 		private double m_overextensionPercent;
 		protected DateTime m_marketOpenTime;
@@ -90,11 +83,6 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			m_fastMA = new PowerLanguage.Function._SuperSmoother(this);
-			m_mediumMA = new PowerLanguage.Function._SuperSmoother(this);
-			m_slowMA = new PowerLanguage.Function._SuperSmoother(this);
-			FastMA = DEFAULT_FAST_MA;
-			MediumMA = DEFAULT_MEDIUM_MA;
-			SlowMA = DEFAULT_SLOW_MA;
 			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
 			OverextensionPercent = DEFAULT_OVEREXTENSION_PERCENT;
 			TrailingPercentActivation = DEFAULT_TRAILING_PERCENT_ACTIVATION;
@@ -117,11 +105,6 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			if (FastMA <= 0) throw new Exception("FastMA must be larger than zero.");
-			if (MediumMA <= 0) throw new Exception("MediumMA must be larger than zero.");
-			if (FastMA > MediumMA) throw new Exception("FastMA must be less than MediumMA.");
-			if (SlowMA <= 0) throw new Exception("SlowMA must be larger than zero.");
-			if (MediumMA > SlowMA) throw new Exception("MediumMA must be less than SlowMA.");
 			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero, e.g. 0.01 would imply 1% below the entry price.");
 			if (OverextensionPercent < 0) throw new Exception("Overextension percent must be larger than zero, e.g. 0.08 would imply 8% above the fast MA");
 			if (TrailingPercentActivation < 0 || TrailingPercentActivation > 1) throw new Exception("TrailingPercentActivation must be larger than zero and less than or equal to one, e.g. 0.1 would imply 10% above the entry price.");
@@ -134,11 +117,7 @@ namespace PowerLanguage.Strategy
 			if (m_minuteTimeFrame.Info.TimeZone != RequestTimeZone.Exchange) throw new Exception("Minute time zone is not in Exchange timezone, this would misalign the trade timeframes");
 			if (m_dailyTimeFrame.Info.TimeZone != RequestTimeZone.Exchange) throw new Exception("Daily time zone is not in Exchange timezone, this would misalign the trade timeframes");
 			m_fastMA.Instrument = m_dailyTimeFrame;
-			m_fastMA.Length = FastMA;
-			m_mediumMA.Instrument = m_dailyTimeFrame;
-			m_mediumMA.Length = MediumMA;
-			m_slowMA.Instrument = m_dailyTimeFrame;
-			m_slowMA.Length = SlowMA;
+			m_fastMA.Length = DEFAULT_FAST_MA;
 			m_overextensionPercent = OverextensionPercent + 1.0;
 			m_epDayPercentLimit = 1 + EPDayPercentLimit;
 			m_tightStopPrice = 0.0;
@@ -235,7 +214,7 @@ namespace PowerLanguage.Strategy
 
 			//NOTE: We need to disable the bullish overextension initially since on an episodic pivot the stock will almost certainly be overextended for the first
 			//      few days of the trade.
-			if (m_fastMA[0] != 0.0 && daysCount >= FastMA / 2 && m_minuteTimeFrame.Close[0] > (m_fastMA[0] * m_overextensionPercent) && m_minuteTimeFrame.Status == EBarState.Close)  //b.
+			if (m_fastMA[0] != 0.0 && daysCount >= DEFAULT_FAST_MA / 2 && m_minuteTimeFrame.Close[0] > (m_fastMA[0] * m_overextensionPercent) && m_minuteTimeFrame.Status == EBarState.Close)  //b.
 			{
 				trace(ETraceLevel.Info, $"Exiting position based on bullish overextension.");
 				m_lxAll.Send(m_lxAll.Info.Name + "OE"); // OE = overextension
