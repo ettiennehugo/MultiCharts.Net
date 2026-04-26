@@ -142,7 +142,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//determine the entry date of the trade  
-			DateTime entryDate = this.EntryTime(0);
+			DateTime entryDate = EntryTime(EMarketPositionSide.Long, EUseFill.First);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
 			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 

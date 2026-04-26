@@ -130,14 +130,14 @@ namespace PowerLanguage.Strategy
 			m_minuteVolumePercentile.Instrument = m_minuteTimeFrame;
 		}
 
-		static DateTime s_testDate = DateTime.Parse("11/29/2023");
+		//static DateTime s_testDate = DateTime.Parse("11/29/2023");
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 
-			if (Bars.Time[0].Date == s_testDate.Date)
-				Output.WriteLine("TestPoint");
+			//if (Bars.Time[0].Date == s_testDate.Date)
+			//	Output.WriteLine("TestPoint");
 
 			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++; //backtester do not send order filled messages so we need to compare position sizes between bars
 			m_previousPositionSide = PositionSide;
