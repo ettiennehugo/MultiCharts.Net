@@ -607,6 +607,11 @@ namespace PowerLanguage.Strategy
 
 		public DateTime EntryTime(EMarketPositionSide side, EUseFill useFill = EUseFill.First)
 		{
+			//add special handling for backtesting just returning entry order time of last open trade
+			if (!Environment.IsRealTimeCalc) {
+				return CurrentPosition.OpenTrades.Count > 0 ? CurrentPosition.OpenTrades[0].EntryOrder.Time : DateTime.MinValue;
+			}
+
 			//nothing to do for flat side, needs to be long or short
 			if (side == EMarketPositionSide.Flat)
 			{
@@ -647,6 +652,12 @@ namespace PowerLanguage.Strategy
 
 		public DateTime ExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
 		{
+			//add special handling for backtesting just returning entry order time of last open trade
+			if (!Environment.IsRealTimeCalc)
+			{
+				return CurrentPosition.ClosedTrades.Count > 0 ? CurrentPosition.ClosedTrades[0].ExitOrder.Time : DateTime.MinValue;
+			}
+
 			//nothing to do for flat side, needs to be long or short
 			if (side == EMarketPositionSide.Flat)
 			{

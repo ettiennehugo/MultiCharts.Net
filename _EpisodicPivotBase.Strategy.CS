@@ -29,6 +29,10 @@ namespace PowerLanguage.Strategy
 	public class _EpisodicPivotBase : _CustomSignal
 	{
 		//constants
+		public const string DEFAULT_MARKET_OPEN = "09:30";  //default time used for stock market open
+		public const string DEFAULT_MARKET_CLOSE = "16:00"; //default time used for stock market close
+		public const string DEFAULT_START_TIME = "09:30";		//stock market regular open time
+		public const string DEFAULT_END_TIME = "16:00";			//stock market regular close time
 		public const int DEFAULT_FAST_MA = 10;
 		public const int DEFAULT_MEDIUM_MA = 20;
 		public const int DEFAULT_SLOW_MA = 50;
@@ -38,7 +42,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_TRAILING_PERCENT = 0.05; //trailing stop at this percentage - this is used to determine the trailing stop based on the entry date
 		public const int DEFAULT_FIRST_EXIT_DAYS_COUNT = 5; //first exit days count - this is used to determine the first exit days count based on the entry date
 		public const double DEFAULT_EP_DAY_PERCENT_LIMIT = 0.3; //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
-		public const double DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
+		public const double DEFAULT_TIGHT_STOP_RISK_REWARD = 10.0; //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
 		public const double DEFAULT_PROFIT_PERCENT_BREAKEVEN = 0.05; //move stop-loss to breakeven after this percentage of profit - this is used to determine the first exit days count based on the entry date
 
 		//types
@@ -59,7 +63,7 @@ namespace PowerLanguage.Strategy
 		[Input] public EExitDaysCountStrategy ExitDaysCountStrategy { get; set; } //exit days count strategy - this is used to determine the exit days count based on the entry date
 		[Input] public int FirstExitDaysCount { get; set; } //first exit days count - this is used to determine the first exit days count based on the entry date
 		[Input] public double EPDayPercentLimit { get; set; } //exit full position on EP day if the stock is up more than this percentage - this is used to determine the exit days count based on the entry date
-		[Input] public double FastMATightStopRiskReward { get; set; } //activate tight stop at Fast MA once the risk reward ratio exceeds this ratio
+		[Input] public double TightStopRiskReward { get; set; } //activate tight stop loss once the risk reward ratio exceeds this ratio
 		[Input] public double ProfitPercentBreakeven { get; set; } //move stop-loss to breakeven after this percentage of profit - this is used to determine the first exit days count based on the entry date
 
 		//attribute
@@ -72,9 +76,12 @@ namespace PowerLanguage.Strategy
 		private PowerLanguage.Function._SuperSmoother m_slowMA;
 		private double m_stopLoss;
 		private double m_overextensionPercent;
-		private IInstrument m_minuteTimeFrame;
-		private IInstrument m_dailyTimeFrame;
+		protected DateTime m_marketOpenTime;
+		protected DateTime m_marketCloseTime;
+		protected IInstrument m_minuteTimeFrame;
+		protected IInstrument m_dailyTimeFrame;
 		private double m_epDayPercentLimit;
+		private double m_tightStopPrice;
 
 		//interface methods
 		public _EpisodicPivotBase(object _ctx) : base(_ctx) { }
@@ -96,12 +103,15 @@ namespace PowerLanguage.Strategy
 			ExitDaysCountStrategy = EExitDaysCountStrategy.TradingDays;
 			FirstExitDaysCount = DEFAULT_FIRST_EXIT_DAYS_COUNT;
 			EPDayPercentLimit = DEFAULT_EP_DAY_PERCENT_LIMIT;
-			FastMATightStopRiskReward = DEFAULT_FASTMA_TIGHT_STOP_RISK_REWARD;
+			TightStopRiskReward = DEFAULT_TIGHT_STOP_RISK_REWARD;
 			ProfitPercentBreakeven = DEFAULT_PROFIT_PERCENT_BREAKEVEN;
 			m_lxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "EPLXP", EOrderAction.Sell, OrderExit.Total));
 			m_lxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "EPLXA", EOrderAction.Sell));
 			m_lxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLXSL", EOrderAction.Sell));
 			m_lxTightStopAll = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "EPLXTSL", EOrderAction.Sell));
+
+			m_marketOpenTime = DateTime.ParseExact(DEFAULT_MARKET_OPEN, "HH:mm", null);
+			m_marketCloseTime = DateTime.ParseExact(DEFAULT_MARKET_CLOSE, "HH:mm", null);
 		}
 
 		protected override void StartCalc()
@@ -118,9 +128,11 @@ namespace PowerLanguage.Strategy
 			if (TrailingPercent < 0 || TrailingPercent > 1) throw new Exception("TrailingPercent must be larger than zero and less than or equal to one, e.g. 0.02 would imply 2% below the entry price.");
 			if (FirstExitDaysCount <= 0) throw new Exception("FirstExitDaysCount must be larger than zero.");
 			if (EPDayPercentLimit <= 0) throw new Exception("EPDayPercentLimit must be larger than zero.");
-			if (FastMATightStopRiskReward <= 1) throw new Exception("FastMATightStopRiskReward must be larger than one.");
+			if (TightStopRiskReward <= 1) throw new Exception("FastMATightStopRiskReward must be larger than one.");
 			m_minuteTimeFrame = BarsOfData(1);
 			m_dailyTimeFrame = BarsOfData(2);
+			if (m_minuteTimeFrame.Info.TimeZone != RequestTimeZone.Exchange) throw new Exception("Minute time zone is not in Exchange timezone, this would misalign the trade timeframes");
+			if (m_dailyTimeFrame.Info.TimeZone != RequestTimeZone.Exchange) throw new Exception("Daily time zone is not in Exchange timezone, this would misalign the trade timeframes");
 			m_fastMA.Instrument = m_dailyTimeFrame;
 			m_fastMA.Length = FastMA;
 			m_mediumMA.Instrument = m_dailyTimeFrame;
@@ -129,6 +141,7 @@ namespace PowerLanguage.Strategy
 			m_slowMA.Length = SlowMA;
 			m_overextensionPercent = OverextensionPercent + 1.0;
 			m_epDayPercentLimit = 1 + EPDayPercentLimit;
+			m_tightStopPrice = 0.0;
 		}
 
 		protected override void CalcBar()
@@ -137,7 +150,9 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (PositionSide == 0)
 			{
-				m_stopLoss = double.MinValue;	//reset stop-loss for next position computation
+				//reset stop-loss prices for next position computation
+				m_stopLoss = double.MinValue;
+				m_tightStopPrice = double.MinValue;
 				return;
 			}
 
@@ -147,7 +162,16 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 
 			//determine the entry day risk that was taken
-			double entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
+			double entryRisk = 0.0;
+			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)   //NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
+				//Entry was taken during market hours
+				entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
+			else
+			{
+				//Entry was taken pre-post-market hours
+				entryRisk = StrategyInfo.AvgEntryPriceAtBroker != 0.0 ? StrategyInfo.AvgEntryPriceAtBroker : StrategyInfo.AvgEntryPrice;
+				entryRisk -= StopLossBuffer;
+			}
 
 			//exit half position on first exit days after the entry and we have not exited anything out of the current position
 			if (daysCount >= FirstExitDaysCount && CurrentPosition.ClosedTrades.Count == 0)
@@ -156,15 +180,29 @@ namespace PowerLanguage.Strategy
 			//generate entry day stop-loss
 
 			//NOTE: A few things to keep in mind determining the entry day low and the stop-loss:
-			// * If we are still in a position on the entry day is would mean that the IntradayLow would reflect low of the day when the entry was taken.
-			// * If we are still in a position after a few days it would also mean that a lookback on the low of the n-days since entry would also reflect the
-			//   entry day low since we always want to enforce an exit that is right at the low of the entry day at least.
-			// * Given the above two invariants we will keep our stop-loss based on those calculations with the stop-loss buffer.
-			// * We NEVER allow the stop-loss to go lower since that would increase our risk, it can only go up.
-			double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
-			double stopLoss = dayLow - StopLossBuffer;
-			m_stopLoss = m_stopLoss == double.MinValue || m_stopLoss < stopLoss ? stopLoss : m_stopLoss;	//stop-loss can only be initialized or move up (it can never move down)
-			trace(ETraceLevel.Info, $"Generating entry day ({entryDate.ToString("yyyy-MM-dd")}) stop-loss at {m_stopLoss} (computed stop-loss based on day low {stopLoss}).");
+			// * Depending on the entry time whether it was a during market hours entry or a pre-/post-market, based on that we will determine the stop-loss price.
+			// * Market hours stop-loss:
+			//		* If we are still in a position on the entry day is would mean that the IntradayLow would reflect low of the day when the entry was taken.
+			//		* If we are still in a position after a few days it would also mean that a lookback on the low of the n-days since entry would also reflect the
+			//		  entry day low since we always want to enforce an exit that is right at the low of the entry day at least.
+			//		* Given the above two invariants we will keep our stop-loss based on those calculations with the stop-loss buffer.
+			//		* We NEVER allow the stop-loss to go lower since that would increase our risk, it can only go up.
+			// * Pre-/post-market hours stop-loss:
+			//		* Average entry price minus the stop-loss buffer price.
+			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)		//NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
+			{
+				double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
+				double stopLoss = dayLow - StopLossBuffer;
+				m_stopLoss = m_stopLoss == double.MinValue || m_stopLoss < stopLoss ? stopLoss : m_stopLoss;  //stop-loss can only be initialized or move up (it can never move down)
+				trace(ETraceLevel.Info, $"Generating entry day ({entryDate.ToString("yyyy-MM-dd HH:mm::ss")}) stop-loss at {m_stopLoss} based on market hours trading entry (computed stop-loss based on day low {stopLoss}).");
+			}
+			else
+			{
+				m_stopLoss = this.StrategyInfo.AvgEntryPriceAtBroker != 0.0 ? StrategyInfo.AvgEntryPriceAtBroker : StrategyInfo.AvgEntryPrice;
+				m_stopLoss -= StopLossBuffer;
+				trace(ETraceLevel.Info, $"Generating entry day {entryDate.ToString("yyyy-MM-dd HH:mm::ss")} stop-loss at {m_stopLoss} based on pre-/post-market hours trading entry. AverageEntryPrice({StrategyInfo.AvgEntryPrice}) AverageEntryPriceAtBroker({StrategyInfo.AvgEntryPriceAtBroker})");
+			}
+
 			m_lxStopLoss.Send(m_stopLoss);
 
 			//generate the breakeven stop-loss if the position is up by a certain percentage
@@ -188,7 +226,7 @@ namespace PowerLanguage.Strategy
 			///		a.If the stock did not break the HIGH of the EP entry day after 5-days (EP day is day 0, next day 1 etc.)
 			///		b.If the stock is in a bullish overextension - use a specific percentage above the 10MA as overextension measure
 			///		c.If the stock shoot up on the EP day they tend to reverse course, e.g. 20%+ exit full position on EP day
-			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the 10MA to avoid the market turn against you
+			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the most recent bar low.
 			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])  //a.
 			{
 				trace(ETraceLevel.Info, $"Exiting position since close after {FirstExitDaysCount} days did not break the high of the EP day.");
@@ -209,10 +247,16 @@ namespace PowerLanguage.Strategy
 				m_lxAll.Send(m_lxAll.Info.Name + "EPL"); // EPL = EP day percent limit
 			}
 
-			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > FastMATightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
+			if (entryRisk != 0 && CurrentPosition.Profit / entryRisk > TightStopRiskReward && m_dailyTimeFrame.Status == EBarState.Close) //d.
 			{
-				trace(ETraceLevel.Info, $"Exiting position based on risk reward ratio.");
-				m_lxTightStopAll.Send(m_fastMA[0]);
+				//start trailing under the low of the most recent bar with stop-loss just moving upward
+				if (m_tightStopPrice == double.MinValue)
+					m_tightStopPrice = m_minuteTimeFrame.Low[0];
+				else
+					m_tightStopPrice = m_tightStopPrice > m_minuteTimeFrame.Low[0] ? m_tightStopPrice : m_minuteTimeFrame.Low[0];
+
+				trace(ETraceLevel.Info, $"Trailing tight stop-loss at {m_tightStopPrice} due to risk/reward ratio {CurrentPosition.Profit / entryRisk} > {TightStopRiskReward}.");
+				m_lxTightStopAll.Send(m_tightStopPrice);
 			}
 
 			//close position when we're back testing and this is the last bar

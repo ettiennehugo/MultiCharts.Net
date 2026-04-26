@@ -32,8 +32,6 @@ namespace PowerLanguage.Strategy
 	public class _EpisodicPivotHighVolumeLELX : _EpisodicPivotBase
 	{
 		//constants
-		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
-		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
 		public int DEFAULT_ENTRIES_PER_TIME_FILTER = 1; //number of entries per time filter - this is used to determine the number of entries per time filter
 		public const double DEFAULT_MINIMUM_PERCENTAGE_CHANGE = 0.1;      //ignore stocks that fall below this minimum percentage change
 		public const double DEFAULT_MAXIMUM_PERCENTAGE_CHANGE = 0.3;      //ignore stocks that have massive overextended moves as to avoid parabolic moves that will just reverse
@@ -66,12 +64,11 @@ namespace PowerLanguage.Strategy
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
 
 		//attribute
-		private IOrderPriced m_le;
+		private IOrderPriced m_stpLE;
+		private IOrderPriced m_lmtLE;
 		private DateTime m_startTime;
 		private DateTime m_endTime;
 		private DateTime m_previousDayFilter;
-		private IInstrument m_minuteTimeFrame;
-		private IInstrument m_dailyTimeFrame;
 		private int m_entriesPerTimeFilter;
 		private int m_previousPositionSide;
 		private PowerLanguage.Function._VolumePercentile m_dailyVolumePercentile;
@@ -101,7 +98,8 @@ namespace PowerLanguage.Strategy
 			RequiredVolumePercentile = DEFAULT_REQUIRED_VOLUME_PERCENTILE;
 			UseRoundLots = false;
 			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
-			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "EPHVLE", EOrderAction.Buy));
+			m_stpLE = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "EPHVStpLE", EOrderAction.Buy));
+			m_lmtLE = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "EPHVLmtLE", EOrderAction.Buy));
 			m_dailyVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_minuteVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 		}
@@ -124,8 +122,6 @@ namespace PowerLanguage.Strategy
 			if (RequiredClosePercentile < 0 || RequiredClosePercentile > 1) throw new Exception("RequiredClosePercentile must be larger than or equal to zero and less than one.");
 			if (RequiredVolumePercentile < 0 || RequiredVolumePercentile > 1) throw new Exception("RequiredVolumePercentile must be larger than or equal to zero and less than one.");
 			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero.");
-			m_minuteTimeFrame = BarsOfData(1); //get the minute time frame for the stock
-			m_dailyTimeFrame = BarsOfData(2); //get the daily time frame for the stock
 			m_dailyVolumePercentile.Instrument = m_dailyTimeFrame;
 			m_minuteVolumePercentile.Instrument = m_minuteTimeFrame;
 		}
@@ -183,11 +179,30 @@ namespace PowerLanguage.Strategy
 			double closePercentile = closeLowDelta / range;
 			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
 
-			//determine the risk based on the entry day low
-			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
+			//determine projected entry price and risk based on time of entry
+			double entryPrice = 0.0;
+			double risk = 0.0;
+			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
+			{
+				entryPrice = m_minuteTimeFrame.Close[0];
+				risk = entryPrice - IntradayLow - StopLossBuffer;    //NOTE: Here we use the LOW and not the open as this might be a reentry.
+			}
+			else
+			{
+				entryPrice = m_minuteTimeFrame.StatusLine.Ask;
 
-			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0] + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
+				//adjust entry price for backtesting purposes since StatusLine.Ask is not set during backtesting only during real-time trading
+				if (!Environment.IsRealTimeCalc || entryPrice <= 0)
+				{
+					//fallback for backtesting – use a small premium above the bar close
+					entryPrice = m_minuteTimeFrame.Close[0] * 1.001;
+					trace(ETraceLevel.Warning, $"Backtest fallback using close price {entryPrice} instead of Ask");
+				}
+
+				risk = entryPrice - StopLossBuffer;   //pre-/post-market entries use tighter stop-loss
+			}
+
+			int equityBasedSize = positionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, 1, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
@@ -199,8 +214,15 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Entry order at Price {m_minuteTimeFrame.Close[0]} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
-			m_le.Send(m_minuteTimeFrame.Close[0], size);
+			//check whether we are trading in market hours or pre-/post-market hours
+			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
+			{
+				trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Market hours entry order {m_stpLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				m_stpLE.Send(entryPrice, size);
+			} else {
+				trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Pre-/post-market hours entry order {m_lmtLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				m_lmtLE.Send(entryPrice, size);
+			}
 		}
 	}
 }
