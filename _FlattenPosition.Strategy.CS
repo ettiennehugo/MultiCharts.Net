@@ -33,13 +33,12 @@ namespace PowerLanguage.Strategy
 			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "FlatSX", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void CalcBar()
-		{
-			if (StrategyInfo.MarketPosition > 0)
-				m_lx.Send();
-			else if (StrategyInfo.MarketPosition < 0)
-				m_sx.Send();
-		}
+        protected override void CalcBar(){
+            if (StrategyInfo.MarketPosition > 0)
+                m_lx.Send();
+            else if (StrategyInfo.MarketPosition < 0)
+                m_sx.Send();
+        }
 
 		//methods
 
