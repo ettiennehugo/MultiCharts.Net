@@ -402,7 +402,7 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({position.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
 				return;
 			}
-			DateTime entryDate = this.EntryTime(0);
+			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
 			trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 
@@ -429,7 +429,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = this.EntryTime(0);
+			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
 			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit} NetProfit({position.Profit + position.OpenProfit}))");
 
@@ -450,7 +450,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = this.EntryTime(0);
+			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
 			trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
 

@@ -3,6 +3,8 @@ using System.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using PowerLanguage.TradeManager;
+using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy
 {
@@ -13,7 +15,8 @@ namespace PowerLanguage.Strategy
 	public abstract class _CustomSignal : PortfolioSignalObject
 	{
 		//constants
-		public double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;	//number of seconds after which account info would be recalculated if accounts are not yet loaded
+		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
+		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = -63;				//look back 3-months of trading orders to discover entry/exit orders
 
 		//types
 		/// <summary>
@@ -181,6 +184,7 @@ namespace PowerLanguage.Strategy
 		[Input] public virtual ETraceLevel TraceLevel { get; set; }
 
 		//attributes
+		protected ITradingData m_tradingData;
 		private double m_intradayLow;
 		private double m_intradayHigh;
 		private double m_intradayClose;
@@ -219,6 +223,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			m_tradingData = TradeManager.TradingData;
 			m_currentDay = DateTime.Now.Date;
 			m_intradayLowTime = DateTime.Now;
 			m_intradayHighTime = DateTime.Now;
@@ -243,17 +248,21 @@ namespace PowerLanguage.Strategy
 			//with callbacks like OnRefreshComplete etc. If you call it right before accessing the account data
 			//those accounts would not be set and your results would be incorrect so initially we keep on calling
 			//the CalcBar method until we have accounts loaded
-			if (Environment.IsAutoTradingMode) {
+			if (Environment.IsAutoTradingMode)
+			{
 				TradeManager.ProcessEvents();
 
 				//force recalculation after a specific interval if account information is not yet loaded from the above ProcessEvents call
 				if (m_loadAccounts)
 				{
-					if (TradeManager.TradingData.Accounts.Items.Length == 0) {
+					if (TradeManager.TradingData.Accounts.Items.Length == 0)
+					{
 						trace(ETraceLevel.Warning, "CalcBar - ProcessEvents failed to load account queuing recalculation.");
 						ExecControl.RecalcLastBarAfter(TimeSpan.FromSeconds(DEFAULT_ACCOUNT_RECALC_INTERVAL));
-					} else {
-						trace(ETraceLevel.Info,$"CalcBar - Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
+					}
+					else
+					{
+						trace(ETraceLevel.Info, $"CalcBar - Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
 						m_loadAccounts = false;
 					}
 				}
@@ -262,7 +271,8 @@ namespace PowerLanguage.Strategy
 			//force call to CalcBar of holidays to ensure refresh happens
 			int _ = m_holidays.Value;
 
-			if (Environment.CalcReason == CalculationReason.Default) {
+			if (Environment.CalcReason == CalculationReason.Default)
+			{
 				if (Bars.Time[0].Date != m_currentDay.Date)
 				{
 					m_intradayBarCount = 0;
@@ -285,14 +295,14 @@ namespace PowerLanguage.Strategy
 						m_intradayLow = Bars.Low[0];
 						m_intradayLowTime = Bars.Time[0];
 					}
-	
+
 					if (m_intradayHigh < Bars.High[0])
 					{
 						m_intradayHighTime = Bars.Time[0];
 						m_intradayHigh = Bars.High[0];
 					}
 				}
-	
+
 				if (Bars.Status == EBarState.Close)
 				{
 					m_intradayBarCount++;
@@ -443,7 +453,7 @@ namespace PowerLanguage.Strategy
 			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
 			double volumeAverage = 0.0;
 
-			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= (volumePeriod - 1))	//-1 since CurrentBar is zero based
+			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= (volumePeriod - 1))  //-1 since CurrentBar is zero based
 			{
 				volumeAverage = bars.Volume.Average(volumePeriod, volumePeriodOffset);
 				result = (int)checked(Math.Round(volumeAverage * maxAvgVolumePercent, 0));
@@ -499,7 +509,7 @@ namespace PowerLanguage.Strategy
 		protected int tradingDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
 			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always be smaller than currentDateTime");
-			DateTime date = currentDateTime.Date;	//IMPORTANT: Holidays below ignore the Time component so we must use DateOnly component.
+			DateTime date = currentDateTime.Date; //IMPORTANT: Holidays below ignore the Time component so we must use DateOnly component.
 			int count = 0;
 
 			if (Bars.Info.Category != ESymbolCategory.Stock)
@@ -595,28 +605,84 @@ namespace PowerLanguage.Strategy
 			return new Tuple<DateTime, double>(highBarTime, high);
 		}
 
-		public DateTime EntryTime(int posAgo, EUseFill useFill)
+		public DateTime EntryTime(EMarketPositionSide side, EUseFill useFill = EUseFill.First)
 		{
-			if (useFill == EUseFill.Last) return this.EntryTime(posAgo);
-
-			//useFill == EUseFill.First
-			DateTime entryDate = DateTime.MaxValue;
-			if (Positions[0].OpenTrades.Count > 0 && Positions[0].ClosedTrades.Count > 0)
+			//nothing to do for flat side, needs to be long or short
+			if (side == EMarketPositionSide.Flat)
 			{
-				DateTime openTradesEarliestDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-				DateTime closedTradesEarliestDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
-				entryDate = openTradesEarliestDate < closedTradesEarliestDate ? openTradesEarliestDate : closedTradesEarliestDate;
+				trace(ETraceLevel.Warning, $"EntryTime - position side set to flat, nothing to do.");
+				return DateTime.MinValue;
 			}
-			else if (Positions[0].OpenTrades.Count > 0)
-				entryDate = Positions[0].OpenTrades.Min(trade => trade.EntryOrder.Time);
-			else if (Positions[0].ClosedTrades.Count > 0)
-				entryDate = Positions[0].ClosedTrades.Min(trade => trade.EntryOrder.Time);
 
-			if (entryDate == DateTime.MaxValue)
-				trace(ETraceLevel.Verbose, $"EntryTime - Unable to compute position entry date with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
-			else
-				trace(ETraceLevel.Verbose, $"EntryTime - Position entry date {entryDate.ToString("yyyyMMdd hh:mm:ss")} with {Positions[0].OpenTrades.Count} open trades and {Positions[0].ClosedTrades.Count} closed trades");
-			return entryDate;
+			//refresh orders based on symbol and timeframe
+			m_tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+			m_tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+			TradeManager.ProcessEvents();
+
+			//determine entry order type to look for
+			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Buy : ETM_OrderAction.eTM_OA_Sell;
+
+			//get all filled entry orders for this instrument
+			var entryFillTimes = TradeManager.TradingData.Orders.Items
+					.Where(o =>
+							(o.SymbolStr == Bars.Info.Name)
+							&& o.State == ETM_OrderState.eTM_OS_Filled
+							&& o.Action == orderAction
+							&& o.LeftContracts == 0
+					)
+					.Select(o => o.FinalDT ?? o.GeneratedDT)      //FinalDT = actual broker fill time
+					.Where(dt => dt > DateTime.MinValue)
+					.OrderBy(dt => dt)                            //sort chronological to find first/last entry
+					.ToList();
+
+			//make sure we found filled orders
+			if (entryFillTimes.Count == 0)
+			{
+				trace(ETraceLevel.Warning, $"EntryTime - no fills found: OrderAction({orderAction}) DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				return DateTime.MinValue;
+			}
+
+			return useFill == EUseFill.First ? entryFillTimes.First() : entryFillTimes.Last();
+		}
+
+		public DateTime ExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
+		{
+			//nothing to do for flat side, needs to be long or short
+			if (side == EMarketPositionSide.Flat)
+			{
+				trace(ETraceLevel.Warning, $"ExitTime - position side set to flat, nothing to do.");
+				return DateTime.MinValue;
+			}
+
+			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
+			m_tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+			m_tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+			TradeManager.ProcessEvents();
+
+			//determine exit order type (opposite of entry action)
+			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Sell : ETM_OrderAction.eTM_OA_Buy;
+
+			//get all filled exit orders for this instrument
+			var exitFillTimes = TradeManager.TradingData.Orders.Items
+					.Where(o =>
+							(o.SymbolStr == Bars.Info.Name)
+							&& o.State == ETM_OrderState.eTM_OS_Filled
+							&& o.Action == orderAction
+							&& o.LeftContracts == 0
+					)
+					.Select(o => o.FinalDT ?? o.GeneratedDT)	//FinalDT = actual broker fill time
+					.Where(dt => dt > DateTime.MinValue)
+					.OrderBy(dt => dt)												//sort chronological to find first/last exit
+					.ToList();
+
+			//make sure we found filled orders
+			if (exitFillTimes.Count == 0)
+			{
+				trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				return DateTime.MinValue;
+			}
+
+			return useFill == EUseFill.First ? exitFillTimes.First() : exitFillTimes.Last();
 		}
 	}
 }
