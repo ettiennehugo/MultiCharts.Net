@@ -453,7 +453,7 @@ namespace PowerLanguage.Strategy
 			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
 			double volumeAverage = 0.0;
 
-			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= (volumePeriod - 1))  //-1 since CurrentBar is zero based
+			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= (volumePeriod + volumePeriodOffset - 1))  //-1 since CurrentBar is zero based
 			{
 				volumeAverage = bars.Volume.Average(volumePeriod, volumePeriodOffset);
 				result = (int)checked(Math.Round(volumeAverage * maxAvgVolumePercent, 0));
