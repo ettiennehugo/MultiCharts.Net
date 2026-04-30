@@ -228,7 +228,10 @@ namespace PowerLanguage.Strategy
 			double sum = 0.0;
 			for (int i = 0; i < LookBack; i++)
 			{
-				double rangePct = (m_dailyTimeframe.Open[i] > 0.0) ? Math.Abs(m_dailyTimeframe.Open[i] - m_dailyTimeframe.Close[i]) / m_dailyTimeframe.Open[i] : 0.0;
+				//averages are always computed as positive numbers using the lowest of the daily open/close and then computing the percentage change from
+				//that using the absolute value of the difference between the open and close to yield a positive percentage change for the day
+				double baseRange = m_dailyTimeframe.Open[i] < m_dailyTimeframe.Close[i] ? m_dailyTimeframe.Open[i] : m_dailyTimeframe.Close[i];
+				double rangePct = (baseRange != 0.0) ? Math.Abs(m_dailyTimeframe.Open[i] - m_dailyTimeframe.Close[i]) / baseRange : 0.0;
 				sum += rangePct;
 			}
 
@@ -237,48 +240,53 @@ namespace PowerLanguage.Strategy
 
 		void updateProjectedStopLoss()
 		{
+			double projectedStopLossPrice = 0.0;
 			if (m_longPosition)
 			{
 				//determine stop-loss price with buffer
-				m_projectedStopLossPrice = IntradayLow;
+				projectedStopLossPrice = IntradayLow;
 
 				switch (StopLossPlacement)
 				{
 					case EStopLossPlacement.EntryDayMid:
-						m_projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
+						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						m_projectedStopLossPrice = m_dailyTimeframe.Low[0];
+						projectedStopLossPrice = m_dailyTimeframe.Low[0];
 						break;
 					case EStopLossPlacement.XDay:
-						m_projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack);
+						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack);
 						break;
 				}
 
-				m_projectedStopLossPrice -= StopLossBuffer;
+				projectedStopLossPrice -= StopLossBuffer;
 			}
 			else
 			{
 				//determine stop-loss price with buffer
-				m_projectedStopLossPrice = IntradayHigh;
+				projectedStopLossPrice = IntradayHigh;
 
 				switch (StopLossPlacement)
 				{
 					case EStopLossPlacement.EntryDayMid:
-						m_projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
+						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						m_projectedStopLossPrice = m_dailyTimeframe.High[0];
+						projectedStopLossPrice = m_dailyTimeframe.High[0];
 						break;
 					case EStopLossPlacement.XDay:
-						m_projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack);
+						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack);
 						break;
 				}
 
-				m_projectedStopLossPrice += StopLossBuffer;
+				projectedStopLossPrice += StopLossBuffer;
 			}
 
-			trace(ETraceLevel.Verbose, $"updateProjectedStopLoss - Price({m_projectedStopLossPrice})");
+			if (m_projectedStopLossPrice != projectedStopLossPrice)
+			{
+				m_projectedStopLossPrice = projectedStopLossPrice;
+				trace(ETraceLevel.Verbose, $"updateProjectedStopLoss - Price({m_projectedStopLossPrice})");
+			}
 		}
 
 		protected int positionSize()

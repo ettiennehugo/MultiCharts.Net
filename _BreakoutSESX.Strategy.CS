@@ -74,8 +74,11 @@ namespace PowerLanguage.Strategy
 			if (m_tradingTimeframe.Time[0].TimeOfDay >= m_startTime.TimeOfDay &&
 					m_tradingTimeframe.Time[0].TimeOfDay <= m_endTime.TimeOfDay)
 			{
-				double range = IntradayClose - IntradayOpen;
-				double rangePct = (IntradayOpen != 0.0) ? Math.Abs(range) / IntradayOpen : 0.0;
+				double range = IntradayOpen - IntradayClose;	//bar must be bearish to yield a positive range range expansion
+				double rangePct = (IntradayClose != 0.0) ? range / IntradayClose : 0.0;
+
+				trace(ETraceLevel.Verbose, $"sendEntry testing for bearish range expansion - Range({range}) AvgRange({m_averageRange.Value})");
+
 				if (range < 0.0 && m_averageRange.Value < rangePct)
 				{
 					trace(ETraceLevel.Info, $"sendEntry bearish range expansion detected - Range({range}) AvgRange({m_averageRange.Value})");
