@@ -410,9 +410,18 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({position.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
 				return;
 			}
+			
 			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			if (entryDate == DateTime.MinValue)
+			{
+				trace(ETraceLevel.Error, $"processEntryDayExtremeExit - no entry date found, returning");
+				return;
+			}
+
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
+			trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
+			if (daysCount >= ExecInfo.MaxBarsBack)
+				trace(ETraceLevel.Error, $"processEntryDayExtremeExit - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			if (daysCount >= EntryDayExtremeCheck)
 			{
@@ -438,8 +447,16 @@ namespace PowerLanguage.Strategy
 			}
 
 			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			if (entryDate == DateTime.MinValue)
+			{
+				trace(ETraceLevel.Error, $"flattenIfNotProfitable - no entry date found, returning");
+				return;
+			}
+
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit} NetProfit({position.Profit + position.OpenProfit}))");
+			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+			if (daysCount >= ExecInfo.MaxBarsBack)
+				trace(ETraceLevel.Error, $"flattenIfNotProfitable - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			//NOTE: We take into account both realized profit (Profit) and open profit into account to determine position profitability 
 			if (daysCount >= FlattenIfNotProfitable && (position.Profit + position.OpenProfit) < 0.0)
@@ -459,8 +476,16 @@ namespace PowerLanguage.Strategy
 			}
 
 			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			if (entryDate == DateTime.MinValue)
+			{
+				trace(ETraceLevel.Error, $"flattenIfMaxPeriodReached - no entry date found, returning");
+				return;
+			}
+
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - EntryDate({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
+			trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
+			if (daysCount >= ExecInfo.MaxBarsBack)
+				trace(ETraceLevel.Error, $"flattenIfMaxPeriodReached - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			if (daysCount >= MaxHoldPeriod)
 			{

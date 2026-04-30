@@ -630,10 +630,10 @@ namespace PowerLanguage.Strategy
 			//get all filled entry orders for this instrument
 			var entryFillTimes = TradeManager.TradingData.Orders.Items
 					.Where(o =>
-							(o.SymbolStr == Bars.Info.Name)
-							&& o.State == ETM_OrderState.eTM_OS_Filled
-							&& o.Action == orderAction
-							&& o.LeftContracts == 0
+							o.SymbolStr == Bars.Info.Name &&
+							o.State == ETM_OrderState.eTM_OS_Filled &&
+							o.Action == orderAction &&
+							o.LeftContracts == 0
 					)
 					.Select(o => o.FinalDT ?? o.GeneratedDT)      //FinalDT = actual broker fill time
 					.Where(dt => dt > DateTime.MinValue)

@@ -137,8 +137,14 @@ namespace PowerLanguage.Strategy
 
 			//determine the entry date of the trade  
 			DateTime entryDate = EntryTime(EMarketPositionSide.Long, EUseFill.First);
-			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
-			trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd")}) DaysCount({daysCount})");
+			int daysCount = 0;
+			if (entryDate == DateTime.MinValue)
+				trace(ETraceLevel.Warning, "No entry order found for position, can not determine daysCount since entry.");
+			else
+			{
+				daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(entryDate, Bars.Time[0]) : tradingDayCount(entryDate, Bars.Time[0]);
+				trace(ETraceLevel.Info, $"Entry date({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
+			}
 
 			//determine the entry day risk that was taken
 			double entryRisk = 0.0;
