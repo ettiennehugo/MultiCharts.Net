@@ -122,9 +122,9 @@ namespace PowerLanguage.Strategy {
 			ExitFriday = true;
 			m_entryCount = 0;
 			m_previousPositionSide = 0;
-			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LxP", EOrderAction.BuyToCover));
-			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LxA", EOrderAction.BuyToCover));
-			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LxSL", EOrderAction.BuyToCover));
+			m_sxPartial = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SxP", EOrderAction.BuyToCover));
+			m_sxAll = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SxA", EOrderAction.BuyToCover));
+			m_sxStopLoss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SxSL", EOrderAction.BuyToCover));
 			m_previousDateTime = DateTime.MinValue;
 		}
 
