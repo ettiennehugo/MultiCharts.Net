@@ -187,13 +187,18 @@ namespace PowerLanguage.Strategy
 			int equityBasedSize = positionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
-			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-			size = size < volumeBasedSize ? size : volumeBasedSize;
+			
+			//determine final entry size - the final size must be smallest of the entry size non-zero values 
+			int size = equityBasedSize;
+			size = riskBasedSize > 0 && size > riskBasedSize ? riskBasedSize: size;
+			size = volumeBasedSize > 0 && size > volumeBasedSize ? volumeBasedSize : size;
 			if (size == 0)
 			{
-				trace(ETraceLevel.Info, $"Entry size is zero so no entry would be take, EquityBasedSize({equityBasedSize}), RiskBasedSize({riskBasedSize}), VolumeBasedSize({volumeBasedSize})");
+				trace(ETraceLevel.Info, $"Entry size is zero so no entry would be taken - EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 				return; //do not enter if the size is zero
 			}
+			else
+				trace(ETraceLevel.Verbose, $"Entry size {size} computed using these size calculations - EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 
 			//check whether we are trading in market hours or pre-/post-market hours
 			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
