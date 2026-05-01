@@ -77,6 +77,7 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_secondExit;
 		private IOrderPriced m_exitMax;
 		private IOrderMarket m_exitAll;
+		private String m_entryOrderName;
 		private String m_entryDayExtremeOrderName;
 		private String m_flattenIfNotProfitableOrderName;
 		private String m_maxHoldPeriodOrderName;
@@ -112,7 +113,8 @@ namespace PowerLanguage.Strategy
 
 			if (m_longPosition)
 			{
-				m_entry = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "LEBo", EOrderAction.Buy));
+				m_entryOrderName = "LEBo";
+				m_entry = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, m_entryOrderName, EOrderAction.Buy));
 				m_stopLossExit = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LXSL", EOrderAction.Sell, OrderExit.FromAll));
 				m_firstExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LXBo1", EOrderAction.Sell, OrderExit.FromAll));
 				m_secondExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LXBo2", EOrderAction.Sell, OrderExit.FromAll));
@@ -124,7 +126,8 @@ namespace PowerLanguage.Strategy
 			}
 			else
 			{
-				m_entry = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SEBo", EOrderAction.SellShort));
+				m_entryOrderName = "SEBo";
+				m_entry = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, m_entryOrderName, EOrderAction.SellShort));
 				m_stopLossExit = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SXSL", EOrderAction.BuyToCover, OrderExit.FromAll));
 				m_firstExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SXBo1", EOrderAction.BuyToCover, OrderExit.FromAll));
 				m_secondExit = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SXBo2", EOrderAction.BuyToCover, OrderExit.FromAll));
@@ -411,7 +414,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 			
-			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			DateTime entryDate = EntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"processEntryDayExtremeExit - no entry date found, returning");
@@ -446,7 +449,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			DateTime entryDate = EntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"flattenIfNotProfitable - no entry date found, returning");
@@ -475,7 +478,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = EntryTime(m_longPosition ? EMarketPositionSide.Long : EMarketPositionSide.Short, EUseFill.First);
+			DateTime entryDate = EntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"flattenIfMaxPeriodReached - no entry date found, returning");

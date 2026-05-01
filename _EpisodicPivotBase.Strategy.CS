@@ -69,6 +69,8 @@ namespace PowerLanguage.Strategy
 		private PowerLanguage.Function._SuperSmoother m_fastMA;
 		private double m_stopLoss;
 		private double m_overextensionPercent;
+		protected String m_stpEntryOrderName;
+		protected String m_lmtEntryOrderName;
 		protected DateTime m_marketOpenTime;
 		protected DateTime m_marketCloseTime;
 		protected IInstrument m_minuteTimeFrame;
@@ -136,7 +138,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//determine the entry date of the trade  
-			DateTime entryDate = EntryTime(EMarketPositionSide.Long, EUseFill.First);
+			DateTime entryDate = EntryTime(m_stpEntryOrderName, m_lmtEntryOrderName);
 			int daysCount = 0;
 			if (entryDate == DateTime.MinValue)
 				trace(ETraceLevel.Warning, "No entry order found for position, can not determine daysCount since entry.");

@@ -605,17 +605,31 @@ namespace PowerLanguage.Strategy
 			return new Tuple<DateTime, double>(highBarTime, high);
 		}
 
-		public DateTime EntryTime(EMarketPositionSide side, EUseFill useFill = EUseFill.First)
+		//Finds the most recent entry order that completed the entry for the given name, so if there are multiple fills
+		//this would return the time of the last order the completed the entry.
+		//Method can be called with any number of entry order names as parameters.
+		public DateTime EntryTime(params String[] entryOrderNames)
 		{
 			//add special handling for backtesting just returning entry order time of last open trade
-			if (!Environment.IsRealTimeCalc) {
-				return CurrentPosition.OpenTrades.Count > 0 ? CurrentPosition.OpenTrades[0].EntryOrder.Time : DateTime.MinValue;
-			}
-
-			//nothing to do for flat side, needs to be long or short
-			if (side == EMarketPositionSide.Flat)
+			if (!Environment.IsRealTimeCalc)
 			{
-				trace(ETraceLevel.Warning, $"EntryTime - position side set to flat, nothing to do.");
+				var position = Positions[0];
+				if (position.OpenTrades.Count > 0)
+				{
+					var lastOpenTrade = position.OpenTrades
+							.Where(t => t.EntryOrder != null &&
+													entryOrderNames.Any(name =>
+															!string.IsNullOrEmpty(name) && t.EntryOrder.Name.Contains(name)))
+							.OrderByDescending(t => t.EntryOrder?.Time ?? DateTime.MinValue)
+							.FirstOrDefault();
+
+					if (lastOpenTrade?.EntryOrder != null)
+					{
+						DateTime btEntryTime = lastOpenTrade.EntryOrder.Time;
+						trace(ETraceLevel.Verbose, $"EntryTime (backtest) -> {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched: {string.Join("; ", entryOrderNames)})");
+						return btEntryTime;
+					}
+				}
 				return DateTime.MinValue;
 			}
 
@@ -624,30 +638,25 @@ namespace PowerLanguage.Strategy
 			m_tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 			TradeManager.ProcessEvents();
 
-			//determine entry order type to look for
-			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Buy : ETM_OrderAction.eTM_OA_Sell;
+			DateTime? entryLastFill = TradeManager.TradingData.Orders.Items
+							.Where(o =>
+									o.SymbolStr == Bars.Info.Name &&
+									(entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))) &&
+									o.State == ETM_OrderState.eTM_OS_Filled &&
+									o.LeftContracts == 0
+							)
+							.Select(o => o.FinalDT ?? o.GeneratedDT)
+							.Where(dt => dt > DateTime.MinValue)
+							.OrderByDescending(dt => dt)      // most recent first
+							.FirstOrDefault();
 
-			//get all filled entry orders for this instrument
-			var entryFillTimes = TradeManager.TradingData.Orders.Items
-					.Where(o =>
-							o.SymbolStr == Bars.Info.Name &&
-							o.State == ETM_OrderState.eTM_OS_Filled &&
-							o.Action == orderAction &&
-							o.LeftContracts == 0
-					)
-					.Select(o => o.FinalDT ?? o.GeneratedDT)      //FinalDT = actual broker fill time
-					.Where(dt => dt > DateTime.MinValue)
-					.OrderBy(dt => dt)                            //sort chronological to find first/last entry
-					.ToList();
-
-			//make sure we found filled orders
-			if (entryFillTimes.Count == 0)
+			if (entryLastFill == null || entryLastFill.Value == DateTime.MinValue)
 			{
-				trace(ETraceLevel.Warning, $"EntryTime - no fills found: OrderAction({orderAction}) DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				trace(ETraceLevel.Warning, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
 				return DateTime.MinValue;
 			}
 
-			return useFill == EUseFill.First ? entryFillTimes.First() : entryFillTimes.Last();
+			return entryLastFill.Value;
 		}
 
 		public DateTime ExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)

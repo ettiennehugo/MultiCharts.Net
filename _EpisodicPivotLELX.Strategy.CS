@@ -84,8 +84,10 @@ namespace PowerLanguage.Strategy
 			RequiredClosePercentile = DEFAULT_REQUIRED_CLOSE_PERCENTILE;
 			UseRoundLots = false;
 			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
-			m_stpLE = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "EPStpLE", EOrderAction.Buy));
-			m_lmtLE = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "EPLmtLE", EOrderAction.Buy));
+			m_stpEntryOrderName = "EPStpLE";
+			m_lmtEntryOrderName = "EPLmtLE";
+			m_stpLE = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, m_stpEntryOrderName, EOrderAction.Buy));
+			m_lmtLE = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, m_lmtEntryOrderName, EOrderAction.Buy));
 		}
 
 		protected override void StartCalc()
