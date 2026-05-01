@@ -294,20 +294,24 @@ namespace PowerLanguage.Strategy
 
 		protected int positionSize()
 		{
-			if (AbsoluteSize != 0)
+			if (AbsoluteSize > 0)
 			{
 				trace(ETraceLevel.Verbose, $"positionSize - AbsoluteSize({AbsoluteSize})");
 				return AbsoluteSize;
 			}
 
-			int size = 0;
 			double risk = Math.Abs(IntradayClose - m_projectedStopLossPrice);
 			double equity = equityAvailable();
 			int equitySize = m_tradingTimeframe.CloseValue != 0 ? (int)Math.Truncate((equity * MaxEquityPercent) / m_tradingTimeframe.CloseValue) : 0;
 			int riskSize = riskBasedPositionSize(risk, MaxRiskBasedPercent, UseRoundLots);
 			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, 1, MaxVolumePercent, UseRoundLots);
-			size = (int)Math.Min(equitySize ,Math.Min(riskSize, volumeSize));
-			trace(ETraceLevel.Verbose, $"positionSize - Size({size}) Risk({risk}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquitySize({equitySize}) RiskSize({riskSize}) VolumeSize({volumeSize})");
+
+			//determine final entry size - the final size must be smallest of the entry size non-zero values 
+			int size = (int)Math.Min(equitySize, Math.Min(riskSize, volumeSize));
+			if (size == 0)
+				trace(ETraceLevel.Info, $"positionSize - Size({size}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquityBasedSize({equitySize}) RiskBasedSize({riskSize}) VolumeBasedSize({volumeSize})");
+			else
+				trace(ETraceLevel.Verbose, $"positionSize - Size({size}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquityBasedSize({equitySize}) RiskBasedSize({riskSize}) VolumeBasedSize({volumeSize})");
 
 			return size;
 		}

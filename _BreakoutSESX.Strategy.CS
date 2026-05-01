@@ -77,7 +77,8 @@ namespace PowerLanguage.Strategy
 				double range = IntradayOpen - IntradayClose;	//bar must be bearish to yield a positive range range expansion
 				double rangePct = (IntradayClose != 0.0) ? range / IntradayClose : 0.0;
 
-				trace(ETraceLevel.Verbose, $"sendEntry testing for bearish range expansion - Range({range}) AvgRange({m_averageRange.Value})");
+				if (m_averageRange.Value != double.MaxValue) // trace test if we have a valid average range
+					trace(ETraceLevel.Verbose, $"sendEntry testing for bearish range expansion - Range({range}) AvgRange({m_averageRange.Value})");
 
 				if (range < 0.0 && m_averageRange.Value < rangePct)
 				{

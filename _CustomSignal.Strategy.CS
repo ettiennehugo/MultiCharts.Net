@@ -461,7 +461,7 @@ namespace PowerLanguage.Strategy
 
 			int beforeRoundLots = result;
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Verbose, $"volumeBasedPositionSize - Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
+			trace(ETraceLevel.Verbose, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
 			return result;
 		}
 

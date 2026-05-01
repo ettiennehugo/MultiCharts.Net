@@ -189,11 +189,9 @@ namespace PowerLanguage.Strategy
 			int equityBasedSize = positionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
-			
+
 			//determine final entry size - the final size must be smallest of the entry size non-zero values 
-			int size = equityBasedSize;
-			size = riskBasedSize > 0 && size > riskBasedSize ? riskBasedSize: size;
-			size = volumeBasedSize > 0 && size > volumeBasedSize ? volumeBasedSize : size;
+			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
 			if (size == 0)
 			{
 				trace(ETraceLevel.Info, $"Entry size is zero so no entry would be taken - EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
