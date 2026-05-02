@@ -273,8 +273,14 @@ namespace PowerLanguage.Strategy {
 			int equityBasedSize = positionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
-			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-			return size < volumeBasedSize ? size : volumeBasedSize;
+			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
+
+			if (size == 0)
+				trace(ETraceLevel.Info, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+			else
+				trace(ETraceLevel.Verbose, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+
+			return size;
 		}
 
 		protected void exit() {
