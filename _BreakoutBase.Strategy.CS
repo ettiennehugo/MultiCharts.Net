@@ -381,7 +381,7 @@ namespace PowerLanguage.Strategy
 
 			if (CurrentPosition.Value == 0)
 			{
-				trace(ETraceLevel.Debug, $"processExit - early exit OrderId({order.Info.Name}) Position.Value({position.Value})");
+				trace(ETraceLevel.Debug, $"processExit - early exit OrderId({order.Info.Name}) Position.Value({CurrentPosition.Value})");
 				return;
 			}
 
@@ -427,11 +427,11 @@ namespace PowerLanguage.Strategy
 				//never exit more than we currently have open
 				int currentOpen = (int)Math.Abs(CurrentPosition.OpenLots);
 				qtyToExit = Math.Max(0, Math.Min(qtyToExit, currentOpen));
-				trace(ETraceLevel.Debug, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+				trace(ETraceLevel.Debug, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 
 				if (qtyToExit > 0)
 				{
-					trace(ETraceLevel.Info, $"processExit - sending exit order {order.Info.Name} ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+					trace(ETraceLevel.Info, $"processExit - sending exit order {order.Info.Name} ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 					order.Send(targetPrice, qtyToExit);
 				}
 			}
