@@ -28,7 +28,8 @@ namespace PowerLanguage.Strategy
 			Error,
 			Warning,
 			Info,
-			Verbose,    //trace all messages
+			Verbose,
+			Debug,			//extensive logs for debugging purposes
 		}
 
 		/// <summary>
