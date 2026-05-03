@@ -21,6 +21,7 @@ namespace PowerLanguage.Strategy
 		//constants
 		public const int DEFAULT_LOOKBACK = 5;
 		public const double DEFAULT_EXPANSION_FACTOR = 1.0;
+		public const int DEFAULT_ENTRY_COUNT = 2;
 		public const int DEFAULT_ABSOLUTE_SIZE = 0;
 		public const double DEFAULT_MAX_EQUITY_PERCENT = 0.1;
 		public const double DEFAULT_MAX_VOLUME_PERCENT = 0.2;
@@ -43,6 +44,7 @@ namespace PowerLanguage.Strategy
 		//Entry parameters
 		[Input] public int LookBack { get; set; }               // look back number of days for % change to detect expansion
 		[Input] public double ExpansionFactor { get; set; }     // additional expansion factor to use to control expansion detection sensitivity, default 1.0 (e.g. 1.25 would require a 25% additional move above average last LookBack days % change)
+		[Input] public int EntryCount { get; set; }							// entry count per day of trading, default is 2 meaning a second re-entry would be taken if a first entry on the day resulted in a hit of the stop-loss
 
 		//Position size (risk control) parameters
 		[Input] public int AbsoluteSize { get; set; }           // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
@@ -81,6 +83,9 @@ namespace PowerLanguage.Strategy
 		private String m_entryDayExtremeOrderName;
 		private String m_flattenIfNotProfitableOrderName;
 		private String m_maxHoldPeriodOrderName;
+		private int m_entryCountForDay;
+		private DateTime m_previousBarDateTime;
+		private int m_previousMarketPosition;
 
 		//interface methods
 		public _BreakoutBase(object _ctx, bool longPosition) : base(_ctx) { m_longPosition = longPosition; }
@@ -91,8 +96,12 @@ namespace PowerLanguage.Strategy
 			m_averageRange = new VariableSeries<double>(this);
 
 			m_stopLossPrice = 0.0;
+			m_previousBarDateTime = DateTime.MinValue;
+			m_previousMarketPosition = 0;
+
 			LookBack = DEFAULT_LOOKBACK;
 			ExpansionFactor = DEFAULT_EXPANSION_FACTOR;
+			EntryCount = DEFAULT_ENTRY_COUNT;
 			AbsoluteSize = DEFAULT_ABSOLUTE_SIZE;
 			MaxEquityPercent = DEFAULT_MAX_EQUITY_PERCENT;
 			MaxVolumePercent = DEFAULT_MAX_VOLUME_PERCENT;
@@ -146,6 +155,7 @@ namespace PowerLanguage.Strategy
 			//validate inputs
 			if (LookBack <= 0) throw new ArgumentException("LookBack should be larger than zero.");
 			if (ExpansionFactor <= 0) throw new ArgumentException("ExpansionFactor should be larger than zero.");
+			if (EntryCount < 1) throw new ArgumentException("EntryCount should be 1 or more to get a entry");
 			if (AbsoluteSize < 0) throw new ArgumentException("AbsoluteSize should be larger or equal to zero.");
 			if (MaxEquityPercent <= 0 || MaxEquityPercent > 1.0) throw new ArgumentException("MaxEquityPercent must be larger than 0.0 and less equal to 1.0.");
 			if (MaxVolumePercent <= 0 || MaxVolumePercent > 1.0) throw new ArgumentException("MaxVolumePercent must be larger than 0.0 and less equal to 1.0.");
@@ -166,6 +176,8 @@ namespace PowerLanguage.Strategy
 
 			//initialize rest of the instance
 			m_projectedStopLossPrice = 0.0;
+			m_previousMarketPosition = StrategyInfo.MarketPosition;
+			m_entryCountForDay = 0;
 			m_tradingTimeframe = Bars;
 			m_dailyTimeframe = BarsOfData(2);
 
@@ -186,6 +198,13 @@ namespace PowerLanguage.Strategy
 			//update general indicators
 			updatePercentChange();
 
+			//update actions when a new day if detected
+			if (m_previousBarDateTime.Date != m_tradingTimeframe.Time[0].Date)
+			{
+				m_entryCountForDay = 0;	//reset our entry count and retry entries for the new day
+			}
+
+			//perform trade actions based on whether we're holding a position or not
 			if (StrategyInfo.MarketPosition == 0)
 			{
 				//reset the stop-loss price
@@ -194,13 +213,20 @@ namespace PowerLanguage.Strategy
 				//update the projected stop-loss while no position
 				updateProjectedStopLoss();
 
-				//send entry
-				sendEntry();
+				//check whether we need to request and entry based on the entry count
+				//for the day
+				if (m_entryCountForDay < EntryCount)
+					sendEntry();
 			}
 			else
 			{
-				//setup stop-loss price
-				if (m_stopLossPrice == 0.0) m_stopLossPrice = m_projectedStopLossPrice;
+				//setup state when this is the first bar of a new position
+				if (m_previousMarketPosition == 0)
+				{
+					++m_entryCountForDay;
+					m_stopLossPrice = m_projectedStopLossPrice;
+					trace(ETraceLevel.Verbose, $"CalcBar - new entry detected: EntryCountForDay({m_entryCountForDay})");
+				}
 
 				//manage open trades
 				sendStopLoss();
@@ -212,6 +238,9 @@ namespace PowerLanguage.Strategy
 				flattenIfNotProfitable();
 				flattenIfMaxPeriodReached();
 			}
+
+			m_previousMarketPosition = StrategyInfo.MarketPosition;
+			m_previousBarDateTime = m_tradingTimeframe.Time[0];
 		}
 
 		//methods
@@ -309,7 +338,7 @@ namespace PowerLanguage.Strategy
 			//determine final entry size - the final size must be smallest of the entry size non-zero values 
 			int size = (int)Math.Min(equitySize, Math.Min(riskSize, volumeSize));
 			if (size == 0)
-				trace(ETraceLevel.Info, $"positionSize - Size({size}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquityBasedSize({equitySize}) RiskBasedSize({riskSize}) VolumeBasedSize({volumeSize})");
+				trace(ETraceLevel.Warning, $"positionSize - Size({size}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquityBasedSize({equitySize}) RiskBasedSize({riskSize}) VolumeBasedSize({volumeSize})");
 			else
 				trace(ETraceLevel.Verbose, $"positionSize - Size({size}) IntradayClose({IntradayClose}) StopLoss({m_projectedStopLossPrice}) Equity({equity}) EquityBasedSize({equitySize}) RiskBasedSize({riskSize}) VolumeBasedSize({volumeSize})");
 
@@ -409,12 +438,15 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		//static DateTime s_testDate = DateTime.Parse("12/04/2025");
 		private void processEntryDayExtremeExit()
 		{
-			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || EntryDayExtremeCheck <= 0)
+			//if (m_tradingTimeframe.Time[0].Date == s_testDate.Date)
+			//	Output.WriteLine("Test");
+
+			if (CurrentPosition.Side == EMarketPositionSide.Flat || EntryDayExtremeCheck <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({position.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
+				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({CurrentPosition.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
 				return;
 			}
 			
@@ -432,13 +464,13 @@ namespace PowerLanguage.Strategy
 
 			if (daysCount >= EntryDayExtremeCheck)
 			{
-				double entryDayExtreme = position.Value > 0 ? m_dailyTimeframe.High[daysCount] : m_dailyTimeframe.Low[daysCount];
-				bool exitPosition = position.Value > 0 ? m_tradingTimeframe.CloseValue <= entryDayExtreme : m_tradingTimeframe.CloseValue >= entryDayExtreme;
-				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) CloseValue({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
+				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount] : m_dailyTimeframe.Low[daysCount];
+				bool exitPosition = CurrentPosition.Side == EMarketPositionSide.Long ? m_tradingTimeframe.CloseValue <= entryDayExtreme : m_tradingTimeframe.Close[0] >= entryDayExtreme;
+				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) Close({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
 
 				if (exitPosition)
 				{
-					trace(ETraceLevel.Info, $"processEntryDayExtremeExit closing position - Size({position.Value})");
+					trace(ETraceLevel.Info, $"processEntryDayExtremeExit closing position - Size({CurrentPosition.OpenLots})");
 					m_exitAll.Send(m_entryDayExtremeOrderName);
 				}
 			}
@@ -446,10 +478,9 @@ namespace PowerLanguage.Strategy
 
 		private void flattenIfNotProfitable()
 		{
-			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || FlattenIfNotProfitable <= 0)
+			if (CurrentPosition.Side == EMarketPositionSide.Flat || FlattenIfNotProfitable <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - early exit Position.Value({position.Value}) FlattenIfNotProfitable({FlattenIfNotProfitable})");
+				trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - early exit Position.Value({CurrentPosition.Value}) FlattenIfNotProfitable({FlattenIfNotProfitable})");
 				return;
 			}
 
@@ -461,24 +492,23 @@ namespace PowerLanguage.Strategy
 			}
 
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 			if (daysCount >= ExecInfo.MaxBarsBack)
 				trace(ETraceLevel.Error, $"flattenIfNotProfitable - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			//NOTE: We take into account both realized profit (Profit) and open profit into account to determine position profitability 
-			if (daysCount >= FlattenIfNotProfitable && (position.Profit + position.OpenProfit) < 0.0)
+			if (daysCount >= FlattenIfNotProfitable && (CurrentPosition.Profit + CurrentPosition.OpenProfit) < 0.0)
 			{
-				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position - Size({position.Value}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position - Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 				m_exitAll.Send(m_flattenIfNotProfitableOrderName);
 			}
 		}
 
 		private void flattenIfMaxPeriodReached()
 		{
-			IMarketPosition position = Positions[0];
-			if (position.Value == 0 || MaxHoldPeriod <= 0)
+			if (CurrentPosition.Value == 0 || MaxHoldPeriod <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - early exit Position.Value({position.Value}) MaxHoldPeriod({MaxHoldPeriod})");
+				trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - early exit Position.Value({CurrentPosition.Value}) MaxHoldPeriod({MaxHoldPeriod})");
 				return;
 			}
 
@@ -496,7 +526,7 @@ namespace PowerLanguage.Strategy
 
 			if (daysCount >= MaxHoldPeriod)
 			{
-				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position - Size({position.Value}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position - Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 				m_exitAll.Send(m_maxHoldPeriodOrderName);
 			}
 		}

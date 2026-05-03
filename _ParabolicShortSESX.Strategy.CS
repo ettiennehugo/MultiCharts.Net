@@ -92,6 +92,7 @@ namespace PowerLanguage.Strategy {
 		private int m_entryCount;
 		private DateTime m_previousDateTime;
 		private int m_previousPositionSide;
+		private int m_previousDayCount;
 
 		//interface methods
 		public _ParabolicShortSESX(object _ctx) : base(_ctx) { }
@@ -149,6 +150,7 @@ namespace PowerLanguage.Strategy {
 			m_volumePercentile.Instrument = m_primaryTimeFrame;
 			m_entryDate = DateTime.MinValue;
 			m_stopLoss = -1;
+			m_previousDayCount = -1;
 
 			m_retracementExitFilled = false;
 			m_priceActionChanged = false;
@@ -170,6 +172,7 @@ namespace PowerLanguage.Strategy {
 				m_retracementExitFilled = false;
 				m_entryDate = DateTime.MinValue;
 				m_stopLoss = -1;
+				m_previousDayCount = -1;
 				if (EntryStrategy == EEntryStrategy.FirstBearishBar)
 					entryFirstBearishBar();
 				else
@@ -198,11 +201,11 @@ namespace PowerLanguage.Strategy {
 			int size = entryPositionSize(risk);
 			if (size == 0)
 			{
-				trace(ETraceLevel.Error, $"Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+				trace(ETraceLevel.Error, $"entryFirstBearishBarShort - entry on bearish bar at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 				return;
 			}
 
-			trace(ETraceLevel.Info, $"Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			trace(ETraceLevel.Info, $"entryFirstBearishBar - Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
@@ -228,21 +231,21 @@ namespace PowerLanguage.Strategy {
 
 			if (lowerHighBar == null)
 			{
-				trace(ETraceLevel.Error, $"PriceAction analysis returned that a lower high was found but could find the lower high bar");
+				trace(ETraceLevel.Error, $"entryFirstLowerHigh - PriceAction analysis returned that a lower high was found but could find the lower high bar");
 				return; //do not enter if a lower high did not form yet
 			}
 
 			//exit if bar does not have significant volume
 			if (VolumePercentile > 0 && m_volumePercentile[0] < VolumePercentile)
 			{
-				trace(ETraceLevel.Verbose, $"Volume percentile {m_volumePercentile[0]} is below the required volume percentile {VolumePercentile} not entering.");
+				trace(ETraceLevel.Verbose, $"entryFirstLowerHigh - Volume percentile {m_volumePercentile[0]} is below the required volume percentile {VolumePercentile} not entering.");
 				return;
 			}
 
 			//compare the current entry timeframe bar against the secondary timeframe used for price action analysis
 			if (m_primaryTimeFrame.High[0] > lowerHighBar.high)
 			{
-				trace(ETraceLevel.Verbose, $"Entry timeframe high {m_primaryTimeFrame.High[0]} breaking above lower high {lowerHighBar.high} at {m_primaryTimeFrame.Time[0].ToString("yyyyMMdd-HHmmss.fff")} skipping short entry");
+				trace(ETraceLevel.Verbose, $"entryFirstLowerHigh - Entry timeframe high {m_primaryTimeFrame.High[0]} breaking above lower high {lowerHighBar.high} at {m_primaryTimeFrame.Time[0].ToString("yyyyMMdd-HHmmss.fff")} skipping short entry");
 				return;
 			}
 
@@ -260,11 +263,11 @@ namespace PowerLanguage.Strategy {
 			int size = entryPositionSize(risk);
 			if (size == 0)
 			{
-				trace(ETraceLevel.Error, $"Short entry on lower high at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+				trace(ETraceLevel.Error, $"entryFirstLowerHigh - Short entry on lower high at {m_primaryTimeFrame.Close[0]} failed due to zero size. Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 				return;
 			}
 
-			trace(ETraceLevel.Info, $"Short entry on lower high at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			trace(ETraceLevel.Info, $"entryFirstLowerHigh - Short entry on lower high at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
@@ -276,7 +279,7 @@ namespace PowerLanguage.Strategy {
 			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
 
 			if (size == 0)
-				trace(ETraceLevel.Info, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+				trace(ETraceLevel.Warning, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 			else
 				trace(ETraceLevel.Verbose, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 
@@ -287,7 +290,7 @@ namespace PowerLanguage.Strategy {
 			//exit on Fridays if required
 			if (ExitFriday && m_primaryTimeFrame.Time[0].DayOfWeek == DayOfWeek.Friday && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay)
 			{
-				trace(ETraceLevel.Info, $"Exit Friday {m_exitTime.ToString("HH:mm")}");
+				trace(ETraceLevel.Info, $"exit - Exit Friday {m_exitTime.ToString("HH:mm")}");
 				m_sxAll.Send();
 				return;
 			}
@@ -298,8 +301,10 @@ namespace PowerLanguage.Strategy {
 				DateTime openEntryDate = DateTime.MaxValue;
 				DateTime closeEntryDate = DateTime.MaxValue;
 
+				//TODO - use EntryTime method here 
 				if (CurrentPosition.OpenTrades.Count > 0) openEntryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
 				if (CurrentPosition.ClosedTrades.Count > 0) closeEntryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
+
 
 				if (openEntryDate != DateTime.MaxValue && openEntryDate < closeEntryDate)
 					m_entryDate = openEntryDate;
@@ -307,12 +312,13 @@ namespace PowerLanguage.Strategy {
 					m_entryDate = closeEntryDate;
 			}
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, m_primaryTimeFrame.Time[0]) : tradingDayCount(m_entryDate, m_primaryTimeFrame.Time[0]);
-			trace(ETraceLevel.Info, $"Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
+			if (daysCount != m_previousDayCount) trace(ETraceLevel.Info, $"exit - Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
+			m_previousDayCount = daysCount;
 
 			//exit after a specific number of days
 			if (ExitDaysCount > 0 && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay && daysCount >= ExitDaysCount)
 			{
-				trace(ETraceLevel.Info, $"Exit after {ExitDaysCount} days");
+				trace(ETraceLevel.Info, $"exit - Exit after {ExitDaysCount} days");
 				m_sxAll.Send();
 				return;
 			}
@@ -335,7 +341,7 @@ namespace PowerLanguage.Strategy {
 			//exit partial position if we reach the specific retracement of the spike
 			if (!m_retracementExitFilled && entryDayHigh * RetracementExitPercent > m_primaryTimeFrame.Close[0])
 			{
-				trace(ETraceLevel.Info, $"Partial exit {m_primaryTimeFrame.Close[0]} EntryDayHigh {entryDayHigh} RetracementExitPercent {RetracementExitPercent}");
+				trace(ETraceLevel.Info, $"exit - Partial exit {m_primaryTimeFrame.Close[0]} EntryDayHigh {entryDayHigh} RetracementExitPercent {RetracementExitPercent}");
 				m_sxPartial.Send((int)Math.Ceiling(Math.Abs(StrategyInfo.MarketPosition) / (double)2));
 				return;
 			}

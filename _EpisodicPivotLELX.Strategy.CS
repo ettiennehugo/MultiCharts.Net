@@ -106,13 +106,13 @@ namespace PowerLanguage.Strategy
 			if (StopLossBuffer < 0) throw new Exception("StopLossBuffer must be larger than or equal to zero.");
 		}
 
-		//static DateTime s_testDate = DateTime.Parse("11/29/2023");
+		//static DateTime s_testDate = DateTime.Parse("04/29/2026");
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 
-			//if (Bars.Time[0].Date == s_testDate.Date)
+            //if (Bars.Time[0].Date == s_testDate.Date)
 			//	Output.WriteLine("TestPoint");
 
 			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;  //backtester do not send order filled messages to we need to compare position sizes between bars
@@ -194,7 +194,7 @@ namespace PowerLanguage.Strategy
 			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
 			if (size == 0)
 			{
-				trace(ETraceLevel.Info, $"Entry size is zero so no entry would be taken - EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+				trace(ETraceLevel.Warning, $"Entry size is zero so no entry would be taken - EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 				return; //do not enter if the size is zero
 			}
 			else

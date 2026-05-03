@@ -498,8 +498,11 @@ namespace PowerLanguage.Strategy
 		protected int calendarDayCount(DateTime entryDate, DateTime currentDateTime)
 		{
 			if (entryDate.Date > currentDateTime.Date) throw new ArgumentException("entryDate must always be smaller than currentDateTime");
-			TimeSpan days = currentDateTime - entryDate;
-			return days.Days;
+			//NOTE: We use only the dates and not times as TimeSpan will count complete 24-hour periods when time is involved leading to off-by-1 errors,
+			//      we are only interested in the days without too much consideration for the time. E.g. 2024-05-01 14:00 to 2024-05-02 10:00 would
+			//      return 0 instead of 1 when time is involved since there has not elapsed a 24-hour period between the two while 2024-05-01 to 2024-05-02
+			//      would return 1 as we expect irrespective of time.
+			return (currentDateTime.Date - entryDate.Date).Days;
 		}
 
 		/// <summary>
