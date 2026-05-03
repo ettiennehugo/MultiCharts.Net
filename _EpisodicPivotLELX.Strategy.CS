@@ -130,19 +130,28 @@ namespace PowerLanguage.Strategy
 			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter)
 			{
-				trace(ETraceLevel.Debug, $"CalcBar - entries per time filter reached, not taking entry.");
+				trace(ETraceLevel.Debug, $"CalcBar - entries per time filter reached - returning");
 				return; //do not enter if the number of entries per time filter is reached
 			}
 
 			//check if the stock has gapped up
-			if (m_dailyTimeFrame.Close[0] == 0) return; //avoid division by zero
+			if (m_dailyTimeFrame.Close[0] == 0)
+			{
+				trace(ETraceLevel.Debug, $"CalcBar - daily timeframe close is zero - returning");
+				return; //avoid division by zero
+			}
+
 			double percentageChange = (IntradayOpen - m_dailyTimeFrame.Close[0]) / m_dailyTimeFrame.Close[0]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
-			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the gap up criteria
+			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange)
+			{
+				trace(ETraceLevel.Debug, $"CalcBar - percentage change {percentageChange} not in range of ({MinimumPercentageChange}:{MaximumPercentageChange}) - returning");
+				return; //ignore stocks that do not meet the gap up criteria
+			}
 
 			//current bar low must be above the open, we don't want to enter on a down day as the stock is moving lower
 			if (m_minuteTimeFrame.Close[0] < IntradayOpen)
 			{
-				trace(ETraceLevel.Debug, $"CalcBar - current bar close ({m_minuteTimeFrame.Close[0]}) is below intraday open ({IntradayOpen}), don't take entry on a down day.");
+				trace(ETraceLevel.Debug, $"CalcBar - current bar close ({m_minuteTimeFrame.Close[0]}) is below intraday open ({IntradayOpen}) - don't take entry on a down day.");
 				return;
 			}
 

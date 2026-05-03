@@ -376,9 +376,18 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected int positionSize(double entryPrice, double maxEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
+			int result = 0;
+			if (entryPrice == 0.0d)
+			{
+				trace(ETraceLevel.Debug, $"positionSize - entryPrice is zero returning result {result}");
+				return result;
+			}
+
 			double positionCash = equityAvailable(maxEquityPerPosPercent);
-			int result = (int)Math.Truncate(positionCash / entryPrice);
+			result = (int)Math.Truncate(positionCash / entryPrice);
+			int positionBeforeRoundLots = result;
 			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
+			trace(ETraceLevel.Debug, $"positionSize - Equity({positionCash}) EntryPrice({entryPrice}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -393,12 +402,17 @@ namespace PowerLanguage.Strategy
 		protected int positionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
-			if (bars.Close[0] == 0.0d) return result;
+			if (bars.Close[0] == 0.0d)
+			{
+				trace(ETraceLevel.Debug, $"positionSize - bars close value is zero at time {bars.Time[0]:MM/dd/yyyy HH:mm:ss} returning result {result}");
+				return result;
+			}
 
 			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
 			result = (int)Math.Truncate(positionCash / bars.Close[0]);
+			int positionBeforeRoundLots = result;
 			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
-
+			trace(ETraceLevel.Debug, $"positionSize - Equity({positionCash}) BarsClose({bars.Close[0]}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -421,9 +435,9 @@ namespace PowerLanguage.Strategy
 			}
 
 			double shares = positionCash / risk;
-			if (double.IsInfinity(shares) || double.IsNaN(shares))
+			if (double.IsInfinity(shares) || double.IsNaN(shares) || shares > int.MaxValue || shares < 0)
 			{
-				trace(ETraceLevel.Warning, $"riskBasedPositionSize resulted in overflow (possible data issue or very small risk) returning zero - Risk({risk}) PositionCash({positionCash})");
+				trace(ETraceLevel.Warning, $"riskBasedPositionSize would result in overflow (possible data issue or very small risk) or negative shares returning zero - Risk({risk}) PositionCash({positionCash}) Shares({shares})");
 				return 0;
 			}
 
