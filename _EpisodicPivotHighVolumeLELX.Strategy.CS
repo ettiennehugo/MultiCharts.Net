@@ -225,10 +225,10 @@ namespace PowerLanguage.Strategy
 			//check whether we are trading in market hours or pre-/post-market hours
 			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
 			{
-				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Market hours entry order {m_stpLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - market hours entry order {m_stpLE.Info.Name} - Price({entryPrice}) Size({size}) PctChange({percentageChange}) ClosePercentile({closePercentile})");
 				m_stpLE.Send(entryPrice, size);
 			} else {
-				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Pre-/post-market hours entry order {m_lmtLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - pre-/post-market hours entry order {m_lmtLE.Info.Name} - Price({entryPrice}) Size({size}) PctChange({percentageChange}) ClosePercentile({closePercentile})");
 				m_lmtLE.Send(entryPrice, size);
 			}
 		}

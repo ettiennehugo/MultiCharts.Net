@@ -379,7 +379,7 @@ namespace PowerLanguage.Strategy
 			int result = 0;
 			if (entryPrice == 0.0d)
 			{
-				trace(ETraceLevel.Debug, $"positionSize - entryPrice is zero returning result {result}");
+				trace(ETraceLevel.Debug, $"equityBasedPositionSize - entryPrice is zero returning result {result}");
 				return result;
 			}
 
@@ -387,7 +387,7 @@ namespace PowerLanguage.Strategy
 			result = (int)Math.Truncate(positionCash / entryPrice);
 			int positionBeforeRoundLots = result;
 			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
-			trace(ETraceLevel.Debug, $"positionSize - Equity({positionCash}) EntryPrice({entryPrice}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
+			trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) EntryPrice({entryPrice}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -399,20 +399,20 @@ namespace PowerLanguage.Strategy
 		///                    (multiples of 100) to align with the instritutional traders and market makers. Odd lot orders
 		///                    can create slippage and poor fills.
 		/// </summary>
-		protected int equityBasedPositionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
+		protected int equityBasedPositionSize(IInstrument bars, double maxEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
 			if (bars.Close[0] == 0.0d)
 			{
-				trace(ETraceLevel.Debug, $"positionSize - bars close value is zero at time {bars.Time[0]:MM/dd/yyyy HH:mm:ss} returning result {result}");
+				trace(ETraceLevel.Debug, $"equityBasedPositionSize - bars close value is zero at time {bars.Time[0]:MM/dd/yyyy HH:mm:ss} returning result {result}");
 				return result;
 			}
 
-			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
+			double positionCash = equityAvailable(maxEquityPerPosPercent);
 			result = (int)Math.Truncate(positionCash / bars.Close[0]);
 			int positionBeforeRoundLots = result;
 			if (useRoundLots) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
-			trace(ETraceLevel.Debug, $"positionSize - Equity({positionCash}) BarsClose({bars.Close[0]}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
+			trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) BarsClose({bars.Close[0]}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -476,7 +476,7 @@ namespace PowerLanguage.Strategy
 
 			int beforeRoundLots = result;
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Debug, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
+			trace(ETraceLevel.Debug, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) VolumeLength({volumePeriod}) VolumePeriodOffset({volumePeriodOffset}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
 			return result;
 		}
 
