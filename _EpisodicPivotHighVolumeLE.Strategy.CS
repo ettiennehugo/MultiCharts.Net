@@ -181,7 +181,7 @@ namespace PowerLanguage.Strategy {
 			double risk = m_minuteTimeFrame.Close[0] - IntradayLow - StopLossBuffer;
 
 			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = positionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
+			int equityBasedSize = equityBasedPositionSize(m_minuteTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, 1, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;

@@ -207,7 +207,7 @@ namespace PowerLanguage.Strategy
 				risk = entryPrice - StopLossBuffer;   //pre-/post-market entries use tighter stop-loss
 			}
 
-			int equityBasedSize = positionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
+			int equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, 1, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;

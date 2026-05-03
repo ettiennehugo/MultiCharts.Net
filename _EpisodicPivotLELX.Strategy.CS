@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = positionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
+			int equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
 			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
 

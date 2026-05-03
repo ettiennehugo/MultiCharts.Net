@@ -374,7 +374,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Determine the position size based on a given entry price and a maximum equity per position as a percentage of the available equity.
 		/// </summary>
-		protected int positionSize(double entryPrice, double maxEquityPerPosPercent = 0.0d, bool useRoundLots = false)
+		protected int equityBasedPositionSize(double entryPrice, double maxEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
 			if (entryPrice == 0.0d)
@@ -399,7 +399,7 @@ namespace PowerLanguage.Strategy
 		///                    (multiples of 100) to align with the instritutional traders and market makers. Odd lot orders
 		///                    can create slippage and poor fills.
 		/// </summary>
-		protected int positionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
+		protected int equityBasedPositionSize(IInstrument bars, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
 			int result = 0;
 			if (bars.Close[0] == 0.0d)
