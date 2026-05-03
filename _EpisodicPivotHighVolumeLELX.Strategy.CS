@@ -173,11 +173,16 @@ namespace PowerLanguage.Strategy
 			double closeLowDelta = m_minuteTimeFrame.Close[0] - m_minuteTimeFrame.Low[0];
 			if (range == 0)
 			{
-				trace(ETraceLevel.Warning, $"{m_minuteTimeFrame.Time[0]} - Range is zero, cannot calculate close percentile - Close {m_minuteTimeFrame.Close[0]} - Low {m_minuteTimeFrame.Low[0]} - High {m_minuteTimeFrame.High[0]}");
+				trace(ETraceLevel.Warning, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Range is zero, cannot calculate close percentile - Close {m_minuteTimeFrame.Close[0]} - Low {m_minuteTimeFrame.Low[0]} - High {m_minuteTimeFrame.High[0]}");
 				return;
 			}
 			double closePercentile = closeLowDelta / range;
-			if (closePercentile < RequiredClosePercentile) return; //ignore stocks that do not meet the close percentile criteria
+			//ignore stocks that do not meet the close percentile criteria
+			if (closePercentile < RequiredClosePercentile)
+			{
+				trace(ETraceLevel.Debug, $"CalcBar - close percentile {closePercentile} < {RequiredClosePercentile} returning");
+				return;
+			}
 
 			//determine projected entry price and risk based on time of entry
 			double entryPrice = 0.0;
@@ -196,7 +201,7 @@ namespace PowerLanguage.Strategy
 				{
 					//fallback for backtesting – use a small premium above the bar close
 					entryPrice = m_minuteTimeFrame.Close[0] * 1.001;
-					trace(ETraceLevel.Warning, $"Backtest fallback using close price {entryPrice} instead of Ask");
+					trace(ETraceLevel.Warning, $"CalcBar - backtest fallback using close price {entryPrice} instead of Ask");
 				}
 
 				risk = entryPrice - StopLossBuffer;   //pre-/post-market entries use tighter stop-loss
@@ -210,17 +215,20 @@ namespace PowerLanguage.Strategy
 
 			if (size == 0)
 			{
-				trace(ETraceLevel.Warning, $"{m_minuteTimeFrame.Time[0]} - Position size calculated as zero - EquityBasedSize {equityBasedSize} - RiskBasedSize {riskBasedSize} - VolumeBasedSize {size} - UseRoundLots {UseRoundLots}");
+				trace(ETraceLevel.Warning, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Position size calculated as zero - EquityBasedSize {equityBasedSize} - RiskBasedSize {riskBasedSize} - VolumeBasedSize {size} - UseRoundLots {UseRoundLots}");
 				return;
 			}
+			else
+				trace(ETraceLevel.Verbose, $"CalcBar - Size({size}) IntradayClose({IntradayClose}) StopLoss({IntradayLow - StopLossBuffer}) Equity({equityAvailable()}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+
 
 			//check whether we are trading in market hours or pre-/post-market hours
 			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
 			{
-				trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Market hours entry order {m_stpLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Market hours entry order {m_stpLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
 				m_stpLE.Send(entryPrice, size);
 			} else {
-				trace(ETraceLevel.Info, $"{m_minuteTimeFrame.Time[0]} - Pre-/post-market hours entry order {m_lmtLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
+				trace(ETraceLevel.Info, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Pre-/post-market hours entry order {m_lmtLE.Info.Name} at Price {entryPrice} - Size {size} - PctChange {percentageChange} - ClosePercentile {closePercentile}");
 				m_lmtLE.Send(entryPrice, size);
 			}
 		}

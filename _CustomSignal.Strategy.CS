@@ -409,14 +409,14 @@ namespace PowerLanguage.Strategy
 		{
 			if (risk <= 0 || maxRiskEquityPerPosPercent <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"riskBasedPositionSize risk or maxRiskEquityPerPosPercent not correct - Risk({risk}) MaxRiskEquityPerPosPercent({maxRiskEquityPerPosPercent})");
+				trace(ETraceLevel.Debug, $"riskBasedPositionSize risk or maxRiskEquityPerPosPercent not correct - Risk({risk}) MaxRiskEquityPerPosPercent({maxRiskEquityPerPosPercent})");
 				return 0;
 			}
 
 			double positionCash = equityAvailable(maxRiskEquityPerPosPercent);
 			if (positionCash <= 0.0)
 			{
-				trace(ETraceLevel.Verbose, $"riskBasedPositionSize zero equity available returning zero size");
+				trace(ETraceLevel.Debug, $"riskBasedPositionSize zero equity available returning zero size");
 				return 0;
 			}
 
@@ -429,7 +429,7 @@ namespace PowerLanguage.Strategy
 
 			int result = (int)Math.Floor(shares);
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Verbose, $"riskBasedPositionSize - Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
+			trace(ETraceLevel.Debug, $"riskBasedPositionSize - Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
 			return result;
 		}
 
@@ -462,7 +462,7 @@ namespace PowerLanguage.Strategy
 
 			int beforeRoundLots = result;
 			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //floor to 100 shares for round lot orders
-			trace(ETraceLevel.Verbose, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
+			trace(ETraceLevel.Debug, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
 			return result;
 		}
 
@@ -630,7 +630,7 @@ namespace PowerLanguage.Strategy
 					if (lastOpenTrade?.EntryOrder != null)
 					{
 						DateTime btEntryTime = lastOpenTrade.EntryOrder.Time;
-						trace(ETraceLevel.Verbose, $"EntryTime (backtest) -> {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched: {string.Join("; ", entryOrderNames)})");
+						trace(ETraceLevel.Debug, $"EntryTime backtest -> {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched: {string.Join("; ", entryOrderNames)})");
 						return btEntryTime;
 					}
 				}

@@ -11,11 +11,11 @@ namespace PowerLanguage.Strategy {
 	/// The strategy uses the price action analysis to determine the entry point and the exit point.
 	/// Timeframes used:
 	///		Primary: 1/5 minute chart for the entry
-	///		Secondary: 15-minute/30-minutes/hourly - used for price action analysis
+	///		Secondary: 5-/15-/30-minutes/hourly - used for price action analysis
 	///		Dialy timeframe
 	///	Entry:
-	///	 * If EntryStrategy is set to FirstBearishBar the entry is made on the 5-minute bearish bar
-	///	 * If EntryStrategy is set to FirstLowerHigh the entry is made on the 15-minute timeframe when a lower high forms.
+	///	 * If EntryStrategy is set to FirstBearishBar the entry is made on the primary timeframe bearish bar
+	///	 * If EntryStrategy is set to FirstLowerHigh the entry is made on the secondary timeframe when a lower high forms.
 	///	 
 	/// Exit:
 	///  * Initial stop loss is at the high of the day.
@@ -28,6 +28,8 @@ namespace PowerLanguage.Strategy {
 		//constants
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
+		public const int DEFAULT_PARABOLIC_GROWTH_LENGTH = 5;	//price growth length on the daily timeframe to use to measure whether this is a parabolic move
+		public const double DEFAULT_PARABOLIC_GROWTH_FACTOR = 3.0;	//price growth on the daily timeframe, price needs to grow by this factor to be considered a parabolic move over the given price growth length above 
 		public int DEFAULT_FRACTAL_LAYERS = 3; //number of fractal layers to use for the price action analysis
 		public const double DEFAULT_FACTOR_CLOSE = 0.05; //factor close - user a more finely tuned factor close to determine lower highs, this uses 5% of the ATR as parabolic shorts can have huge bar moves
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.15; //per default don't enter positions larger than 15% of available equity
@@ -50,13 +52,15 @@ namespace PowerLanguage.Strategy {
 
 		public enum EExitDaysCountStrategy
 		{
-			CalendarDays,
-			TradingDays
+			CalendarDays,				//exit based on a number of calendar days, used as the default as this is the less risky trade management strategy
+			TradingDays					//exit based on a number of trading days, note that this could increase your risk since the strategy might hold positions over weekends
 		};
 
 		//properties
 		[Input] public string StartTime { get; set; } //start time for the entry
 		[Input] public string EndTime { get; set; } //end time for the entry
+		[Input] public int ParabolicGrowthLength { get; set; }	//period length on the daily timeframe to detect the parabolic move
+		[Input] public double ParabolicGrowthFactor { get; set; }	//growth factor on the daily timeframe to be considered a parabolic move, can be considered a percentage, e.g. 3.0 would mean the price needs to tripe before considered a parabolic move
 		[Input] public EEntryStrategy EntryStrategy { get; set; }	//entry strategy to use for the short entry
 		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
 		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
@@ -104,7 +108,9 @@ namespace PowerLanguage.Strategy {
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			EndTime = DEFAULT_END_TIME;
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
-			EntryStrategy = EEntryStrategy.FirstBearishBar;
+			ParabolicGrowthLength = DEFAULT_PARABOLIC_GROWTH_LENGTH;
+			ParabolicGrowthFactor = DEFAULT_PARABOLIC_GROWTH_FACTOR;
+			EntryStrategy = EEntryStrategy.FirstLowerHigh;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
@@ -134,6 +140,8 @@ namespace PowerLanguage.Strategy {
 			base.StartCalc();
 			m_startTime = DateTime.ParseExact(StartTime, "HH:mm", null);
 			m_endTime = DateTime.ParseExact(EndTime, "HH:mm", null);
+			if (ParabolicGrowthLength <= 0) throw new Exception("ParabolicGrowthLength needs to be a positive number.");
+			if (ParabolicGrowthFactor <= 0) throw new Exception("ParabolicGrowthFactor needs to be a positive number.");
 			if (MaximumEquityPerPosPercent <= 0 || MaximumEquityPerPosPercent > 1) throw new Exception("MaximumEquityPerPosPercent must be larger than zero and less then one.");
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumVolumeBasedPercent <= 0 || MaximumVolumeBasedPercent > 1) throw new Exception("MaximumVolumeBasedPercent must be larger than zero and less than one.");
@@ -189,9 +197,23 @@ namespace PowerLanguage.Strategy {
 
 		//methods
 		protected void entryFirstBearishBar() {
-			if (m_entryCount >= ReentryCount) return;
+			if (m_entryCount >= ReentryCount)
+			{
+				trace(ETraceLevel.Debug, $"entryFirstBearishBar skipped - ReentryCount reached ({m_entryCount})");
+				return;
+			}
+
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 3.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 3.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+
+			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
+
+			//ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < ParabolicGrowthFactor)
+			{
+				trace(ETraceLevel.Debug, $"entryFirstBearishBar skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength]} < {ParabolicGrowthFactor})");
+				return;
+			}
+
 			if (m_primaryTimeFrame.Open[0] < m_primaryTimeFrame.Close[0]) return; //ignore bullish bars, we only enter on the first bearish bar
 
 			//determine the risk based on the entry bar close and the day high
@@ -205,15 +227,27 @@ namespace PowerLanguage.Strategy {
 				return;
 			}
 
-			trace(ETraceLevel.Info, $"entryFirstBearishBar - Short entry on bearish bar at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			trace(ETraceLevel.Info, $"entryFirstBearishBar - Short entry {m_se.Info.Name} on bearish bar at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
 		protected void entryFirstLowerHigh() {
-			if (m_entryCount >= ReentryCount) return;
+			if (m_entryCount >= ReentryCount)
+			{
+				trace(ETraceLevel.Debug, $"entryFirstLowerHigh skipped - ReentryCount reached ({m_entryCount})");
+				return;
+			}
+
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
-			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to calculate the volume percentile
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[5] < 3.0 || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < 3.0) return; //ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+
+			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
+
+			//ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < ParabolicGrowthFactor)
+			{
+				trace(ETraceLevel.Debug, $"entryFirstLowerHigh skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength]} < {ParabolicGrowthFactor})");
+				return;
+			}
 
 			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
@@ -267,7 +301,7 @@ namespace PowerLanguage.Strategy {
 				return;
 			}
 
-			trace(ETraceLevel.Info, $"entryFirstLowerHigh - Short entry on lower high at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
+			trace(ETraceLevel.Info, $"entryFirstLowerHigh - Short entry {m_se.Info.Name} on lower high at {m_primaryTimeFrame.Close[0]} Size {size} Risk {risk} IntradayHigh {IntradayHigh} EntryBarClose {m_primaryTimeFrame.Close[0]}");
 			m_se.Send(m_primaryTimeFrame.Close[0], size);
 		}
 
@@ -290,7 +324,7 @@ namespace PowerLanguage.Strategy {
 			//exit on Fridays if required
 			if (ExitFriday && m_primaryTimeFrame.Time[0].DayOfWeek == DayOfWeek.Friday && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay)
 			{
-				trace(ETraceLevel.Info, $"exit - Exit Friday {m_exitTime.ToString("HH:mm")}");
+				trace(ETraceLevel.Info, $"exit - Exit Friday {m_sxAll.Info.Name} at time {m_exitTime.ToString("HH:mm")}");
 				m_sxAll.Send();
 				return;
 			}
@@ -312,13 +346,13 @@ namespace PowerLanguage.Strategy {
 					m_entryDate = closeEntryDate;
 			}
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, m_primaryTimeFrame.Time[0]) : tradingDayCount(m_entryDate, m_primaryTimeFrame.Time[0]);
-			if (daysCount != m_previousDayCount) trace(ETraceLevel.Info, $"exit - Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
+			if (daysCount != m_previousDayCount) trace(ETraceLevel.Debug, $"exit - Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
 			m_previousDayCount = daysCount;
 
 			//exit after a specific number of days
 			if (ExitDaysCount > 0 && m_primaryTimeFrame.Time[0].TimeOfDay >= m_exitTime.TimeOfDay && daysCount >= ExitDaysCount)
 			{
-				trace(ETraceLevel.Info, $"exit - Exit after {ExitDaysCount} days");
+				trace(ETraceLevel.Info, $"exit - Exit {m_sxAll.Info.Name} after {ExitDaysCount} days");
 				m_sxAll.Send();
 				return;
 			}
@@ -336,12 +370,13 @@ namespace PowerLanguage.Strategy {
 					}
 				}
 
+			trace(ETraceLevel.Debug, $"exit - Stop loss {m_sxStopLoss.Info.Name} at price {m_stopLoss}");
 			m_sxStopLoss.Send(m_stopLoss);
 
 			//exit partial position if we reach the specific retracement of the spike
 			if (!m_retracementExitFilled && entryDayHigh * RetracementExitPercent > m_primaryTimeFrame.Close[0])
 			{
-				trace(ETraceLevel.Info, $"exit - Partial exit {m_primaryTimeFrame.Close[0]} EntryDayHigh {entryDayHigh} RetracementExitPercent {RetracementExitPercent}");
+				trace(ETraceLevel.Debug, $"exit - sending partial exit {m_sxPartial.Info.Name} at price {m_primaryTimeFrame.Close[0]} EntryDayHigh({entryDayHigh}) RetracementExitPercent({RetracementExitPercent})");
 				m_sxPartial.Send((int)Math.Ceiling(Math.Abs(StrategyInfo.MarketPosition) / (double)2));
 				return;
 			}

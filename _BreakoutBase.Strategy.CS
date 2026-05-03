@@ -351,7 +351,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_stopLossPrice >= 0)
 				{
-					trace(ETraceLevel.Verbose, $"sendStopLoss - StopLossPrice({m_stopLossPrice})");
+					trace(ETraceLevel.Debug, $"sendStopLoss - sending {m_stopLossExit.Info.Name} at price StopLossPrice({m_stopLossPrice})");
 					m_stopLossExit.Send(m_stopLossPrice);
 				}
 				else
@@ -366,7 +366,7 @@ namespace PowerLanguage.Strategy
 				this.CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 				IMarketPosition position = Positions[0];
 				double profit = StrategyInfo.AvgEntryPrice * BreakEvenProfit;
-				trace(ETraceLevel.Info, $"sendBreakEvenStop sending breakeven stop - ProfitPerPos({profit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+				trace(ETraceLevel.Debug, $"sendBreakEvenStop - sending breakeven stop ProfitPerPos({profit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 				GenerateBreakEven(profit);
 			}
 		}
@@ -375,42 +375,41 @@ namespace PowerLanguage.Strategy
 		{
 			if (profitPercent == 0.0 || positionSize == 0.0)
 			{
-				trace(ETraceLevel.Verbose, $"processExit - early exit OrderId({order.Info.Name}) ProfitPercent({profitPercent}) PositionSize({positionSize})");
+				trace(ETraceLevel.Debug, $"processExit - early exit OrderId({order.Info.Name}) ProfitPercent({profitPercent}) PositionSize({positionSize})");
 				return;
 			}
 
-			IMarketPosition position = Positions[0];
-			if (position.Value == 0)
+			if (CurrentPosition.Value == 0)
 			{
-				trace(ETraceLevel.Verbose, $"processExit - early exit OrderId({order.Info.Name}) Position.Value({position.Value})");
+				trace(ETraceLevel.Debug, $"processExit - early exit OrderId({order.Info.Name}) Position.Value({position.Value})");
 				return;
 			}
 
 			double entryPrice = StrategyInfo.AvgEntryPrice;
 			if (entryPrice <= 0.0)
 			{
-				trace(ETraceLevel.Verbose, $"processExit - early exit EntryPrice({entryPrice})");
+				trace(ETraceLevel.Debug, $"processExit - early exit EntryPrice({entryPrice})");
 				return;
 			}
 
 			//determine target price for long/short position and whether it was achieved
-			double targetPrice = (position.Value > 0) ? entryPrice * (1 + profitPercent) : entryPrice * (1 - profitPercent);
-			bool targetAchieved = (position.Value > 0 && m_tradingTimeframe.CloseValue >= targetPrice) ||
-														(position.Value < 0 && m_tradingTimeframe.CloseValue <= targetPrice);
+			double targetPrice = (CurrentPosition.Value > 0) ? entryPrice * (1 + profitPercent) : entryPrice * (1 - profitPercent);
+			bool targetAchieved = (CurrentPosition.Value > 0 && m_tradingTimeframe.CloseValue >= targetPrice) ||
+														(CurrentPosition.Value < 0 && m_tradingTimeframe.CloseValue <= targetPrice);
 			trace(ETraceLevel.Verbose, $"processExit - ProfitTarget({targetPrice}) OrderName({order.Info.Name}) IntradayClose({IntradayClose}) TargetAchieved({targetAchieved})");
 
 			if (targetAchieved)
 			{
 				//compute the total position size that was held by trade
 				double openSize = 0.0;
-				foreach (ITrade t in position.OpenTrades)
+				foreach (ITrade t in CurrentPosition.OpenTrades)
 				{
 					if (t.EntryOrder != null)
 						openSize += Math.Abs(t.EntryOrder.Contracts);
 				}
 
 				double closedSize = 0.0;
-				foreach (ITrade t in position.ClosedTrades)
+				foreach (ITrade t in CurrentPosition.ClosedTrades)
 				{
 					if (t.EntryOrder != null)
 						closedSize += Math.Abs(t.EntryOrder.Contracts);
@@ -420,19 +419,19 @@ namespace PowerLanguage.Strategy
 
 				//safety fallback (in case the collections are empty on first bar)
 				if (originalSize == 0.0)
-					originalSize = Math.Abs(position.OpenLots);
+					originalSize = Math.Abs(CurrentPosition.OpenLots);
 
 				//positionSize is a PERCENTAGE of the ORIGINAL size
 				int qtyToExit = (int)Math.Round(originalSize * positionSize);
 
 				//never exit more than we currently have open
-				int currentOpen = (int)Math.Abs(position.OpenLots);
+				int currentOpen = (int)Math.Abs(CurrentPosition.OpenLots);
 				qtyToExit = Math.Max(0, Math.Min(qtyToExit, currentOpen));
-				trace(ETraceLevel.Verbose, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+				trace(ETraceLevel.Debug, $"processExit - OriginalSize({originalSize}) OpenSize({openSize}) ClosedSize({closedSize}) CurrentOpen({currentOpen}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 
 				if (qtyToExit > 0)
 				{
-					trace(ETraceLevel.Info, $"processExit sending exit order - ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
+					trace(ETraceLevel.Info, $"processExit - sending exit order {order.Info.Name} ProfitTarget({profitPercent}%) ExitOrder({order.ID}) TargetPrice({targetPrice}) QuantityToExit({qtyToExit}) OpenProfit({position.OpenProfit}) RealizedProfit({position.Profit}) NetProfit({position.Profit + position.OpenProfit})");
 					order.Send(targetPrice, qtyToExit);
 				}
 			}
@@ -446,7 +445,7 @@ namespace PowerLanguage.Strategy
 
 			if (CurrentPosition.Side == EMarketPositionSide.Flat || EntryDayExtremeCheck <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - early exit Position.Value({CurrentPosition.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
+				trace(ETraceLevel.Debug, $"processEntryDayExtremeExit - early exit Position.Value({CurrentPosition.Value}) EntryDayExtremeCheck({EntryDayExtremeCheck})");
 				return;
 			}
 			
@@ -458,7 +457,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
+			trace(ETraceLevel.Debug, $"processEntryDayExtremeExit - Entry date({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
 			if (daysCount >= ExecInfo.MaxBarsBack)
 				trace(ETraceLevel.Error, $"processEntryDayExtremeExit - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
@@ -466,11 +465,11 @@ namespace PowerLanguage.Strategy
 			{
 				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount] : m_dailyTimeframe.Low[daysCount];
 				bool exitPosition = CurrentPosition.Side == EMarketPositionSide.Long ? m_tradingTimeframe.CloseValue <= entryDayExtreme : m_tradingTimeframe.Close[0] >= entryDayExtreme;
-				trace(ETraceLevel.Verbose, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) Close({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
+				trace(ETraceLevel.Debug, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) Close({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
 
 				if (exitPosition)
 				{
-					trace(ETraceLevel.Info, $"processEntryDayExtremeExit closing position - Size({CurrentPosition.OpenLots})");
+					trace(ETraceLevel.Info, $"processEntryDayExtremeExit - closing position with order {m_exitAll.Info.Name} Size({CurrentPosition.OpenLots})");
 					m_exitAll.Send(m_entryDayExtremeOrderName);
 				}
 			}
@@ -480,7 +479,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (CurrentPosition.Side == EMarketPositionSide.Flat || FlattenIfNotProfitable <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - early exit Position.Value({CurrentPosition.Value}) FlattenIfNotProfitable({FlattenIfNotProfitable})");
+				trace(ETraceLevel.Debug, $"flattenIfNotProfitable - early exit Position.Value({CurrentPosition.Value}) FlattenIfNotProfitable({FlattenIfNotProfitable})");
 				return;
 			}
 
@@ -492,14 +491,14 @@ namespace PowerLanguage.Strategy
 			}
 
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
+			trace(ETraceLevel.Debug, $"flattenIfNotProfitable - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 			if (daysCount >= ExecInfo.MaxBarsBack)
 				trace(ETraceLevel.Error, $"flattenIfNotProfitable - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			//NOTE: We take into account both realized profit (Profit) and open profit into account to determine position profitability 
 			if (daysCount >= FlattenIfNotProfitable && (CurrentPosition.Profit + CurrentPosition.OpenProfit) < 0.0)
 			{
-				trace(ETraceLevel.Info, $"flattenIfNotProfitable closing position - Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
+				trace(ETraceLevel.Info, $"flattenIfNotProfitable - closing position with order {m_exitAll.Info.Name} Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 				m_exitAll.Send(m_flattenIfNotProfitableOrderName);
 			}
 		}
@@ -508,7 +507,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (CurrentPosition.Value == 0 || MaxHoldPeriod <= 0)
 			{
-				trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - early exit Position.Value({CurrentPosition.Value}) MaxHoldPeriod({MaxHoldPeriod})");
+				trace(ETraceLevel.Debug, $"flattenIfMaxPeriodReached - early exit Position.Value({CurrentPosition.Value}) MaxHoldPeriod({MaxHoldPeriod})");
 				return;
 			}
 
@@ -520,13 +519,13 @@ namespace PowerLanguage.Strategy
 			}
 
 			int daysCount = tradingDayCount(entryDate, m_tradingTimeframe.Time[0]);
-			trace(ETraceLevel.Verbose, $"flattenIfMaxPeriodReached - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
+			trace(ETraceLevel.Debug, $"flattenIfMaxPeriodReached - EntryDate({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
 			if (daysCount >= ExecInfo.MaxBarsBack)
 				trace(ETraceLevel.Error, $"flattenIfMaxPeriodReached - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
 
 			if (daysCount >= MaxHoldPeriod)
 			{
-				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached closing position - Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
+				trace(ETraceLevel.Info, $"flattenIfMaxPeriodReached - closing position with order {m_exitAll.Info.Name} Size({CurrentPosition.Value}) OpenProfit({CurrentPosition.OpenProfit}) RealizedProfit({CurrentPosition.Profit}) NetProfit({CurrentPosition.Profit + CurrentPosition.OpenProfit})");
 				m_exitAll.Send(m_maxHoldPeriodOrderName);
 			}
 		}
