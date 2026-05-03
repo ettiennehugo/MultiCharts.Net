@@ -630,7 +630,7 @@ namespace PowerLanguage.Strategy
 					if (lastOpenTrade?.EntryOrder != null)
 					{
 						DateTime btEntryTime = lastOpenTrade.EntryOrder.Time;
-						trace(ETraceLevel.Debug, $"EntryTime backtest -> {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched: {string.Join("; ", entryOrderNames)})");
+						trace(ETraceLevel.Debug, $"EntryTime backtest {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched order(s): {string.Join("; ", entryOrderNames)})");
 						return btEntryTime;
 					}
 				}
@@ -656,7 +656,7 @@ namespace PowerLanguage.Strategy
 
 			if (entryLastFill == null || entryLastFill.Value == DateTime.MinValue)
 			{
-				trace(ETraceLevel.Warning, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
 				return DateTime.MinValue;
 			}
 

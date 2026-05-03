@@ -240,10 +240,10 @@ namespace PowerLanguage.Strategy {
 
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 
-			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
+			if (m_dailyTimeFrame.CurrentBar < ParabolicGrowthLength) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
 
 			//ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < ParabolicGrowthFactor)
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor)
 			{
 				trace(ETraceLevel.Debug, $"entryFirstLowerHigh skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength]} < {ParabolicGrowthFactor})");
 				return;
@@ -330,21 +330,7 @@ namespace PowerLanguage.Strategy {
 			}
 
 			//determine the entry date of the trade
-			if (m_entryDate == DateTime.MinValue)
-			{
-				DateTime openEntryDate = DateTime.MaxValue;
-				DateTime closeEntryDate = DateTime.MaxValue;
-
-				//TODO - use EntryTime method here 
-				if (CurrentPosition.OpenTrades.Count > 0) openEntryDate = CurrentPosition.OpenTrades.Min(trade => trade.EntryOrder.Time);
-				if (CurrentPosition.ClosedTrades.Count > 0) closeEntryDate = CurrentPosition.ClosedTrades.Min(trade => trade.EntryOrder.Time);
-
-
-				if (openEntryDate != DateTime.MaxValue && openEntryDate < closeEntryDate)
-					m_entryDate = openEntryDate;
-				else if (closeEntryDate != DateTime.MaxValue && closeEntryDate < openEntryDate)
-					m_entryDate = closeEntryDate;
-			}
+			if (m_entryDate == DateTime.MinValue) m_entryDate = EntryTime(m_se.Info.Name);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, m_primaryTimeFrame.Time[0]) : tradingDayCount(m_entryDate, m_primaryTimeFrame.Time[0]);
 			if (daysCount != m_previousDayCount) trace(ETraceLevel.Debug, $"exit - Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
 			m_previousDayCount = daysCount;
