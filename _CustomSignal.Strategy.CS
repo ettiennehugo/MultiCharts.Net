@@ -182,10 +182,22 @@ namespace PowerLanguage.Strategy
 
 		public Function.USHolidays Holidays { get { return m_holidays; } }
 
+		protected ITradingData tradingData
+		{
+			get {
+				if (m_tradingData == null)
+				{
+					TradeManager.ProcessEvents();
+					m_tradingData = TradeManager.TradingData;
+				}
+
+				return m_tradingData;
+			}
+		}
+
 		[Input] public virtual ETraceLevel TraceLevel { get; set; }
 
 		//attributes
-		protected ITradingData m_tradingData;
 		private double m_intradayLow;
 		private double m_intradayHigh;
 		private double m_intradayClose;
@@ -200,6 +212,7 @@ namespace PowerLanguage.Strategy
 		private bool m_loadAccounts;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
+		private ITradingData m_tradingData;
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
@@ -224,7 +237,6 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_tradingData = TradeManager.TradingData;
 			m_currentDay = DateTime.Now.Date;
 			m_intradayLowTime = DateTime.Now;
 			m_intradayHighTime = DateTime.Now;
