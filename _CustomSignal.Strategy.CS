@@ -664,8 +664,8 @@ namespace PowerLanguage.Strategy
 			}
 
 			//refresh orders based on symbol and timeframe
-			m_tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
-			m_tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 			TradeManager.ProcessEvents();
 
 			DateTime? entryLastFill = TradeManager.TradingData.Orders.Items
@@ -705,8 +705,8 @@ namespace PowerLanguage.Strategy
 			}
 
 			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
-			m_tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
-			m_tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 			TradeManager.ProcessEvents();
 
 			//determine exit order type (opposite of entry action)
