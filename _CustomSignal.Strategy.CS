@@ -16,7 +16,8 @@ namespace PowerLanguage.Strategy
 	{
 		//constants
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
-		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = -63;				//look back 3-months of trading orders to discover entry/exit orders
+		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = -63;       //look back 3-months of trading orders to discover entry/exit orders
+		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);	//Refresh time for the trade manager to process events.
 
 		//types
 		/// <summary>
@@ -185,17 +186,17 @@ namespace PowerLanguage.Strategy
 		protected ITradingData tradingData
 		{
 			get {
-				if (m_tradingData == null)
-				{
-					TradeManager.ProcessEvents();
-					m_tradingData = TradeManager.TradingData;
-				}
-
-				return m_tradingData;
+				refreshTradeManagerIfNeeded();
+				return s_tradingData;
 			}
 		}
 
 		[Input] public virtual ETraceLevel TraceLevel { get; set; }
+
+		//static attributes
+		private static ITradingData s_tradingData;
+		private static DateTime s_lastTradeManagerRefresh = DateTime.MinValue;
+		private static readonly object s_tradingDataLock = new object();
 
 		//attributes
 		private double m_intradayLow;
@@ -212,7 +213,6 @@ namespace PowerLanguage.Strategy
 		private bool m_loadAccounts;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
-		private ITradingData m_tradingData;
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
@@ -263,7 +263,7 @@ namespace PowerLanguage.Strategy
 			//the CalcBar method until we have accounts loaded
 			if (Environment.IsAutoTradingMode)
 			{
-				TradeManager.ProcessEvents();
+				refreshTradeManagerIfNeeded();
 
 				//force recalculation after a specific interval if account information is not yet loaded from the above ProcessEvents call
 				if (m_loadAccounts)
@@ -666,7 +666,6 @@ namespace PowerLanguage.Strategy
 			//refresh orders based on symbol and timeframe
 			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
-			TradeManager.ProcessEvents();
 
 			DateTime? entryLastFill = TradeManager.TradingData.Orders.Items
 							.Where(o =>
@@ -707,7 +706,6 @@ namespace PowerLanguage.Strategy
 			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
 			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
-			TradeManager.ProcessEvents();
 
 			//determine exit order type (opposite of entry action)
 			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Sell : ETM_OrderAction.eTM_OA_Buy;
@@ -734,5 +732,27 @@ namespace PowerLanguage.Strategy
 
 			return useFill == EUseFill.First ? exitFillTimes.First() : exitFillTimes.Last();
 		}
+
+		protected void refreshTradeManagerIfNeeded()
+		{
+			if (!Environment.IsAutoTradingMode)
+				return;
+
+			//avoid lock contention if refresh not required
+			if (s_tradingData != null && (DateTime.Now - s_lastTradeManagerRefresh <= DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+				return;
+
+			lock (s_tradingDataLock)
+			{
+				if (s_tradingData == null || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+				{
+					trace(ETraceLevel.Debug,$"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({s_lastTradeManagerRefresh}) CurrentTime({DateTime.Now})");
+					TradeManager.ProcessEvents();
+					s_tradingData = TradeManager.TradingData;
+					s_lastTradeManagerRefresh = DateTime.Now;
+				}
+			}
+		}
+
 	}
 }
