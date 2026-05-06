@@ -267,15 +267,15 @@ namespace PowerLanguage.Strategy
 
 				//force recalculation after a specific interval if account information is not yet loaded from the above ProcessEvents call
 				if (m_loadAccounts)
-				{
-					if (TradeManager.TradingData.Accounts.Items.Length == 0)
+				{				
+					if (tradingData.Accounts.Items.Length == 0)
 					{
 						trace(ETraceLevel.Warning, "CalcBar - ProcessEvents failed to load account queuing recalculation.");
 						ExecControl.RecalcLastBarAfter(TimeSpan.FromSeconds(DEFAULT_ACCOUNT_RECALC_INTERVAL));
 					}
 					else
 					{
-						trace(ETraceLevel.Info, $"CalcBar - Loaded {TradeManager.TradingData.Accounts.Items.Length} accounts from broker.");
+						trace(ETraceLevel.Info, $"CalcBar - Loaded {tradingData.Accounts.Items.Length} accounts from broker.");
 						m_loadAccounts = false;
 					}
 				}
@@ -338,8 +338,8 @@ namespace PowerLanguage.Strategy
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
 			{
-				trace(ETraceLevel.Verbose, $"equityAvailable - Checking {this.TradeManager.TradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
-				foreach (var account in this.TradeManager.TradingData.Accounts.Items)
+				trace(ETraceLevel.Verbose, $"equityAvailable - Checking {tradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
+				foreach (var account in tradingData.Accounts.Items)
 				{
 					trace(ETraceLevel.Verbose, $"equityAvailable - Found account {account.Name} with equity {account.Equity ?? 0}.");
 					if (account.Name == this.Account)
@@ -667,7 +667,7 @@ namespace PowerLanguage.Strategy
 			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 
-			DateTime? entryLastFill = TradeManager.TradingData.Orders.Items
+			DateTime? entryLastFill = tradingData.Orders.Items
 							.Where(o =>
 									o.SymbolStr == Bars.Info.Name &&
 									(entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))) &&
@@ -681,7 +681,7 @@ namespace PowerLanguage.Strategy
 
 			if (entryLastFill == null || entryLastFill.Value == DateTime.MinValue)
 			{
-				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
 				return DateTime.MinValue;
 			}
 
@@ -711,7 +711,7 @@ namespace PowerLanguage.Strategy
 			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Sell : ETM_OrderAction.eTM_OA_Buy;
 
 			//get all filled exit orders for this instrument
-			var exitFillTimes = TradeManager.TradingData.Orders.Items
+			var exitFillTimes = tradingData.Orders.Items
 					.Where(o =>
 							(o.SymbolStr == Bars.Info.Name)
 							&& o.State == ETM_OrderState.eTM_OS_Filled
@@ -726,7 +726,7 @@ namespace PowerLanguage.Strategy
 			//make sure we found filled orders
 			if (exitFillTimes.Count == 0)
 			{
-				trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({TradeManager.TradingData.Orders.IntervalFltr.From},{TradeManager.TradingData.Orders.IntervalFltr.To}).");
+				trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
 				return DateTime.MinValue;
 			}
 
