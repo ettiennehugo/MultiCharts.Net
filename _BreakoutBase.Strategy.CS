@@ -191,9 +191,14 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		//static DateTime testDateTime = DateTime.Parse("04/23/2026");
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+
+			//if (testDateTime.Date == m_tradingTimeframe.Time[0].Date)
+			//	Output.WriteLine("Test output");
 
 			//update general indicators
 			updatePercentChange();
