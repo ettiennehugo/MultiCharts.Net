@@ -112,11 +112,11 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 
-            //if (Bars.Time[0].Date == s_testDate.Date)
+      //if (Bars.Time[0].Date == s_testDate.Date)
 			//	Output.WriteLine("TestPoint");
 
-			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;  //backtester do not send order filled messages to we need to compare position sizes between bars
-			m_previousPositionSide = PositionSide;
+			if (Environment.CalcReason == CalculationReason.OrderFilled || (StrategyInfo.MarketPosition != 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++;  //backtester do not send order filled messages to we need to compare position sizes between bars
+			m_previousPositionSide = StrategyInfo.MarketPosition;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 
 			//check for enough data and implement time filter
@@ -127,7 +127,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (m_previousDayFilter.Date != m_minuteTimeFrame.Time[0].Date) m_entriesPerTimeFilter = 0;
 			m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
-			if (PositionSide != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
+			if (StrategyInfo.MarketPosition != 0 || m_dailyTimeFrame.CurrentBar < 2) return; //do not enter if there is already a position or not enough data
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter)
 			{
 				trace(ETraceLevel.Debug, $"CalcBar - entries per time filter reached - returning");
@@ -135,13 +135,13 @@ namespace PowerLanguage.Strategy
 			}
 
 			//check if the stock has gapped up
-			if (m_dailyTimeFrame.Close[0] == 0)
+			if (m_dailyTimeFrame.Close[1] == 0)
 			{
-				trace(ETraceLevel.Debug, $"CalcBar - daily timeframe close is zero - returning");
+				trace(ETraceLevel.Debug, $"CalcBar - previous daily timeframe close is zero - returning");
 				return; //avoid division by zero
 			}
 
-			double percentageChange = (IntradayOpen - m_dailyTimeFrame.Close[0]) / m_dailyTimeFrame.Close[0]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
+			double percentageChange = (m_dailyTimeFrame.Open[0] - m_dailyTimeFrame.Close[1]) / m_dailyTimeFrame.Close[1]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange)
 			{
 				trace(ETraceLevel.Debug, $"CalcBar - percentage change {percentageChange} not in range of {MinimumPercentageChange} to {MaximumPercentageChange} - returning");

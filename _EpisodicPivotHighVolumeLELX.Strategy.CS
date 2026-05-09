@@ -98,8 +98,10 @@ namespace PowerLanguage.Strategy
 			RequiredVolumePercentile = DEFAULT_REQUIRED_VOLUME_PERCENTILE;
 			UseRoundLots = false;
 			StopLossBuffer = DEFAULT_STOP_LOSS_BUFFER;
-			m_stpLE = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "EPHVStpLE", EOrderAction.Buy));
-			m_lmtLE = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "EPHVLmtLE", EOrderAction.Buy));
+			m_stpEntryOrderName = "EPHVStpLE";
+			m_lmtEntryOrderName = "EPHVLmtLE";
+			m_stpLE = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, m_stpEntryOrderName, EOrderAction.Buy));
+			m_lmtLE = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, m_lmtEntryOrderName, EOrderAction.Buy));
 			m_dailyVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_minuteVolumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 		}
@@ -135,8 +137,8 @@ namespace PowerLanguage.Strategy
 			//if (Bars.Time[0].Date == s_testDate.Date)
 			//	Output.WriteLine("TestPoint");
 
-			if (Environment.CalcReason == CalculationReason.OrderFilled || (PositionSide > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++; //backtester do not send order filled messages so we need to compare position sizes between bars
-			m_previousPositionSide = PositionSide;
+			if (Environment.CalcReason == CalculationReason.OrderFilled || (StrategyInfo.MarketPosition > 0 && m_previousPositionSide == 0)) m_entriesPerTimeFilter++; //backtester do not send order filled messages so we need to compare position sizes between bars
+			m_previousPositionSide = StrategyInfo.MarketPosition;
 			if (Environment.CalcReason != CalculationReason.Default || m_minuteTimeFrame.Status != EBarState.Close) return;
 
 			//check for enough data and implement strategy rules
@@ -150,20 +152,20 @@ namespace PowerLanguage.Strategy
 				m_entriesPerTimeFilter = 0;
 				m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 			}
-			if (PositionSide != 0) return;
-			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength)) return;
+			if (StrategyInfo.MarketPosition != 0) return;
+			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength + 1)) return;
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
-			if (m_minuteTimeFrame.Close[0] < m_dailyTimeFrame.High[0]) return;  //only enter if the stock still has momentum from the previous day otherwise you get entries on sideways to down moving stocks
+			if (m_minuteTimeFrame.Close[0] < m_dailyTimeFrame.High[1]) return;  //only enter if the stock still has momentum from the previous day otherwise you get entries on sideways to down moving stocks
 
 			//check if PREVIOUS DAILY bar met the specific percentage change to be considered an episodic pivot
 			if (m_dailyTimeFrame.Low[1] == 0) return; //avoid division by zero
-			double percentageChange = (m_dailyTimeFrame.Close[0] / m_dailyTimeFrame.Low[0]) - 1.0;  //on daily index 0 is the previous day's values, we also need to ensure the previous day was a bullish day
-			if (m_dailyTimeFrame.Open[0] > m_dailyTimeFrame.Close[0]) return; //we only take bullish entries to ensure there are preexisting momentum
+			double percentageChange = (m_dailyTimeFrame.Close[1] / m_dailyTimeFrame.Low[1]) - 1.0;  //on daily index 1 is the previous day's values, we also need to ensure the previous day was a bullish day
+			if (m_dailyTimeFrame.Open[1] > m_dailyTimeFrame.Close[1]) return; //we only take bullish entries to ensure there are preexisting momentum
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
 
 			//check required volume traded on the PREVIOUS DAILY bar to be considered an episodic pivot
-			if (MinimumDailyVolumePercentile > 0 && m_dailyVolumePercentile[0] < MinimumDailyVolumePercentile) return;
-			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[0] < (m_dailyTimeFrame.Volume.Average(VolumeLength) + AbsoluteAboveAverageVolume)) return;
+			if (MinimumDailyVolumePercentile > 0 && m_dailyVolumePercentile[1] < MinimumDailyVolumePercentile) return;
+			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[1] < (m_dailyTimeFrame.Volume.Average(VolumeLength, 1) + AbsoluteAboveAverageVolume)) return;
 
 			//required volume percentile on minute time frame
 			if (RequiredVolumePercentile > 0 && m_minuteVolumePercentile[0] < RequiredVolumePercentile) return; //ignore stocks that do not meet the volume percentile criteria

@@ -256,14 +256,16 @@ namespace PowerLanguage.Strategy
 
 		void updatePercentChange()
 		{
-			if (m_dailyTimeframe.CurrentBar <= LookBack)
+			if (m_dailyTimeframe.CurrentBar <= LookBack + 1)
 			{
 				m_averageRange.Value = double.MaxValue; // neutral / no-entry
 				return;
 			}
 
 			double sum = 0.0;
-			for (int i = 0; i < LookBack; i++)
+			//NOTE: We need to offset the daily average range calculations by 1 day to avoid including the current trading day into the computations.
+			//      Including the current day in the calculations causes the average to be pulled down leading to false entries.
+			for (int i = 1; i <= LookBack; i++)
 			{
 				//averages are always computed as positive numbers using the lowest of the daily open/close and then computing the percentage change from
 				//that using the absolute value of the difference between the open and close to yield a positive percentage change for the day
@@ -289,10 +291,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low[0];
+						projectedStopLossPrice = m_dailyTimeframe.Low[1];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack);
+						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack, 1);
 						break;
 				}
 
@@ -309,10 +311,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.High[0];
+						projectedStopLossPrice = m_dailyTimeframe.High[1];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack);
+						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack, 1);
 						break;
 				}
 

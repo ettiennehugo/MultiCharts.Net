@@ -129,7 +129,7 @@ namespace PowerLanguage.Strategy
 		{
 			CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 			base.CalcBar();
-			if (PositionSide == 0)
+			if (StrategyInfo.MarketPosition == 0)
 			{
 				//reset stop-loss prices for next position computation
 				m_stopLoss = double.MinValue;
@@ -148,11 +148,14 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Debug, $"CalcBar - entry date({entryDate.ToString("yyyy-MM-dd HH:mm:ss")}) DaysCount({daysCount})");
 			}
 
+			if (daysCount >= ExecInfo.MaxBarsBack)
+				trace(ETraceLevel.Error, $"CalcBar - daysCount {daysCount} larger than MaxBarsBack {ExecInfo.MaxBarsBack}");
+
 			//determine the entry day risk that was taken
 			double entryRisk = 0.0;
 			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)   //NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
 				//Entry was taken during market hours
-				entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low[daysCount - 1]); //-1 since daily timeframe would be the previous day
+				entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? m_dailyTimeFrame.Low[0] : m_dailyTimeFrame.Low.Lowest(daysCount, 1));
 			else
 			{
 				//Entry was taken pre-post-market hours
@@ -182,7 +185,7 @@ namespace PowerLanguage.Strategy
 			//		* Average entry price minus the stop-loss buffer price.
 			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)		//NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
 			{
-				double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
+				double dayLow = daysCount == 0 ? m_dailyTimeFrame.Low[0] : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
 				double stopLoss = dayLow - StopLossBuffer;
 				m_stopLoss = m_stopLoss == double.MinValue || m_stopLoss < stopLoss ? stopLoss : m_stopLoss;  //stop-loss can only be initialized or move up (it can never move down)
 				trace(ETraceLevel.Debug, $"CalcBar - generating entry day ({entryDate.ToString("yyyy-MM-dd HH:mm::ss")}) stop-loss {m_lxStopLoss.Info.Name} at {m_stopLoss} based on market hours trading entry (computed stop-loss based on day low {stopLoss}).");
