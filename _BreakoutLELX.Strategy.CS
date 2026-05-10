@@ -79,11 +79,11 @@ namespace PowerLanguage.Strategy
 				double rangePct = (IntradayOpen != 0.0) ? range / IntradayOpen : 0.0;
 
 				if (m_averageRange.Value != double.MaxValue) // trace test if we have a valid average range
-					trace(ETraceLevel.Debug, $"sendEntry testing for bullish range - Range({range}) AvgRange({m_averageRange.Value}) DailyRange({m_dailyTimeframe.Close[0] - m_dailyTimeframe.Open[0]}) IC({IntradayClose}) IO({IntradayOpen}) DC({m_dailyTimeframe.Close[0]}) DO({m_dailyTimeframe.Open[0]})");
+					trace(ETraceLevel.Debug, $"sendEntry - testing for bullish range - Range({range}) RangePct({rangePct}) AvgRange({m_averageRange.Value}) DailyRange({IntradayClose - IntradayOpen}) IC({IntradayClose}) IO({IntradayOpen}) DC({m_dailyTimeframe.Close[DailyOffset]}) DO({m_dailyTimeframe.Open[DailyOffset]})");
 
 				if (range > 0.0 && m_averageRange.Value < rangePct)
 				{
-					trace(ETraceLevel.Info, $"sendEntry bullish range expansion detected - Range({range}) AvgRange({m_averageRange.Value})");
+					trace(ETraceLevel.Info, $"sendEntry - bullish range expansion detected - Range({range}) RangePct({rangePct}) AvgRange({m_averageRange.Value})");
 					m_entry.Send(positionSize());
 				}		
 			}

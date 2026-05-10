@@ -208,13 +208,20 @@ namespace PowerLanguage.Strategy {
 			if (m_dailyTimeFrame.CurrentBar < 10) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
 
 			//ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor || m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[10] < ParabolicGrowthFactor)
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset] < ParabolicGrowthFactor)
 			{
-				trace(ETraceLevel.Debug, $"entryFirstBearishBar skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength]} < {ParabolicGrowthFactor})");
+				trace(ETraceLevel.Debug, $"entryFirstBearishBar skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[1] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset]} < {ParabolicGrowthFactor})");
 				return;
 			}
+			trace(ETraceLevel.Debug, $"entryFirstBearishBar - parabolic move of factor {ParabolicGrowthFactor} detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset]} >= {ParabolicGrowthFactor})");
 
-			if (m_primaryTimeFrame.Open[0] < m_primaryTimeFrame.Close[0]) return; //ignore bullish bars, we only enter on the first bearish bar
+			// only enter if the time filter is met
+			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
+
+			// we only enter on the first bearish bar
+			if (m_primaryTimeFrame.Open[0] < m_primaryTimeFrame.Close[0]) return; //ignore bullish bars
+
+			trace(ETraceLevel.Debug, $"entryFirstBearishBar - bearish bar detected");
 
 			//determine the risk based on the entry bar close and the day high
 			double risk = IntradayHigh - m_primaryTimeFrame.Close[0];
@@ -240,19 +247,23 @@ namespace PowerLanguage.Strategy {
 
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 
-			if (m_dailyTimeFrame.CurrentBar < ParabolicGrowthLength) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
+			// only enter if the time filter is met
+			if (m_dailyTimeFrame.CurrentBar < ParabolicGrowthLength + DailyOffset) return; //ensure we have enough daily bars to evaluate rest of the entry criteria
 
 			//ensure that the daily timeframe has a significant move up, this is used to filter out stocks that are not moving enough
-			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength] < ParabolicGrowthFactor)
+			if (m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset] < ParabolicGrowthFactor)
 			{
-				trace(ETraceLevel.Debug, $"entryFirstLowerHigh skipped - parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength]} < {ParabolicGrowthFactor})");
+				trace(ETraceLevel.Debug, $"entryFirstLowerHigh - skipped parabolic move of factor {ParabolicGrowthFactor} not detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset]} < {ParabolicGrowthFactor})");
 				return;
 			}
+			trace(ETraceLevel.Debug, $"entryFirstLowerHigh - parabolic move of factor {ParabolicGrowthFactor} detected over {ParabolicGrowthLength} days ({m_primaryTimeFrame.Close[0] / m_dailyTimeFrame.Close[ParabolicGrowthLength + DailyOffset]} >= {ParabolicGrowthFactor})");
 
 			if (m_primaryTimeFrame.Time[0].TimeOfDay < m_startTime.TimeOfDay || m_primaryTimeFrame.Time[0].TimeOfDay > m_endTime.TimeOfDay) return; //exit if time filter not met
 
 			//perform price action analysis on secondary timeframe close 
 			if (!m_lowerHighDetected) return; //only enter when lower high is formed on secondary timeframe
+
+			trace(ETraceLevel.Debug, $"entryFirstLowerHigh - lower high detected");
 
 			//find the lower high bar - we need to reverse iterate to find the most recent lower high for analysis
 			PriceActionBar lowerHighBar = null;
@@ -309,7 +320,7 @@ namespace PowerLanguage.Strategy {
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = equityBasedPositionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
 
 			if (size == 0)
@@ -344,7 +355,9 @@ namespace PowerLanguage.Strategy {
 			}
 
 			//maintain stop-loss based on the entry day and the formation of new lower highs
-			double entryDayHigh = daysCount == 0 ? IntradayHigh : m_dailyTimeFrame.High[daysCount - 1];
+			//NOTE: These daily time frame computations could be off depending on the quality of data you receive. The minute timeframe data tends to be more exact,
+			//      hence on the entry day we use the IntradayHigh computed off the minute data.
+			double entryDayHigh = daysCount == 0 ? IntradayHigh : m_dailyTimeFrame.High[daysCount + DailyOffset];
 			if (m_stopLoss == -1) m_stopLoss = entryDayHigh;
 			if (m_priceActionChanged)
 				foreach (var bar in m_priceAction.ChangedBars.Reverse())  //we need to reverse iterate the changed bars to find the most recent higher low

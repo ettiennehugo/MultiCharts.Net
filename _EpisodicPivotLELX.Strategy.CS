@@ -135,13 +135,13 @@ namespace PowerLanguage.Strategy
 			}
 
 			//check if the stock has gapped up
-			if (m_dailyTimeFrame.Close[1] == 0)
+			if (m_dailyTimeFrame.Close[DailyOffset] == 0)
 			{
 				trace(ETraceLevel.Debug, $"CalcBar - previous daily timeframe close is zero - returning");
 				return; //avoid division by zero
 			}
 
-			double percentageChange = (m_dailyTimeFrame.Open[0] - m_dailyTimeFrame.Close[1]) / m_dailyTimeFrame.Close[1]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
+			double percentageChange = (IntradayOpen - m_dailyTimeFrame.Close[DailyOffset]) / m_dailyTimeFrame.Close[DailyOffset]; //NOTE: We're using the close instead of the high as the close is considered the previous days sentiment (not the high).
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange)
 			{
 				trace(ETraceLevel.Debug, $"CalcBar - percentage change {percentageChange} not in range of {MinimumPercentageChange} to {MaximumPercentageChange} - returning");
@@ -197,7 +197,7 @@ namespace PowerLanguage.Strategy
 			//determine the entry size based on the available equity, risk and volume
 			int equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, 1, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
 
 			//determine final entry size - the final size must be smallest of the entry size non-zero values 
 			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));

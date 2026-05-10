@@ -262,19 +262,25 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			double sum = 0.0;
-			//NOTE: We need to offset the daily average range calculations by 1 day to avoid including the current trading day into the computations.
-			//      Including the current day in the calculations causes the average to be pulled down leading to false entries.
-			for (int i = 1; i <= LookBack; i++)
+			//only update the daily average ranges when we have a new trading day
+			if (m_tradingTimeframe.Time[0].Date != m_tradingTimeframe.Time[1].Date)
 			{
-				//averages are always computed as positive numbers using the lowest of the daily open/close and then computing the percentage change from
-				//that using the absolute value of the difference between the open and close to yield a positive percentage change for the day
-				double baseRange = m_dailyTimeframe.Open[i] < m_dailyTimeframe.Close[i] ? m_dailyTimeframe.Open[i] : m_dailyTimeframe.Close[i];
-				double rangePct = (baseRange != 0.0) ? Math.Abs(m_dailyTimeframe.Open[i] - m_dailyTimeframe.Close[i]) / baseRange : 0.0;
-				sum += rangePct;
-			}
+				double sum = 0.0;
+				//NOTE: We need to offset the daily average range calculations by daily offset number of days depending on whether we're backtesting or whether
+				//      we're doing real-time trading.
+				for (int i = DailyOffset; i < LookBack + DailyOffset; i++)
+				{
+					//averages are always computed as positive numbers using the lowest of the daily open/close and then computing the percentage change from
+					//that using the absolute value of the difference between the open and close to yield a positive percentage change for the day
+					double baseRange = m_dailyTimeframe.Open[i] < m_dailyTimeframe.Close[i] ? m_dailyTimeframe.Open[i] : m_dailyTimeframe.Close[i];
+					double rangePct = (baseRange != 0.0) ? Math.Abs(m_dailyTimeframe.Open[i] - m_dailyTimeframe.Close[i]) / baseRange : 0.0;
+					sum += rangePct;
+					trace(ETraceLevel.Debug, $"updatePercentChange - Time({m_dailyTimeframe.Time[i]:yyyy-MM-dd}) Open({m_dailyTimeframe.Open[i]}) Close({m_dailyTimeframe.Close[i]}) BaseRange({baseRange}) RangePct({rangePct}) Sum({sum})");
+				}
 
-			m_averageRange.Value = (sum / LookBack) * ExpansionFactor;
+				m_averageRange.Value = (sum / LookBack) * ExpansionFactor;
+				trace(ETraceLevel.Debug, $"updatePercentChange - AvgRange({m_averageRange.Value}) Sum({sum}) Lookback({LookBack})");
+			}
 		}
 
 		void updateProjectedStopLoss()
@@ -291,10 +297,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low[1];
+						projectedStopLossPrice = m_dailyTimeframe.Low[DailyOffset];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack, 1);
+						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack, DailyOffset);
 						break;
 				}
 
@@ -311,10 +317,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.High[1];
+						projectedStopLossPrice = m_dailyTimeframe.High[DailyOffset];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack, 1);
+						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack, DailyOffset);
 						break;
 				}
 
@@ -340,7 +346,7 @@ namespace PowerLanguage.Strategy
 			double equity = equityAvailable();
 			int equitySize = m_tradingTimeframe.CloseValue != 0 ? (int)Math.Truncate((equity * MaxEquityPercent) / m_tradingTimeframe.CloseValue) : 0;
 			int riskSize = riskBasedPositionSize(risk, MaxRiskBasedPercent, UseRoundLots);
-			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, 1, MaxVolumePercent, UseRoundLots);
+			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, DailyOffset, MaxVolumePercent, UseRoundLots);
 
 			//determine final entry size - the final size must be smallest of the entry size non-zero values 
 			int size = (int)Math.Min(equitySize, Math.Min(riskSize, volumeSize));
@@ -470,7 +476,7 @@ namespace PowerLanguage.Strategy
 
 			if (daysCount >= EntryDayExtremeCheck)
 			{
-				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount] : m_dailyTimeframe.Low[daysCount];
+				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount + DailyOffset] : m_dailyTimeframe.Low[daysCount + DailyOffset];
 				bool exitPosition = CurrentPosition.Side == EMarketPositionSide.Long ? m_tradingTimeframe.CloseValue <= entryDayExtreme : m_tradingTimeframe.Close[0] >= entryDayExtreme;
 				trace(ETraceLevel.Debug, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) Close({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
 

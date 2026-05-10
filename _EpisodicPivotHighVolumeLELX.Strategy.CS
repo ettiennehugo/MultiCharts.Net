@@ -153,19 +153,19 @@ namespace PowerLanguage.Strategy
 				m_previousDayFilter = m_minuteTimeFrame.Time[0].Date;
 			}
 			if (StrategyInfo.MarketPosition != 0) return;
-			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength + 1)) return;
+			if (m_dailyTimeFrame.CurrentBar < Math.Max(2, VolumeLength + DailyOffset)) return;
 			if (m_entriesPerTimeFilter >= EntriesPerTimeFilter) return; //do not enter if the number of entries per time filter is reached
-			if (m_minuteTimeFrame.Close[0] < m_dailyTimeFrame.High[1]) return;  //only enter if the stock still has momentum from the previous day otherwise you get entries on sideways to down moving stocks
+			if (m_minuteTimeFrame.Close[0] < m_dailyTimeFrame.High[DailyOffset]) return;  //only enter if the stock still has momentum from the previous day otherwise you get entries on sideways to down moving stocks
 
 			//check if PREVIOUS DAILY bar met the specific percentage change to be considered an episodic pivot
-			if (m_dailyTimeFrame.Low[1] == 0) return; //avoid division by zero
-			double percentageChange = (m_dailyTimeFrame.Close[1] / m_dailyTimeFrame.Low[1]) - 1.0;  //on daily index 1 is the previous day's values, we also need to ensure the previous day was a bullish day
-			if (m_dailyTimeFrame.Open[1] > m_dailyTimeFrame.Close[1]) return; //we only take bullish entries to ensure there are preexisting momentum
+			if (m_dailyTimeFrame.Low[DailyOffset] == 0) return; //avoid division by zero
+			double percentageChange = (m_dailyTimeFrame.Close[DailyOffset] / m_dailyTimeFrame.Low[DailyOffset]) - 1.0;  //make sure previous day was a bullish day
+			if (m_dailyTimeFrame.Open[DailyOffset] > m_dailyTimeFrame.Close[DailyOffset]) return; //we only take bullish entries to ensure there are preexisting momentum
 			if (percentageChange < MinimumPercentageChange || percentageChange > MaximumPercentageChange) return; //ignore stocks that do not meet the percentage change criteria
 
 			//check required volume traded on the PREVIOUS DAILY bar to be considered an episodic pivot
 			if (MinimumDailyVolumePercentile > 0 && m_dailyVolumePercentile[1] < MinimumDailyVolumePercentile) return;
-			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[1] < (m_dailyTimeFrame.Volume.Average(VolumeLength, 1) + AbsoluteAboveAverageVolume)) return;
+			if (AbsoluteAboveAverageVolume > 0 && m_dailyTimeFrame.Volume[DailyOffset] < (m_dailyTimeFrame.Volume.Average(VolumeLength, DailyOffset) + AbsoluteAboveAverageVolume)) return;
 
 			//required volume percentile on minute time frame
 			if (RequiredVolumePercentile > 0 && m_minuteVolumePercentile[0] < RequiredVolumePercentile) return; //ignore stocks that do not meet the volume percentile criteria
@@ -211,7 +211,7 @@ namespace PowerLanguage.Strategy
 
 			int equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
 			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, 1, MaximumVolumeBasedPercent, UseRoundLots);
+			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
 			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
 			size = size < volumeBasedSize ? size : volumeBasedSize;
 

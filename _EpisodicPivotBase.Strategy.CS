@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 			double entryRisk = 0.0;
 			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)   //NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
 				//Entry was taken during market hours
-				entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? m_dailyTimeFrame.Low[0] : m_dailyTimeFrame.Low.Lowest(daysCount, 1));
+				entryRisk = StrategyInfo.AvgEntryPrice - (daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, DailyOffset));
 			else
 			{
 				//Entry was taken pre-post-market hours
@@ -185,7 +185,7 @@ namespace PowerLanguage.Strategy
 			//		* Average entry price minus the stop-loss buffer price.
 			if (m_marketOpenTime.TimeOfDay <= entryDate.TimeOfDay && m_marketCloseTime.TimeOfDay >= entryDate.TimeOfDay)		//NOTE: This assumes entry times are based on the Exchange times since the market open/close times would be based on exchange times.
 			{
-				double dayLow = daysCount == 0 ? m_dailyTimeFrame.Low[0] : m_dailyTimeFrame.Low.Lowest(daysCount, 1); //1 is used to exclude the current day's bar and low
+				double dayLow = daysCount == 0 ? IntradayLow : m_dailyTimeFrame.Low.Lowest(daysCount, DailyOffset);
 				double stopLoss = dayLow - StopLossBuffer;
 				m_stopLoss = m_stopLoss == double.MinValue || m_stopLoss < stopLoss ? stopLoss : m_stopLoss;  //stop-loss can only be initialized or move up (it can never move down)
 				trace(ETraceLevel.Debug, $"CalcBar - generating entry day ({entryDate.ToString("yyyy-MM-dd HH:mm::ss")}) stop-loss {m_lxStopLoss.Info.Name} at {m_stopLoss} based on market hours trading entry (computed stop-loss based on day low {stopLoss}).");
@@ -221,7 +221,7 @@ namespace PowerLanguage.Strategy
 			///		b.If the stock is in a bullish overextension - use a specific percentage above the 10MA as overextension measure
 			///		c.If the stock shoot up on the EP day they tend to reverse course, e.g. 20%+ exit full position on EP day
 			///		d.Once the position is up 10x/20x of the risk tighten the trailing stop to the most recent bar low.
-			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount] > m_dailyTimeFrame.Close[0])  //a.
+			if (daysCount == FirstExitDaysCount && m_dailyTimeFrame.Status == EBarState.Close && m_dailyTimeFrame.High[daysCount + DailyOffset] > IntradayClose)  //a.
 			{
 				trace(ETraceLevel.Info, $"CalcBar - exiting position with {m_lxAll.Info.Name + "NBH"} since close after {FirstExitDaysCount} days did not break the high of the EP day.");
 				m_lxAll.Send(m_lxAll.Info.Name + "NBH"); // NBH = no break high

@@ -181,6 +181,16 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
+		//NOTE: When you mix daily and intraday charts to look for intraday entries there is an off-by-one error between the
+		//      Multicharts backtesting engine and the real-time trading engine where Daily.Close[0] would differ in the sense
+		//      that in the backtesting engine this means the PREVIOUS trading day and in the real-time trading engine this
+		//      means the CURRENT trading day. Why align backtesting and real-time calculations if you can have them do completely
+		//      different things????
+		public int DailyOffset
+		{
+			get { return m_dailyOffset; }
+		}
+
 		public Function.USHolidays Holidays { get { return m_holidays; } }
 
 		protected ITradingData tradingData
@@ -208,6 +218,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_intradayCloseTime;
 		private DateTime m_intradayOpenTime;
 		private double m_intradayVolume;
+		private int m_dailyOffset;
 		private DateTime m_currentDay;
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
@@ -249,6 +260,9 @@ namespace PowerLanguage.Strategy
 			m_intradayOpen = 0.0d;
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
+			//For backtesting index 0 becomes the previous day while for real-time trading index 1 becomes
+			//the previous day.
+			m_dailyOffset = Environment.IsRealTimeCalc ? 1 : 0;
 		}
 
 		/// <summary>
