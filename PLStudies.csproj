@@ -492,7 +492,9 @@
     <Compile Include="_test2.Indicator.CS" />
     <Compile Include="_test3.Indicator.CS" />
     <Compile Include="_TimeRangeSignal.Strategy.CS" />
-    <Compile Include="_TPO_.Indicator.CS" />
+    <Compile Include="_TPO_.Indicator.CS">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="_TradeManagerTest.Strategy.CS" />
     <Compile Include="_TrendLine.Strategy.CS" />
     <Compile Include="_VCP.Function.CS" />

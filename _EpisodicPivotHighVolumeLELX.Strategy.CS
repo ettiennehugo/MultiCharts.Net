@@ -55,10 +55,11 @@ namespace PowerLanguage.Strategy
 		[Input] public double MaximumPercentageChange { get; set; } //gap up/down clipped to this maximum to avoid overextended stocks - this must always be a positive value, algorithm will flip it around if required
 		[Input] public double MinimumDailyVolumePercentile { get; set; } //[alternate] minimum volume percentile before considering an entry - this is used for volume confirmation
 		[Input] public int AbsoluteAboveAverageVolume { get; set; } //[alternate] absolute above average volume for the entry - this is used for volume confirmation of the number of shares traded above the volume average
-		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
-		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
-		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
-		[Input] public int VolumeLength { get; set; } //length of the volume for the entry size - this is used to determine the entry size based on the average trading volume
+		[Input] public int AbsoluteSize { get; set; } // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
+		[Input] public double RiskBasedEntryPercent { get; set; } // [alternate B] risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
+		[Input] public double MaximumVolumeBasedPercent { get; set; } // [alternate B] maximum volume based percentage - this is used to determine the entry size based on the average trading volume\
+		[Input] public int VolumeLength { get; set; } // [alternate B] length of the volume for the entry size - this is used to determine the entry size based on the average trading volume
 		[Input] public double RequiredClosePercentile { get; set; } //required close percentile on the minute timeframe for entry - bar needs to close above this percentile for an entry to be considered, set to zero (0) to disable close percentile filter
 		[Input] public double RequiredVolumePercentile { get; set; } //required volume percentile on the minute timeframe for entry - volume on bar need to be above this percentile for an entry to be considered, set to zero (0) to disable volume percentile filter
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
@@ -209,20 +210,31 @@ namespace PowerLanguage.Strategy
 				risk = entryPrice - StopLossBuffer;   //pre-/post-market entries use tighter stop-loss
 			}
 
-			int equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
-			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, VolumeLength, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
-			int size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-			size = size < volumeBasedSize ? size : volumeBasedSize;
+			//default entry size to absolute size since it's the override
+			int equityBasedSize = 0;
+			int riskBasedSize = 0;
+			int volumeBasedSize = 0;
 
+			int size = AbsoluteSize;
+			if (size <= 0)
+			{
+				//determine the entry size based on the available equity, risk and volume
+				equityBasedSize = equityBasedPositionSize(entryPrice + StopLossBuffer, MaximumEquityPerPosPercent, UseRoundLots);  //+ StopLoss buffer to ensure sizing takes into account that actual exit is sent at SL - StopLossBuffer
+				riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
+				volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
+
+				//determine final entry size - the final size must be smallest of the entry size non-zero values 
+				size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
+			}
+
+			//log position size parameters and calculations
 			if (size == 0)
 			{
-				trace(ETraceLevel.Warning, $"CalcBar - {m_minuteTimeFrame.Time[0]} - Position size calculated as zero - EquityBasedSize {equityBasedSize} - RiskBasedSize {riskBasedSize} - VolumeBasedSize {size} - UseRoundLots {UseRoundLots}");
-				return;
+				trace(ETraceLevel.Warning, $"CalcBar - entry size is zero so no entry would be taken - AbsoluteSize({AbsoluteSize}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+				return; //do not enter if the size is zero
 			}
 			else
-				trace(ETraceLevel.Verbose, $"CalcBar - Size({size}) IntradayClose({IntradayClose}) StopLoss({IntradayLow - StopLossBuffer}) Equity({equityAvailable()}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
-
+				trace(ETraceLevel.Debug, $"CalcBar - entry size {size} computed using these size calculations - AbsoluteSize({AbsoluteSize}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 
 			//check whether we are trading in market hours or pre-/post-market hours
 			if (m_minuteTimeFrame.Time[0].TimeOfDay >= m_marketOpenTime.TimeOfDay && m_minuteTimeFrame.Time[0].TimeOfDay <= m_marketCloseTime.TimeOfDay)
