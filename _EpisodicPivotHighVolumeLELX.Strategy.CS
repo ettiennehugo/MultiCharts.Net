@@ -90,6 +90,7 @@ namespace PowerLanguage.Strategy
 			MinimumPercentageChange = DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
 			MinimumDailyVolumePercentile = DEFAULT_MINIMUM_DAILY_VOLUME_PERCENTILE;
+			AbsoluteSize = 0;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			AbsoluteAboveAverageVolume = DEFAULT_ABSOLUTE_ABOVE_AVERAGE_VOLUME;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;

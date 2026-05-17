@@ -61,10 +61,11 @@ namespace PowerLanguage.Strategy {
 		[Input] public string EndTime { get; set; } //end time for the entry
 		[Input] public int ParabolicGrowthLength { get; set; }	//period length on the daily timeframe to detect the parabolic move
 		[Input] public double ParabolicGrowthFactor { get; set; }	//growth factor on the daily timeframe to be considered a parabolic move, can be considered a percentage, e.g. 3.0 would mean the price needs to tripe before considered a parabolic move
-		[Input] public EEntryStrategy EntryStrategy { get; set; }	//entry strategy to use for the short entry
-		[Input] public double MaximumEquityPerPosPercent { get; set; } //maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
-		[Input] public double RiskBasedEntryPercent { get; set; } //risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
-		[Input] public double MaximumVolumeBasedPercent { get; set; } //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
+		[Input] public EEntryStrategy EntryStrategy { get; set; } //entry strategy to use for the short entry
+		[Input] public int AbsoluteSize { get; set; } // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
+		[Input] public double RiskBasedEntryPercent { get; set; } // [alternate B] risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
+		[Input] public double MaximumVolumeBasedPercent { get; set; } // [alternate B] maximum volume based percentage - this is used to determine the entry size based on the average trading volume
 		[Input] public double ClosePercentile { get; set; } //required close percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public double VolumePercentile { get; set; } //required volume percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
@@ -111,6 +112,7 @@ namespace PowerLanguage.Strategy {
 			ParabolicGrowthLength = DEFAULT_PARABOLIC_GROWTH_LENGTH;
 			ParabolicGrowthFactor = DEFAULT_PARABOLIC_GROWTH_FACTOR;
 			EntryStrategy = EEntryStrategy.FirstLowerHigh;
+			AbsoluteSize = 0;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
@@ -317,16 +319,28 @@ namespace PowerLanguage.Strategy {
 		}
 
 		protected int entryPositionSize(double risk) {
-			//determine the entry size based on the available equity, risk and volume
-			int equityBasedSize = equityBasedPositionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
-			int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
-			int volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
-			int size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
+			//default entry size to absolute size since it's the override
+			int equityBasedSize = 0;
+			int riskBasedSize = 0;
+			int volumeBasedSize = 0;
 
+			int size = AbsoluteSize;
+			if (size <= 0)
+			{
+				//determine the entry size based on the available equity, risk and volume
+				equityBasedSize = equityBasedPositionSize(m_primaryTimeFrame.Close[0], MaximumEquityPerPosPercent, UseRoundLots);
+				riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, UseRoundLots);
+				volumeBasedSize = volumeBasedPositionSize(m_dailyTimeFrame, DEFAULT_VOLUME_LENGTH, DailyOffset, MaximumVolumeBasedPercent, UseRoundLots);
+
+				//determine final entry size - the final size must be smallest of the entry size non-zero values 
+				size = (int)Math.Min(equityBasedSize, Math.Min(riskBasedSize, volumeBasedSize));
+			}
+
+			//log position size parameters and calculations
 			if (size == 0)
-				trace(ETraceLevel.Warning, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+				trace(ETraceLevel.Warning, $"positionSize - entry size is zero so no entry would be taken - AbsoluteSize({AbsoluteSize}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 			else
-				trace(ETraceLevel.Verbose, $"positionSize - Size({size}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
+				trace(ETraceLevel.Debug, $"positionSize - entry size {size} computed using these size calculations - AbsoluteSize({AbsoluteSize}) EquityBasedSize({equityBasedSize}) RiskBasedSize({riskBasedSize}) VolumeBasedSize({volumeBasedSize})");
 
 			return size;
 		}

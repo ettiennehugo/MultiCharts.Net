@@ -79,6 +79,7 @@ namespace PowerLanguage.Strategy
 			m_previousDayFilter = DateTime.MinValue;
 			MinimumPercentageChange = DEFAULT_MINIMUM_PERCENTAGE_CHANGE;
 			MaximumPercentageChange = DEFAULT_MAXIMUM_PERCENTAGE_CHANGE;
+			AbsoluteSize = 0;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
