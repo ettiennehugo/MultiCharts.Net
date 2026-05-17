@@ -355,7 +355,7 @@ namespace PowerLanguage.Strategy {
 			}
 
 			//determine the entry date of the trade
-			if (m_entryDate == DateTime.MinValue) m_entryDate = EntryTime(m_se.Info.Name);
+			if (m_entryDate == DateTime.MinValue) m_entryDate = orderEntryTime(m_se.Info.Name);
 			int daysCount = ExitDaysCountStrategy == EExitDaysCountStrategy.CalendarDays ? calendarDayCount(m_entryDate, m_primaryTimeFrame.Time[0]) : tradingDayCount(m_entryDate, m_primaryTimeFrame.Time[0]);
 			if (daysCount != m_previousDayCount) trace(ETraceLevel.Debug, $"exit - Entry date {m_entryDate.ToString("yyyy-MM-dd")} DaysCount {daysCount}");
 			m_previousDayCount = daysCount;

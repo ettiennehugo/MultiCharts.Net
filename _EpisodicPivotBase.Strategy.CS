@@ -138,7 +138,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//determine the entry date of the trade  
-			DateTime entryDate = EntryTime(m_stpEntryOrderName, m_lmtEntryOrderName);
+			DateTime entryDate = orderEntryTime(m_stpEntryOrderName, m_lmtEntryOrderName);
 			int daysCount = 0;
 			if (entryDate == DateTime.MinValue)
 				trace(ETraceLevel.Warning, "CalcBar - no entry order found for position, can not determine daysCount since entry.");

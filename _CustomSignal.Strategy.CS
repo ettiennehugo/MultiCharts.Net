@@ -664,7 +664,7 @@ namespace PowerLanguage.Strategy
 		//Finds the most recent entry order that completed the entry for the given name, so if there are multiple fills
 		//this would return the time of the last order the completed the entry.
 		//Method can be called with any number of entry order names as parameters.
-		public DateTime EntryTime(params String[] entryOrderNames)
+		public DateTime orderEntryTime(params String[] entryOrderNames)
 		{
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
@@ -715,7 +715,7 @@ namespace PowerLanguage.Strategy
 			return entryLastFill.Value;
 		}
 
-		public DateTime ExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
+		public DateTime orderExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
 		{
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)

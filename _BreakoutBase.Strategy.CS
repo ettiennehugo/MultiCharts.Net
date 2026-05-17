@@ -462,7 +462,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 			
-			DateTime entryDate = EntryTime(m_entryOrderName);
+			DateTime entryDate = orderEntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"processEntryDayExtremeExit - no entry date found, returning");
@@ -496,7 +496,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = EntryTime(m_entryOrderName);
+			DateTime entryDate = orderEntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"flattenIfNotProfitable - no entry date found, returning");
@@ -524,7 +524,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			DateTime entryDate = EntryTime(m_entryOrderName);
+			DateTime entryDate = orderEntryTime(m_entryOrderName);
 			if (entryDate == DateTime.MinValue)
 			{
 				trace(ETraceLevel.Error, $"flattenIfMaxPeriodReached - no entry date found, returning");
