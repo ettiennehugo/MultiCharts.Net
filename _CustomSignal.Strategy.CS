@@ -678,7 +678,8 @@ namespace PowerLanguage.Strategy
 			}
 
 			//refresh orders based on symbol and timeframe
-			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+            refreshTradeManagerIfNeeded();
+			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1));
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 
 			DateTime? entryLastFill = tradingData.Orders.Items
