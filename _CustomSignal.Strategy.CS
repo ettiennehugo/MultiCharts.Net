@@ -773,7 +773,7 @@ namespace PowerLanguage.Strategy
 			lock (s_tradingDataLock)
 			{
 				trace(ETraceLevel.Debug,$"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({s_lastTradeManagerRefresh}) CurrentTime({DateTime.Now})");
-				if (TradeManagerRefresh == ETradeManagerRefresh.Synchronous || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL)) TradeManager.ProcessEvents();
+				if (s_tradingData == null || TradeManagerRefresh == ETradeManagerRefresh.Synchronous || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL)) TradeManager.ProcessEvents();
 				if (s_tradingData == null) s_tradingData = TradeManager.TradingData; 
 				s_lastTradeManagerRefresh = DateTime.Now;
 			}
