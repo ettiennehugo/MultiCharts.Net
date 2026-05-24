@@ -41,7 +41,7 @@
     <Reference Include="System.Runtime.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\FileHelpers.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\Ichimoku.dll" />
-    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\CS\packages\Newtonsoft.Json.13.0.3\lib\netstandard2.0\Newtonsoft.Json.dll" />
+    <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\CS\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\PriceAction.dll" />
     <Reference Include="C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\RiskManagement.dll" />
     <Reference Include="C:\Program Files\TS Support\MultiCharts .NET64\Microsoft.CodeAnalysis.dll" />
@@ -492,7 +492,9 @@
     <Compile Include="_test2.Indicator.CS" />
     <Compile Include="_test3.Indicator.CS" />
     <Compile Include="_TimeRangeSignal.Strategy.CS" />
-    <Compile Include="_TPO_.Indicator.CS" />
+    <Compile Include="_TPO_.Indicator.CS">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="_TradeManagerTest.Strategy.CS" />
     <Compile Include="_TrendLine.Strategy.CS" />
     <Compile Include="_VCP.Function.CS" />
@@ -508,6 +510,7 @@
     <Compile Include="_Voss.Function.CS" />
     <Compile Include="_Voss.Indicator.CS" />
     <Compile Include="_VWAP.Indicator.CS" />
+    <Compile Include="_MarketBreadth.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
