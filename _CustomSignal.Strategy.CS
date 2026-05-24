@@ -43,18 +43,8 @@ namespace PowerLanguage.Strategy
 			Last,
 		}
 
-		/// <summary>
-		/// Trade manager refresh rate used to avoid trade manager COM integration from acquiring too many window handles.
-		/// </summary>
-		public enum ETradeManagerRefresh
-		{
-			Synchronous,		//access trade manager directly note that this could cause issues with large portfolios where too many window handles are required
-			Asynchronous,		//access trade manager sparingly to avoid issues with larger portfolios
-		}
-
 		// Input parameters
 		[Input] public virtual ETraceLevel TraceLevel { get; set; }
-		[Input] public virtual ETradeManagerRefresh TradeManagerRefresh { get; set; }
 
 		/// <summary>
 		/// Singleton log file manager for internal use only.
@@ -254,7 +244,6 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			m_holidays = new PowerLanguage.Function.USHolidays(this);
 			TraceLevel = ETraceLevel.None;
-			TradeManagerRefresh = ETradeManagerRefresh.Synchronous;
 		}
 
 		protected override void StartCalc()
@@ -766,18 +755,19 @@ namespace PowerLanguage.Strategy
 				return;
 
 			//avoid lock contention if refresh not required
-			if (s_tradingData != null && TradeManagerRefresh == ETradeManagerRefresh.Asynchronous &&
-			   (DateTime.Now - s_lastTradeManagerRefresh <= DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+			if (s_tradingData != null && (DateTime.Now - s_lastTradeManagerRefresh <= DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
 				return;
 
 			lock (s_tradingDataLock)
 			{
-				trace(ETraceLevel.Debug,$"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({s_lastTradeManagerRefresh}) CurrentTime({DateTime.Now})");
-				if (s_tradingData == null || TradeManagerRefresh == ETradeManagerRefresh.Synchronous || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL)) TradeManager.ProcessEvents();
-				if (s_tradingData == null) s_tradingData = TradeManager.TradingData; 
-				s_lastTradeManagerRefresh = DateTime.Now;
+				if (s_tradingData == null || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+				{
+					trace(ETraceLevel.Debug, $"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({s_lastTradeManagerRefresh}) CurrentTime({DateTime.Now})");
+					TradeManager.ProcessEvents();
+					s_tradingData = TradeManager.TradingData;
+					s_lastTradeManagerRefresh = DateTime.Now;
+				}
 			}
 		}
-
 	}
 }
