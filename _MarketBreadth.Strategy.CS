@@ -17,14 +17,14 @@ namespace PowerLanguage.Strategy
 	/// 	§ 10-day ratio of stock up vs stocks down 4%+
 	/// 	§ Number of stocks up 25%+ in a quarter
 	/// 	§ Number of stocks down 25%+ in a quarter
-	/// ○ Secondary breath indicators
+	/// ○ Secondary breadth indicators
 	/// 	§ Number of stocks up 25%+ in a month
 	/// 	§ Number of stocks down 25%+ in a month
 	/// 	§ Number of stocks up 50%+ in a month
 	/// 	§ Number of stocks down 50%+ in a month
 	/// 	§ Number of stocks up 13%+ in 34-days
 	///   § Number of stocks down 13%+ in 34-days
-	/// ○ Additional breath indicators
+	/// ○ Additional breadth indicators
 	///   § Number of stocks up 20%+ in 5-days
 	///   § Number of stocks down 20%+ in 5-days
 	///   § Number of stocks above 40-day SMA
@@ -32,7 +32,7 @@ namespace PowerLanguage.Strategy
 	///   § Number of stocks new high for year
 	///   § Number of stocks new low for year
 	///   § Number of stocks new high for quarter
-	///   § Number of stocks new low for qaurter
+	///   § Number of stocks new low for quarter
 	///   § Number of stocks new high for month
 	///   § Number of stocks new low for month
 	/// </summary>
@@ -49,79 +49,80 @@ namespace PowerLanguage.Strategy
 
 		// types
 		[FixedLengthRecord()]
+		[IgnoreFirst()]
 		public class Entry
 		{
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			[FieldConverter(ConverterKind.Date, "ddMMyyyy")]
 			public DateTime TimeStamp;
 
-			[FieldFixedLength(10)]
-			public int InstrumentCount; // Number of instruments analysed to compute these numbers
+			[FieldFixedLength(15)]
+			public int Count; // Number of instruments analysed to compute these numbers
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up4Pct;  // Number of stocks up 4%+ today(UP4%+)
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down4Pct;  //Number of stocks down 4%+ today(DN4%+)
 
 			[FieldFixedLength(20)]
-			public double UpDown4PctRat5D; // ratio of stocks up vs stocks down 4%+ on this date against the stocks up vs down 5-days ago
+			public string UpDown4PctRat5D = "0.00000000".PadLeft(20); // ratio of stocks up vs stocks down 4%+ on this date against the stocks up vs down 5-days ago
 
 			[FieldFixedLength(20)]
-			public double UpDown4PctRat10D; // ratio of stocks up vs stocks down 4%+ on this date against the stocks up vs down 10-days ago
+			public string UpDown4PctRat10D = "0.00000000".PadLeft(20); // ratio of stocks up vs stocks down 4%+ on this date against the stocks up vs down 10-days ago
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up25PctQrt;  // Number of stocks up 25%+ in a quarter
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down25PctQrt;  // Number of stocks down 25%+ in a quarter
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up25PctMth;  // Number of stocks up 25%+ in a month
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down25PctMth;  // Number of stocks down 25%+ in a month
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up50PctMth;  // Number of stocks up 50%+ in a month
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down50PctMth;  // Number of stocks down 50%+ in a month
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up13Pct34D;  // Number of stocks up 13%+ in 34-days
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down13Pct34D;  // Number of stocks down 13%+ in 34-days
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Up20Pct5D;  // Number of stocks up 20%+ in 5-days
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Down20Pct5D;  // Number of stocks down 20%+ in 5-days
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Above40SMA;  // Number of stocks above the 40-day SMA
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int Below40SMA;  // Number of stocks Below the 40-day SMA
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewHighYear;  // Number of stocks new high for year
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewLowYear;  // Number of stocks new low for year
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewHighQrt;  // Number of stocks new high for quarter
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewLowQrt;  // Number of stocks new low for mont
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewHighMth;  // Number of stocks new high for month
 
-			[FieldFixedLength(10)]
+			[FieldFixedLength(15)]
 			public int NewLowMth;  // Number of stocks new low for month
 		}
 
@@ -140,7 +141,7 @@ namespace PowerLanguage.Strategy
 
 		//attributes
 		private Guid m_guid;
-		private int m_index;
+		//private int m_index;
 		private SortedDictionary<DateTime, Entry> m_entries;
 		Function.AverageFC m_sma40;
 
@@ -150,9 +151,8 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{			
 			UpdateMode = EUpdateMode.Replace;
-			OutputFile = System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments) + "\\MarketBreadth.asc";
+			OutputFile = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments), "MarketBreadth.asc");
 			m_sma40 = new AverageFC(this);
-			m_index = -1;	//default the index to an invalid value so ensure it is explicitly set
 		}
 
 		protected override void StartCalc()
@@ -160,21 +160,6 @@ namespace PowerLanguage.Strategy
 			m_guid = Guid.NewGuid();
 			m_sma40.price = Bars.Close;
 			m_sma40.length = 40;
-
-			foreach (var signal in this.PortfolioStrategies)
-			{
-				foreach (var strategy in signal.Signals)
-				{
-					if (strategy is _MarketBreadth marketBreadth && marketBreadth.m_guid == this.m_guid)
-					{
-						m_index = signal.MyIndex;
-						break;
-					}
-				}
-				if (m_index != -1) break;
-			}
-
-			Output.WriteLine($"StartCalc {this.Bars.Info.Name} == {m_index}");
 
 			m_entries = new SortedDictionary<DateTime, Entry>();
 			this.MyPortfolioData[KEY_ENTRIES] = m_entries;
@@ -188,7 +173,7 @@ namespace PowerLanguage.Strategy
 				var entry = new Entry();
 
 				entry.TimeStamp = Bars.Time[0].Date;
-				entry.InstrumentCount = 1;
+				entry.Count = 1;
 				entry.Up4Pct = Bars.CurrentBar > 2 && Bars.Close[1] != 0.0 && Bars.Close[0] / Bars.Close[1] > 1.04 ? 1 : 0;
 				entry.Down4Pct = Bars.CurrentBar > 2 && Bars.Close[1] != 0.0 && Bars.Close[0] / Bars.Close[1] < 0.96 ? 1 : 0;
 				entry.Up25PctQrt = Bars.CurrentBar > QUARTER_LENGTH && Bars.Close[QUARTER_LENGTH] != 0.0 && Bars.Close[0] / Bars.Close[QUARTER_LENGTH] > 1.25 ? 1 : 0;
@@ -218,7 +203,10 @@ namespace PowerLanguage.Strategy
 				this.MyPortfolioData[KEY_FINISHED] = true;
 				bool allFinished = true;
 				foreach (var signal in this.PortfolioStrategies)
+				{
 					allFinished &= (bool)signal.PortfolioData[KEY_FINISHED];
+					if (!allFinished) break;
+				}
 
 				if (allFinished) saveOutputFile();
 			}
@@ -226,7 +214,7 @@ namespace PowerLanguage.Strategy
 
 		protected void saveOutputFile()
 		{
-			Output.WriteLine($"StopCalc {this.Bars.Info.Name} == {m_index}");
+			Output.WriteLine($"saveOutputFile called from {this.Bars.Info.Name}");
 
 			SortedDictionary<DateTime, Entry> entries = new SortedDictionary<DateTime, Entry>();
 			foreach (var signal in this.PortfolioStrategies)
@@ -239,7 +227,7 @@ namespace PowerLanguage.Strategy
 					{
 						if (entries.TryGetValue(signalEntry.Key, out var entry))
 						{
-							entry.InstrumentCount += signalEntry.Value.InstrumentCount;
+							entry.Count += signalEntry.Value.Count;
 							entry.Up4Pct += signalEntry.Value.Up4Pct;
 							entry.Down4Pct += signalEntry.Value.Down4Pct;
 							entry.Up25PctQrt += signalEntry.Value.Up25PctQrt;
@@ -266,26 +254,28 @@ namespace PowerLanguage.Strategy
 							entries[signalEntry.Key] = signalEntry.Value;
 					}
 				}
+			}
 
-				//create derived entries
-				for (int i = 0; i < entries.Values.Count; ++i)
+			//create derived entries
+			for (int i = 0; i < entries.Values.Count; ++i)
+			{
+				var entry = entries.Values.ElementAt(i);
+				double upDownRatioNow = 0.0;  //compute value only once below
+				if (i >= 5)
 				{
-					var entry = entries.Values.ElementAt(i);
-					double upDownRatioNow = 0.0;	//compute value only once below
-					if (i >= 5)
-					{
-						var entryMin5 = entries.Values.ElementAt(i - 5);
-						upDownRatioNow = entry.Down4Pct != 0 ? (double)entry.Up4Pct / entry.Down4Pct : 0;
-						double upDownRatioMin5 = entryMin5.Down4Pct != 0 ? (double)entryMin5.Down4Pct / entryMin5.Down4Pct : 1; //we return 1 to avoid div by zero below
-						entry.UpDown4PctRat5D = upDownRatioMin5 > DEFAULT_EPSILON ? upDownRatioNow / upDownRatioMin5 : 0.0;
-					}
+					var entryMin5 = entries.Values.ElementAt(i - 5);
+					upDownRatioNow = entry.Down4Pct != 0 ? (double)entry.Up4Pct / entry.Down4Pct : 0;
+					double upDownRatioMin5 = entryMin5.Down4Pct != 0 ? (double)entryMin5.Up4Pct / entryMin5.Down4Pct : 1; //we return 1 to avoid div by zero below
+					double ratio5 = upDownRatioMin5 > DEFAULT_EPSILON ? upDownRatioNow / upDownRatioMin5 : 0.0;
+					entry.UpDown4PctRat5D = ratio5.ToString("0.00000000").PadLeft(20);
+				}
 
-					if (i >= 10)
-					{
-						var entryMin10 = entries.Values.ElementAt(i - 10);
-						double upDownRatioMin10 = entryMin10.Down4Pct != 0 ? (double)entryMin10.Down4Pct / entryMin10.Down4Pct : 1; //we return 1 to avoid div by zero below
-						entry.UpDown4PctRat5D = upDownRatioMin10 > DEFAULT_EPSILON ? upDownRatioNow / upDownRatioMin10 : 0.0;
-					}
+				if (i >= 10)
+				{
+					var entryMin10 = entries.Values.ElementAt(i - 10);
+					double upDownRatioMin10 = entryMin10.Down4Pct != 0 ? (double)entryMin10.Up4Pct / entryMin10.Down4Pct : 1; //we return 1 to avoid div by zero below
+					double ratio10 = upDownRatioMin10 > DEFAULT_EPSILON ? upDownRatioNow / upDownRatioMin10 : 0.0;
+					entry.UpDown4PctRat10D = ratio10.ToString("0.00000000").PadLeft(20);
 				}
 			}
 
@@ -323,11 +313,14 @@ namespace PowerLanguage.Strategy
 					Directory.CreateDirectory(directory);
 
 				//output the fixed column data
-				outputFile.WriteFile(OutputFile, fileEntriesRaw);
+				outputFile.ErrorManager.ErrorMode = ErrorMode.ThrowException;
+				outputFile.HeaderText = outputFile.GetFileHeader();
+				string fileContent = outputFile.WriteString(fileEntriesRaw);
+				File.WriteAllText(OutputFile, fileContent);
 			}
 			catch (Exception e)
 			{
-				Output.WriteLine($"❌ ERROR writing MarketBreadth file: {e.Message}");
+				Output.WriteLine($"ERROR writing MarketBreadth file: {e.Message}");
 				Output.WriteLine($"   Full path attempted: {OutputFile}");
 				Output.WriteLine($"   Stack trace: {e.StackTrace}");
 			}
