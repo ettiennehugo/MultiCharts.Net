@@ -407,7 +407,7 @@ namespace PowerLanguage.Strategy
 					{
 						// Ratios are stored as strings (e.g. "1.23456789"). We scale by 1 000 000 so we keep 6 decimal places of precision
 						// inside an int (perfect for MultiCharts "price" field). You can divide by 1_000_000 later in your indicator if you need the exact ratio.
-						fieldValue = (int)(dblVal * 1_000_000);
+						fieldValue = (int)(dblVal);
 					}
 
 					records.Add(new OHLCV
