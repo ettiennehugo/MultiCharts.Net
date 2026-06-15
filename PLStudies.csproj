@@ -511,6 +511,8 @@
     <Compile Include="_Voss.Indicator.CS" />
     <Compile Include="_VWAP.Indicator.CS" />
     <Compile Include="_MarketBreadth.Strategy.CS" />
+    <Compile Include="_BreakoutAutoBase.Strategy.CS" />
+    <Compile Include="_BreakoutAutoLELX.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
