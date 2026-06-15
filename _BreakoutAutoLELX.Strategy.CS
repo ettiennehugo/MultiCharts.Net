@@ -33,7 +33,7 @@ namespace PowerLanguage.Strategy
 	///		Note does not cater for pre-/post-market entries/exits would need to add limit orders for those.
 	///		
 	/// </summary>
-	public class _BreakoutAutoLELX : _BreakoutBase
+	public class _BreakoutAutoLELX : _BreakoutAutoBase
 	{
 		//types
 
