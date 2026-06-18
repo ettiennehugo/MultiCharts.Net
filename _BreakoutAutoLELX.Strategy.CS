@@ -41,10 +41,12 @@ namespace PowerLanguage.Strategy
 		//constants
 		public const string DEFAULT_START_TIME = "09:30";
 		public const string DEFAULT_END_TIME = "10:00";
+		public const double DEFAULT_AVG_VOLUME_FILTER = 150000.0;
 
 		//properties
 		[Input] public string StartTime { get; set; }           // Start time for the entries to be taken, default to 09:30 (assuming stock exchange local time)
 		[Input] public string EndTime { get; set; }             // End time for entries to be taken, defaul to 10:00 (assuming stock exchange local time)
+		[Input] public double AvgVolumeFilter { get; set; }			// Required average volume over the last three days, this is to make sure we stay out of low float stocks that can be all over the place on low volume. 
 
 		//attribute
 		private DateTime m_startTime;
@@ -58,6 +60,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			StartTime = DEFAULT_START_TIME;
 			EndTime = DEFAULT_END_TIME;
+			AvgVolumeFilter = DEFAULT_AVG_VOLUME_FILTER;
 		}
 
 		protected override void StartCalc()
@@ -65,6 +68,7 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			if (!DateTime.TryParse(StartTime, out m_startTime)) throw new ArgumentException($"Failed to parse start time {StartTime}.");
 			if (!DateTime.TryParse(EndTime, out m_endTime)) throw new ArgumentException($"Failed to parse end time {EndTime}.");
+			if (AvgVolumeFilter < 0.0) throw new ArgumentException("Average volume filter value must be greater or equal to zero.");
 			if (m_startTime.TimeOfDay > m_endTime.TimeOfDay) throw new ArgumentException($"Start time {StartTime} must be less than end time {EndTime}.");
 		}
 
@@ -79,12 +83,14 @@ namespace PowerLanguage.Strategy
 			}
 
 			//pre - existing momentum check
+			double avgVolume = m_dailyTimeframe.Volume.Average(3, 1);
 			double low21 = m_dailyTimeframe.Close.Lowest(21, 1);
 			double low63 = m_dailyTimeframe.Close.Lowest(63, 1);
 			double low126 = m_dailyTimeframe.Close.Lowest(126, 1);
-			if ((m_dailyTimeframe.CurrentBar > 21 && low21 != 0.0 && m_dailyTimeframe.Close[1] / low21 > 1.3) ||
-					(m_dailyTimeframe.CurrentBar > 63 && low63 != 0.0 && m_dailyTimeframe.Close[1] / low63 > 1.3) ||
-					(m_dailyTimeframe.CurrentBar > 126 && low126 != 0.0 && m_dailyTimeframe.Close[1] / low126 > 1.3))
+			if (avgVolume > AvgVolumeFilter &&
+			    ((m_dailyTimeframe.CurrentBar > 21 && low21 != 0.0 && m_dailyTimeframe.Close[1] / low21 > 1.3) ||
+					 (m_dailyTimeframe.CurrentBar > 63 && low63 != 0.0 && m_dailyTimeframe.Close[1] / low63 > 1.3) ||
+					 (m_dailyTimeframe.CurrentBar > 126 && low126 != 0.0 && m_dailyTimeframe.Close[1] / low126 > 1.3)))
 			{
 				if (m_tradingTimeframe.Time[0].TimeOfDay >= m_startTime.TimeOfDay &&
 						m_tradingTimeframe.Time[0].TimeOfDay <= m_endTime.TimeOfDay)
