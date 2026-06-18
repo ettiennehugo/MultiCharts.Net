@@ -343,7 +343,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				m_averageRange.Value = (sum / LookBack) * ExpansionFactor;
-				trace(ETraceLevel.Debug, $"updatePercentChange - AvgRange({m_averageRange.Value}) Sum({sum}) Lookback({LookBack})");
+				trace(ETraceLevel.Debug, $"updatePercentChange - AvgRange({m_averageRange.Value}) Sum({sum}) Lookback({LookBack}) ExpansionFactor({ExpansionFactor})");
 			}
 		}
 

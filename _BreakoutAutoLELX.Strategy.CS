@@ -79,9 +79,12 @@ namespace PowerLanguage.Strategy
 			}
 
 			//pre - existing momentum check
-			if ((m_dailyTimeframe.CurrentBar > 21 && m_dailyTimeframe.Close.Lowest(21, 1) != 0.0 && m_dailyTimeframe.Close[1] / m_dailyTimeframe.Close.Lowest(21, 1) > 1.3) ||
-					(m_dailyTimeframe.CurrentBar > 63 && m_dailyTimeframe.Close.Lowest(63, 1) != 0.0 && m_dailyTimeframe.Close[1] / m_dailyTimeframe.Close.Lowest(36, 1) > 1.3) ||
-					(m_dailyTimeframe.CurrentBar > 126 && m_dailyTimeframe.Close.Lowest(126, 1) != 0.0 && m_dailyTimeframe.Close[1] / m_dailyTimeframe.Close.Lowest(126, 1) > 1.3))
+			double low21 = m_dailyTimeframe.Close.Lowest(21, 1);
+			double low63 = m_dailyTimeframe.Close.Lowest(63, 1);
+			double low126 = m_dailyTimeframe.Close.Lowest(126, 1);
+			if ((m_dailyTimeframe.CurrentBar > 21 && low21 != 0.0 && m_dailyTimeframe.Close[1] / low21 > 1.3) ||
+					(m_dailyTimeframe.CurrentBar > 63 && low63 != 0.0 && m_dailyTimeframe.Close[1] / low63 > 1.3) ||
+					(m_dailyTimeframe.CurrentBar > 126 && low126 != 0.0 && m_dailyTimeframe.Close[1] / low126 > 1.3))
 			{
 				if (m_tradingTimeframe.Time[0].TimeOfDay >= m_startTime.TimeOfDay &&
 						m_tradingTimeframe.Time[0].TimeOfDay <= m_endTime.TimeOfDay)
