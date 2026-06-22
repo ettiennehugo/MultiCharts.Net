@@ -7,12 +7,12 @@ using System.Linq;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
-	/// Parabolic Short SE - this strategy is used to enter a short position when a lower high is formed after a parabolic move up.
+	/// Parabolic Short SE - this strategy is used to enter a short position when a bearish bar or lower high is formed after a parabolic bullish move up.
 	/// The strategy uses the price action analysis to determine the entry point and the exit point.
 	/// Timeframes used:
 	///		Primary: 1/5 minute chart for the entry
 	///		Secondary: 5-/15-/30-minutes/hourly - used for price action analysis
-	///		Dialy timeframe
+	///		Daily timeframe
 	///	Entry:
 	///	 * If EntryStrategy is set to FirstBearishBar the entry is made on the primary timeframe bearish bar
 	///	 * If EntryStrategy is set to FirstLowerHigh the entry is made on the secondary timeframe when a lower high forms.
