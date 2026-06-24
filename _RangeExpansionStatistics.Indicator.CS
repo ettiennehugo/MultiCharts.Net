@@ -80,7 +80,8 @@ namespace PowerLanguage.Indicator
 		{
 			if (Environment.CalcReason != CalculationReason.Default) return;
 			m_bars.Insert(0, new OHLCV(Bars.Time[0], Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]));
-			double curRange = Bars.High[0] - Bars.Low[0];
+            
+            double curRange = Bars.High[0] - Bars.Low[0];
 			double open = Bars.Open[0];
 			double close = Bars.Close[0];
 
@@ -129,9 +130,11 @@ namespace PowerLanguage.Indicator
 
 			// ==================== OUTPUT ====================
 			if (Bars.LastBarOnChart)
-			{
+			{                
 				Output.WriteLine("=== RANGE EXPANSION STATS (Contraction + Expansion) ===");
 				Output.WriteLine($"Symbol: {Bars.Info.Name} | Long={LongLength}, Short={ShortLength}, Factor={ExpansionFactor}x, Direction={TradeDirection}, ForwardLookback={ForwardLookback}\n");
+                Output.WriteLine($"Date Range: {Bars.Request.Range.From.Date:yyyy/MM/dd} - {Bars.Request.Range.To.Date:yyyy/MM/dd}");
+                Output.WriteLine("");
 
 				// === BULLISH SECTION ===
 				if ((TradeDirection == ETradeDirection.BullishAndBearish || TradeDirection == ETradeDirection.Bullish) && m_bullReBarNumbers.Count >= 3)
@@ -158,6 +161,7 @@ namespace PowerLanguage.Indicator
 			Output.WriteLine($"Avg Open→Close     : {m_bullOpenToClose.Average():F2}%");
 			Output.WriteLine($"Avg Open→Low (dip) : {m_bullOpenToLow.Average():F2}%");
 			Output.WriteLine($"Avg Day Range       : {m_bullDayRange.Average():F2}%\n");
+            Output.WriteLine("");
 
 			// Forward distribution + cumulative for bullish
 			PrintForwardDistribution(m_bullReBarNumbers, true);
@@ -174,6 +178,7 @@ namespace PowerLanguage.Indicator
 			Output.WriteLine($"Avg Open→Close     : {m_bearOpenToClose.Average():F2}%  (net down move)");
 			Output.WriteLine($"Avg Open→High (adv): {m_bearOpenToHigh.Average():F2}%  (adverse for shorts)");
 			Output.WriteLine($"Avg Day Range       : {m_bearDayRange.Average():F2}%\n");
+            Output.WriteLine("");
 
 			PrintForwardDistribution(m_bearReBarNumbers, false);
 		}
@@ -222,32 +227,6 @@ namespace PowerLanguage.Indicator
 
 			if (totalForDist == 0) return;
 
-			//string dirLabel = isBullish ? "BULLISH" : "BEARISH";
-			//Output.WriteLine($"FORWARD MOVE DISTRIBUTION ({dirLabel}) - Max move in next {ForwardLookback} bars");
-
-			//// Histogram
-			//Output.WriteLine("Move Bucket     Count     Probability");
-			//Output.WriteLine("------------------------------------");
-
-			//if (bucketCounts.ContainsKey(-1))
-			//{
-			//	double p = bucketCounts[-1] / (double)totalForDist * 100;
-			//	Output.WriteLine(string.Format("< 4%              {0,5}        {1,6:F1}%", bucketCounts[-1], p));
-			//}
-
-			//for (int low = 4; low <= 48; low += 2)
-			//{
-			//	int c = bucketCounts.ContainsKey(low) ? bucketCounts[low] : 0;
-			//	double p = c / (double)totalForDist * 100;
-			//	Output.WriteLine(string.Format("{0,2}-{1,2}%           {2,5}        {3,6:F1}%", low, low + 2, c, p));
-			//}
-
-			//if (bucketCounts.ContainsKey(999))
-			//{
-			//	double p = bucketCounts[999] / (double)totalForDist * 100;
-			//	Output.WriteLine(string.Format(">50%              {0,5}      {1,6:F1}%", bucketCounts[999], p));
-			//}
-
 			string dirLabel = isBullish ? "BULLISH" : "BEARISH";
 			Output.WriteLine($"FORWARD MOVE DISTRIBUTION ({dirLabel}) - Max move in next {ForwardLookback} bars");
 
@@ -280,6 +259,8 @@ namespace PowerLanguage.Indicator
 				prob = string.Format("{0:F1}%", p);
 				Output.WriteLine(string.Format("{0,-15} {1,-12} {2,8}", bucket, bucketCounts[999], prob));
 			}
+            
+            Output.WriteLine("");
 
 			// === CUMULATIVE PROBABILITIES ===
 			Output.WriteLine($"\nCUMULATIVE PROBABILITY ({dirLabel}) – Probability of AT LEAST X% move");
