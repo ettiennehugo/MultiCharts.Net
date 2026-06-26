@@ -157,10 +157,10 @@ namespace PowerLanguage.Indicator
 
 			Output.WriteLine("--- BULLISH RANGE EXPANSIONS ---");
 			Output.WriteLine($"Bullish RE Days: {total} ({pct:F1}% of bars)");
-			Output.WriteLine($"Avg High from Open : {m_bullHighFromOpen.Average():F2}%");
-			Output.WriteLine($"Avg Open→Close     : {m_bullOpenToClose.Average():F2}%");
-			Output.WriteLine($"Avg Open→Low (dip) : {m_bullOpenToLow.Average():F2}%");
-			Output.WriteLine($"Avg Day Range       : {m_bullDayRange.Average():F2}%\n");
+			Output.WriteLine($"Avg High from Open : {m_bullHighFromOpen.Average():F4}%");
+			Output.WriteLine($"Avg Open→Close     : {m_bullOpenToClose.Average():F4}%");
+			Output.WriteLine($"Avg Open→Low (dip) : {m_bullOpenToLow.Average():F4}%");
+			Output.WriteLine($"Avg Day Range       : {m_bullDayRange.Average():F4}%\n");
             Output.WriteLine("");
 
 			// Forward distribution + cumulative for bullish
@@ -174,10 +174,10 @@ namespace PowerLanguage.Indicator
 
 			Output.WriteLine("--- BEARISH RANGE EXPANSIONS ---");
 			Output.WriteLine($"Bearish RE Days: {total} ({pct:F1}% of bars)");
-			Output.WriteLine($"Avg Low from Open  : {m_bearLowFromOpen.Average():F2}%  (drop from open)");
-			Output.WriteLine($"Avg Open→Close     : {m_bearOpenToClose.Average():F2}%  (net down move)");
-			Output.WriteLine($"Avg Open→High (adv): {m_bearOpenToHigh.Average():F2}%  (adverse for shorts)");
-			Output.WriteLine($"Avg Day Range       : {m_bearDayRange.Average():F2}%\n");
+			Output.WriteLine($"Avg Low from Open  : {m_bearLowFromOpen.Average():F4}%  (drop from open)");
+			Output.WriteLine($"Avg Open→Close     : {m_bearOpenToClose.Average():F4}%  (net down move)");
+			Output.WriteLine($"Avg Open→High (adv): {m_bearOpenToHigh.Average():F4}%  (adverse for shorts)");
+			Output.WriteLine($"Avg Day Range       : {m_bearDayRange.Average():F4}%\n");
             Output.WriteLine("");
 
 			PrintForwardDistribution(m_bearReBarNumbers, false);
@@ -239,7 +239,7 @@ namespace PowerLanguage.Indicator
 			{
 				double p = bucketCounts[-1] / (double)totalForDist * 100;
 				string bucket = "< 4%";
-				prob = string.Format("{0:F1}%", p);
+				prob = string.Format("{0:F4}%", p);
 				Output.WriteLine(string.Format("{0,-15} {1,-12} {2,8}", bucket, bucketCounts[-1], prob));
 			}
 
@@ -248,7 +248,7 @@ namespace PowerLanguage.Indicator
 				int c = bucketCounts.ContainsKey(low) ? bucketCounts[low] : 0;
 				double p = c / (double)totalForDist * 100;
 				string bucket = string.Format("{0}-{1}%", low, low + 2);   // cleaner: "4-6%", "10-12%"
-				prob = string.Format("{0:F1}%", p);
+				prob = string.Format("{0:F4}%", p);
 				Output.WriteLine(string.Format("{0,-15} {1,-12} {2,8}", bucket, c, prob));
 			}
 
@@ -256,7 +256,7 @@ namespace PowerLanguage.Indicator
 			{
 				double p = bucketCounts[999] / (double)totalForDist * 100;
 				string bucket = ">50%";
-				prob = string.Format("{0:F1}%", p);
+				prob = string.Format("{0:F4}%", p);
 				Output.WriteLine(string.Format("{0,-15} {1,-12} {2,8}", bucket, bucketCounts[999], prob));
 			}
             
@@ -272,19 +272,19 @@ namespace PowerLanguage.Indicator
 			// >50%
 			if (bucketCounts.ContainsKey(999)) running += bucketCounts[999];
 			label = "At least 50%";
-			Output.WriteLine(string.Format("{0,-15} {1,6:F1}%", label, running / totalForDist * 100));
+			Output.WriteLine(string.Format("{0,-15} {1,6:F4}%", label, running / totalForDist * 100));
 
 			for (int low = 48; low >= 4; low -= 2)
 			{
 				if (bucketCounts.ContainsKey(low)) running += bucketCounts[low];
 				label = string.Format("At least {0,2}%", low);
-				Output.WriteLine(string.Format("{0,-15} {1,6:F1}%", label, running / totalForDist * 100));
+				Output.WriteLine(string.Format("{0,-15} {1,6:F4}%", label, running / totalForDist * 100));
 			}
 
 			// at least 4% = everything except <4%
 			double atLeast4 = (totalForDist - (bucketCounts.ContainsKey(-1) ? bucketCounts[-1] : 0)) / (double)totalForDist * 100;
 			label = "At least  4%";
-			Output.WriteLine(string.Format("{0,-15} {1,6:F1}%", label, atLeast4));
+			Output.WriteLine(string.Format("{0,-15} {1,6:F4}%", label, atLeast4));
 			Output.WriteLine("------------------------------------------------\n");
 		}
 
