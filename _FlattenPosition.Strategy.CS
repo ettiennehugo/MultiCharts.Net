@@ -29,16 +29,18 @@ namespace PowerLanguage.Strategy
 
 		protected override void Create()
 		{
-			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "FlatLX", EOrderAction.Sell, OrderExit.FromAll));
-			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "FlatSX", EOrderAction.BuyToCover, OrderExit.FromAll));
+			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "FlatLX", EOrderAction.Sell, OrderExit.FromAll));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "FlatSX", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-        protected override void CalcBar(){
-            if (StrategyInfo.MarketPosition > 0)
-                m_lx.Send();
-            else if (StrategyInfo.MarketPosition < 0)
-                m_sx.Send();
-        }
+		protected override void CalcBar()
+		{
+			int brokerPosition = StrategyInfo.MarketPositionAtBroker;
+			if (brokerPosition > 0)
+				m_lx.Send(brokerPosition);
+			else if (brokerPosition < 0)
+				m_sx.Send(brokerPosition);
+		}
 
 		//methods
 
