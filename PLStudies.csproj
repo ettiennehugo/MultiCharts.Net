@@ -194,9 +194,7 @@
     <Compile Include="Chaos_Gator.Indicator.CS" />
     <Compile Include="Volume_Dn.Indicator.CS" />
     <Compile Include="Spread__Ratio.Indicator.CS" />
-    <Compile Include="_TPO_.Indicator.CS">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Include="_TPO_.Indicator.CS" />
     <Compile Include="Mov_Avg_1_Line.Indicator.CS" />
     <Compile Include="C_Doji.Indicator.CS" />
     <Compile Include="ZigZag_Pnts.Indicator.CS" />
@@ -491,6 +489,7 @@
     <Compile Include="_BreakoutAutoBase.Strategy.CS" />
     <Compile Include="_BreakoutAutoLELX.Strategy.CS" />
     <Compile Include="_RangeExpansionStatistics.Indicator.CS" />
+    <Compile Include="_ReversalLELX.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
