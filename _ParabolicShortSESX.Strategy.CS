@@ -25,6 +25,28 @@ namespace PowerLanguage.Strategy {
 	/// </summary>
 	public class _ParabolicShortSESX : _CustomSignal
 	{
+		//types
+		public enum EEntryStrategy
+		{
+			FirstBearishBar,    //enter on the close of the first bearish bar, this will be an early entry with higher risk to be stopped out with a larger trade size since it would be a tight entry from the day high
+			FirstLowerHigh,     //enter on the first lower high that formed, this will be a later entry with lower risk to be stopped out but smaller trade size
+		}
+
+		public enum EExitDaysCountStrategy
+		{
+			CalendarDays,       //exit based on a number of calendar days, used as the default as this is the less risky trade management strategy
+			TradingDays         //exit based on a number of trading days, note that this could increase your risk since the strategy might hold positions over weekends
+		};
+
+		public enum EReentryStrategy
+		{
+			Always,							//just reenter always when an entry is signalled and entries are left 
+			LossOnly,						//reenter only if the current day has not had a winning trade
+			WinsOnly,						//reenter only if the current day had not had a losing trade
+			PLPositive,					//reenter only if the daily P/L is positive
+			PLNegative,					//reenter only if the daily P/L is negative
+		};
+
 		//constants
 		public const string DEFAULT_START_TIME = "09:30"; //stock market regular open time
 		public const string DEFAULT_END_TIME = "16:00";   //stock market regular close time
@@ -36,25 +58,13 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.0075; //use 0.75% of equity for risk based entry
 		public const double DEFAULT_CLOSE_PERCENTILE = 0.5; //required close percentile - this is used to determine the entry size based on the average trading volume 
 		public const double DEFAULT_VOLUME_PERCENTILE = 0.5; //required volume percentile - this is used to determine the entry size based on the average trading volume
-		public const int DEFAULT_REENTRY_COUNT = 1;	//reentry count to use if the strategy get stopped out
+		public const int DEFAULT_REENTRY_COUNT = 1; //reentry count to use if the strategy get stopped out
+		public const EReentryStrategy DEFAULT_REENTRY_STRATEGY = EReentryStrategy.Always;	//always reenter per default
 		public const int DEFAULT_VOLUME_LENGTH = 20; //length of the volume period to use for the volume based entry size
 		public const double DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT = 0.2; //maximum volume based percentage - this is used to determine the entry size based on the average trading volume
 		public const double DEFAULT_RETRACEMENT_EXIT_PERCENT = 0.5; //exit percentage - this is used to determine the exit percentage based on the entry date
 		public const int DEFAULT_EXIT_DAYS_COUNT = 3; //number of days to exit the full position
 		public const string DEFAULT_EXIT_TIME = "15:35"; //exit time for the full position
-
-		//types
-		public enum EEntryStrategy
-		{
-			FirstBearishBar,		//enter on the close of the first bearish bar, this will be an early entry with higher risk to be stopped out with a larger trade size since it would be a tight entry from the day high
-			FirstLowerHigh,			//enter on the first lower high that formed, this will be a later entry with lower risk to be stopped out but smaller trade size
-		}
-
-		public enum EExitDaysCountStrategy
-		{
-			CalendarDays,				//exit based on a number of calendar days, used as the default as this is the less risky trade management strategy
-			TradingDays					//exit based on a number of trading days, note that this could increase your risk since the strategy might hold positions over weekends
-		};
 
 		//properties
 		[Input] public string StartTime { get; set; } //start time for the entry
@@ -70,6 +80,7 @@ namespace PowerLanguage.Strategy {
 		[Input] public double VolumePercentile { get; set; } //required volume percentile - this is used to determine the entry size based on the average trading volume
 		[Input] public bool UseRoundLots { get; set; } //use round lots for the entry size - this is used to determine the entry size based on the average trading volume
 		[Input] public int ReentryCount { get; set; }	//reentry count if the strategy gets stopped out 
+		[Input] public EReentryStrategy ReentryStrategy { get; set; } //reentry strategy if a signal is given and reentry are left
 		[Input] public double RetracementExitPercent { get; set; } //exit percentage - this is used to determine the exit percentage based on the entry date
 		[Input] public EExitDaysCountStrategy ExitDaysCountStrategy { get; set; } //exit days count strategy - this is used to determine the exit days count based on the entry date
 		[Input] public int ExitDaysCount { get; set; } //full exit days count - this is used to determine the full exit days count based on the entry date
@@ -98,6 +109,20 @@ namespace PowerLanguage.Strategy {
 		private DateTime m_previousDateTime;
 		private int m_previousPositionSide;
 		private int m_previousDayCount;
+		private int m_startWinTrades;
+		private int m_startLosTrades;
+		private int m_startTotalTrades;
+		private int m_todayWins;
+		private int m_todayLosses;
+		private int m_todayTrades;
+		private double m_todayPL;
+		private DateTime m_lastDate;
+		private bool m_initializedToday;
+		private bool m_onlyWinningTrades;
+		private bool m_onlyLosingTrades;
+		private double m_startNetProfit;
+		private bool m_todayPositivePL;
+		private bool m_todayNegativePL;
 
 		//interface methods
 		public _ParabolicShortSESX(object _ctx) : base(_ctx) { }
@@ -162,6 +187,13 @@ namespace PowerLanguage.Strategy {
 			m_stopLoss = -1;
 			m_previousDayCount = -1;
 
+			m_lastDate = DateTime.MinValue;
+			m_initializedToday = false;
+			m_onlyWinningTrades = false;
+			m_onlyLosingTrades = false;
+			m_todayPositivePL = false;
+			m_todayNegativePL = false;
+
 			m_retracementExitFilled = false;
 			m_priceActionChanged = false;
 			m_lowerHighDetected = false;
@@ -170,6 +202,39 @@ namespace PowerLanguage.Strategy {
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+
+			//setup state to measure daily winners/losers and P/L for reentries
+			DateTime barDate = Bars.Time[0].Date;
+			if (barDate > m_lastDate)
+			{
+				m_startWinTrades = NumWinTrades;
+				m_startLosTrades = NumLosTrades;
+				m_startTotalTrades = TotalTrades;
+				m_lastDate = barDate;
+				m_initializedToday = true;
+				m_startNetProfit = NetProfit;
+				trace(ETraceLevel.Debug, $"State for new day - InitializedToday({m_initializedToday}) StartWinTrades({m_startWinTrades}) StartLosTrades({m_startLosTrades}) StartTotalTrades({m_startTotalTrades}) StartNetProfit({m_startNetProfit})");
+			}
+			//first calculation after enabling the strategy mid-day
+			else if (!m_initializedToday && Environment.IsRealTimeCalc)
+			{
+				//snapshot now (best we can do without scanning history)
+				m_startWinTrades = NumWinTrades;
+				m_startLosTrades = NumLosTrades;
+				m_startTotalTrades = TotalTrades;
+				m_initializedToday = true;
+				m_startNetProfit = NetProfit;
+				trace(ETraceLevel.Debug, $"State for new day (real-time calculation) - InitializedToday({m_initializedToday}) StartWinTrades({m_startWinTrades}) StartLosTrades({m_startLosTrades}) StartTotalTrades({m_startTotalTrades}) StartNetProfit({m_startNetProfit})");
+			}
+
+			m_todayWins = NumWinTrades - m_startWinTrades;
+			m_todayLosses = NumLosTrades - m_startLosTrades;
+			m_todayTrades = TotalTrades - m_startTotalTrades;
+			m_todayPL = NetProfit - m_startNetProfit;
+			m_onlyWinningTrades = (m_todayTrades == 0) || (m_todayLosses == 0);		//NOTE: When we have not had any trades we need to at least enter one trade to determine win only state.
+			m_onlyLosingTrades = (m_todayTrades == 0) || (m_todayWins == 0); //NOTE: When we have not had any trades we need to at least enter one trade to determine lose only state.
+			m_todayPositivePL = m_todayPL >= 0;	//NOTE: We allow entry on flat P/L otherwise you can never get an entry.
+			m_todayNegativePL = m_todayPL <= 0; //NOTE: We allow entry on flat P/L otherwise you can never get an entry.
 
 			if (m_secondaryTimeFrame.Status == EBarState.Close)
 			{
@@ -199,11 +264,7 @@ namespace PowerLanguage.Strategy {
 
 		//methods
 		protected void entryFirstBearishBar() {
-			if (m_entryCount >= ReentryCount)
-			{
-				trace(ETraceLevel.Debug, $"entryFirstBearishBar skipped - ReentryCount reached ({m_entryCount})");
-				return;
-			}
+			if (!entriesLeft("entryFirstBearishBar")) return;
 
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 
@@ -241,11 +302,7 @@ namespace PowerLanguage.Strategy {
 		}
 
 		protected void entryFirstLowerHigh() {
-			if (m_entryCount >= ReentryCount)
-			{
-				trace(ETraceLevel.Debug, $"entryFirstLowerHigh skipped - ReentryCount reached ({m_entryCount})");
-				return;
-			}
+			if (!entriesLeft("entryFirstLowerHigh")) return;
 
 			if (m_primaryTimeFrame.Status != EBarState.Close || m_primaryTimeFrame.CurrentBar < 2) return;
 
@@ -393,6 +450,38 @@ namespace PowerLanguage.Strategy {
 				m_sxPartial.Send((int)Math.Ceiling(Math.Abs(StrategyInfo.MarketPosition) / (double)2));
 				return;
 			}
+		}
+
+		protected bool entriesLeft(string caller) {
+			if (m_entryCount >= ReentryCount)
+			{
+				trace(ETraceLevel.Debug, $"{caller} skipped - Input ReentryCount({ReentryCount}) EntryCount({m_entryCount}) TodayWins({m_todayWins}) TodayLosses({m_todayLosses}) TodayPL({m_todayPL})");
+				return false;
+			}
+
+			switch (ReentryStrategy)
+			{
+				case EReentryStrategy.Always:
+					return true;
+				case EReentryStrategy.LossOnly:
+					if (!m_onlyLosingTrades)
+						trace(ETraceLevel.Debug, $"{caller} skipped - Only losing trades false. Input ReentryCount({ReentryCount}) EntryCount({m_entryCount}) TodayWins({m_todayWins}) TodayLosses({m_todayLosses}) TodayPL({m_todayPL})");
+					return m_onlyLosingTrades;
+				case EReentryStrategy.WinsOnly:
+					if (!m_onlyWinningTrades)
+						trace(ETraceLevel.Debug, $"{caller} skipped - Only winning trades false. Input ReentryCount({ReentryCount}) EntryCount({m_entryCount}) TodayWins({m_todayWins}) TodayLosses({m_todayLosses}) TodayPL({m_todayPL})");
+					return m_onlyWinningTrades;
+				case EReentryStrategy.PLPositive:
+					if (!m_todayPositivePL)
+						trace(ETraceLevel.Debug, $"{caller} skipped - Daily P/L not positive. Input ReentryCount({ReentryCount}) EntryCount({m_entryCount}) TodayWins({m_todayWins}) TodayLosses({m_todayLosses}) TodayPL({m_todayPL})");
+					return m_todayPositivePL;
+				case EReentryStrategy.PLNegative:
+					if (!m_todayNegativePL)
+						trace(ETraceLevel.Debug, $"{caller} skipped - Daily P/L not negative. Input ReentryCount({ReentryCount}) EntryCount({m_entryCount}) TodayWins({m_todayWins}) TodayLosses({m_todayLosses}) TodayPL({m_todayPL})");
+					return m_todayNegativePL;
+			}
+
+			return true;
 		}
 	}
 }
