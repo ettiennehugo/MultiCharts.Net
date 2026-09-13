@@ -54,8 +54,10 @@ namespace PowerLanguage.Strategy {
 		public const double DEFAULT_PARABOLIC_GROWTH_FACTOR = 3.0;	//price growth on the daily timeframe, price needs to grow by this factor to be considered a parabolic move over the given price growth length above 
 		public int DEFAULT_FRACTAL_LAYERS = 3; //number of fractal layers to use for the price action analysis
 		public const double DEFAULT_FACTOR_CLOSE = 0.05; //factor close - user a more finely tuned factor close to determine lower highs, this uses 5% of the ATR as parabolic shorts can have huge bar moves
+		public const int DEFAULT_ABSOLUTE_SIZE = 0; //default absolute size to control the entry size exactly
 		public const double DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT = 0.15; //per default don't enter positions larger than 15% of available equity
 		public const double DEFAULT_RISK_BASED_ENTRY_PERCENT = 0.0075; //use 0.75% of equity for risk based entry
+		public const bool DEFAULT_USE_ROUND_LOTS = false; // per default don't use round lot
 		public const double DEFAULT_CLOSE_PERCENTILE = 0.5; //required close percentile - this is used to determine the entry size based on the average trading volume 
 		public const double DEFAULT_VOLUME_PERCENTILE = 0.5; //required volume percentile - this is used to determine the entry size based on the average trading volume
 		public const int DEFAULT_REENTRY_COUNT = 1; //reentry count to use if the strategy get stopped out
@@ -137,13 +139,13 @@ namespace PowerLanguage.Strategy {
 			ParabolicGrowthLength = DEFAULT_PARABOLIC_GROWTH_LENGTH;
 			ParabolicGrowthFactor = DEFAULT_PARABOLIC_GROWTH_FACTOR;
 			EntryStrategy = EEntryStrategy.FirstLowerHigh;
-			AbsoluteSize = 0;
+			AbsoluteSize = DEFAULT_ABSOLUTE_SIZE;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
 			MaximumVolumeBasedPercent = DEFAULT_MAXIMUM_VOLUME_BASED_PERCENT;
 			ClosePercentile = DEFAULT_CLOSE_PERCENTILE;
 			VolumePercentile = DEFAULT_VOLUME_PERCENTILE;
-			UseRoundLots = false;
+			UseRoundLots = DEFAULT_USE_ROUND_LOTS; ;
 			ReentryCount = DEFAULT_REENTRY_COUNT;
 			m_volumePercentile = new PowerLanguage.Function._VolumePercentile(this);
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "Se", EOrderAction.SellShort));
