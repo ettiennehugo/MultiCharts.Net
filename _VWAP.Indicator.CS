@@ -37,16 +37,8 @@ namespace PowerLanguage.Indicator
 		{
 			m_vwap.Type = Type;
 			m_vwap.Length = Length;
-			m_vwap.FromDate = DateTime.ParseExact(
-				FromDate.Trim(),
-				new[] { "yyyy/MM/dd HH:mm", "yyyy/MM/dd H:mm", "yyyy/MM/dd" },
-				System.Globalization.CultureInfo.InvariantCulture,
-				System.Globalization.DateTimeStyles.None);
-			m_vwap.ToDate = DateTime.ParseExact(
-				ToDate.Trim(),
-				new[] { "yyyy/MM/dd HH:mm", "yyyy/MM/dd H:mm", "yyyy/MM/dd" },
-				System.Globalization.CultureInfo.InvariantCulture,
-				System.Globalization.DateTimeStyles.None);
+			m_vwap.FromDate = DateTime.Parse(FromDate.Trim());
+			m_vwap.ToDate = DateTime.Parse(ToDate.Trim());
 		}
 
 		protected override void CalcBar()
