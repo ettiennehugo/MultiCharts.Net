@@ -492,6 +492,11 @@
     <Compile Include="_BreakoutAutoLELX.Strategy.CS" />
     <Compile Include="_RangeExpansionStatistics.Indicator.CS" />
     <Compile Include="_ReversalLELX.Strategy.CS" />
+    <Compile Include="_VolumeProfileBase.Strategy.CS" />
+    <Compile Include="_VPTwoTargetLevels.Indicator.CS" />
+    <Compile Include="_VolumeProfileStatistics.Indicator.CS" />
+    <Compile Include="_VWAP.Function.CS" />
+    <Compile Include="_VolumeProfileFuturesBase.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
