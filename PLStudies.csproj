@@ -497,6 +497,13 @@
     <Compile Include="_VolumeProfileStatistics.Indicator.CS" />
     <Compile Include="_VWAP.Function.CS" />
     <Compile Include="_VolumeProfileFuturesBase.Strategy.CS" />
+    <Compile Include="_DeltaDivRevFuturesLELX.Strategy.CS" />
+    <Compile Include="_DeltaDivRevFuturesSESX.Strategy.CS" />
+    <Compile Include="_AbsorptionRevFuturesLELX.Strategy.CS" />
+    <Compile Include="_AbsorptionRevFuturesSESX.Strategy.CS" />
+    <Compile Include="_StackedImblContLELX.Strategy.CS" />
+    <Compile Include="_StackedImblContSESX.Strategy.CS" />
+    <Compile Include="_VolumeProfileTest1.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
