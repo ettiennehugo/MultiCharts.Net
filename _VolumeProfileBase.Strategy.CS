@@ -23,12 +23,14 @@ namespace PowerLanguage.Strategy
 	///
 	/// TODO:
 	///   - volume normalization
-	///   - HVN, LVN detection - DONE
+	///   - HVN, LVN detection - DONE NEED TO TEST
+	///     - Add directional checks (bullish/bearish) that would return the list of HVN's, VAL, VAH, POC that would be considered high probability zones - DONE TO TEST
 	///   - VWAP integration - DONE (internal engines + profile-histogram VWAP)
-	///   - confluence zones
-	///   - directionality of confluence zones
-	///   - ranking of best zones (add parameter to keep only a certain number of zones, e.g. 5)
-	///   - can you introduce a mechanism for if-then logic for the different zones (accept vs reject, per setup).
+	///   - confluence zones - DONE NEED TO TEST
+	///     - TODO there might still be DOUBLE COUNTING happening on the generated code for the confluence zones - you need to make sure you count unique factors in the z-scoring - DONE NEED TO TEST
+	///   - directionality of confluence zones - TODO
+	///   - ranking of best zones (add parameter to keep only a certain number of zones, e.g. 5) - DONE NEED TO TEST
+	///   - can you introduce a mechanism for if-then logic for the different zones (accept vs reject, per setup). - this should rather go to a signal
 	/// </summary>
 	public class _VolumeProfileBase : _CustomSignal
 	{
@@ -40,6 +42,15 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int VWAP_SLOT_COUNT = 3;
+		public const int CONFLUENCE_STREAM_COUNT = 3;
+		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
+		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
+		public const int DEFAULT_CONFLUENCE_MIN_HITS = 2;
+		public const int DEFAULT_CONFLUENCE_TOP_COUNT = 5;
+		public const int DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS = 1;
+		public const double DEFAULT_CONFLUENCE_DECAY = 0.75;
+		public const double DEFAULT_CONFLUENCE_CROSS_BONUS = 0.35;
+		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95;
 
 		//types
 		/// <summary>
@@ -83,7 +94,6 @@ namespace PowerLanguage.Strategy
 			public readonly int datastream;
 			public readonly int startBar;
 			public readonly int endBar;
-
 			public VpKey(int datastream, IProfile p)
 			{
 				this.datastream = datastream;
@@ -91,15 +101,12 @@ namespace PowerLanguage.Strategy
 				startBar = iv.First;
 				endBar = iv.Second;
 			}
-
 			public bool Equals(VpKey o)
 			{
 				return datastream == o.datastream && startBar == o.startBar && endBar == o.endBar;
 			}
-
 			public override bool Equals(object o) { return o is VpKey k && Equals(k); }
 			public override int GetHashCode() { return datastream ^ (startBar * 397) ^ endBar; }
-
 		};
 
 		/// <summary>
@@ -107,23 +114,199 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		public class VpExtra
 		{
+			public int dataStream;
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
 			public double vah;  // Value area high.
 			public double val;  // Value area low.
 			public double profileVwap;  // Σ(price * levelVolume) / Σ(levelVolume) from the same rows used for HVN/LVN.
-			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
+			public double vwap;         // slot 1 snapshot (0 when Disabled / not yet valid)
 			public double vwap2;        // slot 2 snapshot
 			public double vwap3;        // slot 3 snapshot
-			public double vwap1Sigma;    // slot 1 σ from the running window (0 when unused)
+			public double vwapSigma;    // slot 1 σ from the running window (0 when unused)
 			public double vwap2Sigma;
 			public double vwap3Sigma;
-			public int vwap1Stream;      // chart data stream slot 1 was built from (0 = unused)
+			public int vwapStream;      // chart data stream slot 1 was built from (0 = unused)
 			public int vwap2Stream;
 			public int vwap3Stream;
 			public readonly List<Node> hvns = new List<Node>(); // List of high volume nodes for a volume profile.
 			public readonly List<Node> lvns = new List<Node>(); // List of low volume nodes for a volume profile.
+
+			/// <summary>
+			/// Every ILevel on this profile with raw Total / Ask / Bid volume and
+			/// empirical percentiles vs every ILevel on every IProfile on this
+			/// extra's data stream only.
+			/// </summary>
+			public readonly List<LevelVol> levels = new List<LevelVol>();
+			public double maxTotalPercentile;
+			public double maxAskPercentile;
+			public double maxBidPercentile;
+
+			public bool HasExceptionalVolume(double minPercentile)
+			{
+				if (minPercentile <= 0) minPercentile = DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE;
+				return maxTotalPercentile >= minPercentile
+					|| maxAskPercentile >= minPercentile
+					|| maxBidPercentile >= minPercentile;
+			}
+
+			public bool HasExceptionalVolume()
+			{
+				return HasExceptionalVolume(DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE);
+			}
+
+			public List<LevelVol> ExceptionalLevels(double minPercentile)
+			{
+				if (minPercentile <= 0) minPercentile = DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE;
+				List<LevelVol> hit = new List<LevelVol>();
+				for (int i = 0; i < levels.Count; i++)
+				{
+					LevelVol lv = levels[i];
+					if (lv.totalPercentile >= minPercentile
+						|| lv.askPercentile >= minPercentile
+						|| lv.bidPercentile >= minPercentile)
+						hit.Add(lv);
+				}
+				return hit;
+			}
+
+			public LevelVol PeakTotalLevel()
+			{
+				LevelVol best = new LevelVol();
+				for (int i = 0; i < levels.Count; i++)
+				{
+					if (levels[i].totalPercentile > best.totalPercentile)
+						best = levels[i];
+				}
+				return best;
+			}
 		};
+
+		/// <summary>
+		/// One ILevel snapshot plus empirical volume percentiles.
+		/// Percentiles are the CDF of this level vs every ILevel on every IProfile
+		/// on the same data stream only. 1.0 = largest volume on that stream.
+		/// </summary>
+		public struct LevelVol
+		{
+			public double price;
+			public double total;                 // same as ILevel.TotalValue (ask+bid fallback)
+			public double ask;                   // same as ILevel.AskTradedValue
+			public double bid;                   // same as ILevel.BidTradedValue
+			public double totalPercentile;
+			public double askPercentile;
+			public double bidPercentile;
+
+			public bool IsExceptional(double minPercentile)
+			{
+				if (minPercentile <= 0) minPercentile = DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE;
+				return totalPercentile >= minPercentile
+					|| askPercentile >= minPercentile
+					|| bidPercentile >= minPercentile;
+			}
+		}
+
+		/// <summary>
+		/// Level kind that can vote for a confluence zone.
+		/// </summary>
+		public enum EConfluenceKind
+		{
+			Poc = 0,
+			Vah = 1,
+			Val = 2,
+			Hvn = 3,
+			ProfileVwap = 4,
+			Vwap = 5,
+			Vwap2 = 6,
+			Vwap3 = 7
+		}
+
+		/// <summary>
+		/// Trade direction used when asking confluence zones for targets.
+		/// Bullish = magnets above price. Bearish = magnets below price.
+		/// </summary>
+		public enum EVpDirection
+		{
+			Bearish = -1,
+			Bullish = 1
+		}
+
+		/// <summary>
+		/// One contributing level inside a confluence zone.
+		/// </summary>
+		public struct ConfluenceHit
+		{
+			public int dataStream;
+			public int profileStartBar;   // -1 when the hit is a live VWAP slot, not a profile
+			public int profileAge;        // 0 = most recent profile on that stream
+			public EConfluenceKind kind;
+			public double price;
+			public double weight;          // after stream weight, kind weight, and age decay
+		}
+
+		/// <summary>
+		/// Cluster of aligned VAL / VAH / HVN / POC / VWAP levels.
+		/// Z-score is computed across the current bar's zone raw scores
+		/// (stream weights already applied).
+		/// </summary>
+		public class ConfluenceZone
+		{
+			public double low;
+			public double high;
+			public double center;          // weight-weighted mean of hit prices
+			public double rawScore;
+			public double zScore;
+			public int hitCount;
+			public int streamCount;
+			public int profileCount;
+			public readonly List<ConfluenceHit> hits = new List<ConfluenceHit>();
+
+			public bool HasStream(int dataStream)
+			{
+				for (int i = 0; i < hits.Count; i++)
+					if (hits[i].dataStream == dataStream) return true;
+				return false;
+			}
+
+			public bool HasKind(EConfluenceKind kind)
+			{
+				for (int i = 0; i < hits.Count; i++)
+					if (hits[i].kind == kind) return true;
+				return false;
+			}
+		}
+
+		/// <summary>
+		/// A confluence zone selected as a high-probability target beyond a reference price
+		/// in a given direction. price is the magnet (zone center); touch is the first
+		/// edge price would meet (zone.low on a long, zone.high on a short).
+		/// </summary>
+		public class ConfluenceTarget
+		{
+			public double price;
+			public double touch;
+			public double distance;
+			public EVpDirection direction;
+			public ConfluenceZone zone;
+		}
+
+		/// <summary>
+		/// Working row used only while building confluence zones.
+		/// One row per contributing level (POC / VAH / VAL / HVN / profile VWAP / live VWAP)
+		/// after stream weight and same-stream age decay have been applied.
+		/// Sorted by price and clustered within ConfluenceAlignTicks; each finished
+		/// cluster becomes a public ConfluenceZone with ConfluenceHit copies of these rows.
+		/// Not persisted and not part of the subclass API.
+		/// </summary>
+		private struct ConfluenceAnchor
+		{
+			public int dataStream;
+			public int profileStartBar;
+			public int profileAge;
+			public EConfluenceKind kind;
+			public double price;
+			public double weight;
+		}
 
 		/// <summary>
 		/// Internal storage class to associate a specific data stream with it's profiles collection and
@@ -307,11 +490,36 @@ namespace PowerLanguage.Strategy
 		[Input] public string Vwap3FromDate { get; set; }   // Used when Vwap3Type = AdaptiveFromDate.
 		[Input] public int Vwap3DataStream { get; set; }    // Chart data stream slot 3 reads. 1 = Data1, 2 = Data2, …
 
+		// Confluence configuration. Not [Input] — subclasses decide what to expose.
+		// Stream index 0 (or less) disables that slot. Weight 0 drops the stream from scoring.
+		public int ConfluenceDataStream1 { get; set; }
+		public int ConfluenceDataStream2 { get; set; }
+		public int ConfluenceDataStream3 { get; set; }
+		public double ConfluenceWeight1 { get; set; }
+		public double ConfluenceWeight2 { get; set; }
+		public double ConfluenceWeight3 { get; set; }
+		public int ConfluenceLookbackProfiles { get; set; }   // succeeding VPs per stream, live included
+		public int ConfluenceAlignTicks { get; set; }        // cluster width in ticks
+		public int ConfluenceMinHits { get; set; }           // minimum aligned levels to keep a zone
+		public int ConfluenceTopCount { get; set; }          // default N for GetTopConfluenceZones()
+		public double ConfluenceSameStreamDecay { get; set; } // age 0 = 1, age 1 = decay, age 2 = decay^2
+		public double ConfluenceCrossStreamBonus { get; set; } // extra raw-score multiplier per extra stream
+		public bool ConfluenceIncludeHvns { get; set; }
+		public bool ConfluenceIncludeVwapSlots { get; set; }
+		public bool ConfluenceIncludeProfileVwap { get; set; }
+		public double ConfluenceTargetMinZScore { get; set; }  // drop zones below this z-score
+		public int ConfluenceTargetClearTicks { get; set; }    // zone must clear the reference price by this many ticks
+		public int ConfluenceTargetCount { get; set; }         // default N for GetConfluenceTargets()
+
 		//attribute
 		private Dictionary<int, StreamPack> m_streams;  /// Stream packs by data stream index.
 		private VwapEngine m_vwap1;
 		private VwapEngine m_vwap2;
 		private VwapEngine m_vwap3;
+		private readonly List<ConfluenceZone> m_confluenceZones = new List<ConfluenceZone>();
+		private bool m_confluenceDirty;
+		private int m_confluenceBuiltBar;
+		private bool m_volumePctDirty;
 
 		//interface methods
 		public _VolumeProfileBase(object _ctx) : base(_ctx) { }
@@ -337,6 +545,28 @@ namespace PowerLanguage.Strategy
 			Vwap3FromDate = "";
 			Vwap3DataStream = 1;
 
+			ConfluenceDataStream1 = 1;
+			ConfluenceDataStream2 = 2;
+			ConfluenceDataStream3 = 3;
+			ConfluenceWeight1 = 1.00;   // execution TF
+			ConfluenceWeight2 = 1.25;   // higher TF carries more by default
+			ConfluenceWeight3 = 1.50;
+			ConfluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
+			ConfluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
+			ConfluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
+			ConfluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
+			ConfluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
+			ConfluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
+			ConfluenceIncludeHvns = true;
+			ConfluenceIncludeVwapSlots = true;
+			ConfluenceIncludeProfileVwap = true;
+			ConfluenceTargetMinZScore = 0;
+			ConfluenceTargetClearTicks = DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS;
+			ConfluenceTargetCount = DEFAULT_CONFLUENCE_TOP_COUNT;
+			m_confluenceDirty = true;
+			m_confluenceBuiltBar = int.MinValue;
+			m_volumePctDirty = true;
+
 			m_streams = new Dictionary<int, StreamPack>();
 			m_vwap1 = new VwapEngine { label = "VWAP1", lastInSession = new VariableSeries<bool>(this) };
 			m_vwap2 = new VwapEngine { label = "VWAP2", lastInSession = new VariableSeries<bool>(this) };
@@ -360,6 +590,10 @@ namespace PowerLanguage.Strategy
 			configureVwap(m_vwap1, VwapType, VwapLength, VwapFromDate, VwapDataStream, "VwapFromDate", "VwapDataStream");
 			configureVwap(m_vwap2, Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
 			configureVwap(m_vwap3, Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
+			m_confluenceDirty = true;
+			m_confluenceBuiltBar = int.MinValue;
+			m_confluenceZones.Clear();
+			m_volumePctDirty = true;
 		}
 
 		protected override void CalcBar()
@@ -369,6 +603,8 @@ namespace PowerLanguage.Strategy
 			stepVwap(m_vwap2);
 			stepVwap(m_vwap3);
 			stampCurrentExtras();
+			m_confluenceDirty = true;
+			refreshVolumePercentiles();
 		}
 
 		/// <summary>
@@ -409,6 +645,7 @@ namespace PowerLanguage.Strategy
 				if (streamPack.extra.TryGetValue(key, out VpExtra extra))
 				{
 					stampExtra(extra);
+					refreshVolumePercentiles();
 					return extra;
 				}
 				trace(ETraceLevel.Verbose, $"Failed to find extra entry for data stream {datastream} for bar {barIndex}.");
@@ -416,20 +653,183 @@ namespace PowerLanguage.Strategy
 			return null;
 		}
 
+		/// <summary>
+		/// True when the volume profile that owns barIndex on Data1 is a newly
+		/// forming profile — the previous bar belonged to a different (now completed) profile.
+		/// barIndex uses the same ItemForBar convention as ExtraVolumeProfileForBar.
+		/// </summary>
+		public bool IsNewVolumeProfile(int barIndex)
+		{
+			return IsNewVolumeProfile(1, barIndex);
+		}
+
+		/// <summary>
+		/// True when the volume profile that owns barIndex on the given data stream
+		/// is a newly forming profile — the previous bar belonged to a different
+		/// (now completed) profile.
+		///
+		/// Detection uses IProfile.BarsInterval.First on ItemForBar(barIndex) vs
+		/// ItemForBar(barIndex - 1). Do not use the full VpKey here: endBar walks
+		/// forward while a profile is still developing, so the key changes every bar.
+		///
+		/// barIndex must use the same ItemForBar convention as ExtraVolumeProfileForBar
+		/// (typically the stream's CurrentBar, or FullSymbolData.Current - 1 — pick one
+		/// and stay consistent). Session / week / every-N-bar windows return true on
+		/// the first bar of the new window. Every-1-bar VP returns true on every bar.
+		/// A single composite / last-only profile returns true only on the first bar
+		/// that has a profile (or when there is no previous profile to compare).
+		/// </summary>
+		public bool IsNewVolumeProfile(int datastream, int barIndex)
+		{
+			if (barIndex < 0) return false;
+			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
+			{
+				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no volume profile collection on data stream {datastream}.");
+				return false;
+			}
+
+			IProfile vp = itemForBar(streamPack, datastream, barIndex);
+			if (vp == null || vp.Empty)
+			{
+				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no profile on data stream {datastream} for bar {barIndex}.");
+				return false;
+			}
+
+			int start = profileStartBar(vp);
+			if (start >= 0 && start == barIndex)
+				return true;
+
+			if (barIndex == 0)
+				return true;
+
+			IProfile prev = itemForBar(streamPack, datastream, barIndex - 1);
+			if (prev == null || prev.Empty)
+				return true;
+
+			int prevStart = profileStartBar(prev);
+			if (start >= 0 && prevStart >= 0)
+				return start != prevStart;
+
+			return !object.ReferenceEquals(vp, prev);
+		}
+
+		/// <summary>
+		/// All confluence zones on this bar, sorted by price (low → high).
+		/// Rebuilds when the bar or the profile collection has changed.
+		/// </summary>
+		public List<ConfluenceZone> GetConfluenceZones()
+		{
+			ensureConfluenceZones();
+			List<ConfluenceZone> copy = new List<ConfluenceZone>(m_confluenceZones);
+			copy.Sort((a, b) => a.center.CompareTo(b.center));
+			return copy;
+		}
+
+		/// <summary>
+		/// Highest-ranked confluence zones using ConfluenceTopCount.
+		/// Sorted by z-score, then raw score, then hit count.
+		/// </summary>
+		public List<ConfluenceZone> GetTopConfluenceZones()
+		{
+			return GetTopConfluenceZones(ConfluenceTopCount);
+		}
+
+		/// <summary>
+		/// Highest-ranked confluence zones, at most <paramref name="count"/>.
+		/// Sorted by z-score, then raw score, then hit count.
+		/// </summary>
+		public List<ConfluenceZone> GetTopConfluenceZones(int count)
+		{
+			ensureConfluenceZones();
+			if (count <= 0 || m_confluenceZones.Count == 0)
+				return new List<ConfluenceZone>();
+			List<ConfluenceZone> copy = new List<ConfluenceZone>(m_confluenceZones);
+			copy.Sort(compareZonesByRank);
+			if (copy.Count > count)
+				copy.RemoveRange(count, copy.Count - count);
+			return copy;
+		}
+
+		/// <summary>
+		/// High-probability confluence targets beyond <paramref name="price"/>
+		/// in <paramref name="direction"/>. Uses ConfluenceTargetCount.
+		/// Sorted by z-score, then raw score, then nearest first.
+		/// </summary>
+		public List<ConfluenceTarget> GetConfluenceTargets(double price, EVpDirection direction)
+		{
+			return GetConfluenceTargets(price, direction, ConfluenceTargetCount);
+		}
+
+		/// <summary>
+		/// High-probability confluence targets beyond <paramref name="price"/>
+		/// in <paramref name="direction"/>, at most <paramref name="count"/>.
+		/// Bullish keeps zones fully above price; bearish keeps zones fully below.
+		/// Zones the price is already inside are skipped.
+		/// </summary>
+		public List<ConfluenceTarget> GetConfluenceTargets(double price, EVpDirection direction, int count)
+		{
+			List<ConfluenceTarget> all = collectConfluenceTargets(price, direction);
+			if (count <= 0 || all.Count == 0)
+				return count <= 0 ? new List<ConfluenceTarget>() : all;
+			if (all.Count > count)
+				all.RemoveRange(count, all.Count - count);
+			return all;
+		}
+
+		/// <summary>
+		/// Same filter as GetConfluenceTargets but returns the zones themselves,
+		/// still ordered as high-probability targets in that direction.
+		/// </summary>
+		public List<ConfluenceZone> GetConfluenceTargetZones(double price, EVpDirection direction)
+		{
+			return GetConfluenceTargetZones(price, direction, ConfluenceTargetCount);
+		}
+
+		/// <summary>
+		/// Same filter as GetConfluenceTargets but returns the zones themselves.
+		/// </summary>
+		public List<ConfluenceZone> GetConfluenceTargetZones(double price, EVpDirection direction, int count)
+		{
+			List<ConfluenceTarget> targets = GetConfluenceTargets(price, direction, count);
+			List<ConfluenceZone> zones = new List<ConfluenceZone>(targets.Count);
+			for (int i = 0; i < targets.Count; i++)
+				if (targets[i].zone != null) zones.Add(targets[i].zone);
+			return zones;
+		}
+
+		/// <summary>
+		/// Force a rebuild on the next GetConfluenceZones / GetTopConfluenceZones call.
+		/// </summary>
+		public void InvalidateConfluenceZones()
+		{
+			m_confluenceDirty = true;
+		}
+
+		/// <summary>
+		/// Recompute ILevel volume percentiles per data stream
+		/// (each stream ranked only against its own profiles).
+		/// Called from CalcBar; also safe to call after a manual profile refresh.
+		/// </summary>
+		public void RefreshVolumePercentiles()
+		{
+			m_volumePctDirty = true;
+			refreshVolumePercentiles();
+		}
+
 		/// <summary>Slot 1 current VWAP, or NaN when Disabled / not valid yet.</summary>
-		public double CurrentVwap1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : double.NaN; } }
+		public double CurrentVwap { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : double.NaN; } }
 		/// <summary>Slot 2 current VWAP, or NaN when Disabled / not valid yet.</summary>
 		public double CurrentVwap2 { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : double.NaN; } }
 		/// <summary>Slot 3 current VWAP, or NaN when Disabled / not valid yet.</summary>
 		public double CurrentVwap3 { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : double.NaN; } }
-		public double CurrentVwapSigma1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
+		public double CurrentVwapSigma { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
 		public double CurrentVwap2Sigma { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : double.NaN; } }
 		public double CurrentVwap3Sigma { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : double.NaN; } }
-		public bool VwapActive1 { get { return m_vwap1 != null && m_vwap1.type != EVwapType.Disabled && m_vwap1.valid; } }
+		public bool VwapActive { get { return m_vwap1 != null && m_vwap1.type != EVwapType.Disabled && m_vwap1.valid; } }
 		public bool Vwap2Active { get { return m_vwap2 != null && m_vwap2.type != EVwapType.Disabled && m_vwap2.valid; } }
 		public bool Vwap3Active { get { return m_vwap3 != null && m_vwap3.type != EVwapType.Disabled && m_vwap3.valid; } }
 		/// <summary>Resolved chart data stream for slot 1 (1 = Data1). 0 if unused.</summary>
-		public int CurrentVwapStream1 { get { return slotStream(m_vwap1); } }
+		public int CurrentVwapStream { get { return slotStream(m_vwap1); } }
 		public int CurrentVwap2Stream { get { return slotStream(m_vwap2); } }
 		public int CurrentVwap3Stream { get { return slotStream(m_vwap3); } }
 
@@ -496,7 +896,6 @@ namespace PowerLanguage.Strategy
 				if (eng != null) { eng.valid = false; eng.value = double.NaN; eng.sigma = double.NaN; }
 				return;
 			}
-
 			IInstrument bars = barsOf(eng.datastream);
 			if (bars == null)
 			{
@@ -551,13 +950,13 @@ namespace PowerLanguage.Strategy
 		private void stampExtra(VpExtra extra)
 		{
 			if (extra == null) return;
-			extra.vwap1 = m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : 0;
+			extra.vwap = m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : 0;
 			extra.vwap2 = m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : 0;
 			extra.vwap3 = m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : 0;
-			extra.vwap1Sigma = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
+			extra.vwapSigma = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
 			extra.vwap2Sigma = m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : 0;
 			extra.vwap3Sigma = m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : 0;
-			extra.vwap1Stream = slotStream(m_vwap1);
+			extra.vwapStream = slotStream(m_vwap1);
 			extra.vwap2Stream = slotStream(m_vwap2);
 			extra.vwap3Stream = slotStream(m_vwap3);
 		}
@@ -626,6 +1025,345 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
+		{
+			if (streamPack == null || streamPack.pack == null || barIndex < 0) return null;
+			try
+			{
+				return streamPack.pack.ItemForBar(barIndex);
+			}
+			catch (Exception e)
+			{
+				trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {barIndex} - {e.Message}");
+				return null;
+			}
+		}
+
+		private static int profileStartBar(IProfile vp)
+		{
+			if (vp == null) return -1;
+			try
+			{
+				return vp.BarsInterval.First;
+			}
+			catch
+			{
+				return -1;
+			}
+		}
+
+		private List<ConfluenceTarget> collectConfluenceTargets(double price, EVpDirection direction)
+		{
+			ensureConfluenceZones();
+			List<ConfluenceTarget> list = new List<ConfluenceTarget>();
+			if (price <= 0 || m_confluenceZones.Count == 0) return list;
+
+			int dir = direction == EVpDirection.Bearish ? -1 : 1;
+			int clearTicks = ConfluenceTargetClearTicks < 0 ? 0 : ConfluenceTargetClearTicks;
+			double clear = clearTicks * tickSize();
+			if (clear < 0) clear = 0;
+			double minZ = ConfluenceTargetMinZScore;
+
+			for (int i = 0; i < m_confluenceZones.Count; i++)
+			{
+				ConfluenceZone zone = m_confluenceZones[i];
+				if (zone == null || zone.center <= 0) continue;
+				if (zone.zScore < minZ) continue;
+				if (!zoneClearsPrice(zone, price, dir, clear)) continue;
+
+				double touch = dir > 0 ? zone.low : zone.high;
+				if (touch <= 0) touch = zone.center;
+				list.Add(new ConfluenceTarget
+				{
+					price = zone.center,
+					touch = touch,
+					distance = Math.Abs(zone.center - price),
+					direction = dir > 0 ? EVpDirection.Bullish : EVpDirection.Bearish,
+					zone = zone
+				});
+			}
+			list.Sort(compareTargetsByRank);
+			return list;
+		}
+
+		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, double clear)
+		{
+			if (zone == null) return false;
+			if (dir > 0)
+				return zone.low >= price + clear;
+			return zone.high <= price - clear;
+		}
+
+		private static int compareTargetsByRank(ConfluenceTarget a, ConfluenceTarget b)
+		{
+			if (a == null && b == null) return 0;
+			if (a == null) return 1;
+			if (b == null) return -1;
+			ConfluenceZone za = a.zone;
+			ConfluenceZone zb = b.zone;
+			int z = compareZonesByRank(za ?? new ConfluenceZone(), zb ?? new ConfluenceZone());
+			if (z != 0) return z;
+			return a.distance.CompareTo(b.distance);
+		}
+
+		private static int compareZonesByRank(ConfluenceZone a, ConfluenceZone b)
+		{
+			if (a == null && b == null) return 0;
+			if (a == null) return 1;
+			if (b == null) return -1;
+			int z = b.zScore.CompareTo(a.zScore);
+			if (z != 0) return z;
+			int r = b.rawScore.CompareTo(a.rawScore);
+			if (r != 0) return r;
+			return b.hitCount.CompareTo(a.hitCount);
+		}
+
+		private void ensureConfluenceZones()
+		{
+			int bar = 0;
+			try { bar = Bars.CurrentBar; } catch { }
+			if (!m_confluenceDirty && m_confluenceBuiltBar == bar) return;
+			rebuildConfluenceZones();
+			m_confluenceDirty = false;
+			m_confluenceBuiltBar = bar;
+		}
+
+		private void rebuildConfluenceZones()
+		{
+			m_confluenceZones.Clear();
+			List<ConfluenceAnchor> anchors = new List<ConfluenceAnchor>(64);
+			collectConfluenceAnchors(anchors);
+			if (anchors.Count == 0) return;
+
+			double tol = confluenceTolerance();
+			anchors.Sort((a, b) => a.price.CompareTo(b.price));
+
+			List<ConfluenceAnchor> cluster = new List<ConfluenceAnchor>();
+			for (int i = 0; i < anchors.Count; i++)
+			{
+				if (cluster.Count == 0 || anchors[i].price - cluster[cluster.Count - 1].price <= tol)
+				{
+					cluster.Add(anchors[i]);
+					continue;
+				}
+				addConfluenceZone(cluster);
+				cluster.Clear();
+				cluster.Add(anchors[i]);
+			}
+			addConfluenceZone(cluster);
+			applyConfluenceZScores();
+		}
+
+		private void collectConfluenceAnchors(List<ConfluenceAnchor> anchors)
+		{
+			collectStreamAnchors(ConfluenceDataStream1, ConfluenceWeight1, anchors);
+			collectStreamAnchors(ConfluenceDataStream2, ConfluenceWeight2, anchors);
+			collectStreamAnchors(ConfluenceDataStream3, ConfluenceWeight3, anchors);
+			if (ConfluenceIncludeVwapSlots)
+				collectVwapSlotAnchors(anchors);
+		}
+
+		private void collectStreamAnchors(int datastream, double streamWeight, List<ConfluenceAnchor> anchors)
+		{
+			if (datastream < 1 || streamWeight <= 0) return;
+			if (!m_streams.TryGetValue(datastream, out StreamPack sp) || sp.pack == null) return;
+
+			List<IProfile> profiles = listedProfiles(sp);
+			if (profiles.Count == 0) return;
+
+			int take = ConfluenceLookbackProfiles < 1 ? DEFAULT_CONFLUENCE_LOOKBACK : ConfluenceLookbackProfiles;
+			int from = Math.Max(0, profiles.Count - take);
+			double decay = ConfluenceSameStreamDecay;
+			if (decay < 0) decay = 0;
+			if (decay > 1) decay = 1;
+
+			for (int i = from; i < profiles.Count; i++)
+			{
+				IProfile vp = profiles[i];
+				ensureExtra(sp, vp);
+				VpKey key = new VpKey(datastream, vp);
+				if (!sp.extra.TryGetValue(key, out VpExtra extra) || extra == null) continue;
+
+				int age = profiles.Count - 1 - i;   // 0 = most recent on this stream
+				double ageW = Math.Pow(decay, age);
+				double w = streamWeight * ageW;
+				int start = profileStartBar(vp);
+				addProfileAnchors(anchors, extra, datastream, start, age, w);
+			}
+		}
+
+		private static List<IProfile> listedProfiles(StreamPack sp)
+		{
+			List<IProfile> list = new List<IProfile>();
+			if (sp == null || sp.pack == null || sp.pack.Items == null) return list;
+			try
+			{
+				foreach (IProfile vp in sp.pack.Items)
+				{
+					if (vp == null || vp.Empty) continue;
+					list.Add(vp);
+				}
+			}
+			catch { }
+			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
+			return list;
+		}
+
+		private void addProfileAnchors(List<ConfluenceAnchor> anchors, VpExtra extra, int datastream, int startBar, int age, double streamAgeWeight)
+		{
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * 1.00);
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * 0.90);
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * 0.90);
+			if (ConfluenceIncludeProfileVwap)
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.ProfileVwap, extra.profileVwap, streamAgeWeight * 0.80);
+
+			if (!ConfluenceIncludeHvns || extra.hvns == null) return;
+			for (int i = 0; i < extra.hvns.Count; i++)
+			{
+				Node n = extra.hvns[i];
+				if (n.isPoc) continue;   // already counted as POC
+				double hs = n.strength > 0.35 ? n.strength : 0.35;
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Hvn, n.peak, streamAgeWeight * 0.85 * hs);
+			}
+		}
+
+		private void collectVwapSlotAnchors(List<ConfluenceAnchor> anchors)
+		{
+			addSlotAnchor(anchors, m_vwap1, EConfluenceKind.Vwap);
+			addSlotAnchor(anchors, m_vwap2, EConfluenceKind.Vwap2);
+			addSlotAnchor(anchors, m_vwap3, EConfluenceKind.Vwap3);
+		}
+
+		private void addSlotAnchor(List<ConfluenceAnchor> anchors, VwapEngine eng, EConfluenceKind kind)
+		{
+			if (eng == null || eng.type == EVwapType.Disabled || !eng.valid || eng.value <= 0) return;
+			int ds = eng.datastream;
+			double w = streamWeightFor(ds);
+			if (w <= 0) return;
+			addAnchor(anchors, ds, -1, 0, kind, eng.value, w * 0.85);
+		}
+
+		private double streamWeightFor(int datastream)
+		{
+			if (datastream < 1) return 0;
+			if (datastream == ConfluenceDataStream1) return ConfluenceWeight1;
+			if (datastream == ConfluenceDataStream2) return ConfluenceWeight2;
+			if (datastream == ConfluenceDataStream3) return ConfluenceWeight3;
+			return 0;   // slot VWAP only votes when its stream is one of the three confluence streams
+		}
+
+		private static void addAnchor(List<ConfluenceAnchor> anchors, int datastream, int startBar, int age, EConfluenceKind kind, double price, double weight)
+		{
+			if (anchors == null || price <= 0 || weight <= 0) return;
+			anchors.Add(new ConfluenceAnchor
+			{
+				dataStream = datastream,
+				profileStartBar = startBar,
+				profileAge = age,
+				kind = kind,
+				price = price,
+				weight = weight
+			});
+		}
+
+		private void addConfluenceZone(List<ConfluenceAnchor> cluster)
+		{
+			if (cluster == null || cluster.Count == 0) return;
+			int minHits = ConfluenceMinHits < 1 ? 1 : ConfluenceMinHits;
+			if (cluster.Count < minHits) return;
+
+			ConfluenceZone zone = new ConfluenceZone();
+			double wSum = 0;
+			double pw = 0;
+			double lo = cluster[0].price;
+			double hi = cluster[0].price;
+			HashSet<int> streams = new HashSet<int>();
+			HashSet<long> profiles = new HashSet<long>();
+
+			for (int i = 0; i < cluster.Count; i++)
+			{
+				ConfluenceAnchor a = cluster[i];
+				if (a.price < lo) lo = a.price;
+				if (a.price > hi) hi = a.price;
+				wSum += a.weight;
+				pw += a.price * a.weight;
+				streams.Add(a.dataStream);
+				if (a.profileStartBar >= 0)
+					profiles.Add(((long)a.dataStream << 32) ^ (uint)a.profileStartBar);
+				zone.hits.Add(new ConfluenceHit
+				{
+					dataStream = a.dataStream,
+					profileStartBar = a.profileStartBar,
+					profileAge = a.profileAge,
+					kind = a.kind,
+					price = a.price,
+					weight = a.weight
+				});
+			}
+
+			zone.low = lo;
+			zone.high = hi;
+			zone.center = wSum > 0 ? pw / wSum : (lo + hi) * 0.5;
+			zone.hitCount = zone.hits.Count;
+			zone.streamCount = streams.Count;
+			zone.profileCount = profiles.Count;
+			double bonus = ConfluenceCrossStreamBonus;
+			if (bonus < 0) bonus = 0;
+			zone.rawScore = wSum * (1.0 + bonus * Math.Max(0, zone.streamCount - 1));
+			m_confluenceZones.Add(zone);
+		}
+
+		private void applyConfluenceZScores()
+		{
+			int n = m_confluenceZones.Count;
+			if (n == 0) return;
+			if (n == 1)
+			{
+				m_confluenceZones[0].zScore = 0;
+				return;
+			}
+			double mean = 0;
+			for (int i = 0; i < n; i++)
+				mean += m_confluenceZones[i].rawScore;
+			mean /= n;
+			double var = 0;
+			for (int i = 0; i < n; i++)
+			{
+				double d = m_confluenceZones[i].rawScore - mean;
+				var += d * d;
+			}
+			double stdev = Math.Sqrt(var / n);
+			if (stdev <= 0)
+			{
+				for (int i = 0; i < n; i++)
+					m_confluenceZones[i].zScore = 0;
+				return;
+			}
+			for (int i = 0; i < n; i++)
+				m_confluenceZones[i].zScore = (m_confluenceZones[i].rawScore - mean) / stdev;
+		}
+
+		private double confluenceTolerance()
+		{
+			int ticks = ConfluenceAlignTicks < 1 ? DEFAULT_CONFLUENCE_ALIGN_TICKS : ConfluenceAlignTicks;
+			double tick = tickSize();
+			if (tick <= 0) tick = 0.01;
+			return ticks * tick;
+		}
+
+		private double tickSize()
+		{
+			try
+			{
+				double mm = Bars.Info.MinMove;
+				double ps = Bars.Info.PriceScale;
+				if (ps != 0) return Math.Abs(mm / ps);
+				if (mm > 0) return mm;
+			}
+			catch { }
+			return 0.01;
+		}
+
 		private void hookStreams()
 		{
 			m_streams.Clear();
@@ -665,6 +1403,8 @@ namespace PowerLanguage.Strategy
 					ensureExtra(sp, vp);
 			}
 			catch { }
+			m_confluenceDirty = true;
+			m_volumePctDirty = true;
 		}
 
 		private void ensureExtra(StreamPack sp, IProfile vp)
@@ -677,21 +1417,28 @@ namespace PowerLanguage.Strategy
 				extra = new VpExtra();
 				sp.extra[key] = extra;
 			}
+			extra.dataStream = sp.datastream;
 			fillNodes(vp, extra);
 			stampExtra(extra);
+			m_volumePctDirty = true;
 		}
 
 		private void fillNodes(IProfile vp, VpExtra extra)
 		{
 			extra.hvns.Clear();
 			extra.lvns.Clear();
+			extra.levels.Clear();
 			extra.poc = 0;
 			extra.vah = 0;
 			extra.val = 0;
 			extra.pocVol = 0;
 			extra.profileVwap = 0;
+			extra.maxTotalPercentile = 0;
+			extra.maxAskPercentile = 0;
+			extra.maxBidPercentile = 0;
 			if (vp == null || vp.Values == null) return;
-			List<Row> rows = readRows(vp);
+			readLevels(vp, extra.levels);
+			List<Row> rows = rowsFromLevels(extra.levels);
 			if (rows.Count < 3) return;
 			extra.poc = levelPrice(vp.POC);
 			extra.vah = vaExtreme(vp, true);
@@ -762,18 +1509,138 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private List<Row> readRows(IProfile vp)
+		private static void readLevels(IProfile vp, List<LevelVol> dest)
 		{
-			var rows = new List<Row>();
+			if (vp == null || vp.Values == null || dest == null) return;
 			foreach (ILevel lvl in vp.Values)
 			{
 				if (lvl == null || lvl.Price == null) continue;
-				double vol = (double)(lvl.AskTradedValue + lvl.BidTradedValue);
-				if (vol <= 0) continue;
-				rows.Add(new Row { price = lvl.Price.Dbl, volume = vol });
+				double ask = 0, bid = 0, total = 0;
+				try { ask = (double)lvl.AskTradedValue; } catch { }
+				try { bid = (double)lvl.BidTradedValue; } catch { }
+				try { total = (double)lvl.TotalValue; } catch { }
+				if (total <= 0) total = ask + bid;
+				if (total <= 0 && ask <= 0 && bid <= 0) continue;
+				dest.Add(new LevelVol
+				{
+					price = lvl.Price.Dbl,
+					total = total,
+					ask = ask,
+					bid = bid
+				});
 			}
-			rows.Sort((x, y) => x.price.CompareTo(y.price));
+			dest.Sort((a, b) => a.price.CompareTo(b.price));
+		}
+
+		private static List<Row> rowsFromLevels(List<LevelVol> levels)
+		{
+			List<Row> rows = new List<Row>(levels != null ? levels.Count : 0);
+			if (levels == null) return rows;
+			for (int i = 0; i < levels.Count; i++)
+			{
+				if (levels[i].total <= 0) continue;
+				rows.Add(new Row { price = levels[i].price, volume = levels[i].total });
+			}
 			return rows;
+		}
+
+		private void refreshVolumePercentiles()
+		{
+			if (!m_volumePctDirty) return;
+			m_volumePctDirty = false;
+
+			foreach (var kv in m_streams)
+			{
+				StreamPack sp = kv.Value;
+				if (sp == null || sp.pack == null || sp.pack.Items == null) continue;
+				List<VpExtra> streamExtras = new List<VpExtra>();
+				try
+				{
+					foreach (IProfile vp in sp.pack.Items)
+					{
+						if (vp == null || vp.Empty) continue;
+						VpKey key = new VpKey(sp.datastream, vp);
+						VpExtra extra;
+						if (!sp.extra.TryGetValue(key, out extra) || extra == null || extra.levels.Count == 0)
+							continue;
+						streamExtras.Add(extra);
+					}
+				}
+				catch { }
+				if (streamExtras.Count == 0) continue;
+
+				double[] sTotal, sAsk, sBid;
+				gatherLevelVolumes(streamExtras, out sTotal, out sAsk, out sBid);
+				Array.Sort(sTotal);
+				Array.Sort(sAsk);
+				Array.Sort(sBid);
+				for (int e = 0; e < streamExtras.Count; e++)
+					stampLevelPercentiles(streamExtras[e], sTotal, sAsk, sBid);
+			}
+		}
+
+		private static void gatherLevelVolumes(List<VpExtra> extras, out double[] totals, out double[] asks, out double[] bids)
+		{
+			int n = 0;
+			if (extras != null)
+			{
+				for (int i = 0; i < extras.Count; i++)
+					if (extras[i] != null) n += extras[i].levels.Count;
+			}
+			totals = new double[n];
+			asks = new double[n];
+			bids = new double[n];
+			int w = 0;
+			if (extras == null) return;
+			for (int i = 0; i < extras.Count; i++)
+			{
+				VpExtra extra = extras[i];
+				if (extra == null) continue;
+				for (int k = 0; k < extra.levels.Count; k++)
+				{
+					totals[w] = extra.levels[k].total;
+					asks[w] = extra.levels[k].ask;
+					bids[w] = extra.levels[k].bid;
+					w++;
+				}
+			}
+		}
+
+		private static void stampLevelPercentiles(VpExtra extra, double[] streamTotal, double[] streamAsk, double[] streamBid)
+		{
+			if (extra == null) return;
+			extra.maxTotalPercentile = 0;
+			extra.maxAskPercentile = 0;
+			extra.maxBidPercentile = 0;
+			for (int i = 0; i < extra.levels.Count; i++)
+			{
+				LevelVol lv = extra.levels[i];
+				lv.totalPercentile = rankPercentile(streamTotal, lv.total);
+				lv.askPercentile = rankPercentile(streamAsk, lv.ask);
+				lv.bidPercentile = rankPercentile(streamBid, lv.bid);
+				extra.levels[i] = lv;
+				if (lv.totalPercentile > extra.maxTotalPercentile) extra.maxTotalPercentile = lv.totalPercentile;
+				if (lv.askPercentile > extra.maxAskPercentile) extra.maxAskPercentile = lv.askPercentile;
+				if (lv.bidPercentile > extra.maxBidPercentile) extra.maxBidPercentile = lv.bidPercentile;
+			}
+		}
+
+		/// <summary>
+		/// Empirical CDF: fraction of samples with value &lt;= x. 0..1.
+		/// </summary>
+		private static double rankPercentile(double[] sortedAscending, double x)
+		{
+			if (sortedAscending == null || sortedAscending.Length == 0) return 0;
+			int n = sortedAscending.Length;
+			int lo = 0;
+			int hi = n;
+			while (lo < hi)
+			{
+				int mid = lo + ((hi - lo) / 2);
+				if (sortedAscending[mid] <= x) lo = mid + 1;
+				else hi = mid;
+			}
+			return lo / (double)n;
 		}
 
 		private static Node makeNode(List<Row> rows, double[] vols, int a, int b, int peak, double pocVol, bool isPoc)
