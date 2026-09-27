@@ -376,12 +376,9 @@ namespace PowerLanguage.Strategy
 
 			private void stepSession(IInstrument bars)
 			{
-				bool last = false;
-				try { last = bars.LastBarInSession; } catch { }
-				if (lastInSession != null) lastInSession.Value = last;
-
+				lastInSession.Value = bars.LastBarInSession;
 				bool first = bars.CurrentBar <= 1;
-				if (!first && lastInSession != null)
+				if (!first)
 				{
 					try { first = lastInSession[1]; }
 					catch { first = false; }
@@ -581,6 +578,8 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			if (ConfluenceMinHits < 1) throw new ArgumentException("ConfluenceMinHits must be 1 or greater.");
+			if (ConfluenceCrossStreamBonus < 0.0) throw new ArgumentException("ConfluenceCrossStreamBonus must be 0.0 or greater."); 
 			if (HvnPercentile < 0 || HvnPercentile > 1.0) throw new ArgumentException("HvnPercentile must be a percentage, 0 to 1.0.");
 			if (LvnPercentile < 0 || LvnPercentile > 1.0) throw new ArgumentException("LvnPercentile must be a percentage, 0 to 1.0.");
 			if (HvnPercentile < LvnPercentile) throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
@@ -876,7 +875,7 @@ namespace PowerLanguage.Strategy
 
 			if (stream < 1)
 				throw new ArgumentException(streamInputName + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
-			if (!IsExist(stream))
+			if (stream > MaxDataStream)
 				throw new ArgumentException(streamInputName + " = " + stream + " is not on this chart. Add that data stream or set " + eng.label + " Type to Disabled.");
 			eng.datastream = stream;
 
@@ -912,7 +911,7 @@ namespace PowerLanguage.Strategy
 			try
 			{
 				if (stream <= 1) return Bars;
-				if (!IsExist(stream)) return null;
+				if (stream < 1 || stream > MaxDataStream) return null;
 				return BarsOfData(stream);
 			}
 			catch
@@ -1195,7 +1194,11 @@ namespace PowerLanguage.Strategy
 		private static List<IProfile> listedProfiles(StreamPack sp)
 		{
 			List<IProfile> list = new List<IProfile>();
-			if (sp == null || sp.pack == null || sp.pack.Items == null) return list;
+			try
+			{
+				if (sp == null || sp.pack == null || sp.pack.Items == null) return list;
+			} catch { /* sp.pack.Items can be in an unusable state where it's not null but should be disposed */ }
+
 			try
 			{
 				foreach (IProfile vp in sp.pack.Items)
@@ -1269,8 +1272,7 @@ namespace PowerLanguage.Strategy
 		private void addConfluenceZone(List<ConfluenceAnchor> cluster)
 		{
 			if (cluster == null || cluster.Count == 0) return;
-			int minHits = ConfluenceMinHits < 1 ? 1 : ConfluenceMinHits;
-			if (cluster.Count < minHits) return;
+			if (cluster.Count < ConfluenceMinHits) return;
 
 			ConfluenceZone zone = new ConfluenceZone();
 			double wSum = 0;
@@ -1307,9 +1309,7 @@ namespace PowerLanguage.Strategy
 			zone.hitCount = zone.hits.Count;
 			zone.streamCount = streams.Count;
 			zone.profileCount = profiles.Count;
-			double bonus = ConfluenceCrossStreamBonus;
-			if (bonus < 0) bonus = 0;
-			zone.rawScore = wSum * (1.0 + bonus * Math.Max(0, zone.streamCount - 1));
+			zone.rawScore = wSum * (1.0 + ConfluenceCrossStreamBonus * Math.Max(0, zone.streamCount - 1));
 			m_confluenceZones.Add(zone);
 		}
 
@@ -1369,12 +1369,8 @@ namespace PowerLanguage.Strategy
 			m_streams.Clear();
 			for (int s = 1; s <= MaxDataStream; ++s)
 			{
-				if (!IsExist(s)) continue;
 				IProfilesCollection pack = getPack(s);
-				if (pack == null) continue;
-				bool visible = false;
-				try { visible = pack.Visible; } catch { }
-				if (!visible) continue;          // VP not enabled on this stream
+				if (pack == null || !pack.Visible) continue; // VP not enabled on this stream
 				StreamPack sp = new StreamPack(s);
 				sp.pack = pack;
 				sp.handler = delegate (bool full) { onVpChanged(sp, full); };
@@ -1552,7 +1548,9 @@ namespace PowerLanguage.Strategy
 			foreach (var kv in m_streams)
 			{
 				StreamPack sp = kv.Value;
-				if (sp == null || sp.pack == null || sp.pack.Items == null) continue;
+				try
+				{ if (sp == null || sp.pack == null || sp.pack.Items == null) continue; } 
+				catch { continue; /* sp.pack.Items can be in an unusable state where it's not null but should be disposed */ }
 				List<VpExtra> streamExtras = new List<VpExtra>();
 				try
 				{
