@@ -3,6 +3,7 @@ using PowerLanguage.Function;
 using PowerLanguage.VolumeProfile;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
@@ -103,7 +104,7 @@ namespace PowerLanguage.Strategy
 				if (p == null) return;
 				try
 				{
-					startBar = p.BarsInterval.First;
+					startBar = toChartBar(p.BarsInterval.First);
 				}
 				catch { }
 			}
@@ -337,6 +338,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		private sealed class VwapEngine
 		{
+			public _VolumeProfileBase parent;
 			public EVwapType type;
 			public int length;
 			public DateTime fromDate;
@@ -394,7 +396,12 @@ namespace PowerLanguage.Strategy
 					try { first = lastInSession[1]; }
 					catch { first = false; }
 				}
-				if (first) clearSums();
+
+				if (first)
+				{
+					parent.trace(ETraceLevel.Debug,$"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					clearSums();
+				}
 
 				add(priceAt(bars, 0), volume(bars, 0));
 				finish();
@@ -418,6 +425,7 @@ namespace PowerLanguage.Strategy
 
 				if (!m_seenAnchorBar)
 				{
+					parent.trace(ETraceLevel.Debug, $"Resetting anchored VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 					clearSums();
 					m_seenAnchorBar = true;
 				}
@@ -620,7 +628,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Returns the extra volume profile information computed for the given bar.
 		/// </summary>
-		/// <param name="barIndex">Index of the bar for which to get the extra volume profile information on data stream 1</param>
+		/// <param name="barIndex">1-based chart bar (Status Bar # / FullSymbolData.Current).</param>
 		/// <returns>Extra volume profile information or null if nothing found.</returns>
 		public VpExtra ExtraVolumeProfileForBar(int barIndex)
 		{
@@ -630,10 +638,12 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Returns the extra volume profile information computed for the given bar.
 		/// </summary>
-		/// <param name="barIndex">Index of the bar for which to get the extra volume profile information on data stream 1</param>
+		/// <param name="datastream">Chart data stream. 1 = Data1.</param>
+		/// <param name="barIndex">1-based chart bar (Status Bar # / FullSymbolData.Current).</param>
 		/// <returns>Extra volume profile information or null if nothing found.</returns>
 		public VpExtra ExtraVolumeProfileForBar(int datastream, int barIndex)
 		{
+			if (barIndex < 1) return null;
 			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 				return null;
 
@@ -655,34 +665,33 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// True when the volume profile that owns barIndex on Data1 is a newly
-		/// forming profile — the previous bar belonged to a different (now completed) profile.
-		/// barIndex uses the same ItemForBar convention as ExtraVolumeProfileForBar.
+		/// True when Data1's current chart bar is the first bar of a new volume profile.
+		/// Current bar is FullSymbolData.Current (1-based Status Bar #).
+		/// Do not pass Bars.CurrentBar — that is MaxBarsBack-relative.
 		/// </summary>
-		public bool IsNewVolumeProfile(int barIndex)
+		public bool IsNewVolumeProfile()
 		{
-			return IsNewVolumeProfile(1, barIndex);
+			return IsNewVolumeProfile(1, streamItemBarIndex(1));
 		}
 
 		/// <summary>
-		/// True when the volume profile that owns barIndex on the given data stream
-		/// is a newly forming profile — the previous bar belonged to a different
-		/// (now completed) profile.
+		/// True when the given data stream's current chart bar is the first bar of a new volume profile.
+		/// </summary>
+		public bool IsNewVolumeProfile(int datastream)
+		{
+			return IsNewVolumeProfile(datastream, streamItemBarIndex(datastream));
+		}
+
+		/// <summary>
+		/// True when the volume profile that owns <paramref name="barIndex"/> is newly
+		/// forming — the previous chart bar belonged to a different profile.
 		///
-		/// Detection uses IProfile.BarsInterval.First on ItemForBar(barIndex) vs
-		/// ItemForBar(barIndex - 1). Do not use the full VpKey here: endBar walks
-		/// forward while a profile is still developing, so the key changes every bar.
-		///
-		/// barIndex must use the same ItemForBar convention as ExtraVolumeProfileForBar
-		/// (typically the stream's CurrentBar, or FullSymbolData.Current - 1 — pick one
-		/// and stay consistent). Session / week / every-N-bar windows return true on
-		/// the first bar of the new window. Every-1-bar VP returns true on every bar.
-		/// A single composite / last-only profile returns true only on the first bar
-		/// that has a profile (or when there is no previous profile to compare).
+		/// <paramref name="barIndex"/> is 1-based (Status Bar # / FullSymbolData.Current).
+		/// Detection is start(this bar) vs start(previous bar) in that same 1-based space.
 		/// </summary>
 		public bool IsNewVolumeProfile(int datastream, int barIndex)
 		{
-			if (barIndex < 0) return false;
+			if (barIndex < 1) return false;
 			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 			{
 				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no volume profile collection on data stream {datastream}.");
@@ -692,27 +701,20 @@ namespace PowerLanguage.Strategy
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
 			if (vp == null)
 			{
-				VpExtra here = extraForStart(streamPack, datastream, barIndex);
-				VpExtra prior = barIndex > 0 ? extraForStart(streamPack, datastream, barIndex - 1) : null;
-				if (here != null && !object.ReferenceEquals(here, prior))
-					return true;
 				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no profile on data stream {datastream} for bar {barIndex}.");
 				return false;
 			}
 
-			int start = profileStartBar(vp);
-			if (start >= 0 && start == barIndex)
-				return true;
-
-			if (barIndex == 0)
+			if (barIndex == 1)
 				return true;
 
 			IProfile prev = itemForBar(streamPack, datastream, barIndex - 1);
-			if (prev == null || prev.Empty)
-				return true;
+			if (prev == null)
+				return false;
 
+			int start = profileStartBar(vp);
 			int prevStart = profileStartBar(prev);
-			if (start >= 0 && prevStart >= 0)
+			if (start >= 1 && prevStart >= 1)
 				return start != prevStart;
 
 			return !object.ReferenceEquals(vp, prev);
@@ -871,6 +873,7 @@ namespace PowerLanguage.Strategy
 
 		private void configureVwap(VwapEngine eng, EVwapType type, int length, string fromText, int stream, string dateInputName, string streamInputName)
 		{
+			eng.parent = this;
 			eng.type = type;
 			eng.length = length < 1 ? DEFAULT_VWAP_LENGTH : length;
 			eng.datastream = 0;
@@ -926,6 +929,35 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>
+		/// 1-based chart bar for this stream's current calculation bar.
+		/// FullSymbolData.Current (Status Bar #). CurrentBar is MaxBarsBack-relative and is not used.
+		/// </summary>
+		private int streamItemBarIndex(int stream)
+		{
+			IInstrument bars = barsOf(stream);
+			if (bars == null) return -1;
+			try
+			{
+				int n = bars.FullSymbolData.Current;
+				if (n >= 1) return n;
+			}
+			catch { }
+			return -1;
+		}
+
+		/// <summary>Native IProfilesCollection.ItemForBar argument. MC is 0-based.</summary>
+		private static int toNativeItemBar(int chartBar)
+		{
+			return chartBar < 1 ? -1 : chartBar - 1;
+		}
+
+		/// <summary>Status Bar # / public API index from a native 0-based ItemForBar / BarsInterval value.</summary>
+		private static int toChartBar(int nativeBar)
+		{
+			return nativeBar < 0 ? nativeBar : nativeBar + 1;
+		}
+
 		private void stampCurrentExtras()
 		{
 			foreach (var kv in m_streams)
@@ -941,25 +973,18 @@ namespace PowerLanguage.Strategy
 		{
 			if (sp == null || sp.pack == null) return;
 
-			IInstrument bars = barsOf(sp.datastream);
-			if (bars != null)
+			int chartBar = streamItemBarIndex(sp.datastream);
+			if (chartBar >= 1)
 			{
-				int current = 0;
-				int abs = -1;
-				try { current = bars.CurrentBar; } catch { }
-				try { abs = bars.FullSymbolData.Current - 1; } catch { }
-
-				ensureExtraAt(sp, current);
-				if (abs >= 0 && abs != current)
-					ensureExtraAt(sp, abs);
-				if (current > 0)
-					ensureExtraAt(sp, current - 1);
+				ensureExtraAt(sp, chartBar);
+				if (chartBar > 1)
+					ensureExtraAt(sp, chartBar - 1);
 			}
 		}
 
 		private void ensureExtraAt(StreamPack sp, int barIndex)
 		{
-			if (sp == null || barIndex < 0) return;
+			if (sp == null || barIndex < 1) return;
 			IProfile vp = itemForBar(sp, sp.datastream, barIndex);
 			if (vp == null) return;
 			ensureExtra(sp, vp);
@@ -1067,14 +1092,15 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <param name="barIndex">1-based chart bar.</param>
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
-			if (streamPack == null || streamPack.pack == null || barIndex < 0) return null;
+			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
 
 			IProfile best = null;
 			int bestDist = int.MaxValue;
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex), barIndex, ref best, ref bestDist);
-			if (barIndex > 0)
+			if (barIndex > 1)
 				considerProfile(rawItemForBar(streamPack, datastream, barIndex - 1), barIndex, ref best, ref bestDist);
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex + 1), barIndex, ref best, ref bestDist);
 
@@ -1084,10 +1110,8 @@ namespace PowerLanguage.Strategy
 
 			if (best != null) return best;
 
-			// Last resort: whatever ItemForBar returns, even if interval metadata is empty
-			// on the first bar of a new every-N-bar window.
 			return rawItemForBar(streamPack, datastream, barIndex)
-				?? (barIndex > 0 ? rawItemForBar(streamPack, datastream, barIndex - 1) : null)
+				?? (barIndex > 1 ? rawItemForBar(streamPack, datastream, barIndex - 1) : null)
 				?? rawItemForBar(streamPack, datastream, barIndex + 1);
 		}
 
@@ -1095,7 +1119,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (vp == null || !profileOwnsBar(vp, barIndex)) return;
 			int start = profileStartBar(vp);
-			int dist = start >= 0 ? Math.Abs(start - barIndex) : int.MaxValue / 2;
+			int dist = start >= 1 ? Math.Abs(start - barIndex) : int.MaxValue / 2;
 			if (dist < bestDist)
 			{
 				best = vp;
@@ -1103,30 +1127,40 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <param name="barIndex">1-based chart bar. Converted to native 0-based for pack.ItemForBar.</param>
 		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
-			if (streamPack == null || streamPack.pack == null || barIndex < 0) return null;
+			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
+			int native = toNativeItemBar(barIndex);
+			IProfile vp = rawNativeItemForBar(streamPack, datastream, native);
+			if (vp != null) return vp;
+			// Some builds accept the 1-based Status index directly.
+			return rawNativeItemForBar(streamPack, datastream, barIndex);
+		}
+
+		private IProfile rawNativeItemForBar(StreamPack streamPack, int datastream, int nativeBar)
+		{
+			if (streamPack == null || streamPack.pack == null || nativeBar < 0) return null;
 			try
 			{
-				return streamPack.pack.ItemForBar(barIndex);
+				return streamPack.pack.ItemForBar(nativeBar);
 			}
 			catch (Exception e)
 			{
-				trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {barIndex} - {e.Message}");
+				trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {nativeBar} - {e.Message}");
 				return null;
 			}
 		}
 
 		private static bool profileOwnsBar(IProfile vp, int barIndex)
 		{
-			if (vp == null || barIndex < 0) return false;
+			if (vp == null || barIndex < 1) return false;
 			int start = profileStartBar(vp);
 			int end = profileEndBar(vp);
-			if (start < 0 && end < 0) return false;
-			if (start < 0) start = end;
-			if (end < 0 || end < start) end = start;
+			if (start < 1 && end < 1) return false;
+			if (start < 1) start = end;
+			if (end < 1 || end < start) end = start;
 
-			// Inclusive, and both half-open forms MC documents / uses in practice.
 			if (barIndex >= start && barIndex <= end) return true;
 			if (barIndex > start && barIndex <= end) return true;
 			if (barIndex >= start && barIndex < end) return true;
@@ -1134,12 +1168,13 @@ namespace PowerLanguage.Strategy
 			return false;
 		}
 
+		/// <summary>1-based start of the profile window (Status Bar #).</summary>
 		private static int profileStartBar(IProfile vp)
 		{
 			if (vp == null) return -1;
 			try
 			{
-				return vp.BarsInterval.First;
+				return toChartBar(vp.BarsInterval.First);
 			}
 			catch
 			{
@@ -1147,12 +1182,13 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>1-based end of the profile window (Status Bar #).</summary>
 		private static int profileEndBar(IProfile vp)
 		{
 			if (vp == null) return -1;
 			try
 			{
-				return vp.BarsInterval.Second;
+				return toChartBar(vp.BarsInterval.Second);
 			}
 			catch
 			{

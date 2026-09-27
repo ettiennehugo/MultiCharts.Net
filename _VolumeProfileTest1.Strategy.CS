@@ -13,9 +13,9 @@ namespace PowerLanguage.Strategy
 	/// dumps the *previous* (now completed) profile's VpExtra state to the
 	/// _CustomSignal trace file at ETraceLevel.Info.
 	///
-	/// Detection uses IsNewVolumeProfile(datastream, barIndex) — start-bar
-	/// compare, same ItemForBar convention as ExtraVolumeProfileForBar.
-	/// Previous profile is ExtraVolumeProfileForBar(datastream, barIndex - 1).
+	/// Detection uses IsNewVolumeProfile() — 1-based Status Bar # /
+	/// FullSymbolData.Current. Previous profile is
+	/// ExtraVolumeProfileForBar(datastream, barIndex - 1).
 	///
 	/// Chart: Format Instrument → Volume Profile → Enable (Visible).
 	/// Add this signal; leave AutoEntry / orders alone — this class does not trade.
@@ -99,8 +99,8 @@ namespace PowerLanguage.Strategy
 		public void TracePriorProfileOnNew(int datastream)
 		{
 			int barIndex = currentBarIndex(datastream);
-			if (barIndex < 0) return;
-			if (!IsNewVolumeProfile(datastream, barIndex)) return;
+			if (barIndex < 1) return;
+			if (!IsNewVolumeProfile(datastream)) return;
 			TracePreviousVolumeProfile(datastream, barIndex);
 		}
 
@@ -118,7 +118,7 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Info,
 				$"[VP-TEST] NEW profile Data{datastream} bar={newProfileBarIndex} time={when} — dumping PRIOR profile");
 
-			if (newProfileBarIndex <= 0)
+			if (newProfileBarIndex < 2)
 			{
 				trace(ETraceLevel.Info,
 					$"[VP-TEST] Data{datastream} bar={newProfileBarIndex} has no previous bar; no prior profile to dump.");
@@ -242,7 +242,7 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			List<LevelVol> hit = extra.ExceptionalLevels(0.0);
+			List<LevelVol> hit = extra.ExceptionalLevels(DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE);
 			LevelVol peak = extra.PeakTotalLevel();
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] EXC Data{0} bar={1} count={2} peakTotal px={3} tot={4} pct={5}",
@@ -323,8 +323,13 @@ namespace PowerLanguage.Strategy
 		{
 			IInstrument bars = barsOfStream(datastream);
 			if (bars == null) return -1;
-			try { return bars.CurrentBar; }
-			catch { return -1; }
+			try
+			{
+				int n = bars.FullSymbolData.Current;
+				if (n >= 1) return n;
+			}
+			catch { }
+			return -1;
 		}
 
 		private DateTime barTimeOf(int datastream, int barsBack)
