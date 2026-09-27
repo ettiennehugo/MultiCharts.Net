@@ -1194,10 +1194,16 @@ namespace PowerLanguage.Strategy
 		private static List<IProfile> listedProfiles(StreamPack sp)
 		{
 			List<IProfile> list = new List<IProfile>();
+			if (sp == null || sp.pack == null) return list;
 			try
 			{
-				if (sp == null || sp.pack == null || sp.pack.Items == null) return list;
-			} catch { /* sp.pack.Items can be in an unusable state where it's not null but should be disposed */ }
+				if (sp.pack.Items == null) return list;
+			}
+			catch
+			{
+				// Items can be non-null but already disposed / unusable.
+				return list;
+			}
 
 			try
 			{
@@ -1207,7 +1213,10 @@ namespace PowerLanguage.Strategy
 					list.Add(vp);
 				}
 			}
-			catch { }
+			catch
+			{
+				return list;
+			}
 			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
 			return list;
 		}
