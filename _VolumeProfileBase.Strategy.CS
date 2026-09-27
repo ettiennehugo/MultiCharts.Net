@@ -88,25 +88,36 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Volume Profile Key object used to locate extra data stored per volume profile.
+		/// Keyed by data stream + start bar only. endBar walks forward while a
+		/// profile is still forming (every-N-bar VP on bar 0 / 13 / 26 …), so it
+		/// must not be part of equality or extras disappear on window boundaries.
 		/// </summary>
 		private struct VpKey : IEquatable<VpKey>
 		{
 			public readonly int datastream;
 			public readonly int startBar;
-			public readonly int endBar;
 			public VpKey(int datastream, IProfile p)
 			{
 				this.datastream = datastream;
-				Pair<int> iv = p.BarsInterval;
-				startBar = iv.First;
-				endBar = iv.Second;
+				startBar = -1;
+				if (p == null) return;
+				try
+				{
+					startBar = p.BarsInterval.First;
+				}
+				catch { }
+			}
+			public VpKey(int datastream, int startBar)
+			{
+				this.datastream = datastream;
+				this.startBar = startBar;
 			}
 			public bool Equals(VpKey o)
 			{
-				return datastream == o.datastream && startBar == o.startBar && endBar == o.endBar;
+				return datastream == o.datastream && startBar == o.startBar;
 			}
 			public override bool Equals(object o) { return o is VpKey k && Equals(k); }
-			public override int GetHashCode() { return datastream ^ (startBar * 397) ^ endBar; }
+			public override int GetHashCode() { return datastream ^ (startBar * 397); }
 		};
 
 		/// <summary>
@@ -579,7 +590,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.StartCalc();
 			if (ConfluenceMinHits < 1) throw new ArgumentException("ConfluenceMinHits must be 1 or greater.");
-			if (ConfluenceCrossStreamBonus < 0.0) throw new ArgumentException("ConfluenceCrossStreamBonus must be 0.0 or greater."); 
+			if (ConfluenceCrossStreamBonus < 0.0) throw new ArgumentException("ConfluenceCrossStreamBonus must be 0.0 or greater.");
 			if (HvnPercentile < 0 || HvnPercentile > 1.0) throw new ArgumentException("HvnPercentile must be a percentage, 0 to 1.0.");
 			if (LvnPercentile < 0 || LvnPercentile > 1.0) throw new ArgumentException("LvnPercentile must be a percentage, 0 to 1.0.");
 			if (HvnPercentile < LvnPercentile) throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
@@ -623,33 +634,24 @@ namespace PowerLanguage.Strategy
 		/// <returns>Extra volume profile information or null if nothing found.</returns>
 		public VpExtra ExtraVolumeProfileForBar(int datastream, int barIndex)
 		{
-			if (m_streams.TryGetValue(datastream, out StreamPack streamPack))
+			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
+				return null;
+
+			IProfile vp = itemForBar(streamPack, datastream, barIndex);
+			if (vp != null)
+				ensureExtra(streamPack, vp);
+
+			VpExtra extra = extraFor(streamPack, datastream, vp);
+			if (extra == null)
+				extra = extraForStart(streamPack, datastream, barIndex);
+			if (extra == null)
 			{
-				IProfile vp = null;
-				try
-				{
-					vp = streamPack.pack.ItemForBar(barIndex);
-				}
-				catch (Exception e)
-				{
-					trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {barIndex} - {e.Message}");
-					return null;
-				}
-				if (vp == null || vp.Empty)
-				{
-					trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
-					return null;
-				}
-				VpKey key = new VpKey(datastream, vp);
-				if (streamPack.extra.TryGetValue(key, out VpExtra extra))
-				{
-					stampExtra(extra);
-					refreshVolumePercentiles();
-					return extra;
-				}
-				trace(ETraceLevel.Verbose, $"Failed to find extra entry for data stream {datastream} for bar {barIndex}.");
+				trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
+				return null;
 			}
-			return null;
+			stampExtra(extra);
+			refreshVolumePercentiles();
+			return extra;
 		}
 
 		/// <summary>
@@ -688,8 +690,12 @@ namespace PowerLanguage.Strategy
 			}
 
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
-			if (vp == null || vp.Empty)
+			if (vp == null)
 			{
+				VpExtra here = extraForStart(streamPack, datastream, barIndex);
+				VpExtra prior = barIndex > 0 ? extraForStart(streamPack, datastream, barIndex - 1) : null;
+				if (here != null && !object.ReferenceEquals(here, prior))
+					return true;
 				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no profile on data stream {datastream} for bar {barIndex}.");
 				return false;
 			}
@@ -923,27 +929,64 @@ namespace PowerLanguage.Strategy
 		private void stampCurrentExtras()
 		{
 			foreach (var kv in m_streams)
+				syncStreamExtras(kv.Value);
+		}
+
+		/// <summary>
+		/// Create / refresh VpExtra for the live profile on this stream (and any
+		/// other profiles already in the collection). Must run from CalcBar so
+		/// extras exist on the first bar of an every-N-bar window, before EChanged.
+		/// </summary>
+		private void syncStreamExtras(StreamPack sp)
+		{
+			if (sp == null || sp.pack == null) return;
+
+			IInstrument bars = barsOf(sp.datastream);
+			if (bars != null)
 			{
-				StreamPack sp = kv.Value;
-				if (sp.pack == null) continue;
-				int barIndex = 0;
-				try
-				{
-					IInstrument b = barsOf(sp.datastream);
-					if (b == null) continue;
-					barIndex = b.CurrentBar;
-				}
-				catch { continue; }
-				try
-				{
-					IProfile vp = sp.pack.ItemForBar(barIndex);
-					if (vp == null || vp.Empty) continue;
-					VpKey key = new VpKey(sp.datastream, vp);
-					if (sp.extra.TryGetValue(key, out VpExtra extra))
-						stampExtra(extra);
-				}
-				catch { }
+				int current = 0;
+				int abs = -1;
+				try { current = bars.CurrentBar; } catch { }
+				try { abs = bars.FullSymbolData.Current - 1; } catch { }
+
+				ensureExtraAt(sp, current);
+				if (abs >= 0 && abs != current)
+					ensureExtraAt(sp, abs);
+				if (current > 0)
+					ensureExtraAt(sp, current - 1);
 			}
+		}
+
+		private void ensureExtraAt(StreamPack sp, int barIndex)
+		{
+			if (sp == null || barIndex < 0) return;
+			IProfile vp = itemForBar(sp, sp.datastream, barIndex);
+			if (vp == null) return;
+			ensureExtra(sp, vp);
+		}
+
+		private static VpExtra extraFor(StreamPack sp, int datastream, IProfile vp)
+		{
+			if (sp == null || vp == null) return null;
+			VpKey key = new VpKey(datastream, vp);
+			VpExtra extra;
+			if (sp.extra.TryGetValue(key, out extra)) return extra;
+			if (key.startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, key.startBar), out extra))
+				return extra;
+			return null;
+		}
+
+		private static VpExtra extraForStart(StreamPack sp, int datastream, int startBar)
+		{
+			if (sp == null) return null;
+			VpExtra extra;
+			if (startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar), out extra))
+				return extra;
+			if (startBar > 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar - 1), out extra))
+				return extra;
+			if (startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar + 1), out extra))
+				return extra;
+			return null;
 		}
 
 		private void stampExtra(VpExtra extra)
@@ -1027,6 +1070,42 @@ namespace PowerLanguage.Strategy
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 0) return null;
+
+			IProfile best = null;
+			int bestDist = int.MaxValue;
+			considerProfile(rawItemForBar(streamPack, datastream, barIndex), barIndex, ref best, ref bestDist);
+			if (barIndex > 0)
+				considerProfile(rawItemForBar(streamPack, datastream, barIndex - 1), barIndex, ref best, ref bestDist);
+			considerProfile(rawItemForBar(streamPack, datastream, barIndex + 1), barIndex, ref best, ref bestDist);
+
+			List<IProfile> listed = listedProfiles(streamPack);
+			for (int i = 0; i < listed.Count; i++)
+				considerProfile(listed[i], barIndex, ref best, ref bestDist);
+
+			if (best != null) return best;
+
+			// Last resort: whatever ItemForBar returns, even if interval metadata is empty
+			// on the first bar of a new every-N-bar window.
+			return rawItemForBar(streamPack, datastream, barIndex)
+				?? (barIndex > 0 ? rawItemForBar(streamPack, datastream, barIndex - 1) : null)
+				?? rawItemForBar(streamPack, datastream, barIndex + 1);
+		}
+
+		private static void considerProfile(IProfile vp, int barIndex, ref IProfile best, ref int bestDist)
+		{
+			if (vp == null || !profileOwnsBar(vp, barIndex)) return;
+			int start = profileStartBar(vp);
+			int dist = start >= 0 ? Math.Abs(start - barIndex) : int.MaxValue / 2;
+			if (dist < bestDist)
+			{
+				best = vp;
+				bestDist = dist;
+			}
+		}
+
+		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
+		{
+			if (streamPack == null || streamPack.pack == null || barIndex < 0) return null;
 			try
 			{
 				return streamPack.pack.ItemForBar(barIndex);
@@ -1038,12 +1117,42 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		private static bool profileOwnsBar(IProfile vp, int barIndex)
+		{
+			if (vp == null || barIndex < 0) return false;
+			int start = profileStartBar(vp);
+			int end = profileEndBar(vp);
+			if (start < 0 && end < 0) return false;
+			if (start < 0) start = end;
+			if (end < 0 || end < start) end = start;
+
+			// Inclusive, and both half-open forms MC documents / uses in practice.
+			if (barIndex >= start && barIndex <= end) return true;
+			if (barIndex > start && barIndex <= end) return true;
+			if (barIndex >= start && barIndex < end) return true;
+			if (barIndex == start || barIndex == end) return true;
+			return false;
+		}
+
 		private static int profileStartBar(IProfile vp)
 		{
 			if (vp == null) return -1;
 			try
 			{
 				return vp.BarsInterval.First;
+			}
+			catch
+			{
+				return -1;
+			}
+		}
+
+		private static int profileEndBar(IProfile vp)
+		{
+			if (vp == null) return -1;
+			try
+			{
+				return vp.BarsInterval.Second;
 			}
 			catch
 			{
@@ -1414,8 +1523,9 @@ namespace PowerLanguage.Strategy
 
 		private void ensureExtra(StreamPack sp, IProfile vp)
 		{
-			if (vp == null || vp.Empty) return;
+			if (sp == null || vp == null) return;
 			VpKey key = new VpKey(sp.datastream, vp);
+			if (key.startBar < 0) return;
 			VpExtra extra;
 			if (!sp.extra.TryGetValue(key, out extra))
 			{
@@ -1423,7 +1533,10 @@ namespace PowerLanguage.Strategy
 				sp.extra[key] = extra;
 			}
 			extra.dataStream = sp.datastream;
-			fillNodes(vp, extra);
+			bool empty = false;
+			try { empty = vp.Empty; } catch { empty = true; }
+			if (!empty)
+				fillNodes(vp, extra);
 			stampExtra(extra);
 			m_volumePctDirty = true;
 		}
@@ -1558,7 +1671,7 @@ namespace PowerLanguage.Strategy
 			{
 				StreamPack sp = kv.Value;
 				try
-				{ if (sp == null || sp.pack == null || sp.pack.Items == null) continue; } 
+				{ if (sp == null || sp.pack == null || sp.pack.Items == null) continue; }
 				catch { continue; /* sp.pack.Items can be in an unusable state where it's not null but should be disposed */ }
 				List<VpExtra> streamExtras = new List<VpExtra>();
 				try
