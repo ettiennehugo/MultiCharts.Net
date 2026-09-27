@@ -39,7 +39,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_HVN_PERCENTILE = 0.8;  // Default percentile of prices relative to POC considered high volume node prices.
 		public const double DEFAULT_LVN_PERCENTILE = 0.2;  // Default percentile of prices relative to POC considered low volume node prices.
 		public const int DEFAULT_SMOOTH_TICKS = 3;  // Default smoothing length used for ticks.
-		public const int DEFAULT_MIN_NODE_TICKS = 1;
+		public const int DEFAULT_MIN_NODE_TICKS = 3;  // min HVN/LVN high-low span in ticks
 		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int VWAP_SLOT_COUNT = 3;
@@ -399,7 +399,7 @@ namespace PowerLanguage.Strategy
 
 				if (first)
 				{
-					parent.trace(ETraceLevel.Debug,$"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					parent.trace(ETraceLevel.Debug, $"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 					clearSums();
 				}
 
@@ -490,6 +490,7 @@ namespace PowerLanguage.Strategy
 		//properties
 		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes.
 		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes.
+		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks.
 
 		[Input] public EVwapType VwapType { get; set; }     // Slot 1. Disabled = unused.
 		[Input] public int VwapLength { get; set; }         // Used when VwapType = Length.
@@ -545,6 +546,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			HvnPercentile = DEFAULT_HVN_PERCENTILE;
 			LvnPercentile = DEFAULT_LVN_PERCENTILE;
+			MinNodeTicks = DEFAULT_MIN_NODE_TICKS;
 
 			VwapType = EVwapType.Session;
 			VwapLength = DEFAULT_VWAP_LENGTH;
@@ -602,6 +604,7 @@ namespace PowerLanguage.Strategy
 			if (HvnPercentile < 0 || HvnPercentile > 1.0) throw new ArgumentException("HvnPercentile must be a percentage, 0 to 1.0.");
 			if (LvnPercentile < 0 || LvnPercentile > 1.0) throw new ArgumentException("LvnPercentile must be a percentage, 0 to 1.0.");
 			if (HvnPercentile < LvnPercentile) throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
+			if (MinNodeTicks < 1) throw new ArgumentException("MinNodeTicks must be 1 or greater.");
 			unhookStreams();
 			m_streams.Clear();
 			hookStreams();
@@ -1518,6 +1521,14 @@ namespace PowerLanguage.Strategy
 			return 0.01;
 		}
 
+		private bool nodeWideEnough(double low, double high)
+		{
+			int ticks = MinNodeTicks < 1 ? DEFAULT_MIN_NODE_TICKS : MinNodeTicks;
+			double need = ticks * tickSize();
+			if (need <= 0) return true;
+			return (high - low) + 1e-12 >= need;
+		}
+
 		private void hookStreams()
 		{
 			m_streams.Clear();
@@ -1636,7 +1647,7 @@ namespace PowerLanguage.Strategy
 				int a = i;
 				while (i < rows.Count && vols[i] >= hvnFloor) i++;
 				int b = i - 1;
-				if (b - a + 1 < DEFAULT_MIN_NODE_TICKS) continue;
+				if (!nodeWideEnough(rows[a].price, rows[b].price)) continue;
 				int peak = a;
 				for (int k = a + 1; k <= b; k++)
 					if (vols[k] > vols[peak]) peak = k;
@@ -1651,7 +1662,7 @@ namespace PowerLanguage.Strategy
 				while (a > 0 && vols[a - 1] <= lvnCeil) a--;
 				int b = t;
 				while (b < rows.Count - 1 && vols[b + 1] <= lvnCeil) b++;
-				if (b - a + 1 < DEFAULT_MIN_NODE_TICKS) continue;
+				if (!nodeWideEnough(rows[a].price, rows[b].price)) continue;
 				// unused wings with no HVN on both sides are not nodes
 				bool hvnBelow = hasHvnTouching(extra.hvns, rows[a].price, true);
 				bool hvnAbove = hasHvnTouching(extra.hvns, rows[b].price, false);
