@@ -49,6 +49,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			TraceLevel = ETraceLevel.Debug;
 			TracePriorOnNewProfile = true;
 			TraceAllDataStreams = false;
 			TraceDataStream = DEFAULT_TRACE_STREAM;
