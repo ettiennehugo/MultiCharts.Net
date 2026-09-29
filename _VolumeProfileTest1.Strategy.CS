@@ -25,7 +25,6 @@ namespace PowerLanguage.Strategy
 		//constants
 		public const int DEFAULT_TRACE_STREAM = 1;
 		public const int DEFAULT_MAX_TRACE_LEVELS = 16;
-		public const int MAX_STREAM_SCAN = 8;
 
 		//properties
 		/// <summary>When true, dump prior-VP state on the first bar of each new profile.</summary>
@@ -74,23 +73,12 @@ namespace PowerLanguage.Strategy
 			if (!TracePriorOnNewProfile) return;
 
 			if (TraceAllDataStreams)
-				TracePriorProfilesOnNewForAllStreams();
+			{
+				for (int ds = 1; ds <= MaxDataStream; ds++)
+					TracePriorProfileOnNew(ds);
+			}
 			else
 				TracePriorProfileOnNew(TraceDataStream);
-		}
-
-		//methods
-		/// <summary>
-		/// Walk Data1..DataN and dump the previous profile on any stream
-		/// that just opened a new volume profile.
-		/// </summary>
-		public void TracePriorProfilesOnNewForAllStreams()
-		{
-			for (int ds = 1; ds <= MAX_STREAM_SCAN; ds++)
-			{
-				if (!streamExists(ds)) continue;
-				TracePriorProfileOnNew(ds);
-			}
 		}
 
 		/// <summary>
@@ -179,7 +167,7 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] {0} VWAP slots  vwap={1}(s{2} σ={3})  vwap2={4}(s{5} σ={6})  vwap3={7}(s{8} σ={9})",
 				label,
-				fmt(extra.vwap), extra.vwapStream, fmt(extra.vwapSigma),
+				fmt(extra.vwap1), extra.vwap1Stream, fmt(extra.vwapSigma1),
 				fmt(extra.vwap2), extra.vwap2Stream, fmt(extra.vwap2Sigma),
 				fmt(extra.vwap3), extra.vwap3Stream, fmt(extra.vwap3Sigma)));
 
@@ -346,25 +334,11 @@ namespace PowerLanguage.Strategy
 			try
 			{
 				if (datastream <= 1) return Bars;
-				if (!IsExist(datastream)) return null;
 				return BarsOfData(datastream);
 			}
 			catch
 			{
 				return null;
-			}
-		}
-
-		private bool streamExists(int datastream)
-		{
-			try
-			{
-				if (datastream <= 1) return true;
-				return IsExist(datastream);
-			}
-			catch
-			{
-				return false;
 			}
 		}
 
