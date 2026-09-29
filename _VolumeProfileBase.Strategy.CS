@@ -132,13 +132,13 @@ namespace PowerLanguage.Strategy
 			public double vah;  // Value area high.
 			public double val;  // Value area low.
 			public double profileVwap;  // Σ(price * levelVolume) / Σ(levelVolume) from the same rows used for HVN/LVN.
-			public double vwap;         // slot 1 snapshot (0 when Disabled / not yet valid)
+			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
 			public double vwap2;        // slot 2 snapshot
 			public double vwap3;        // slot 3 snapshot
-			public double vwapSigma;    // slot 1 σ from the running window (0 when unused)
+			public double vwapSigma1;    // slot 1 σ from the running window (0 when unused)
 			public double vwap2Sigma;
 			public double vwap3Sigma;
-			public int vwapStream;      // chart data stream slot 1 was built from (0 = unused)
+			public int vwap1Stream;      // chart data stream slot 1 was built from (0 = unused)
 			public int vwap2Stream;
 			public int vwap3Stream;
 			public readonly List<Node> hvns = new List<Node>(); // List of high volume nodes for a volume profile.
@@ -492,10 +492,10 @@ namespace PowerLanguage.Strategy
 		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes.
 		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks.
 
-		[Input] public EVwapType VwapType { get; set; }     // Slot 1. Disabled = unused.
-		[Input] public int VwapLength { get; set; }         // Used when VwapType = Length.
-		[Input] public string VwapFromDate { get; set; }    // Used when VwapType = AdaptiveFromDate.
-		[Input] public int VwapDataStream { get; set; }     // Chart data stream slot 1 reads. 1 = Data1, 2 = Data2, …
+		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
+		[Input] public int Vwap1Length { get; set; }        // Used when VwapType = Length.
+		[Input] public string Vwap1FromDate { get; set; }   // Used when VwapType = AdaptiveFromDate.
+		[Input] public int Vwap1DataStream { get; set; }    // Chart data stream slot 1 reads. 1 = Data1, 2 = Data2, …
 
 		[Input] public EVwapType Vwap2Type { get; set; }    // Slot 2. Disabled = unused.
 		[Input] public int Vwap2Length { get; set; }        // Used when Vwap2Type = Length.
@@ -548,10 +548,10 @@ namespace PowerLanguage.Strategy
 			LvnPercentile = DEFAULT_LVN_PERCENTILE;
 			MinNodeTicks = DEFAULT_MIN_NODE_TICKS;
 
-			VwapType = EVwapType.Session;
-			VwapLength = DEFAULT_VWAP_LENGTH;
-			VwapFromDate = "";
-			VwapDataStream = 1;
+			Vwap1Type = EVwapType.Session;
+			Vwap1Length = DEFAULT_VWAP_LENGTH;
+			Vwap1FromDate = "";
+			Vwap1DataStream = 1;
 
 			Vwap2Type = EVwapType.Disabled;
 			Vwap2Length = DEFAULT_VWAP_LENGTH;
@@ -608,7 +608,7 @@ namespace PowerLanguage.Strategy
 			unhookStreams();
 			m_streams.Clear();
 			hookStreams();
-			configureVwap(m_vwap1, VwapType, VwapLength, VwapFromDate, VwapDataStream, "VwapFromDate", "VwapDataStream");
+			configureVwap(m_vwap1, Vwap1Type, Vwap1Length, Vwap1FromDate, Vwap1DataStream, "VwapFromDate", "VwapDataStream");
 			configureVwap(m_vwap2, Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
 			configureVwap(m_vwap3, Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
 			m_confluenceDirty = true;
@@ -1020,13 +1020,13 @@ namespace PowerLanguage.Strategy
 		private void stampExtra(VpExtra extra)
 		{
 			if (extra == null) return;
-			extra.vwap = m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : 0;
+			extra.vwap1 = m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : 0;
 			extra.vwap2 = m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : 0;
 			extra.vwap3 = m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : 0;
-			extra.vwapSigma = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
+			extra.vwapSigma1 = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
 			extra.vwap2Sigma = m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : 0;
 			extra.vwap3Sigma = m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : 0;
-			extra.vwapStream = slotStream(m_vwap1);
+			extra.vwap1Stream = slotStream(m_vwap1);
 			extra.vwap2Stream = slotStream(m_vwap2);
 			extra.vwap3Stream = slotStream(m_vwap3);
 		}
@@ -1034,8 +1034,8 @@ namespace PowerLanguage.Strategy
 		private void anchorSlot1(DateTime from)
 		{
 			if (m_vwap1 == null || m_vwap1.type == EVwapType.Disabled) return;
-			VwapType = EVwapType.AdaptiveFromDate;
-			VwapFromDate = from.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+			Vwap1Type = EVwapType.AdaptiveFromDate;
+			Vwap1FromDate = from.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 			m_vwap1.type = EVwapType.AdaptiveFromDate;
 			m_vwap1.fromDate = from;
 			m_vwap1.Reset();
