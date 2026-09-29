@@ -184,11 +184,9 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
-		//NOTE: When you mix daily and intraday charts to look for intraday entries there is an off-by-one error between the
-		//      Multicharts backtesting engine and the real-time trading engine where Daily.Close[0] would differ in the sense
-		//      that in the backtesting engine this means the PREVIOUS trading day and in the real-time trading engine this
-		//      means the CURRENT trading day. Why align backtesting and real-time calculations if you can have them do completely
-		//      different things????
+		//NOTE: Based on real-time history matching (Strategies Properties->Back Testing) the zero index in the bars can change.
+		//      When real-time history matching is enabled 0-index is the previous fully formed day and when it is disabled
+		//      0-index is the current forming day.
 		public int DailyOffset
 		{
 			get { return m_dailyOffset; }
@@ -261,9 +259,18 @@ namespace PowerLanguage.Strategy
 			m_intradayOpen = 0.0d;
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
-			//For backtesting index 0 becomes the previous day while for real-time trading index 1 becomes
-			//the previous day.
+			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
+			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 			m_dailyOffset = Environment.IsRealTimeCalc ? 1 : 0;
+
+			//force load the data streams up front so we don't get into exception breaks somewhere down the line
+			for (int i = 1; i <= MaxDataStream; ++i)
+			{
+				if (IsExist(i))
+				{
+					_ = BarsOfData(i);
+				}
+			}
 		}
 
 		/// <summary>
