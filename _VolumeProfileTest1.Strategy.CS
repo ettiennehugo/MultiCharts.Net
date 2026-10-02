@@ -11,11 +11,13 @@ namespace PowerLanguage.Strategy
 	///
 	/// When a new volume profile starts to form on a watched data stream,
 	/// dumps the *previous* (now completed) profile's VpExtra state to the
-	/// _CustomSignal trace file at ETraceLevel.Info.
+	/// _CustomSignal trace file at ETraceLevel.Info — once per profile.
 	///
-	/// Detection uses IsNewVolumeProfile() — 1-based Status Bar # /
-	/// FullSymbolData.Current. Previous profile is
-	/// ExtraVolumeProfileForBar(datastream, barIndex - 1).
+	/// IsNewVolumeProfile(stream) stays true for the entire life of the bar
+	/// that opened the profile. On a higher-TF stream that bar does not
+	/// advance while Data1 keeps calculating, so the gate is the profile
+	/// start bar: log the prior profile only when this stream's start bar
+	/// changes, and never again for that start bar.
 	///
 	/// Chart: Format Instrument → Volume Profile → Enable (Visible).
 	/// Add this signal; leave AutoEntry / orders alone — this class does not trade.
@@ -43,6 +45,11 @@ namespace PowerLanguage.Strategy
 		/// <summary>Cap on exceptional-level rows written per profile.</summary>
 		[Input] public int TraceMaxLevels { get; set; }
 
+		// last profile start bar observed on each stream (1-based). 0 = not yet seen.
+		private readonly Dictionary<int, int> m_openStart = new Dictionary<int, int>();
+		// prior profiles already written, key = "datastream:startBar"
+		private readonly HashSet<string> m_loggedPrior = new HashSet<string>();
+
 		//interface methods
 		public _VolumeProfileTest1(object _ctx) : base(_ctx) { }
 
@@ -65,6 +72,8 @@ namespace PowerLanguage.Strategy
 				throw new ArgumentException("TraceDataStream must be a chart data stream index >= 1 (1 = Data1).");
 			if (TraceMaxLevels < 0)
 				TraceMaxLevels = 0;
+			m_openStart.Clear();
+			m_loggedPrior.Clear();
 		}
 
 		protected override void CalcBar()
@@ -93,48 +102,62 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// If a new volume profile is starting on <paramref name="datastream"/>
-		/// this bar, write the previous profile's state at Info.
+		/// If this stream's volume profile start bar just changed, the previous
+		/// profile is fully formed. Write it once. Same start bar on later
+		/// Data1 calculations (higher-TF bar still open) is ignored.
 		/// </summary>
 		public void TracePriorProfileOnNew(int datastream)
 		{
 			int barIndex = currentBarIndex(datastream);
 			if (barIndex < 1) return;
-			if (!IsNewVolumeProfile(datastream)) return;
-			TracePreviousVolumeProfile(datastream, barIndex);
+
+			int start = profileStartOnBar(datastream, barIndex);
+			if (start < 1) return;
+
+			if (m_openStart.TryGetValue(datastream, out int seen) && seen == start)
+				return;
+
+			m_openStart[datastream] = start;
+			if (seen < 1)
+				return; // first profile on this stream — not completed yet
+
+			string key = datastream.ToString(CultureInfo.InvariantCulture)
+				+ ":" + seen.ToString(CultureInfo.InvariantCulture);
+			if (!m_loggedPrior.Add(key))
+				return;
+
+			int priorBar = start - 1;
+			if (priorBar < 1) priorBar = barIndex - 1;
+			TracePreviousVolumeProfile(datastream, barIndex, priorBar, seen);
 		}
 
 		/// <summary>
-		/// Info-trace the completed profile that owned <paramref name="newProfileBarIndex"/> - 1.
-		/// Call only when IsNewVolumeProfile(datastream, newProfileBarIndex) is true.
+		/// Info-trace the completed profile that owned <paramref name="priorBar"/>.
+		/// Called once per prior start bar, when the next profile begins.
 		/// </summary>
-		public void TracePreviousVolumeProfile(int datastream, int newProfileBarIndex)
+		public void TracePreviousVolumeProfile(int datastream, int newProfileBarIndex, int priorBar, int priorStart)
 		{
 			DateTime barTime = barTimeOf(datastream, 0);
 			string when = barTime == DateTime.MinValue
 				? "n/a"
 				: barTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
-			trace(ETraceLevel.Info,
-				$"[VP-TEST] NEW profile Data{datastream} bar={newProfileBarIndex} time={when} — dumping PRIOR profile");
+			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+				"[VP-TEST] NEW profile Data{0} bar={1} time={2} — dumping PRIOR once (priorStart={3})",
+				datastream, newProfileBarIndex, when, priorStart));
 
-			if (newProfileBarIndex < 2)
+			if (priorBar < 1)
 			{
 				trace(ETraceLevel.Info,
 					$"[VP-TEST] Data{datastream} bar={newProfileBarIndex} has no previous bar; no prior profile to dump.");
-				TraceLiveVwapSlots();
-				if (TraceConfluence) TraceConfluenceSnapshot(datastream, newProfileBarIndex);
 				return;
 			}
 
-			int priorBar = newProfileBarIndex - 1;
 			VpExtra extra = ExtraVolumeProfileForBar(datastream, priorBar);
 			if (extra == null)
 			{
 				trace(ETraceLevel.Info,
 					$"[VP-TEST] Data{datastream} priorBar={priorBar} ExtraVolumeProfileForBar returned null.");
-				TraceLiveVwapSlots();
-				if (TraceConfluence) TraceConfluenceSnapshot(datastream, newProfileBarIndex);
 				return;
 			}
 
@@ -149,6 +172,36 @@ namespace PowerLanguage.Strategy
 			TraceLiveVwapSlots();
 			if (TraceConfluence)
 				TraceConfluenceSnapshot(datastream, newProfileBarIndex);
+		}
+
+		/// <summary>
+		/// Info-trace the completed profile that owned <paramref name="newProfileBarIndex"/> - 1.
+		/// Still once-only: a repeated call for the same prior start bar is dropped.
+		/// </summary>
+		public void TracePreviousVolumeProfile(int datastream, int newProfileBarIndex)
+		{
+			int priorBar = newProfileBarIndex - 1;
+			int priorStart = priorBar;
+			VpExtra extra = priorBar >= 1 ? ExtraVolumeProfileForBar(datastream, priorBar) : null;
+			if (extra != null && extra.startBar >= 1) priorStart = extra.startBar;
+			if (priorStart >= 1)
+			{
+				string key = datastream.ToString(CultureInfo.InvariantCulture)
+					+ ":" + priorStart.ToString(CultureInfo.InvariantCulture);
+				if (!m_loggedPrior.Add(key))
+					return;
+			}
+			TracePreviousVolumeProfile(datastream, newProfileBarIndex, priorBar, priorStart);
+		}
+
+		private int profileStartOnBar(int datastream, int barIndex)
+		{
+			VpExtra extra = ExtraVolumeProfileForBar(datastream, barIndex);
+			if (extra != null && extra.startBar >= 1)
+				return extra.startBar;
+			if (IsNewVolumeProfile(datastream, barIndex))
+				return barIndex;
+			return -1;
 		}
 
 		/// <summary>
