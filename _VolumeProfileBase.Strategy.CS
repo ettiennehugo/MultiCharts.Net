@@ -926,7 +926,8 @@ namespace PowerLanguage.Strategy
 		{
 			try
 			{
-				if (stream == 1) return Bars;
+				if (stream <= 1) return Bars;
+				if (stream < 1 || stream > MaxDataStream) return null;
 				return BarsOfData(stream);
 			}
 			catch
@@ -942,7 +943,6 @@ namespace PowerLanguage.Strategy
 		private int streamItemBarIndex(int stream)
 		{
 			IInstrument bars = barsOf(stream);
-
 			if (bars == null) return -1;
 			try
 			{
@@ -1104,10 +1104,34 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		/// <param name="barIndex">1-based chart bar.</param>
+		/// <summary>
+		/// Profile that owns <paramref name="barIndex"/> (1-based Status Bar # /
+		/// FullSymbolData.Current). A single ItemForBar call is not trusted.
+		///
+		/// Two independent failures show up in MultiCharts: the native ItemForBar
+		/// index is 0-based on some builds and the 1-based Status index on others,
+		/// and at a window edge ItemForBar often returns the neighbor profile or
+		/// null — especially on the first bar of a new profile, and while the live
+		/// profile is still developing (BarsInterval.Second walks forward, so the
+		/// end bar is not a stable identity).
+		///
+		/// Probes ItemForBar at bar, bar-1, and bar+1, then every profile in
+		/// pack.Items (that scan does not depend on ItemForBar's index).
+		/// considerProfile keeps a hit only if BarsInterval contains the bar, and
+		/// among those keeps the start closest to barIndex. Closest-start is what
+		/// IsNewVolumeProfile needs: start(bar) vs start(bar-1). The previous
+		/// window winning on the first bar of a new profile would miss the event
+		/// or fire it a bar late.
+		///
+		/// If nothing passes ownership (BarsInterval threw, or start and end were
+		/// both unusable), returns the raw ItemForBar hit anyway — exact bar, then
+		/// previous, then next. That is better than null, not an ownership guarantee.
+		/// </summary>
+		/// <param name="barIndex">1-based chart bar (Status Bar # / FullSymbolData.Current).</param>
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
+
 			IProfile best = null;
 			int bestDist = int.MaxValue;
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex), barIndex, ref best, ref bestDist);
@@ -1126,6 +1150,12 @@ namespace PowerLanguage.Strategy
 				?? rawItemForBar(streamPack, datastream, barIndex + 1);
 		}
 
+		/// <summary>
+		/// Ownership filter for itemForBar. Drops a null hit and any profile whose
+		/// BarsInterval does not contain barIndex. Among owners, keeps the one whose
+		/// start is closest to barIndex so an off-by-one neighbor (previous window
+		/// or the next developing window) does not win on the boundary bar.
+		/// </summary>
 		private static void considerProfile(IProfile vp, int barIndex, ref IProfile best, ref int bestDist)
 		{
 			if (vp == null || !profileOwnsBar(vp, barIndex)) return;
@@ -1138,6 +1168,12 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>
+		/// Unfiltered ItemForBar for a 1-based chart bar. Tries the native 0-based
+		/// index (barIndex - 1) first, then the 1-based Status index, because some
+		/// builds accept the Status index directly. Does not check that the returned
+		/// profile owns the bar — itemForBar / considerProfile do that.
+		/// </summary>
 		/// <param name="barIndex">1-based chart bar. Converted to native 0-based for pack.ItemForBar.</param>
 		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
@@ -1149,6 +1185,13 @@ namespace PowerLanguage.Strategy
 			return rawNativeItemForBar(streamPack, datastream, barIndex);
 		}
 
+		/// <summary>
+		/// pack.ItemForBar(nativeBar). Swallows the exception MultiCharts throws when
+		/// the index is out of range, the pack is disposed, or no profile is registered
+		/// for that bar yet. Index convention is the caller's problem: rawItemForBar
+		/// passes both the 0-based and the 1-based index.
+		/// </summary>
+		/// <param name="nativeBar">Index passed straight through to ItemForBar.</param>
 		private IProfile rawNativeItemForBar(StreamPack streamPack, int datastream, int nativeBar)
 		{
 			if (streamPack == null || streamPack.pack == null || nativeBar < 0) return null;
