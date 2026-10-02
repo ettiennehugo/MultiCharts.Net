@@ -67,9 +67,9 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
-			base.StartCalc();
 			if (MaxDataStream >= 2) ConfluenceDataStream2 = 2;
 			if (MaxDataStream >= 3) ConfluenceDataStream3 = 3;
+			base.StartCalc();
 			if (TraceDataStream < 1)
 				throw new ArgumentException("TraceDataStream must be a chart data stream index >= 1 (1 = Data1).");
 			if (MaxDataStream >= 1 && TraceDataStream > MaxDataStream)
@@ -366,6 +366,10 @@ namespace PowerLanguage.Strategy
 					kinds.Append(z.hits[h].kind);
 					kinds.Append('@');
 					kinds.Append(z.hits[h].dataStream);
+					kinds.Append("#");
+					kinds.Append(z.hits[h].profileStartBar);
+					kinds.Append("/a");
+					kinds.Append(z.hits[h].profileAge);
 				}
 				trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 					"[VP-TEST]   CONF[{0}] center={1} lo={2} hi={3} z={4} raw={5} hits={6} streams={7} profiles={8} [{9}]",
