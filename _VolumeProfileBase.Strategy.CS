@@ -139,6 +139,10 @@ namespace PowerLanguage.Strategy
 			public int dataStream;
 			public int startBar;  // 1-based Status Bar # / FullSymbolData.Current of BarsInterval.First
 			public int endBar;    // 1-based Status Bar # of BarsInterval.Second (walks while developing)
+			public double open;   // open of the profile's first bar
+			public double high;   // highest high across the profile window
+			public double low;    // lowest low across the profile window
+			public double close;  // close of the profile's last bar (developing bar while the window is open)
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
 			public double vah;  // Value area high.
@@ -2178,6 +2182,7 @@ namespace PowerLanguage.Strategy
 			if (poc > 0) extra.poc = poc;
 			if (vah > 0) extra.vah = vah;
 			if (val > 0) extra.val = val;
+			applyProfileOhlc(extra);
 
 			double pocVol = 0;
 			try
@@ -2187,6 +2192,74 @@ namespace PowerLanguage.Strategy
 			catch { }
 			if (pocVol <= 0) pocVol = volumeAtPrice(extra, extra.poc);
 			if (pocVol > 0) extra.pocVol = pocVol;
+		}
+
+		/// <summary>
+		/// Bar OHLC of the profile window on extra.dataStream. Open is the first
+		/// bar, close is the last bar, high/low are the extremes of that span.
+		/// Not VAH/VAL. 0 when the bar is outside MaxBarsBack.
+		/// </summary>
+		private void applyProfileOhlc(VpExtra extra)
+		{
+			if (extra == null) return;
+			extra.open = 0;
+			extra.high = 0;
+			extra.low = 0;
+			extra.close = 0;
+
+			int start = extra.startBar;
+			int end = extra.endBar;
+			if (start < 1) return;
+			if (end < start) end = start;
+
+			int stream = extra.dataStream < 1 ? 1 : extra.dataStream;
+			IInstrument bars = barsOf(stream);
+			if (bars == null) return;
+			int current = streamItemBarIndex(stream);
+			if (current < 1) return;
+			if (end > current) end = current;
+			if (start > current) return;
+
+			double o = barPrice(bars, current, start, 0);
+			double c = barPrice(bars, current, end, 3);
+			double hi = 0;
+			double lo = 0;
+			for (int b = start; b <= end; b++)
+			{
+				double h = barPrice(bars, current, b, 1);
+				double l = barPrice(bars, current, b, 2);
+				if (h > hi) hi = h;
+				if (l > 0 && (lo <= 0 || l < lo)) lo = l;
+			}
+			if (o > 0) extra.open = o;
+			if (hi > 0) extra.high = hi;
+			if (lo > 0) extra.low = lo;
+			if (c > 0) extra.close = c;
+		}
+
+		/// <summary>kind: 0 open, 1 high, 2 low, 3 close. chartBar is 1-based Status Bar #.</summary>
+		private static double barPrice(IInstrument bars, int current, int chartBar, int kind)
+		{
+			if (bars == null || chartBar < 1 || current < chartBar) return 0;
+			int ago = current - chartBar;
+			try
+			{
+				if (ago == 0)
+				{
+					if (kind == 0) return bars.OpenValue;
+					if (kind == 1) return bars.HighValue;
+					if (kind == 2) return bars.LowValue;
+					return bars.CloseValue;
+				}
+				if (kind == 0) return bars.Open[ago];
+				if (kind == 1) return bars.High[ago];
+				if (kind == 2) return bars.Low[ago];
+				return bars.Close[ago];
+			}
+			catch
+			{
+				return 0;
+			}
 		}
 
 		/// <summary>kind: 0 POC, 1 VAH, 2 VAL. Tries 1-based Status bar then native 0-based ItemForBar index.</summary>
