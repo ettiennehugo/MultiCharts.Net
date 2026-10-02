@@ -226,6 +226,10 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Info, header);
 
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+				"[VP-TEST] {0} OHLC open={1} high={2} low={3} close={4}",
+				label, fmt(extra.open), fmt(extra.high), fmt(extra.low), fmt(extra.close)));
+
+			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] {0} POC={1} pocVol={2} VAH={3} VAL={4} vaWidth={5} profileVwap={6}",
 				label,
 				fmt(extra.poc), fmt(extra.pocVol),
