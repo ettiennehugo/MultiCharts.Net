@@ -51,6 +51,9 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS = 1;
 		public const double DEFAULT_CONFLUENCE_DECAY = 0.75;
 		public const double DEFAULT_CONFLUENCE_CROSS_BONUS = 0.35;
+		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_1 = 1.00;  // execution / primary stream
+		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
+		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
 		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_PROFILE_VWAP = 0.80;    // default confluence weight for profile VWAP alignment
@@ -417,8 +420,8 @@ namespace PowerLanguage.Strategy
 
 			private void stepLength(IInstrument bars)
 			{
-				int n = length < 1 ? DEFAULT_VWAP_LENGTH : length;
-				if (bars.CurrentBar < n) return;
+				int n = length;
+				if (n < 1 || bars.CurrentBar < n) return;
 
 				clearSums();
 				for (int i = 0; i < n; i++)
@@ -496,45 +499,240 @@ namespace PowerLanguage.Strategy
 		}
 
 		//properties
-		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes.
-		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes.
-		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks.
+		// [Input] properties are plain auto-properties. Their bounds are checked once in StartCalc.
+		// Non-[Input] properties keep the check in the getter.
+		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes. 0..1, and above LvnPercentile.
+		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes. 0..1, and below HvnPercentile.
+		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks. >= 1.
 
 		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
-		[Input] public int Vwap1Length { get; set; }        // Used when VwapType = Length.
-		[Input] public string Vwap1FromDate { get; set; }   // Used when VwapType = AdaptiveFromDate.
+		[Input] public int Vwap1Length { get; set; }        // Used when Vwap1Type = Length. >= 1.
+		[Input] public string Vwap1FromDate { get; set; }   // Used when Vwap1Type = AdaptiveFromDate.
 		[Input] public int Vwap1DataStream { get; set; }    // Chart data stream slot 1 reads. 1 = Data1, 2 = Data2, …
 
 		[Input] public EVwapType Vwap2Type { get; set; }    // Slot 2. Disabled = unused.
-		[Input] public int Vwap2Length { get; set; }        // Used when Vwap2Type = Length.
+		[Input] public int Vwap2Length { get; set; }        // Used when Vwap2Type = Length. >= 1.
 		[Input] public string Vwap2FromDate { get; set; }   // Used when Vwap2Type = AdaptiveFromDate.
 		[Input] public int Vwap2DataStream { get; set; }    // Chart data stream slot 2 reads. 1 = Data1, 2 = Data2, …
 
 		[Input] public EVwapType Vwap3Type { get; set; }    // Slot 3. Disabled = unused.
-		[Input] public int Vwap3Length { get; set; }        // Used when Vwap3Type = Length.
+		[Input] public int Vwap3Length { get; set; }        // Used when Vwap3Type = Length. >= 1.
 		[Input] public string Vwap3FromDate { get; set; }   // Used when Vwap3Type = AdaptiveFromDate.
 		[Input] public int Vwap3DataStream { get; set; }    // Chart data stream slot 3 reads. 1 = Data1, 2 = Data2, …
 
 		// Confluence configuration. Not [Input] — subclasses decide what to expose.
-		// Stream index 0 (or less) disables that slot. Weight 0 drops the stream from scoring.
-		public int ConfluenceDataStream1 { get; set; }
-		public int ConfluenceDataStream2 { get; set; }
-		public int ConfluenceDataStream3 { get; set; }
-		public double ConfluenceWeight1 { get; set; }
-		public double ConfluenceWeight2 { get; set; }
-		public double ConfluenceWeight3 { get; set; }
-		public int ConfluenceLookbackProfiles { get; set; }   // succeeding VPs per stream, live included
-		public int ConfluenceAlignTicks { get; set; }        // cluster width in ticks
-		public int ConfluenceMinHits { get; set; }           // minimum aligned levels to keep a zone
-		public int ConfluenceTopCount { get; set; }          // default N for GetTopConfluenceZones()
-		public double ConfluenceSameStreamDecay { get; set; } // age 0 = 1, age 1 = decay, age 2 = decay^2
-		public double ConfluenceCrossStreamBonus { get; set; } // extra raw-score multiplier per extra stream
+		// Stream index 0 or less disables that slot. Weight 0 drops the stream from scoring.
+		private int m_confluenceDataStream1 = 1;
+		private int m_confluenceDataStream2 = -1; // by default disable the second data stream
+		private int m_confluenceDataStream3 = -1; // by default disable the third data stream
+		private double m_confluenceWeight1 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_1;
+		private double m_confluenceWeight2 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_2;
+		private double m_confluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
+		private int m_confluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
+		private int m_confluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
+		private int m_confluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
+		private int m_confluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
+		private double m_confluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
+		private double m_confluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
+		private int m_confluenceTargetClearTicks = DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS;
+		private int m_confluenceTargetCount = DEFAULT_CONFLUENCE_TOP_COUNT;
+
+		// Confluence configuration. Not [Input] — subclasses decide what to expose.
+		// Setter throws ArgumentException and does not store the value when it is out of range.
+		/// <summary>
+		/// Chart stream whose volume profiles vote in confluence slot 1.
+		/// 1 = Data1. Only this slot is required. Valid: 1 … MaxDataStream.
+		/// ≤ 0 disables the slot. Default 1.
+		/// </summary>
+		public int ConfluenceDataStream1
+		{
+			get { return m_confluenceDataStream1; }
+			set { requireOptionalDataStream("ConfluenceDataStream1", value); m_confluenceDataStream1 = value; }
+		}
+		/// <summary>
+		/// Chart stream for confluence slot 2. Optional higher timeframe.
+		/// Valid: 1 … MaxDataStream, or ≤ 0 to disable. Default -1 (disabled).
+		/// Do not default this to 2 — Data2 is not required on the chart.
+		/// </summary>
+		public int ConfluenceDataStream2
+		{
+			get { return m_confluenceDataStream2; }
+			set { requireOptionalDataStream("ConfluenceDataStream2", value); m_confluenceDataStream2 = value; }
+		}
+		/// <summary>
+		/// Chart stream for confluence slot 3. Optional highest timeframe.
+		/// Valid: 1 … MaxDataStream, or ≤ 0 to disable. Default -1 (disabled).
+		/// </summary>
+		public int ConfluenceDataStream3
+		{
+			get { return m_confluenceDataStream3; }
+			set { requireOptionalDataStream("ConfluenceDataStream3", value); m_confluenceDataStream3 = value; }
+		}
+		/// <summary>
+		/// Score multiplier for anchors from ConfluenceDataStream1.
+		/// Valid: ≥ 0. 0 drops the stream from scoring. Default 1.00 (execution timeframe).
+		/// </summary>
+		public double ConfluenceWeight1
+		{
+			get { return m_confluenceWeight1; }
+			set { requireNonNegative("ConfluenceWeight1", value); m_confluenceWeight1 = value; }
+		}
+		/// <summary>
+		/// Score multiplier for anchors from ConfluenceDataStream2.
+		/// Valid: ≥ 0. 0 drops the stream. Default 1.25. Unused while the slot is disabled.
+		/// </summary>
+		public double ConfluenceWeight2
+		{
+			get { return m_confluenceWeight2; }
+			set { requireNonNegative("ConfluenceWeight2", value); m_confluenceWeight2 = value; }
+		}
+		/// <summary>
+		/// Score multiplier for anchors from ConfluenceDataStream3.
+		/// Valid: ≥ 0. 0 drops the stream. Default 1.50. Unused while the slot is disabled.
+		/// </summary>
+		public double ConfluenceWeight3
+		{
+			get { return m_confluenceWeight3; }
+			set { requireNonNegative("ConfluenceWeight3", value); m_confluenceWeight3 = value; }
+		}
+		/// <summary>
+		/// How many succeeding volume profiles per enabled stream to include, live profile included.
+		/// Age 0 is the newest. Valid: ≥ 1. Default 4.
+		/// </summary>
+		public int ConfluenceLookbackProfiles
+		{
+			get { return m_confluenceLookbackProfiles; }
+			set { requireAtLeast("ConfluenceLookbackProfiles", value, 1); m_confluenceLookbackProfiles = value; }
+		}
+		/// <summary>
+		/// Prices within this many ticks are clustered into one confluence zone.
+		/// Valid: ≥ 1. Default 4.
+		/// </summary>
+		public int ConfluenceAlignTicks
+		{
+			get { return m_confluenceAlignTicks; }
+			set { requireAtLeast("ConfluenceAlignTicks", value, 1); m_confluenceAlignTicks = value; }
+		}
+		/// <summary>
+		/// Minimum aligned anchors required to keep a zone. Valid: ≥ 1. Default 2.
+		/// </summary>
+		public int ConfluenceMinHits
+		{
+			get { return m_confluenceMinHits; }
+			set { requireAtLeast("ConfluenceMinHits", value, 1); m_confluenceMinHits = value; }
+		}
+		/// <summary>
+		/// Default count for GetTopConfluenceZones(). Valid: ≥ 1. Default 5.
+		/// </summary>
+		public int ConfluenceTopCount
+		{
+			get { return m_confluenceTopCount; }
+			set { requireAtLeast("ConfluenceTopCount", value, 1); m_confluenceTopCount = value; }
+		}
+		/// <summary>
+		/// Same-stream age decay. Age 0 weight is 1, age 1 is this value, age 2 is this value squared.
+		/// Valid: 0.0–1.0. Default 0.75. 1.0 keeps older profiles at full weight.
+		/// </summary>
+		public double ConfluenceSameStreamDecay
+		{
+			get { return m_confluenceSameStreamDecay; }
+			set { requireUnitInterval("ConfluenceSameStreamDecay", value); m_confluenceSameStreamDecay = value; }
+		}
+		/// <summary>
+		/// Extra raw-score multiplier per stream beyond the first in a zone:
+		/// rawScore *= 1 + bonus * (streamCount - 1). Valid: ≥ 0. Default 0.35. 0 disables the bonus.
+		/// </summary>
+		public double ConfluenceCrossStreamBonus
+		{
+			get { return m_confluenceCrossStreamBonus; }
+			set { requireNonNegative("ConfluenceCrossStreamBonus", value); m_confluenceCrossStreamBonus = value; }
+		}
+		/// <summary>
+		/// When true, HVN peaks (other than the POC) are confluence anchors. Default true.
+		/// </summary>
 		public bool ConfluenceIncludeHvns { get; set; }
+		/// <summary>
+		/// When true, the three live VWAP slots vote if their data stream is one of the enabled confluence streams. Default true.
+		/// </summary>
 		public bool ConfluenceIncludeVwapSlots { get; set; }
+		/// <summary>
+		/// When true, each profile's own volume-weighted price (profile VWAP) is an anchor. Default true.
+		/// </summary>
 		public bool ConfluenceIncludeProfileVwap { get; set; }
-		public double ConfluenceTargetMinZScore { get; set; }  // drop zones below this z-score
-		public int ConfluenceTargetClearTicks { get; set; }    // zone must clear the reference price by this many ticks
-		public int ConfluenceTargetCount { get; set; }         // default N for GetConfluenceTargets()
+		/// <summary>
+		/// Drop confluence targets whose zone z-score is below this. Any finite value is valid, including negative. Default 0.
+		/// </summary>
+		public double ConfluenceTargetMinZScore { get; set; }
+		/// <summary>
+		/// A target zone must clear the reference price by this many ticks (bullish: zone low above price; bearish: zone high below price).
+		/// Valid: ≥ 0. Default 1. 0 allows a zone that starts on the reference price.
+		/// </summary>
+		public int ConfluenceTargetClearTicks
+		{
+			get { return m_confluenceTargetClearTicks; }
+			set { requireNonNegative("ConfluenceTargetClearTicks", value); m_confluenceTargetClearTicks = value; }
+		}
+		/// <summary>
+		/// Default count for GetConfluenceTargets(). Valid: ≥ 1. Default 5.
+		/// </summary>
+		public int ConfluenceTargetCount
+		{
+			get { return m_confluenceTargetCount; }
+			set { requireAtLeast("ConfluenceTargetCount", value, 1); m_confluenceTargetCount = value; }
+		}
+
+		private void validateInputs()
+		{
+			requireUnitInterval("HvnPercentile", HvnPercentile);
+			requireUnitInterval("LvnPercentile", LvnPercentile);
+			if (HvnPercentile < LvnPercentile)
+				throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
+			requireAtLeast("MinNodeTicks", MinNodeTicks, 1);
+			requireAtLeast("Vwap1Length", Vwap1Length, 1);
+			requireAtLeast("Vwap2Length", Vwap2Length, 1);
+			requireAtLeast("Vwap3Length", Vwap3Length, 1);
+			requireDataStream("Vwap1DataStream", Vwap1DataStream);
+			requireDataStream("Vwap2DataStream", Vwap2DataStream);
+			requireDataStream("Vwap3DataStream", Vwap3DataStream);
+		}
+
+		private static void requireUnitInterval(string name, double value)
+		{
+			if (value < 0.0 || value > 1.0)
+				throw new ArgumentException(name + " must be between 0.0 and 1.0.");
+		}
+
+		private static void requireAtLeast(string name, int value, int min)
+		{
+			if (value < min)
+				throw new ArgumentException(name + " must be " + min + " or greater.");
+		}
+
+		private static void requireNonNegative(string name, double value)
+		{
+			if (value < 0.0)
+				throw new ArgumentException(name + " must be 0.0 or greater.");
+		}
+
+		private static void requireNonNegative(string name, int value)
+		{
+			if (value < 0)
+				throw new ArgumentException(name + " must be 0 or greater.");
+		}
+
+		private void requireDataStream(string name, int stream)
+		{
+			if (stream < 1)
+				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
+			if (MaxDataStream >= 1 && stream > MaxDataStream)
+				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
+		}
+
+		private void requireOptionalDataStream(string name, int stream)
+		{
+			if (stream <= 0) return;
+			requireDataStream(name, stream);
+		}
 
 		//attribute
 		private Dictionary<int, StreamPack> m_streams;  /// Stream packs by data stream index.
@@ -571,12 +769,12 @@ namespace PowerLanguage.Strategy
 			Vwap3FromDate = "";
 			Vwap3DataStream = 1;
 
-			ConfluenceDataStream1 = 1;
-			ConfluenceDataStream2 = 2;
-			ConfluenceDataStream3 = 3;
-			ConfluenceWeight1 = 1.00;   // execution TF
-			ConfluenceWeight2 = 1.25;   // higher TF carries more by default
-			ConfluenceWeight3 = 1.50;
+			//NOTE: ConfluenceDataStreamX is already set and since it accesses MaxDataStream to validate we skip
+			//      the initialization here since MC.Net will raise an exception accessing MaxDataStream in the
+			//      Create method.
+			ConfluenceWeight1 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_1;   // execution TF
+			ConfluenceWeight2 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_2;   // higher TF carries more by default
+			ConfluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
 			ConfluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
 			ConfluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
 			ConfluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
@@ -607,13 +805,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			if (ConfluenceMinHits < 1) throw new ArgumentException("ConfluenceMinHits must be 1 or greater.");
-			if (ConfluenceCrossStreamBonus < 0.0) throw new ArgumentException("ConfluenceCrossStreamBonus must be 0.0 or greater.");
-			if (ConfluenceSameStreamDecay < 0.0 || ConfluenceSameStreamDecay > 1.0) throw new ArgumentException("ConfluenceSameStreamDecay must be between 0.0 and 1.0.");
-			if (HvnPercentile < 0 || HvnPercentile > 1.0) throw new ArgumentException("HvnPercentile must be a percentage, 0 to 1.0.");
-			if (LvnPercentile < 0 || LvnPercentile > 1.0) throw new ArgumentException("LvnPercentile must be a percentage, 0 to 1.0.");
-			if (HvnPercentile < LvnPercentile) throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
-			if (MinNodeTicks < 1) throw new ArgumentException("MinNodeTicks must be 1 or greater.");
+			validateInputs();
 			unhookStreams();
 			m_streams.Clear();
 			hookStreams();
@@ -837,21 +1029,29 @@ namespace PowerLanguage.Strategy
 			refreshVolumePercentiles();
 		}
 
-		/// <summary>Slot 1 current VWAP, or NaN when Disabled / not valid yet.</summary>
+		/// <summary>Slot 1 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : double.NaN; } }
-		/// <summary>Slot 2 current VWAP, or NaN when Disabled / not valid yet.</summary>
+		/// <summary>Slot 2 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap2 { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : double.NaN; } }
-		/// <summary>Slot 3 current VWAP, or NaN when Disabled / not valid yet.</summary>
+		/// <summary>Slot 3 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3 { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : double.NaN; } }
+		/// <summary>Slot 1 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwapSigma { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
+		/// <summary>Slot 2 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap2Sigma { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : double.NaN; } }
+		/// <summary>Slot 3 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3Sigma { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : double.NaN; } }
+		/// <summary>True when slot 1 is not Disabled and has a valid value. Read-only.</summary>
 		public bool VwapActive { get { return m_vwap1 != null && m_vwap1.type != EVwapType.Disabled && m_vwap1.valid; } }
+		/// <summary>True when slot 2 is not Disabled and has a valid value. Read-only.</summary>
 		public bool Vwap2Active { get { return m_vwap2 != null && m_vwap2.type != EVwapType.Disabled && m_vwap2.valid; } }
+		/// <summary>True when slot 3 is not Disabled and has a valid value. Read-only.</summary>
 		public bool Vwap3Active { get { return m_vwap3 != null && m_vwap3.type != EVwapType.Disabled && m_vwap3.valid; } }
-		/// <summary>Resolved chart data stream for slot 1 (1 = Data1). 0 if unused.</summary>
+		/// <summary>Chart stream slot 1 was built from (1 = Data1). 0 if unused. Read-only.</summary>
 		public int CurrentVwapStream { get { return slotStream(m_vwap1); } }
+		/// <summary>Chart stream slot 2 was built from (1 = Data1). 0 if unused. Read-only.</summary>
 		public int CurrentVwap2Stream { get { return slotStream(m_vwap2); } }
+		/// <summary>Chart stream slot 3 was built from (1 = Data1). 0 if unused. Read-only.</summary>
 		public int CurrentVwap3Stream { get { return slotStream(m_vwap3); } }
 
 		/// <summary>
@@ -889,21 +1089,14 @@ namespace PowerLanguage.Strategy
 		{
 			eng.parent = this;
 			eng.type = type;
-			eng.length = length < 1 ? DEFAULT_VWAP_LENGTH : length;
+			eng.length = length;
 			eng.datastream = 0;
 			eng.fromDate = DateTime.MinValue;
 			eng.Reset();
 
 			if (type == EVwapType.Disabled) return;
 
-			if (stream < 1)
-				throw new ArgumentException(streamInputName + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
-			if (stream > MaxDataStream)
-				throw new ArgumentException(streamInputName + " = " + stream + " is not on this chart. Add that data stream or set " + eng.label + " Type to Disabled.");
 			eng.datastream = stream;
-
-			if (type == EVwapType.Length && length < 1)
-				throw new ArgumentException(eng.label + " length must be >= 1 when Type is Length.");
 			if (type != EVwapType.AdaptiveFromDate) return;
 
 			if (!tryParseDate(fromText, out DateTime dt))
@@ -1264,9 +1457,8 @@ namespace PowerLanguage.Strategy
 			if (price <= 0 || m_confluenceZones.Count == 0) return list;
 
 			int dir = direction == EVpDirection.Bearish ? -1 : 1;
-			int clearTicks = ConfluenceTargetClearTicks < 0 ? 0 : ConfluenceTargetClearTicks;
+			int clearTicks = ConfluenceTargetClearTicks;
 			double clear = clearTicks * tickSize();
-			if (clear < 0) clear = 0;
 			double minZ = ConfluenceTargetMinZScore;
 
 			for (int i = 0; i < m_confluenceZones.Count; i++)
@@ -1376,7 +1568,7 @@ namespace PowerLanguage.Strategy
 			List<IProfile> profiles = listedProfiles(sp);
 			if (profiles.Count == 0) return;
 
-			int take = ConfluenceLookbackProfiles < 1 ? DEFAULT_CONFLUENCE_LOOKBACK : ConfluenceLookbackProfiles;
+			int take = ConfluenceLookbackProfiles;
 			int from = Math.Max(0, profiles.Count - take);
 			double decay = ConfluenceSameStreamDecay;
 
@@ -1557,7 +1749,7 @@ namespace PowerLanguage.Strategy
 
 		private double confluenceTolerance()
 		{
-			int ticks = ConfluenceAlignTicks < 1 ? DEFAULT_CONFLUENCE_ALIGN_TICKS : ConfluenceAlignTicks;
+			int ticks = ConfluenceAlignTicks;
 			double tick = tickSize();
 			if (tick <= 0) tick = 0.01;
 			return ticks * tick;
@@ -1578,7 +1770,7 @@ namespace PowerLanguage.Strategy
 
 		private bool nodeWideEnough(double low, double high)
 		{
-			int ticks = MinNodeTicks < 1 ? DEFAULT_MIN_NODE_TICKS : MinNodeTicks;
+			int ticks = MinNodeTicks;
 			double need = ticks * tickSize();
 			if (need <= 0) return true;
 			return (high - low) + 1e-12 >= need;

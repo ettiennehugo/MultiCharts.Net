@@ -42,7 +42,7 @@ namespace PowerLanguage.Strategy
 		[Input] public bool TraceExceptionalLevels { get; set; }
 		/// <summary>Include a short confluence snapshot taken on the new-profile bar.</summary>
 		[Input] public bool TraceConfluence { get; set; }
-		/// <summary>Cap on exceptional-level rows written per profile.</summary>
+		/// <summary>Cap on exceptional-level rows written per profile. 0 writes none.</summary>
 		[Input] public int TraceMaxLevels { get; set; }
 
 		// last profile start bar observed on each stream (1-based). 0 = not yet seen.
@@ -68,10 +68,14 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			if (MaxDataStream >= 2) ConfluenceDataStream2 = 2;
+			if (MaxDataStream >= 3) ConfluenceDataStream3 = 3;
 			if (TraceDataStream < 1)
 				throw new ArgumentException("TraceDataStream must be a chart data stream index >= 1 (1 = Data1).");
+			if (MaxDataStream >= 1 && TraceDataStream > MaxDataStream)
+				throw new ArgumentException("TraceDataStream = " + TraceDataStream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
 			if (TraceMaxLevels < 0)
-				TraceMaxLevels = 0;
+				throw new ArgumentException("TraceMaxLevels must be 0 or greater.");
 			m_openStart.Clear();
 			m_loggedPrior.Clear();
 		}
