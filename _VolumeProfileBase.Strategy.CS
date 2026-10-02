@@ -40,6 +40,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_LVN_PERCENTILE = 0.2;  // Default percentile of prices relative to POC considered low volume node prices.
 		public const int DEFAULT_SMOOTH_TICKS = 3;  // Default smoothing length used for ticks.
 		public const int DEFAULT_MIN_NODE_TICKS = 3;  // min HVN/LVN high-low span in ticks
+		public const double PRICE_EPSILON = 1e-12;  // tolerance for price-span compares; about 1 ULP near 7800, far below a tick
 		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int VWAP_SLOT_COUNT = 3;
@@ -1567,8 +1568,9 @@ namespace PowerLanguage.Strategy
 			if (!m_streams.TryGetValue(datastream, out StreamPack sp) || sp.pack == null) return;
 
 			// Do not walk pack.Items. That collection kept the same profile objects
-			// across weeks while ItemForBar tracked the rolling every-N-bar windows.
-			// Resolve the same way as ExtraVolumeProfileForBar, then step to the previous window.
+			// (and the same 7776–7778 extras) across weeks while ItemForBar tracked
+			// the rolling every-N-bar windows. Resolve the same way as
+			// ExtraVolumeProfileForBar, then step to the previous window.
 			int bar = streamItemBarIndex(datastream);
 			if (bar < 1) return;
 
@@ -1723,6 +1725,9 @@ namespace PowerLanguage.Strategy
 			zone.low = lo;
 			zone.high = hi;
 			zone.center = wSum > 0 ? pw / wSum : (lo + hi) * 0.5;
+			double tick = tickSize();
+			if (tick > 0 && (zone.high - zone.low) + PRICE_EPSILON < tick)
+				return;
 			zone.hitCount = zone.hits.Count;
 			zone.streamCount = streams.Count;
 			zone.profileCount = profiles.Count;
@@ -1786,7 +1791,7 @@ namespace PowerLanguage.Strategy
 			int ticks = MinNodeTicks;
 			double need = ticks * tickSize();
 			if (need <= 0) return true;
-			return (high - low) + 1e-12 >= need;
+			return (high - low) + PRICE_EPSILON >= need;
 		}
 
 		private void hookStreams()
