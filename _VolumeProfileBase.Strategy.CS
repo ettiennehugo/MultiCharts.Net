@@ -127,6 +127,8 @@ namespace PowerLanguage.Strategy
 		public class VpExtra
 		{
 			public int dataStream;
+			public int startBar;  // 1-based Status Bar # / FullSymbolData.Current of BarsInterval.First
+			public int endBar;    // 1-based Status Bar # of BarsInterval.Second (walks while developing)
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
 			public double vah;  // Value area high.
@@ -135,7 +137,7 @@ namespace PowerLanguage.Strategy
 			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
 			public double vwap2;        // slot 2 snapshot
 			public double vwap3;        // slot 3 snapshot
-			public double vwapSigma1;    // slot 1 σ from the running window (0 when unused)
+			public double vwap1Sigma;    // slot 1 σ from the running window (0 when unused)
 			public double vwap2Sigma;
 			public double vwap3Sigma;
 			public int vwap1Stream;      // chart data stream slot 1 was built from (0 = unused)
@@ -652,9 +654,9 @@ namespace PowerLanguage.Strategy
 
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
 			if (vp != null)
-				ensureExtra(streamPack, vp);
+				ensureExtra(streamPack, vp, barIndex);
 
-			VpExtra extra = extraFor(streamPack, datastream, vp);
+			VpExtra extra = extraFor(streamPack, datastream, vp, barIndex);
 			if (extra == null)
 				extra = extraForStart(streamPack, datastream, barIndex);
 			if (extra == null)
@@ -662,6 +664,8 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
 				return null;
 			}
+			if (vp != null)
+				applyProfileGeometry(vp, extra, barIndex);
 			stampExtra(extra);
 			refreshVolumePercentiles();
 			return extra;
@@ -922,8 +926,7 @@ namespace PowerLanguage.Strategy
 		{
 			try
 			{
-				if (stream <= 1) return Bars;
-				if (stream < 1 || stream > MaxDataStream) return null;
+				if (stream == 1) return Bars;
 				return BarsOfData(stream);
 			}
 			catch
@@ -939,6 +942,7 @@ namespace PowerLanguage.Strategy
 		private int streamItemBarIndex(int stream)
 		{
 			IInstrument bars = barsOf(stream);
+
 			if (bars == null) return -1;
 			try
 			{
@@ -990,31 +994,36 @@ namespace PowerLanguage.Strategy
 			if (sp == null || barIndex < 1) return;
 			IProfile vp = itemForBar(sp, sp.datastream, barIndex);
 			if (vp == null) return;
-			ensureExtra(sp, vp);
+			ensureExtra(sp, vp, barIndex);
 		}
 
-		private static VpExtra extraFor(StreamPack sp, int datastream, IProfile vp)
+		private VpExtra extraFor(StreamPack sp, int datastream, IProfile vp, int chartBar)
 		{
 			if (sp == null || vp == null) return null;
 			VpKey key = new VpKey(datastream, vp);
 			VpExtra extra;
-			if (sp.extra.TryGetValue(key, out extra)) return extra;
-			if (key.startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, key.startBar), out extra))
-				return extra;
-			return null;
+			if (!sp.extra.TryGetValue(key, out extra) && key.startBar >= 1)
+				sp.extra.TryGetValue(new VpKey(datastream, key.startBar), out extra);
+			if (extra != null)
+				applyProfileGeometry(vp, extra, chartBar);
+			return extra;
 		}
 
-		private static VpExtra extraForStart(StreamPack sp, int datastream, int startBar)
+		private VpExtra extraForStart(StreamPack sp, int datastream, int startBar)
 		{
 			if (sp == null) return null;
-			VpExtra extra;
-			if (startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar), out extra))
-				return extra;
-			if (startBar > 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar - 1), out extra))
-				return extra;
-			if (startBar >= 0 && sp.extra.TryGetValue(new VpKey(datastream, startBar + 1), out extra))
-				return extra;
-			return null;
+			VpExtra extra = null;
+			if (startBar >= 1)
+				sp.extra.TryGetValue(new VpKey(datastream, startBar), out extra);
+			if (extra == null && startBar > 1)
+				sp.extra.TryGetValue(new VpKey(datastream, startBar - 1), out extra);
+			if (extra == null && startBar >= 1)
+				sp.extra.TryGetValue(new VpKey(datastream, startBar + 1), out extra);
+			if (extra == null) return null;
+			IProfile vp = itemForBar(sp, datastream, startBar);
+			if (vp != null)
+				applyProfileGeometry(vp, extra, startBar);
+			return extra;
 		}
 
 		private void stampExtra(VpExtra extra)
@@ -1023,7 +1032,7 @@ namespace PowerLanguage.Strategy
 			extra.vwap1 = m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : 0;
 			extra.vwap2 = m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : 0;
 			extra.vwap3 = m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : 0;
-			extra.vwapSigma1 = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
+			extra.vwap1Sigma = m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : 0;
 			extra.vwap2Sigma = m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : 0;
 			extra.vwap3Sigma = m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : 0;
 			extra.vwap1Stream = slotStream(m_vwap1);
@@ -1099,7 +1108,6 @@ namespace PowerLanguage.Strategy
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
-
 			IProfile best = null;
 			int bestDist = int.MaxValue;
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex), barIndex, ref best, ref bestDist);
@@ -1570,6 +1578,11 @@ namespace PowerLanguage.Strategy
 
 		private void ensureExtra(StreamPack sp, IProfile vp)
 		{
+			ensureExtra(sp, vp, 0);
+		}
+
+		private void ensureExtra(StreamPack sp, IProfile vp, int chartBar)
+		{
 			if (sp == null || vp == null) return;
 			VpKey key = new VpKey(sp.datastream, vp);
 			if (key.startBar < 0) return;
@@ -1583,12 +1596,12 @@ namespace PowerLanguage.Strategy
 			bool empty = false;
 			try { empty = vp.Empty; } catch { empty = true; }
 			if (!empty)
-				fillNodes(vp, extra);
+				fillNodes(vp, extra, chartBar);
 			stampExtra(extra);
 			m_volumePctDirty = true;
 		}
 
-		private void fillNodes(IProfile vp, VpExtra extra)
+		private void fillNodes(IProfile vp, VpExtra extra, int chartBar)
 		{
 			extra.hvns.Clear();
 			extra.lvns.Clear();
@@ -1603,11 +1616,9 @@ namespace PowerLanguage.Strategy
 			extra.maxBidPercentile = 0;
 			if (vp == null || vp.Values == null) return;
 			readLevels(vp, extra.levels);
+			applyProfileGeometry(vp, extra, chartBar);
 			List<Row> rows = rowsFromLevels(extra.levels);
 			if (rows.Count < 3) return;
-			extra.poc = levelPrice(vp.POC);
-			extra.vah = vaExtreme(vp, true);
-			extra.val = vaExtreme(vp, false);
 
 			double pv = 0;
 			double tv = 0;
@@ -1632,8 +1643,8 @@ namespace PowerLanguage.Strategy
 					pocIdx = k;
 				}
 			}
-			extra.pocVol = pocVol;
 			if (extra.poc <= 0) extra.poc = rows[pocIdx].price;
+			if (extra.pocVol <= 0) extra.pocVol = volumeAtPrice(extra, extra.poc);
 			if (pocVol <= 0) return;
 			double hvnFloor = percentile(vols, HvnPercentile);
 			double lvnCeil = percentile(vols, LvnPercentile);
@@ -1873,6 +1884,102 @@ namespace PowerLanguage.Strategy
 			if (lo == hi) return s[lo];
 			double w = pos - lo;
 			return s[lo] * (1.0 - w) + s[hi] * w;
+		}
+
+		/// <summary>
+		/// POC / VAH / VAL / pocVol from the live IProfile. Chart labels use
+		/// POCForBar / HighVAForBar / LowVAForBar; vp.POC and vp.VA can lag
+		/// or point at a different tick than the histogram.
+		/// </summary>
+		private void applyProfileGeometry(IProfile vp, VpExtra extra, int chartBar)
+		{
+			if (vp == null || extra == null) return;
+
+			int endChart = profileEndBar(vp);
+			int startChart = profileStartBar(vp);
+			if (startChart >= 1) extra.startBar = startChart;
+			if (endChart >= 1) extra.endBar = endChart;
+			int bar = chartBar >= 1 ? chartBar : (endChart >= 1 ? endChart : startChart);
+
+			double poc = firstPositive(
+				priceForBar(vp, bar, 0),
+				priceForBar(vp, bar - 1, 0),
+				priceForBar(vp, endChart, 0),
+				priceForBar(vp, startChart, 0),
+				levelPrice(vp.POC));
+			double vah = firstPositive(
+				priceForBar(vp, bar, 1),
+				priceForBar(vp, bar - 1, 1),
+				priceForBar(vp, endChart, 1),
+				vaExtreme(vp, true));
+			double val = firstPositive(
+				priceForBar(vp, bar, 2),
+				priceForBar(vp, bar - 1, 2),
+				priceForBar(vp, endChart, 2),
+				vaExtreme(vp, false));
+
+			if (poc > 0) extra.poc = poc;
+			if (vah > 0) extra.vah = vah;
+			if (val > 0) extra.val = val;
+
+			double pocVol = 0;
+			try
+			{
+				if (vp.POC != null) pocVol = (double)vp.POC.TotalValue;
+			}
+			catch { }
+			if (pocVol <= 0) pocVol = volumeAtPrice(extra, extra.poc);
+			if (pocVol > 0) extra.pocVol = pocVol;
+		}
+
+		/// <summary>kind: 0 POC, 1 VAH, 2 VAL. Tries 1-based Status bar then native 0-based ItemForBar index.</summary>
+		private static double priceForBar(IProfile vp, int chartBar, int kind)
+		{
+			if (vp == null || chartBar < 1) return 0;
+			double px = priceForBarNative(vp, chartBar, kind);
+			if (px > 0) return px;
+			return priceForBarNative(vp, chartBar - 1, kind);
+		}
+
+		private static double priceForBarNative(IProfile vp, int bar, int kind)
+		{
+			if (vp == null || bar < 0) return 0;
+			try
+			{
+				Price p = null;
+				if (kind == 0) p = vp.POCForBar(bar);
+				else if (kind == 1) p = vp.HighVAForBar(bar);
+				else p = vp.LowVAForBar(bar);
+				return p != null ? p.Dbl : 0;
+			}
+			catch { return 0; }
+		}
+
+		private static double firstPositive(params double[] xs)
+		{
+			if (xs == null) return 0;
+			for (int i = 0; i < xs.Length; i++)
+				if (xs[i] > 0) return xs[i];
+			return 0;
+		}
+
+		private static double volumeAtPrice(VpExtra extra, double price)
+		{
+			if (extra == null || extra.levels == null || extra.levels.Count == 0 || price <= 0)
+				return 0;
+			double bestVol = 0;
+			double bestDist = double.MaxValue;
+			for (int i = 0; i < extra.levels.Count; i++)
+			{
+				LevelVol lv = extra.levels[i];
+				double d = Math.Abs(lv.price - price);
+				if (d < bestDist)
+				{
+					bestDist = d;
+					bestVol = lv.total;
+				}
+			}
+			return bestVol;
 		}
 
 		private static double levelPrice(ILevel lvl)
