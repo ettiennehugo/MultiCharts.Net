@@ -51,7 +51,13 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS = 1;
 		public const double DEFAULT_CONFLUENCE_DECAY = 0.75;
 		public const double DEFAULT_CONFLUENCE_CROSS_BONUS = 0.35;
-		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95;
+		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
+		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
+		public const double DEFAULT_CONFLUENCE_WEIGHT_PROFILE_VWAP = 0.80;    // default confluence weight for profile VWAP alignment
+		public const double DEFAULT_CONFLUENCE_WEIGHT_HVN = 0.85;   // default confluence weight for high value area node alignment
+		public const double DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT = 0.85;   // default confluence weight for POC alignment
+		public const double DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR = 0.35; // default minimum HVN strength
+		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 
 		//types
 		/// <summary>
@@ -603,6 +609,7 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			if (ConfluenceMinHits < 1) throw new ArgumentException("ConfluenceMinHits must be 1 or greater.");
 			if (ConfluenceCrossStreamBonus < 0.0) throw new ArgumentException("ConfluenceCrossStreamBonus must be 0.0 or greater.");
+			if (ConfluenceSameStreamDecay < 0.0 || ConfluenceSameStreamDecay > 1.0) throw new ArgumentException("ConfluenceSameStreamDecay must be between 0.0 and 1.0.");
 			if (HvnPercentile < 0 || HvnPercentile > 1.0) throw new ArgumentException("HvnPercentile must be a percentage, 0 to 1.0.");
 			if (LvnPercentile < 0 || LvnPercentile > 1.0) throw new ArgumentException("LvnPercentile must be a percentage, 0 to 1.0.");
 			if (HvnPercentile < LvnPercentile) throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
@@ -1372,8 +1379,6 @@ namespace PowerLanguage.Strategy
 			int take = ConfluenceLookbackProfiles < 1 ? DEFAULT_CONFLUENCE_LOOKBACK : ConfluenceLookbackProfiles;
 			int from = Math.Max(0, profiles.Count - take);
 			double decay = ConfluenceSameStreamDecay;
-			if (decay < 0) decay = 0;
-			if (decay > 1) decay = 1;
 
 			for (int i = from; i < profiles.Count; i++)
 			{
@@ -1422,19 +1427,19 @@ namespace PowerLanguage.Strategy
 
 		private void addProfileAnchors(List<ConfluenceAnchor> anchors, VpExtra extra, int datastream, int startBar, int age, double streamAgeWeight)
 		{
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * 1.00);
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * 0.90);
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * 0.90);
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_POC);
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
+			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
 			if (ConfluenceIncludeProfileVwap)
-				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.ProfileVwap, extra.profileVwap, streamAgeWeight * 0.80);
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.ProfileVwap, extra.profileVwap, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_PROFILE_VWAP);
 
 			if (!ConfluenceIncludeHvns || extra.hvns == null) return;
 			for (int i = 0; i < extra.hvns.Count; i++)
 			{
 				Node n = extra.hvns[i];
 				if (n.isPoc) continue;   // already counted as POC
-				double hs = n.strength > 0.35 ? n.strength : 0.35;
-				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Hvn, n.peak, streamAgeWeight * 0.85 * hs);
+				double hs = n.strength > DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR ? n.strength : DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR;
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Hvn, n.peak, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_HVN * hs);
 			}
 		}
 
@@ -1451,12 +1456,11 @@ namespace PowerLanguage.Strategy
 			int ds = eng.datastream;
 			double w = streamWeightFor(ds);
 			if (w <= 0) return;
-			addAnchor(anchors, ds, -1, 0, kind, eng.value, w * 0.85);
+			addAnchor(anchors, ds, -1, 0, kind, eng.value, w * DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT);
 		}
 
 		private double streamWeightFor(int datastream)
 		{
-			if (datastream < 1) return 0;
 			if (datastream == ConfluenceDataStream1) return ConfluenceWeight1;
 			if (datastream == ConfluenceDataStream2) return ConfluenceWeight2;
 			if (datastream == ConfluenceDataStream3) return ConfluenceWeight3;
