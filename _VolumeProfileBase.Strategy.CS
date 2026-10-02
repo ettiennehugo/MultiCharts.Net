@@ -596,8 +596,9 @@ namespace PowerLanguage.Strategy
 			set { requireNonNegative("ConfluenceWeight3", value); m_confluenceWeight3 = value; }
 		}
 		/// <summary>
-		/// How many succeeding volume profiles per enabled stream to include, live profile included.
-		/// Age 0 is the newest. Valid: ≥ 1. Default 4.
+		/// How many volume profiles per enabled stream to include, newest first.
+		/// Age 0 is the profile that owns the stream's current bar, resolved with
+		/// ItemForBar — not pack.Items. Valid: ≥ 1. Default 4.
 		/// </summary>
 		public int ConfluenceLookbackProfiles
 		{
@@ -1565,25 +1566,37 @@ namespace PowerLanguage.Strategy
 			if (datastream < 1 || streamWeight <= 0) return;
 			if (!m_streams.TryGetValue(datastream, out StreamPack sp) || sp.pack == null) return;
 
-			List<IProfile> profiles = listedProfiles(sp);
-			if (profiles.Count == 0) return;
+			// Do not walk pack.Items. That collection kept the same profile objects
+			// across weeks while ItemForBar tracked the rolling every-N-bar windows.
+			// Resolve the same way as ExtraVolumeProfileForBar, then step to the previous window.
+			int bar = streamItemBarIndex(datastream);
+			if (bar < 1) return;
 
 			int take = ConfluenceLookbackProfiles;
-			int from = Math.Max(0, profiles.Count - take);
 			double decay = ConfluenceSameStreamDecay;
+			var seen = new HashSet<int>();
 
-			for (int i = from; i < profiles.Count; i++)
+			for (int age = 0; age < take && bar >= 1; age++)
 			{
-				IProfile vp = profiles[i];
-				ensureExtra(sp, vp);
-				VpKey key = new VpKey(datastream, vp);
-				if (!sp.extra.TryGetValue(key, out VpExtra extra) || extra == null) continue;
+				IProfile vp = itemForBar(sp, datastream, bar);
+				if (vp == null) break;
 
-				int age = profiles.Count - 1 - i;   // 0 = most recent on this stream
-				double ageW = Math.Pow(decay, age);
-				double w = streamWeight * ageW;
 				int start = profileStartBar(vp);
-				addProfileAnchors(anchors, extra, datastream, start, age, w);
+				if (start < 1) start = bar;
+				if (!seen.Add(start)) break;
+
+				ensureExtra(sp, vp, bar);
+				VpKey key = new VpKey(datastream, vp);
+				if (!sp.extra.TryGetValue(key, out VpExtra extra) || extra == null)
+					sp.extra.TryGetValue(new VpKey(datastream, start), out extra);
+				if (extra != null)
+				{
+					applyProfileGeometry(vp, extra, bar);
+					double w = streamWeight * Math.Pow(decay, age);
+					addProfileAnchors(anchors, extra, datastream, start, age, w);
+				}
+
+				bar = start - 1;
 			}
 		}
 
