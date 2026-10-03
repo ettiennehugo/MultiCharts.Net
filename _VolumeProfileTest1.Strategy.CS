@@ -230,11 +230,10 @@ namespace PowerLanguage.Strategy
 				label, fmt(extra.open), fmt(extra.high), fmt(extra.low), fmt(extra.close)));
 
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
-				"[VP-TEST] {0} POC={1} pocVol={2} VAH={3} VAL={4} vaWidth={5} profileVwap={6}",
+				"[VP-TEST] {0} POC={1} pocVol={2} VAH={3} VAL={4} vaWidth={5}",
 				label,
 				fmt(extra.poc), fmt(extra.pocVol),
-				fmt(extra.vah), fmt(extra.val), fmt(vaWidth),
-				fmt(extra.profileVwap)));
+				fmt(extra.vah), fmt(extra.val), fmt(vaWidth)));
 
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] {0} VWAP slots  vwap={1}(s{2} σ={3})  vwap2={4}(s{5} σ={6})  vwap3={7}(s{8} σ={9})",
