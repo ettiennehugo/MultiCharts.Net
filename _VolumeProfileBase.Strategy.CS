@@ -26,7 +26,7 @@ namespace PowerLanguage.Strategy
 	///   - volume normalization
 	///   - HVN, LVN detection - DONE NEED TO TEST
 	///     - Add directional checks (bullish/bearish) that would return the list of HVN's, VAL, VAH, POC that would be considered high probability zones - DONE TO TEST
-	///   - VWAP integration - DONE (internal engines + profile-histogram VWAP)
+	///   - VWAP integration - DONE (internal engines)
 	///   - confluence zones - DONE NEED TO TEST
 	///     - TODO there might still be DOUBLE COUNTING happening on the generated code for the confluence zones - you need to make sure you count unique factors in the z-scoring - DONE NEED TO TEST
 	///   - directionality of confluence zones - TODO
@@ -57,7 +57,6 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
 		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_PROFILE_VWAP = 0.80;    // default confluence weight for profile VWAP alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_HVN = 0.85;   // default confluence weight for high value area node alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT = 0.85;   // default confluence weight for POC alignment
 		public const double DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR = 0.35; // default minimum HVN strength
@@ -147,10 +146,9 @@ namespace PowerLanguage.Strategy
 			public double pocVol; // Volume at the point of control.
 			public double vah;  // Value area high.
 			public double val;  // Value area low.
-			public double profileVwap;  // Σ(price * levelVolume) / Σ(levelVolume) from the same rows used for HVN/LVN.
 			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
-			public double vwap2;        // slot 2 snapshot
-			public double vwap3;        // slot 3 snapshot
+			public double vwap2;         // slot 2 snapshot
+			public double vwap3;         // slot 3 snapshot
 			public double vwap1Sigma;    // slot 1 σ from the running window (0 when unused)
 			public double vwap2Sigma;
 			public double vwap3Sigma;
@@ -243,10 +241,9 @@ namespace PowerLanguage.Strategy
 			Vah = 1,
 			Val = 2,
 			Hvn = 3,
-			ProfileVwap = 4,
-			Vwap = 5,
-			Vwap2 = 6,
-			Vwap3 = 7
+			Vwap1 = 4,
+			Vwap2 = 5,
+			Vwap3 = 6
 		}
 
 		/// <summary>
@@ -320,7 +317,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Working row used only while building confluence zones.
-		/// One row per contributing level (POC / VAH / VAL / HVN / profile VWAP / live VWAP)
+		/// One row per contributing level (POC / VAH / VAL / HVN / live VWAP)
 		/// after stream weight and same-stream age decay have been applied.
 		/// Sorted by price and clustered within ConfluenceAlignTicks; each finished
 		/// cluster becomes a public ConfluenceZone with ConfluenceHit copies of these rows.
@@ -662,10 +659,6 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		public bool ConfluenceIncludeVwapSlots { get; set; }
 		/// <summary>
-		/// When true, each profile's own volume-weighted price (profile VWAP) is an anchor. Default true.
-		/// </summary>
-		public bool ConfluenceIncludeProfileVwap { get; set; }
-		/// <summary>
 		/// Drop confluence targets whose zone z-score is below this. Any finite value is valid, including negative. Default 0.
 		/// </summary>
 		public double ConfluenceTargetMinZScore { get; set; }
@@ -789,7 +782,6 @@ namespace PowerLanguage.Strategy
 			ConfluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
 			ConfluenceIncludeHvns = true;
 			ConfluenceIncludeVwapSlots = true;
-			ConfluenceIncludeProfileVwap = true;
 			ConfluenceTargetMinZScore = 0;
 			ConfluenceTargetClearTicks = DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS;
 			ConfluenceTargetCount = DEFAULT_CONFLUENCE_TOP_COUNT;
@@ -1641,8 +1633,6 @@ namespace PowerLanguage.Strategy
 			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_POC);
 			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
 			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
-			if (ConfluenceIncludeProfileVwap)
-				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.ProfileVwap, extra.profileVwap, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_PROFILE_VWAP);
 
 			if (!ConfluenceIncludeHvns || extra.hvns == null) return;
 			for (int i = 0; i < extra.hvns.Count; i++)
@@ -1656,7 +1646,7 @@ namespace PowerLanguage.Strategy
 
 		private void collectVwapSlotAnchors(List<ConfluenceAnchor> anchors)
 		{
-			addSlotAnchor(anchors, m_vwap1, EConfluenceKind.Vwap);
+			addSlotAnchor(anchors, m_vwap1, EConfluenceKind.Vwap1);
 			addSlotAnchor(anchors, m_vwap2, EConfluenceKind.Vwap2);
 			addSlotAnchor(anchors, m_vwap3, EConfluenceKind.Vwap3);
 		}
@@ -1871,7 +1861,6 @@ namespace PowerLanguage.Strategy
 			extra.vah = 0;
 			extra.val = 0;
 			extra.pocVol = 0;
-			extra.profileVwap = 0;
 			extra.maxTotalPercentile = 0;
 			extra.maxAskPercentile = 0;
 			extra.maxBidPercentile = 0;
@@ -1880,15 +1869,6 @@ namespace PowerLanguage.Strategy
 			applyProfileGeometry(vp, extra, chartBar);
 			List<Row> rows = rowsFromLevels(extra.levels);
 			if (rows.Count < 3) return;
-
-			double pv = 0;
-			double tv = 0;
-			for (int r = 0; r < rows.Count; r++)
-			{
-				pv += rows[r].price * rows[r].volume;
-				tv += rows[r].volume;
-			}
-			if (tv > 0) extra.profileVwap = pv / tv;
 
 			double[] vols = new double[rows.Count];
 			for (int j = 0; j < rows.Count; j++)
