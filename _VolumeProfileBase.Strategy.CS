@@ -147,8 +147,8 @@ namespace PowerLanguage.Strategy
 			public double vah;  // Value area high.
 			public double val;  // Value area low.
 			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
-			public double vwap2;         // slot 2 snapshot
-			public double vwap3;         // slot 3 snapshot
+			public double vwap2;        // slot 2 snapshot
+			public double vwap3;        // slot 3 snapshot
 			public double vwap1Sigma;    // slot 1 σ from the running window (0 when unused)
 			public double vwap2Sigma;
 			public double vwap3Sigma;
@@ -690,9 +690,9 @@ namespace PowerLanguage.Strategy
 			requireAtLeast("Vwap1Length", Vwap1Length, 1);
 			requireAtLeast("Vwap2Length", Vwap2Length, 1);
 			requireAtLeast("Vwap3Length", Vwap3Length, 1);
-			requireDataStream("Vwap1DataStream", Vwap1DataStream);
-			requireDataStream("Vwap2DataStream", Vwap2DataStream);
-			requireDataStream("Vwap3DataStream", Vwap3DataStream);
+			requireDataStream("Vwap1DataStream", Vwap1DataStream, Vwap1Type);
+			requireDataStream("Vwap2DataStream", Vwap2DataStream, Vwap2Type);
+			requireDataStream("Vwap3DataStream", Vwap3DataStream, Vwap3Type);
 		}
 
 		private static void requireUnitInterval(string name, double value)
@@ -725,6 +725,13 @@ namespace PowerLanguage.Strategy
 				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
 			if (MaxDataStream >= 1 && stream > MaxDataStream)
 				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
+		}
+
+		// A disabled VWAP slot is not stepped, so its stream is not required on the chart.
+		private void requireDataStream(string name, int stream, EVwapType type)
+		{
+			if (type == EVwapType.Disabled) return;
+			requireDataStream(name, stream);
 		}
 
 		private void requireOptionalDataStream(string name, int stream)
