@@ -316,24 +316,6 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Working row used only while building confluence zones.
-		/// One row per contributing level (POC / VAH / VAL / HVN / live VWAP)
-		/// after stream weight and same-stream age decay have been applied.
-		/// Sorted by price and clustered within ConfluenceAlignTicks; each finished
-		/// cluster becomes a public ConfluenceZone with ConfluenceHit copies of these rows.
-		/// Not persisted and not part of the subclass API.
-		/// </summary>
-		private struct ConfluenceAnchor
-		{
-			public int dataStream;
-			public int profileStartBar;
-			public int profileAge;
-			public EConfluenceKind kind;
-			public double price;
-			public double weight;
-		}
-
-		/// <summary>
 		/// Internal storage class to associate a specific data stream with it's profiles collection and
 		/// extra data stores for it and the update handler delegate.
 		/// </summary>
@@ -497,6 +479,249 @@ namespace PowerLanguage.Strategy
 				try { v = barsAgo == 0 ? bars.TicksValue : bars.Ticks[barsAgo]; }
 				catch { }
 				return v;
+			}
+		}
+
+		/// <summary>
+		/// Rebuilds <see cref="m_confluenceZones"/> on the owning study.
+		/// The zone list itself stays on <see cref="_VolumeProfileBase"/>.
+		/// </summary>
+		private sealed class ConfluenceEngine
+		{
+			/// <summary>
+			/// Working row used only while building confluence zones.
+			/// Sorted by price and clustered within ConfluenceAlignTicks.
+			/// </summary>
+			private struct ConfluenceAnchor
+			{
+				public int dataStream;
+				public int profileStartBar;
+				public int profileAge;
+				public EConfluenceKind kind;
+				public double price;
+				public double weight;
+			}
+
+			private readonly _VolumeProfileBase m_owner;
+
+			public ConfluenceEngine(_VolumeProfileBase owner)
+			{
+				m_owner = owner;
+			}
+
+			public void Rebuild()
+			{
+				m_owner.m_confluenceZones.Clear();
+				List<ConfluenceAnchor> anchors = new List<ConfluenceAnchor>(64);
+				collectConfluenceAnchors(anchors);
+				if (anchors.Count == 0) return;
+
+				double tol = confluenceTolerance();
+				anchors.Sort((a, b) => a.price.CompareTo(b.price));
+
+				List<ConfluenceAnchor> cluster = new List<ConfluenceAnchor>();
+				for (int i = 0; i < anchors.Count; i++)
+				{
+					if (cluster.Count == 0 || anchors[i].price - cluster[cluster.Count - 1].price <= tol)
+					{
+						cluster.Add(anchors[i]);
+						continue;
+					}
+					addConfluenceZone(cluster);
+					cluster.Clear();
+					cluster.Add(anchors[i]);
+				}
+				addConfluenceZone(cluster);
+				applyConfluenceZScores();
+			}
+
+			private void collectConfluenceAnchors(List<ConfluenceAnchor> anchors)
+			{
+				collectStreamAnchors(m_owner.ConfluenceDataStream1, m_owner.ConfluenceWeight1, anchors);
+				collectStreamAnchors(m_owner.ConfluenceDataStream2, m_owner.ConfluenceWeight2, anchors);
+				collectStreamAnchors(m_owner.ConfluenceDataStream3, m_owner.ConfluenceWeight3, anchors);
+				if (m_owner.ConfluenceIncludeVwapSlots)
+					collectVwapSlotAnchors(anchors);
+			}
+
+			private void collectStreamAnchors(int datastream, double streamWeight, List<ConfluenceAnchor> anchors)
+			{
+				if (datastream < 1 || streamWeight <= 0) return;
+				if (!m_owner.m_streams.TryGetValue(datastream, out StreamPack sp) || sp.pack == null) return;
+
+				// Do not walk pack.Items. That collection kept the same profile objects
+				// (and the same 7776–7778 extras) across weeks while ItemForBar tracked
+				// the rolling every-N-bar windows. Resolve the same way as
+				// ExtraVolumeProfileForBar, then step to the previous window.
+				int bar = m_owner.streamItemBarIndex(datastream);
+				if (bar < 1) return;
+
+				int take = m_owner.ConfluenceLookbackProfiles;
+				double decay = m_owner.ConfluenceSameStreamDecay;
+				var seen = new HashSet<int>();
+
+				for (int age = 0; age < take && bar >= 1; age++)
+				{
+					IProfile vp = m_owner.itemForBar(sp, datastream, bar);
+					if (vp == null) break;
+
+					int start = profileStartBar(vp);
+					if (start < 1) start = bar;
+					if (!seen.Add(start)) break;
+
+					m_owner.ensureExtra(sp, vp, bar);
+					VpKey key = new VpKey(datastream, vp);
+					if (!sp.extra.TryGetValue(key, out VpExtra extra) || extra == null)
+						sp.extra.TryGetValue(new VpKey(datastream, start), out extra);
+					if (extra != null)
+					{
+						m_owner.applyProfileGeometry(vp, extra, bar);
+						double w = streamWeight * Math.Pow(decay, age);
+						addProfileAnchors(anchors, extra, datastream, start, age, w);
+					}
+
+					bar = start - 1;
+				}
+			}
+
+			private void addProfileAnchors(List<ConfluenceAnchor> anchors, VpExtra extra, int datastream, int startBar, int age, double streamAgeWeight)
+			{
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_POC);
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
+				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
+
+				if (!m_owner.ConfluenceIncludeHvns || extra.hvns == null) return;
+				for (int i = 0; i < extra.hvns.Count; i++)
+				{
+					Node n = extra.hvns[i];
+					if (n.isPoc) continue;   // already counted as POC
+					double hs = n.strength > DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR ? n.strength : DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR;
+					addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Hvn, n.peak, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_HVN * hs);
+				}
+			}
+
+			private void collectVwapSlotAnchors(List<ConfluenceAnchor> anchors)
+			{
+				addSlotAnchor(anchors, m_owner.m_vwap1, EConfluenceKind.Vwap1);
+				addSlotAnchor(anchors, m_owner.m_vwap2, EConfluenceKind.Vwap2);
+				addSlotAnchor(anchors, m_owner.m_vwap3, EConfluenceKind.Vwap3);
+			}
+
+			private void addSlotAnchor(List<ConfluenceAnchor> anchors, VwapEngine eng, EConfluenceKind kind)
+			{
+				if (eng == null || eng.type == EVwapType.Disabled || !eng.valid || eng.value <= 0) return;
+				int ds = eng.datastream;
+				double w = streamWeightFor(ds);
+				if (w <= 0) return;
+				addAnchor(anchors, ds, -1, 0, kind, eng.value, w * DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT);
+			}
+
+			private double streamWeightFor(int datastream)
+			{
+				if (datastream == m_owner.ConfluenceDataStream1) return m_owner.ConfluenceWeight1;
+				if (datastream == m_owner.ConfluenceDataStream2) return m_owner.ConfluenceWeight2;
+				if (datastream == m_owner.ConfluenceDataStream3) return m_owner.ConfluenceWeight3;
+				return 0;   // slot VWAP only votes when its stream is one of the three confluence streams
+			}
+
+			private static void addAnchor(List<ConfluenceAnchor> anchors, int datastream, int startBar, int age, EConfluenceKind kind, double price, double weight)
+			{
+				if (anchors == null || price <= 0 || weight <= 0) return;
+				anchors.Add(new ConfluenceAnchor
+				{
+					dataStream = datastream,
+					profileStartBar = startBar,
+					profileAge = age,
+					kind = kind,
+					price = price,
+					weight = weight
+				});
+			}
+
+			private void addConfluenceZone(List<ConfluenceAnchor> cluster)
+			{
+				if (cluster == null || cluster.Count == 0) return;
+				if (cluster.Count < m_owner.ConfluenceMinHits) return;
+
+				ConfluenceZone zone = new ConfluenceZone();
+				double wSum = 0;
+				double pw = 0;
+				double lo = cluster[0].price;
+				double hi = cluster[0].price;
+				HashSet<int> streams = new HashSet<int>();
+				HashSet<long> profiles = new HashSet<long>();
+
+				for (int i = 0; i < cluster.Count; i++)
+				{
+					ConfluenceAnchor a = cluster[i];
+					if (a.price < lo) lo = a.price;
+					if (a.price > hi) hi = a.price;
+					wSum += a.weight;
+					pw += a.price * a.weight;
+					streams.Add(a.dataStream);
+					if (a.profileStartBar >= 0)
+						profiles.Add(((long)a.dataStream << 32) ^ (uint)a.profileStartBar);
+					zone.hits.Add(new ConfluenceHit
+					{
+						dataStream = a.dataStream,
+						profileStartBar = a.profileStartBar,
+						profileAge = a.profileAge,
+						kind = a.kind,
+						price = a.price,
+						weight = a.weight
+					});
+				}
+
+				zone.low = lo;
+				zone.high = hi;
+				zone.center = wSum > 0 ? pw / wSum : (lo + hi) * 0.5;
+				double tick = m_owner.tickSize();
+				if (tick > 0 && (zone.high - zone.low) + PRICE_EPSILON < tick)
+					return;
+				zone.hitCount = zone.hits.Count;
+				zone.streamCount = streams.Count;
+				zone.profileCount = profiles.Count;
+				zone.rawScore = wSum * (1.0 + m_owner.ConfluenceCrossStreamBonus * Math.Max(0, zone.streamCount - 1));
+				m_owner.m_confluenceZones.Add(zone);
+			}
+
+			private void applyConfluenceZScores()
+			{
+				List<ConfluenceZone> zones = m_owner.m_confluenceZones;
+				int n = zones.Count;
+				if (n == 0) return;
+				if (n == 1)
+				{
+					zones[0].zScore = 0;
+					return;
+				}
+				double mean = 0;
+				for (int i = 0; i < n; i++)
+					mean += zones[i].rawScore;
+				mean /= n;
+				double var = 0;
+				for (int i = 0; i < n; i++)
+				{
+					double d = zones[i].rawScore - mean;
+					var += d * d;
+				}
+				double stdev = Math.Sqrt(var / n);
+				if (stdev <= 0)
+				{
+					for (int i = 0; i < n; i++)
+						zones[i].zScore = 0;
+					return;
+				}
+				for (int i = 0; i < n; i++)
+					zones[i].zScore = (zones[i].rawScore - mean) / stdev;
+			}
+
+			private double confluenceTolerance()
+			{
+				int ticks = m_owner.ConfluenceAlignTicks;
+				double tick = m_owner.tickSize();
+				if (tick <= 0) tick = 0.01;
+				return ticks * tick;
 			}
 		}
 
@@ -746,6 +971,7 @@ namespace PowerLanguage.Strategy
 		private VwapEngine m_vwap2;
 		private VwapEngine m_vwap3;
 		private readonly List<ConfluenceZone> m_confluenceZones = new List<ConfluenceZone>();
+		private ConfluenceEngine m_confluenceEngine;
 		private bool m_confluenceDirty;
 		private int m_confluenceBuiltBar;
 		private bool m_volumePctDirty;
@@ -800,6 +1026,7 @@ namespace PowerLanguage.Strategy
 			m_vwap1 = new VwapEngine { label = "VWAP1", lastInSession = new VariableSeries<bool>(this) };
 			m_vwap2 = new VwapEngine { label = "VWAP2", lastInSession = new VariableSeries<bool>(this) };
 			m_vwap3 = new VwapEngine { label = "VWAP3", lastInSession = new VariableSeries<bool>(this) };
+			m_confluenceEngine = new ConfluenceEngine(this);
 		}
 
 		protected override void Destroy()
@@ -1525,84 +1752,10 @@ namespace PowerLanguage.Strategy
 			int bar = 0;
 			try { bar = Bars.CurrentBar; } catch { }
 			if (!m_confluenceDirty && m_confluenceBuiltBar == bar) return;
-			rebuildConfluenceZones();
+			if (m_confluenceEngine == null) m_confluenceEngine = new ConfluenceEngine(this);
+			m_confluenceEngine.Rebuild();
 			m_confluenceDirty = false;
 			m_confluenceBuiltBar = bar;
-		}
-
-		private void rebuildConfluenceZones()
-		{
-			m_confluenceZones.Clear();
-			List<ConfluenceAnchor> anchors = new List<ConfluenceAnchor>(64);
-			collectConfluenceAnchors(anchors);
-			if (anchors.Count == 0) return;
-
-			double tol = confluenceTolerance();
-			anchors.Sort((a, b) => a.price.CompareTo(b.price));
-
-			List<ConfluenceAnchor> cluster = new List<ConfluenceAnchor>();
-			for (int i = 0; i < anchors.Count; i++)
-			{
-				if (cluster.Count == 0 || anchors[i].price - cluster[cluster.Count - 1].price <= tol)
-				{
-					cluster.Add(anchors[i]);
-					continue;
-				}
-				addConfluenceZone(cluster);
-				cluster.Clear();
-				cluster.Add(anchors[i]);
-			}
-			addConfluenceZone(cluster);
-			applyConfluenceZScores();
-		}
-
-		private void collectConfluenceAnchors(List<ConfluenceAnchor> anchors)
-		{
-			collectStreamAnchors(ConfluenceDataStream1, ConfluenceWeight1, anchors);
-			collectStreamAnchors(ConfluenceDataStream2, ConfluenceWeight2, anchors);
-			collectStreamAnchors(ConfluenceDataStream3, ConfluenceWeight3, anchors);
-			if (ConfluenceIncludeVwapSlots)
-				collectVwapSlotAnchors(anchors);
-		}
-
-		private void collectStreamAnchors(int datastream, double streamWeight, List<ConfluenceAnchor> anchors)
-		{
-			if (datastream < 1 || streamWeight <= 0) return;
-			if (!m_streams.TryGetValue(datastream, out StreamPack sp) || sp.pack == null) return;
-
-			// Do not walk pack.Items. That collection kept the same profile objects
-			// (and the same 7776–7778 extras) across weeks while ItemForBar tracked
-			// the rolling every-N-bar windows. Resolve the same way as
-			// ExtraVolumeProfileForBar, then step to the previous window.
-			int bar = streamItemBarIndex(datastream);
-			if (bar < 1) return;
-
-			int take = ConfluenceLookbackProfiles;
-			double decay = ConfluenceSameStreamDecay;
-			var seen = new HashSet<int>();
-
-			for (int age = 0; age < take && bar >= 1; age++)
-			{
-				IProfile vp = itemForBar(sp, datastream, bar);
-				if (vp == null) break;
-
-				int start = profileStartBar(vp);
-				if (start < 1) start = bar;
-				if (!seen.Add(start)) break;
-
-				ensureExtra(sp, vp, bar);
-				VpKey key = new VpKey(datastream, vp);
-				if (!sp.extra.TryGetValue(key, out VpExtra extra) || extra == null)
-					sp.extra.TryGetValue(new VpKey(datastream, start), out extra);
-				if (extra != null)
-				{
-					applyProfileGeometry(vp, extra, bar);
-					double w = streamWeight * Math.Pow(decay, age);
-					addProfileAnchors(anchors, extra, datastream, start, age, w);
-				}
-
-				bar = start - 1;
-			}
 		}
 
 		private static List<IProfile> listedProfiles(StreamPack sp)
@@ -1633,145 +1786,6 @@ namespace PowerLanguage.Strategy
 			}
 			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
 			return list;
-		}
-
-		private void addProfileAnchors(List<ConfluenceAnchor> anchors, VpExtra extra, int datastream, int startBar, int age, double streamAgeWeight)
-		{
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_POC);
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
-			addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
-
-			if (!ConfluenceIncludeHvns || extra.hvns == null) return;
-			for (int i = 0; i < extra.hvns.Count; i++)
-			{
-				Node n = extra.hvns[i];
-				if (n.isPoc) continue;   // already counted as POC
-				double hs = n.strength > DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR ? n.strength : DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR;
-				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Hvn, n.peak, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_HVN * hs);
-			}
-		}
-
-		private void collectVwapSlotAnchors(List<ConfluenceAnchor> anchors)
-		{
-			addSlotAnchor(anchors, m_vwap1, EConfluenceKind.Vwap1);
-			addSlotAnchor(anchors, m_vwap2, EConfluenceKind.Vwap2);
-			addSlotAnchor(anchors, m_vwap3, EConfluenceKind.Vwap3);
-		}
-
-		private void addSlotAnchor(List<ConfluenceAnchor> anchors, VwapEngine eng, EConfluenceKind kind)
-		{
-			if (eng == null || eng.type == EVwapType.Disabled || !eng.valid || eng.value <= 0) return;
-			int ds = eng.datastream;
-			double w = streamWeightFor(ds);
-			if (w <= 0) return;
-			addAnchor(anchors, ds, -1, 0, kind, eng.value, w * DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT);
-		}
-
-		private double streamWeightFor(int datastream)
-		{
-			if (datastream == ConfluenceDataStream1) return ConfluenceWeight1;
-			if (datastream == ConfluenceDataStream2) return ConfluenceWeight2;
-			if (datastream == ConfluenceDataStream3) return ConfluenceWeight3;
-			return 0;   // slot VWAP only votes when its stream is one of the three confluence streams
-		}
-
-		private static void addAnchor(List<ConfluenceAnchor> anchors, int datastream, int startBar, int age, EConfluenceKind kind, double price, double weight)
-		{
-			if (anchors == null || price <= 0 || weight <= 0) return;
-			anchors.Add(new ConfluenceAnchor
-			{
-				dataStream = datastream,
-				profileStartBar = startBar,
-				profileAge = age,
-				kind = kind,
-				price = price,
-				weight = weight
-			});
-		}
-
-		private void addConfluenceZone(List<ConfluenceAnchor> cluster)
-		{
-			if (cluster == null || cluster.Count == 0) return;
-			if (cluster.Count < ConfluenceMinHits) return;
-
-			ConfluenceZone zone = new ConfluenceZone();
-			double wSum = 0;
-			double pw = 0;
-			double lo = cluster[0].price;
-			double hi = cluster[0].price;
-			HashSet<int> streams = new HashSet<int>();
-			HashSet<long> profiles = new HashSet<long>();
-
-			for (int i = 0; i < cluster.Count; i++)
-			{
-				ConfluenceAnchor a = cluster[i];
-				if (a.price < lo) lo = a.price;
-				if (a.price > hi) hi = a.price;
-				wSum += a.weight;
-				pw += a.price * a.weight;
-				streams.Add(a.dataStream);
-				if (a.profileStartBar >= 0)
-					profiles.Add(((long)a.dataStream << 32) ^ (uint)a.profileStartBar);
-				zone.hits.Add(new ConfluenceHit
-				{
-					dataStream = a.dataStream,
-					profileStartBar = a.profileStartBar,
-					profileAge = a.profileAge,
-					kind = a.kind,
-					price = a.price,
-					weight = a.weight
-				});
-			}
-
-			zone.low = lo;
-			zone.high = hi;
-			zone.center = wSum > 0 ? pw / wSum : (lo + hi) * 0.5;
-			double tick = tickSize();
-			if (tick > 0 && (zone.high - zone.low) + PRICE_EPSILON < tick)
-				return;
-			zone.hitCount = zone.hits.Count;
-			zone.streamCount = streams.Count;
-			zone.profileCount = profiles.Count;
-			zone.rawScore = wSum * (1.0 + ConfluenceCrossStreamBonus * Math.Max(0, zone.streamCount - 1));
-			m_confluenceZones.Add(zone);
-		}
-
-		private void applyConfluenceZScores()
-		{
-			int n = m_confluenceZones.Count;
-			if (n == 0) return;
-			if (n == 1)
-			{
-				m_confluenceZones[0].zScore = 0;
-				return;
-			}
-			double mean = 0;
-			for (int i = 0; i < n; i++)
-				mean += m_confluenceZones[i].rawScore;
-			mean /= n;
-			double var = 0;
-			for (int i = 0; i < n; i++)
-			{
-				double d = m_confluenceZones[i].rawScore - mean;
-				var += d * d;
-			}
-			double stdev = Math.Sqrt(var / n);
-			if (stdev <= 0)
-			{
-				for (int i = 0; i < n; i++)
-					m_confluenceZones[i].zScore = 0;
-				return;
-			}
-			for (int i = 0; i < n; i++)
-				m_confluenceZones[i].zScore = (m_confluenceZones[i].rawScore - mean) / stdev;
-		}
-
-		private double confluenceTolerance()
-		{
-			int ticks = ConfluenceAlignTicks;
-			double tick = tickSize();
-			if (tick <= 0) tick = 0.01;
-			return ticks * tick;
 		}
 
 		private double tickSize()
