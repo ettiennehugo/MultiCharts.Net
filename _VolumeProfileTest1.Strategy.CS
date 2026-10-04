@@ -394,13 +394,29 @@ namespace PowerLanguage.Strategy
 					kinds.Append(z.hits[h].profileStartBar);
 					kinds.Append("/a");
 					kinds.Append(z.hits[h].profileAge);
+					kinds.Append("/");
+					kinds.Append(z.hits[h].sourceVolumeId);
+					if (!string.IsNullOrEmpty(z.hits[h].absorbedLabels))
+					{
+						kinds.Append("~");
+						kinds.Append(z.hits[h].absorbedLabels);
+					}
+				}
+				string dropped = "";
+				if (z.dropped != null)
+				{
+					for (int d = 0; d < z.dropped.Count; d++)
+					{
+						if (d > 0) dropped += ",";
+						dropped += z.dropped[d].kind.ToString() + ":" + z.dropped[d].reason;
+					}
 				}
 				trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
-					"[VP-TEST]   CONF[{0}] center={1} lo={2} hi={3} z={4} raw={5} hits={6} streams={7} profiles={8} [{9}]",
-					i, fmt(z.center), fmt(z.low), fmt(z.high),
-					fmt(z.zScore), fmt(z.rawScore),
-					z.hitCount, z.streamCount, z.profileCount,
-					kinds.ToString()));
+					"[VP-TEST]   CONF[{0}] {1}/{2} use={3} anchor={4} lo={5} hi={6} acc={7} rej={8} ctx={9} src={10} [{11}] dropped=[{12}]",
+					i, z.role, z.location, z.suggestedUse,
+					fmt(z.anchor), fmt(z.low), fmt(z.high),
+					fmt(z.acceptanceScore), fmt(z.rejectionScore), fmt(z.contextScore),
+					z.independentSources, kinds.ToString(), dropped));
 			}
 		}
 
