@@ -56,6 +56,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
 		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
+		public const double DEFAULT_CONFLUENCE_WEIGHT_NAKED_POC = 1.25; // naked (unmitigated) POC outweighs a mitigated POC
 		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_HVN = 0.85;   // default confluence weight for high value area node alignment
 		public const double DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT = 0.85;   // default confluence weight for POC alignment
@@ -144,6 +145,20 @@ namespace PowerLanguage.Strategy
 			public double close;  // close of the profile's last bar (developing bar while the window is open)
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
+			public bool pocComplete;   // window closed relative to the current calc bar, and poc > 0
+			public bool pocNaked;      // pocComplete and no later bar has traded poc, as of the current calc bar
+			public int pocTouchedBar;  // 1-based first post-close bar whose range covered poc; 0 if none at or before current
+
+			/// <summary>
+			/// True when this completed POC was still naked as of <paramref name="asOfBar"/>.
+			/// asOfBar is 1-based (Status Bar #). A developing profile is never naked.
+			/// A stored touch after asOfBar does not mitigate the historical question.
+			/// </summary>
+			public bool IsNakedPoc(int asOfBar)
+			{
+				if (!pocComplete || poc <= 0 || asOfBar <= endBar) return false;
+				return pocTouchedBar == 0 || pocTouchedBar > asOfBar;
+			}
 			public double vah;  // Value area high.
 			public double val;  // Value area low.
 			public double vwap1;         // slot 1 snapshot (0 when Disabled / not yet valid)
@@ -243,7 +258,8 @@ namespace PowerLanguage.Strategy
 			Hvn = 3,
 			Vwap1 = 4,
 			Vwap2 = 5,
-			Vwap3 = 6
+			Vwap3 = 6,
+			NakedPoc = 7
 		}
 
 		/// <summary>
@@ -576,6 +592,7 @@ namespace PowerLanguage.Strategy
 					if (extra != null)
 					{
 						m_owner.applyProfileGeometry(vp, extra, bar);
+						m_owner.stampNakedPocs(sp);
 						double w = streamWeight * Math.Pow(decay, age);
 						addProfileAnchors(anchors, extra, datastream, start, age, w);
 					}
@@ -586,7 +603,11 @@ namespace PowerLanguage.Strategy
 
 			private void addProfileAnchors(List<ConfluenceAnchor> anchors, VpExtra extra, int datastream, int startBar, int age, double streamAgeWeight)
 			{
-				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Poc, extra.poc, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_POC);
+				// Naked replaces POC. A second anchor would double-count the same price.
+				bool naked = extra.pocNaked;
+				EConfluenceKind pocKind = naked ? EConfluenceKind.NakedPoc : EConfluenceKind.Poc;
+				double pocWeight = naked ? DEFAULT_CONFLUENCE_WEIGHT_NAKED_POC : DEFAULT_CONFLUENCE_WEIGHT_POC;
+				addAnchor(anchors, datastream, startBar, age, pocKind, extra.poc, streamAgeWeight * pocWeight);
 				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Vah, extra.vah, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
 				addAnchor(anchors, datastream, startBar, age, EConfluenceKind.Val, extra.val, streamAgeWeight * DEFAULT_CONFLUENCE_WEIGHT_VA);
 
@@ -731,6 +752,8 @@ namespace PowerLanguage.Strategy
 		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes. 0..1, and above LvnPercentile.
 		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes. 0..1, and below HvnPercentile.
 		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks. >= 1.
+		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
+		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
 
 		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
 		[Input] public int Vwap1Length { get; set; }        // Used when Vwap1Type = Length. >= 1.
@@ -912,6 +935,7 @@ namespace PowerLanguage.Strategy
 			if (HvnPercentile < LvnPercentile)
 				throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
 			requireAtLeast("MinNodeTicks", MinNodeTicks, 1);
+			requireNonNegative("NakedPocTickTolerance", NakedPocTickTolerance);
 			requireAtLeast("Vwap1Length", Vwap1Length, 1);
 			requireAtLeast("Vwap2Length", Vwap2Length, 1);
 			requireAtLeast("Vwap3Length", Vwap3Length, 1);
@@ -985,6 +1009,8 @@ namespace PowerLanguage.Strategy
 			HvnPercentile = DEFAULT_HVN_PERCENTILE;
 			LvnPercentile = DEFAULT_LVN_PERCENTILE;
 			MinNodeTicks = DEFAULT_MIN_NODE_TICKS;
+			TrackNakedPoc = true;
+			NakedPocTickTolerance = 1;
 
 			Vwap1Type = EVwapType.Session;
 			Vwap1Length = DEFAULT_VWAP_LENGTH;
@@ -1098,8 +1124,40 @@ namespace PowerLanguage.Strategy
 			if (vp != null)
 				applyProfileGeometry(vp, extra, barIndex);
 			stampExtra(extra);
+			stampNakedPocs(streamPack);
 			refreshVolumePercentiles();
 			return extra;
+		}
+
+		/// <summary>
+		/// Completed POCs on <paramref name="datastream"/> that no later bar has traded
+		/// as of that stream's current calculation bar. Newest unfinished auction first.
+		/// The developing profile is never included.
+		/// </summary>
+		public List<VpExtra> NakedPocs(int datastream)
+		{
+			return NakedPocs(datastream, streamItemBarIndex(datastream));
+		}
+
+		/// <summary>
+		/// Completed POCs on <paramref name="datastream"/> still naked as of
+		/// <paramref name="asOfBar"/> (1-based Status Bar #). Stamps as of the
+		/// current calculation bar first, then answers the historical question
+		/// from pocTouchedBar. Newest unfinished auction first.
+		/// </summary>
+		public List<VpExtra> NakedPocs(int datastream, int asOfBar)
+		{
+			List<VpExtra> hit = new List<VpExtra>();
+			if (m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack sp) || sp == null)
+				return hit;
+			stampNakedPocs(sp);
+			foreach (VpExtra extra in sp.extra.Values)
+			{
+				if (extra != null && extra.IsNakedPoc(asOfBar))
+					hit.Add(extra);
+			}
+			hit.Sort((a, b) => b.startBar.CompareTo(a.startBar));
+			return hit;
 		}
 
 		/// <summary>
@@ -1419,6 +1477,90 @@ namespace PowerLanguage.Strategy
 				if (chartBar > 1)
 					ensureExtraAt(sp, chartBar - 1);
 			}
+			stampNakedPocs(sp);
+		}
+
+		/// <summary>
+		/// Stamp pocComplete / pocNaked / pocTouchedBar on extras already stored
+		/// for this stream. As-of bound is streamItemBarIndex, never FullSymbolData.Count.
+		/// A gap through the POC does not mitigate it; the bar range must cover poc.
+		/// Scan starts at endBar + 1. In-window trade does not mitigate.
+		/// Bars outside MaxBarsBack return 0 from barPrice and are not a fill, so a
+		/// POC older than MaxBarsBack can stay naked even if dropped history traded it.
+		/// </summary>
+		private void stampNakedPocs(StreamPack sp)
+		{
+			if (sp == null || sp.extra == null) return;
+			if (!TrackNakedPoc)
+			{
+				foreach (VpExtra extra in sp.extra.Values)
+					clearNakedPoc(extra);
+				return;
+			}
+
+			int current = streamItemBarIndex(sp.datastream);
+			if (current < 1) return;
+
+			double tick = tickSize();
+			double tol = tick > 0 ? NakedPocTickTolerance * tick : 0;
+			IInstrument bars = barsOf(sp.datastream);
+
+			List<VpExtra> extras = new List<VpExtra>(sp.extra.Values);
+			extras.Sort((a, b) =>
+			{
+				int asb = a == null ? 0 : a.startBar;
+				int bsb = b == null ? 0 : b.startBar;
+				return asb.CompareTo(bsb);
+			});
+
+			for (int i = 0; i < extras.Count; i++)
+			{
+				VpExtra extra = extras[i];
+				if (extra == null) continue;
+				if (extra.poc <= 0)
+				{
+					clearNakedPoc(extra);
+					continue;
+				}
+
+				bool complete = extra.endBar >= extra.startBar && extra.endBar < current;
+				extra.pocComplete = complete;
+				if (!complete)
+				{
+					extra.pocNaked = false;
+					extra.pocTouchedBar = 0;
+					continue;
+				}
+
+				int touched = extra.pocTouchedBar;
+				if (touched <= extra.endBar || touched > current)
+					touched = 0;
+				if (touched == 0)
+				{
+					double poc = extra.poc;
+					for (int b = extra.endBar + 1; b <= current; b++)
+					{
+						double h = barPrice(bars, current, b, 1);
+						double l = barPrice(bars, current, b, 2);
+						if (h <= 0 || l <= 0) continue;
+						if (h >= poc - tol && l <= poc + tol)
+						{
+							touched = b;
+							break;
+						}
+					}
+				}
+				extra.pocTouchedBar = touched;
+				extra.pocNaked = touched == 0;
+			}
+		}
+
+		private static void clearNakedPoc(VpExtra extra)
+		{
+			if (extra == null) return;
+			extra.pocComplete = false;
+			extra.pocNaked = false;
+			extra.pocTouchedBar = 0;
 		}
 
 		private void ensureExtraAt(StreamPack sp, int barIndex)
