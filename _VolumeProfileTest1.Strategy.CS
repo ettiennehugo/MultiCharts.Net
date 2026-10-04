@@ -175,7 +175,10 @@ namespace PowerLanguage.Strategy
 				TraceExceptionalLevelsList(extra, datastream, priorBar);
 			TraceLiveVwapSlots();
 			if (TraceConfluence)
+			{
 				TraceConfluenceSnapshot(datastream, newProfileBarIndex);
+				TraceConfluenceTargets(datastream, priorBar, extra);
+			}
 		}
 
 		/// <summary>
@@ -379,6 +382,90 @@ namespace PowerLanguage.Strategy
 					i, fmt(z.center), fmt(z.low), fmt(z.high),
 					fmt(z.zScore), fmt(z.rawScore),
 					z.hitCount, z.streamCount, z.profileCount,
+					kinds.ToString()));
+			}
+		}
+
+		/// <summary>
+		/// Info-trace the top 5 confluence targets beyond the completed profile's POC
+		/// and each HVN, both bullish (magnets above) and bearish (magnets below).
+		/// Written once, with the prior-profile dump.
+		/// </summary>
+		public void TraceConfluenceTargets(int datastream, int barIndex, VpExtra extra)
+		{
+			const int top = 5;
+			if (extra == null)
+			{
+				trace(ETraceLevel.Info, $"[VP-TEST] TGT Data{datastream} bar={barIndex} extra=null");
+				return;
+			}
+
+			TraceTargetsFrom(datastream, barIndex, "POC", extra.poc, 0, 0, false, top);
+			if (extra.hvns == null || extra.hvns.Count == 0)
+			{
+				trace(ETraceLevel.Info, $"[VP-TEST] TGT Data{datastream} bar={barIndex} HVN count=0");
+				return;
+			}
+
+			for (int i = 0; i < extra.hvns.Count; i++)
+			{
+				Node n = extra.hvns[i];
+				TraceTargetsFrom(datastream, barIndex, "HVN[" + i + "]", n.peak, n.low, n.high, n.isPoc, top);
+			}
+		}
+
+		private void TraceTargetsFrom(int datastream, int barIndex, string from, double reference, double low, double high, bool isPoc, int top)
+		{
+			if (reference <= 0)
+			{
+				trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+					"[VP-TEST] TGT Data{0} bar={1} from={2} ref={3} skipped",
+					datastream, barIndex, from, fmt(reference)));
+				return;
+			}
+
+			string range = low > 0 && high > 0
+				? string.Format(CultureInfo.InvariantCulture, " range={0}-{1}", fmt(low), fmt(high))
+				: "";
+			string pocTag = isPoc ? " isPoc=True" : "";
+			TraceTargetsOneSide(datastream, barIndex, from, reference, range, pocTag, EVpDirection.Bullish, top);
+			TraceTargetsOneSide(datastream, barIndex, from, reference, range, pocTag, EVpDirection.Bearish, top);
+		}
+
+		private void TraceTargetsOneSide(int datastream, int barIndex, string from, double reference, string range, string pocTag, EVpDirection direction, int top)
+		{
+			List<ConfluenceTarget> targets = GetConfluenceTargets(reference, direction, top);
+			int n = targets == null ? 0 : targets.Count;
+			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+				"[VP-TEST] TGT Data{0} bar={1} from={2} ref={3}{4}{5} {6} count={7}",
+				datastream, barIndex, from, fmt(reference), range, pocTag, direction, n));
+			if (n == 0) return;
+
+			StringBuilder kinds = new StringBuilder();
+			for (int i = 0; i < n; i++)
+			{
+				ConfluenceTarget t = targets[i];
+				if (t == null) continue;
+				ConfluenceZone z = t.zone;
+				kinds.Length = 0;
+				if (z != null)
+				{
+					for (int h = 0; h < z.hits.Count; h++)
+					{
+						if (h > 0) kinds.Append(',');
+						kinds.Append(z.hits[h].kind);
+						kinds.Append('@');
+						kinds.Append(z.hits[h].dataStream);
+						kinds.Append("#");
+						kinds.Append(z.hits[h].profileStartBar);
+					}
+				}
+				trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+					"[VP-TEST]   TGT[{0}] {1} from={2} touch={3} price={4} dist={5} z={6} raw={7} hits={8} [{9}]",
+					i, direction, from,
+					fmt(t.touch), fmt(t.price), fmt(t.distance),
+					fmt(z != null ? z.zScore : 0), fmt(z != null ? z.rawScore : 0),
+					z != null ? z.hitCount : 0,
 					kinds.ToString()));
 			}
 		}
