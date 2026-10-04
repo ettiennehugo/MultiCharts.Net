@@ -19,6 +19,11 @@ namespace PowerLanguage.Strategy
 	/// start bar: log the prior profile only when this stream's start bar
 	/// changes, and never again for that start bar.
 	///
+	/// On that same dump, TraceLookbackNakedPocs lists naked POCs on this
+	/// stream that still fall inside ConfluenceLookbackProfiles (current
+	/// window plus older windows, newest first). The developing profile is
+	/// never naked.
+	///
 	/// Chart: Format Instrument → Volume Profile → Enable (Visible).
 	/// Add this signal; leave AutoEntry / orders alone — this class does not trade.
 	/// </summary>
@@ -42,6 +47,8 @@ namespace PowerLanguage.Strategy
 		[Input] public bool TraceExceptionalLevels { get; set; }
 		/// <summary>Include a short confluence snapshot taken on the new-profile bar.</summary>
 		[Input] public bool TraceConfluence { get; set; }
+		/// <summary>Include naked POCs on this stream inside ConfluenceLookbackProfiles.</summary>
+		[Input] public bool TraceNakedPocs { get; set; }
 		/// <summary>Cap on exceptional-level rows written per profile. 0 writes none.</summary>
 		[Input] public int TraceMaxLevels { get; set; }
 
@@ -62,6 +69,7 @@ namespace PowerLanguage.Strategy
 			TraceNodes = true;
 			TraceExceptionalLevels = true;
 			TraceConfluence = true;
+			TraceNakedPocs = true;
 			TraceMaxLevels = DEFAULT_MAX_TRACE_LEVELS;
 		}
 
@@ -154,6 +162,8 @@ namespace PowerLanguage.Strategy
 			{
 				trace(ETraceLevel.Info,
 					$"[VP-TEST] Data{datastream} bar={newProfileBarIndex} has no previous bar; no prior profile to dump.");
+				if (TraceNakedPocs)
+					TraceLookbackNakedPocs(datastream, newProfileBarIndex);
 				return;
 			}
 
@@ -162,6 +172,8 @@ namespace PowerLanguage.Strategy
 			{
 				trace(ETraceLevel.Info,
 					$"[VP-TEST] Data{datastream} priorBar={priorBar} ExtraVolumeProfileForBar returned null.");
+				if (TraceNakedPocs)
+					TraceLookbackNakedPocs(datastream, newProfileBarIndex);
 				return;
 			}
 
@@ -179,6 +191,8 @@ namespace PowerLanguage.Strategy
 				TraceConfluenceSnapshot(datastream, newProfileBarIndex);
 				TraceConfluenceTargets(datastream, priorBar, extra);
 			}
+			if (TraceNakedPocs)
+				TraceLookbackNakedPocs(datastream, newProfileBarIndex);
 		}
 
 		/// <summary>
@@ -212,7 +226,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Info-trace the core VpExtra snapshot (POC / VA / VWAP / percentiles).
+		/// Info-trace the core VpExtra snapshot (POC / naked POC / VA / VWAP / percentiles).
 		/// </summary>
 		public void TraceVpExtra(int datastream, int barIndex, VpExtra extra, string label)
 		{
@@ -237,6 +251,10 @@ namespace PowerLanguage.Strategy
 				label,
 				fmt(extra.poc), fmt(extra.pocVol),
 				fmt(extra.vah), fmt(extra.val), fmt(vaWidth)));
+
+			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+				"[VP-TEST] {0} nakedPOC={1} complete={2} touchedBar={3}",
+				label, extra.pocNaked, extra.pocComplete, extra.pocTouchedBar));
 
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] {0} VWAP slots  vwap={1}(s{2} σ={3})  vwap2={4}(s{5} σ={6})  vwap3={7}(s{8} σ={9})",
@@ -468,6 +486,75 @@ namespace PowerLanguage.Strategy
 					z != null ? z.hitCount : 0,
 					kinds.ToString()));
 			}
+		}
+
+		/// <summary>
+		/// Info-trace naked POCs on <paramref name="datastream"/> that still sit
+		/// inside the confluence lookback for that stream. Age 0 is the profile
+		/// open on <paramref name="asOfBar"/> (the current / developing window —
+		/// never naked). Older ages are prior windows, newest first, capped at
+		/// ConfluenceLookbackProfiles. Profiles outside that walk are omitted
+		/// even if NakedPocs still has them.
+		/// </summary>
+		public void TraceLookbackNakedPocs(int datastream, int asOfBar)
+		{
+			if (asOfBar < 1) asOfBar = currentBarIndex(datastream);
+			int lookback = ConfluenceLookbackProfiles;
+			if (lookback < 1) lookback = 1;
+
+			// Public query stamps pocNaked / pocTouchedBar as of the calc bar, then
+			// answers the historical question. The walk below is the lookback filter.
+			List<VpExtra> nakedAll = NakedPocs(datastream, asOfBar);
+			var nakedStarts = new HashSet<int>();
+			if (nakedAll != null)
+			{
+				for (int i = 0; i < nakedAll.Count; i++)
+				{
+					VpExtra n = nakedAll[i];
+					if (n != null && n.startBar >= 1) nakedStarts.Add(n.startBar);
+				}
+			}
+
+			int bar = asOfBar;
+			var seen = new HashSet<int>();
+			int window = 0;
+			int nakedCount = 0;
+			int currentStart = -1;
+			bool currentNaked = false;
+			var rows = new List<string>();
+
+			for (int age = 0; age < lookback && bar >= 1; age++)
+			{
+				VpExtra extra = ExtraVolumeProfileForBar(datastream, bar);
+				if (extra == null || extra.startBar < 1) break;
+				if (!seen.Add(extra.startBar)) break;
+				window++;
+				if (age == 0) currentStart = extra.startBar;
+
+				bool naked = extra.IsNakedPoc(asOfBar) || nakedStarts.Contains(extra.startBar);
+				if (age == 0) currentNaked = naked;
+				if (!naked)
+				{
+					bar = extra.startBar - 1;
+					continue;
+				}
+
+				rows.Add(string.Format(CultureInfo.InvariantCulture,
+					"[VP-TEST]   NAKED[{0}] age={1} start={2} end={3} POC={4} pocVol={5} complete={6} touchedBar={7} current={8}",
+					nakedCount, age, extra.startBar, extra.endBar,
+					fmt(extra.poc), fmt(extra.pocVol), extra.pocComplete, extra.pocTouchedBar,
+					age == 0));
+				nakedCount++;
+				bar = extra.startBar - 1;
+			}
+
+			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
+				"[VP-TEST] NAKED Data{0} bar={1} lookback={2} window={3} naked={4} streamNaked={5} currentStart={6} currentNaked={7} track={8}",
+				datastream, asOfBar, lookback, window, nakedCount,
+				nakedAll == null ? 0 : nakedAll.Count,
+				currentStart, currentNaked, TrackNakedPoc));
+			for (int i = 0; i < rows.Count; i++)
+				trace(ETraceLevel.Info, rows[i]);
 		}
 
 		private int currentBarIndex(int datastream)
