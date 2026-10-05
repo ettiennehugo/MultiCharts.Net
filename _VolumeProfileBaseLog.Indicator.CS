@@ -250,6 +250,11 @@ namespace PowerLanguage.Indicator
 				throw new ArgumentException("NakedPocBandTicks must be >= 0.");
 			m_tick = ResolveTick();
 			EnsureLoaded(force: true);
+			if (!m_registered)
+			{
+				ChartCustomDraw.Register(this);
+				m_registered = true;
+			}
 			RequestRedraw();
 		}
 
@@ -259,13 +264,24 @@ namespace PowerLanguage.Indicator
 			// another ReDraw from here clears the overlay and paints it again.
 		}
 
+		protected override void StopCalc()
+		{
+			Detach();
+		}
+
 		protected override void Destroy()
 		{
-			if (m_registered)
-			{
-				ChartCustomDraw.Unregister(this);
-				m_registered = false;
-			}
+			Detach();
+		}
+
+		void Detach()
+		{
+			if (!m_registered) return;
+			try { ChartCustomDraw.Unregister(this); }
+			catch { }
+			m_registered = false;
+			Publish(new LogSnapshot());
+			RequestRedraw();
 		}
 
 		void IChartCustomDrawer.Draw(DrawContext context, EDrawPhases phase)
