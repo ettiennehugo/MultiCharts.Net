@@ -48,7 +48,7 @@ namespace PowerLanguage.Indicator
 	public class _VolumeProfileBaseLog : IndicatorObject, IChartCustomDrawer
 	{
 		//constants
-		const int DefaultOpacityPercent = 65;
+		const int DefaultOpacityPercent = 25;
 		const int DefaultBorderWidth = 1;
 		const int DefaultNakedBandTicks = 2;
 		const float ArrowSize = 5f;
@@ -226,11 +226,11 @@ namespace PowerLanguage.Indicator
 			ZoneBorderWidth = DefaultBorderWidth;
 			NakedPocBandTicks = DefaultNakedBandTicks;
 			HvnColor = Color.LightGreen;
-			LvnColor = Color.FromArgb(255, 160, 160);
-			ConfluenceColor = Color.FromArgb(200, 170, 255);
+			LvnColor = Color.Red;
+			ConfluenceColor = Color.MediumPurple;
 			BullishTargetColor = Color.LimeGreen;
 			BearishTargetColor = Color.Red;
-			NakedPocColor = Color.Gold;
+			NakedPocColor = Color.Goldenrod;
 			if (!m_registered)
 			{
 				ChartCustomDraw.Register(this);
@@ -255,11 +255,8 @@ namespace PowerLanguage.Indicator
 
 		protected override void CalcBar()
 		{
-			if (Bars.LastBarOnChart)
-			{
-				EnsureLoaded(force: false);
-				RequestRedraw();
-			}
+			// Price updates already repaint the chart and call Draw. Requesting
+			// another ReDraw from here clears the overlay and paints it again.
 		}
 
 		protected override void Destroy()
@@ -273,8 +270,11 @@ namespace PowerLanguage.Indicator
 
 		void IChartCustomDrawer.Draw(DrawContext context, EDrawPhases phase)
 		{
-			if (phase != EDrawPhases.BeforeFGShapes) return;
+			if (phase != EDrawPhases.BeforeSeries) return;
 			if (context == null || context.graphics == null || context.Environment == null) return;
+			// Draw only the last call of this paint. Earlier dirty-rect passes are
+			// wiped when the price series updates, which is the flicker.
+			if (!context.FinalDraw) return;
 			RectangleF view = context.DrawRect;
 			if (view.Width < 1f || view.Height < 1f) return;
 
@@ -549,9 +549,11 @@ namespace PowerLanguage.Indicator
 					p.EndTime = t;
 					p.HasEndTime = true;
 				}
-				else if (p.NewTime != DateTime.MinValue)
+				else if (p.NewTime != DateTime.MinValue && p.NewBar > p.EndBar)
 				{
-					// NEW time is the first bar after the completed profile.
+					// NEW time is the first bar after this profile. Keep it for culling.
+					// Drawing pulls one chart bar back so a weekend gap is not treated
+					// as a bar step (that left the last profile one bar short).
 					p.EndTime = p.NewTime;
 					p.HasEndTime = true;
 				}
@@ -960,12 +962,58 @@ namespace PowerLanguage.Indicator
 				high = mid + pad;
 			}
 			ChartPoint left = Anchor(profile, startBar, true, high);
-			ChartPoint right = Anchor(profile, endBar, false, low);
+			PointF a, b;
 			RectangleF rect;
-			if (!TryRect(context, left, right, out rect)) return;
+			if (profile.NewTime != DateTime.MinValue && profile.NewBar > startBar && startBar == profile.StartBar)
+			{
+				// ChartPoint is the bar center. NewTime is the next profile open,
+				// so pull one bar back to the end-bar center, then grow both edges
+				// by half a bar so the band covers the full start and end bars.
+				ChartPoint exclusive = new ChartPoint(profile.NewTime, low);
+				if (!TryPoints(context, left, exclusive, out a, out b)) return;
+				float barPx = Math.Abs(b.X - a.X) / (profile.NewBar - startBar);
+				if (b.X >= a.X) b.X -= barPx;
+				else b.X += barPx;
+				ExtendHalfBar(ref a, ref b, barPx);
+				if (!TryRectFromPoints(a, b, out rect)) return;
+			}
+			else
+			{
+				ChartPoint right = Anchor(profile, endBar, false, low);
+				if (!TryPoints(context, left, right, out a, out b)) return;
+				float barPx = BarSpacingPx(context, profile);
+				if (barPx > 0f) ExtendHalfBar(ref a, ref b, barPx);
+				if (!TryRectFromPoints(a, b, out rect)) return;
+			}
 			if (!rect.IntersectsWith(view)) return;
 			g.FillRectangle(fill, rect);
 			g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+		}
+
+		float BarSpacingPx(DrawContext context, ProfileDump profile)
+		{
+			if (profile.NewTime == DateTime.MinValue || !profile.HasStartTime || profile.NewBar <= profile.StartBar)
+				return 0f;
+			PointF a, b;
+			if (!TryPoints(context, new ChartPoint(profile.StartTime, profile.Poc), new ChartPoint(profile.NewTime, profile.Poc), out a, out b))
+				return 0f;
+			return Math.Abs(b.X - a.X) / (profile.NewBar - profile.StartBar);
+		}
+
+		static void ExtendHalfBar(ref PointF left, ref PointF right, float barPx)
+		{
+			if (barPx <= 0f) return;
+			float half = barPx * 0.5f;
+			if (left.X <= right.X)
+			{
+				left.X -= half;
+				right.X += half;
+			}
+			else
+			{
+				left.X += half;
+				right.X -= half;
+			}
 		}
 
 		void DrawArrow(DrawContext context, Graphics g, RectangleF view, ProfileDump profile, double origin, double dest, Pen pen, int index)
@@ -1001,6 +1049,11 @@ namespace PowerLanguage.Indicator
 				rect = RectangleF.Empty;
 				return false;
 			}
+			return TryRectFromPoints(a, b, out rect);
+		}
+
+		static bool TryRectFromPoints(PointF a, PointF b, out RectangleF rect)
+		{
 			float x = Math.Min(a.X, b.X);
 			float y = Math.Min(a.Y, b.Y);
 			float w = Math.Abs(a.X - b.X);
