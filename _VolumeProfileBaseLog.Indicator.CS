@@ -40,6 +40,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
+using System.Net.Mime;
 using System.Text;
 
 namespace PowerLanguage.Indicator
@@ -1055,17 +1056,6 @@ namespace PowerLanguage.Indicator
 				return new ChartPoint(profile.EndTime, price);
 			if (bar < 1) bar = profile.NewBar > 0 ? profile.NewBar : 1;
 			return new ChartPoint(bar, price);
-		}
-
-		static bool TryRect(DrawContext context, ChartPoint left, ChartPoint right, out RectangleF rect)
-		{
-			PointF a, b;
-			if (!TryPoints(context, left, right, out a, out b))
-			{
-				rect = RectangleF.Empty;
-				return false;
-			}
-			return TryRectFromPoints(a, b, out rect);
 		}
 
 		static bool TryRectFromPoints(PointF a, PointF b, out RectangleF rect)
