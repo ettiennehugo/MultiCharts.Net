@@ -20,7 +20,7 @@
   -------
   HVN          light green rectangle over the profile window
   LVN          light red rectangle over the profile window
-  Confluence   light purple rectangle (Magnet / Acceptance / Rejection / Mixed)
+  Confluence   magnet orange, acceptance green, rejection red, mixed yellow
   Naked POC    gold band on the profile window (color not specified in the brief)
   Bullish      green arrow from the POC/HVN origin to the target price
   Bearish      red arrow from the POC/HVN origin to the target price
@@ -40,7 +40,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
-using System.Net.Mime;
 using System.Text;
 
 namespace PowerLanguage.Indicator
@@ -192,7 +191,10 @@ namespace PowerLanguage.Indicator
 		[Input] public int NakedPocBandTicks { get; set; }
 		[Input] public Color HvnColor { get; set; }
 		[Input] public Color LvnColor { get; set; }
-		[Input] public Color ConfluenceColor { get; set; }
+		[Input] public Color ConfluenceMagnetColor { get; set; }
+		[Input] public Color ConfluenceAcceptanceColor { get; set; }
+		[Input] public Color ConfluenceRejectionColor { get; set; }
+		[Input] public Color ConfluenceMixedColor { get; set; }
 		[Input] public Color BullishTargetColor { get; set; }
 		[Input] public Color BearishTargetColor { get; set; }
 		[Input] public Color NakedPocColor { get; set; }
@@ -228,7 +230,10 @@ namespace PowerLanguage.Indicator
 			NakedPocBandTicks = DefaultNakedBandTicks;
 			HvnColor = Color.LightGreen;
 			LvnColor = Color.Red;
-			ConfluenceColor = Color.MediumPurple;
+			ConfluenceMagnetColor = Color.Orange;
+			ConfluenceAcceptanceColor = Color.LimeGreen;
+			ConfluenceRejectionColor = Color.Red;
+			ConfluenceMixedColor = Color.Yellow;
 			BullishTargetColor = Color.LimeGreen;
 			BearishTargetColor = Color.Red;
 			NakedPocColor = Color.Goldenrod;
@@ -319,8 +324,14 @@ namespace PowerLanguage.Indicator
 				using (Brush hvnFill = MakeFill(HvnColor, alpha))
 				using (Pen lvnPen = MakePen(LvnColor, border))
 				using (Brush lvnFill = MakeFill(LvnColor, alpha))
-				using (Pen confPen = MakePen(ConfluenceColor, border))
-				using (Brush confFill = MakeFill(ConfluenceColor, alpha))
+				using (Pen magnetPen = MakePen(ConfluenceMagnetColor, border))
+				using (Brush magnetFill = MakeFill(ConfluenceMagnetColor, alpha))
+				using (Pen acceptPen = MakePen(ConfluenceAcceptanceColor, border))
+				using (Brush acceptFill = MakeFill(ConfluenceAcceptanceColor, alpha))
+				using (Pen rejectPen = MakePen(ConfluenceRejectionColor, border))
+				using (Brush rejectFill = MakeFill(ConfluenceRejectionColor, alpha))
+				using (Pen mixedPen = MakePen(ConfluenceMixedColor, border))
+				using (Brush mixedFill = MakeFill(ConfluenceMixedColor, alpha))
 				using (Pen nakedPen = MakePen(NakedPocColor, border))
 				using (Brush nakedFill = MakeFill(NakedPocColor, alpha))
 				using (Pen bullPen = MakeArrowPen(BullishTargetColor, border))
@@ -330,7 +341,9 @@ namespace PowerLanguage.Indicator
 					{
 						if (!PriceMayIntersect(profile, priceLo, priceHi, pad)) continue;
 						DrawProfile(context, g, view, profile, priceLo, priceHi, pad,
-							hvnPen, hvnFill, lvnPen, lvnFill, confPen, confFill, nakedPen, nakedFill, bullPen, bearPen);
+							hvnPen, hvnFill, lvnPen, lvnFill,
+							magnetPen, magnetFill, acceptPen, acceptFill, rejectPen, rejectFill, mixedPen, mixedFill,
+							nakedPen, nakedFill, bullPen, bearPen);
 					}
 				}
 			}
@@ -866,7 +879,9 @@ namespace PowerLanguage.Indicator
 			DrawContext context, Graphics g, RectangleF view, ProfileDump profile,
 			double priceLo, double priceHi, double pad,
 			Pen hvnPen, Brush hvnFill, Pen lvnPen, Brush lvnFill,
-			Pen confPen, Brush confFill, Pen nakedPen, Brush nakedFill,
+			Pen magnetPen, Brush magnetFill, Pen acceptPen, Brush acceptFill,
+			Pen rejectPen, Brush rejectFill, Pen mixedPen, Brush mixedFill,
+			Pen nakedPen, Brush nakedFill,
 			Pen bullPen, Pen bearPen)
 		{
 			if (ShowHvn)
@@ -894,13 +909,53 @@ namespace PowerLanguage.Indicator
 					ConfZone z = profile.Confluence[i];
 					if (!RoleEnabled(z.Role)) continue;
 					if (!BandVisible(z.Low, z.High, priceLo, priceHi, pad)) continue;
-					DrawBand(context, g, view, profile, z.Low, z.High, pad, confPen, confFill);
+					Pen pen;
+					Brush fill;
+					if (!RoleStyle(z.Role, magnetPen, magnetFill, acceptPen, acceptFill, rejectPen, rejectFill, mixedPen, mixedFill, out pen, out fill))
+						continue;
+					DrawBand(context, g, view, profile, z.Low, z.High, pad, pen, fill);
 				}
 			}
 			if (ShowNakedPoc)
 				DrawNaked(context, g, view, profile, priceLo, priceHi, pad, nakedPen, nakedFill);
 			if (ShowBullishTargets || ShowBearishTargets)
 				DrawTargets(context, g, view, profile, priceLo, priceHi, bullPen, bearPen);
+		}
+
+		bool RoleStyle(
+			string role,
+			Pen magnetPen, Brush magnetFill, Pen acceptPen, Brush acceptFill,
+			Pen rejectPen, Brush rejectFill, Pen mixedPen, Brush mixedFill,
+			out Pen pen, out Brush fill)
+		{
+			pen = null;
+			fill = null;
+			if (string.IsNullOrEmpty(role)) return false;
+			if (role.Equals("Magnet", StringComparison.OrdinalIgnoreCase))
+			{
+				pen = magnetPen;
+				fill = magnetFill;
+				return true;
+			}
+			if (role.Equals("Acceptance", StringComparison.OrdinalIgnoreCase))
+			{
+				pen = acceptPen;
+				fill = acceptFill;
+				return true;
+			}
+			if (role.Equals("Rejection", StringComparison.OrdinalIgnoreCase))
+			{
+				pen = rejectPen;
+				fill = rejectFill;
+				return true;
+			}
+			if (role.Equals("Mixed", StringComparison.OrdinalIgnoreCase))
+			{
+				pen = mixedPen;
+				fill = mixedFill;
+				return true;
+			}
+			return false;
 		}
 
 		bool RoleEnabled(string role)
@@ -1056,6 +1111,17 @@ namespace PowerLanguage.Indicator
 				return new ChartPoint(profile.EndTime, price);
 			if (bar < 1) bar = profile.NewBar > 0 ? profile.NewBar : 1;
 			return new ChartPoint(bar, price);
+		}
+
+		static bool TryRect(DrawContext context, ChartPoint left, ChartPoint right, out RectangleF rect)
+		{
+			PointF a, b;
+			if (!TryPoints(context, left, right, out a, out b))
+			{
+				rect = RectangleF.Empty;
+				return false;
+			}
+			return TryRectFromPoints(a, b, out rect);
 		}
 
 		static bool TryRectFromPoints(PointF a, PointF b, out RectangleF rect)
