@@ -230,11 +230,11 @@ namespace PowerLanguage.Indicator
 			NakedPocBandTicks = DefaultNakedBandTicks;
 			HvnColor = Color.LightGreen;
 			LvnColor = Color.Red;
-			ConfluenceMagnetColor = Color.Orange;
-			ConfluenceAcceptanceColor = Color.LimeGreen;
+			ConfluenceMagnetColor = Color.Yellow;
+			ConfluenceAcceptanceColor = Color.LightGreen;
 			ConfluenceRejectionColor = Color.Red;
-			ConfluenceMixedColor = Color.Yellow;
-			BullishTargetColor = Color.LimeGreen;
+			ConfluenceMixedColor = Color.Orange;
+			BullishTargetColor = Color.LightGreen;
 			BearishTargetColor = Color.Red;
 			NakedPocColor = Color.Goldenrod;
 			if (!m_registered)
