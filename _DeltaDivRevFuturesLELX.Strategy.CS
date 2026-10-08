@@ -128,7 +128,7 @@ namespace PowerLanguage.Strategy
 				if (bar != m_lastEntrySkipBar)
 				{
 					m_lastEntrySkipBar = bar;
-					trace(ETraceLevel.Debug, $"entry skip bar {bar} status {Bars.Status} is not Close");
+					trace(ETraceLevel.Debug, $"entry skip bar({bar}) status({Bars.Status}) is not Close");
 				}
 				return;
 			}
@@ -176,7 +176,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0)
 			{
 				if (!m_seenLong)
-					trace(ETraceLevel.Debug, $"position opened bar {bar} pos {pos} armed {m_armed} stop {m_stopPrice} target {m_targetPrice} qty {m_qty}");
+					trace(ETraceLevel.Debug, $"position opened bar({bar}) pos({pos}) armed({m_armed}) stop({m_stopPrice}) target({m_targetPrice}) qty({m_qty})");
 				m_seenLong = true;
 				resendProtection();
 				return;
@@ -184,7 +184,7 @@ namespace PowerLanguage.Strategy
 
 			if (m_seenLong)
 			{
-				trace(ETraceLevel.Debug, $"position flat after long bar {bar} clearing ticket stop {m_stopPrice} target {m_targetPrice} qty {m_qty}");
+				trace(ETraceLevel.Debug, $"position flat after long bar({bar}) clearing ticket stop({m_stopPrice}) target({m_targetPrice}) qty({m_qty})");
 				clearTicket();
 				m_seenLong = false;
 				return;
@@ -199,7 +199,7 @@ namespace PowerLanguage.Strategy
 			// Fill bar closed and still flat: the market-next-bar entry did not fill.
 			if (bar > m_armBar && Bars.Status == EBarState.Close)
 			{
-				trace(ETraceLevel.Debug, $"entry unfilled bar {bar} armBar {m_armBar} still flat, clearing ticket");
+				trace(ETraceLevel.Debug, $"entry unfilled bar({bar}) armBar({m_armBar}) still flat, clearing ticket");
 				clearTicket();
 			}
 		}
@@ -208,7 +208,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (!m_armed || m_qty < 1)
 			{
-				trace(ETraceLevel.Debug, $"resend skipped armed {m_armed} qty {m_qty} stop {m_stopPrice} target {m_targetPrice}");
+				trace(ETraceLevel.Debug, $"resend skipped armed({m_armed}) qty({m_qty}) stop({m_stopPrice}) target({m_targetPrice})");
 				return;
 			}
 			m_lxStop.Send(m_stopPrice, m_qty);
@@ -218,14 +218,14 @@ namespace PowerLanguage.Strategy
 			if (bar != m_lastProtectTraceBar)
 			{
 				m_lastProtectTraceBar = bar;
-				trace(ETraceLevel.Debug, $"send LX Stop {m_stopPrice} LX Target {m_targetPrice} qty {m_qty} bar {bar} status {Bars.Status} pos {StrategyInfo.MarketPosition}");
+				trace(ETraceLevel.Debug, $"send LX Stop({m_stopPrice}) LX Target({m_targetPrice}) qty({m_qty}) bar({bar}) status({Bars.Status}) pos({StrategyInfo.MarketPosition})");
 			}
 		}
 
 		private void clearTicket()
 		{
 			if (m_armed)
-				trace(ETraceLevel.Debug, $"clear ticket armBar {m_armBar} stop {m_stopPrice} target {m_targetPrice} qty {m_qty}");
+				trace(ETraceLevel.Debug, $"clear ticket armBar({m_armBar}) stop({m_stopPrice}) target({m_targetPrice}) qty({m_qty})");
 			m_armed = false;
 			m_armBar = 0;
 			m_stopPrice = 0;
@@ -265,7 +265,7 @@ namespace PowerLanguage.Strategy
 			if (!m_data2ReadyTraced)
 			{
 				m_data2ReadyTraced = true;
-				trace(ETraceLevel.Debug, $"Data2 ready MaxDataStream {MaxDataStream} deltaType {delta.Info.Resolution.DeltaType} bar {delta.FullSymbolData.Current}");
+				trace(ETraceLevel.Debug, $"Data2 ready MaxDataStream({MaxDataStream}) deltaType({delta.Info.Resolution.DeltaType}) bar({delta.FullSymbolData.Current})");
 			}
 			return true;
 		}
@@ -276,14 +276,14 @@ namespace PowerLanguage.Strategy
 			int span = 2 * strength;
 			if (Bars.CurrentBar < span)
 			{
-				trace(ETraceLevel.Debug, $"pivot skip CurrentBar {Bars.CurrentBar} < span {span}");
+				trace(ETraceLevel.Debug, $"pivot skip CurrentBar({Bars.CurrentBar}) span({span})");
 				return;
 			}
 
 			double swingLow = Bars.Low[strength];
 			if (!(swingLow > 0) || double.IsNaN(swingLow) || double.IsInfinity(swingLow))
 			{
-				trace(ETraceLevel.Debug, $"pivot skip swing low invalid {swingLow} ago {strength}");
+				trace(ETraceLevel.Debug, $"pivot skip swingLow({swingLow}) ago({strength}) invalid");
 				return;
 			}
 
@@ -292,7 +292,7 @@ namespace PowerLanguage.Strategy
 				double low = Bars.Low[i];
 				if (low < swingLow)
 				{
-					trace(ETraceLevel.Debug, $"pivot miss ago {strength} low {swingLow} undercut by ago {i} low {low}");
+					trace(ETraceLevel.Debug, $"pivot miss ago({strength}) low({swingLow}) undercut by ago({i}) low({low})");
 					return;
 				}
 			}
@@ -300,19 +300,19 @@ namespace PowerLanguage.Strategy
 			int swingBar = Bars.FullSymbolData.Current - strength;
 			if (swingBar < 1 || swingBar == m_lastSwingBar)
 			{
-				trace(ETraceLevel.Debug, $"pivot duplicate swingBar {swingBar} lastSwingBar {m_lastSwingBar}");
+				trace(ETraceLevel.Debug, $"pivot duplicate swingBar({swingBar}) lastSwingBar({m_lastSwingBar})");
 				return;
 			}
 			if (m_hasPrevSwing && swingBar <= m_prevSwingBar)
 			{
-				trace(ETraceLevel.Debug, $"pivot not after previous swingBar {swingBar} prevSwingBar {m_prevSwingBar}");
+				trace(ETraceLevel.Debug, $"pivot not after previous swingBar({swingBar}) prevSwingBar({m_prevSwingBar})");
 				return;
 			}
 
 			// First confirmed swing arms the chain. A divergence needs a prior low.
 			if (!m_hasPrevSwing)
 			{
-				trace(ETraceLevel.Debug, $"pivot first swing bar {swingBar} low {swingLow} no previous, chain armed");
+				trace(ETraceLevel.Debug, $"pivot first swing bar({swingBar}) low({swingLow}) no previous, chain armed");
 				rememberSwing(swingBar, swingLow);
 				return;
 			}
@@ -321,7 +321,7 @@ namespace PowerLanguage.Strategy
 			int prevAgo = Bars.FullSymbolData.Current - m_prevSwingBar;
 			if (prevAgo < 0)
 			{
-				trace(ETraceLevel.Debug, $"pivot prevAgo {prevAgo} invalid, replacing previous swing");
+				trace(ETraceLevel.Debug, $"pivot prevAgo({prevAgo}) invalid, replacing previous swing");
 				rememberSwing(swingBar, swingLow);
 				return;
 			}
@@ -331,20 +331,20 @@ namespace PowerLanguage.Strategy
 			bool session = diverged && sessionAllowsEntry();
 			bool dayBlocked = diverged && blockedByDayLimit();
 			bool canEnter = diverged && flat && !m_armed && session && !dayBlocked;
-			trace(ETraceLevel.Debug, $"swing confirm bar {swingBar} low {swingLow} prevBar {m_prevSwingBar} prevLow {m_prevSwingLow} tick {tick} diverged {diverged} flat {flat} pos {StrategyInfo.MarketPosition} armed {m_armed} session {session} dayBlocked {dayBlocked} canEnter {canEnter}");
+			trace(ETraceLevel.Debug, $"swing confirm bar({swingBar}) low({swingLow}) prevBar({m_prevSwingBar}) prevLow({m_prevSwingLow}) tick({tick}) diverged({diverged}) flat({flat}) pos({StrategyInfo.MarketPosition}) armed({m_armed}) session({session}) dayBlocked({dayBlocked}) canEnter({canEnter})");
 			if (canEnter)
 				enterLong(swingBar, swingLow, tick);
 			else if (diverged && !flat)
-				trace(ETraceLevel.Debug, $"entry blocked already in position {StrategyInfo.MarketPosition}");
+				trace(ETraceLevel.Debug, $"entry blocked already in position({StrategyInfo.MarketPosition})");
 			else if (diverged && m_armed)
-				trace(ETraceLevel.Debug, $"entry blocked ticket already armed armBar {m_armBar}");
+				trace(ETraceLevel.Debug, $"entry blocked ticket already armed armBar({m_armBar})");
 
 			rememberSwing(swingBar, swingLow);
 		}
 
 		private void rememberSwing(int swingBar, double swingLow)
 		{
-			trace(ETraceLevel.Debug, $"remember swing bar {swingBar} low {swingLow} was {m_prevSwingBar} / {m_prevSwingLow}");
+			trace(ETraceLevel.Debug, $"remember swing bar({swingBar}) low({swingLow}) was bar({m_prevSwingBar}) low({m_prevSwingLow})");
 			m_prevSwingBar = swingBar;
 			m_prevSwingLow = swingLow;
 			m_hasPrevSwing = true;
@@ -357,7 +357,7 @@ namespace PowerLanguage.Strategy
 			// Lower low, or a stall within EqualLowTicks of the prior swing. A higher low is not a reversal.
 			if (swingLow > stallLimit)
 			{
-				trace(ETraceLevel.Debug, $"div reject higher low swing {swingLow} prev {m_prevSwingLow} stallLimit {stallLimit} equalTicks {EqualLowTicks}");
+				trace(ETraceLevel.Debug, $"div reject higher low swing({swingLow}) prev({m_prevSwingLow}) stallLimit({stallLimit}) equalTicks({EqualLowTicks})");
 				return false;
 			}
 
@@ -373,45 +373,45 @@ namespace PowerLanguage.Strategy
 			}
 			catch (Exception ex)
 			{
-				trace(ETraceLevel.Debug, $"div reject Data2 read failed swingAgo {swingAgo} prevAgo {prevAgo} {ex.Message}");
+				trace(ETraceLevel.Debug, $"div reject Data2 read failed swingAgo({swingAgo}) prevAgo({prevAgo}) error({ex.Message})");
 				return false;
 			}
 
 			if (double.IsNaN(deltaAtSwing) || double.IsNaN(deltaAtPrev) || double.IsNaN(deltaNow))
 			{
-				trace(ETraceLevel.Debug, $"div reject delta NaN swing {deltaAtSwing} prev {deltaAtPrev} now {deltaNow}");
+				trace(ETraceLevel.Debug, $"div reject delta NaN swing({deltaAtSwing}) prev({deltaAtPrev}) now({deltaNow})");
 				return false;
 			}
 			if (deltaAtSwing < deltaAtPrev + MinDeltaRise)
 			{
-				trace(ETraceLevel.Debug, $"div reject delta not higher swing {deltaAtSwing} prev {deltaAtPrev} minRise {MinDeltaRise}");
+				trace(ETraceLevel.Debug, $"div reject delta not higher swing({deltaAtSwing}) prev({deltaAtPrev}) minRise({MinDeltaRise})");
 				return false;
 			}
 			// Higher delta low that is already rolling over is not an entry.
 			if (!(deltaNow > deltaAtSwing))
 			{
-				trace(ETraceLevel.Debug, $"div reject delta not rising now {deltaNow} swing {deltaAtSwing}");
+				trace(ETraceLevel.Debug, $"div reject delta not rising now({deltaNow}) swing({deltaAtSwing})");
 				return false;
 			}
 
 			double close = Bars.Close[0];
 			if (close < swingLow)
 			{
-				trace(ETraceLevel.Debug, $"div reject close {close} below swing {swingLow}");
+				trace(ETraceLevel.Debug, $"div reject close({close}) below swing({swingLow})");
 				return false;
 			}
 			double distance = close - swingLow;
 			if (distance > MaxEntryDistanceTicks * tick)
 			{
-				trace(ETraceLevel.Debug, $"div reject chase close {close} swing {swingLow} distance {distance} max {MaxEntryDistanceTicks * tick}");
+				trace(ETraceLevel.Debug, $"div reject chase close({close}) swing({swingLow}) distance({distance}) max({MaxEntryDistanceTicks * tick})");
 				return false;
 			}
 			if (RequireBullishClose && !(close > Bars.Open[0]))
 			{
-				trace(ETraceLevel.Debug, $"div reject close {close} not above open {Bars.Open[0]}");
+				trace(ETraceLevel.Debug, $"div reject close({close}) not above open({Bars.Open[0]})");
 				return false;
 			}
-			trace(ETraceLevel.Debug, $"div pass swingAgo {swingAgo} prevAgo {prevAgo} swing {swingLow} prevSwing {m_prevSwingLow} deltaSwing {deltaAtSwing} deltaPrev {deltaAtPrev} deltaNow {deltaNow} close {close} open {Bars.Open[0]}");
+			trace(ETraceLevel.Debug, $"div pass swingAgo({swingAgo}) prevAgo({prevAgo}) swing({swingLow}) prevSwing({m_prevSwingLow}) deltaSwing({deltaAtSwing}) deltaPrev({deltaAtPrev}) deltaNow({deltaNow}) close({close}) open({Bars.Open[0]})");
 			return true;
 		}
 
@@ -423,25 +423,25 @@ namespace PowerLanguage.Strategy
 			MarketSession sessions = GetSessions();
 			if (state != GlobexState.Open)
 			{
-				trace(ETraceLevel.Debug, $"session reject globex {state}");
+				trace(ETraceLevel.Debug, $"session reject globex({state})");
 				return false;
 			}
 			if (InSession(MarketSession.Rth))
 			{
-				trace(ETraceLevel.Debug, $"session pass rth sessions {sessions}");
+				trace(ETraceLevel.Debug, $"session pass rth sessions({sessions})");
 				return true;
 			}
 			if (AllowOutsideRth && (InSession(MarketSession.Europe) || InSession(MarketSession.NewYork)))
 			{
-				trace(ETraceLevel.Debug, $"session pass outside rth sessions {sessions}");
+				trace(ETraceLevel.Debug, $"session pass outside rth sessions({sessions})");
 				return true;
 			}
 			if (AllowAsia && InSession(MarketSession.Asia))
 			{
-				trace(ETraceLevel.Debug, $"session pass asia sessions {sessions}");
+				trace(ETraceLevel.Debug, $"session pass asia sessions({sessions})");
 				return true;
 			}
-			trace(ETraceLevel.Debug, $"session reject sessions {sessions} allowOutsideRth {AllowOutsideRth} allowAsia {AllowAsia}");
+			trace(ETraceLevel.Debug, $"session reject sessions({sessions}) allowOutsideRth({AllowOutsideRth}) allowAsia({AllowAsia})");
 			return false;
 		}
 
@@ -451,7 +451,7 @@ namespace PowerLanguage.Strategy
 				return false;
 			DateTime today = GlobexDate(Bars.Time[0]);
 			bool blocked = m_entryGlobexDate == today;
-			trace(ETraceLevel.Debug, $"day limit globexDate {today:yyyy-MM-dd} lastEntry {m_entryGlobexDate:yyyy-MM-dd} blocked {blocked}");
+			trace(ETraceLevel.Debug, $"day limit globexDate({today:yyyy-MM-dd}) lastEntry({m_entryGlobexDate:yyyy-MM-dd}) blocked({blocked})");
 			return blocked;
 		}
 
@@ -459,10 +459,10 @@ namespace PowerLanguage.Strategy
 		{
 			double close = Bars.Close[0];
 			double stopPrice = swingLow - StopBufferTicks * tick;
-			trace(ETraceLevel.Debug, $"stop swing {swingLow} bufferTicks {StopBufferTicks} tick {tick} stop {stopPrice} close {close}");
+			trace(ETraceLevel.Debug, $"stop swing({swingLow}) bufferTicks({StopBufferTicks}) tick({tick}) stop({stopPrice}) close({close})");
 			if (close <= stopPrice)
 			{
-				trace(ETraceLevel.Info, $"skip size {Bars.Time[0]:MM/dd/yyyy HH:mm} swing {swingLow} close {close} is not above stop {stopPrice}");
+				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) swing({swingLow}) close({close}) is not above stop({stopPrice})");
 				return;
 			}
 
@@ -478,27 +478,27 @@ namespace PowerLanguage.Strategy
 			// qty = floor( equityAvailable(RiskPercent) / dollarRiskPerContract ), round lots off.
 			double dollarRiskPerContract = Math.Round(Math.Abs(close - stopPrice) * pointValue, 2);
 			int qty = riskBasedPositionSize(dollarRiskPerContract, RiskPercent, false);
-			trace(ETraceLevel.Debug, $"size dollarRiskPerContract {dollarRiskPerContract} riskPercent {RiskPercent} rawQty {qty} maxContracts {MaxContracts} pointValue {pointValue}");
+			trace(ETraceLevel.Debug, $"size dollarRiskPerContract({dollarRiskPerContract}) riskPercent({RiskPercent}) rawQty({qty}) maxContracts({MaxContracts}) pointValue({pointValue})");
 			if (MaxContracts > 0 && qty > MaxContracts)
 			{
-				trace(ETraceLevel.Debug, $"size cap {qty} to MaxContracts {MaxContracts}");
+				trace(ETraceLevel.Debug, $"size cap qty({qty}) MaxContracts({MaxContracts})");
 				qty = MaxContracts;
 			}
 			if (qty < 1)
 			{
-				trace(ETraceLevel.Info, $"skip size {Bars.Time[0]:MM/dd/yyyy HH:mm} swing {swingLow} stop {stopPrice} pointValue {pointValue} dollarRiskPerContract {dollarRiskPerContract} qty {qty}");
+				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) qty({qty})");
 				return;
 			}
 
 			double riskEquity = equityAvailable(RiskPercent);
 			double minProfit = riskEquity * ProfitFactor;
 			double minTarget = close + minProfit / (pointValue * qty);
-			trace(ETraceLevel.Debug, $"target hurdle riskEquity {riskEquity} profitFactor {ProfitFactor} minProfit {minProfit} minTarget {minTarget} qty {qty}");
+			trace(ETraceLevel.Debug, $"target hurdle riskEquity({riskEquity}) profitFactor({ProfitFactor}) minProfit({minProfit}) minTarget({minTarget}) qty({qty})");
 			ExitCandidate target;
 			int examined;
 			if (!trySelectTarget(close, pointValue, qty, minProfit, out target, out examined))
 			{
-				trace(ETraceLevel.Info, $"skip target {Bars.Time[0]:MM/dd/yyyy HH:mm} riskEquity {riskEquity} minProfit {minProfit} minTarget {minTarget} candidates {examined}");
+				trace(ETraceLevel.Info, $"skip target time({Bars.Time[0]:MM/dd/yyyy HH:mm}) riskEquity({riskEquity}) minProfit({minProfit}) minTarget({minTarget}) candidates({examined})");
 				return;
 			}
 
@@ -509,14 +509,14 @@ namespace PowerLanguage.Strategy
 			m_armBar = Bars.FullSymbolData.Current;
 			m_entryGlobexDate = GlobexDate(Bars.Time[0]);
 
-			trace(ETraceLevel.Debug, $"send LE Div qty {qty} LX Stop {stopPrice} LX Target {target.orderPrice} kind {target.kind} touch {target.touchPrice} armBar {m_armBar}");
+			trace(ETraceLevel.Debug, $"send LE Div qty({qty}) LX Stop({stopPrice}) LX Target({target.orderPrice}) kind({target.kind}) touch({target.touchPrice}) armBar({m_armBar})");
 			m_le.Send(qty);
 			m_lxStop.Send(stopPrice, qty);
 			m_lxTgt.Send(target.orderPrice, qty);
 			m_lastProtectTraceBar = m_armBar;
 
 			double profit = profitDollars(target.orderPrice, close, pointValue, qty);
-			trace(ETraceLevel.Info, $"entry {Bars.Time[0]:MM/dd/yyyy HH:mm} swingBar {swingBar} swingLow {swingLow} stop {stopPrice} qty {qty} pointValue {pointValue} dollarRiskPerContract {dollarRiskPerContract} riskEquity {riskEquity} minProfit {minProfit} target {target.kind} {target.orderPrice} profitDollars {profit}");
+			trace(ETraceLevel.Info, $"entry time({Bars.Time[0]:MM/dd/yyyy HH:mm}) swingBar({swingBar}) swingLow({swingLow}) stop({stopPrice}) qty({qty}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) riskEquity({riskEquity}) minProfit({minProfit}) target({target.kind}) price({target.orderPrice}) profitDollars({profit})");
 		}
 
 		// Nearest structural level that pays the factor. The factor is a floor, not a
@@ -528,7 +528,7 @@ namespace PowerLanguage.Strategy
 			examined = 0;
 
 			List<ConfluenceTarget> zones = GetConfluenceTargets(close, EVpDirection.Bullish, TargetScanCount);
-			trace(ETraceLevel.Debug, $"confluence targets {(zones == null ? 0 : zones.Count)} scan {TargetScanCount} close {close} atTouch {TargetAtTouch}");
+			trace(ETraceLevel.Debug, $"confluence targets({(zones == null ? 0 : zones.Count)}) scan({TargetScanCount}) close({close}) atTouch({TargetAtTouch})");
 			if (zones != null)
 			{
 				for (int i = 0; i < zones.Count; i++)
@@ -536,13 +536,13 @@ namespace PowerLanguage.Strategy
 					ConfluenceTarget t = zones[i];
 					if (t == null || t.zone == null)
 					{
-						trace(ETraceLevel.Debug, $"confluence skip null target index {i}");
+						trace(ETraceLevel.Debug, $"confluence skip null target index({i})");
 						continue;
 					}
 					// Engine already drops Rejection and Mixed. Keep Magnet and Acceptance only.
 					if (t.zone.role != EConfluenceRole.Magnet && t.zone.role != EConfluenceRole.Acceptance)
 					{
-						trace(ETraceLevel.Debug, $"confluence skip role {t.zone.role} use {t.zone.suggestedUse} low {t.zone.low} high {t.zone.high}");
+						trace(ETraceLevel.Debug, $"confluence skip role({t.zone.role}) use({t.zone.suggestedUse}) low({t.zone.low}) high({t.zone.high})");
 						continue;
 					}
 
@@ -560,7 +560,7 @@ namespace PowerLanguage.Strategy
 			addStream(streams, ConfluenceDataStream1);
 			addStream(streams, ConfluenceDataStream2);
 			addStream(streams, ConfluenceDataStream3);
-			trace(ETraceLevel.Debug, $"target streams {string.Join(",", streams)}");
+			trace(ETraceLevel.Debug, $"target streams({string.Join(",", streams)})");
 
 			for (int s = 0; s < streams.Count; s++)
 			{
@@ -568,12 +568,12 @@ namespace PowerLanguage.Strategy
 				int asOf = streamBar(stream);
 				if (asOf < 1)
 				{
-					trace(ETraceLevel.Debug, $"stream {stream} has no bar index");
+					trace(ETraceLevel.Debug, $"stream({stream}) has no bar index");
 					continue;
 				}
 
 				List<VpExtra> naked = NakedPocs(stream, asOf);
-				trace(ETraceLevel.Debug, $"naked pocs stream {stream} asOf {asOf} count {(naked == null ? 0 : naked.Count)}");
+				trace(ETraceLevel.Debug, $"naked pocs stream({stream}) asOf({asOf}) count({(naked == null ? 0 : naked.Count)})");
 				if (naked != null)
 				{
 					for (int i = 0; i < naked.Count; i++)
@@ -589,9 +589,9 @@ namespace PowerLanguage.Strategy
 			}
 
 			if (best == null)
-				trace(ETraceLevel.Debug, $"target none examined {examined} minProfit {minProfit}");
+				trace(ETraceLevel.Debug, $"target none examined({examined}) minProfit({minProfit})");
 			else
-				trace(ETraceLevel.Debug, $"target best {best.kind} touch {best.touchPrice} order {best.orderPrice} sources {best.sources} rank {best.kindRank} quality {best.quality} examined {examined}");
+				trace(ETraceLevel.Debug, $"target best kind({best.kind}) touch({best.touchPrice}) order({best.orderPrice}) sources({best.sources}) rank({best.kindRank}) quality({best.quality}) examined({examined})");
 			return best != null;
 		}
 
@@ -613,7 +613,7 @@ namespace PowerLanguage.Strategy
 				}
 				if (extra == null)
 				{
-					trace(ETraceLevel.Debug, $"profile miss stream {stream} bar {barIndex}");
+					trace(ETraceLevel.Debug, $"profile miss stream({stream}) bar({barIndex})");
 					barIndex--;
 					continue;
 				}
@@ -629,13 +629,13 @@ namespace PowerLanguage.Strategy
 				// Developing profile is not a target and does not consume lookback.
 				if (!extra.pocComplete)
 				{
-					trace(ETraceLevel.Debug, $"profile developing stream {stream} start {start} end {extra.endBar} poc {extra.poc}");
+					trace(ETraceLevel.Debug, $"profile developing stream({stream}) start({start}) end({extra.endBar}) poc({extra.poc})");
 					barIndex = next;
 					continue;
 				}
 
 				completed++;
-				trace(ETraceLevel.Debug, $"profile complete stream {stream} start {start} end {extra.endBar} poc {extra.poc} hvns {(extra.hvns == null ? 0 : extra.hvns.Count)} lookback {completed}/{ProfileLookback}");
+				trace(ETraceLevel.Debug, $"profile complete stream({stream}) start({start}) end({extra.endBar}) poc({extra.poc}) hvns({(extra.hvns == null ? 0 : extra.hvns.Count)}) lookback({completed}/{ProfileLookback})");
 				if (extra.poc > 0)
 					consider(ref best, ref examined, extra.poc, extra.poc, 1, 1, 1.0, "POC", close, pointValue, qty, minProfit);
 
@@ -647,7 +647,7 @@ namespace PowerLanguage.Strategy
 						Node node = hvns[i];
 						if (!(node.peak > 0) || node.strength < HvnStrengthFloor)
 						{
-							trace(ETraceLevel.Debug, $"hvn skip stream {stream} start {start} peak {node.peak} strength {node.strength} floor {HvnStrengthFloor}");
+							trace(ETraceLevel.Debug, $"hvn skip stream({stream}) start({start}) peak({node.peak}) strength({node.strength}) floor({HvnStrengthFloor})");
 							continue;
 						}
 						consider(ref best, ref examined, node.peak, node.peak, 1, 0, node.strength, "HVN", close, pointValue, qty, minProfit);
@@ -661,7 +661,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (!(touch > 0) || !(order > 0) || double.IsNaN(touch) || double.IsNaN(order))
 			{
-				trace(ETraceLevel.Debug, $"target reject {kind} invalid touch {touch} order {order}");
+				trace(ETraceLevel.Debug, $"target reject kind({kind}) invalid touch({touch}) order({order})");
 				return;
 			}
 			examined++;
@@ -669,12 +669,12 @@ namespace PowerLanguage.Strategy
 			// Touch must clear the dollar hurdle even when the order sits at the anchor.
 			if (profit + 0.01 < minProfit)
 			{
-				trace(ETraceLevel.Debug, $"target reject {kind} touch {touch} order {order} profit {profit} < minProfit {minProfit}");
+				trace(ETraceLevel.Debug, $"target reject kind({kind}) touch({touch}) order({order}) profit({profit}) minProfit({minProfit})");
 				return;
 			}
 			if (!(order > close))
 			{
-				trace(ETraceLevel.Debug, $"target reject {kind} order {order} is not above close {close}");
+				trace(ETraceLevel.Debug, $"target reject kind({kind}) order({order}) is not above close({close})");
 				return;
 			}
 
@@ -686,7 +686,8 @@ namespace PowerLanguage.Strategy
 			candidate.quality = quality;
 			candidate.kind = kind;
 			bool wins = best == null || prefer(candidate, best);
-			trace(ETraceLevel.Debug, $"target {(wins ? "take" : "lose")} {kind} touch {touch} order {order} sources {sources} rank {kindRank} quality {quality} profit {profit} vs {(best == null ? "none" : best.kind + " " + best.touchPrice)}");
+			string versus = best == null ? "none" : $"{best.kind} {best.touchPrice}";
+			trace(ETraceLevel.Debug, $"target result({(wins ? "take" : "lose")}) kind({kind}) touch({touch}) order({order}) sources({sources}) rank({kindRank}) quality({quality}) profit({profit}) vs({versus})");
 			if (wins)
 				best = candidate;
 		}
