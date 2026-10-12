@@ -93,9 +93,9 @@ namespace PowerLanguage.Strategy
 			HvnStrengthFloor = 0.35;
 			TargetAtTouch = true;
 
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE Div", EOrderAction.Buy));
-			m_lxStop = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LX Stop", EOrderAction.Sell, OrderExit.FromAll));
-			m_lxTgt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "LX Target", EOrderAction.Sell, OrderExit.FromAll));
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LEDDR", EOrderAction.Buy));
+			m_lxStop = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LXStp", EOrderAction.Sell, OrderExit.FromAll));
+			m_lxTgt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "LXTgt", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc()
