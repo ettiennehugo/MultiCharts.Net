@@ -503,6 +503,9 @@
     <Compile Include="_StackedImblContSESX.Strategy.CS" />
     <Compile Include="_VolumeProfileTest1.Strategy.CS" />
     <Compile Include="_VolumeProfileBaseLog.Indicator.CS" />
+    <Compile Include="_DeltaDivRevFuturesLELX2.Strategy.CS" />
+    <Compile Include="_POCPullbackLELX.Strategy.CS" />
+    <Compile Include="_POCPullbackSESX.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
