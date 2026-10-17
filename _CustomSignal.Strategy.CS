@@ -1,10 +1,12 @@
-﻿using System;
-using System.Text;
+﻿using ATCenterProxy.interop;
+using PowerLanguage.TradeManager;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using PowerLanguage.TradeManager;
-using ATCenterProxy.interop;
+using System.Text;
+using static Microsoft.CodeAnalysis.CSharp.SyntaxTokenParser;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace PowerLanguage.Strategy
 {
@@ -477,13 +479,24 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price.
+		/// <paramref name="risk"/> is DOLLAR risk per unit (price distance × BigPointValue), not a price distance.
 		/// </summary>
 		protected int stopLossBasedPositionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
-			double risk = checked(Math.Round(Math.Abs(bars.Close[0] - stopLossPrice), 2));
-			int result = riskBasedPositionSize(risk, maxRiskEquityPerPosPercent);
-			if (useRoundLots && result > 100) result = (int)(Math.Truncate(result / 100.0d) * 100.0d); //round to the nearest 100 shares for round lot orders
-			return result;
+			return stopLossBasedPositionSize(bars, bars.Close[0], stopLossPrice, maxRiskEquityPerPosPercent, useRoundLots);
+		}
+
+		/// <summary>Units such that |entry - stop| * BigPointValue * units ≈ equity * riskFraction. BPV = 1 for stocks.</summary>
+		protected int stopLossBasedPositionSize(IInstrument bars, double entryPrice, double stopLossPrice, double maxRiskEquityPerPosPercent, bool useRoundLots = false)
+		{
+			double bpv = bars.Info.BigPointValue;
+			if (double.IsNaN(bpv) || double.IsInfinity(bpv) || bpv <= 0)
+			{
+				trace(ETraceLevel.Warning, $"stopLossBasedPositionSizeAt - BigPointValue({bpv}) invalid, returning 0");
+				return 0;
+			}
+			double dollarRiskPerUnit = Math.Abs(entryPrice - stopLossPrice) * bpv;
+			return riskBasedPositionSize(dollarRiskPerUnit, maxRiskEquityPerPosPercent, useRoundLots);
 		}
 
 		/// <summary>
@@ -681,24 +694,28 @@ namespace PowerLanguage.Strategy
 
 			//refresh orders based on symbol and timeframe
 			refreshTradeManagerIfNeeded();
-			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1));
-			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
-
-			DateTime? entryLastFill = tradingData.Orders.Items
-							.Where(o =>
-									o.SymbolStr == Bars.Info.Name &&
-									(entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))) &&
-									o.State == ETM_OrderState.eTM_OS_Filled &&
-									o.LeftContracts == 0
-							)
-							.Select(o => o.FinalDT ?? o.GeneratedDT)
-							.Where(dt => dt > DateTime.MinValue)
-							.OrderByDescending(dt => dt)      // most recent first
-							.FirstOrDefault();
+			DateTime? entryLastFill;
+			string window;
+			lock (s_tradingDataLock)
+			{
+				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
+				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1));
+				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+				entryLastFill = td.Orders.Items
+														.Where(o => o.SymbolStr == Bars.Info.Name
+																		 && entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))
+																		 && o.State == ETM_OrderState.eTM_OS_Filled
+																		 && o.LeftContracts == 0)
+														.Select(o => o.FinalDT ?? o.GeneratedDT)
+														.Where(dt => dt > DateTime.MinValue)
+														.OrderByDescending(dt => dt)
+														.FirstOrDefault();             // materialized inside the lock
+				window = $"{td.Orders.IntervalFltr.From},{td.Orders.IntervalFltr.To}";
+			}
 
 			if (entryLastFill == null || entryLastFill.Value == DateTime.MinValue)
 			{
-				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
+				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({window}).");
 				return DateTime.MinValue;
 			}
 
