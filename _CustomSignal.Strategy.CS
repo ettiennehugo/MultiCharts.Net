@@ -17,7 +17,7 @@ namespace PowerLanguage.Strategy
 		//constants
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
 		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = -63;       //look back 3-months of trading orders to discover entry/exit orders
-		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);	//Refresh time for the trade manager to process events.
+		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
 
 		//types
 		/// <summary>
@@ -30,7 +30,7 @@ namespace PowerLanguage.Strategy
 			Warning,
 			Info,
 			Verbose,
-			Debug,			//extensive logs for debugging purposes
+			Debug,      //extensive logs for debugging purposes
 		}
 
 		/// <summary>
@@ -191,7 +191,8 @@ namespace PowerLanguage.Strategy
 
 		protected ITradingData tradingData
 		{
-			get {
+			get
+			{
 				refreshTradeManagerIfNeeded();
 				return s_tradingData;
 			}
@@ -241,7 +242,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_currentDay = DateTime.MinValue;	// make sure that current day is always set on the first CalcBar iteration
+			m_currentDay = DateTime.MinValue; // make sure that current day is always set on the first CalcBar iteration
 			m_intradayLowTime = DateTime.Now;
 			m_intradayHighTime = DateTime.Now;
 			m_intradayCloseTime = DateTime.Now;
@@ -282,7 +283,7 @@ namespace PowerLanguage.Strategy
 
 				//force recalculation after a specific interval if account information is not yet loaded from the above ProcessEvents call
 				if (m_loadAccounts)
-				{				
+				{
 					if (tradingData.Accounts.Items.Length == 0)
 					{
 						trace(ETraceLevel.Warning, "CalcBar - ProcessEvents failed to load account queuing recalculation.");
@@ -679,7 +680,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//refresh orders based on symbol and timeframe
-            refreshTradeManagerIfNeeded();
+			refreshTradeManagerIfNeeded();
 			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1));
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 
@@ -709,7 +710,24 @@ namespace PowerLanguage.Strategy
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
 			{
-				return CurrentPosition.ClosedTrades.Count > 0 ? CurrentPosition.ClosedTrades[0].ExitOrder.Time : DateTime.MinValue;
+				IMarketPosition pos = null;
+				if (CurrentPosition.ClosedTrades.Count > 0) pos = CurrentPosition;   // partial exits of the open position
+				else if (Positions.Count > 1) pos = Positions[1];                    // last closed position (verify Count vs Length)
+
+				if (pos == null || pos.ClosedTrades.Count == 0) return DateTime.MinValue;
+				if (side != EMarketPositionSide.Flat && pos.Side != side) return DateTime.MinValue;
+
+				DateTime first = DateTime.MaxValue, last = DateTime.MinValue;
+
+				foreach (var t in pos.ClosedTrades)
+				{
+					if (t.ExitOrder == null) continue;
+					DateTime x = t.ExitOrder.Time;
+					if (x < first) first = x;
+					if (x > last) last = x;
+				}
+
+				return useFill == EUseFill.First ? first : last;
 			}
 
 			//nothing to do for flat side, needs to be long or short
@@ -734,9 +752,9 @@ namespace PowerLanguage.Strategy
 							&& o.Action == orderAction
 							&& o.LeftContracts == 0
 					)
-					.Select(o => o.FinalDT ?? o.GeneratedDT)	//FinalDT = actual broker fill time
+					.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
 					.Where(dt => dt > DateTime.MinValue)
-					.OrderBy(dt => dt)												//sort chronological to find first/last exit
+					.OrderBy(dt => dt)                        //sort chronological to find first/last exit
 					.ToList();
 
 			//make sure we found filled orders
