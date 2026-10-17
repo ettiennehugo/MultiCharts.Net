@@ -187,14 +187,6 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
-		//NOTE: Based on real-time history matching (Strategies Properties->Back Testing) the zero index in the bars can change.
-		//      When real-time history matching is enabled 0-index is the previous fully formed day and when it is disabled
-		//      0-index is the current forming day.
-		public int DailyOffset
-		{
-			get { return m_dailyOffset; }
-		}
-
 		public Function.USHolidays Holidays { get { return m_holidays; } }
 
 		protected ITradingData tradingData
@@ -220,7 +212,6 @@ namespace PowerLanguage.Strategy
 		private DateTime m_intradayCloseTime;
 		private DateTime m_intradayOpenTime;
 		private double m_intradayVolume;
-		private int m_dailyOffset;
 		private DateTime m_currentDay;
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
@@ -264,7 +255,6 @@ namespace PowerLanguage.Strategy
 			m_loadAccounts = true;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
-			m_dailyOffset = Environment.IsRealTimeCalc ? 1 : 0;
 
 			//force load the data streams up front so we don't get into exception breaks somewhere down the line
 			for (int i = 1; i <= MaxDataStream; ++i)

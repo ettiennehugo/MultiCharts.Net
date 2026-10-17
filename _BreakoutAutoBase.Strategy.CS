@@ -85,15 +85,15 @@ namespace PowerLanguage.Strategy
 				if (m_marketDailyTimeframe != null)
 				{
 					if (m_marketFastMASeries.Value > m_marketSlowMASeries.Value &&
-							m_marketFastMASeries[0 + DailyOffset] - m_marketFastMASeries[1 + DailyOffset] > 0.0 &&
-							m_marketSlowMASeries[0 + DailyOffset] - m_marketSlowMASeries[1 + DailyOffset] > 0.0)
+							m_marketFastMASeries[0] - m_marketFastMASeries[1] > 0.0 &&
+							m_marketSlowMASeries[0] - m_marketSlowMASeries[1] > 0.0)
 					{
 						return EMarketMode.Bullish;
 					}
 
 					if (m_marketFastMASeries.Value < m_marketSlowMASeries.Value &&
-							m_marketFastMASeries[0 + DailyOffset] - m_marketFastMASeries[1 + DailyOffset] < 0.0 &&
-							m_marketSlowMASeries[0 + DailyOffset] - m_marketSlowMASeries[1 + DailyOffset] < 0.0)
+							m_marketFastMASeries[0] - m_marketFastMASeries[1] < 0.0 &&
+							m_marketSlowMASeries[0] - m_marketSlowMASeries[1] < 0.0)
 					{
 						return EMarketMode.Bearish;
 					}
@@ -332,7 +332,7 @@ namespace PowerLanguage.Strategy
 				double sum = 0.0;
 				//NOTE: We need to offset the daily average range calculations by daily offset number of days depending on whether we're backtesting or whether
 				//      we're doing real-time trading.
-				for (int i = DailyOffset; i < LookBack + DailyOffset; i++)
+				for (int i = 0; i < LookBack; i++)
 				{
 					//averages are always computed as positive numbers using the lowest of the daily open/close and then computing the percentage change from
 					//that using the absolute value of the difference between the open and close to yield a positive percentage change for the day
@@ -384,10 +384,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low[DailyOffset];
+						projectedStopLossPrice = m_dailyTimeframe.Low[0];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack, DailyOffset);
+						projectedStopLossPrice = m_dailyTimeframe.Low.Lowest(LookBack, 0);
 						break;
 				}
 
@@ -404,10 +404,10 @@ namespace PowerLanguage.Strategy
 						projectedStopLossPrice = (IntradayOpen + IntradayClose) / 2;
 						break;
 					case EStopLossPlacement.PreEntryDay:
-						projectedStopLossPrice = m_dailyTimeframe.High[DailyOffset];
+						projectedStopLossPrice = m_dailyTimeframe.High[0];
 						break;
 					case EStopLossPlacement.XDay:
-						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack, DailyOffset);
+						projectedStopLossPrice = m_dailyTimeframe.High.Highest(LookBack, 0);
 						break;
 				}
 
@@ -433,7 +433,7 @@ namespace PowerLanguage.Strategy
 			double equity = equityAvailable();
 			int equitySize = m_tradingTimeframe.CloseValue != 0 ? (int)Math.Truncate((equity * MaxEquityPercent) / m_tradingTimeframe.CloseValue) : 0;
 			int riskSize = riskBasedPositionSize(risk, MaxRiskBasedPercent, UseRoundLots);
-			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, DailyOffset, MaxVolumePercent, UseRoundLots);
+			int volumeSize = volumeBasedPositionSize(m_dailyTimeframe, DEFAULT_VOLUME_LENGTH, 0, MaxVolumePercent, UseRoundLots);
 
 			//determine final entry size - the final size must be smallest of the entry size non-zero values 
 			int size = (int)Math.Min(equitySize, Math.Min(riskSize, volumeSize));
@@ -563,7 +563,7 @@ namespace PowerLanguage.Strategy
 
 			if (daysCount >= EntryDayExtremeCheck)
 			{
-				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount + DailyOffset] : m_dailyTimeframe.Low[daysCount + DailyOffset];
+				double entryDayExtreme = CurrentPosition.Side == EMarketPositionSide.Long ? m_dailyTimeframe.High[daysCount] : m_dailyTimeframe.Low[daysCount];
 				bool exitPosition = CurrentPosition.Side == EMarketPositionSide.Long ? m_tradingTimeframe.CloseValue <= entryDayExtreme : m_tradingTimeframe.Close[0] >= entryDayExtreme;
 				trace(ETraceLevel.Debug, $"processEntryDayExtremeExit - EntryDayExtreme({entryDayExtreme}) Close({m_tradingTimeframe.CloseValue}) ExitPosition({exitPosition})");
 
