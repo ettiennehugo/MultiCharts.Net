@@ -63,7 +63,10 @@ namespace PowerLanguage.Strategy
 				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmm}.csv";   //log files are csv's for analysis in Excel
 				try
 				{
-					m_logFilePath = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs", logFilename);
+					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
+					Directory.CreateDirectory(dir);                       // no-op when it exists
+					m_logFilePath = Path.Combine(dir, logFilename);
+					File.AppendAllText(m_logFilePath, "", Encoding.UTF8);  // prove we can write here
 					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
