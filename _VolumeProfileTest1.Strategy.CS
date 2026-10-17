@@ -355,7 +355,7 @@ namespace PowerLanguage.Strategy
 		{
 			trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 				"[VP-TEST] LIVE VWAP  slot1={0} s{1} σ={2} active={3}  slot2={4} s{5} σ={6} active={7}  slot3={8} s{9} σ={10} active={11}",
-				fmt(CurrentVwap), CurrentVwapStream, fmt(CurrentVwapSigma), VwapActive,
+				fmt(CurrentVwap1), CurrentVwap1Stream, fmt(CurrentVwapSigma1), Vwap1Active,
 				fmt(CurrentVwap2), CurrentVwap2Stream, fmt(CurrentVwap2Sigma), Vwap2Active,
 				fmt(CurrentVwap3), CurrentVwap3Stream, fmt(CurrentVwap3Sigma), Vwap3Active));
 		}

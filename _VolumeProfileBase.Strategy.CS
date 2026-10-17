@@ -2085,25 +2085,25 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>Slot 1 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
-		public double CurrentVwap { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : double.NaN; } }
+		public double CurrentVwap1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.value : double.NaN; } }
 		/// <summary>Slot 2 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap2 { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.value : double.NaN; } }
 		/// <summary>Slot 3 current VWAP, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3 { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.value : double.NaN; } }
 		/// <summary>Slot 1 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
-		public double CurrentVwapSigma { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
+		public double CurrentVwapSigma1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
 		/// <summary>Slot 2 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap2Sigma { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : double.NaN; } }
 		/// <summary>Slot 3 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3Sigma { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : double.NaN; } }
 		/// <summary>True when slot 1 is not Disabled and has a valid value. Read-only.</summary>
-		public bool VwapActive { get { return m_vwap1 != null && m_vwap1.type != EVwapType.Disabled && m_vwap1.valid; } }
+		public bool Vwap1Active { get { return m_vwap1 != null && m_vwap1.type != EVwapType.Disabled && m_vwap1.valid; } }
 		/// <summary>True when slot 2 is not Disabled and has a valid value. Read-only.</summary>
 		public bool Vwap2Active { get { return m_vwap2 != null && m_vwap2.type != EVwapType.Disabled && m_vwap2.valid; } }
 		/// <summary>True when slot 3 is not Disabled and has a valid value. Read-only.</summary>
 		public bool Vwap3Active { get { return m_vwap3 != null && m_vwap3.type != EVwapType.Disabled && m_vwap3.valid; } }
 		/// <summary>Chart stream slot 1 was built from (1 = Data1). 0 if unused. Read-only.</summary>
-		public int CurrentVwapStream { get { return slotStream(m_vwap1); } }
+		public int CurrentVwap1Stream { get { return slotStream(m_vwap1); } }
 		/// <summary>Chart stream slot 2 was built from (1 = Data1). 0 if unused. Read-only.</summary>
 		public int CurrentVwap2Stream { get { return slotStream(m_vwap2); } }
 		/// <summary>Chart stream slot 3 was built from (1 = Data1). 0 if unused. Read-only.</summary>
@@ -2112,7 +2112,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Re-anchor slot 1 from a swing / news / session-open time. No-op if the slot is Disabled.
 		/// </summary>
-		public void AnchorVwap(DateTime from)
+		public void AnchorVwap1(DateTime from)
 		{
 			anchorSlot1(from);
 		}
@@ -2166,7 +2166,9 @@ namespace PowerLanguage.Strategy
 				if (eng != null) { eng.valid = false; eng.value = double.NaN; eng.sigma = double.NaN; }
 				return;
 			}
+
 			IInstrument bars = barsOf(eng.datastream);
+
 			if (bars == null)
 			{
 				eng.valid = false;
@@ -2174,7 +2176,11 @@ namespace PowerLanguage.Strategy
 				eng.sigma = double.NaN;
 				return;
 			}
-			eng.Step(bars);
+
+			// only update the VWAP state when the bar actually closes
+			// otherwise we double count bars
+			if (bars.Status == EBarState.Close)
+				eng.Step(bars);
 		}
 
 		private IInstrument barsOf(int stream)

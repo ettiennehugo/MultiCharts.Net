@@ -25,7 +25,7 @@ namespace PowerLanguage.Strategy
 	///   1. Initially just exit with same take profit as stop-loss 
 	///   2. Take profit/stop loss must not be more than 10-20% of average daily range.
 	/// </summary>
-	public class _POCPullbackSESX : SignalObject
+	public class _POCPullbackSESX : _VolumeProfileFuturesBase
 	{
 		//constants
 
@@ -37,26 +37,25 @@ namespace PowerLanguage.Strategy
 
 
 		//attribute
-		private IOrderMarket m_le;
+
 
 		//interface methods
 		public _POCPullbackSESX(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
-			// create variable objects, function objects, order objects etc.
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.Buy));
+			base.Create();
 		}
 
 		protected override void StartCalc()
 		{
-			// assign inputs 
+			base.StartCalc();
+
 		}
 
 		protected override void CalcBar()
 		{
-			// strategy logic 
-			m_le.Send();
+			base.CalcBar();
 		}
 
 		//methods

@@ -4,7 +4,8 @@ using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
-namespace PowerLanguage.Strategy {
+namespace PowerLanguage.Strategy
+{
 	/// <summary>
 	/// Stacked imbalance continuation for futures trading. Discussed in Volume Profile Book 1 chapter 6.3.
 	/// The strategy is discussed more in the context of scalping in the book so stick to shorter time frames.
@@ -20,38 +21,41 @@ namespace PowerLanguage.Strategy {
 	///   * Stop loss goes below the zone low of the stacked imbalance low + a buffer.
 	///   * Take profit goes by the given reward factor - typically keep this 1.5 to 3 range. TBD - Should you support HVN/VAH exits???
 	/// </summary>
-	public class _StackedImblContLELX : _VolumeProfileFuturesBase {
-        //constants
-
-        
-        //types
+	public class _StackedImblContLELX : _VolumeProfileFuturesBase
+	{
+		//constants
 
 
-        //properties
+		//types
 
 
-        //attribute
-        private IOrderMarket m_le;
-
-        //interface methods
-        public _StackedImblContLELX(object _ctx):base(_ctx){}
-
-        protected override void Create() {
-            // create variable objects, function objects, order objects etc.
-            m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.Buy));
-        }
-
-        protected override void StartCalc() {
-            // assign inputs 
-        }
-
-        protected override void CalcBar(){
-            // strategy logic 
-            m_le.Send();
-        }
-
-        //methods
+		//properties
 
 
-    }
+		//attribute
+
+
+		//interface methods
+		public _StackedImblContLELX(object _ctx) : base(_ctx) { }
+
+		protected override void Create()
+		{
+			base.Create();
+		}
+
+		protected override void StartCalc()
+		{
+			base.StartCalc();
+
+		}
+
+		protected override void CalcBar()
+		{
+			base.CalcBar();
+		}
+
+		//methods
+
+
+	}
 }

@@ -4,7 +4,8 @@ using System.Linq;
 using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
-namespace PowerLanguage.Strategy {
+namespace PowerLanguage.Strategy
+{
 	/// <summary>
 	/// Absorption reversal for futures trading. Discussed in Volume Profile Book 1 chapter 6.2.
 	/// The strategy is discussed more in the context of scalping in the book so stick to shorter time frames.
@@ -19,38 +20,41 @@ namespace PowerLanguage.Strategy {
 	///   * Stop loss goes below the absorption low.
 	///   * Take profit goes by the given reward factor as a limit order - typically keep this 1.5 to 3 range.
 	/// </summary>
-	public class _AbsorptionRevFuturesLELX : _VolumeProfileFuturesBase {
-        //constants
-
-        
-        //types
+	public class _AbsorptionRevFuturesLELX : _VolumeProfileFuturesBase
+	{
+		//constants
 
 
-        //properties
+		//types
 
 
-        //attribute
-        private IOrderMarket m_le;
-
-        //interface methods
-        public _AbsorptionRevFuturesLELX(object _ctx):base(_ctx){}
-
-        protected override void Create() {
-            // create variable objects, function objects, order objects etc.
-            m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.Buy));
-        }
-
-        protected override void StartCalc() {
-            // assign inputs 
-        }
-
-        protected override void CalcBar(){
-            // strategy logic 
-            m_le.Send();
-        }
-
-        //methods
+		//properties
 
 
-    }
+		//attribute
+
+
+		//interface methods
+		public _AbsorptionRevFuturesLELX(object _ctx) : base(_ctx) { }
+
+		protected override void Create()
+		{
+			base.Create();
+		}
+
+		protected override void StartCalc()
+		{
+			base.StartCalc();
+
+		}
+
+		protected override void CalcBar()
+		{
+			base.CalcBar();
+		}
+
+		//methods
+
+
+	}
 }
