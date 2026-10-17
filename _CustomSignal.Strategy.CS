@@ -250,7 +250,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_currentDay = DateTime.Now.Date;
+			m_currentDay = DateTime.MinValue;	// make sure that current day is always set on the first CalcBar iteration
 			m_intradayLowTime = DateTime.Now;
 			m_intradayHighTime = DateTime.Now;
 			m_intradayCloseTime = DateTime.Now;
@@ -319,7 +319,7 @@ namespace PowerLanguage.Strategy
 					m_intradayLow = Bars.Low[0];
 					m_intradayHigh = Bars.High[0];
 					m_currentDay = Bars.Time[0].Date;
-					m_intradayVolume = Bars.Volume[0];
+					m_intradayVolume = 0.0; // accumulated only on bar close below
 					m_currentDay = Bars.Time[0];
 					m_intradayLowTime = Bars.Time[0];
 					m_intradayHighTime = Bars.Time[0];
