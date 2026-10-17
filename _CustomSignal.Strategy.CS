@@ -1,12 +1,12 @@
 ﻿using ATCenterProxy.interop;
+using PowerLanguage.Function;
 using PowerLanguage.TradeManager;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
-using static Microsoft.CodeAnalysis.CSharp.SyntaxTokenParser;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace PowerLanguage.Strategy
 {
@@ -218,6 +218,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_currentDay;
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
+		private bool m_unknownAppWarned;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -256,6 +257,7 @@ namespace PowerLanguage.Strategy
 			m_intradayOpen = 0.0d;
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
+			m_unknownAppWarned = false;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -396,6 +398,15 @@ namespace PowerLanguage.Strategy
 						equityAvailable *= percentEquity;
 					}
 					break;
+				default:
+					if (equityAvailable == 0.0d) equityAvailable = this.InitialCapital + this.NetProfit;
+					equityAvailable = maxCustomRiskEquityPerPosPercent > 0.0d ? equityAvailable * maxCustomRiskEquityPerPosPercent : equityAvailable;
+					if (!m_unknownAppWarned)
+					{
+						m_unknownAppWarned = true;
+						trace(ETraceLevel.Warning, $"equityAvailable - unhandled ApplicationCode {Environment.ApplicationCode}, using chart equity");
+					}
+					break;
 			}
 
 			return equityAvailable;
@@ -408,6 +419,28 @@ namespace PowerLanguage.Strategy
 		{
 			if (!useRoundLots || qty < 100) return qty;
 			return (qty / 100) * 100;
+		}
+
+		/// <summary>
+		/// Takes a desired qty and reduces it if that quantity would consume more than maxEquityFraction of available equity at the given unitNotional.
+		/// Caps qty so qty * unitNotional <= equityAvailable(maxEquityFraction). Stocks: unitNotional = price; futures: margin per contract.
+		/// Example: equity available for this trade = $50,000, unit notional = $150 → max qty = floor(50,000 / 150) = 333. If your signal or
+		///          risk model wanted 500 shares, this method forces it down to 333.
+		/// Place in call chain or position entry:
+		/// → signal / entry condition
+		/// → risk-based qty(e.g.risk $ / stop distance)
+		/// → volatility or ATR adjustment
+		/// → capByNotional(...)          ← this method
+		/// → min lot size / rounding / broker constraints
+		/// → send order
+		/// </summary>
+		protected int capByNotional(int qty, double unitNotional, double maxEquityFraction)
+		{
+			if (qty <= 0 || unitNotional <= 0 || maxEquityFraction <= 0) return qty;
+			double equity = equityAvailable(maxEquityFraction);
+			int cap = Math.Max(0, (int)Math.Floor(equity / unitNotional));
+			if (cap < qty) trace(ETraceLevel.Debug, $"capByNotional - qty({qty}) capped to {cap} unitNotional({unitNotional}) equity({equity})");
+			return Math.Min(qty, cap);
 		}
 
 		/// <summary>
