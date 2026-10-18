@@ -626,14 +626,15 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Scans back from the current bar the given number of days back and returns the lowest low found.
+    /// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
+    /// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 		/// </summary>
-		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null)
+		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
 		{
 			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
-			double low = IntradayLow;
-			DateTime lowBarTime = IntradayLowTime;
+			double low = includeToday ? IntradayLow : double.MaxValue;
+			DateTime lowBarTime = includeToday ? IntradayLowTime : DateTime.MinValue;
 			DateTime lowDate = IntradayLowTime;
 			int daysProcessed = 0;
 			DateTime startDate = Bars.Time[0].Date;
@@ -667,14 +668,15 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Scans back from the current bar the given number of days back and returns the highest high found.
+		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
+		/// daysBack = 0 → today's high; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 		/// </summary>
-		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null)
+		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
 		{
 			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayHighTime, IntradayHigh);
-			double high = IntradayHigh;
-			DateTime highBarTime = IntradayHighTime;
+			double high = includeToday ? IntradayHigh : double.MinValue;
+			DateTime highBarTime = includeToday ? IntradayHighTime : DateTime.MinValue;
 			int daysProcessed = 0;
 			DateTime startDate = Bars.Time[0].Date;
 			DateTime lastDate = startDate;
