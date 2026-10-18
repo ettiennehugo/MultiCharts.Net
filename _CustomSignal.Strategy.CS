@@ -807,6 +807,7 @@ namespace PowerLanguage.Strategy
 			lock (s_tradingDataLock)
 			{
 				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
+				if (td == null) return DateTime.MinValue;   // TradeManager not loaded (e.g. real-time without auto trading)
 				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1)); // negative value is correct, we want to look backward
 				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 				entryLastFill = td.Orders.Items
@@ -862,30 +863,40 @@ namespace PowerLanguage.Strategy
 				return DateTime.MinValue;
 			}
 
-			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
-			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now); // negative value is correct, we want to look backward
-			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
-
 			//determine exit order type (opposite of entry action)
 			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Sell : ETM_OrderAction.eTM_OA_Buy;
 
-			//get all filled exit orders for this instrument
-			var exitFillTimes = tradingData.Orders.Items
-					.Where(o =>
-							(o.SymbolStr == Bars.Info.Name)
-							&& o.State == ETM_OrderState.eTM_OS_Filled
-							&& o.Action == orderAction
-							&& o.LeftContracts == 0
-					)
-					.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
-					.Where(dt => dt > DateTime.MinValue)
-					.OrderBy(dt => dt)                        //sort chronological to find first/last exit
-					.ToList();
+			//refresh orders based on symbol and timeframe (same pattern as EntryTime): the filters live on the shared static
+			//TradeManager snapshot so set them and materialize the query under the same lock (CS-06)
+			refreshTradeManagerIfNeeded();
+			List<DateTime> exitFillTimes;
+			string window;
+			lock (s_tradingDataLock)
+			{
+				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
+				if (td == null) return DateTime.MinValue;   // TradeManager not loaded (e.g. real-time without auto trading)
+				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now); // negative value is correct, we want to look backward
+				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+
+				//get all filled exit orders for this instrument
+				exitFillTimes = td.Orders.Items
+						.Where(o =>
+								(o.SymbolStr == Bars.Info.Name)
+								&& o.State == ETM_OrderState.eTM_OS_Filled
+								&& o.Action == orderAction
+								&& o.LeftContracts == 0
+						)
+						.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
+						.Where(dt => dt > DateTime.MinValue)
+						.OrderBy(dt => dt)                        //sort chronological to find first/last exit
+						.ToList();                                // materialized inside the lock
+				window = $"{td.Orders.IntervalFltr.From},{td.Orders.IntervalFltr.To}";
+			}
 
 			//make sure we found filled orders
 			if (exitFillTimes.Count == 0)
 			{
-				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({window}).");
 				return DateTime.MinValue;
 			}
 
