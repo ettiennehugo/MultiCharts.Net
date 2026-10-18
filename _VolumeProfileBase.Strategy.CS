@@ -439,6 +439,9 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Self-contained VWAP accumulator. Stepped from CalcBar against a data stream's Bars.
+		/// Allows IOG and calculations on same bars by calculating provisional values and only
+		/// committing the result to the Vwap once a bar is completed and no more ticks/data are
+		/// expected for it.
 		/// </summary>
 		private sealed class VwapEngine
 		{
@@ -452,11 +455,17 @@ namespace PowerLanguage.Strategy
 			public double value;
 			public double sigma;
 			public bool valid;
-			public VariableSeries<bool> lastInSession; // owned by the study, slot-specific
 
 			private double m_sumPV;
 			private double m_sumP2V;
 			private double m_sumV;
+
+			// Provisional = the stream bar currently at index 0 (may be forming). Committed sums exclude it.
+			private int m_curBar = int.MinValue;      // FullSymbolData.Current of the provisional bar
+			private bool m_curLastInSession;          // LastBarInSession of that bar (latest call)
+			private double m_provPV, m_provP2V, m_provV;
+			private bool m_gapWarned;
+
 			private bool m_seenAnchorBar;
 			// Length VWAP only. Session and AdaptiveFromDate stay incremental in their own methods.
 			// Ring holds the typical price and volume that add() would have seen, oldest slot at
@@ -477,6 +486,10 @@ namespace PowerLanguage.Strategy
 				m_lenCount = 0;
 				m_lenNext = 0;
 				m_lenBar = int.MinValue;
+				m_curBar = int.MinValue;
+				m_curLastInSession = false;
+				clearProvisional();
+				m_gapWarned = false;
 				value = double.NaN;
 				sigma = double.NaN;
 				valid = false;
@@ -505,21 +518,24 @@ namespace PowerLanguage.Strategy
 
 			private void stepSession(IInstrument bars)
 			{
-				lastInSession.Value = bars.LastBarInSession;
-				bool first = bars.CurrentBar <= 1;
-				if (!first)
+				int bar = bars.FullSymbolData.Current;
+				if (bar != m_curBar)
 				{
-					try { first = lastInSession[1]; }
-					catch { first = false; }
+					// The previously held bar is final now. A session starts after a bar that was LastBarInSession.
+					bool newSession = m_curBar == int.MinValue || m_curLastInSession;
+					if (newSession)
+					{
+						if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+						clearSums();
+						clearProvisional();
+					}
+					else
+						commitProvisional();
+					warnIfGap(bar);
+					m_curBar = bar;
 				}
-
-				if (first)
-				{
-					if (parent.traceOn(ETraceLevel.Debug)) parent.trace(ETraceLevel.Debug, $"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
-					clearSums();
-				}
-
-				add(priceAt(bars, 0), volume(bars, 0));
+				m_curLastInSession = bars.LastBarInSession;
+				setProvisional(priceAt(bars, 0), volume(bars, 0));
 				finish();
 			}
 
@@ -617,15 +633,22 @@ namespace PowerLanguage.Strategy
 			{
 				if (fromDate == DateTime.MinValue) return;
 				if (bars.TimeValue < fromDate) return;
-
+				int bar = bars.FullSymbolData.Current;
 				if (!m_seenAnchorBar)
 				{
-					if (parent.traceOn(ETraceLevel.Debug)) parent.trace(ETraceLevel.Debug, $"Resetting anchored VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting anchored VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 					clearSums();
+					clearProvisional();
 					m_seenAnchorBar = true;
+					m_curBar = bar;
 				}
-
-				add(priceAt(bars, 0), volume(bars, 0));
+				else if (bar != m_curBar)
+				{
+					commitProvisional();
+					warnIfGap(bar);
+					m_curBar = bar;
+				}
+				setProvisional(priceAt(bars, 0), volume(bars, 0));
 				finish();
 			}
 
@@ -644,11 +667,43 @@ namespace PowerLanguage.Strategy
 				m_sumV += vol;
 			}
 
+			private void clearProvisional()
+			{
+				m_provPV = 0;
+				m_provP2V = 0;
+				m_provV = 0;
+			}
+
+			private void setProvisional(double price, double vol)
+			{
+				if (vol <= 0 || price <= 0) { clearProvisional(); return; }   // same skip rule as add()
+				m_provPV = price * vol;
+				m_provP2V = price * price * vol;
+				m_provV = vol;
+			}
+
+			private void commitProvisional()
+			{
+				m_sumPV += m_provPV;
+				m_sumP2V += m_provP2V;
+				m_sumV += m_provV;
+				clearProvisional();
+			}
+
+			private void warnIfGap(int bar)
+			{
+				if (m_gapWarned || m_curBar == int.MinValue || bar <= m_curBar + 1) return;
+				m_gapWarned = true;
+				parent.trace(ETraceLevel.Warning, $"{label}: data stream {datastream} advanced {bar - m_curBar} bars between Data1 calculations; " +
+																					"intermediate bars are not in the VWAP. Use a stream with bars at least as long as Data1.");
+			}
+
 			private void finish()
 			{
-				if (m_sumV <= 0) return;
-				value = m_sumPV / m_sumV;
-				double var = (m_sumP2V / m_sumV) - (value * value);
+				double v = m_sumV + m_provV;
+				if (v <= 0) return;
+				value = (m_sumPV + m_provPV) / v;
+				double var = ((m_sumP2V + m_provP2V) / v) - (value * value);
 				sigma = var > 0 ? Math.Sqrt(var) : 0;
 				valid = value > 0;
 			}
@@ -1806,9 +1861,9 @@ namespace PowerLanguage.Strategy
 			m_volumePctDirty = true;
 
 			m_streams = new Dictionary<int, StreamPack>();
-			m_vwap1 = new VwapEngine { label = "VWAP1", lastInSession = new VariableSeries<bool>(this) };
-			m_vwap2 = new VwapEngine { label = "VWAP2", lastInSession = new VariableSeries<bool>(this) };
-			m_vwap3 = new VwapEngine { label = "VWAP3", lastInSession = new VariableSeries<bool>(this) };
+			m_vwap1 = new VwapEngine { label = "VWAP1" };
+			m_vwap2 = new VwapEngine { label = "VWAP2" };
+			m_vwap3 = new VwapEngine { label = "VWAP3" };
 			m_confluenceEngine = new ConfluenceEngine(this);
 		}
 
