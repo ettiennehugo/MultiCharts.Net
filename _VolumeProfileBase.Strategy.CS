@@ -1883,6 +1883,9 @@ namespace PowerLanguage.Strategy
 			m_confluenceBuiltGeneration = -1;
 			m_confluenceZones.Clear();
 			m_volumePctDirty = true;
+			warnIfLengthExceedsMaxBarsBack(m_vwap1);
+			warnIfLengthExceedsMaxBarsBack(m_vwap2);
+			warnIfLengthExceedsMaxBarsBack(m_vwap3);
 		}
 
 		protected override void CalcBar()
@@ -2165,6 +2168,14 @@ namespace PowerLanguage.Strategy
 		{
 			if (eng == null || eng.type == EVwapType.Disabled) return 0;
 			return eng.datastream;
+		}
+
+		private void warnIfLengthExceedsMaxBarsBack(VwapEngine eng)
+		{
+			if (eng == null || eng.type != EVwapType.Length) return;
+			if (eng.length - 1 > ExecInfo.MaxBarsBack)
+				trace(ETraceLevel.Warning, eng.label + ": Length " + eng.length + " needs MaxBarsBack >= " + (eng.length - 1) +
+							" (currently " + ExecInfo.MaxBarsBack + "). Use auto-detect or raise it.");
 		}
 
 		private void configureVwap(VwapEngine eng, EVwapType type, int length, string fromText, int stream, string dateInputName, string streamInputName)
