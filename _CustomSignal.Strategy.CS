@@ -209,6 +209,11 @@ namespace PowerLanguage.Strategy
 		private bool m_loadAccounts;
 		private bool m_unknownAppWarned;
 		private bool m_volumeMbbWarned;
+		private bool m_tradingDayWarned;
+		private int m_entryCacheBar;
+		private bool m_entryCacheClosed;
+		private string m_entryCacheKey;
+		private DateTime m_entryCacheValue;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -264,6 +269,8 @@ namespace PowerLanguage.Strategy
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
 			m_volumeMbbWarned = false;
+			m_tradingDayWarned = false;
+			m_entryCacheBar = -1;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -633,8 +640,11 @@ namespace PowerLanguage.Strategy
 			DateTime date = currentDateTime.Date; //IMPORTANT: Holidays below ignore the Time component so we must use DateOnly component.
 			int count = 0;
 
-			if (Bars.Info.Category != ESymbolCategory.Stock)
+			if (!m_tradingDayWarned && Bars.Info.Category != ESymbolCategory.Stock)
+			{
+				m_tradingDayWarned = true;
 				trace(ETraceLevel.Warning, "tradingDayCount - WARNING - ExitDays used with non-stock object using TradingDays specification calculated around stock market calendar.");
+			}
 
 			while (date.Date > entryDate.Date)
 			{
@@ -728,10 +738,33 @@ namespace PowerLanguage.Strategy
 			return new Tuple<DateTime, double>(highBarTime, high);
 		}
 
-		//Finds the most recent entry order that completed the entry for the given name, so if there are multiple fills
-		//this would return the time of the last order the completed the entry.
-		//Method can be called with any number of entry order names as parameters.
+		/// <summary>
+		/// Finds the most recent entry order that completed the entry for the given name, so if there are multiple fills
+		/// this would return the time of the last order the completed the entry.
+		/// NOTE: This method performs a cached read, so if you run into issues try the non-cached version below.
+		/// </summary>
+		/// <param name="entryOrderNames">List of entry orders to determine the entry time for</param>
+		/// <returns></returns>
 		public DateTime orderEntryTime(params String[] entryOrderNames)
+		{
+			int bar = Bars.FullSymbolData.Current;
+			bool closed = Bars.Status == EBarState.Close;
+			string key = entryOrderNames == null ? "" : string.Join("\u001f", entryOrderNames);
+			if (bar == m_entryCacheBar && closed == m_entryCacheClosed && key == m_entryCacheKey && !Environment.IsRealTimeCalc)
+				return m_entryCacheValue;
+			DateTime result = orderEntryTimeUncached(entryOrderNames);
+			m_entryCacheBar = bar; m_entryCacheClosed = closed; m_entryCacheKey = key; m_entryCacheValue = result;
+			return result;
+		}
+
+		/// <summary>
+		/// Finds the most recent entry order that completed the entry for the given name, so if there are multiple fills
+		/// this would return the time of the last order the completed the entry.
+		/// NOTE: This method does a hard by-pass of the above caching mechnism and always reads from the TradeManager.
+		/// </summary>
+		/// <param name="entryOrderNames">List of entry orders to determine the entry time for</param>
+		/// <returns></returns>
+		public DateTime orderEntryTimeUncached(params String[] entryOrderNames)
 		{
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
