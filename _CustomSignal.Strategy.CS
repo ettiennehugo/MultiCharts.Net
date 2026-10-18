@@ -219,6 +219,7 @@ namespace PowerLanguage.Strategy
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
 		private bool m_unknownAppWarned;
+		private bool m_volumeMbbWarned;
 		private PowerLanguage.Function.USHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -258,6 +259,7 @@ namespace PowerLanguage.Strategy
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
+			m_volumeMbbWarned = false;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -306,7 +308,8 @@ namespace PowerLanguage.Strategy
 
 			if (Environment.CalcReason == CalculationReason.Default)
 			{
-				if (Bars.Time[0].Date != m_currentDay.Date)
+				DateTime dayKey = tradingDayKey(Bars.Time[0]);
+				if (dayKey != m_currentDay.Date)
 				{
 					m_intradayBarCount = 0;
 					m_intradayOpen = Bars.Open[0];
@@ -315,7 +318,7 @@ namespace PowerLanguage.Strategy
 					m_intradayHigh = Bars.High[0];
 					m_currentDay = Bars.Time[0].Date;
 					m_intradayVolume = 0.0; // accumulated only on bar close below
-					m_currentDay = Bars.Time[0];
+					m_currentDay = dayKey;
 					m_intradayLowTime = Bars.Time[0];
 					m_intradayHighTime = Bars.Time[0];
 					m_intradayCloseTime = Bars.Time[0];
@@ -345,6 +348,11 @@ namespace PowerLanguage.Strategy
 				}
 			}
 		}
+
+    /// <summary>
+		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
+		/// </summary>
+    protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
 
 		/// <summary>
 		/// Determines the equity available for trading a position based on some custom risk equity per position percentage. If
@@ -549,9 +557,17 @@ namespace PowerLanguage.Strategy
 		protected int volumeBasedPositionSize(IInstrument bars, int volumePeriod, int volumePeriodOffset, double maxAvgVolumePercent, bool useRoundLots = false)
 		{
 			int result = 0; //do not enter a position if we do not have enough data to compute the average volume
-			double volumeAverage = 0.0;
+			
+			// CurrentBar is 1-based and MaxBarsBack-relative; the real limit is MaxBarsBack >= period + offset - 1.
+			int deepest = volumePeriod + volumePeriodOffset - 1;
+			if (deepest > ExecInfo.MaxBarsBack && !m_volumeMbbWarned)
+			{
+				m_volumeMbbWarned = true;   // field, reset in StartCalc
+				trace(ETraceLevel.Warning, $"volumeBasedPositionSize - needs {deepest} bars back but MaxBarsBack is {ExecInfo.MaxBarsBack}");
+			}
 
-			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= (volumePeriod + volumePeriodOffset - 1))  //-1 since CurrentBar is zero based
+			double volumeAverage = 0.0;
+			if (maxAvgVolumePercent > 0.0d && bars.CurrentBar >= 1 && deepest <= ExecInfo.MaxBarsBack)
 			{
 				volumeAverage = bars.Volume.Average(volumePeriod, volumePeriodOffset);
 				result = (int)checked(Math.Round(volumeAverage * maxAvgVolumePercent, 0));

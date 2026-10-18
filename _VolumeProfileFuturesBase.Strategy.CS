@@ -396,6 +396,12 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		/// <summary>
+		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
+		/// Used in _CustomSignal.CalcBar to determine when to start recalculating the intraday values.
+		/// </summary>
+		protected override DateTime tradingDayKey(DateTime barTime) { return GlobexDate(barTime); }
+
 		private bool TryWindow(
 				MarketSession session,
 				out TimeSpan start,
