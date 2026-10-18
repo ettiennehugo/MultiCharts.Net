@@ -58,6 +58,7 @@ namespace PowerLanguage.Strategy
 
 			private string m_logFilePath;
 			private IOutput m_output; //MC main output window
+			private StreamWriter m_writer;   // guarded by s_lock, opened lazily and kept open (CS-16)
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -86,6 +87,9 @@ namespace PowerLanguage.Strategy
 					if (s_instance == null)
 					{
 						s_instance = new LogFileSingleton(output);
+						LogFileSingleton instance = s_instance;
+						AppDomain.CurrentDomain.ProcessExit += (s, e) => instance.Close();
+						AppDomain.CurrentDomain.DomainUnload += (s, e) => instance.Close();   // study DLL reload
 					}
 
 					return s_instance;
@@ -98,13 +102,29 @@ namespace PowerLanguage.Strategy
 				{
 					try
 					{
+						if (m_writer == null)
+						{
+							var fs = new FileStream(m_logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
+						}
 						string csvMessage = escapeCsv(message);
-						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}{System.Environment.NewLine}", Encoding.UTF8);
+						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}");
 					}
 					catch (Exception ex)
 					{
+						try { if (m_writer != null) m_writer.Dispose(); } catch { }
+						m_writer = null;   // reopen on next write
 						m_output.WriteLine($"Error writing to log file: {ex.Message}");
 					}
+				}
+			}
+
+			public void Close()
+			{
+				lock (s_lock)
+				{
+					try { if (m_writer != null) m_writer.Dispose(); } catch { }
+					m_writer = null;
 				}
 			}
 
