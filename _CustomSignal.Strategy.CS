@@ -202,7 +202,7 @@ namespace PowerLanguage.Strategy
 
 		//static attributes
 		private static ITradingData s_tradingData;
-		private static DateTime s_lastTradeManagerRefresh = DateTime.MinValue;
+		private static long s_lastTradeManagerRefreshTicks = DateTime.MinValue.Ticks;   // Interlocked access only
 		private static readonly object s_tradingDataLock = new object();
 
 		//attributes
@@ -227,6 +227,21 @@ namespace PowerLanguage.Strategy
 		public _CustomSignal(object _ctx) : base(_ctx) { }
 
 		//methods
+		/// <summary>
+		/// Checks whether tracing is enabled, use to guard expensive string formatting etc since the $"..." on traces
+		/// would be evaluated before any tracing checks are actually done.
+		/// Hot-path guard: if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"...");
+		/// </summary>
+		protected bool traceOn(ETraceLevel level) 
+		{ 
+			return TraceLevel >= level;
+		}
+
+		/// <summary>
+		/// Traces the given message string to the log file if the trace level is set higher or equal than the given trace level.
+		/// </summary>
+		/// <param name="traceLevel">Trace level under which to log the message</param>
+		/// <param name="message">Message to log to the file (use above trace guard if this message if complicated to format and it's in a hot path)</param>
 		public void trace(ETraceLevel traceLevel, string message)
 		{
 			if (TraceLevel >= traceLevel)
@@ -366,10 +381,10 @@ namespace PowerLanguage.Strategy
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
 			{
-				trace(ETraceLevel.Verbose, $"equityAvailable - Checking {tradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
+				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"equityAvailable - Checking {tradingData.Accounts.Items.Length} accounts to find available equity on signal account {this.Account}.");
 				foreach (var account in tradingData.Accounts.Items)
 				{
-					trace(ETraceLevel.Verbose, $"equityAvailable - Found account {account.Name} with equity {account.Equity ?? 0}.");
+					if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"equityAvailable - Found account {account.Name} with equity {account.Equity ?? 0}.");
 					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
@@ -467,7 +482,7 @@ namespace PowerLanguage.Strategy
 			result = (int)Math.Truncate(positionCash / entryPrice);
 			int positionBeforeRoundLots = result;
 			result = applyRoundLots(result, useRoundLots);
-			trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) EntryPrice({entryPrice}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
+			if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) EntryPrice({entryPrice}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -492,7 +507,7 @@ namespace PowerLanguage.Strategy
 			result = (int)Math.Truncate(positionCash / bars.Close[0]);
 			int positionBeforeRoundLots = result;
 			result = applyRoundLots(result, useRoundLots);
-			trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) BarsClose({bars.Close[0]}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
+			if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"equityBasedPositionSize - Equity({positionCash}) BarsClose({bars.Close[0]}) MaxEquityPercent({maxEquityPerPosPercent}) BeforeRoundLots({positionBeforeRoundLots}) Result/AfterRoundLots({result})");
 			return result;
 		}
 
@@ -523,7 +538,7 @@ namespace PowerLanguage.Strategy
 
 			int result = (int)Math.Floor(shares);
 			result = applyRoundLots(result, useRoundLots);
-			trace(ETraceLevel.Debug, $"riskBasedPositionSize - Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
+			if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"riskBasedPositionSize - Risk({risk}) PositionCash({positionCash}) SharesBeforeRoundLots({(int)Math.Floor(shares)}) FinalSize({result})");
 			return result;
 		}
 
@@ -575,7 +590,7 @@ namespace PowerLanguage.Strategy
 
 			int beforeRoundLots = result;
 			result = applyRoundLots(result, useRoundLots);
-			trace(ETraceLevel.Debug, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) VolumeLength({volumePeriod}) VolumePeriodOffset({volumePeriodOffset}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
+			if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"volumeBasedPositionSize - CurrentBar({bars.CurrentBar}) VolumeLength({volumePeriod}) VolumePeriodOffset({volumePeriodOffset}) Average({volumeAverage}) AvgVolumeWithMaxPercentage({volumeAverage * maxAvgVolumePercent}) SizeBeforeRoundLots({beforeRoundLots}) RoundedSize({result})");
 			return result;
 		}
 
@@ -675,7 +690,7 @@ namespace PowerLanguage.Strategy
 
 				if (i == ExecInfo.MaxBarsBack - 1)
 				{
-					trace(ETraceLevel.Warning, $"recentLow - Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
+					if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"recentLow - Reached MaxBarsBack looking {daysBack} days back at index {i} with low {low} that might be incorrect.");
 					break;
 				}
 			}
@@ -716,7 +731,7 @@ namespace PowerLanguage.Strategy
 
 				if (i == ExecInfo.MaxBarsBack - 1)
 				{
-					trace(ETraceLevel.Warning, $"recentHigh - Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
+					if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"recentHigh - Reached MaxBarsBack looking {daysBack} days back at index {i} with high {high} that might be incorrect.");
 					break;
 				}
 			}
@@ -745,7 +760,7 @@ namespace PowerLanguage.Strategy
 					if (lastOpenTrade?.EntryOrder != null)
 					{
 						DateTime btEntryTime = lastOpenTrade.EntryOrder.Time;
-						trace(ETraceLevel.Debug, $"EntryTime backtest {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched order(s): {string.Join("; ", entryOrderNames)})");
+						if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"EntryTime backtest {btEntryTime:yyyy-MM-dd HH:mm:ss} (matched order(s): {string.Join("; ", entryOrderNames)})");
 						return btEntryTime;
 					}
 				}
@@ -775,7 +790,7 @@ namespace PowerLanguage.Strategy
 
 			if (entryLastFill == null || entryLastFill.Value == DateTime.MinValue)
 			{
-				trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({window}).");
+				if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"EntryTime - no fills found for order names: [{String.Join("; ", entryOrderNames)}] DateInterval({window}).");
 				return DateTime.MinValue;
 			}
 
@@ -810,7 +825,7 @@ namespace PowerLanguage.Strategy
 			//nothing to do for flat side, needs to be long or short
 			if (side == EMarketPositionSide.Flat)
 			{
-				trace(ETraceLevel.Warning, $"ExitTime - position side set to flat, nothing to do.");
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - position side set to flat, nothing to do.");
 				return DateTime.MinValue;
 			}
 
@@ -837,7 +852,7 @@ namespace PowerLanguage.Strategy
 			//make sure we found filled orders
 			if (exitFillTimes.Count == 0)
 			{
-				trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
 				return DateTime.MinValue;
 			}
 
@@ -850,17 +865,18 @@ namespace PowerLanguage.Strategy
 				return;
 
 			//avoid lock contention if refresh not required
-			if (s_tradingData != null && (DateTime.Now - s_lastTradeManagerRefresh <= DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+			long last = System.Threading.Interlocked.Read(ref s_lastTradeManagerRefreshTicks);
+			if (s_tradingData != null && DateTime.Now.Ticks - last <= DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL.Ticks)
 				return;
 
 			lock (s_tradingDataLock)
 			{
-				if (s_tradingData == null || (DateTime.Now - s_lastTradeManagerRefresh > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL))
+				if (s_tradingData == null || DateTime.Now.Ticks - System.Threading.Interlocked.Read(ref s_lastTradeManagerRefreshTicks) > DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL.Ticks)
 				{
-					trace(ETraceLevel.Debug, $"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({s_lastTradeManagerRefresh}) CurrentTime({DateTime.Now})");
+					if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"refreshTradeManagerIfNeeded - refreshing trade manager LastRefresh({new DateTime(System.Threading.Interlocked.Read(ref s_lastTradeManagerRefreshTicks))}) CurrentTime({DateTime.Now})");
 					TradeManager.ProcessEvents();
 					s_tradingData = TradeManager.TradingData;
-					s_lastTradeManagerRefresh = DateTime.Now;
+					System.Threading.Interlocked.Exchange(ref s_lastTradeManagerRefreshTicks, DateTime.Now.Ticks);
 				}
 			}
 		}

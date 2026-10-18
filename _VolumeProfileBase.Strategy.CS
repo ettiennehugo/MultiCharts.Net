@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
 
 namespace PowerLanguage.Strategy
 {
@@ -514,7 +515,7 @@ namespace PowerLanguage.Strategy
 
 				if (first)
 				{
-					parent.trace(ETraceLevel.Debug, $"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					if (parent.traceOn(ETraceLevel.Debug)) parent.trace(ETraceLevel.Debug, $"Resetting session VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 					clearSums();
 				}
 
@@ -619,7 +620,7 @@ namespace PowerLanguage.Strategy
 
 				if (!m_seenAnchorBar)
 				{
-					parent.trace(ETraceLevel.Debug, $"Resetting anchored VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					if (parent.traceOn(ETraceLevel.Debug)) parent.trace(ETraceLevel.Debug, $"Resetting anchored VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 					clearSums();
 					m_seenAnchorBar = true;
 				}
@@ -1877,7 +1878,7 @@ namespace PowerLanguage.Strategy
 				extra = extraForStart(streamPack, datastream, barIndex);
 			if (extra == null)
 			{
-				trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
+				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
 				return null;
 			}
 			if (vp != null)
@@ -1949,14 +1950,14 @@ namespace PowerLanguage.Strategy
 			if (barIndex < 1) return false;
 			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 			{
-				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no volume profile collection on data stream {datastream}.");
+				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no volume profile collection on data stream {datastream}.");
 				return false;
 			}
 
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
 			if (vp == null)
 			{
-				trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no profile on data stream {datastream} for bar {barIndex}.");
+				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no profile on data stream {datastream} for bar {barIndex}.");
 				return false;
 			}
 
@@ -2582,7 +2583,7 @@ namespace PowerLanguage.Strategy
 			}
 			catch (Exception e)
 			{
-				trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {nativeBar} - {e.Message}");
+				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"Exception trying to find volume profile on data stream {datastream} for bar {nativeBar} - {e.Message}");
 				return null;
 			}
 		}
