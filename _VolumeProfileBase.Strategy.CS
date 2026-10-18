@@ -56,6 +56,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_OVERLAY_FACTOR = 0.50;   // VWAP context only; never acceptance or rejection
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
+		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
 
 		//types
 		/// <summary>
@@ -710,30 +711,18 @@ namespace PowerLanguage.Strategy
 
 			private static double priceAt(IInstrument bars, int barsAgo)
 			{
-				try
-				{
-					double h = barsAgo == 0 ? bars.HighValue : bars.High[barsAgo];
-					double l = barsAgo == 0 ? bars.LowValue : bars.Low[barsAgo];
-					double c = barsAgo == 0 ? bars.CloseValue : bars.Close[barsAgo];
-					if (h > 0 && l > 0) return (h + l + c) / 3.0;
-					return c;
-				}
-				catch
-				{
-					try { return barsAgo == 0 ? bars.CloseValue : bars.Close[barsAgo]; }
-					catch { return 0; }
-				}
+				double h = barsAgo == 0 ? bars.HighValue : bars.High[barsAgo];
+				double l = barsAgo == 0 ? bars.LowValue : bars.Low[barsAgo];
+				double c = barsAgo == 0 ? bars.CloseValue : bars.Close[barsAgo];
+				if (h > 0 && l > 0) return (h + l + c) / 3.0;
+				return c;
 			}
 
 			private static double volume(IInstrument bars, int barsAgo)
 			{
-				double v = 0;
-				try { v = barsAgo == 0 ? bars.VolumeValue : bars.Volume[barsAgo]; }
-				catch { }
+				double v = barsAgo == 0 ? bars.VolumeValue : bars.Volume[barsAgo];
 				if (v > 0) return v;
-				try { v = barsAgo == 0 ? bars.TicksValue : bars.Ticks[barsAgo]; }
-				catch { }
-				return v;
+				return barsAgo == 0 ? bars.TicksValue : bars.Ticks[barsAgo];
 			}
 		}
 
@@ -2384,6 +2373,10 @@ namespace PowerLanguage.Strategy
 						}
 					}
 					extra.lastNakedScanBar = current;
+					// Only bars that can no longer change are final; the forming bar is rescanned next call.
+					bool currentClosed = bars != null && bars.Status == EBarState.Close;
+					int lastFinal = currentClosed ? current : current - 1;
+					if (lastFinal > extra.lastNakedScanBar) extra.lastNakedScanBar = lastFinal;
 				}
 				extra.pocTouchedBar = touched;
 				extra.pocNaked = touched == 0;
@@ -2876,8 +2869,9 @@ namespace PowerLanguage.Strategy
 			if (bars == null || chartBar < 1) return DateTime.MinValue;
 			int current = streamItemBarIndex(stream);
 			if (current < 1 || chartBar > current) return DateTime.MinValue;
-			try { return bars.Time[current - chartBar]; }
-			catch { return DateTime.MinValue; }
+			int ago = current - chartBar;
+			if (ago > ExecInfo.MaxBarsBack) return DateTime.MinValue;
+			return bars.Time[ago];
 		}
 
 		private double tickSize()
@@ -3035,7 +3029,10 @@ namespace PowerLanguage.Strategy
 			if (vp == null || vp.Values == null) return;
 			readLevels(vp, extra.levels);
 			applyProfileGeometry(vp, extra, chartBar);
-			List<Row> rows = rowsFromLevels(extra.levels);
+
+			bool[] traded;
+			List<Row> rows = denseRowsFromLevels(extra.levels, tickSize(), out traded);
+			if (rows.Count == 0) { rows = rowsFromLevels(extra.levels); traded = null; }   // fallback: old sparse behaviour
 			if (rows.Count < 3) return;
 
 			double[] vols = new double[rows.Count];
@@ -3055,8 +3052,18 @@ namespace PowerLanguage.Strategy
 			if (extra.poc <= 0) extra.poc = rows[pocIdx].price;
 			if (extra.pocVol <= 0) extra.pocVol = volumeAtPrice(extra, extra.poc);
 			if (pocVol <= 0) return;
-			double hvnFloor = percentile(vols, HvnPercentile);
-			double lvnCeil = percentile(vols, LvnPercentile);
+
+			// Thresholds from traded rows only, so adding empty rows does not drag the cut-offs down.
+			double[] basis = vols;
+			if (traded != null)
+			{
+				var tv = new List<double>(vols.Length);
+				for (int k = 0; k < vols.Length; k++) if (traded[k]) tv.Add(vols[k]);
+				if (tv.Count >= 3) basis = tv.ToArray();
+			}
+			double hvnFloor = percentile(basis, HvnPercentile);
+			double lvnCeil = percentile(basis, LvnPercentile);
+
 			double range = rows[rows.Count - 1].price - rows[0].price;
 			if (range <= 0) return;
 			// HVN: contiguous runs above the high percentile that contain a peak
@@ -3126,6 +3133,38 @@ namespace PowerLanguage.Strategy
 				if (levels[i].total <= 0) continue;
 				rows.Add(new Row { price = levels[i].price, volume = levels[i].total });
 			}
+			return rows;
+		}
+
+		/// Dense rows from lowest to highest level at the profile's row step (multiple of tick). Missing prices get volume 0.
+		/// traded[i] is true where the source profile had volume.
+		private static List<Row> denseRowsFromLevels(List<LevelVol> levels, double tick, out bool[] traded)
+		{
+			traded = new bool[0];
+			var rows = new List<Row>();
+			if (levels == null || levels.Count == 0 || tick <= 0) return rows;
+			double step = 0;
+			for (int i = 1; i < levels.Count; i++)
+			{
+				double g = levels[i].price - levels[i - 1].price;
+				if (g > tick * 0.5 && (step == 0 || g < step)) step = g;
+			}
+			if (step <= 0) step = tick;
+			step = Math.Max(1, Math.Round(step / tick)) * tick;   // row size is a whole number of ticks
+			double lo = levels[0].price, hi = levels[levels.Count - 1].price;
+			int n = (int)Math.Round((hi - lo) / step) + 1;
+			if (n < 1 || n > MAX_DENSE_ROWS) return rows;          // caller falls back to sparse rows
+			var vol = new double[n];
+			traded = new bool[n];
+			for (int i = 0; i < levels.Count; i++)
+			{
+				int idx = (int)Math.Round((levels[i].price - lo) / step);
+				if (idx < 0 || idx >= n || levels[i].total <= 0) continue;
+				vol[idx] += levels[i].total;
+				traded[idx] = true;
+			}
+			for (int i = 0; i < n; i++)
+				rows.Add(new Row { price = Math.Round((lo + i * step) / tick) * tick, volume = vol[i] });
 			return rows;
 		}
 
@@ -3403,28 +3442,22 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>kind: 0 open, 1 high, 2 low, 3 close. chartBar is 1-based Status Bar #.</summary>
-		private static double barPrice(IInstrument bars, int current, int chartBar, int kind)
+		private double barPrice(IInstrument bars, int current, int chartBar, int kind)
 		{
 			if (bars == null || chartBar < 1 || current < chartBar) return 0;
 			int ago = current - chartBar;
-			try
+			if (ago > ExecInfo.MaxBarsBack) return 0;   // outside guaranteed history: report "unreadable", do not probe
+			if (ago == 0)
 			{
-				if (ago == 0)
-				{
-					if (kind == 0) return bars.OpenValue;
-					if (kind == 1) return bars.HighValue;
-					if (kind == 2) return bars.LowValue;
-					return bars.CloseValue;
-				}
-				if (kind == 0) return bars.Open[ago];
-				if (kind == 1) return bars.High[ago];
-				if (kind == 2) return bars.Low[ago];
-				return bars.Close[ago];
+				if (kind == 0) return bars.OpenValue;
+				if (kind == 1) return bars.HighValue;
+				if (kind == 2) return bars.LowValue;
+				return bars.CloseValue;
 			}
-			catch
-			{
-				return 0;
-			}
+			if (kind == 0) return bars.Open[ago];
+			if (kind == 1) return bars.High[ago];
+			if (kind == 2) return bars.Low[ago];
+			return bars.Close[ago];
 		}
 
 		/// <summary>kind: 0 POC, 1 VAH, 2 VAL. Tries 1-based Status bar then native 0-based ItemForBar index.</summary>
