@@ -198,6 +198,29 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
+		/// <summary>
+		/// Daily (higher time frame) stream that DailyOffset inspects. Derived classes that index a daily stream set it in StartCalc.
+		/// </summary>
+		protected IInstrument DailyStream { get; set; }
+
+		/// <summary>
+		/// Offset to add to daily-stream indices so that index 0 + DailyOffset is the last COMPLETED day (CS-04).
+		/// History/backtest: the higher time frame stream only exposes completed bars, so the offset is 0 (unchanged backtests).
+		/// Real time: with real-time history matching off the daily stream's bar 0 is the forming day (Status != Close), so the
+		/// offset is 1; with it on (or once the day has closed) bar 0 is complete and the offset is 0. Evaluated per call because
+		/// the old StartCalc snapshot of IsRealTimeCalc was always false (StartCalc runs before the first real-time tick).
+		/// </summary>
+		public int DailyOffset
+		{
+			get
+			{
+				if (!Environment.IsRealTimeCalc) return 0;
+				IInstrument daily = DailyStream;
+				if (daily == null) return 1;   // no stream registered: assume bar 0 is the forming day in real time
+				return daily.Status == EBarState.Close ? 0 : 1;
+			}
+		}
+
 		public Function._Holidays Holidays { get { return m_holidays; } }
 
 		protected ITradingData tradingData
