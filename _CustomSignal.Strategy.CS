@@ -214,6 +214,7 @@ namespace PowerLanguage.Strategy
 		private bool m_entryCacheClosed;
 		private string m_entryCacheKey;
 		private DateTime m_entryCacheValue;
+		private long m_entryCacheSnapshot;
 		private PowerLanguage.Function._NyseHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -282,6 +283,7 @@ namespace PowerLanguage.Strategy
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
+			m_entryCacheSnapshot = 0;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -761,10 +763,18 @@ namespace PowerLanguage.Strategy
 			int bar = Bars.FullSymbolData.Current;
 			bool closed = Bars.Status == EBarState.Close;
 			string key = entryOrderNames == null ? "" : string.Join("\u001f", entryOrderNames);
-			if (bar == m_entryCacheBar && closed == m_entryCacheClosed && key == m_entryCacheKey && !Environment.IsRealTimeCalc)
+			//real-time: the result comes from the shared TradeManager snapshot, so it can only change when the snapshot is
+			//refreshed; key the cache on the refresh stamp (CS-19). Backtest: Positions only change per bar/state.
+			long snapshot = 0;
+			if (Environment.IsRealTimeCalc)
+			{
+				refreshTradeManagerIfNeeded();
+				snapshot = System.Threading.Interlocked.Read(ref s_lastTradeManagerRefreshTicks);
+			}
+			if (bar == m_entryCacheBar && closed == m_entryCacheClosed && key == m_entryCacheKey && snapshot == m_entryCacheSnapshot)
 				return m_entryCacheValue;
 			DateTime result = orderEntryTimeUncached(entryOrderNames);
-			m_entryCacheBar = bar; m_entryCacheClosed = closed; m_entryCacheKey = key; m_entryCacheValue = result;
+			m_entryCacheBar = bar; m_entryCacheClosed = closed; m_entryCacheKey = key; m_entryCacheValue = result; m_entryCacheSnapshot = snapshot;
 			return result;
 		}
 
