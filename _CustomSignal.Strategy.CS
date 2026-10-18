@@ -18,7 +18,7 @@ namespace PowerLanguage.Strategy
 	{
 		//constants
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
-		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = -63;       //look back 3-months of trading orders to discover entry/exit orders
+		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = 63;        //look back 3-months of trading orders to discover entry/exit orders
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
 
 		//types
@@ -314,7 +314,8 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			//force call to CalcBar of holidays to ensure refresh happens
+			// FunctionSimple.Value executes USHolidays.CalcBar for this bar; it rebuilds the holiday list on a year change.
+			// Must run every bar before isHoliday() is used.
 			int _ = m_holidays.Value;
 
 			if (Environment.CalcReason == CalculationReason.Default)
@@ -796,7 +797,7 @@ namespace PowerLanguage.Strategy
 			lock (s_tradingDataLock)
 			{
 				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
-				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1));
+				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1)); // negative value is correct, we want to look backward
 				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 				entryLastFill = td.Orders.Items
 														.Where(o => o.SymbolStr == Bars.Info.Name
@@ -852,7 +853,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
-			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now);
+			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now); // negative value is correct, we want to look backward
 			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 
 			//determine exit order type (opposite of entry action)
