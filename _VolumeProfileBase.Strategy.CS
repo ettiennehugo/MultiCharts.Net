@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.ToolTip;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrackBar;
 
 namespace PowerLanguage.Strategy
@@ -161,6 +162,13 @@ namespace PowerLanguage.Strategy
 			internal bool nodesBuilt;
 			internal int nodesBuiltForStart;
 			internal int nodesBuiltGeneration = -1;
+			internal int filledAtBar = -1;          // stream calc bar of the last developing fill
+			internal bool filledAtClose;            // that fill saw the bar's final state
+			internal int filledGeneration = -1;     // stream generation of the last developing fill
+
+			internal bool inClosedSet;          // levels already merged into the stream's closed reference
+			internal int pctStampedFill = -1;   // filledAtBar of the last percentile stamp for a developing extra
+			internal int pctStampedClosedGen = -1;
 
 			/// <summary>
 			/// True when this completed POC was still naked as of <paramref name="asOfBar"/>.
@@ -426,6 +434,13 @@ namespace PowerLanguage.Strategy
 			public bool nakedSuppressed;
 			public int levelsGeneration;
 			public int percentilesStampedGeneration = -1;
+
+			// Closed-profile reference distribution (sorted ascending, filled prefix closedCount).
+			public double[] closedTotal = new double[0], closedAsk = new double[0], closedBid = new double[0];
+			public int closedCount;
+			public int closedLevelsGeneration;      // bumps when a profile joins the closed set
+			public int closedStampedGeneration = -1;
+
 			public volatile bool pendingChange;   // set by EChanged, consumed in CalcBar
 			public volatile bool pendingFull;
 			public StreamPack(int datastream) { this.datastream = datastream; }
@@ -1877,7 +1892,15 @@ namespace PowerLanguage.Strategy
 			configureVwap(m_vwap2, Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
 			configureVwap(m_vwap3, Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
 			foreach (var kv in m_streams)
-				if (kv.Value != null) kv.Value.bumpGeneration();
+			{
+				if (kv.Value != null)
+				{
+					kv.Value.bumpGeneration();
+					kv.Value.closedCount = 0; kv.Value.closedLevelsGeneration++; kv.Value.closedStampedGeneration = -1;
+					foreach (VpExtra e in kv.Value.extra.Values) if (e != null) { e.inClosedSet = false; e.pctStampedFill = -1; }
+				}
+			}
+
 			m_confluenceGeneration++;
 			m_confluenceDirty = true;
 			m_confluenceBuiltGeneration = -1;
@@ -2223,16 +2246,9 @@ namespace PowerLanguage.Strategy
 
 		private IInstrument barsOf(int stream)
 		{
-			try
-			{
-				if (stream <= 1) return Bars;
-				if (stream < 1 || stream > MaxDataStream) return null;
-				return BarsOfData(stream);
-			}
-			catch
-			{
-				return null;
-			}
+			if (stream <= 1) return Bars;
+			if (stream < 1 || stream > MaxDataStream) return null;
+			return BarsOfData(stream);
 		}
 
 		/// <summary>
@@ -2282,9 +2298,16 @@ namespace PowerLanguage.Strategy
 			int chartBar = streamItemBarIndex(sp.datastream);
 			if (chartBar >= 1)
 			{
-				ensureExtraAt(sp, chartBar);
+				IProfile cur = itemForBar(sp, sp.datastream, chartBar);
 				if (chartBar > 1)
-					ensureExtraAt(sp, chartBar - 1);
+				{
+					// First bar of a new window: give the just-closed profile its final fill.
+					IProfile prev = itemForBar(sp, sp.datastream, chartBar - 1);
+					if (prev != null && (cur == null || profileStartBar(prev) != profileStartBar(cur)))
+						ensureExtra(sp, prev, chartBar - 1);
+				}
+				if (cur != null)
+					ensureExtra(sp, cur, chartBar);   // last: leaves the developing extra stamped as of chartBar
 			}
 			stampNakedPocs(sp);
 		}
@@ -2909,6 +2932,10 @@ namespace PowerLanguage.Strategy
 		{
 			if (sp.pack == null) return;
 			sp.bumpGeneration();
+
+			sp.closedCount = 0; sp.closedLevelsGeneration++; sp.closedStampedGeneration = -1;
+			foreach (VpExtra e in sp.extra.Values) if (e != null) { e.inClosedSet = false; e.pctStampedFill = -1; }
+
 			if (full)
 			{
 				sp.extra.Clear();   // objects behind old VpKeys are gone, below code will recompute them for a full refresh
@@ -2964,28 +2991,36 @@ namespace PowerLanguage.Strategy
 					&& extra.levels.Count > 0;
 				if (!closed)
 				{
-					int windowEnd = profileEndBar(vp);
-					bool windowOpenPastCalcBar = current >= 1 && windowEnd > current;
-					if (windowOpenPastCalcBar)
+					bool atClose = isStreamBarClosed(sp.datastream);
+					bool sameStamp = extra.filledAtBar == current
+																	&& extra.filledGeneration == sp.generation
+																	&& (extra.filledAtClose || !atClose)
+																	&& atClose;
+					if (sameStamp)
 					{
-						// Histogram would include bars after the calc bar. Keep geometry (as-of values) only.
-						clearHistogram(extra);
-						applyProfileGeometry(vp, extra, chartBar);
-						extra.nodesBuilt = false;
-					}
-					else
-					{
-						fillNodes(vp, extra, chartBar);
-						extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+						applyProfileGeometry(vp, extra, chartBar);   // as-of POC/VA can still move intrabar
+						stampExtra(extra);
+						return;
 					}
 
+					fillNodes(vp, extra, chartBar);
+					extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
 					extra.nodesBuiltForStart = extra.startBar;
 					extra.nodesBuiltGeneration = sp.generation;
+					extra.filledAtBar = current;
+					extra.filledAtClose = atClose;
+					extra.filledGeneration = sp.generation;
 					sp.levelsGeneration++;
 					m_volumePctDirty = true;
 				}
 			}
 			stampExtra(extra);
+		}
+
+		private bool isStreamBarClosed(int stream)
+		{
+			IInstrument bars = barsOf(stream);
+			return bars == null || bars.Status == EBarState.Close;
 		}
 
 		private static void clearHistogram(VpExtra extra)
@@ -3161,49 +3196,71 @@ namespace PowerLanguage.Strategy
 		{
 			if (!m_volumePctDirty || m_streams == null) return;
 			m_volumePctDirty = false;
-
 			foreach (var kv in m_streams)
 			{
 				StreamPack sp = kv.Value;
 				if (sp == null || sp.extra == null) continue;
-				// No extra on this stream gained, lost, or resized levels since the last stamp.
 				if (sp.percentilesStampedGeneration == sp.levelsGeneration) continue;
-				m_pctExtras.Clear();
-				foreach (VpExtra extra in sp.extra.Values)
+				int current = streamItemBarIndex(sp.datastream);
+
+				// 1. Merge newly closed profiles into the reference (O(P) scan, O(N) merge per close).
+				foreach (VpExtra e in sp.extra.Values)
 				{
-					if (extra == null || extra.levels.Count == 0) continue;
-					m_pctExtras.Add(extra);
+					if (e == null || e.inClosedSet || e.levels.Count == 0) continue;
+					bool closed = current >= 1 && e.endBar >= e.startBar && e.endBar < current && e.nodesBuilt;
+					if (!closed) continue;
+					mergeIntoClosed(sp, e);
+					e.inClosedSet = true;
+					sp.closedLevelsGeneration++;
 				}
-				if (m_pctExtras.Count == 0)
+
+				// 2. Reference grew: restamp every closed extra (once per profile close, not per bar).
+				if (sp.closedStampedGeneration != sp.closedLevelsGeneration)
 				{
-					sp.percentilesStampedGeneration = sp.levelsGeneration;
-					continue;
+					foreach (VpExtra e in sp.extra.Values)
+						if (e != null && e.inClosedSet)
+							stampLevelPercentiles(e, sp.closedTotal, sp.closedAsk, sp.closedBid, sp.closedCount);
+					sp.closedStampedGeneration = sp.closedLevelsGeneration;
 				}
-				int n = 0;
-				for (int i = 0; i < m_pctExtras.Count; i++)
-					n += m_pctExtras[i].levels.Count;
-				if (m_pctTotal.Length < n) m_pctTotal = new double[n];
-				if (m_pctAsk.Length < n) m_pctAsk = new double[n];
-				if (m_pctBid.Length < n) m_pctBid = new double[n];
-				int w = 0;
-				for (int i = 0; i < m_pctExtras.Count; i++)
+
+				// 3. Developing extras: stamp against the closed reference only when their fill changed.
+				foreach (VpExtra e in sp.extra.Values)
 				{
-					VpExtra extra = m_pctExtras[i];
-					for (int k = 0; k < extra.levels.Count; k++)
-					{
-						m_pctTotal[w] = extra.levels[k].total;
-						m_pctAsk[w] = extra.levels[k].ask;
-						m_pctBid[w] = extra.levels[k].bid;
-						w++;
-					}
+					if (e == null || e.inClosedSet || e.levels.Count == 0) continue;
+					if (e.pctStampedFill >= 0 && e.pctStampedFill == e.filledAtBar
+							&& e.pctStampedClosedGen == sp.closedLevelsGeneration) continue;   // same fill, same reference
+					stampLevelPercentiles(e, sp.closedTotal, sp.closedAsk, sp.closedBid, sp.closedCount);
+					e.pctStampedFill = e.filledAtBar;
+					e.pctStampedClosedGen = sp.closedLevelsGeneration;
 				}
-				Array.Sort(m_pctTotal, 0, n);
-				Array.Sort(m_pctAsk, 0, n);
-				Array.Sort(m_pctBid, 0, n);
-				for (int e = 0; e < m_pctExtras.Count; e++)
-					stampLevelPercentiles(m_pctExtras[e], m_pctTotal, m_pctAsk, m_pctBid, n);
 				sp.percentilesStampedGeneration = sp.levelsGeneration;
 			}
+		}
+
+		private static void mergeIntoClosed(StreamPack sp, VpExtra e)
+		{
+			int add = e.levels.Count;
+			int n = sp.closedCount + add;
+			sp.closedTotal = mergeSorted(sp.closedTotal, sp.closedCount, e.levels, 0, n);
+			sp.closedAsk = mergeSorted(sp.closedAsk, sp.closedCount, e.levels, 1, n);
+			sp.closedBid = mergeSorted(sp.closedBid, sp.closedCount, e.levels, 2, n);
+			sp.closedCount = n;
+		}
+
+		// Merge the existing sorted prefix with the extra's values (kind 0 total, 1 ask, 2 bid).
+		private static double[] mergeSorted(double[] a, int count, List<LevelVol> levels, int kind, int n)
+		{
+			var b = new double[levels.Count];
+			for (int i = 0; i < b.Length; i++)
+				b[i] = kind == 0 ? levels[i].total : (kind == 1 ? levels[i].ask : levels[i].bid);
+			Array.Sort(b);
+			var r = a.Length >= n ? a : new double[Math.Max(n, a.Length * 2)];
+			int ia = count - 1, ib = b.Length - 1, w = n - 1;   // merge from the back so r may alias a
+			while (ib >= 0)
+				r[w--] = (ia >= 0 && a[ia] > b[ib]) ? a[ia--] : b[ib--];
+			if (!object.ReferenceEquals(r, a))
+				while (ia >= 0) r[w--] = a[ia--];
+			return r;
 		}
 
 		private static void stampLevelPercentiles(VpExtra extra, double[] streamTotal, double[] streamAsk, double[] streamBid, int count)
@@ -3453,13 +3510,14 @@ namespace PowerLanguage.Strategy
 			return bars.Close[ago];
 		}
 
-		/// <summary>kind: 0 POC, 1 VAH, 2 VAL. Tries 1-based Status bar then native 0-based ItemForBar index.</summary>
+		/// <summary>
+		/// kind: 0 POC, 1 VAH, 2 VAL. chartBar is 1-based; 
+		/// POCForBar/HighVAForBar/LowVAForBar take the absolute 0-based bar (same as ItemForBar).
+		/// Never probe chartBar itself: that is the next bar.
+		/// </summary>
 		private static double priceForBar(IProfile vp, int chartBar, int kind)
 		{
-			if (vp == null || chartBar < 1) return 0;
-			double px = priceForBarNative(vp, chartBar, kind);
-			if (px > 0) return px;
-			return priceForBarNative(vp, chartBar - 1, kind);
+			return priceForBarNative(vp, toNativeItemBar(chartBar), kind);
 		}
 
 		private static double priceForBarNative(IProfile vp, int bar, int kind)
