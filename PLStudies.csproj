@@ -342,7 +342,6 @@
     <Compile Include="ModifiedRSI.Function.CS" />
     <Compile Include="ModifiedStochastic.Function.CS" />
     <Compile Include="RoofingFilter.Function.CS" />
-    <Compile Include="USHolidays.Function.CS" />
     <Compile Include="VWAP.Function.CS" />
     <Compile Include="_AdaptiveSuperSmoother.Function.CS" />
     <Compile Include="_AdaptiveSuperSmoother.Indicator.CS" />
@@ -506,6 +505,9 @@
     <Compile Include="_DeltaDivRevFuturesLELX2.Strategy.CS" />
     <Compile Include="_POCPullbackLELX.Strategy.CS" />
     <Compile Include="_POCPullbackSESX.Strategy.CS" />
+    <Compile Include="_Holidays.Function.CS" />
+    <Compile Include="_USHolidays.Function.CS" />
+    <Compile Include="_NyseHolidays.Function.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

@@ -178,7 +178,7 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayVolume; }
 		}
 
-		public Function.USHolidays Holidays { get { return m_holidays; } }
+		public Function._Holidays Holidays { get { return m_holidays; } }
 
 		protected ITradingData tradingData
 		{
@@ -214,7 +214,7 @@ namespace PowerLanguage.Strategy
 		private bool m_entryCacheClosed;
 		private string m_entryCacheKey;
 		private DateTime m_entryCacheValue;
-		private PowerLanguage.Function.USHolidays m_holidays;
+		private PowerLanguage.Function._NyseHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
 		//interface methods
@@ -249,7 +249,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			m_holidays = new PowerLanguage.Function.USHolidays(this);
+			m_holidays = new PowerLanguage.Function._NyseHolidays(this);
 			TraceLevel = ETraceLevel.None;
 		}
 

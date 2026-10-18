@@ -30,7 +30,7 @@ namespace PowerLanguage.Strategy
 
     public _CheckData(object _ctx) : base(_ctx) { }
 
-    protected USHolidays _usHolidays;
+    protected _NyseHolidays _holidays;
     protected List<DateTime> _barsReceived;
     protected List<DateTime> _expectedBars;
     protected DateTime _firstBarTime;
@@ -46,7 +46,7 @@ namespace PowerLanguage.Strategy
     {
       TraceFilename = "";
       FixData = false;
-      _usHolidays = new USHolidays(this);
+      _holidays = new _NyseHolidays(this);
     }
 
     protected override void StartCalc()
@@ -71,7 +71,7 @@ namespace PowerLanguage.Strategy
     protected override void CalcBar()
     {
       //force update of US holidays if required
-      _usHolidays.Call();
+      _holidays.Call();
 
       //make sure strategy is never used for live trading
       if (Environment.IsAutoTradingMode || Environment.IsRealTimeCalc)
@@ -215,7 +215,7 @@ namespace PowerLanguage.Strategy
       while (expectedBarTime == DateTime.MinValue)
       {
         nextBarTime += _barDuration;
-        if (isInTradingSession(ref nextBarTime) && !_usHolidays.isHoliday(nextBarTime))
+        if (isInTradingSession(ref nextBarTime) && !_holidays.isHoliday(nextBarTime))
           expectedBarTime = nextBarTime;
       }
 
