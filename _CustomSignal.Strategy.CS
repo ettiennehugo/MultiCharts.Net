@@ -670,7 +670,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
+		/// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (tradingDayKey, i.e. Globex days for futures).
 		/// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 		/// </summary>
@@ -680,21 +680,22 @@ namespace PowerLanguage.Strategy
 			double low = includeToday ? IntradayLow : double.MaxValue;
 			DateTime lowBarTime = includeToday ? IntradayLowTime : DateTime.MinValue;
 			int daysProcessed = 0;
-			DateTime startDate = Bars.Time[0].Date;
+			DateTime startDate = tradingDayKey(Bars.Time[0]);
 			DateTime lastDate = startDate;
 
 			for (int i = 0; i < Bars.CurrentBar; i++)
 			{
-				if (Bars.Time[i].Date != lastDate)
+				DateTime day = tradingDayKey(Bars.Time[i]);
+				if (day != lastDate)
 				{
 					daysProcessed++;
-					lastDate = Bars.Time[i].Date;
+					lastDate = day;
 				}
 
 				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
 					break;
 
-				if (Bars.Time[i].Date != startDate && low > Bars.Low[i])
+				if (day != startDate && low > Bars.Low[i])
 				{
 					low = Bars.Low[i];
 					lowBarTime = Bars.Time[i];
@@ -711,7 +712,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
+		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (tradingDayKey, i.e. Globex days for futures).
 		/// daysBack = 0 → today's high; daysBack = 1 → max(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 		/// </summary>
@@ -721,21 +722,22 @@ namespace PowerLanguage.Strategy
 			double high = includeToday ? IntradayHigh : double.MinValue;
 			DateTime highBarTime = includeToday ? IntradayHighTime : DateTime.MinValue;
 			int daysProcessed = 0;
-			DateTime startDate = Bars.Time[0].Date;
+			DateTime startDate = tradingDayKey(Bars.Time[0]);
 			DateTime lastDate = startDate;
 
 			for (int i = 0; i < Bars.CurrentBar; i++)
 			{
-				if (Bars.Time[i].Date != lastDate)
+				DateTime day = tradingDayKey(Bars.Time[i]);
+				if (day != lastDate)
 				{
 					daysProcessed++;
-					lastDate = Bars.Time[i].Date;
+					lastDate = day;
 				}
 
 				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
 					break;
 
-				if (Bars.Time[i].Date != startDate && high < Bars.High[i])
+				if (day != startDate && high < Bars.High[i])
 				{
 					high = Bars.High[i];
 					highBarTime = Bars.Time[i];
