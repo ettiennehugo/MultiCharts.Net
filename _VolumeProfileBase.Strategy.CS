@@ -2958,6 +2958,8 @@ namespace PowerLanguage.Strategy
 			if (sp == null || vp == null) return;
 			VpKey key = new VpKey(sp.datastream, vp);
 			if (key.startBar < 0) return;
+			int current = streamItemBarIndex(sp.datastream);
+			if (current >= 1 && key.startBar > current) return;   // starts after the calc bar: does not exist yet
 			VpExtra extra;
 			if (!sp.extra.TryGetValue(key, out extra))
 			{
@@ -2974,7 +2976,6 @@ namespace PowerLanguage.Strategy
 				// so the developing profile (endBar walks with the calc bar) still fills.
 				// A generation bump fails the generation check and rebuilds, which also
 				// refreshes POC / VAH / VAL. VWAP is still stamped below either way.
-				int current = streamItemBarIndex(sp.datastream);
 				bool closed = current >= 1
 					&& extra.endBar >= extra.startBar
 					&& extra.endBar < current
@@ -2985,8 +2986,21 @@ namespace PowerLanguage.Strategy
 					&& extra.levels.Count > 0;
 				if (!closed)
 				{
-					fillNodes(vp, extra, chartBar);
-					extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					int windowEnd = profileEndBar(vp);
+					bool windowOpenPastCalcBar = current >= 1 && windowEnd > current;
+					if (windowOpenPastCalcBar)
+					{
+						// Histogram would include bars after the calc bar. Keep geometry (as-of values) only.
+						clearHistogram(extra);
+						applyProfileGeometry(vp, extra, chartBar);
+						extra.nodesBuilt = false;
+					}
+					else
+					{
+						fillNodes(vp, extra, chartBar);
+						extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					}
+
 					extra.nodesBuiltForStart = extra.startBar;
 					extra.nodesBuiltGeneration = sp.generation;
 					sp.levelsGeneration++;
@@ -2994,6 +3008,16 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			stampExtra(extra);
+		}
+
+		private static void clearHistogram(VpExtra extra)
+		{
+			extra.hvns.Clear();
+			extra.lvns.Clear();
+			extra.levels.Clear();
+			extra.maxTotalPercentile = 0;
+			extra.maxAskPercentile = 0;
+			extra.maxBidPercentile = 0;
 		}
 
 		private void fillNodes(IProfile vp, VpExtra extra, int chartBar)
