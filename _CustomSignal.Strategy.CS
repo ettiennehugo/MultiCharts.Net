@@ -108,31 +108,20 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			private static readonly char[] s_csvSpecial = { ',', '"', '\n', '\r' };
 			private string escapeCsv(string input)
 			{
 				if (string.IsNullOrEmpty(input))
 					return input;
 
 				//check if escaping is needed
-				bool needsQuotes = input.IndexOfAny(new char[] { ',', '"', '\n', '\r' }) >= 0;
+				bool needsQuotes = input.IndexOfAny(s_csvSpecial) >= 0;
 
 				if (!needsQuotes)
 					return input;
 
-				//build escaped version
-				StringBuilder sb = new StringBuilder();
-				sb.Append('"'); //start quote
-
-				foreach (char c in input)
-				{
-					if (c == '"')
-						sb.Append("\"\""); //escape quote
-					else
-						sb.Append(c);
-				}
-
-				sb.Append('"'); //end quote
-				return sb.ToString();
+				//return escaped version
+				return "\"" + input.Replace("\"", "\"\"") + "\"";
 			}
 		}
 
