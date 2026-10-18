@@ -1815,6 +1815,7 @@ namespace PowerLanguage.Strategy
 		protected override void Destroy()
 		{
 			unhookStreams();
+			base.Destroy();
 		}
 
 		protected override void StartCalc()

@@ -220,6 +220,7 @@ namespace PowerLanguage.Strategy
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
 
+
 		//methods
 		/// <summary>
 		/// Checks whether tracing is enabled, use to guard expensive string formatting etc since the $"..." on traces
@@ -250,6 +251,16 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			m_holidays = new PowerLanguage.Function.USHolidays(this);
 			TraceLevel = ETraceLevel.None;
+		}
+
+		/// <summary>
+		/// Static state (log file, TradeManager snapshot) is process-wide and shared by every signal instance.
+		/// The log file handle is closed on process exit/domain unload.
+		/// </summary>
+		protected override void Destroy()
+		{
+			m_logger = null;
+			base.Destroy();
 		}
 
 		protected override void StartCalc()
