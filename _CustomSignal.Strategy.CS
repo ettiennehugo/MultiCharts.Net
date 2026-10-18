@@ -325,7 +325,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			// FunctionSimple.Value executes USHolidays.CalcBar for this bar; it rebuilds the holiday list on a year change.
+			// FunctionSimple.Value executes _NyseHolidays.CalcBar for this bar; it rebuilds the holiday list on a year change.
 			// Must run every bar before isHoliday() is used.
 			int _ = m_holidays.Value;
 
@@ -339,7 +339,6 @@ namespace PowerLanguage.Strategy
 					m_intradayClose = Bars.Close[0];
 					m_intradayLow = Bars.Low[0];
 					m_intradayHigh = Bars.High[0];
-					m_currentDay = Bars.Time[0].Date;
 					m_intradayVolume = 0.0; // accumulated only on bar close below
 					m_currentDay = dayKey;
 					m_intradayLowTime = Bars.Time[0];
@@ -372,10 +371,10 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-    /// <summary>
+		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
 		/// </summary>
-    protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
+		protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
 
 		/// <summary>
 		/// Determines the equity available for trading a position based on some custom risk equity per position percentage. If
@@ -521,6 +520,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of available equity.
+		/// <paramref name="risk"/> is DOLLAR risk per unit (price distance × BigPointValue), not a price distance.
 		/// </summary>
 		protected int riskBasedPositionSize(double risk, double maxRiskEquityPerPosPercent, bool useRoundLots = false)
 		{
@@ -551,8 +551,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price.
-		/// <paramref name="risk"/> is DOLLAR risk per unit (price distance × BigPointValue), not a price distance.
+		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price,
+		/// using the instrument's last close (bars.Close[0]) as the entry price.
 		/// </summary>
 		protected int stopLossBasedPositionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
@@ -565,7 +565,7 @@ namespace PowerLanguage.Strategy
 			double bpv = bars.Info.BigPointValue;
 			if (double.IsNaN(bpv) || double.IsInfinity(bpv) || bpv <= 0)
 			{
-				trace(ETraceLevel.Warning, $"stopLossBasedPositionSizeAt - BigPointValue({bpv}) invalid, returning 0");
+				trace(ETraceLevel.Warning, $"stopLossBasedPositionSize - BigPointValue({bpv}) invalid, returning 0");
 				return 0;
 			}
 			double dollarRiskPerUnit = Math.Abs(entryPrice - stopLossPrice) * bpv;
@@ -668,8 +668,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-    /// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
-    /// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
+		/// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
+		/// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 		/// </summary>
 		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
@@ -677,7 +677,6 @@ namespace PowerLanguage.Strategy
 			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
 			double low = includeToday ? IntradayLow : double.MaxValue;
 			DateTime lowBarTime = includeToday ? IntradayLowTime : DateTime.MinValue;
-			DateTime lowDate = IntradayLowTime;
 			int daysProcessed = 0;
 			DateTime startDate = Bars.Time[0].Date;
 			DateTime lastDate = startDate;
@@ -711,7 +710,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
-		/// daysBack = 0 → today's high; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
+		/// daysBack = 0 → today's high; daysBack = 1 → max(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 		/// </summary>
 		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
@@ -838,7 +837,7 @@ namespace PowerLanguage.Strategy
 			{
 				IMarketPosition pos = null;
 				if (CurrentPosition.ClosedTrades.Count > 0) pos = CurrentPosition;   // partial exits of the open position
-				else if (Positions.Count > 1) pos = Positions[1];                    // last closed position (verify Count vs Length)
+				else if (Positions.Count > 1) pos = Positions[1];                    // last closed position (Positions[0] == CurrentPosition)
 
 				if (pos == null || pos.ClosedTrades.Count == 0) return DateTime.MinValue;
 				if (side != EMarketPositionSide.Flat && pos.Side != side) return DateTime.MinValue;
