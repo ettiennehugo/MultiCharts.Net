@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrackBar;
 
 namespace PowerLanguage.Strategy
 {
@@ -57,6 +58,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
+		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
 		/// <summary>
@@ -424,6 +426,8 @@ namespace PowerLanguage.Strategy
 			public bool nakedSuppressed;
 			public int levelsGeneration;
 			public int percentilesStampedGeneration = -1;
+			public volatile bool pendingChange;   // set by EChanged, consumed in CalcBar
+			public volatile bool pendingFull;
 			public StreamPack(int datastream) { this.datastream = datastream; }
 			public void bumpGeneration()
 			{
@@ -1884,6 +1888,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+			processPendingProfileChanges();
 			stepVwap(m_vwap1);
 			stepVwap(m_vwap2);
 			stepVwap(m_vwap3);
@@ -2155,30 +2160,6 @@ namespace PowerLanguage.Strategy
 		/// <summary>Chart stream slot 3 was built from (1 = Data1). 0 if unused. Read-only.</summary>
 		public int CurrentVwap3Stream { get { return slotStream(m_vwap3); } }
 
-		/// <summary>
-		/// Re-anchor slot 1 from a swing / news / session-open time. No-op if the slot is Disabled.
-		/// </summary>
-		public void AnchorVwap1(DateTime from)
-		{
-			anchorSlot1(from);
-		}
-
-		/// <summary>
-		/// Re-anchor slot 2 from a swing / news / session-open time. No-op if the slot is Disabled.
-		/// </summary>
-		public void AnchorVwap2(DateTime from)
-		{
-			anchorSlot2(from);
-		}
-
-		/// <summary>
-		/// Re-anchor slot 3 from a swing / news / session-open time. No-op if the slot is Disabled.
-		/// </summary>
-		public void AnchorVwap3(DateTime from)
-		{
-			anchorSlot3(from);
-		}
-
 		//methods
 		private static int slotStream(VwapEngine eng)
 		{
@@ -2328,7 +2309,8 @@ namespace PowerLanguage.Strategy
 			if (current < 1) return;
 
 			double tick = tickSize();
-			double tol = tick > 0 ? NakedPocTickTolerance * tick : 0;
+			// Half a micro-tick of slack so an exact touch is never lost to rounding.
+			double tol = tick > 0 ? NakedPocTickTolerance * tick + tick * 1e-6 : PRICE_EPSILON;
 			IInstrument bars = barsOf(sp.datastream);
 
 			foreach (VpExtra extra in sp.extra.Values)
@@ -2441,36 +2423,6 @@ namespace PowerLanguage.Strategy
 			extra.vwap1Stream = slotStream(m_vwap1);
 			extra.vwap2Stream = slotStream(m_vwap2);
 			extra.vwap3Stream = slotStream(m_vwap3);
-		}
-
-		private void anchorSlot1(DateTime from)
-		{
-			if (m_vwap1 == null || m_vwap1.type == EVwapType.Disabled) return;
-			Vwap1Type = EVwapType.AdaptiveFromDate;
-			Vwap1FromDate = from.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-			m_vwap1.type = EVwapType.AdaptiveFromDate;
-			m_vwap1.fromDate = from;
-			m_vwap1.Reset();
-		}
-
-		private void anchorSlot2(DateTime from)
-		{
-			if (m_vwap2 == null || m_vwap2.type == EVwapType.Disabled) return;
-			Vwap2Type = EVwapType.AdaptiveFromDate;
-			Vwap2FromDate = from.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-			m_vwap2.type = EVwapType.AdaptiveFromDate;
-			m_vwap2.fromDate = from;
-			m_vwap2.Reset();
-		}
-
-		private void anchorSlot3(DateTime from)
-		{
-			if (m_vwap3 == null || m_vwap3.type == EVwapType.Disabled) return;
-			Vwap3Type = EVwapType.AdaptiveFromDate;
-			Vwap3FromDate = from.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-			m_vwap3.type = EVwapType.AdaptiveFromDate;
-			m_vwap3.fromDate = from;
-			m_vwap3.Reset();
 		}
 
 		private static bool tryParseDate(string text, out DateTime dt)
@@ -2687,7 +2639,7 @@ namespace PowerLanguage.Strategy
 
 			int dir = direction == EVpDirection.Bearish ? -1 : 1;
 			int clearTicks = ConfluenceTargetClearTicks;
-			double clear = clearTicks * tickSize();
+			double tick = tickSize();
 			double minZ = ConfluenceTargetMinZScore;
 
 			for (int i = 0; i < m_confluenceZones.Count; i++)
@@ -2696,7 +2648,7 @@ namespace PowerLanguage.Strategy
 				if (zone == null || zone.center <= 0) continue;
 				if (zone.role == EConfluenceRole.Rejection || zone.suggestedUse == "entry" || zone.suggestedUse == "conflict") continue;
 				if (zone.zScore < minZ) continue;
-				if (!zoneClearsPrice(zone, price, dir, clear)) continue;
+				if (!zoneClearsPrice(zone, price, dir, clearTicks, tick)) continue;
 
 				double magnet = zone.anchor > 0 ? zone.anchor : zone.center;
 				double touch = dir > 0 ? zone.low : zone.high;
@@ -2714,12 +2666,13 @@ namespace PowerLanguage.Strategy
 			return list;
 		}
 
-		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, double clear)
+		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, int clearTicks, double tick)
 		{
-			if (zone == null) return false;
+			if (tick <= 0) tick = 0.01;
+			// Compare in whole ticks: robust to 1-ULP noise in derived zone edges.
 			if (dir > 0)
-				return zone.low >= price + clear;
-			return zone.high <= price - clear;
+				return Math.Round((zone.low - price) / tick) >= clearTicks;
+			return Math.Round((price - zone.high) / tick) >= clearTicks;
 		}
 
 		private static int compareTargetsByRank(ConfluenceTarget a, ConfluenceTarget b)
@@ -2923,6 +2876,26 @@ namespace PowerLanguage.Strategy
 		// is not treated as frozen against the new profile objects.
 		private void onVpChanged(StreamPack sp, bool full)
 		{
+			if (full) sp.pendingFull = true;
+			sp.pendingChange = true;
+		}
+
+		// Runs on the calculation thread at the top of CalcBar.
+		private void processPendingProfileChanges()
+		{
+			foreach (var kv in m_streams)
+			{
+				StreamPack sp = kv.Value;
+				if (sp == null || !sp.pendingChange) continue;
+				bool full = sp.pendingFull;
+				sp.pendingChange = false;
+				sp.pendingFull = false;
+				applyVpChanged(sp, full);
+			}
+		}
+
+		private void applyVpChanged(StreamPack sp, bool full)
+		{
 			if (sp.pack == null) return;
 			sp.bumpGeneration();
 			if (full)
@@ -3091,9 +3064,10 @@ namespace PowerLanguage.Strategy
 				while (b < rows.Count - 1 && vols[b + 1] <= lvnCeil) b++;
 				if (!nodeWideEnough(rows[a].price, rows[b].price)) continue;
 				// unused wings with no HVN on both sides are not nodes
-				bool hvnBelow = hasHvnTouching(extra.hvns, rows[a].price, true);
-				bool hvnAbove = hasHvnTouching(extra.hvns, rows[b].price, false);
-				if (!hvnBelow && !hvnAbove) continue;
+				double maxGap = DEFAULT_LVN_HVN_MAX_GAP_TICKS * tickSize();
+				bool hvnBelow = hasHvnAdjacent(extra.hvns, rows[a].price, true, maxGap);
+				bool hvnAbove = hasHvnAdjacent(extra.hvns, rows[b].price, false, maxGap);
+				if (!hvnBelow || !hvnAbove) continue;   // LVN = valley between two HVNs
 				double width = rows[b].price - rows[a].price;
 				if (width > range * DEFAULT_MAX_LVN_PCT_OF_RANGE) continue;
 				extra.lvns.Add(makeNode(rows, vols, a, b, t, pocVol, false));
@@ -3281,12 +3255,20 @@ namespace PowerLanguage.Strategy
 			return leLeft && leRight;
 		}
 
-		private static bool hasHvnTouching(List<Node> hvns, double price, bool lookingDown)
+		private static bool hasHvnAdjacent(List<Node> hvns, double edge, bool lookingDown, double maxGap)
 		{
 			for (int i = 0; i < hvns.Count; i++)
 			{
-				if (lookingDown && hvns[i].high <= price) return true;
-				if (!lookingDown && hvns[i].low >= price) return true;
+				if (lookingDown)
+				{
+					double gap = edge - hvns[i].high;
+					if (gap >= -PRICE_EPSILON && gap <= maxGap + PRICE_EPSILON) return true;
+				}
+				else
+				{
+					double gap = hvns[i].low - edge;
+					if (gap >= -PRICE_EPSILON && gap <= maxGap + PRICE_EPSILON) return true;
+				}
 			}
 			return false;
 		}

@@ -508,6 +508,7 @@
     <Compile Include="_Holidays.Function.CS" />
     <Compile Include="_USHolidays.Function.CS" />
     <Compile Include="_NyseHolidays.Function.CS" />
+    <Compile Include="_Test1.Indicator.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
