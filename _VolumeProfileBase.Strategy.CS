@@ -3253,15 +3253,28 @@ namespace PowerLanguage.Strategy
 				int current = streamItemBarIndex(sp.datastream);
 
 				// 1. Merge newly closed profiles into the reference (O(P) scan, O(N) merge per close).
+				//    After a reset (StartCalc / profile-collection change) every closed profile is new at once:
+				//    merging them one by one copies the growing prefix each time (O(P x N)), so rebuild the
+				//    reference with a single sort instead.
+				m_newClosedScratch.Clear();
 				foreach (VpExtra e in sp.extra.Values)
 				{
 					if (e == null || e.inClosedSet || e.levels.Count == 0) continue;
 					bool closed = current >= 1 && e.endBar >= e.startBar && e.endBar < current && e.nodesBuilt;
 					if (!closed) continue;
-					mergeIntoClosed(sp, e);
-					e.inClosedSet = true;
+					m_newClosedScratch.Add(e);
+				}
+				if (m_newClosedScratch.Count > 1 && sp.closedCount == 0)
+					rebuildClosed(sp, m_newClosedScratch);
+				else
+					for (int i = 0; i < m_newClosedScratch.Count; i++)
+						mergeIntoClosed(sp, m_newClosedScratch[i]);
+				for (int i = 0; i < m_newClosedScratch.Count; i++)
+				{
+					m_newClosedScratch[i].inClosedSet = true;
 					sp.closedLevelsGeneration++;
 				}
+				m_newClosedScratch.Clear();
 
 				// 2. Reference grew: restamp every closed extra (once per profile close, not per bar).
 				if (sp.closedStampedGeneration != sp.closedLevelsGeneration)
@@ -3284,6 +3297,36 @@ namespace PowerLanguage.Strategy
 				}
 				sp.percentilesStampedGeneration = sp.levelsGeneration;
 			}
+		}
+
+		private readonly List<VpExtra> m_newClosedScratch = new List<VpExtra>();
+
+		// Bulk build of an empty closed reference: concatenate and sort each column once (VPB-15B follow-up).
+		private static void rebuildClosed(StreamPack sp, List<VpExtra> extras)
+		{
+			int n = 0;
+			for (int i = 0; i < extras.Count; i++) n += extras[i].levels.Count;
+			var t = new double[n];
+			var a = new double[n];
+			var b = new double[n];
+			int w = 0;
+			for (int i = 0; i < extras.Count; i++)
+			{
+				List<LevelVol> levels = extras[i].levels;
+				for (int k = 0; k < levels.Count; k++, w++)
+				{
+					t[w] = levels[k].total;
+					a[w] = levels[k].ask;
+					b[w] = levels[k].bid;
+				}
+			}
+			Array.Sort(t);
+			Array.Sort(a);
+			Array.Sort(b);
+			sp.closedTotal = t;
+			sp.closedAsk = a;
+			sp.closedBid = b;
+			sp.closedCount = n;
 		}
 
 		private static void mergeIntoClosed(StreamPack sp, VpExtra e)
