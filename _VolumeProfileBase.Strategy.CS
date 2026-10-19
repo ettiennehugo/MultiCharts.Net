@@ -55,6 +55,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR = 0.35; // default minimum HVN strength
 		public const double DEFAULT_CONFLUENCE_NAKED_MULTIPLIER = 1.15; // naked modifies the POC credit; it is not a second source
 		public const double DEFAULT_CONFLUENCE_REFINEMENT = 0.25;       // one nested child per parent already in the zone
+		private const double MAX_PARENT_CREDIT_MULTIPLIER = 1.25;   // a refined child never lifts its parent above 1.25 x credit
 		public const double DEFAULT_CONFLUENCE_OVERLAY_FACTOR = 0.50;   // VWAP context only; never acceptance or rejection
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
@@ -1350,9 +1351,7 @@ namespace PowerLanguage.Strategy
 						continue;
 					}
 					double bonus = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
-					double room = (1.25 * parent.credit) - parent.credit;
-					if (room < 0) room = 0;
-					if (bonus > room) bonus = room;
+					bonus = Math.Min(bonus, Math.Max(0.0, (MAX_PARENT_CREDIT_MULTIPLIER - 1.0) * parent.credit));   // VPB-14: named cap (no-op at 0.25)
 					child.credit = bonus;
 				}
 			}
@@ -2254,7 +2253,7 @@ namespace PowerLanguage.Strategy
 		private IInstrument barsOf(int stream)
 		{
 			if (stream <= 1) return Bars;
-			if (stream < 1 || stream > MaxDataStream) return null;
+			if (stream > MaxDataStream) return null;
 			return BarsOfData(stream);
 		}
 
@@ -2412,14 +2411,6 @@ namespace PowerLanguage.Strategy
 			extra.pocNaked = false;
 			extra.pocTouchedBar = 0;
 			extra.lastNakedScanBar = 0;
-		}
-
-		private void ensureExtraAt(StreamPack sp, int barIndex)
-		{
-			if (sp == null || barIndex < 1) return;
-			IProfile vp = itemForBar(sp, sp.datastream, barIndex);
-			if (vp == null) return;
-			ensureExtra(sp, vp, barIndex);
 		}
 
 		private VpExtra extraFor(StreamPack sp, int datastream, IProfile vp, int chartBar)
@@ -2912,8 +2903,8 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Bump before ensureExtra so a closed histogram rebuilt for the old generation
-		// is not treated as frozen against the new profile objects.
+		// EChanged may arrive off the calculation thread: only flag the stream here; the generation bump and the
+		// rebuild run in processPendingProfileChanges at the top of CalcBar (VPB-09).
 		private void onVpChanged(StreamPack sp, bool full)
 		{
 			if (full) sp.pendingFull = true;
