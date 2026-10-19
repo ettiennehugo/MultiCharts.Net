@@ -3,13 +3,8 @@ using PowerLanguage.Function;
 using PowerLanguage.VolumeProfile;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.Linq;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.ToolTip;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrackBar;
 
 namespace PowerLanguage.Strategy
 {
@@ -35,8 +30,6 @@ namespace PowerLanguage.Strategy
 		public const double PRICE_EPSILON = 1e-12;  // tolerance for price-span compares; about 1 ULP near 7800, far below a tick
 		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
 		public const int DEFAULT_VWAP_LENGTH = 20;
-		public const int VWAP_SLOT_COUNT = 3;
-		public const int CONFLUENCE_STREAM_COUNT = 3;
 		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
 		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
 		public const int DEFAULT_CONFLUENCE_MIN_HITS = 2;
@@ -47,12 +40,6 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_1 = 1.00;  // execution / primary stream
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
-		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_NAKED_POC = 1.25; // naked (unmitigated) POC outweighs a mitigated POC
-		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_HVN = 0.85;   // default confluence weight for high value area node alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT = 0.85;   // default confluence weight for POC alignment
-		public const double DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR = 0.35; // default minimum HVN strength
 		public const double DEFAULT_CONFLUENCE_NAKED_MULTIPLIER = 1.15; // naked modifies the POC credit; it is not a second source
 		public const double DEFAULT_CONFLUENCE_REFINEMENT = 0.25;       // one nested child per parent already in the zone
 		private const double MAX_PARENT_CREDIT_MULTIPLIER = 1.25;   // a refined child never lifts its parent above 1.25 x credit
@@ -60,8 +47,8 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
-		private const int MAX_RESOLVED_CACHE = 4096;
-		private const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale   // itemForBar memo entries per stream before it is cleared
+		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
+		private const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale
 		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
@@ -1419,13 +1406,6 @@ namespace PowerLanguage.Strategy
 				};
 			}
 
-			private static bool isAcceptance(EConfluenceKind k)
-			{
-				return k == EConfluenceKind.Poc || k == EConfluenceKind.NakedPoc
-					|| k == EConfluenceKind.Vah || k == EConfluenceKind.Val
-					|| k == EConfluenceKind.Hvn;
-			}
-
 			private static bool isRejection(EConfluenceKind k)
 			{
 				return k == EConfluenceKind.Lvn;
@@ -1817,10 +1797,6 @@ namespace PowerLanguage.Strategy
 		private double m_tick;   // tickSize() cache, reset in StartCalc
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
-		private double[] m_pctTotal = new double[0];
-		private double[] m_pctAsk = new double[0];
-		private double[] m_pctBid = new double[0];
-		private readonly List<VpExtra> m_pctExtras = new List<VpExtra>();
 
 		//interface methods
 		public _VolumeProfileBase(object _ctx) : base(_ctx) { }
