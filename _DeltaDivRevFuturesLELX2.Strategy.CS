@@ -43,8 +43,7 @@ namespace PowerLanguage.Strategy
 		[Input] public bool AllowAsia { get; set; }             // Allow trading the Asia session
 		[Input] public int EntriesPerSession { get; set; }      // Number of entries per session - 0 = unlimited
 		[Input] public int AbsoluteSize { get; set; } // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
-		[Input] public double MaximumEquityPerPosPercent { get; set; } // NOT USED since DER-03 (an equity/price cap is meaningless for margined futures); kept so saved settings still load - remove when convenient
-		[Input] public int MaxContracts { get; set; } // [alternate B] cap on the risk-based contract count, 0 = no cap
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a fraction of equityAvailable - caps the contract count at equity * fraction / contract notional (price * BigPointValue)
 		[Input] public double RiskBasedEntryPercent { get; set; } // [alternate B] risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
 
 		//attribute
@@ -74,7 +73,6 @@ namespace PowerLanguage.Strategy
 			AbsoluteSize = 0;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
-			MaxContracts = 1;   // conservative default
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LEDDR", EOrderAction.Buy));
 			m_lxStop = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LXStp", EOrderAction.Sell, OrderExit.FromAll));
 			m_lxTgt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "LXTgt", EOrderAction.Sell, OrderExit.FromAll));
@@ -156,10 +154,11 @@ namespace PowerLanguage.Strategy
 				else
 				{
 					// DER-03: contract sizing, |entry - stop| * BigPointValue dollars at risk per contract (the old equity/price
-					// "shares" and points-as-dollars sizes were meaningless for futures), capped by MaxContracts.
-					size = stopLossBasedPositionSize(m_price, refPrice, low, RiskBasedEntryPercent, false);
-					if (MaxContracts > 0 && size > MaxContracts) size = MaxContracts;
-					trace(ETraceLevel.Debug, $"Sending LE: size({size}) ref({refPrice:F4}) stop({low:F4}) risk({risk:F4}) bpv({m_price.Info.BigPointValue}) maxContracts({MaxContracts})");
+					// "shares" and points-as-dollars sizes were meaningless for futures), capped by MaximumEquityPerPosPercent of equityAvailable at the contract notional (PR #1 review).
+					int riskBasedSize = stopLossBasedPositionSize(m_price, refPrice, low, RiskBasedEntryPercent, false);
+					double contractNotional = refPrice * m_price.Info.BigPointValue;
+					size = capByNotional(riskBasedSize, contractNotional, MaximumEquityPerPosPercent);
+					trace(ETraceLevel.Debug, $"Sending LE: size({size}) riskBasedSize({riskBasedSize}) ref({refPrice:F4}) stop({low:F4}) risk({risk:F4}) bpv({m_price.Info.BigPointValue}) notional({contractNotional:F2}) maxEquityPct({MaximumEquityPerPosPercent})");
 				}
 
 				if (size <= 0)
