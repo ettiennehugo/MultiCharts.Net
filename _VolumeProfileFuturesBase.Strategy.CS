@@ -1,10 +1,6 @@
 ﻿using ATCenterProxy.interop;
-using Microsoft.CodeAnalysis.CSharp;
 using PowerLanguage.Function;
 using System;
-using System.Drawing;
-using System.Linq;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace PowerLanguage.Strategy
 {
@@ -24,7 +20,7 @@ namespace PowerLanguage.Strategy
 	/// * Reset developing value area on IsNewGlobexDay(), not at midnight.
 	/// * Do not send orders when GetGlobexState() != Open.
 	/// </summary>
-	public class _VolumeProfileFuturesBase : _VolumeProfileBase
+	public abstract class _VolumeProfileFuturesBase : _VolumeProfileBase
 	{
 		//constants
 		public const string DEFAULT_ASIA_START = "18:00"; // EST Asia session start
@@ -39,6 +35,20 @@ namespace PowerLanguage.Strategy
 		public const string DEFAULT_HALT_END = "18:00"; // EST Daily maintenance halt session end
 		public const string DEFAULT_GLOBEX_OPEN = "18:00";  // EST Sunday open after weekend
 		public const string DEFAULT_GLOBEX_CLOSE = "17:00"; // EST Friday close for weekend
+
+		// Same defaults as TimeSpans (VPF-13: no culture-sensitive TimeSpan.Parse per instance). Keep both in sync.
+		public static readonly TimeSpan DefaultAsiaStart = new TimeSpan(18, 0, 0);
+		public static readonly TimeSpan DefaultAsiaEnd = new TimeSpan(3, 0, 0);
+		public static readonly TimeSpan DefaultEuropeStart = new TimeSpan(3, 0, 0);
+		public static readonly TimeSpan DefaultEuropeEnd = new TimeSpan(11, 30, 0);
+		public static readonly TimeSpan DefaultNewYorkStart = new TimeSpan(8, 0, 0);
+		public static readonly TimeSpan DefaultNewYorkEnd = new TimeSpan(17, 0, 0);
+		public static readonly TimeSpan DefaultRthStart = new TimeSpan(9, 30, 0);
+		public static readonly TimeSpan DefaultRthEnd = new TimeSpan(16, 15, 0);
+		public static readonly TimeSpan DefaultHaltStart = new TimeSpan(17, 0, 0);
+		public static readonly TimeSpan DefaultHaltEnd = new TimeSpan(18, 0, 0);
+		public static readonly TimeSpan DefaultGlobexOpen = new TimeSpan(18, 0, 0);
+		public static readonly TimeSpan DefaultGlobexClose = new TimeSpan(17, 0, 0);
 
 		//types
 		/// <summary>
@@ -70,8 +80,9 @@ namespace PowerLanguage.Strategy
 
 
 		//attribute
-		private TimeSpan m_asiaStart, m_asiaEnd, m_euStart, m_euEnd, m_nyStart, m_nyEnd;
-		private TimeSpan m_rthStart, m_rthEnd, m_haltStart, m_haltEnd, m_globexOpen, m_globexClose;
+		// Session windows in US Eastern; set by configureSessions (override per product, VPF-05).
+		protected TimeSpan m_asiaStart, m_asiaEnd, m_euStart, m_euEnd, m_nyStart, m_nyEnd;
+		protected TimeSpan m_rthStart, m_rthEnd, m_haltStart, m_haltEnd, m_globexOpen, m_globexClose;
 		private TimeZoneInfo m_est;
 
 		//interface methods
@@ -80,18 +91,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			m_asiaStart = TimeSpan.Parse(DEFAULT_ASIA_START);
-			m_asiaEnd = TimeSpan.Parse(DEFAULT_ASIA_END);
-			m_euStart = TimeSpan.Parse(DEFAULT_EUROPE_START);
-			m_euEnd = TimeSpan.Parse(DEFAULT_EUROPE_END);
-			m_nyStart = TimeSpan.Parse(DEFAULT_NEWYORK_START);
-			m_nyEnd = TimeSpan.Parse(DEFAULT_NEWYORK_END);
-			m_rthStart = TimeSpan.Parse(DEFAULT_RTH_START);
-			m_rthEnd = TimeSpan.Parse(DEFAULT_RTH_END);
-			m_haltStart = TimeSpan.Parse(DEFAULT_HALT_START);
-			m_haltEnd = TimeSpan.Parse(DEFAULT_HALT_END);
-			m_globexOpen = TimeSpan.Parse(DEFAULT_GLOBEX_OPEN);
-			m_globexClose = TimeSpan.Parse(DEFAULT_GLOBEX_CLOSE);
+			configureSessions();
 
 			try
 			{
@@ -104,6 +104,28 @@ namespace PowerLanguage.Strategy
 		}
 
 		//methods
+		/// <summary>
+		/// Set the session windows (US Eastern). The defaults are the CME equity-index hours (ES/NQ); other products
+		/// (CL, GC, ZN, 6E, ...) have different RTH hours: override, call base first and change only what differs, e.g.
+		/// protected override void configureSessions() { base.configureSessions(); m_rthStart = new TimeSpan(9, 0, 0); m_rthEnd = new TimeSpan(14, 30, 0); }
+		/// Called from Create (the derived object is fully constructed by then).
+		/// </summary>
+		protected virtual void configureSessions()
+		{
+			m_asiaStart = DefaultAsiaStart;
+			m_asiaEnd = DefaultAsiaEnd;
+			m_euStart = DefaultEuropeStart;
+			m_euEnd = DefaultEuropeEnd;
+			m_nyStart = DefaultNewYorkStart;
+			m_nyEnd = DefaultNewYorkEnd;
+			m_rthStart = DefaultRthStart;
+			m_rthEnd = DefaultRthEnd;
+			m_haltStart = DefaultHaltStart;
+			m_haltEnd = DefaultHaltEnd;
+			m_globexOpen = DefaultGlobexOpen;
+			m_globexClose = DefaultGlobexClose;
+		}
+
 		/// <summary>
 		/// Bar time converted to US Eastern (DST-aware).
 		/// </summary>
