@@ -9,8 +9,8 @@ namespace PowerLanguage.Strategy
 	/// volume profiles and VWAP in the futures market.
 	/// 
 	/// Chart Setup:
-	/// 1. Set the ChartTimeZone input to the zone the chart's bar times are in: chart on Local → "" (this PC's zone);
-	///    chart on Exchange for CME → "Central Standard Time"; chart on Eastern → "Eastern Standard Time".
+	/// 1. The bar time zone is read from Bars.Info.TimeZone (Format Instrument → Settings → Time Zone): Local = this PC's
+	///    zone, GMT = UTC, Exchange = the zone of Bars.Info.Exchange (see exchangeTimeZoneId; unknown exchanges fail in StartCalc).
 	/// 2. All session logic runs in US Eastern; ToEastern converts each bar time once (cached per bar).
 	/// 3. Use the "CME Globex" session template (or equivalent) so the VP base's session VWAP reset agrees with
 	///    the Globex trading day that tradingDayKey/GlobexDate use (18:00 → 17:00 ET).
@@ -78,20 +78,12 @@ namespace PowerLanguage.Strategy
 			Open			// open - see MarketSession to determine exact session state
 		}
 
-		//properties
-		/// <summary>
-		/// VPF-01. Time zone of the chart's bar timestamps. "" or "Local" = this PC's zone (MultiCharts "Local", the old
-		/// behaviour); otherwise a Windows time zone id, e.g. "Central Standard Time" for a CME chart on Exchange time.
-		/// An unknown id fails in StartCalc.
-		/// </summary>
-		[Input] public string ChartTimeZone { get; set; }
-
 		//attribute
 		// Session windows in US Eastern; set by configureSessions (override per product, VPF-05).
 		protected TimeSpan m_asiaStart, m_asiaEnd, m_euStart, m_euEnd, m_nyStart, m_nyEnd;
 		protected TimeSpan m_rthStart, m_rthEnd, m_haltStart, m_haltEnd, m_globexOpen, m_globexClose;
 		private TimeZoneInfo m_est;
-		private TimeZoneInfo m_chartTz;     // resolved from ChartTimeZone in StartCalc
+		private TimeZoneInfo m_chartTz;     // resolved from Bars.Info in StartCalc (VPF-01)
 		private bool m_chartIsEastern;      // chart zone has Eastern's rules: no conversion needed
 		private DateTime m_cacheBarTime;    // VPF-10 one-entry cache, keyed on bar time
 		private DateTime m_cacheEt;
@@ -115,27 +107,60 @@ namespace PowerLanguage.Strategy
 			{
 				m_est = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 			}
-			ChartTimeZone = "";
 		}
 
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_chartTz = resolveChartTz(ChartTimeZone);
+			m_chartTz = resolveChartTz(Bars.Info);
 			m_chartIsEastern = m_chartTz.Id == m_est.Id
 				|| (m_chartTz.BaseUtcOffset == m_est.BaseUtcOffset && m_chartTz.HasSameRules(m_est));
 			m_cacheValid = false;   // zone or session windows may have changed
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
-		private static TimeZoneInfo resolveChartTz(string id)
+		/// <summary>
+		/// VPF-01. Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
+		/// </summary>
+		private TimeZoneInfo resolveChartTz(IInstrumentSettings info)
 		{
-			if (string.IsNullOrWhiteSpace(id) || string.Equals(id.Trim(), "Local", StringComparison.OrdinalIgnoreCase))
-				return TimeZoneInfo.Local;
-			try { return TimeZoneInfo.FindSystemTimeZoneById(id.Trim()); }
+			switch (info.TimeZone)
+			{
+				case RequestTimeZone.Local:
+					return TimeZoneInfo.Local;
+				case RequestTimeZone.GMT:
+					return TimeZoneInfo.Utc;
+				case RequestTimeZone.Exchange:
+					string id = exchangeTimeZoneId(info.Exchange);
+					if (id == null)
+						throw new Exception("Exchange '" + info.Exchange + "' has no known time zone: set the chart to Local time or override exchangeTimeZoneId.");
+					return findTz(id);
+				default:
+					return TimeZoneInfo.Local;
+			}
+		}
+
+		/// <summary>
+		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
+		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
+		/// </summary>
+		protected virtual string exchangeTimeZoneId(string exchange)
+		{
+			if (string.IsNullOrWhiteSpace(exchange)) return null;
+			string e = exchange.ToUpperInvariant();
+			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
+			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
+			// New York: NYMEX/COMEX and the US equity exchanges
+			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
+			return null;
+		}
+
+		private static TimeZoneInfo findTz(string windowsId)
+		{
+			try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
 			catch (TimeZoneNotFoundException) { }
-			catch (InvalidTimeZoneException) { }
-			throw new ArgumentException("ChartTimeZone '" + id + "' is not a known time zone id (see tzutil /l).");
+			if (windowsId == "Central Standard Time") return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+			return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 		}
 
 		//methods
@@ -162,7 +187,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Bar time (chart time zone, see ChartTimeZone) converted to US Eastern (DST-aware). VPF-01/03.
+		/// Bar time (bar time zone from Bars.Info, see resolveChartTz) converted to US Eastern (DST-aware). VPF-01/03.
 		/// Pass bar times only; never pass a value that is already Eastern (use the *Et cores for those, VPF-02).
 		/// </summary>
 		protected DateTime ToEastern(DateTime barTime)
