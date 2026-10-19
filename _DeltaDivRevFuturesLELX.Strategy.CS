@@ -739,13 +739,5 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private double tickSize()
-		{
-			double tick = Bars.Info.MinMove / Bars.Info.PriceScale;
-			if (double.IsNaN(tick) || double.IsInfinity(tick) || tick <= 0)
-				return 0.01;
-			return tick;
-		}
-
 	}
 }

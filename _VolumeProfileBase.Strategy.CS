@@ -60,7 +60,8 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
-		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
+		private const int MAX_RESOLVED_CACHE = 4096;
+		private const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale   // itemForBar memo entries per stream before it is cleared
 		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
@@ -1813,6 +1814,7 @@ namespace PowerLanguage.Strategy
 		private int m_confluenceBuiltBar2 = int.MinValue;
 		private int m_confluenceBuiltBar3 = int.MinValue;
 		private bool m_volumePctDirty;
+		private double m_tick;   // tickSize() cache, reset in StartCalc
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
 		private double[] m_pctTotal = new double[0];
@@ -1885,6 +1887,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			m_tick = 0;   // re-resolved on first use (VPB-20)
 			validateInputs();
 			unhookStreams();
 			m_streams.Clear();
@@ -2902,17 +2905,31 @@ namespace PowerLanguage.Strategy
 			return bars.Time[ago];
 		}
 
-		private double tickSize()
+		/// <summary>
+		/// Minimum price move of Data1 (VPB-20). Resolved once per StartCalc (lazily, so it is valid even if something
+		/// in StartCalc asks first) instead of a try/catch on every call inside per-extra loops. Derived classes use it.
+		/// </summary>
+		protected double tickSize()
+		{
+			if (m_tick <= 0) m_tick = resolveTick();
+			return m_tick;
+		}
+
+		private double resolveTick()
 		{
 			try
 			{
 				double mm = Bars.Info.MinMove;
 				double ps = Bars.Info.PriceScale;
-				if (ps != 0) return Math.Abs(mm / ps);
+				if (ps != 0)
+				{
+					double t = Math.Abs(mm / ps);
+					if (t > 0 && !double.IsInfinity(t)) return t;
+				}
 				if (mm > 0) return mm;
 			}
 			catch { }
-			return 0.01;
+			return FALLBACK_TICK;
 		}
 
 		private bool nodeWideEnough(double low, double high)
