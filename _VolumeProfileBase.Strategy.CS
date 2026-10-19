@@ -20,7 +20,7 @@ namespace PowerLanguage.Strategy
 	/// AdaptiveFromDate reads VwapFromDate / Vwap2FromDate / Vwap3FromDate as strings
 	/// ("yyyy-MM-dd" or "yyyy-MM-dd HH:mm[:ss]").
 	/// </summary>
-	public class _VolumeProfileBase : _CustomSignal
+	public abstract class _VolumeProfileBase : _CustomSignal
 	{
 		//constants
 		public const double DEFAULT_HVN_PERCENTILE = 0.8;  // Default percentile of prices relative to POC considered high volume node prices.
