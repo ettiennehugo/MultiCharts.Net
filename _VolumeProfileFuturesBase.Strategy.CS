@@ -9,9 +9,11 @@ namespace PowerLanguage.Strategy
 	/// volume profiles and VWAP in the futures market.
 	/// 
 	/// Chart Setup:
-	/// 1. QuoteManager symbol timezone = Exchange (CME is Chicago).
-	/// 2. Chart Format Instrument → Time Zone: pick Exchange or Eastern and stay there.
-	/// 3. If the chart is Local and your PC is already Atlanta/Eastern, ToEastern is a no-op. If you ever run MC on a VPS in another zone, the conversion saves you.
+	/// 1. Set the ChartTimeZone input to the zone the chart's bar times are in: chart on Local → "" (this PC's zone);
+	///    chart on Exchange for CME → "Central Standard Time"; chart on Eastern → "Eastern Standard Time".
+	/// 2. All session logic runs in US Eastern; ToEastern converts each bar time once (cached per bar).
+	/// 3. Use the "CME Globex" session template (or equivalent) so the VP base's session VWAP reset agrees with
+	///    the Globex trading day that tradingDayKey/GlobexDate use (18:00 → 17:00 ET).
 	/// 
 	/// General Notes:
 	/// * Allow entries only when InSession(MarketSession.Rth) - high liquidity confirms moves.
@@ -77,13 +79,25 @@ namespace PowerLanguage.Strategy
 		}
 
 		//properties
-
+		/// <summary>
+		/// VPF-01. Time zone of the chart's bar timestamps. "" or "Local" = this PC's zone (MultiCharts "Local", the old
+		/// behaviour); otherwise a Windows time zone id, e.g. "Central Standard Time" for a CME chart on Exchange time.
+		/// An unknown id fails in StartCalc.
+		/// </summary>
+		[Input] public string ChartTimeZone { get; set; }
 
 		//attribute
 		// Session windows in US Eastern; set by configureSessions (override per product, VPF-05).
 		protected TimeSpan m_asiaStart, m_asiaEnd, m_euStart, m_euEnd, m_nyStart, m_nyEnd;
 		protected TimeSpan m_rthStart, m_rthEnd, m_haltStart, m_haltEnd, m_globexOpen, m_globexClose;
 		private TimeZoneInfo m_est;
+		private TimeZoneInfo m_chartTz;     // resolved from ChartTimeZone in StartCalc
+		private bool m_chartIsEastern;      // chart zone has Eastern's rules: no conversion needed
+		private DateTime m_cacheBarTime;    // VPF-10 one-entry cache, keyed on bar time
+		private DateTime m_cacheEt;
+		private GlobexState m_cacheState;
+		private MarketSession m_cacheSessions;
+		private bool m_cacheValid;
 
 		//interface methods
 		public _VolumeProfileFuturesBase(object _ctx) : base(_ctx) { }
@@ -101,6 +115,27 @@ namespace PowerLanguage.Strategy
 			{
 				m_est = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 			}
+			ChartTimeZone = "";
+		}
+
+		protected override void StartCalc()
+		{
+			base.StartCalc();
+			m_chartTz = resolveChartTz(ChartTimeZone);
+			m_chartIsEastern = m_chartTz.Id == m_est.Id
+				|| (m_chartTz.BaseUtcOffset == m_est.BaseUtcOffset && m_chartTz.HasSameRules(m_est));
+			m_cacheValid = false;   // zone or session windows may have changed
+			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
+		}
+
+		private static TimeZoneInfo resolveChartTz(string id)
+		{
+			if (string.IsNullOrWhiteSpace(id) || string.Equals(id.Trim(), "Local", StringComparison.OrdinalIgnoreCase))
+				return TimeZoneInfo.Local;
+			try { return TimeZoneInfo.FindSystemTimeZoneById(id.Trim()); }
+			catch (TimeZoneNotFoundException) { }
+			catch (InvalidTimeZoneException) { }
+			throw new ArgumentException("ChartTimeZone '" + id + "' is not a known time zone id (see tzutil /l).");
 		}
 
 		//methods
@@ -127,28 +162,27 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Bar time converted to US Eastern (DST-aware).
+		/// Bar time (chart time zone, see ChartTimeZone) converted to US Eastern (DST-aware). VPF-01/03.
+		/// Pass bar times only; never pass a value that is already Eastern (use the *Et cores for those, VPF-02).
 		/// </summary>
 		protected DateTime ToEastern(DateTime barTime)
 		{
-			// Bars.Time is unspecified. Treat it as the chart TZ.
-			// Safest default: chart set to Exchange or Eastern.
 			if (barTime.Kind == DateTimeKind.Utc)
 				return TimeZoneInfo.ConvertTimeFromUtc(barTime, m_est);
 
-			return TimeZoneInfo.ConvertTime(barTime, TimeZoneInfo.Local, m_est);
+			// Bars.Time carries no zone: interpret it in the configured chart zone.
+			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);   // ConvertTime rejects Kind=Local with a non-Local source
+			if (m_chartIsEastern) return t;
+			TimeZoneInfo src = m_chartTz ?? TimeZoneInfo.Local;                     // before StartCalc: legacy behaviour (PC local)
+			if (src.IsInvalidTime(t)) t = t.AddHours(1);                            // VPF-03: spring-forward gap, ConvertTime would throw
+			return TimeZoneInfo.ConvertTime(t, src, m_est);
 		}
 
-		protected GlobexState GetGlobexState()
+		// ---- Eastern-time cores (VPF-02): input is already ET, never convert here ----
+		private GlobexState globexStateEt(DateTime et)
 		{
-			return GetGlobexState(Bars.Time[0]);
-		}
-
-		protected GlobexState GetGlobexState(DateTime barTime)
-		{
-			var est = ToEastern(barTime);
-			var t = est.TimeOfDay;
-			var d = est.DayOfWeek;
+			var t = et.TimeOfDay;
+			var d = et.DayOfWeek;
 
 			// Weekend: Fri after close through Sun before reopen
 			if (d == DayOfWeek.Saturday)
@@ -167,6 +201,67 @@ namespace PowerLanguage.Strategy
 			return GlobexState.Open;
 		}
 
+		private static readonly MarketSession[] s_singleSessions =
+		{
+			MarketSession.Asia, MarketSession.Europe, MarketSession.NewYork, MarketSession.Rth, MarketSession.Premarket, MarketSession.PostMarket
+		};
+
+		private MarketSession sessionsEt(DateTime et)
+		{
+			if (globexStateEt(et) != GlobexState.Open)
+				return MarketSession.None;
+
+			// VPF-08: every single-flag session uses its TryWindow window, so GetSessions and TrySessionBounds agree.
+			var t = et.TimeOfDay;
+			var s = MarketSession.None;
+			for (int i = 0; i < s_singleSessions.Length; i++)
+			{
+				TimeSpan start, end;
+				bool wraps;
+				if (TryWindow(s_singleSessions[i], out start, out end, out wraps) && InWindow(t, start, end, wraps))
+					s |= s_singleSessions[i];
+			}
+
+			return s;
+		}
+
+		private DateTime globexDateEt(DateTime et)
+		{
+			if (et.TimeOfDay >= m_globexOpen)
+				return et.Date.AddDays(1);
+			return et.Date;
+		}
+
+		// ---- One-entry per-bar cache (VPF-10): IOG ticks and repeated InSession calls share one conversion ----
+		private void ensureBarCache(DateTime barTime)
+		{
+			if (m_cacheValid && barTime == m_cacheBarTime) return;
+			m_cacheBarTime = barTime;
+			m_cacheEt = ToEastern(barTime);
+			m_cacheState = globexStateEt(m_cacheEt);
+			m_cacheSessions = sessionsEt(m_cacheEt);
+			m_cacheValid = true;
+		}
+
+		/// <summary>Current bar time in US Eastern (cached per bar time).</summary>
+		protected DateTime EasternNow()
+		{
+			ensureBarCache(Bars.Time[0]);
+			return m_cacheEt;
+		}
+
+		protected GlobexState GetGlobexState()
+		{
+			return GetGlobexState(Bars.Time[0]);
+		}
+
+		/// <param name="barTime">Bar time in the chart time zone (not Eastern).</param>
+		protected GlobexState GetGlobexState(DateTime barTime)
+		{
+			ensureBarCache(barTime);
+			return m_cacheState;
+		}
+
 		/// <summary>
 		/// All regional sessions that contain this bar. Overlaps are expected.
 		/// Example: 10:05 AM ET → Europe | NewYork | Rth
@@ -176,27 +271,11 @@ namespace PowerLanguage.Strategy
 			return GetSessions(Bars.Time[0]);
 		}
 
+		/// <param name="barTime">Bar time in the chart time zone (not Eastern).</param>
 		protected MarketSession GetSessions(DateTime barTime)
 		{
-			if (GetGlobexState(barTime) != GlobexState.Open)
-				return MarketSession.None;
-
-			var t = ToEastern(barTime).TimeOfDay;
-			var s = MarketSession.None;
-
-			if (InWindow(t, m_asiaStart, m_asiaEnd, wraps: true)) s |= MarketSession.Asia;
-			if (InWindow(t, m_euStart, m_euEnd, wraps: false)) s |= MarketSession.Europe;
-			if (InWindow(t, m_nyStart, m_nyEnd, wraps: false)) s |= MarketSession.NewYork;
-			if (InWindow(t, m_rthStart, m_rthEnd, wraps: false)) s |= MarketSession.Rth;
-
-			var preEnd = m_rthStart;
-			if (InWindow(t, m_nyStart, preEnd, wraps: false) && t < m_rthStart)
-				s |= MarketSession.Premarket;
-
-			if (t >= m_rthEnd && t < m_haltStart)
-				s |= MarketSession.PostMarket;
-
-			return s;
+			ensureBarCache(barTime);
+			return m_cacheSessions;
 		}
 
 		protected bool InSession(MarketSession session)
@@ -225,22 +304,25 @@ namespace PowerLanguage.Strategy
 		/// CME Globex trading date: a bar at Sunday 18:30 ET belongs to Monday.
 		/// Use this to reset daily VP / IB / "one trade per day" state.
 		/// </summary>
+		/// <param name="barTime">Bar time in the chart time zone (not Eastern).</param>
 		protected DateTime GlobexDate(DateTime barTime)
 		{
-			var et = ToEastern(barTime);
-			if (et.TimeOfDay >= m_globexOpen)
-				return et.Date.AddDays(1);
-			return et.Date;
+			if (m_cacheValid && barTime == m_cacheBarTime) return globexDateEt(m_cacheEt);
+			return globexDateEt(ToEastern(barTime));
 		}
 
+		/// <summary>
+		/// True on the first bar of a Globex trading day (VPF-06: only the chart's very first bar has no predecessor;
+		/// Bars.CurrentBar is MaxBarsBack-relative, so the old CurrentBar &lt; 2 test fired on the first calculated bar).
+		/// </summary>
 		protected bool IsNewGlobexDay()
 		{
-			if (Bars.CurrentBar < 2) return true;
+			if (Bars.FullSymbolData.Current <= 1) return true;
 			return GlobexDate(Bars.Time[0]) != GlobexDate(Bars.Time[1]);
 		}
 
 		/// <summary>
-		/// Check whether a specific time it withint a given window.
+		/// Check whether a specific time is within a given window [start, end).
 		/// </summary>
 		/// <param name="wraps">
 		/// True for windows that cross midnight (Asia 18:00→03:00).
@@ -255,38 +337,40 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Single label when you must pick one. Priority: RTH > NewYork > Europe > Asia.
-		/// Overlaps still exist; use GetSessions when the overlap matters.
+		/// Single label when you must pick one. Priority: RTH > Premarket > PostMarket > NewYork > Europe > Asia
+		/// (VPF-07: Premarket/PostMarket are subsets of NewYork and were unreachable). With the default windows NewYork
+		/// is only returned on a no-RTH holiday session. Overlaps still exist; use GetSessions when the overlap matters.
 		/// </summary>
 		public MarketSession PrimarySession()
 		{
-			return PrimarySession(ToEastern(Bars.Time[0]));
+			return PrimarySession(EasternNow());
 		}
 
+		/// <param name="eastern">Time in US Eastern (already converted; see ToEastern).</param>
 		public MarketSession PrimarySession(DateTime eastern)
 		{
-			MarketSession s = GetSessions(eastern);
+			MarketSession s = sessionsEt(eastern);   // VPF-02: no second conversion
 			if ((s & MarketSession.Rth) != 0) return MarketSession.Rth;
+			if ((s & MarketSession.Premarket) != 0) return MarketSession.Premarket;
+			if ((s & MarketSession.PostMarket) != 0) return MarketSession.PostMarket;
 			if ((s & MarketSession.NewYork) != 0) return MarketSession.NewYork;
 			if ((s & MarketSession.Europe) != 0) return MarketSession.Europe;
 			if ((s & MarketSession.Asia) != 0) return MarketSession.Asia;
-			if ((s & MarketSession.Premarket) != 0) return MarketSession.Premarket;
-			if ((s & MarketSession.PostMarket) != 0) return MarketSession.PostMarket;
 			return MarketSession.None;
+		}
+
+		/// <summary>As <see cref="TimeSinceOpen(DateTime, MarketSession)"/> for the current bar.</summary>
+		public TimeSpan TimeSinceOpen(MarketSession session)
+		{
+			return TimeSinceOpen(EasternNow(), session);
 		}
 
 		/// <summary>
 		/// Elapsed time since this session's open for the Globex day that contains <paramref name="eastern"/>.
 		/// Returns TimeSpan.MinValue if that session is not active.
-		/// <paramref name="eastern"/>
-		/// Time zone in est.
-		/// </paramref>
 		/// </summary>
-		public TimeSpan TimeSinceOpen(MarketSession session)
-		{
-			return TimeSinceOpen(ToEastern(Bars.Time[0]), session);
-		}
-
+		/// <param name="eastern">Time in US Eastern (already converted; see ToEastern).</param>
+		/// <param name="session">A single session flag.</param>
 		public TimeSpan TimeSinceOpen(DateTime eastern, MarketSession session)
 		{
 			DateTime open;
@@ -300,7 +384,7 @@ namespace PowerLanguage.Strategy
 
 		public int MinutesSinceOpen(MarketSession session)
 		{
-			return MinutesSinceOpen(ToEastern(Bars.Time[0]), session);
+			return MinutesSinceOpen(EasternNow(), session);
 		}
 
 		public int MinutesSinceOpen(DateTime eastern, MarketSession session)
@@ -313,7 +397,7 @@ namespace PowerLanguage.Strategy
 
 		public TimeSpan TimeUntilClose(MarketSession session)
 		{
-			return TimeUntilClose(ToEastern(Bars.Time[0]), session);
+			return TimeUntilClose(EasternNow(), session);
 		}
 
 		public TimeSpan TimeUntilClose(DateTime eastern, MarketSession session)
@@ -329,7 +413,7 @@ namespace PowerLanguage.Strategy
 
 		public int MinutesUntilClose(MarketSession session)
 		{
-			return MinutesUntilClose(ToEastern(Bars.Time[0]), session);
+			return MinutesUntilClose(EasternNow(), session);
 		}
 
 		public int MinutesUntilClose(DateTime eastern, MarketSession session)
@@ -359,7 +443,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		public bool IsOpeningRange(MarketSession session, int minutes)
 		{
-			return IsOpeningRange(ToEastern(Bars.Time[0]), session, minutes);
+			return IsOpeningRange(EasternNow(), session, minutes);
 		}
 
 		public bool IsOpeningRange(DateTime eastern, MarketSession session, int minutes)
@@ -368,10 +452,10 @@ namespace PowerLanguage.Strategy
 			return elapsed >= 0 && elapsed < minutes;
 		}
 
-		/// <summary>First N minutes of RTH.</summary>
+		/// <summary>True once at least <paramref name="ibMinutes"/> minutes of RTH have elapsed (after the initial balance). False outside RTH.</summary>
 		public bool IsRthAfterInitialBalance(int ibMinutes)
 		{
-			return IsRthAfterInitialBalance(ToEastern(Bars.Time[0]), ibMinutes);
+			return IsRthAfterInitialBalance(EasternNow(), ibMinutes);
 		}
 
 		public bool IsRthAfterInitialBalance(DateTime eastern, int ibMinutes)
@@ -399,7 +483,7 @@ namespace PowerLanguage.Strategy
 			if (!TryWindow(session, out start, out end, out wraps))
 				return false;
 
-			DateTime gxDate = GlobexDate(eastern);
+			DateTime gxDate = globexDateEt(eastern);   // VPF-02: input is already Eastern
 			// GlobexDate is the *calendar date the session is labeled*.
 			// Open at 18:00 lives on gxDate - 1.
 			DateTime gxStartCalendar = gxDate.AddDays(-1);
