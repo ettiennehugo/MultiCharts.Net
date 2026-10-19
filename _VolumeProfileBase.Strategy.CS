@@ -2395,7 +2395,6 @@ namespace PowerLanguage.Strategy
 							break;
 						}
 					}
-					extra.lastNakedScanBar = current;
 					// Only bars that can no longer change are final; the forming bar is rescanned next call.
 					bool currentClosed = bars != null && bars.Status == EBarState.Close;
 					int lastFinal = currentClosed ? current : current - 1;
