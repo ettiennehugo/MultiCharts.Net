@@ -1972,6 +1972,27 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
+		/// DER-06. Up to <paramref name="count"/> completed profiles on <paramref name="datastream"/> that ended before
+		/// <paramref name="asOfBar"/> (1-based Status Bar #), newest first, straight from the stored extras. Read-only: no fill,
+		/// no geometry, no VWAP stamping; only the (idempotent, once-per-bar) naked-POC stamp that sets pocComplete.
+		/// Extras exist for every profile CalcBar has seen (current and just-closed profile each bar) and for every profile in the
+		/// collection after a full change; profiles that ended before the first calculated bar may be missing, so callers that
+		/// need exactly <paramref name="count"/> profiles should fall back to ExtraVolumeProfileForBar when fewer are returned.
+		/// </summary>
+		public List<VpExtra> RecentCompletedProfiles(int datastream, int count, int asOfBar)
+		{
+			var result = new List<VpExtra>();
+			StreamPack sp;
+			if (count <= 0 || m_streams == null || !m_streams.TryGetValue(datastream, out sp) || sp == null) return result;
+			stampNakedPocs(sp);
+			foreach (VpExtra e in sp.extra.Values)
+				if (e != null && e.pocComplete && e.startBar >= 1 && e.endBar < asOfBar) result.Add(e);
+			result.Sort((a, b) => b.startBar.CompareTo(a.startBar));   // newest first
+			if (result.Count > count) result.RemoveRange(count, result.Count - count);
+			return result;
+		}
+
+		/// <summary>
 		/// Completed POCs on <paramref name="datastream"/> that no later bar has traded
 		/// as of that stream's current calculation bar. Newest unfinished auction first.
 		/// The developing profile is never included.

@@ -597,20 +597,50 @@ namespace PowerLanguage.Strategy
 
 		private void collectCompletedProfiles(int stream, int asOf, double close, double pointValue, int qty, double minProfit, ref ExitCandidate best, ref int examined)
 		{
+			// DER-06: read the last ProfileLookback completed profiles straight from the base's extras (no per-step query with
+			// side effects). Only when fewer exist (start of a backtest, profiles older than the first calculated bar) fall back
+			// to the original backward walk, so the candidate set is unchanged.
+			List<VpExtra> recent = RecentCompletedProfiles(stream, ProfileLookback, asOf);
+			if (recent.Count < ProfileLookback)
+			{
+				walkCompletedProfiles(stream, asOf, close, pointValue, qty, minProfit, ref best, ref examined);
+				return;
+			}
+			for (int p = 0; p < recent.Count; p++)
+				considerCompletedProfile(recent[p], stream, p + 1, close, pointValue, qty, minProfit, ref best, ref examined);
+		}
+
+		private void considerCompletedProfile(VpExtra extra, int stream, int ordinal, double close, double pointValue, int qty, double minProfit, ref ExitCandidate best, ref int examined)
+		{
+			int start = extra.startBar;
+			trace(ETraceLevel.Debug, $"profile complete stream({stream}) start({start}) end({extra.endBar}) poc({extra.poc}) hvns({(extra.hvns == null ? 0 : extra.hvns.Count)}) lookback({ordinal}/{ProfileLookback})");
+			if (extra.poc > 0)
+				consider(ref best, ref examined, extra.poc, extra.poc, 1, 1, 1.0, "POC", close, pointValue, qty, minProfit);
+
+			List<Node> hvns = extra.hvns;
+			if (hvns == null) return;
+			for (int i = 0; i < hvns.Count; i++)
+			{
+				Node node = hvns[i];
+				if (!(node.peak > 0) || node.strength < HvnStrengthFloor)
+				{
+					trace(ETraceLevel.Debug, $"hvn skip stream({stream}) start({start}) peak({node.peak}) strength({node.strength}) floor({HvnStrengthFloor})");
+					continue;
+				}
+				consider(ref best, ref examined, node.peak, node.peak, 1, 0, node.strength, "HVN", close, pointValue, qty, minProfit);
+			}
+		}
+
+		// Original backward walk (fallback for collectCompletedProfiles).
+		private void walkCompletedProfiles(int stream, int asOf, double close, double pointValue, int qty, double minProfit, ref ExitCandidate best, ref int examined)
+		{
 			int barIndex = asOf;
 			int completed = 0;
 			HashSet<int> seen = new HashSet<int>();
 			while (barIndex >= 1 && completed < ProfileLookback)
 			{
-				VpExtra extra;
-				try
-				{
-					extra = ExtraVolumeProfileForBar(stream, barIndex);
-				}
-				catch
-				{
-					break;
-				}
+				// no catch-all: a swallowed exception here would also hide MaxBarsBack auto-detect exceptions
+				VpExtra extra = ExtraVolumeProfileForBar(stream, barIndex);
 				if (extra == null)
 				{
 					trace(ETraceLevel.Debug, $"profile miss stream({stream}) bar({barIndex})");
@@ -635,24 +665,7 @@ namespace PowerLanguage.Strategy
 				}
 
 				completed++;
-				trace(ETraceLevel.Debug, $"profile complete stream({stream}) start({start}) end({extra.endBar}) poc({extra.poc}) hvns({(extra.hvns == null ? 0 : extra.hvns.Count)}) lookback({completed}/{ProfileLookback})");
-				if (extra.poc > 0)
-					consider(ref best, ref examined, extra.poc, extra.poc, 1, 1, 1.0, "POC", close, pointValue, qty, minProfit);
-
-				List<Node> hvns = extra.hvns;
-				if (hvns != null)
-				{
-					for (int i = 0; i < hvns.Count; i++)
-					{
-						Node node = hvns[i];
-						if (!(node.peak > 0) || node.strength < HvnStrengthFloor)
-						{
-							trace(ETraceLevel.Debug, $"hvn skip stream({stream}) start({start}) peak({node.peak}) strength({node.strength}) floor({HvnStrengthFloor})");
-							continue;
-						}
-						consider(ref best, ref examined, node.peak, node.peak, 1, 0, node.strength, "HVN", close, pointValue, qty, minProfit);
-					}
-				}
+				considerCompletedProfile(extra, stream, completed, close, pointValue, qty, minProfit, ref best, ref examined);
 				barIndex = next;
 			}
 		}
