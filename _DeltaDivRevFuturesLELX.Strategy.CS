@@ -43,7 +43,7 @@ namespace PowerLanguage.Strategy
 		[Input] public bool AllowOutsideRth { get; set; }
 		[Input] public bool AllowAsia { get; set; }
 		[Input] public bool OneTradePerGlobexDay { get; set; }
-		[Input] public int MaxContracts { get; set; }            // 0 = no cap
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // > 0 and <= 1. Caps contracts at equityAvailable(this) / (price * BigPointValue), same as LELX2
 		[Input] public int TargetScanCount { get; set; }         // >= 1. passed to GetConfluenceTargets
 		[Input] public int ProfileLookback { get; set; }         // >= 1. completed profiles walked for POC/HVN
 		[Input] public double HvnStrengthFloor { get; set; }     // 0..1. Node.strength minimum
@@ -87,7 +87,7 @@ namespace PowerLanguage.Strategy
 			AllowOutsideRth = false;
 			AllowAsia = false;
 			OneTradePerGlobexDay = false;
-			MaxContracts = 0;
+			MaximumEquityPerPosPercent = 1.0;
 			TargetScanCount = 12;
 			ProfileLookback = 4;
 			HvnStrengthFloor = 0.35;
@@ -154,8 +154,8 @@ namespace PowerLanguage.Strategy
 				throw new ArgumentException("MaxEntryDistanceTicks must be 1 or greater.");
 			if (StopBufferTicks < 0)
 				throw new ArgumentException("StopBufferTicks must be 0 or greater.");
-			if (MaxContracts < 0)
-				throw new ArgumentException("MaxContracts must be 0 or greater.");
+			if (!(MaximumEquityPerPosPercent > 0.0) || MaximumEquityPerPosPercent > 1.0)
+				throw new ArgumentException("MaximumEquityPerPosPercent must be greater than 0 and less than or equal to 1.");
 			if (TargetScanCount < 1)
 				throw new ArgumentException("TargetScanCount must be 1 or greater.");
 			if (ProfileLookback < 1)
@@ -478,12 +478,11 @@ namespace PowerLanguage.Strategy
 			// qty = floor( equityAvailable(RiskPercent) / dollarRiskPerContract ), round lots off.
 			double dollarRiskPerContract = Math.Round(Math.Abs(close - stopPrice) * pointValue, 2);
 			int qty = riskBasedPositionSize(dollarRiskPerContract, RiskPercent, false);
-			trace(ETraceLevel.Debug, $"size dollarRiskPerContract({dollarRiskPerContract}) riskPercent({RiskPercent}) rawQty({qty}) maxContracts({MaxContracts}) pointValue({pointValue})");
-			if (MaxContracts > 0 && qty > MaxContracts)
-			{
-				trace(ETraceLevel.Debug, $"size cap qty({qty}) MaxContracts({MaxContracts})");
-				qty = MaxContracts;
-			}
+			// Cap by MaximumEquityPerPosPercent of equityAvailable at the full contract notional (as LELX2, deae040).
+			double contractNotional = close * pointValue;
+			int riskQty = qty;
+			qty = capByNotional(qty, contractNotional, MaximumEquityPerPosPercent);
+			trace(ETraceLevel.Debug, $"size dollarRiskPerContract({dollarRiskPerContract}) riskPercent({RiskPercent}) riskQty({riskQty}) notional({contractNotional:F2}) maxEquityPct({MaximumEquityPerPosPercent}) qty({qty}) pointValue({pointValue})");
 			if (qty < 1)
 			{
 				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) qty({qty})");
