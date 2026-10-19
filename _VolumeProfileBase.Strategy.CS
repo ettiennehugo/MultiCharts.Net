@@ -60,6 +60,7 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
+		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
 		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
@@ -413,8 +414,9 @@ namespace PowerLanguage.Strategy
 		///
 		/// generation is the invalidation token for this stream. onVpChanged and StartCalc bump it.
 		/// listedCache is the sorted pack.Items snapshot for that generation, so itemForBar does not
-		/// walk Items on every bar. cachedBarA/B remember the last two chartBar resolutions
-		/// (CalcBar always asks for current and current-1). A generation bump drops both caches.
+		/// walk Items on every bar; listedStarts holds the start bar of each listed profile (same order)
+		/// for a binary search. resolved memoizes itemForBar for bars before the calc bar, cachedBarA the
+		/// calc bar itself (VPB-17). A generation bump drops all of them.
 		/// nakedSuppressed is the TrackNakedPoc-off clear-once flag. levelsGeneration moves only
 		/// when an extra gains, loses, or rebuilds levels, so percentiles can skip a quiet stream.
 		/// </summary>
@@ -427,11 +429,11 @@ namespace PowerLanguage.Strategy
 			public int generation;
 			public int listedGeneration = -1;
 			public List<IProfile> listedCache;
+			public int[] listedStarts = new int[0];   // profileStartBar(listedCache[i]), ascending
 			public int resolveGeneration = -1;
-			public int cachedBarA = -1;
+			public readonly Dictionary<int, IProfile> resolved = new Dictionary<int, IProfile>();   // bars < calc bar
+			public int cachedBarA = -1;               // calc bar memo (its window can still grow)
 			public IProfile cachedProfileA;
-			public int cachedBarB = -1;
-			public IProfile cachedProfileB;
 			public bool nakedSuppressed;
 			public int levelsGeneration;
 			public int percentilesStampedGeneration = -1;
@@ -451,10 +453,9 @@ namespace PowerLanguage.Strategy
 				if (generation == int.MaxValue) generation = 1;
 				listedGeneration = -1;
 				resolveGeneration = -1;
+				resolved.Clear();
 				cachedBarA = -1;
-				cachedBarB = -1;
 				cachedProfileA = null;
-				cachedProfileB = null;
 			}
 		};
 
@@ -2513,35 +2514,39 @@ namespace PowerLanguage.Strategy
 		/// both unusable), returns the raw ItemForBar hit anyway — exact bar, then
 		/// previous, then next. That is better than null, not an ownership guarantee.
 		///
-		/// The two-slot cache is only a generation-scoped memo of that resolution.
-		/// CalcBar and IsNewVolumeProfile ask for the current bar and the bar before it.
-		/// A generation bump (profile collection changed) drops the memo. The bar+1 probe
-		/// is still part of the cold resolution; do not remove it.
+		/// The cache is only a generation-scoped memo of that resolution (VPB-17): bars before the
+		/// calc bar go into a dictionary (backward walks such as DER-06 no longer evict the CalcBar
+		/// answers), the calc bar itself into a single slot. A generation bump (profile collection
+		/// changed) drops the memo; the dictionary is also cleared past MAX_RESOLVED_CACHE entries.
+		/// The bar+1 probe is still part of the cold resolution; do not remove it.
 		/// </summary>
 		/// <param name="barIndex">1-based chart bar (Status Bar # / FullSymbolData.Current).</param>
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
-			if (streamPack.resolveGeneration == streamPack.generation)
-			{
-				if (barIndex == streamPack.cachedBarA) return streamPack.cachedProfileA;
-				if (barIndex == streamPack.cachedBarB) return streamPack.cachedProfileB;
-			}
-			else
+			if (streamPack.resolveGeneration != streamPack.generation || streamPack.resolved.Count > MAX_RESOLVED_CACHE)
 			{
 				streamPack.resolveGeneration = streamPack.generation;
+				streamPack.resolved.Clear();
 				streamPack.cachedBarA = -1;
-				streamPack.cachedBarB = -1;
 				streamPack.cachedProfileA = null;
-				streamPack.cachedProfileB = null;
 			}
 
-			IProfile resolved = resolveItemForBar(streamPack, datastream, barIndex);
-			streamPack.cachedBarB = streamPack.cachedBarA;
-			streamPack.cachedProfileB = streamPack.cachedProfileA;
+			IProfile hit;
+			int current = streamItemBarIndex(datastream);
+			if (current >= 1 && barIndex < current)
+			{
+				if (streamPack.resolved.TryGetValue(barIndex, out hit)) return hit;
+				hit = resolveItemForBar(streamPack, datastream, barIndex);
+				streamPack.resolved[barIndex] = hit;
+				return hit;
+			}
+
+			if (barIndex == streamPack.cachedBarA) return streamPack.cachedProfileA;
+			hit = resolveItemForBar(streamPack, datastream, barIndex);
 			streamPack.cachedBarA = barIndex;
-			streamPack.cachedProfileA = resolved;
-			return resolved;
+			streamPack.cachedProfileA = hit;
+			return hit;
 		}
 
 		private IProfile resolveItemForBar(StreamPack streamPack, int datastream, int barIndex)
@@ -2553,9 +2558,29 @@ namespace PowerLanguage.Strategy
 				considerProfile(rawItemForBar(streamPack, datastream, barIndex - 1), barIndex, ref best, ref bestDist);
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex + 1), barIndex, ref best, ref bestDist);
 
+			// VPB-17: the closest owning start is the last listed start <= barIndex (windows on one stream are
+			// sequential), so only look at that neighbourhood; equal starts are walked back over. Fall back to the
+			// full scan only when nothing owns the bar (gaps, profiles whose BarsInterval could not be read).
 			List<IProfile> listed = listedProfiles(streamPack);
-			for (int i = 0; i < listed.Count; i++)
-				considerProfile(listed[i], barIndex, ref best, ref bestDist);
+			int[] starts = streamPack.listedStarts;
+			if (starts.Length == listed.Count && listed.Count > 0)
+			{
+				int idx = Array.BinarySearch(starts, barIndex);
+				if (idx < 0) idx = ~idx - 1;   // last start <= barIndex (-1 when all starts are later)
+				if (idx >= 0)
+				{
+					int lo = idx;
+					while (lo > 0 && starts[lo - 1] == starts[idx]) lo--;
+					while (idx + 1 < starts.Length && starts[idx + 1] == starts[lo]) idx++;
+					for (int i = Math.Max(0, lo - 1); i <= Math.Min(listed.Count - 1, idx + 1); i++)
+						considerProfile(listed[i], barIndex, ref best, ref bestDist);
+				}
+			}
+			if (best == null)
+			{
+				for (int i = 0; i < listed.Count; i++)
+					considerProfile(listed[i], barIndex, ref best, ref bestDist);
+			}
 
 			if (best != null) return best;
 
@@ -2818,6 +2843,7 @@ namespace PowerLanguage.Strategy
 				if (sp.pack.Items == null)
 				{
 					sp.listedCache = list;
+					sp.listedStarts = new int[0];
 					sp.listedGeneration = sp.generation;
 					return list;
 				}
@@ -2826,6 +2852,7 @@ namespace PowerLanguage.Strategy
 			{
 				// Items can be non-null but already disposed / unusable.
 				sp.listedCache = list;
+				sp.listedStarts = new int[0];   // length mismatch: resolveItemForBar falls back to the full scan
 				sp.listedGeneration = sp.generation;
 				return list;
 			}
@@ -2841,10 +2868,14 @@ namespace PowerLanguage.Strategy
 			catch
 			{
 				sp.listedCache = list;
+				sp.listedStarts = new int[0];   // length mismatch: resolveItemForBar falls back to the full scan
 				sp.listedGeneration = sp.generation;
 				return list;
 			}
 			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
+			var starts = new int[list.Count];
+			for (int i = 0; i < list.Count; i++) starts[i] = profileStartBar(list[i]);
+			sp.listedStarts = starts;
 			sp.listedCache = list;
 			sp.listedGeneration = sp.generation;
 			return list;
