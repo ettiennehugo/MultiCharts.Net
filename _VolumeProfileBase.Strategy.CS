@@ -1553,12 +1553,6 @@ namespace PowerLanguage.Strategy
 		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
 		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
 
-		/// <summary>
-		/// VPB-03. When false (default) a profile whose window extends past the calculation bar (backtest only) contributes only
-		/// POCForBar/HighVAForBar/LowVAForBar values as of the calc bar: no histogram, no end-of-window fallbacks. Set true in a
-		/// visualization study to get the old whole-window display. Deliberately not an [Input] so an optimization cannot flip it.
-		/// </summary>
-		protected bool AllowLookAheadHistogram { get; set; }
 
 		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
 		[Input] public int Vwap1Length { get; set; }        // Used when Vwap1Type = Length. >= 1.
@@ -3110,7 +3104,7 @@ namespace PowerLanguage.Strategy
 
 					int windowEnd = profileEndBar(vp);
 					bool windowOpenPastCalcBar = current >= 1 && windowEnd > current;
-					if (windowOpenPastCalcBar && !AllowLookAheadHistogram)
+					if (windowOpenPastCalcBar)
 					{
 						// VPB-03: in a backtest MC builds the profile over its whole window, so the histogram would include
 						// bars after the calc bar. Keep geometry (as-of POC/VA) only; the histogram is filled once the window
@@ -3557,7 +3551,7 @@ namespace PowerLanguage.Strategy
 			// closed relative to the calc bar (endChart <= asOf: a window ending on the calc bar is complete as of it).
 			int asOf = streamItemBarIndex(extra.dataStream < 1 ? 1 : extra.dataStream);
 			if (asOf >= 1 && bar > asOf) bar = asOf;
-			bool whole = AllowLookAheadHistogram || asOf < 1 || endChart <= asOf;
+			bool whole = asOf < 1 || endChart <= asOf;   // VPB-03: never look ahead of the calc bar
 
 			double poc = firstPositive(
 				priceForBar(vp, bar, 0),
