@@ -43,7 +43,8 @@ namespace PowerLanguage.Strategy
 		[Input] public bool AllowAsia { get; set; }             // Allow trading the Asia session
 		[Input] public int EntriesPerSession { get; set; }      // Number of entries per session - 0 = unlimited
 		[Input] public int AbsoluteSize { get; set; } // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
-		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // NOT USED since DER-03 (an equity/price cap is meaningless for margined futures); kept so saved settings still load - remove when convenient
+		[Input] public int MaxContracts { get; set; } // [alternate B] cap on the risk-based contract count, 0 = no cap
 		[Input] public double RiskBasedEntryPercent { get; set; } // [alternate B] risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
 
 		//attribute
@@ -73,6 +74,7 @@ namespace PowerLanguage.Strategy
 			AbsoluteSize = 0;
 			MaximumEquityPerPosPercent = DEFAULT_MAXIMUM_EQUITY_PER_POS_PERCENT;
 			RiskBasedEntryPercent = DEFAULT_RISK_BASED_ENTRY_PERCENT;
+			MaxContracts = 1;   // conservative default
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LEDDR", EOrderAction.Buy));
 			m_lxStop = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "LXStp", EOrderAction.Sell, OrderExit.FromAll));
 			m_lxTgt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "LXTgt", EOrderAction.Sell, OrderExit.FromAll));
@@ -131,7 +133,20 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Debug, $"Divergence detected: bar({m_price.CurrentBar}), priceMom({priceMomentum:F4}), volumeMom({volumeMomentum:F4})");
 				int size = 0;
 				double low = m_price.Low.Lowest(LowLookbackLength);
-				double risk = m_price.StatusLine.Ask - low;
+				// DER-02: StatusLine is the live quote (today's ask, or 0 offline) on every historical bar. Historical bars use the
+				// close as the reference (the entry is MarketNextBar); real time uses the live ask when there is one.
+				double refPrice = m_price.Close[0];
+				if (Environment.IsRealTimeCalc)
+				{
+					double ask = m_price.StatusLine.Ask;
+					if (ask > 0) refPrice = ask;
+				}
+				double risk = refPrice - low;
+				if (risk <= 0)
+				{
+					trace(ETraceLevel.Debug, $"skip: refPrice({refPrice:F4}) not above low({low:F4})");
+					return;
+				}
 
 				if (AbsoluteSize > 0)
 				{
@@ -140,19 +155,23 @@ namespace PowerLanguage.Strategy
 				}
 				else
 				{
-					// risk based position sizing
-					int equityBasedSize = equityBasedPositionSize(m_price.StatusLine.Ask, MaximumEquityPerPosPercent, false);
-					int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, false);
-					size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-					trace(ETraceLevel.Debug, $"Sending LE: size({size}), equityBasedSize({equityBasedSize}), riskBasedSize({riskBasedSize}), recentLow({low:F4}), ask({m_price.StatusLine.Ask:F4}), risk({risk:F4})");
+					// DER-03: contract sizing, |entry - stop| * BigPointValue dollars at risk per contract (the old equity/price
+					// "shares" and points-as-dollars sizes were meaningless for futures), capped by MaxContracts.
+					size = stopLossBasedPositionSize(m_price, refPrice, low, RiskBasedEntryPercent, false);
+					if (MaxContracts > 0 && size > MaxContracts) size = MaxContracts;
+					trace(ETraceLevel.Debug, $"Sending LE: size({size}) ref({refPrice:F4}) stop({low:F4}) risk({risk:F4}) bpv({m_price.Info.BigPointValue}) maxContracts({MaxContracts})");
 				}
 
-				//TODO - these size calculations are almost certainly not correct for futures
+				if (size <= 0)
+				{
+					trace(ETraceLevel.Debug, "skip: size 0");
+					return;
+				}
 				m_le.Send(size);
 
 				// TODO - clean this up
 				m_stopLoss = low;
-				m_targetPrice = m_price.StatusLine.Ask + Math.Abs(risk * RiskRewardFactor);
+				m_targetPrice = refPrice + Math.Abs(risk * RiskRewardFactor);
 				trace(ETraceLevel.Debug, $"SL({m_stopLoss:F4}), TP({m_targetPrice:F4})");
 			}
 		}
