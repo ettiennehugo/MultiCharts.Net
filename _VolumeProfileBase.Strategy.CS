@@ -1560,6 +1560,13 @@ namespace PowerLanguage.Strategy
 		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
 		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
 
+		/// <summary>
+		/// VPB-03. When false (default) a profile whose window extends past the calculation bar (backtest only) contributes only
+		/// POCForBar/HighVAForBar/LowVAForBar values as of the calc bar: no histogram, no end-of-window fallbacks. Set true in a
+		/// visualization study to get the old whole-window display. Deliberately not an [Input] so an optimization cannot flip it.
+		/// </summary>
+		protected bool AllowLookAheadHistogram { get; set; }
+
 		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
 		[Input] public int Vwap1Length { get; set; }        // Used when Vwap1Type = Length. >= 1.
 		[Input] public string Vwap1FromDate { get; set; }   // Used when Vwap1Type = AdaptiveFromDate.
@@ -3003,8 +3010,22 @@ namespace PowerLanguage.Strategy
 						return;
 					}
 
-					fillNodes(vp, extra, chartBar);
-					extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					int windowEnd = profileEndBar(vp);
+					bool windowOpenPastCalcBar = current >= 1 && windowEnd > current;
+					if (windowOpenPastCalcBar && !AllowLookAheadHistogram)
+					{
+						// VPB-03: in a backtest MC builds the profile over its whole window, so the histogram would include
+						// bars after the calc bar. Keep geometry (as-of POC/VA) only; the histogram is filled once the window
+						// closes (nodesBuilt stays false so the closed test above fails until then). Real time never gets here.
+						clearHistogram(extra);
+						applyProfileGeometry(vp, extra, chartBar);
+						extra.nodesBuilt = false;
+					}
+					else
+					{
+						fillNodes(vp, extra, chartBar);
+						extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					}
 					extra.nodesBuiltForStart = extra.startBar;
 					extra.nodesBuiltGeneration = sp.generation;
 					extra.filledAtBar = current;
@@ -3389,23 +3410,28 @@ namespace PowerLanguage.Strategy
 			if (startChart >= 1) extra.startBar = startChart;
 			if (endChart >= 1) extra.endBar = endChart;
 			int bar = chartBar >= 1 ? chartBar : (endChart >= 1 ? endChart : startChart);
+			// VPB-03: never read past the calc bar; the whole-window fallbacks are only legitimate once the window has
+			// closed relative to the calc bar (endChart <= asOf: a window ending on the calc bar is complete as of it).
+			int asOf = streamItemBarIndex(extra.dataStream < 1 ? 1 : extra.dataStream);
+			if (asOf >= 1 && bar > asOf) bar = asOf;
+			bool whole = AllowLookAheadHistogram || asOf < 1 || endChart <= asOf;
 
 			double poc = firstPositive(
 				priceForBar(vp, bar, 0),
 				priceForBar(vp, bar - 1, 0),
-				priceForBar(vp, endChart, 0),
+				whole ? priceForBar(vp, endChart, 0) : 0,
 				priceForBar(vp, startChart, 0),
-				levelPrice(vp.POC));
+				whole ? levelPrice(vp.POC) : 0);
 			double vah = firstPositive(
 				priceForBar(vp, bar, 1),
 				priceForBar(vp, bar - 1, 1),
-				priceForBar(vp, endChart, 1),
-				vaExtreme(vp, true));
+				whole ? priceForBar(vp, endChart, 1) : 0,
+				whole ? vaExtreme(vp, true) : 0);
 			double val = firstPositive(
 				priceForBar(vp, bar, 2),
 				priceForBar(vp, bar - 1, 2),
-				priceForBar(vp, endChart, 2),
-				vaExtreme(vp, false));
+				whole ? priceForBar(vp, endChart, 2) : 0,
+				whole ? vaExtreme(vp, false) : 0);
 
 			if (poc > 0) extra.poc = poc;
 			if (vah > 0) extra.vah = vah;
@@ -3415,7 +3441,7 @@ namespace PowerLanguage.Strategy
 			double pocVol = 0;
 			try
 			{
-				if (vp.POC != null) pocVol = (double)vp.POC.TotalValue;
+				if (whole && vp.POC != null) pocVol = (double)vp.POC.TotalValue;
 			}
 			catch { }
 			if (pocVol <= 0) pocVol = volumeAtPrice(extra, extra.poc);
