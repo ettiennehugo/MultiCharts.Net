@@ -294,6 +294,16 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
+		/// How a confluence zone should be used (VPB-26, was a "target"/"entry"/"conflict" string). Derived from role.
+		/// </summary>
+		public enum ESuggestedUse
+		{
+			Target = 0,
+			Entry = 1,
+			Conflict = 2
+		}
+
+		/// <summary>
 		/// Zone versus the highest-timeframe value area on this rebuild.
 		/// </summary>
 		public enum EConfluenceLocation
@@ -363,7 +373,7 @@ namespace PowerLanguage.Strategy
 			public int independentSources;
 			public EConfluenceRole role;
 			public EConfluenceLocation location;
-			public string suggestedUse;    // target | entry | conflict
+			public ESuggestedUse suggestedUse;    // Target | Entry | Conflict
 			public double exitPrice;       // anchor when this zone is a target; otherwise 0
 			public double entryPrice;      // 0 — the entry edge depends on which side is touched
 			public double invalidationBelow;
@@ -1204,8 +1214,9 @@ namespace PowerLanguage.Strategy
 				zone.hitCount = zone.hits.Count;
 				zone.role = acc > 0 && rej > 0 ? EConfluenceRole.Mixed : pickRole(survivors, acc, rej);
 				zone.location = locate(anchor);
-				zone.suggestedUse = zone.role == EConfluenceRole.Mixed ? "conflict" : (zone.role == EConfluenceRole.Rejection ? "entry" : "target");
-				zone.exitPrice = zone.suggestedUse == "target" ? anchor : 0;
+				zone.suggestedUse = zone.role == EConfluenceRole.Mixed ? ESuggestedUse.Conflict
+					: (zone.role == EConfluenceRole.Rejection ? ESuggestedUse.Entry : ESuggestedUse.Target);
+				zone.exitPrice = zone.suggestedUse == ESuggestedUse.Target ? anchor : 0;
 				zone.entryPrice = 0;
 				zone.invalidationBelow = lo - tol;
 				zone.invalidationAbove = hi + tol;
@@ -2701,7 +2712,7 @@ namespace PowerLanguage.Strategy
 			{
 				ConfluenceZone zone = m_confluenceZones[i];
 				if (zone == null || zone.center <= 0) continue;
-				if (zone.role == EConfluenceRole.Rejection || zone.suggestedUse == "entry" || zone.suggestedUse == "conflict") continue;
+				if (zone.role == EConfluenceRole.Rejection || zone.suggestedUse != ESuggestedUse.Target) continue;
 				if (zone.zScore < minZ) continue;
 				if (!zoneClearsPrice(zone, price, dir, clearTicks, tick)) continue;
 

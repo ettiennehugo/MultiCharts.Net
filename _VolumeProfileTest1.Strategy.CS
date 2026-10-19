@@ -413,7 +413,7 @@ namespace PowerLanguage.Strategy
 				}
 				trace(ETraceLevel.Info, string.Format(CultureInfo.InvariantCulture,
 					"[VP-TEST]   CONF[{0}] {1}/{2} use={3} anchor={4} lo={5} hi={6} acc={7} rej={8} ctx={9} src={10} [{11}] dropped=[{12}]",
-					i, z.role, z.location, z.suggestedUse,
+					i, z.role, z.location, z.suggestedUse.ToString().ToLowerInvariant(),   // lowercase keeps the [VP-TEST] log format
 					fmt(z.anchor), fmt(z.low), fmt(z.high),
 					fmt(z.acceptanceScore), fmt(z.rejectionScore), fmt(z.contextScore),
 					z.independentSources, kinds.ToString(), dropped));

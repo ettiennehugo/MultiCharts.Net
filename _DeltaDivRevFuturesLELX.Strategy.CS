@@ -542,7 +542,7 @@ namespace PowerLanguage.Strategy
 					// Engine already drops Rejection and Mixed. Keep Magnet and Acceptance only.
 					if (t.zone.role != EConfluenceRole.Magnet && t.zone.role != EConfluenceRole.Acceptance)
 					{
-						trace(ETraceLevel.Debug, $"confluence skip role({t.zone.role}) use({t.zone.suggestedUse}) low({t.zone.low}) high({t.zone.high})");
+						trace(ETraceLevel.Debug, $"confluence skip role({t.zone.role}) use({t.zone.suggestedUse.ToString().ToLowerInvariant()}) low({t.zone.low}) high({t.zone.high})");
 						continue;
 					}
 
