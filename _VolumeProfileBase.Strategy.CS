@@ -1943,11 +1943,22 @@ namespace PowerLanguage.Strategy
 			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 				return null;
 
+			// VPB-28: a query must not rewrite history. Only the developing profile is refreshed, and only as of the
+			// calc bar; a closed profile keeps its final POC/VA and its VWAP snapshot from its own last bar. A closed
+			// profile with no extra yet (older than anything CalcBar saw, or after a full profile change) is built as
+			// of its own end bar.
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
-			if (vp != null)
-				ensureExtra(streamPack, vp, barIndex);
+			int cur = streamItemBarIndex(datastream);
+			bool developingQuery = vp != null && (cur < 1 || profileEndBar(vp) >= cur);
+			if (vp != null && developingQuery)
+				ensureExtra(streamPack, vp, cur >= 1 ? cur : barIndex);
 
-			VpExtra extra = extraFor(streamPack, datastream, vp, barIndex);
+			VpExtra extra = vp != null ? lookupExtra(streamPack, datastream, vp) : null;
+			if (extra == null && vp != null && !developingQuery)
+			{
+				ensureExtra(streamPack, vp, profileEndBar(vp));
+				extra = lookupExtra(streamPack, datastream, vp);
+			}
 			if (extra == null)
 				extra = extraForStart(streamPack, datastream, barIndex);
 			if (extra == null)
@@ -1955,9 +1966,6 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
 				return null;
 			}
-			if (vp != null)
-				applyProfileGeometry(vp, extra, barIndex);
-			stampExtra(extra);
 			stampNakedPocs(streamPack);
 			refreshVolumePercentiles();
 			return extra;
@@ -2417,15 +2425,15 @@ namespace PowerLanguage.Strategy
 			extra.lastNakedScanBar = 0;
 		}
 
-		private VpExtra extraFor(StreamPack sp, int datastream, IProfile vp, int chartBar)
+		// Read-only lookup (VPB-28: the old extraFor also re-ran applyProfileGeometry as of the queried bar, which rewrote
+		// a closed profile's POC/VA to an interior, developing value).
+		private VpExtra lookupExtra(StreamPack sp, int datastream, IProfile vp)
 		{
 			if (sp == null || vp == null) return null;
 			VpKey key = new VpKey(datastream, vp);
 			VpExtra extra;
 			if (!sp.extra.TryGetValue(key, out extra) && key.startBar >= 1)
 				sp.extra.TryGetValue(new VpKey(datastream, key.startBar), out extra);
-			if (extra != null)
-				applyProfileGeometry(vp, extra, chartBar);
 			return extra;
 		}
 
@@ -2439,11 +2447,7 @@ namespace PowerLanguage.Strategy
 				sp.extra.TryGetValue(new VpKey(datastream, startBar - 1), out extra);
 			if (extra == null && startBar >= 1)
 				sp.extra.TryGetValue(new VpKey(datastream, startBar + 1), out extra);
-			if (extra == null) return null;
-			IProfile vp = itemForBar(sp, datastream, startBar);
-			if (vp != null)
-				applyProfileGeometry(vp, extra, startBar);
-			return extra;
+			return extra;   // read-only (VPB-28)
 		}
 
 		private void stampExtra(VpExtra extra)
@@ -3052,7 +3056,7 @@ namespace PowerLanguage.Strategy
 					if (sameStamp)
 					{
 						applyProfileGeometry(vp, extra, chartBar);   // as-of POC/VA can still move intrabar
-						stampExtra(extra);
+						if (current < 1 || extra.endBar >= current) stampExtra(extra);   // VPB-28: frozen after close
 						return;
 					}
 
@@ -3081,7 +3085,9 @@ namespace PowerLanguage.Strategy
 					m_volumePctDirty = true;
 				}
 			}
-			stampExtra(extra);
+			// VPB-28: VWAP snapshot = value as of the profile's last bar; frozen once the window has closed, so a later
+			// query no longer overwrites it with the current VWAP.
+			if (current < 1 || extra.endBar >= current) stampExtra(extra);
 		}
 
 		private bool isStreamBarClosed(int stream)
