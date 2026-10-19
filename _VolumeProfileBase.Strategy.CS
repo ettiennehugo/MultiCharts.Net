@@ -435,6 +435,10 @@ namespace PowerLanguage.Strategy
 			public int cachedBarA = -1;               // calc bar memo (its window can still grow)
 			public IProfile cachedProfileA;
 			public bool nakedSuppressed;
+			public int nakedStampedBar = -1;          // VPB-16: stampNakedPocs ran for this (bar, close state, generation, extra count)
+			public bool nakedStampedAtClose;
+			public int nakedStampedGeneration = -1;
+			public int nakedStampedExtraCount = -1;
 			public int levelsGeneration;
 			public int percentilesStampedGeneration = -1;
 
@@ -2342,17 +2346,25 @@ namespace PowerLanguage.Strategy
 				foreach (VpExtra extra in sp.extra.Values)
 					clearNakedPoc(extra);
 				sp.nakedSuppressed = true;
+				sp.nakedStampedBar = -1;
 				return;
 			}
 			sp.nakedSuppressed = false;
 
 			int current = streamItemBarIndex(sp.datastream);
 			if (current < 1) return;
+			IInstrument bars = barsOf(sp.datastream);
+
+			// VPB-16: called from CalcBar and from every query; stamp once per exact state. ensureExtra invalidates
+			// the stamp whenever it (re)fills or re-stamps a developing extra, so each CalcBar tick still rescans.
+			bool atClose = bars == null || bars.Status == EBarState.Close;
+			if (sp.nakedStampedBar == current && sp.nakedStampedGeneration == sp.generation
+				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose))
+				return;
 
 			double tick = tickSize();
 			// Half a micro-tick of slack so an exact touch is never lost to rounding.
 			double tol = tick > 0 ? NakedPocTickTolerance * tick + tick * 1e-6 : PRICE_EPSILON;
-			IInstrument bars = barsOf(sp.datastream);
 
 			foreach (VpExtra extra in sp.extra.Values)
 			{
@@ -2403,6 +2415,10 @@ namespace PowerLanguage.Strategy
 				extra.pocTouchedBar = touched;
 				extra.pocNaked = touched == 0;
 			}
+			sp.nakedStampedBar = current;
+			sp.nakedStampedAtClose = atClose;
+			sp.nakedStampedGeneration = sp.generation;
+			sp.nakedStampedExtraCount = sp.extra.Count;
 		}
 
 		private static void clearNakedPoc(VpExtra extra)
@@ -3026,6 +3042,7 @@ namespace PowerLanguage.Strategy
 					&& extra.levels.Count > 0;
 				if (!closed)
 				{
+					sp.nakedStampedBar = -1;   // VPB-16: poc / endBar of this extra may change below
 					bool atClose = isStreamBarClosed(sp.datastream);
 					bool sameStamp = extra.filledAtBar == current
 																	&& extra.filledGeneration == sp.generation
