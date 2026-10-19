@@ -857,12 +857,11 @@ namespace PowerLanguage.Strategy
 				applyZScores();
 			}
 
+			// Anchors are sorted ascending by price before clustering and appended in that order,
+			// so the cluster's high is its last element (VPB-18: was an O(n) scan per anchor).
 			private static double clusterHigh(List<Anchor> cluster)
 			{
-				double hi = cluster[0].price;
-				for (int i = 1; i < cluster.Count; i++)
-					if (cluster[i].price > hi) hi = cluster[i].price;
-				return hi;
+				return cluster[cluster.Count - 1].price;
 			}
 
 			// Index range instead of GetRange. A split used to copy both sides; the anchors
@@ -1097,11 +1096,14 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			private readonly HashSet<string> m_seenScratch = new HashSet<string>();   // reused by smallestContainer (VPB-18)
+
 			private Anchor smallestContainer(List<Anchor> anchors, Anchor child, bool completedOnly)
 			{
 				Anchor best = null;
 				double bestSpan = double.MaxValue;
-				var seen = new HashSet<string>();
+				var seen = m_seenScratch;
+				seen.Clear();
 				for (int i = 0; i < anchors.Count; i++)
 				{
 					Anchor parent = anchors[i];
@@ -1301,16 +1303,16 @@ namespace PowerLanguage.Strategy
 
 			private static string absorbed(List<Anchor> list, Anchor kept)
 			{
-				string text = "";
+				var text = new System.Text.StringBuilder();
 				for (int i = 0; i < list.Count; i++)
 				{
 					Anchor a = list[i];
 					if (object.ReferenceEquals(a, kept)) continue;
 					if (isOverlay(a.kind) || isRejection(a.kind) != isRejection(kept.kind)) continue;
-					if (text.Length > 0) text += ",";
-					text += a.kind.ToString();
+					if (text.Length > 0) text.Append(',');
+					text.Append(a.kind.ToString());
 				}
-				return text;
+				return text.ToString();
 			}
 
 			private void applyNested(List<Survivor> survivors)
