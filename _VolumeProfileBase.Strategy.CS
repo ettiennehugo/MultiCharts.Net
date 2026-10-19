@@ -585,13 +585,11 @@ namespace PowerLanguage.Strategy
 				{
 					// IOG: CurrentBar did not advance. Replace the slot written for this bar.
 					int slot = (m_lenNext - 1 + n) % n;
-					subtractLengthSlot(slot);
 					writeLengthSlot(slot, bars, 0);
 				}
 				else if (contiguous)
 				{
 					// m_lenNext is the oldest sample. Drop it, write the new bar there, advance.
-					subtractLengthSlot(m_lenNext);
 					writeLengthSlot(m_lenNext, bars, 0);
 					m_lenNext = (m_lenNext + 1) % n;
 					m_lenBar = bars.CurrentBar;
@@ -611,7 +609,8 @@ namespace PowerLanguage.Strategy
 					}
 					m_lenBar = bars.CurrentBar;
 				}
-				// Newest-first resync matches clear-and-resum addition order, including vol/price skips.
+				// Newest-first resync matches clear-and-resum addition order, including vol/price skips. It rebuilds the
+				// sums on every path, so the ring is not adjusted incrementally (VPB-19: the old subtractions were dead work).
 				resyncLengthSums(n);
 				finish();
 			}
@@ -631,17 +630,6 @@ namespace PowerLanguage.Strategy
 			{
 				m_lenPrice[slot] = priceAt(bars, barsAgo);
 				m_lenVol[slot] = volume(bars, barsAgo);
-			}
-
-			// Mirror add(): a skipped bar (vol <= 0 or price <= 0) contributed nothing, so it subtracts nothing.
-			private void subtractLengthSlot(int slot)
-			{
-				double price = m_lenPrice[slot];
-				double vol = m_lenVol[slot];
-				if (vol <= 0 || price <= 0) return;
-				m_sumPV -= price * vol;
-				m_sumP2V -= price * price * vol;
-				m_sumV -= vol;
 			}
 
 			private void resyncLengthSums(int n)
