@@ -184,6 +184,14 @@ namespace PowerLanguage.Strategy
 			var t = et.TimeOfDay;
 			var d = et.DayOfWeek;
 
+			// VPF-04: CME holiday hooks, keyed on the Globex date so the evening before a closure is closed too.
+			DateTime gx = globexDateEt(et);
+			if (IsGlobexClosedDay(gx))
+				return GlobexState.Closed;
+			TimeSpan? holidayHalt = HolidayHaltEt(gx);
+			if (holidayHalt.HasValue && et.Date == gx.Date && t >= holidayHalt.Value)
+				return GlobexState.Halt;   // until the 18:00 reopen, which belongs to the next Globex date
+
 			// Weekend: Fri after close through Sun before reopen
 			if (d == DayOfWeek.Saturday)
 				return GlobexState.Closed;
@@ -222,6 +230,16 @@ namespace PowerLanguage.Strategy
 					s |= s_singleSessions[i];
 			}
 
+			// VPF-04: no cash session on NYSE holidays; early RTH close where configured.
+			DateTime gx = globexDateEt(et);
+			if (IsNoRthDay(gx))
+				s &= ~(MarketSession.Rth | MarketSession.Premarket | MarketSession.PostMarket);
+			else
+			{
+				TimeSpan? early = RthEarlyCloseEt(gx);
+				if (early.HasValue && et.Date == gx.Date && t >= early.Value)
+					s &= ~(MarketSession.Rth | MarketSession.PostMarket);
+			}
 			return s;
 		}
 
@@ -499,6 +517,11 @@ namespace PowerLanguage.Strategy
 			// except Sunday evening pieces which only apply to wrapping Asia/Globex.
 			open = gxDate + start;
 			close = gxDate + end;
+			if (session == MarketSession.Rth)
+			{
+				TimeSpan? early = RthEarlyCloseEt(gxDate);   // VPF-04: MinutesUntilClose(Rth) honours an early close
+				if (early.HasValue && close > gxDate + early.Value) close = gxDate + early.Value;
+			}
 			return true;
 		}
 
@@ -552,6 +575,50 @@ namespace PowerLanguage.Strategy
 				default:
 					return false;
 			}
+		}
+
+		// ---- VPF-04: CME holiday hooks (Globex trading date, ET). Exact CME hours vary by year and product: override. ----
+
+		/// <summary>
+		/// CME Globex fully closed for this Globex trading date. Default: New Year's Day and Christmas Day (the evening session
+		/// that would open the day before belongs to the closed date and is closed too). Good Friday is NOT included by default:
+		/// CME equity futures have opened briefly on some Good Fridays (e.g. when NFP is released); it is still a no-RTH day
+		/// through IsNoRthDay. Override for observed weekend dates or other products.
+		/// </summary>
+		protected virtual bool IsGlobexClosedDay(DateTime globexDate)
+		{
+			DateTime d = globexDate.Date;
+			if (d.Month == 1 && d.Day == 1) return true;
+			if (d.Month == 12 && d.Day == 25) return true;
+			return false;
+		}
+
+		/// <summary>
+		/// No cash (RTH) session on this Globex trading date: NYSE holidays (Holidays, the _NyseHolidays calendar) that are not
+		/// full Globex closures. Rth/Premarket/PostMarket are masked off; Globex itself stays Open (see HolidayHaltEt).
+		/// </summary>
+		protected virtual bool IsNoRthDay(DateTime globexDate)
+		{
+			return Holidays != null && Holidays.isHoliday(globexDate.Date) && !IsGlobexClosedDay(globexDate);
+		}
+
+		/// <summary>
+		/// Early Globex halt (ET) on a holiday session, or null. Default null (not applied). For equity-index futures the
+		/// usual value is 13:00 ET on no-RTH holidays: return IsNoRthDay(globexDate) ? new TimeSpan(13, 0, 0) : (TimeSpan?)null
+		/// after checking the CME holiday calendar for the years you backtest.
+		/// </summary>
+		protected virtual TimeSpan? HolidayHaltEt(DateTime globexDate)
+		{
+			return null;
+		}
+
+		/// <summary>
+		/// Early RTH close (ET) for this Globex trading date, or null. Default null (not applied). For equity-index futures
+		/// the usual value is 13:15 ET on the day after Thanksgiving and on Dec 24 (and some years Jul 3); verify per year.
+		/// </summary>
+		protected virtual TimeSpan? RthEarlyCloseEt(DateTime globexDate)
+		{
+			return null;
 		}
 
 		private static bool IsSingleFlag(MarketSession session)
