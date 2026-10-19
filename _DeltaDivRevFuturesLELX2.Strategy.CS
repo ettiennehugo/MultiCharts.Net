@@ -83,20 +83,14 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_price = Bars;
-			m_priceMA.Instrument = m_price;
-			m_priceMA.Length = PriceMomentumLength;
-			m_cumulativeDeltaMA.Instrument = m_cumulativeDelta;
-			m_cumulativeDeltaMA.Length = VolumeMomentumLength;
-			m_cumulativeDelta = BarsOfData(2);
 			if (PriceMomentumLength <= 0) throw new Exception("Price momentum length should be larger than 0.");
 			if (VolumeMomentumLength <= 0) throw new Exception("Volume momentum length should be larger than 0.");
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumEquityPerPosPercent <= 0 || MaximumEquityPerPosPercent > 1) throw new Exception("MaximumEquityPerPosPercent must be larger than zero and less then one.");
-			if (m_cumulativeDelta.Info.Resolution.DeltaType != DeltaType.Cumulative) throw new Exception("Second data feed must be a cumulative delta feed.");
 
 			m_price = Bars;
 			m_cumulativeDelta = BarsOfData(2);
+			if (m_cumulativeDelta.Info.Resolution.DeltaType != DeltaType.Cumulative) throw new Exception("Second data feed must be a cumulative delta feed.");
 			m_priceMA.Instrument = m_price;
 			m_priceMA.Length = PriceMomentumLength;
 			m_cumulativeDeltaMA.Instrument = m_cumulativeDelta;
