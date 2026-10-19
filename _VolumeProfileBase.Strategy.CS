@@ -49,6 +49,13 @@ namespace PowerLanguage.Strategy
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
 		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
 		private const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale
+		private const double CLUSTER_SPLIT_TOL_MULTIPLE = 4.0;      // a confluence cluster wider than 4 x tol may split
+		private const int CLUSTER_MIN_SPLIT_COUNT = 3;              // ... and only when it holds at least this many anchors
+		private const int ZONE_TOP_SURVIVORS = 3;                   // survivors kept per zone
+		private const double FALLBACK_TIMEFRAME_WEIGHT_STEP = 0.25; // stream weight = 1 + step x timeframeRank when unset
+		private const double SHARE_FACTOR_MIN = 0.5;                // volume-share factor clamp
+		private const double SHARE_FACTOR_MAX = 1.5;
+		private const double LEVEL_MATCH_TICK_FRACTION = 0.51;      // > half a tick: neighbouring levels never match
 		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
@@ -853,7 +860,7 @@ namespace PowerLanguage.Strategy
 					if (cluster[i].price > priceHi) priceHi = cluster[i].price;
 				}
 				int count = hi - lo;
-				if (priceHi - priceLo <= 4.0 * tol + PRICE_EPSILON || count < 3)
+				if (priceHi - priceLo <= CLUSTER_SPLIT_TOL_MULTIPLE * tol + PRICE_EPSILON || count < CLUSTER_MIN_SPLIT_COUNT)
 				{
 					addZone(cluster, lo, hi, tol);
 					return;
@@ -946,7 +953,7 @@ namespace PowerLanguage.Strategy
 				order.Sort((a, b) => lvn
 					? nodes[a].strength.CompareTo(nodes[b].strength)
 					: nodes[b].strength.CompareTo(nodes[a].strength));
-				int cap = order.Count < 3 ? order.Count : 3;
+				int cap = order.Count < ZONE_TOP_SURVIVORS ? order.Count : ZONE_TOP_SURVIVORS;
 				for (int i = 0; i < cap; i++)
 				{
 					Node n = nodes[order[i]];
@@ -1257,7 +1264,7 @@ namespace PowerLanguage.Strategy
 			private Survivor makeSurvivor(Anchor a, string absorbedLabels, bool volume)
 			{
 				double weight = rankWeightFor(a.dataStream);
-				if (weight <= 0) weight = 1.0 + 0.25 * a.timeframeRank;
+				if (weight <= 0) weight = 1.0 + FALLBACK_TIMEFRAME_WEIGHT_STEP * a.timeframeRank;
 				double credit;
 				if (a.overlay)
 					credit = DEFAULT_CONFLUENCE_OVERLAY_FACTOR * weight;
@@ -1427,8 +1434,8 @@ namespace PowerLanguage.Strategy
 			private static double shareFactor(double share)
 			{
 				double f = share / DEFAULT_CONFLUENCE_SHARE_PIVOT;
-				if (f < 0.5) return 0.5;
-				if (f > 1.5) return 1.5;
+				if (f < SHARE_FACTOR_MIN) return SHARE_FACTOR_MIN;
+				if (f > SHARE_FACTOR_MAX) return SHARE_FACTOR_MAX;
 				return f;
 			}
 
@@ -1437,7 +1444,7 @@ namespace PowerLanguage.Strategy
 				ShareSnap snap;
 				if (extra != null && m_shares.TryGetValue(extra, out snap)) return snap;
 				snap = new ShareSnap();
-				snap.tol = tick > 0 ? tick * 0.51 : 1e-6;
+				snap.tol = tick > 0 ? tick * LEVEL_MATCH_TICK_FRACTION : 1e-6;
 				if (extra == null || extra.levels == null || extra.levels.Count == 0)
 				{
 					if (extra != null) m_shares[extra] = snap;
@@ -1521,7 +1528,7 @@ namespace PowerLanguage.Strategy
 			{
 				int ticks = m_owner.ConfluenceAlignTicks;
 				double tick = m_owner.tickSize();
-				if (tick <= 0) tick = 0.01;
+				if (tick <= 0) tick = FALLBACK_TICK;
 				return ticks * tick;
 			}
 		}
@@ -2716,7 +2723,7 @@ namespace PowerLanguage.Strategy
 
 		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, int clearTicks, double tick)
 		{
-			if (tick <= 0) tick = 0.01;
+			if (tick <= 0) tick = FALLBACK_TICK;
 			// Compare in whole ticks: robust to 1-ULP noise in derived zone edges.
 			if (dir > 0)
 				return Math.Round((zone.low - price) / tick) >= clearTicks;
