@@ -2587,15 +2587,22 @@ namespace PowerLanguage.Strategy
 		/// index (barIndex - 1) first, then the 1-based Status index, because some
 		/// builds accept the Status index directly. Does not check that the returned
 		/// profile owns the bar — itemForBar / considerProfile do that.
+		/// VPB-21: bars after the stream's calc bar are never probed (they throw in real time and are
+		/// future objects in a backtest); the 1-based fallback is only tried when its native index
+		/// (barIndex) is not past the calc bar either. Removing the fallback entirely waits on the
+		/// VPB-07 diagnostic (ItemForBar(Current - 1) returns the current profile).
 		/// </summary>
 		/// <param name="barIndex">1-based chart bar. Converted to native 0-based for pack.ItemForBar.</param>
 		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
+			int current = streamItemBarIndex(datastream);
+			if (current >= 1 && barIndex > current) return null;   // not built yet / future: never probe
 			int native = toNativeItemBar(barIndex);
 			IProfile vp = rawNativeItemForBar(streamPack, datastream, native);
 			if (vp != null) return vp;
-			// Some builds accept the 1-based Status index directly.
+			// Some builds accept the 1-based Status index directly (native index barIndex == chart bar barIndex + 1).
+			if (current >= 1 && barIndex >= current) return null;
 			return rawNativeItemForBar(streamPack, datastream, barIndex);
 		}
 
