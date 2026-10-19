@@ -2319,7 +2319,6 @@ namespace PowerLanguage.Strategy
 			int chartBar = streamItemBarIndex(sp.datastream);
 			if (chartBar >= 1)
 			{
-				traceProfileBoundary(sp, chartBar);   // Phase-0 diagnostic, Debug trace only
 				IProfile cur = itemForBar(sp, sp.datastream, chartBar);
 				if (chartBar > 1)
 				{
@@ -2332,32 +2331,6 @@ namespace PowerLanguage.Strategy
 					ensureExtra(sp, cur, chartBar);   // last: leaves the developing extra stamped as of chartBar
 			}
 			stampNakedPocs(sp);
-		}
-
-		/// <summary>
-		/// Phase-0 diagnostic for VPB-07 / VPB-03 / VPB-21 (TraceLevel Debug only; no behaviour change). On the first bar
-		/// of a new profile it logs the native BarsInterval of the profiles ItemForBar returns for this bar and the bar before:
-		///  - cur.First == native: BarsInterval start is inclusive, keep the current code (do NOT apply VPB-07 step 2);
-		///    cur.First == native - 1 == prev.Second: start is exclusive, apply VPB-07 step 2.
-		///  - cur.Second > native on a historical (realtime=False) bar: MultiCharts built the whole window up front, so the
-		///    VPB-03 look-ahead guard is doing real work; cur.Second == native throughout: it is a harmless no-op.
-		///  - cur found via ItemForBar(native): 0-based indexing confirmed, the VPB-21 1-based fallback can be removed.
-		/// </summary>
-		private void traceProfileBoundary(StreamPack sp, int chartBar)
-		{
-			if (!traceOn(ETraceLevel.Debug) || sp == null || sp.pack == null || chartBar < 2) return;
-			int native = toNativeItemBar(chartBar);
-			IProfile cur = rawNativeItemForBar(sp, sp.datastream, native);
-			IProfile prev = rawNativeItemForBar(sp, sp.datastream, native - 1);
-			if (cur == null || prev == null || object.ReferenceEquals(cur, prev)) return;
-			try
-			{
-				trace(ETraceLevel.Debug, $"VP-PHASE0 Data{sp.datastream} boundary native={native} realtime={Environment.IsRealTimeCalc} cur=({cur.BarsInterval.First},{cur.BarsInterval.Second}) prev=({prev.BarsInterval.First},{prev.BarsInterval.Second})");
-			}
-			catch (Exception e)
-			{
-				trace(ETraceLevel.Debug, $"VP-PHASE0 Data{sp.datastream} boundary native={native} BarsInterval unreadable - {e.Message}");
-			}
 		}
 
 		/// <summary>
