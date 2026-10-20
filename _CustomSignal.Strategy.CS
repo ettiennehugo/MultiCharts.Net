@@ -311,6 +311,8 @@ namespace PowerLanguage.Strategy
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
 		private bool m_unknownAppWarned;
+		private bool m_fractionWarned;          // CS-4
+		private bool m_lastEquityFromAccount;   // CS-4: last equityAvailable came from the broker account
 		private bool m_volumeMbbWarned;
 		private bool m_tradingDayWarned;
 		private int m_entryCacheBar;
@@ -392,6 +394,7 @@ namespace PowerLanguage.Strategy
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
+			m_fractionWarned = false;
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
@@ -737,6 +740,13 @@ namespace PowerLanguage.Strategy
 		protected double equityAvailable(double maxCustomRiskEquityPerPosPercent = 0.0d)
 		{
 			double equityAvailable = 0.0d;
+			m_lastEquityFromAccount = false;
+			// CS-4: the *Percent parameters are fractions (0.01 = 1%). Warn once on a value that looks like a percentage; no behaviour change.
+			if (maxCustomRiskEquityPerPosPercent > 1.0 && !m_fractionWarned)
+			{
+				m_fractionWarned = true;
+				trace(ETraceLevel.Warning, $"equityAvailable - fraction {maxCustomRiskEquityPerPosPercent} > 1: the *Percent sizing parameters are fractions (0.01 = 1%)");
+			}
 
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
@@ -748,6 +758,7 @@ namespace PowerLanguage.Strategy
 					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
+						m_lastEquityFromAccount = equityAvailable != 0.0d;
 						break;
 					}
 				}
@@ -793,6 +804,110 @@ namespace PowerLanguage.Strategy
 			}
 
 			return equityAvailable;
+		}
+
+		// ---- CS-4: sizing API consolidation ----
+
+		/// <summary>
+		/// CS-4 limits for sizeForRisk. All optional (0 / false = no limit).
+		/// maxQty: hard cap. maxNotionalFraction: qty x unitNotional <= equityAvailable(maxNotionalFraction).
+		/// unitNotional: $ per unit for the notional cap; 0 = full contract value entry x BigPointValue (D1: ES by full
+		/// contract value; a stock is its price). minStopTicks: refuse stops closer than this. roundLots: floor to 100s.
+		/// </summary>
+		public struct SizingLimits
+		{
+			public int maxQty;
+			public double maxNotionalFraction;
+			public double unitNotional;
+			public double minStopTicks;
+			public bool roundLots;
+		}
+
+		/// <summary>
+		/// CS-4: units so that |entry - stop| x BigPointValue x units ≈ equity x riskFraction, then the limits. riskFraction is a
+		/// fraction in (0, 1] (0.01 = 1%). Returns 0 with a traced reason (bad BPV, stop too close, zero equity, notional cap).
+		/// With default(SizingLimits) it equals stopLossBasedPositionSize(bars, entry, stop, riskFraction).
+		/// </summary>
+		protected int sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits)
+		{
+			if (bars == null || entry <= 0 || riskFraction <= 0 || riskFraction > 1)
+			{
+				trace(ETraceLevel.Debug, $"sizeForRisk - 0: entry({entry}) riskFraction({riskFraction}) must be > 0 and riskFraction <= 1");
+				return 0;
+			}
+			double bpv = bars.Info.BigPointValue;
+			if (double.IsNaN(bpv) || double.IsInfinity(bpv) || bpv <= 0)
+			{
+				trace(ETraceLevel.Warning, $"sizeForRisk - 0: BigPointValue({bpv}) invalid");
+				return 0;
+			}
+			double distance = Math.Abs(entry - stop);
+			if (limits.minStopTicks > 0 && distance < limits.minStopTicks * tickSize() - tickSize() * 1e-6)
+			{
+				trace(ETraceLevel.Debug, $"sizeForRisk - 0: stop distance {distance / tickSize():0.##} ticks < minStopTicks({limits.minStopTicks})");
+				return 0;
+			}
+			int qty = stopLossBasedPositionSize(bars, entry, stop, riskFraction, false);
+			if (qty <= 0) { trace(ETraceLevel.Debug, "sizeForRisk - 0: risk sizing returned 0 (zero equity or zero risk)"); return 0; }
+			if (limits.maxQty > 0 && qty > limits.maxQty) { trace(ETraceLevel.Debug, $"sizeForRisk - qty({qty}) capped to maxQty({limits.maxQty})"); qty = limits.maxQty; }
+			if (limits.maxNotionalFraction > 0)
+			{
+				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * bpv;
+				qty = capByNotional(qty, unit, limits.maxNotionalFraction);
+				if (qty <= 0) { trace(ETraceLevel.Debug, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
+			}
+			qty = applyRoundLots(qty, limits.roundLots);
+			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
+			return qty;
+		}
+
+		/// <summary>
+		/// CS-4: equityAvailable plus, when includeOpenPnl, the current position's open P&amp;L (scaled by the same fraction) for
+		/// non-account equity (chart / portfolio backtest). Account equity already includes open P&amp;L.
+		/// </summary>
+		protected double equityAvailable(double fraction, bool includeOpenPnl)
+		{
+			double e = equityAvailable(fraction);
+			if (!includeOpenPnl || (Environment.IsAutoTradingMode && m_lastEquityFromAccount)) return e;
+			double open = 0;
+			try { open = CurrentPosition.OpenProfit; } catch { }
+			double scale = fraction > 0 ? fraction
+				: Environment.ApplicationCode == EApplicationCode.Portfolio ? this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d : 1.0;
+			return e + open * scale;
+		}
+
+		// ---- Q1: optional pre-trade cost filter (off by default) ----
+
+		/// <summary>
+		/// Q1: skip a trade when MultiCharts Commission + Slippage for the round trip exceeds this fraction of the planned risk
+		/// (R, $ per contract). 0 = off (default). Not an [Input]; set it in the derived strategy.
+		/// </summary>
+		protected double CostFilterMaxFractionOfR { get; set; } = 0.0;
+
+		/// <summary>
+		/// Q1: MultiCharts Strategy Properties commission and slippage for one contract round trip, in $: 2 x (Commission +
+		/// Slippage), both read as $ per contract per side [PG p17, p45]. Override if the commission rule is per trade.
+		/// </summary>
+		protected virtual double roundTripCostPerContract()
+		{
+			return 2.0 * (this.Commission + this.Slippage);
+		}
+
+		/// <summary>Q1: true when the filter is off or the cost is within CostFilterMaxFractionOfR of R. Reason set when false.</summary>
+		protected bool costFilterPasses(IInstrument bars, double entry, double stop, out string reason)
+		{
+			reason = null;
+			if (CostFilterMaxFractionOfR <= 0 || bars == null) return true;
+			double r = Math.Abs(entry - stop) * bars.Info.BigPointValue;
+			double cost = roundTripCostPerContract();
+			if (r <= 0) { reason = "cost filter: zero risk"; return false; }
+			if (cost / r > CostFilterMaxFractionOfR)
+			{
+				reason = $"cost filter: round-trip cost {cost:0.00} = {cost / r:0.000} R > {CostFilterMaxFractionOfR:0.000} R";
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, reason);
+				return false;
+			}
+			return true;
 		}
 
 		/// <summary>
