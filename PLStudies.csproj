@@ -509,6 +509,16 @@
     <Compile Include="_USHolidays.Function.CS" />
     <Compile Include="_NyseHolidays.Function.CS" />
     <Compile Include="_Test1.Indicator.CS" />
+    <Compile Include="_Test1.Strategy.CS" />
+    <Compile Include="_Test2.Strategy.CS" />
+    <Compile Include="_Test3.Strategy.CS" />
+    <Compile Include="_Test4.Strategy.CS" />
+    <Compile Include="_Test5.Strategy.CS" />
+    <Compile Include="_Test6.Strategy.CS" />
+    <Compile Include="_Test7.Strategy.CS" />
+    <Compile Include="_Test8.Strategy.CS" />
+    <Compile Include="_Test9.Strategy.CS" />
+    <Compile Include="_Test10.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
