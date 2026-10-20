@@ -738,6 +738,18 @@ namespace PowerLanguage.Strategy
 			return OwnProfileWindow == EOwnProfileWindow.GlobexDay && DevelopingSource == EDevelopingSource.Own ? DevelopingExtra(DevProfileDataStream) : null;
 		}
 
+		/// <summary>VPB-6 (Rev 2.4, D5): with OwnProfileWindow = Rth, value migration uses completed Own RTH (09:30-16:00) profiles.</summary>
+		protected override List<VpExtra> migrationProfiles(int stream, int count)
+		{
+			if (OwnProfileWindow == EOwnProfileWindow.Rth && DevelopingSource == EDevelopingSource.Own && stream == DevProfileDataStream)
+			{
+				List<VpExtra> own = OwnCompletedProfiles(count);
+				own.RemoveAll(e => e.isPartial);
+				return own;
+			}
+			return base.migrationProfiles(stream, count);
+		}
+
 		/// <summary>VPF-3: last completed RTH Own profile, or null.</summary>
 		public VpExtra PriorRthProfile()
 		{

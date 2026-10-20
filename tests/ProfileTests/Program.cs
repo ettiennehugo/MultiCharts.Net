@@ -120,6 +120,32 @@ static class Program
 		double[] tp, tv; t.Dense(out tp, out tv);
 		Check(tv.Length == 1 && Near(tp[0], 11), "BarTypical at (H+L+C)/3");
 
+		// VPB-6 ValueMigrationScore (Rev 2.4 test vectors), n = 3, D = 0.5.
+		var vUp = new List<double> { 100, 101, 102, 103 };
+		int? v1 = PM.MigrationScore(vUp, 3, 0.5, 103.2);
+		Check(v1 == 3 && PM.ClassifyMigration(v1) == PM.MigrationState.Up, "VMS 1: V=3 Up, got " + v1);
+		int? v2 = PM.MigrationScore(new List<double> { 100, 100.2, 99.9, 100.1 }, 3, 0.5, 100.3);
+		Check(v2 == 0 && PM.ClassifyMigration(v2) == PM.MigrationState.Neutral, "VMS 2: V=0 Neutral, got " + v2);
+		int? v3 = PM.MigrationScore(new List<double> { 103, 102, 101, 100 }, 3, 0.5, 99.8);
+		Check(v3 == -3 && PM.ClassifyMigration(v3) == PM.MigrationState.Down, "VMS 3: V=-3 Down, got " + v3);
+		int? v4 = PM.MigrationScore(new List<double> { 100, 101 }, 3, 0.5, 101.0);
+		Check(v4 == null && PM.ClassifyMigration(v4) == PM.MigrationState.Unknown, "VMS 4: Unknown with two sessions");
+		Check(PM.MigrationScore(vUp, 3, 0.5, 104) == 4, "VMS developing term counts at >= D (range +4)");
+		Check(PM.MigrationScore(vUp, 3, 0.5, null) == 3, "VMS without developing term");
+		Check(PM.MigrationStep(100.5, 100, 0.5) == 1 && PM.MigrationStep(100.49, 100, 0.5) == 0, "VMS |a-b| = D counts, < D does not");
+		// 5. Truncation: the score at session t uses only POCs vUp to t; appending later sessions to a copy cut at t changes nothing.
+		var series = new List<double> { 100, 99, 101, 102, 101.2, 103, 104, 102, 101, 100 };
+		bool trunc = true;
+		for (int s = 3; s < series.Count; s++)
+		{
+			int? full = PM.MigrationScore(series.GetRange(0, s + 1), 3, 0.5, null);
+			var cut = series.GetRange(0, s + 1);
+			int? again = PM.MigrationScore(cut, 3, 0.5, null);
+			cut.AddRange(new double[] { 999, -5 }); // later data exists but is not passed for session t
+			trunc &= full == again && PM.MigrationScore(cut.GetRange(0, s + 1), 3, 0.5, null) == full;
+		}
+		Check(trunc, "VMS 5: truncation");
+
 		Console.WriteLine($"ProfileTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}

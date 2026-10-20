@@ -1947,6 +1947,40 @@ namespace PowerLanguage.Strategy
 				return Shape.D;
 			}
 
+			public enum MigrationState { Unknown = 0, Down, Neutral, Up }
+
+			/// <summary>VPB-6 (Rev 2.4) s(a, b): 0 when |a - b| &lt; d, else sign(a - b).</summary>
+			public static int MigrationStep(double a, double b, double d)
+			{
+				double diff = a - b;
+				if (Math.Abs(diff) < d) return 0;
+				return Math.Sign(diff);
+			}
+
+			/// <summary>
+			/// VPB-6 (Rev 2.4) value-migration score V = sum_{i=0}^{n-1} s(POC_i, POC_{i+1}) (+ s(devPoc, POC_0) when devPoc is
+			/// given). pocsOldestToNewest: completed-session POCs, newest last; only the newest n+1 are used. Returns null
+			/// (Unknown) with fewer than n+1 POCs, n &lt; 1, or a non-finite / negative d.
+			/// </summary>
+			public static int? MigrationScore(IList<double> pocsOldestToNewest, int n, double d, double? devPoc)
+			{
+				if (pocsOldestToNewest == null || n < 1 || pocsOldestToNewest.Count < n + 1 || double.IsNaN(d) || double.IsInfinity(d) || d < 0) return null;
+				int last = pocsOldestToNewest.Count - 1;   // POC_0
+				int v = 0;
+				for (int i = 0; i < n; i++) v += MigrationStep(pocsOldestToNewest[last - i], pocsOldestToNewest[last - i - 1], d);
+				if (devPoc.HasValue && devPoc.Value > 0) v += MigrationStep(devPoc.Value, pocsOldestToNewest[last], d);
+				return v;
+			}
+
+			/// <summary>VPB-6 (Rev 2.4): Up when V >= upAt, Down when V &lt;= -downAt, Neutral otherwise, Unknown when V is null.</summary>
+			public static MigrationState ClassifyMigration(int? v, int upAt = 2, int downAt = 2)
+			{
+				if (!v.HasValue) return MigrationState.Unknown;
+				if (v.Value >= upAt) return MigrationState.Up;
+				if (v.Value <= -downAt) return MigrationState.Down;
+				return MigrationState.Neutral;
+			}
+
 			/// <summary>VPB-7: true when every consecutive pair of value areas overlaps by >= minOverlap of the narrower one.</summary>
 			public static bool IsBalanced(IList<double> vahs, IList<double> vals, double minOverlap)
 			{
@@ -2487,6 +2521,62 @@ namespace PowerLanguage.Strategy
 				if (run >= minCloses) return b;
 			}
 			return 0;
+		}
+
+		/// <summary>
+		/// VPB-6 (Rev 2.4): completed session profiles for value migration, newest first. Default: the stream's completed
+		/// profiles ending before the calc bar. The futures base returns completed Own RTH profiles when OwnProfileWindow = Rth.
+		/// </summary>
+		protected virtual List<VpExtra> migrationProfiles(int stream, int count)
+		{
+			return RecentCompletedProfiles(stream, count, streamItemBarIndex(stream));
+		}
+
+		/// <summary>
+		/// VPB-6 (Rev 2.4) ValueMigrationScore (Keller Book 4 §8.4 coding; a hypothesis, not a measured edge). Settings are
+		/// parameters, not inputs. D = minChangeAtrFraction x ATR, where ATR = dailyAtr when > 0 (caller supplies a daily ATR
+		/// ending at the last completed session), else the mean high-low range of the last atrLen completed sessions. Null
+		/// (Unknown) with fewer than n+1 completed POCs or fewer than atrLen sessions for the fallback ATR. The developing
+		/// term uses DevelopingExtra(stream) (VPB-1 source) as of the calc bar. Range [-n, +n], [-(n+1), +(n+1)] with it.
+		/// </summary>
+		public int? ValueMigrationScore(int stream, int n = 3, double minChangeAtrFraction = 0.10, int atrLen = 20,
+			bool includeDeveloping = true, double dailyAtr = 0)
+		{
+			if (n < 1 || atrLen < 1 || minChangeAtrFraction < 0) return null;
+			List<VpExtra> done = migrationProfiles(stream, Math.Max(n + 1, dailyAtr > 0 ? 0 : atrLen));
+			if (done.Count < n + 1) return null;
+			double atr = dailyAtr;
+			if (!(atr > 0))
+			{
+				if (done.Count < atrLen) return null;
+				double sum = 0;
+				for (int i = 0; i < atrLen; i++)
+				{
+					if (!(done[i].high > 0 && done[i].low > 0)) return null;
+					sum += done[i].high - done[i].low;
+				}
+				atr = sum / atrLen;
+			}
+			var pocs = new List<double>(n + 1);
+			for (int i = n; i >= 0; i--)
+			{
+				if (!(done[i].poc > 0)) return null;
+				pocs.Add(done[i].poc);   // oldest first
+			}
+			double? dev = null;
+			if (includeDeveloping)
+			{
+				VpExtra d = DevelopingExtra(stream);
+				if (d != null && d.poc > 0 && d.startBar > done[0].endBar) dev = d.poc;
+			}
+			return ProfileMath.MigrationScore(pocs, n, minChangeAtrFraction * atr, dev);
+		}
+
+		/// <summary>VPB-6 (Rev 2.4): Up / Down / Neutral from ValueMigrationScore with thresholds (default 2); Unknown when it is null.</summary>
+		public ProfileMath.MigrationState ValueMigrationState(int stream, int n = 3, double minChangeAtrFraction = 0.10, int atrLen = 20,
+			bool includeDeveloping = true, double dailyAtr = 0, int upAt = 2, int downAt = 2)
+		{
+			return ProfileMath.ClassifyMigration(ValueMigrationScore(stream, n, minChangeAtrFraction, atrLen, includeDeveloping, dailyAtr), upAt, downAt);
 		}
 
 		/// <summary>VPF-4 hook: does this profile span a contract-roll splice? Default false; the futures base overrides.</summary>
