@@ -33,8 +33,8 @@ namespace PowerLanguage.Function
 		// http://archive.opm.gov/operating_status_schedules/fedhol/2013.asp
 		protected override void refreshHolidays(int year)
 		{
-			//omit new years if it falls on a Saturday in which case it would be moved to the previous year
-			//(see code below that add's that), if it falls on a Sunday it will be moved to the Monda
+			//omit new years if it falls on a Saturday: NYSE rule 7.2 does NOT observe it on the preceding Friday Dec 31
+			//(e.g. NYSE was open on Fri 2021-12-31), if it falls on a Sunday it will be moved to the Monday
 			DateTime newYears = new DateTime(year, 1, 1);
 			if (newYears.DayOfWeek != DayOfWeek.Saturday) m_holidays.Add(newYears);
 
@@ -42,18 +42,13 @@ namespace PowerLanguage.Function
 			m_holidays.Add(getNthDayOfNthWeek(new DateTime(year, 2, 1), DayOfWeek.Monday, WeekOfMonth.Third)); //Washington's birthday, third Monday in Feb
 			m_holidays.Add(easter(year).AddDays(-2));		//Good Friday
 			m_holidays.Add(getNthDayOfNthWeek(new DateTime(year, 5, 1), DayOfWeek.Monday, WeekOfMonth.Last)); //Memorial day, last Monday in May
-			m_holidays.Add(new DateTime(year, 6, 19)); //Juneteenth National Independance day, June 19th
+			if (year >= 2022) m_holidays.Add(new DateTime(year, 6, 19)); //Juneteenth National Independance day, June 19th (NYSE observes it from 2022)
 			m_holidays.Add(new DateTime(year, 7, 4)); //Independance day, July 4th
 			m_holidays.Add(getNthDayOfNthWeek(new DateTime(year, 9, 1), DayOfWeek.Monday, WeekOfMonth.First)); //Labor day, first Monday of September
 			// No Columbus day
 			// No Veterans day
 			m_holidays.Add(getNthDayOfNthWeek(new DateTime(year, 11, 1), DayOfWeek.Thursday, WeekOfMonth.Fourth)); //Thanksgiving day, fourth Thursday of November
 			m_holidays.Add(new DateTime(year, 12, 25)); //Christmas day, December 25
-
-			//next year's new years holiday can actually fall in this year if it falls on a Saturday, add it to
-			//this year if that's the case
-			newYears = new DateTime(year + 1, 1, 1);
-			if (newYears.DayOfWeek == DayOfWeek.Saturday) m_holidays.Add(newYears.AddDays(-1)); //add next year's new years on Friday of this year
 
 			//Saturday holidays move to Friday and Sunday to Monday
 			for (int i = 0; i < m_holidays.Count; i++)

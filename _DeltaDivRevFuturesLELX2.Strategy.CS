@@ -43,7 +43,7 @@ namespace PowerLanguage.Strategy
 		[Input] public bool AllowAsia { get; set; }             // Allow trading the Asia session
 		[Input] public int EntriesPerSession { get; set; }      // Number of entries per session - 0 = unlimited
 		[Input] public int AbsoluteSize { get; set; } // [alternate A] Overrides the below position sizing parameters to take an absolute position size irrespective or risk/equity, this is the BIG HAMMER for position sizing use with caution, default 0 to disable, greater than 0 to enable.
-		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a percentage of the available equity - this is used to determine the maximum position size for the entry
+		[Input] public double MaximumEquityPerPosPercent { get; set; } // [alternate B] maximum equity per position as a fraction of equityAvailable - caps the contract count at equity * fraction / contract notional (price * BigPointValue)
 		[Input] public double RiskBasedEntryPercent { get; set; } // [alternate B] risk based entry percentage - this is used to base the position size as a percentage of the euity based on the risk taken, set to zero to disable risk based entries
 
 		//attribute
@@ -83,20 +83,14 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_price = Bars;
-			m_priceMA.Instrument = m_price;
-			m_priceMA.Length = PriceMomentumLength;
-			m_cumulativeDeltaMA.Instrument = m_cumulativeDelta;
-			m_cumulativeDeltaMA.Length = VolumeMomentumLength;
-			m_cumulativeDelta = BarsOfData(2);
 			if (PriceMomentumLength <= 0) throw new Exception("Price momentum length should be larger than 0.");
 			if (VolumeMomentumLength <= 0) throw new Exception("Volume momentum length should be larger than 0.");
 			if (RiskBasedEntryPercent < 0 || RiskBasedEntryPercent > 1) throw new Exception("RiskBasedEntryPercent must be larger than or equal to zero and less than one.");
 			if (MaximumEquityPerPosPercent <= 0 || MaximumEquityPerPosPercent > 1) throw new Exception("MaximumEquityPerPosPercent must be larger than zero and less then one.");
-			if (m_cumulativeDelta.Info.Resolution.DeltaType != DeltaType.Cumulative) throw new Exception("Second data feed must be a cumulative delta feed.");
 
 			m_price = Bars;
 			m_cumulativeDelta = BarsOfData(2);
+			if (m_cumulativeDelta.Info.Resolution.DeltaType != DeltaType.Cumulative) throw new Exception("Second data feed must be a cumulative delta feed.");
 			m_priceMA.Instrument = m_price;
 			m_priceMA.Length = PriceMomentumLength;
 			m_cumulativeDeltaMA.Instrument = m_cumulativeDelta;
@@ -137,7 +131,20 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Debug, $"Divergence detected: bar({m_price.CurrentBar}), priceMom({priceMomentum:F4}), volumeMom({volumeMomentum:F4})");
 				int size = 0;
 				double low = m_price.Low.Lowest(LowLookbackLength);
-				double risk = m_price.StatusLine.Ask - low;
+				// DER-02: StatusLine is the live quote (today's ask, or 0 offline) on every historical bar. Historical bars use the
+				// close as the reference (the entry is MarketNextBar); real time uses the live ask when there is one.
+				double refPrice = m_price.Close[0];
+				if (Environment.IsRealTimeCalc)
+				{
+					double ask = m_price.StatusLine.Ask;
+					if (ask > 0) refPrice = ask;
+				}
+				double risk = refPrice - low;
+				if (risk <= 0)
+				{
+					trace(ETraceLevel.Debug, $"skip: refPrice({refPrice:F4}) not above low({low:F4})");
+					return;
+				}
 
 				if (AbsoluteSize > 0)
 				{
@@ -146,19 +153,24 @@ namespace PowerLanguage.Strategy
 				}
 				else
 				{
-					// risk based position sizing
-					int equityBasedSize = equityBasedPositionSize(m_price.StatusLine.Ask, MaximumEquityPerPosPercent, false);
-					int riskBasedSize = riskBasedPositionSize(risk, RiskBasedEntryPercent, false);
-					size = equityBasedSize < riskBasedSize ? equityBasedSize : riskBasedSize;
-					trace(ETraceLevel.Debug, $"Sending LE: size({size}), equityBasedSize({equityBasedSize}), riskBasedSize({riskBasedSize}), recentLow({low:F4}), ask({m_price.StatusLine.Ask:F4}), risk({risk:F4})");
+					// DER-03: contract sizing, |entry - stop| * BigPointValue dollars at risk per contract (the old equity/price
+					// "shares" and points-as-dollars sizes were meaningless for futures), capped by MaximumEquityPerPosPercent of equityAvailable at the contract notional (PR #1 review).
+					int riskBasedSize = stopLossBasedPositionSize(m_price, refPrice, low, RiskBasedEntryPercent, false);
+					double contractNotional = refPrice * m_price.Info.BigPointValue;
+					size = capByNotional(riskBasedSize, contractNotional, MaximumEquityPerPosPercent);
+					trace(ETraceLevel.Debug, $"Sending LE: size({size}) riskBasedSize({riskBasedSize}) ref({refPrice:F4}) stop({low:F4}) risk({risk:F4}) bpv({m_price.Info.BigPointValue}) notional({contractNotional:F2}) maxEquityPct({MaximumEquityPerPosPercent})");
 				}
 
-				//TODO - these size calculations are almost certainly not correct for futures
+				if (size <= 0)
+				{
+					trace(ETraceLevel.Debug, "skip: size 0");
+					return;
+				}
 				m_le.Send(size);
 
 				// TODO - clean this up
 				m_stopLoss = low;
-				m_targetPrice = m_price.StatusLine.Ask + Math.Abs(risk * RiskRewardFactor);
+				m_targetPrice = refPrice + Math.Abs(risk * RiskRewardFactor);
 				trace(ETraceLevel.Debug, $"SL({m_stopLoss:F4}), TP({m_targetPrice:F4})");
 			}
 		}

@@ -45,7 +45,7 @@ namespace PowerLanguage.Function
 		public bool isHoliday(DateTime dateTime)
 		{
 			//holidays are stored as DateOnly with zeroed time, so we only compare using the Date
-			return m_holidays.Contains(dateTime.Date);
+			return m_holidays != null && m_holidays.Contains(dateTime.Date);   // null before the function's StartCalc
 		}
 
 		protected override void StartCalc()

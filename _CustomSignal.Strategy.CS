@@ -58,6 +58,7 @@ namespace PowerLanguage.Strategy
 
 			private string m_logFilePath;
 			private IOutput m_output; //MC main output window
+			private StreamWriter m_writer;   // guarded by s_lock, opened lazily and kept open (CS-16)
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -86,6 +87,9 @@ namespace PowerLanguage.Strategy
 					if (s_instance == null)
 					{
 						s_instance = new LogFileSingleton(output);
+						LogFileSingleton instance = s_instance;
+						AppDomain.CurrentDomain.ProcessExit += (s, e) => instance.Close();
+						AppDomain.CurrentDomain.DomainUnload += (s, e) => instance.Close();   // study DLL reload
 					}
 
 					return s_instance;
@@ -98,13 +102,29 @@ namespace PowerLanguage.Strategy
 				{
 					try
 					{
+						if (m_writer == null)
+						{
+							var fs = new FileStream(m_logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
+						}
 						string csvMessage = escapeCsv(message);
-						File.AppendAllText(m_logFilePath, $"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}{System.Environment.NewLine}", Encoding.UTF8);
+						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}");
 					}
 					catch (Exception ex)
 					{
+						try { if (m_writer != null) m_writer.Dispose(); } catch { }
+						m_writer = null;   // reopen on next write
 						m_output.WriteLine($"Error writing to log file: {ex.Message}");
 					}
+				}
+			}
+
+			public void Close()
+			{
+				lock (s_lock)
+				{
+					try { if (m_writer != null) m_writer.Dispose(); } catch { }
+					m_writer = null;
 				}
 			}
 
@@ -214,6 +234,7 @@ namespace PowerLanguage.Strategy
 		private bool m_entryCacheClosed;
 		private string m_entryCacheKey;
 		private DateTime m_entryCacheValue;
+		private long m_entryCacheSnapshot;
 		private PowerLanguage.Function._NyseHolidays m_holidays;
 		private LogFileSingleton m_logger;
 
@@ -282,6 +303,7 @@ namespace PowerLanguage.Strategy
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
+			m_entryCacheSnapshot = 0;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -325,7 +347,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			// FunctionSimple.Value executes USHolidays.CalcBar for this bar; it rebuilds the holiday list on a year change.
+			// FunctionSimple.Value executes _NyseHolidays.CalcBar for this bar; it rebuilds the holiday list on a year change.
 			// Must run every bar before isHoliday() is used.
 			int _ = m_holidays.Value;
 
@@ -339,7 +361,6 @@ namespace PowerLanguage.Strategy
 					m_intradayClose = Bars.Close[0];
 					m_intradayLow = Bars.Low[0];
 					m_intradayHigh = Bars.High[0];
-					m_currentDay = Bars.Time[0].Date;
 					m_intradayVolume = 0.0; // accumulated only on bar close below
 					m_currentDay = dayKey;
 					m_intradayLowTime = Bars.Time[0];
@@ -372,10 +393,10 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-    /// <summary>
+		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
 		/// </summary>
-    protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
+		protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
 
 		/// <summary>
 		/// Determines the equity available for trading a position based on some custom risk equity per position percentage. If
@@ -521,6 +542,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Position size based on the maximum risk equity per position as a percentage of available equity.
+		/// <paramref name="risk"/> is DOLLAR risk per unit (price distance × BigPointValue), not a price distance.
 		/// </summary>
 		protected int riskBasedPositionSize(double risk, double maxRiskEquityPerPosPercent, bool useRoundLots = false)
 		{
@@ -551,8 +573,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price.
-		/// <paramref name="risk"/> is DOLLAR risk per unit (price distance × BigPointValue), not a price distance.
+		/// Position size based on the maximum risk equity per position as a percentage of equity and a given stop loss price,
+		/// using the instrument's last close (bars.Close[0]) as the entry price.
 		/// </summary>
 		protected int stopLossBasedPositionSize(IInstrument bars, double stopLossPrice, double maxRiskEquityPerPosPercent = 0.0d, bool useRoundLots = false)
 		{
@@ -565,7 +587,7 @@ namespace PowerLanguage.Strategy
 			double bpv = bars.Info.BigPointValue;
 			if (double.IsNaN(bpv) || double.IsInfinity(bpv) || bpv <= 0)
 			{
-				trace(ETraceLevel.Warning, $"stopLossBasedPositionSizeAt - BigPointValue({bpv}) invalid, returning 0");
+				trace(ETraceLevel.Warning, $"stopLossBasedPositionSize - BigPointValue({bpv}) invalid, returning 0");
 				return 0;
 			}
 			double dollarRiskPerUnit = Math.Abs(entryPrice - stopLossPrice) * bpv;
@@ -668,8 +690,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-    /// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
-    /// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
+		/// Lowest low of today plus the previous <paramref name="daysBack"/> trading days (tradingDayKey, i.e. Globex days for futures).
+		/// daysBack = 0 → today's low; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day low.
 		/// </summary>
 		protected Tuple<DateTime, double> recentLow(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
@@ -677,23 +699,23 @@ namespace PowerLanguage.Strategy
 			if (daysBack == 0) return new Tuple<DateTime, double>(IntradayLowTime, IntradayLow);
 			double low = includeToday ? IntradayLow : double.MaxValue;
 			DateTime lowBarTime = includeToday ? IntradayLowTime : DateTime.MinValue;
-			DateTime lowDate = IntradayLowTime;
 			int daysProcessed = 0;
-			DateTime startDate = Bars.Time[0].Date;
+			DateTime startDate = tradingDayKey(Bars.Time[0]);
 			DateTime lastDate = startDate;
 
 			for (int i = 0; i < Bars.CurrentBar; i++)
 			{
-				if (Bars.Time[i].Date != lastDate)
+				DateTime day = tradingDayKey(Bars.Time[i]);
+				if (day != lastDate)
 				{
 					daysProcessed++;
-					lastDate = Bars.Time[i].Date;
+					lastDate = day;
 				}
 
 				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
 					break;
 
-				if (Bars.Time[i].Date != startDate && low > Bars.Low[i])
+				if (day != startDate && low > Bars.Low[i])
 				{
 					low = Bars.Low[i];
 					lowBarTime = Bars.Time[i];
@@ -710,8 +732,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (calendar dates).
-		/// daysBack = 0 → today's high; daysBack = 1 → min(today, previous day). includeToday = false excludes today.
+		/// Highest high of today plus the previous <paramref name="daysBack"/> trading days (tradingDayKey, i.e. Globex days for futures).
+		/// daysBack = 0 → today's high; daysBack = 1 → max(today, previous day). includeToday = false excludes today.
 		/// E.g. 1 day back would be the previous trading day, if days back is set to 0 it will return the current day high.
 		/// </summary>
 		protected Tuple<DateTime, double> recentHigh(int daysBack, DateTime? earliestDateTime = null, bool includeToday = true)
@@ -720,21 +742,22 @@ namespace PowerLanguage.Strategy
 			double high = includeToday ? IntradayHigh : double.MinValue;
 			DateTime highBarTime = includeToday ? IntradayHighTime : DateTime.MinValue;
 			int daysProcessed = 0;
-			DateTime startDate = Bars.Time[0].Date;
+			DateTime startDate = tradingDayKey(Bars.Time[0]);
 			DateTime lastDate = startDate;
 
 			for (int i = 0; i < Bars.CurrentBar; i++)
 			{
-				if (Bars.Time[i].Date != lastDate)
+				DateTime day = tradingDayKey(Bars.Time[i]);
+				if (day != lastDate)
 				{
 					daysProcessed++;
-					lastDate = Bars.Time[i].Date;
+					lastDate = day;
 				}
 
 				if (daysProcessed > daysBack || earliestDateTime?.CompareTo(Bars.Time[i]) > 0)
 					break;
 
-				if (Bars.Time[i].Date != startDate && high < Bars.High[i])
+				if (day != startDate && high < Bars.High[i])
 				{
 					high = Bars.High[i];
 					highBarTime = Bars.Time[i];
@@ -762,10 +785,18 @@ namespace PowerLanguage.Strategy
 			int bar = Bars.FullSymbolData.Current;
 			bool closed = Bars.Status == EBarState.Close;
 			string key = entryOrderNames == null ? "" : string.Join("\u001f", entryOrderNames);
-			if (bar == m_entryCacheBar && closed == m_entryCacheClosed && key == m_entryCacheKey && !Environment.IsRealTimeCalc)
+			//real-time: the result comes from the shared TradeManager snapshot, so it can only change when the snapshot is
+			//refreshed; key the cache on the refresh stamp (CS-19). Backtest: Positions only change per bar/state.
+			long snapshot = 0;
+			if (Environment.IsRealTimeCalc)
+			{
+				refreshTradeManagerIfNeeded();
+				snapshot = System.Threading.Interlocked.Read(ref s_lastTradeManagerRefreshTicks);
+			}
+			if (bar == m_entryCacheBar && closed == m_entryCacheClosed && key == m_entryCacheKey && snapshot == m_entryCacheSnapshot)
 				return m_entryCacheValue;
 			DateTime result = orderEntryTimeUncached(entryOrderNames);
-			m_entryCacheBar = bar; m_entryCacheClosed = closed; m_entryCacheKey = key; m_entryCacheValue = result;
+			m_entryCacheBar = bar; m_entryCacheClosed = closed; m_entryCacheKey = key; m_entryCacheValue = result; m_entryCacheSnapshot = snapshot;
 			return result;
 		}
 
@@ -808,6 +839,7 @@ namespace PowerLanguage.Strategy
 			lock (s_tradingDataLock)
 			{
 				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
+				if (td == null) return DateTime.MinValue;   // TradeManager not loaded (e.g. real-time without auto trading)
 				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now.AddHours(1)); // negative value is correct, we want to look backward
 				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 				entryLastFill = td.Orders.Items
@@ -838,7 +870,7 @@ namespace PowerLanguage.Strategy
 			{
 				IMarketPosition pos = null;
 				if (CurrentPosition.ClosedTrades.Count > 0) pos = CurrentPosition;   // partial exits of the open position
-				else if (Positions.Count > 1) pos = Positions[1];                    // last closed position (verify Count vs Length)
+				else if (Positions.Count > 1) pos = Positions[1];                    // last closed position (Positions[0] == CurrentPosition)
 
 				if (pos == null || pos.ClosedTrades.Count == 0) return DateTime.MinValue;
 				if (side != EMarketPositionSide.Flat && pos.Side != side) return DateTime.MinValue;
@@ -863,30 +895,40 @@ namespace PowerLanguage.Strategy
 				return DateTime.MinValue;
 			}
 
-			//refresh orders based on symbol and timeframe (same pattern as EntryTime)
-			tradingData.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now); // negative value is correct, we want to look backward
-			tradingData.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
-
 			//determine exit order type (opposite of entry action)
 			ETM_OrderAction orderAction = side == EMarketPositionSide.Long ? ETM_OrderAction.eTM_OA_Sell : ETM_OrderAction.eTM_OA_Buy;
 
-			//get all filled exit orders for this instrument
-			var exitFillTimes = tradingData.Orders.Items
-					.Where(o =>
-							(o.SymbolStr == Bars.Info.Name)
-							&& o.State == ETM_OrderState.eTM_OS_Filled
-							&& o.Action == orderAction
-							&& o.LeftContracts == 0
-					)
-					.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
-					.Where(dt => dt > DateTime.MinValue)
-					.OrderBy(dt => dt)                        //sort chronological to find first/last exit
-					.ToList();
+			//refresh orders based on symbol and timeframe (same pattern as EntryTime): the filters live on the shared static
+			//TradeManager snapshot so set them and materialize the query under the same lock (CS-06)
+			refreshTradeManagerIfNeeded();
+			List<DateTime> exitFillTimes;
+			string window;
+			lock (s_tradingDataLock)
+			{
+				ITradingData td = tradingData;   // refreshes if needed (re-entrant lock)
+				if (td == null) return DateTime.MinValue;   // TradeManager not loaded (e.g. real-time without auto trading)
+				td.Orders.IntervalFltr.Set(DateTime.Now.AddDays(-DEFAULT_ENTRY_EXIT_LOOKBACK), DateTime.Now); // negative value is correct, we want to look backward
+				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
+
+				//get all filled exit orders for this instrument
+				exitFillTimes = td.Orders.Items
+						.Where(o =>
+								(o.SymbolStr == Bars.Info.Name)
+								&& o.State == ETM_OrderState.eTM_OS_Filled
+								&& o.Action == orderAction
+								&& o.LeftContracts == 0
+						)
+						.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
+						.Where(dt => dt > DateTime.MinValue)
+						.OrderBy(dt => dt)                        //sort chronological to find first/last exit
+						.ToList();                                // materialized inside the lock
+				window = $"{td.Orders.IntervalFltr.From},{td.Orders.IntervalFltr.To}";
+			}
 
 			//make sure we found filled orders
 			if (exitFillTimes.Count == 0)
 			{
-				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({tradingData.Orders.IntervalFltr.From},{tradingData.Orders.IntervalFltr.To}).");
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"ExitTime - no fills found: OrderAction({orderAction}) DateInterval({window}).");
 				return DateTime.MinValue;
 			}
 

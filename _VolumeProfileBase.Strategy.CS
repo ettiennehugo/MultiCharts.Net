@@ -3,13 +3,8 @@ using PowerLanguage.Function;
 using PowerLanguage.VolumeProfile;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.Linq;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.ToolTip;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrackBar;
 
 namespace PowerLanguage.Strategy
 {
@@ -25,7 +20,7 @@ namespace PowerLanguage.Strategy
 	/// AdaptiveFromDate reads VwapFromDate / Vwap2FromDate / Vwap3FromDate as strings
 	/// ("yyyy-MM-dd" or "yyyy-MM-dd HH:mm[:ss]").
 	/// </summary>
-	public class _VolumeProfileBase : _CustomSignal
+	public abstract class _VolumeProfileBase : _CustomSignal
 	{
 		//constants
 		public const double DEFAULT_HVN_PERCENTILE = 0.8;  // Default percentile of prices relative to POC considered high volume node prices.
@@ -35,8 +30,6 @@ namespace PowerLanguage.Strategy
 		public const double PRICE_EPSILON = 1e-12;  // tolerance for price-span compares; about 1 ULP near 7800, far below a tick
 		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
 		public const int DEFAULT_VWAP_LENGTH = 20;
-		public const int VWAP_SLOT_COUNT = 3;
-		public const int CONFLUENCE_STREAM_COUNT = 3;
 		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
 		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
 		public const int DEFAULT_CONFLUENCE_MIN_HITS = 2;
@@ -47,18 +40,22 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_1 = 1.00;  // execution / primary stream
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
-		public const double DEFAULT_CONFLUENCE_WEIGHT_POC = 1.00;   // default confluence weight for POC alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_NAKED_POC = 1.25; // naked (unmitigated) POC outweighs a mitigated POC
-		public const double DEFAULT_CONFLUENCE_WEIGHT_VA = 0.90;    // default confluence weight for value area alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_HVN = 0.85;   // default confluence weight for high value area node alignment
-		public const double DEFAULT_CONFLUENCE_WEIGHT_VWAP_SLOT = 0.85;   // default confluence weight for POC alignment
-		public const double DEFAULT_CONFLUENCE_HVN_STRENGTH_FLOOR = 0.35; // default minimum HVN strength
 		public const double DEFAULT_CONFLUENCE_NAKED_MULTIPLIER = 1.15; // naked modifies the POC credit; it is not a second source
 		public const double DEFAULT_CONFLUENCE_REFINEMENT = 0.25;       // one nested child per parent already in the zone
+		private const double MAX_PARENT_CREDIT_MULTIPLIER = 1.25;   // a refined child never lifts its parent above 1.25 x credit
 		public const double DEFAULT_CONFLUENCE_OVERLAY_FACTOR = 0.50;   // VWAP context only; never acceptance or rejection
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
+		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
+		private const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale
+		private const double CLUSTER_SPLIT_TOL_MULTIPLE = 4.0;      // a confluence cluster wider than 4 x tol may split
+		private const int CLUSTER_MIN_SPLIT_COUNT = 3;              // ... and only when it holds at least this many anchors
+		private const int ZONE_TOP_SURVIVORS = 3;                   // survivors kept per zone
+		private const double FALLBACK_TIMEFRAME_WEIGHT_STEP = 0.25; // stream weight = 1 + step x timeframeRank when unset
+		private const double SHARE_FACTOR_MIN = 0.5;                // volume-share factor clamp
+		private const double SHARE_FACTOR_MAX = 1.5;
+		private const double LEVEL_MATCH_TICK_FRACTION = 0.51;      // > half a tick: neighbouring levels never match
 		public const int DEFAULT_LVN_HVN_MAX_GAP_TICKS = 4;   // an LVN edge must be within this many ticks of an HVN edge
 
 		//types
@@ -297,6 +294,16 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
+		/// How a confluence zone should be used (VPB-26, was a "target"/"entry"/"conflict" string). Derived from role.
+		/// </summary>
+		public enum ESuggestedUse
+		{
+			Target = 0,
+			Entry = 1,
+			Conflict = 2
+		}
+
+		/// <summary>
 		/// Zone versus the highest-timeframe value area on this rebuild.
 		/// </summary>
 		public enum EConfluenceLocation
@@ -366,7 +373,7 @@ namespace PowerLanguage.Strategy
 			public int independentSources;
 			public EConfluenceRole role;
 			public EConfluenceLocation location;
-			public string suggestedUse;    // target | entry | conflict
+			public ESuggestedUse suggestedUse;    // Target | Entry | Conflict
 			public double exitPrice;       // anchor when this zone is a target; otherwise 0
 			public double entryPrice;      // 0 — the entry edge depends on which side is touched
 			public double invalidationBelow;
@@ -412,8 +419,9 @@ namespace PowerLanguage.Strategy
 		///
 		/// generation is the invalidation token for this stream. onVpChanged and StartCalc bump it.
 		/// listedCache is the sorted pack.Items snapshot for that generation, so itemForBar does not
-		/// walk Items on every bar. cachedBarA/B remember the last two chartBar resolutions
-		/// (CalcBar always asks for current and current-1). A generation bump drops both caches.
+		/// walk Items on every bar; listedStarts holds the start bar of each listed profile (same order)
+		/// for a binary search. resolved memoizes itemForBar for bars before the calc bar, cachedBarA the
+		/// calc bar itself (VPB-17). A generation bump drops all of them.
 		/// nakedSuppressed is the TrackNakedPoc-off clear-once flag. levelsGeneration moves only
 		/// when an extra gains, loses, or rebuilds levels, so percentiles can skip a quiet stream.
 		/// </summary>
@@ -426,12 +434,16 @@ namespace PowerLanguage.Strategy
 			public int generation;
 			public int listedGeneration = -1;
 			public List<IProfile> listedCache;
+			public int[] listedStarts = new int[0];   // profileStartBar(listedCache[i]), ascending
 			public int resolveGeneration = -1;
-			public int cachedBarA = -1;
+			public readonly Dictionary<int, IProfile> resolved = new Dictionary<int, IProfile>();   // bars < calc bar
+			public int cachedBarA = -1;               // calc bar memo (its window can still grow)
 			public IProfile cachedProfileA;
-			public int cachedBarB = -1;
-			public IProfile cachedProfileB;
 			public bool nakedSuppressed;
+			public int nakedStampedBar = -1;          // VPB-16: stampNakedPocs ran for this (bar, close state, generation, extra count)
+			public bool nakedStampedAtClose;
+			public int nakedStampedGeneration = -1;
+			public int nakedStampedExtraCount = -1;
 			public int levelsGeneration;
 			public int percentilesStampedGeneration = -1;
 
@@ -450,10 +462,9 @@ namespace PowerLanguage.Strategy
 				if (generation == int.MaxValue) generation = 1;
 				listedGeneration = -1;
 				resolveGeneration = -1;
+				resolved.Clear();
 				cachedBarA = -1;
-				cachedBarB = -1;
 				cachedProfileA = null;
-				cachedProfileB = null;
 			}
 		};
 
@@ -579,13 +590,11 @@ namespace PowerLanguage.Strategy
 				{
 					// IOG: CurrentBar did not advance. Replace the slot written for this bar.
 					int slot = (m_lenNext - 1 + n) % n;
-					subtractLengthSlot(slot);
 					writeLengthSlot(slot, bars, 0);
 				}
 				else if (contiguous)
 				{
 					// m_lenNext is the oldest sample. Drop it, write the new bar there, advance.
-					subtractLengthSlot(m_lenNext);
 					writeLengthSlot(m_lenNext, bars, 0);
 					m_lenNext = (m_lenNext + 1) % n;
 					m_lenBar = bars.CurrentBar;
@@ -605,7 +614,8 @@ namespace PowerLanguage.Strategy
 					}
 					m_lenBar = bars.CurrentBar;
 				}
-				// Newest-first resync matches clear-and-resum addition order, including vol/price skips.
+				// Newest-first resync matches clear-and-resum addition order, including vol/price skips. It rebuilds the
+				// sums on every path, so the ring is not adjusted incrementally (VPB-19: the old subtractions were dead work).
 				resyncLengthSums(n);
 				finish();
 			}
@@ -625,17 +635,6 @@ namespace PowerLanguage.Strategy
 			{
 				m_lenPrice[slot] = priceAt(bars, barsAgo);
 				m_lenVol[slot] = volume(bars, barsAgo);
-			}
-
-			// Mirror add(): a skipped bar (vol <= 0 or price <= 0) contributed nothing, so it subtracts nothing.
-			private void subtractLengthSlot(int slot)
-			{
-				double price = m_lenPrice[slot];
-				double vol = m_lenVol[slot];
-				if (vol <= 0 || price <= 0) return;
-				m_sumPV -= price * vol;
-				m_sumP2V -= price * price * vol;
-				m_sumV -= vol;
 			}
 
 			private void resyncLengthSums(int n)
@@ -851,12 +850,11 @@ namespace PowerLanguage.Strategy
 				applyZScores();
 			}
 
+			// Anchors are sorted ascending by price before clustering and appended in that order,
+			// so the cluster's high is its last element (VPB-18: was an O(n) scan per anchor).
 			private static double clusterHigh(List<Anchor> cluster)
 			{
-				double hi = cluster[0].price;
-				for (int i = 1; i < cluster.Count; i++)
-					if (cluster[i].price > hi) hi = cluster[i].price;
-				return hi;
+				return cluster[cluster.Count - 1].price;
 			}
 
 			// Index range instead of GetRange. A split used to copy both sides; the anchors
@@ -872,7 +870,7 @@ namespace PowerLanguage.Strategy
 					if (cluster[i].price > priceHi) priceHi = cluster[i].price;
 				}
 				int count = hi - lo;
-				if (priceHi - priceLo <= 4.0 * tol + PRICE_EPSILON || count < 3)
+				if (priceHi - priceLo <= CLUSTER_SPLIT_TOL_MULTIPLE * tol + PRICE_EPSILON || count < CLUSTER_MIN_SPLIT_COUNT)
 				{
 					addZone(cluster, lo, hi, tol);
 					return;
@@ -965,7 +963,7 @@ namespace PowerLanguage.Strategy
 				order.Sort((a, b) => lvn
 					? nodes[a].strength.CompareTo(nodes[b].strength)
 					: nodes[b].strength.CompareTo(nodes[a].strength));
-				int cap = order.Count < 3 ? order.Count : 3;
+				int cap = order.Count < ZONE_TOP_SURVIVORS ? order.Count : ZONE_TOP_SURVIVORS;
 				for (int i = 0; i < cap; i++)
 				{
 					Node n = nodes[order[i]];
@@ -1091,11 +1089,14 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			private readonly HashSet<string> m_seenScratch = new HashSet<string>();   // reused by smallestContainer (VPB-18)
+
 			private Anchor smallestContainer(List<Anchor> anchors, Anchor child, bool completedOnly)
 			{
 				Anchor best = null;
 				double bestSpan = double.MaxValue;
-				var seen = new HashSet<string>();
+				var seen = m_seenScratch;
+				seen.Clear();
 				for (int i = 0; i < anchors.Count; i++)
 				{
 					Anchor parent = anchors[i];
@@ -1213,8 +1214,9 @@ namespace PowerLanguage.Strategy
 				zone.hitCount = zone.hits.Count;
 				zone.role = acc > 0 && rej > 0 ? EConfluenceRole.Mixed : pickRole(survivors, acc, rej);
 				zone.location = locate(anchor);
-				zone.suggestedUse = zone.role == EConfluenceRole.Mixed ? "conflict" : (zone.role == EConfluenceRole.Rejection ? "entry" : "target");
-				zone.exitPrice = zone.suggestedUse == "target" ? anchor : 0;
+				zone.suggestedUse = zone.role == EConfluenceRole.Mixed ? ESuggestedUse.Conflict
+					: (zone.role == EConfluenceRole.Rejection ? ESuggestedUse.Entry : ESuggestedUse.Target);
+				zone.exitPrice = zone.suggestedUse == ESuggestedUse.Target ? anchor : 0;
 				zone.entryPrice = 0;
 				zone.invalidationBelow = lo - tol;
 				zone.invalidationAbove = hi + tol;
@@ -1273,7 +1275,7 @@ namespace PowerLanguage.Strategy
 			private Survivor makeSurvivor(Anchor a, string absorbedLabels, bool volume)
 			{
 				double weight = rankWeightFor(a.dataStream);
-				if (weight <= 0) weight = 1.0 + 0.25 * a.timeframeRank;
+				if (weight <= 0) weight = 1.0 + FALLBACK_TIMEFRAME_WEIGHT_STEP * a.timeframeRank;
 				double credit;
 				if (a.overlay)
 					credit = DEFAULT_CONFLUENCE_OVERLAY_FACTOR * weight;
@@ -1295,16 +1297,16 @@ namespace PowerLanguage.Strategy
 
 			private static string absorbed(List<Anchor> list, Anchor kept)
 			{
-				string text = "";
+				var text = new System.Text.StringBuilder();
 				for (int i = 0; i < list.Count; i++)
 				{
 					Anchor a = list[i];
 					if (object.ReferenceEquals(a, kept)) continue;
 					if (isOverlay(a.kind) || isRejection(a.kind) != isRejection(kept.kind)) continue;
-					if (text.Length > 0) text += ",";
-					text += a.kind.ToString();
+					if (text.Length > 0) text.Append(',');
+					text.Append(a.kind.ToString());
 				}
-				return text;
+				return text.ToString();
 			}
 
 			private void applyNested(List<Survivor> survivors)
@@ -1350,9 +1352,7 @@ namespace PowerLanguage.Strategy
 						continue;
 					}
 					double bonus = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
-					double room = (1.25 * parent.credit) - parent.credit;
-					if (room < 0) room = 0;
-					if (bonus > room) bonus = room;
+					bonus = Math.Min(bonus, Math.Max(0.0, (MAX_PARENT_CREDIT_MULTIPLIER - 1.0) * parent.credit));   // VPB-14: named cap (no-op at 0.25)
 					child.credit = bonus;
 				}
 			}
@@ -1424,13 +1424,6 @@ namespace PowerLanguage.Strategy
 				};
 			}
 
-			private static bool isAcceptance(EConfluenceKind k)
-			{
-				return k == EConfluenceKind.Poc || k == EConfluenceKind.NakedPoc
-					|| k == EConfluenceKind.Vah || k == EConfluenceKind.Val
-					|| k == EConfluenceKind.Hvn;
-			}
-
 			private static bool isRejection(EConfluenceKind k)
 			{
 				return k == EConfluenceKind.Lvn;
@@ -1452,8 +1445,8 @@ namespace PowerLanguage.Strategy
 			private static double shareFactor(double share)
 			{
 				double f = share / DEFAULT_CONFLUENCE_SHARE_PIVOT;
-				if (f < 0.5) return 0.5;
-				if (f > 1.5) return 1.5;
+				if (f < SHARE_FACTOR_MIN) return SHARE_FACTOR_MIN;
+				if (f > SHARE_FACTOR_MAX) return SHARE_FACTOR_MAX;
 				return f;
 			}
 
@@ -1462,7 +1455,7 @@ namespace PowerLanguage.Strategy
 				ShareSnap snap;
 				if (extra != null && m_shares.TryGetValue(extra, out snap)) return snap;
 				snap = new ShareSnap();
-				snap.tol = tick > 0 ? tick * 0.51 : 1e-6;
+				snap.tol = tick > 0 ? tick * LEVEL_MATCH_TICK_FRACTION : 1e-6;
 				if (extra == null || extra.levels == null || extra.levels.Count == 0)
 				{
 					if (extra != null) m_shares[extra] = snap;
@@ -1546,7 +1539,7 @@ namespace PowerLanguage.Strategy
 			{
 				int ticks = m_owner.ConfluenceAlignTicks;
 				double tick = m_owner.tickSize();
-				if (tick <= 0) tick = 0.01;
+				if (tick <= 0) tick = FALLBACK_TICK;
 				return ticks * tick;
 			}
 		}
@@ -1559,6 +1552,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks. >= 1.
 		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
 		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
+
 
 		[Input] public EVwapType Vwap1Type { get; set; }    // Slot 1. Disabled = unused.
 		[Input] public int Vwap1Length { get; set; }        // Used when Vwap1Type = Length. >= 1.
@@ -1812,12 +1806,9 @@ namespace PowerLanguage.Strategy
 		private int m_confluenceBuiltBar2 = int.MinValue;
 		private int m_confluenceBuiltBar3 = int.MinValue;
 		private bool m_volumePctDirty;
+		private double m_tick;   // tickSize() cache, reset in StartCalc
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
-		private double[] m_pctTotal = new double[0];
-		private double[] m_pctAsk = new double[0];
-		private double[] m_pctBid = new double[0];
-		private readonly List<VpExtra> m_pctExtras = new List<VpExtra>();
 
 		//interface methods
 		public _VolumeProfileBase(object _ctx) : base(_ctx) { }
@@ -1884,6 +1875,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			m_tick = 0;   // re-resolved on first use (VPB-20)
 			validateInputs();
 			unhookStreams();
 			m_streams.Clear();
@@ -1945,11 +1937,22 @@ namespace PowerLanguage.Strategy
 			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 				return null;
 
+			// VPB-28: a query must not rewrite history. Only the developing profile is refreshed, and only as of the
+			// calc bar; a closed profile keeps its final POC/VA and its VWAP snapshot from its own last bar. A closed
+			// profile with no extra yet (older than anything CalcBar saw, or after a full profile change) is built as
+			// of its own end bar.
 			IProfile vp = itemForBar(streamPack, datastream, barIndex);
-			if (vp != null)
-				ensureExtra(streamPack, vp, barIndex);
+			int cur = streamItemBarIndex(datastream);
+			bool developingQuery = vp != null && (cur < 1 || profileEndBar(vp) >= cur);
+			if (vp != null && developingQuery)
+				ensureExtra(streamPack, vp, cur >= 1 ? cur : barIndex);
 
-			VpExtra extra = extraFor(streamPack, datastream, vp, barIndex);
+			VpExtra extra = vp != null ? lookupExtra(streamPack, datastream, vp) : null;
+			if (extra == null && vp != null && !developingQuery)
+			{
+				ensureExtra(streamPack, vp, profileEndBar(vp));
+				extra = lookupExtra(streamPack, datastream, vp);
+			}
 			if (extra == null)
 				extra = extraForStart(streamPack, datastream, barIndex);
 			if (extra == null)
@@ -1957,12 +1960,30 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"Failed to find volume profile for data stream {datastream} for bar {barIndex}.");
 				return null;
 			}
-			if (vp != null)
-				applyProfileGeometry(vp, extra, barIndex);
-			stampExtra(extra);
 			stampNakedPocs(streamPack);
 			refreshVolumePercentiles();
 			return extra;
+		}
+
+		/// <summary>
+		/// DER-06. Up to <paramref name="count"/> completed profiles on <paramref name="datastream"/> that ended before
+		/// <paramref name="asOfBar"/> (1-based Status Bar #), newest first, straight from the stored extras. Read-only: no fill,
+		/// no geometry, no VWAP stamping; only the (idempotent, once-per-bar) naked-POC stamp that sets pocComplete.
+		/// Extras exist for every profile CalcBar has seen (current and just-closed profile each bar) and for every profile in the
+		/// collection after a full change; profiles that ended before the first calculated bar may be missing, so callers that
+		/// need exactly <paramref name="count"/> profiles should fall back to ExtraVolumeProfileForBar when fewer are returned.
+		/// </summary>
+		public List<VpExtra> RecentCompletedProfiles(int datastream, int count, int asOfBar)
+		{
+			var result = new List<VpExtra>();
+			StreamPack sp;
+			if (count <= 0 || m_streams == null || !m_streams.TryGetValue(datastream, out sp) || sp == null) return result;
+			stampNakedPocs(sp);
+			foreach (VpExtra e in sp.extra.Values)
+				if (e != null && e.pocComplete && e.startBar >= 1 && e.endBar < asOfBar) result.Add(e);
+			result.Sort((a, b) => b.startBar.CompareTo(a.startBar));   // newest first
+			if (result.Count > count) result.RemoveRange(count, result.Count - count);
+			return result;
 		}
 
 		/// <summary>
@@ -2247,7 +2268,7 @@ namespace PowerLanguage.Strategy
 		private IInstrument barsOf(int stream)
 		{
 			if (stream <= 1) return Bars;
-			if (stream < 1 || stream > MaxDataStream) return null;
+			if (stream > MaxDataStream) return null;
 			return BarsOfData(stream);
 		}
 
@@ -2335,17 +2356,25 @@ namespace PowerLanguage.Strategy
 				foreach (VpExtra extra in sp.extra.Values)
 					clearNakedPoc(extra);
 				sp.nakedSuppressed = true;
+				sp.nakedStampedBar = -1;
 				return;
 			}
 			sp.nakedSuppressed = false;
 
 			int current = streamItemBarIndex(sp.datastream);
 			if (current < 1) return;
+			IInstrument bars = barsOf(sp.datastream);
+
+			// VPB-16: called from CalcBar and from every query; stamp once per exact state. ensureExtra invalidates
+			// the stamp whenever it (re)fills or re-stamps a developing extra, so each CalcBar tick still rescans.
+			bool atClose = bars == null || bars.Status == EBarState.Close;
+			if (sp.nakedStampedBar == current && sp.nakedStampedGeneration == sp.generation
+				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose))
+				return;
 
 			double tick = tickSize();
 			// Half a micro-tick of slack so an exact touch is never lost to rounding.
 			double tol = tick > 0 ? NakedPocTickTolerance * tick + tick * 1e-6 : PRICE_EPSILON;
-			IInstrument bars = barsOf(sp.datastream);
 
 			foreach (VpExtra extra in sp.extra.Values)
 			{
@@ -2388,7 +2417,6 @@ namespace PowerLanguage.Strategy
 							break;
 						}
 					}
-					extra.lastNakedScanBar = current;
 					// Only bars that can no longer change are final; the forming bar is rescanned next call.
 					bool currentClosed = bars != null && bars.Status == EBarState.Close;
 					int lastFinal = currentClosed ? current : current - 1;
@@ -2397,6 +2425,10 @@ namespace PowerLanguage.Strategy
 				extra.pocTouchedBar = touched;
 				extra.pocNaked = touched == 0;
 			}
+			sp.nakedStampedBar = current;
+			sp.nakedStampedAtClose = atClose;
+			sp.nakedStampedGeneration = sp.generation;
+			sp.nakedStampedExtraCount = sp.extra.Count;
 		}
 
 		private static void clearNakedPoc(VpExtra extra)
@@ -2408,23 +2440,15 @@ namespace PowerLanguage.Strategy
 			extra.lastNakedScanBar = 0;
 		}
 
-		private void ensureExtraAt(StreamPack sp, int barIndex)
-		{
-			if (sp == null || barIndex < 1) return;
-			IProfile vp = itemForBar(sp, sp.datastream, barIndex);
-			if (vp == null) return;
-			ensureExtra(sp, vp, barIndex);
-		}
-
-		private VpExtra extraFor(StreamPack sp, int datastream, IProfile vp, int chartBar)
+		// Read-only lookup (VPB-28: the old extraFor also re-ran applyProfileGeometry as of the queried bar, which rewrote
+		// a closed profile's POC/VA to an interior, developing value).
+		private VpExtra lookupExtra(StreamPack sp, int datastream, IProfile vp)
 		{
 			if (sp == null || vp == null) return null;
 			VpKey key = new VpKey(datastream, vp);
 			VpExtra extra;
 			if (!sp.extra.TryGetValue(key, out extra) && key.startBar >= 1)
 				sp.extra.TryGetValue(new VpKey(datastream, key.startBar), out extra);
-			if (extra != null)
-				applyProfileGeometry(vp, extra, chartBar);
 			return extra;
 		}
 
@@ -2438,11 +2462,7 @@ namespace PowerLanguage.Strategy
 				sp.extra.TryGetValue(new VpKey(datastream, startBar - 1), out extra);
 			if (extra == null && startBar >= 1)
 				sp.extra.TryGetValue(new VpKey(datastream, startBar + 1), out extra);
-			if (extra == null) return null;
-			IProfile vp = itemForBar(sp, datastream, startBar);
-			if (vp != null)
-				applyProfileGeometry(vp, extra, startBar);
-			return extra;
+			return extra;   // read-only (VPB-28)
 		}
 
 		private void stampExtra(VpExtra extra)
@@ -2516,35 +2536,39 @@ namespace PowerLanguage.Strategy
 		/// both unusable), returns the raw ItemForBar hit anyway — exact bar, then
 		/// previous, then next. That is better than null, not an ownership guarantee.
 		///
-		/// The two-slot cache is only a generation-scoped memo of that resolution.
-		/// CalcBar and IsNewVolumeProfile ask for the current bar and the bar before it.
-		/// A generation bump (profile collection changed) drops the memo. The bar+1 probe
-		/// is still part of the cold resolution; do not remove it.
+		/// The cache is only a generation-scoped memo of that resolution (VPB-17): bars before the
+		/// calc bar go into a dictionary (backward walks such as DER-06 no longer evict the CalcBar
+		/// answers), the calc bar itself into a single slot. A generation bump (profile collection
+		/// changed) drops the memo; the dictionary is also cleared past MAX_RESOLVED_CACHE entries.
+		/// The bar+1 probe is still part of the cold resolution; do not remove it.
 		/// </summary>
 		/// <param name="barIndex">1-based chart bar (Status Bar # / FullSymbolData.Current).</param>
 		private IProfile itemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
-			if (streamPack.resolveGeneration == streamPack.generation)
-			{
-				if (barIndex == streamPack.cachedBarA) return streamPack.cachedProfileA;
-				if (barIndex == streamPack.cachedBarB) return streamPack.cachedProfileB;
-			}
-			else
+			if (streamPack.resolveGeneration != streamPack.generation || streamPack.resolved.Count > MAX_RESOLVED_CACHE)
 			{
 				streamPack.resolveGeneration = streamPack.generation;
+				streamPack.resolved.Clear();
 				streamPack.cachedBarA = -1;
-				streamPack.cachedBarB = -1;
 				streamPack.cachedProfileA = null;
-				streamPack.cachedProfileB = null;
 			}
 
-			IProfile resolved = resolveItemForBar(streamPack, datastream, barIndex);
-			streamPack.cachedBarB = streamPack.cachedBarA;
-			streamPack.cachedProfileB = streamPack.cachedProfileA;
+			IProfile hit;
+			int current = streamItemBarIndex(datastream);
+			if (current >= 1 && barIndex < current)
+			{
+				if (streamPack.resolved.TryGetValue(barIndex, out hit)) return hit;
+				hit = resolveItemForBar(streamPack, datastream, barIndex);
+				streamPack.resolved[barIndex] = hit;
+				return hit;
+			}
+
+			if (barIndex == streamPack.cachedBarA) return streamPack.cachedProfileA;
+			hit = resolveItemForBar(streamPack, datastream, barIndex);
 			streamPack.cachedBarA = barIndex;
-			streamPack.cachedProfileA = resolved;
-			return resolved;
+			streamPack.cachedProfileA = hit;
+			return hit;
 		}
 
 		private IProfile resolveItemForBar(StreamPack streamPack, int datastream, int barIndex)
@@ -2556,9 +2580,29 @@ namespace PowerLanguage.Strategy
 				considerProfile(rawItemForBar(streamPack, datastream, barIndex - 1), barIndex, ref best, ref bestDist);
 			considerProfile(rawItemForBar(streamPack, datastream, barIndex + 1), barIndex, ref best, ref bestDist);
 
+			// VPB-17: the closest owning start is the last listed start <= barIndex (windows on one stream are
+			// sequential), so only look at that neighbourhood; equal starts are walked back over. Fall back to the
+			// full scan only when nothing owns the bar (gaps, profiles whose BarsInterval could not be read).
 			List<IProfile> listed = listedProfiles(streamPack);
-			for (int i = 0; i < listed.Count; i++)
-				considerProfile(listed[i], barIndex, ref best, ref bestDist);
+			int[] starts = streamPack.listedStarts;
+			if (starts.Length == listed.Count && listed.Count > 0)
+			{
+				int idx = Array.BinarySearch(starts, barIndex);
+				if (idx < 0) idx = ~idx - 1;   // last start <= barIndex (-1 when all starts are later)
+				if (idx >= 0)
+				{
+					int lo = idx;
+					while (lo > 0 && starts[lo - 1] == starts[idx]) lo--;
+					while (idx + 1 < starts.Length && starts[idx + 1] == starts[lo]) idx++;
+					for (int i = Math.Max(0, lo - 1); i <= Math.Min(listed.Count - 1, idx + 1); i++)
+						considerProfile(listed[i], barIndex, ref best, ref bestDist);
+				}
+			}
+			if (best == null)
+			{
+				for (int i = 0; i < listed.Count; i++)
+					considerProfile(listed[i], barIndex, ref best, ref bestDist);
+			}
 
 			if (best != null) return best;
 
@@ -2590,15 +2634,22 @@ namespace PowerLanguage.Strategy
 		/// index (barIndex - 1) first, then the 1-based Status index, because some
 		/// builds accept the Status index directly. Does not check that the returned
 		/// profile owns the bar — itemForBar / considerProfile do that.
+		/// VPB-21: bars after the stream's calc bar are never probed (they throw in real time and are
+		/// future objects in a backtest); the 1-based fallback is only tried when its native index
+		/// (barIndex) is not past the calc bar either. Removing the fallback entirely waits on the
+		/// VPB-07 diagnostic (ItemForBar(Current - 1) returns the current profile).
 		/// </summary>
 		/// <param name="barIndex">1-based chart bar. Converted to native 0-based for pack.ItemForBar.</param>
 		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
 		{
 			if (streamPack == null || streamPack.pack == null || barIndex < 1) return null;
+			int current = streamItemBarIndex(datastream);
+			if (current >= 1 && barIndex > current) return null;   // not built yet / future: never probe
 			int native = toNativeItemBar(barIndex);
 			IProfile vp = rawNativeItemForBar(streamPack, datastream, native);
 			if (vp != null) return vp;
-			// Some builds accept the 1-based Status index directly.
+			// Some builds accept the 1-based Status index directly (native index barIndex == chart bar barIndex + 1).
+			if (current >= 1 && barIndex >= current) return null;
 			return rawNativeItemForBar(streamPack, datastream, barIndex);
 		}
 
@@ -2680,7 +2731,7 @@ namespace PowerLanguage.Strategy
 			{
 				ConfluenceZone zone = m_confluenceZones[i];
 				if (zone == null || zone.center <= 0) continue;
-				if (zone.role == EConfluenceRole.Rejection || zone.suggestedUse == "entry" || zone.suggestedUse == "conflict") continue;
+				if (zone.role == EConfluenceRole.Rejection || zone.suggestedUse != ESuggestedUse.Target) continue;
 				if (zone.zScore < minZ) continue;
 				if (!zoneClearsPrice(zone, price, dir, clearTicks, tick)) continue;
 
@@ -2702,7 +2753,7 @@ namespace PowerLanguage.Strategy
 
 		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, int clearTicks, double tick)
 		{
-			if (tick <= 0) tick = 0.01;
+			if (tick <= 0) tick = FALLBACK_TICK;
 			// Compare in whole ticks: robust to 1-ULP noise in derived zone edges.
 			if (dir > 0)
 				return Math.Round((zone.low - price) / tick) >= clearTicks;
@@ -2814,6 +2865,7 @@ namespace PowerLanguage.Strategy
 				if (sp.pack.Items == null)
 				{
 					sp.listedCache = list;
+					sp.listedStarts = new int[0];
 					sp.listedGeneration = sp.generation;
 					return list;
 				}
@@ -2822,6 +2874,7 @@ namespace PowerLanguage.Strategy
 			{
 				// Items can be non-null but already disposed / unusable.
 				sp.listedCache = list;
+				sp.listedStarts = new int[0];   // length mismatch: resolveItemForBar falls back to the full scan
 				sp.listedGeneration = sp.generation;
 				return list;
 			}
@@ -2837,10 +2890,14 @@ namespace PowerLanguage.Strategy
 			catch
 			{
 				sp.listedCache = list;
+				sp.listedStarts = new int[0];   // length mismatch: resolveItemForBar falls back to the full scan
 				sp.listedGeneration = sp.generation;
 				return list;
 			}
 			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
+			var starts = new int[list.Count];
+			for (int i = 0; i < list.Count; i++) starts[i] = profileStartBar(list[i]);
+			sp.listedStarts = starts;
 			sp.listedCache = list;
 			sp.listedGeneration = sp.generation;
 			return list;
@@ -2861,17 +2918,31 @@ namespace PowerLanguage.Strategy
 			return bars.Time[ago];
 		}
 
-		private double tickSize()
+		/// <summary>
+		/// Minimum price move of Data1 (VPB-20). Resolved once per StartCalc (lazily, so it is valid even if something
+		/// in StartCalc asks first) instead of a try/catch on every call inside per-extra loops. Derived classes use it.
+		/// </summary>
+		protected double tickSize()
+		{
+			if (m_tick <= 0) m_tick = resolveTick();
+			return m_tick;
+		}
+
+		private double resolveTick()
 		{
 			try
 			{
 				double mm = Bars.Info.MinMove;
 				double ps = Bars.Info.PriceScale;
-				if (ps != 0) return Math.Abs(mm / ps);
+				if (ps != 0)
+				{
+					double t = Math.Abs(mm / ps);
+					if (t > 0 && !double.IsInfinity(t)) return t;
+				}
 				if (mm > 0) return mm;
 			}
 			catch { }
-			return 0.01;
+			return FALLBACK_TICK;
 		}
 
 		private bool nodeWideEnough(double low, double high)
@@ -2906,8 +2977,8 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Bump before ensureExtra so a closed histogram rebuilt for the old generation
-		// is not treated as frozen against the new profile objects.
+		// EChanged may arrive off the calculation thread: only flag the stream here; the generation bump and the
+		// rebuild run in processPendingProfileChanges at the top of CalcBar (VPB-09).
 		private void onVpChanged(StreamPack sp, bool full)
 		{
 			if (full) sp.pendingFull = true;
@@ -2991,6 +3062,7 @@ namespace PowerLanguage.Strategy
 					&& extra.levels.Count > 0;
 				if (!closed)
 				{
+					sp.nakedStampedBar = -1;   // VPB-16: poc / endBar of this extra may change below
 					bool atClose = isStreamBarClosed(sp.datastream);
 					bool sameStamp = extra.filledAtBar == current
 																	&& extra.filledGeneration == sp.generation
@@ -2999,12 +3071,26 @@ namespace PowerLanguage.Strategy
 					if (sameStamp)
 					{
 						applyProfileGeometry(vp, extra, chartBar);   // as-of POC/VA can still move intrabar
-						stampExtra(extra);
+						if (current < 1 || extra.endBar >= current) stampExtra(extra);   // VPB-28: frozen after close
 						return;
 					}
 
-					fillNodes(vp, extra, chartBar);
-					extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					int windowEnd = profileEndBar(vp);
+					bool windowOpenPastCalcBar = current >= 1 && windowEnd > current;
+					if (windowOpenPastCalcBar)
+					{
+						// VPB-03: in a backtest MC builds the profile over its whole window, so the histogram would include
+						// bars after the calc bar. Keep geometry (as-of POC/VA) only; the histogram is filled once the window
+						// closes (nodesBuilt stays false so the closed test above fails until then). Real time never gets here.
+						clearHistogram(extra);
+						applyProfileGeometry(vp, extra, chartBar);
+						extra.nodesBuilt = false;
+					}
+					else
+					{
+						fillNodes(vp, extra, chartBar);
+						extra.nodesBuilt = extra.levels.Count > 0 && extra.poc > 0;
+					}
 					extra.nodesBuiltForStart = extra.startBar;
 					extra.nodesBuiltGeneration = sp.generation;
 					extra.filledAtBar = current;
@@ -3014,7 +3100,9 @@ namespace PowerLanguage.Strategy
 					m_volumePctDirty = true;
 				}
 			}
-			stampExtra(extra);
+			// VPB-28: VWAP snapshot = value as of the profile's last bar; frozen once the window has closed, so a later
+			// query no longer overwrites it with the current VWAP.
+			if (current < 1 || extra.endBar >= current) stampExtra(extra);
 		}
 
 		private bool isStreamBarClosed(int stream)
@@ -3204,15 +3292,28 @@ namespace PowerLanguage.Strategy
 				int current = streamItemBarIndex(sp.datastream);
 
 				// 1. Merge newly closed profiles into the reference (O(P) scan, O(N) merge per close).
+				//    After a reset (StartCalc / profile-collection change) every closed profile is new at once:
+				//    merging them one by one copies the growing prefix each time (O(P x N)), so rebuild the
+				//    reference with a single sort instead.
+				m_newClosedScratch.Clear();
 				foreach (VpExtra e in sp.extra.Values)
 				{
 					if (e == null || e.inClosedSet || e.levels.Count == 0) continue;
 					bool closed = current >= 1 && e.endBar >= e.startBar && e.endBar < current && e.nodesBuilt;
 					if (!closed) continue;
-					mergeIntoClosed(sp, e);
-					e.inClosedSet = true;
+					m_newClosedScratch.Add(e);
+				}
+				if (m_newClosedScratch.Count > 1 && sp.closedCount == 0)
+					rebuildClosed(sp, m_newClosedScratch);
+				else
+					for (int i = 0; i < m_newClosedScratch.Count; i++)
+						mergeIntoClosed(sp, m_newClosedScratch[i]);
+				for (int i = 0; i < m_newClosedScratch.Count; i++)
+				{
+					m_newClosedScratch[i].inClosedSet = true;
 					sp.closedLevelsGeneration++;
 				}
+				m_newClosedScratch.Clear();
 
 				// 2. Reference grew: restamp every closed extra (once per profile close, not per bar).
 				if (sp.closedStampedGeneration != sp.closedLevelsGeneration)
@@ -3235,6 +3336,36 @@ namespace PowerLanguage.Strategy
 				}
 				sp.percentilesStampedGeneration = sp.levelsGeneration;
 			}
+		}
+
+		private readonly List<VpExtra> m_newClosedScratch = new List<VpExtra>();
+
+		// Bulk build of an empty closed reference: concatenate and sort each column once (VPB-15B follow-up).
+		private static void rebuildClosed(StreamPack sp, List<VpExtra> extras)
+		{
+			int n = 0;
+			for (int i = 0; i < extras.Count; i++) n += extras[i].levels.Count;
+			var t = new double[n];
+			var a = new double[n];
+			var b = new double[n];
+			int w = 0;
+			for (int i = 0; i < extras.Count; i++)
+			{
+				List<LevelVol> levels = extras[i].levels;
+				for (int k = 0; k < levels.Count; k++, w++)
+				{
+					t[w] = levels[k].total;
+					a[w] = levels[k].ask;
+					b[w] = levels[k].bid;
+				}
+			}
+			Array.Sort(t);
+			Array.Sort(a);
+			Array.Sort(b);
+			sp.closedTotal = t;
+			sp.closedAsk = a;
+			sp.closedBid = b;
+			sp.closedCount = n;
 		}
 
 		private static void mergeIntoClosed(StreamPack sp, VpExtra e)
@@ -3389,23 +3520,28 @@ namespace PowerLanguage.Strategy
 			if (startChart >= 1) extra.startBar = startChart;
 			if (endChart >= 1) extra.endBar = endChart;
 			int bar = chartBar >= 1 ? chartBar : (endChart >= 1 ? endChart : startChart);
+			// VPB-03: never read past the calc bar; the whole-window fallbacks are only legitimate once the window has
+			// closed relative to the calc bar (endChart <= asOf: a window ending on the calc bar is complete as of it).
+			int asOf = streamItemBarIndex(extra.dataStream < 1 ? 1 : extra.dataStream);
+			if (asOf >= 1 && bar > asOf) bar = asOf;
+			bool whole = asOf < 1 || endChart <= asOf;   // VPB-03: never look ahead of the calc bar
 
 			double poc = firstPositive(
 				priceForBar(vp, bar, 0),
 				priceForBar(vp, bar - 1, 0),
-				priceForBar(vp, endChart, 0),
+				whole ? priceForBar(vp, endChart, 0) : 0,
 				priceForBar(vp, startChart, 0),
-				levelPrice(vp.POC));
+				whole ? levelPrice(vp.POC) : 0);
 			double vah = firstPositive(
 				priceForBar(vp, bar, 1),
 				priceForBar(vp, bar - 1, 1),
-				priceForBar(vp, endChart, 1),
-				vaExtreme(vp, true));
+				whole ? priceForBar(vp, endChart, 1) : 0,
+				whole ? vaExtreme(vp, true) : 0);
 			double val = firstPositive(
 				priceForBar(vp, bar, 2),
 				priceForBar(vp, bar - 1, 2),
-				priceForBar(vp, endChart, 2),
-				vaExtreme(vp, false));
+				whole ? priceForBar(vp, endChart, 2) : 0,
+				whole ? vaExtreme(vp, false) : 0);
 
 			if (poc > 0) extra.poc = poc;
 			if (vah > 0) extra.vah = vah;
@@ -3415,7 +3551,7 @@ namespace PowerLanguage.Strategy
 			double pocVol = 0;
 			try
 			{
-				if (vp.POC != null) pocVol = (double)vp.POC.TotalValue;
+				if (whole && vp.POC != null) pocVol = (double)vp.POC.TotalValue;
 			}
 			catch { }
 			if (pocVol <= 0) pocVol = volumeAtPrice(extra, extra.poc);
