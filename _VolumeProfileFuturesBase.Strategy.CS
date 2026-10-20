@@ -15,6 +15,21 @@ namespace PowerLanguage.Strategy
 	/// 2. All session logic runs in US Eastern; ToEastern converts each bar time once (cached per bar).
 	/// 3. Use the "CME Globex" session template (or equivalent) so the VP base's session VWAP reset agrees with
 	///    the Globex trading day that tradingDayKey/GlobexDate use (18:00 → 17:00 ET).
+	/// 4. VPF-4: continuous futures come from the datafeed. Use non-adjusted data for volume-profile levels near a roll
+	///    splice (back-adjusted prices move every level before the roll), and set RollDetection to flag profiles / naked
+	///    POCs / composites that span a splice (crossesRoll).
+	/// 5. Bar times are close times: VPF-2 session statistics and RTH Own profiles count a bar as RTH when its ET close
+	///    time is in (RthStart, RTH value end], value end 16:00 ET (D5). InSession(Rth) keeps the 09:30-16:15 session flag.
+	///
+	/// VPF-8 notes:
+	/// * _CustomSignal.Intraday* (High/Low/Open/Close/Volume and times) are Globex-day values on futures charts
+	///   (18:00 → 17:00 ET, tradingDayKey = GlobexDate), not RTH values; use Session (VPF-2) for RTH / IB / overnight.
+	/// * ToEastern on a Local-zone chart: in the autumn fall-back hour a wall-clock bar time occurs twice and is ambiguous;
+	///   TimeZoneInfo.ConvertTime resolves it as standard time, so one hour of bars can map 1h off. Exchange or GMT bar
+	///   time avoids this. A spring-forward gap time is moved forward one hour.
+	/// * Accessibility: session queries used by derived strategies (GetSessions, InSession, IsRth, GlobexDate, ...) are
+	///   protected; the pure clock helpers (PrimarySession, TimeSinceOpen, MinutesSinceOpen, TimeUntilClose, SessionLength,
+	///   IsOpeningRange, TrySessionBounds) are public. Left as is to avoid breaking callers; new APIs follow the same split.
 	/// 
 	/// General Notes:
 	/// * Allow entries only when InSession(MarketSession.Rth) - high liquidity confirms moves.
@@ -519,7 +534,8 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
-		/// Used in _CustomSignal.CalcBar to determine when to start recalculating the intraday values.
+		/// Used in _CustomSignal.CalcBar to determine when to start recalculating the intraday values, so on futures the
+		/// Intraday* values cover the whole Globex day (VPF-8), and CS-7 daily counters roll at 18:00 ET.
 		/// </summary>
 		protected override DateTime tradingDayKey(DateTime barTime) { return GlobexDate(barTime); }
 
