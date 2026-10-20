@@ -395,6 +395,7 @@ namespace PowerLanguage.Strategy
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
 			m_fractionWarned = false;
+			m_tmDay = DateTime.MinValue; m_tmEntrySeen.Clear(); m_tmExitSeen.Clear(); m_tmEntries = m_tmLosers = 0; m_tmNet = 0;   // CS-7
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
@@ -804,6 +805,116 @@ namespace PowerLanguage.Strategy
 			}
 
 			return equityAvailable;
+		}
+
+		// ---- CS-7: trade-management primitives (protected properties, not [Input]s - D7-c). The base sends no orders. ----
+
+		/// <summary>CS-7: no new entries before this session-clock time (null = off).</summary>
+		protected TimeSpan? NoEntryBefore { get; set; }
+		/// <summary>CS-7: no new entries at or after this session-clock time (null = off).</summary>
+		protected TimeSpan? NoEntryAfter { get; set; }
+		/// <summary>CS-7: mustFlatten() from this intra-session time (null = off). For the session end use ExitOnClose.</summary>
+		protected TimeSpan? FlatBy { get; set; }
+		/// <summary>CS-7: max entries per trading day (tradingDayKey). 0 = off.</summary>
+		protected int MaxTradesPerDay { get; set; }
+		/// <summary>CS-7: block entries after this many losing closed trades in the trading day. 0 = off.</summary>
+		protected int DailyLossStopCount { get; set; }
+		/// <summary>CS-7: block entries once the day's closed net loss reaches this many R (RiskUnitDollars). 0 = off.</summary>
+		protected double DailyLossStopR { get; set; }
+		/// <summary>CS-7: $ value of 1 R for DailyLossStopR.</summary>
+		protected double RiskUnitDollars { get; set; }
+		/// <summary>CS-7: mustFlatten() once the open position is this many bars old. 0 = off.</summary>
+		protected int TimeStopBars { get; set; }
+
+		private DateTime m_tmDay = DateTime.MinValue;
+		private readonly HashSet<string> m_tmEntrySeen = new HashSet<string>();
+		private readonly HashSet<string> m_tmExitSeen = new HashSet<string>();
+		private int m_tmEntries, m_tmLosers;
+		private double m_tmNet;
+
+		/// <summary>CS-7: time of day the entry window / FlatBy compare against. Default the bar time; the futures base uses ET.</summary>
+		protected virtual TimeSpan sessionClock(DateTime barTime) { return barTime.TimeOfDay; }
+
+		/// <summary>CS-7: entries, losing trades and closed net P&amp;L of the current trading day.</summary>
+		protected int TradesToday { get { tmRefresh(); return m_tmEntries; } }
+		protected int LosersToday { get { tmRefresh(); return m_tmLosers; } }
+		protected double NetProfitToday { get { tmRefresh(); return m_tmNet; } }
+
+		private void tmRefresh()
+		{
+			// No cache: fills can arrive on any tick, and the scan is cheap (newest 10 positions, de-duplicated by key).
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (day != m_tmDay)
+			{
+				m_tmDay = day; m_tmEntries = m_tmLosers = 0; m_tmNet = 0;
+				m_tmEntrySeen.Clear(); m_tmExitSeen.Clear();
+			}
+			int n = Math.Min(Positions.Count, 10);
+			for (int i = n - 1; i >= 0; i--)
+			{
+				IMarketPosition pos = Positions[i];
+				if (pos == null) continue;
+				if (pos.ClosedTrades != null)
+					foreach (var t in pos.ClosedTrades)
+					{
+						if (t == null || t.EntryOrder == null) continue;
+						tmEntry(t.EntryOrder.Name, t.EntryOrder.BarNumber, t.EntryOrder.Time);
+						if (t.ExitOrder == null || tradingDayKey(t.ExitOrder.Time) != m_tmDay) continue;
+						string k = t.EntryOrder.Name + "\u001f" + t.EntryOrder.Time.Ticks + "\u001f" + t.ExitOrder.Name + "\u001f" + t.ExitOrder.Time.Ticks + "\u001f" + t.ExitOrder.Contracts;
+						if (!m_tmExitSeen.Add(k)) continue;
+						m_tmNet += t.Profit;
+						if (t.Profit < 0) m_tmLosers++;
+					}
+				if (pos.OpenTrades != null)
+					foreach (var t in pos.OpenTrades)
+						if (t != null && t.EntryOrder != null) tmEntry(t.EntryOrder.Name, t.EntryOrder.BarNumber, t.EntryOrder.Time);
+			}
+		}
+
+		private void tmEntry(string name, int bar, DateTime time)
+		{
+			if (tradingDayKey(time) != m_tmDay) return;
+			if (m_tmEntrySeen.Add(name + "\u001f" + bar + "\u001f" + time.Ticks)) m_tmEntries++;
+		}
+
+		/// <summary>CS-7: may the strategy enter now? reason names the first rule that blocks (traced at Info).</summary>
+		protected bool entryAllowed(out string reason)
+		{
+			reason = null;
+			TimeSpan clock = sessionClock(Bars.Time[0]);
+			if (NoEntryBefore.HasValue && clock < NoEntryBefore.Value) reason = $"before NoEntryBefore({NoEntryBefore.Value})";
+			else if (NoEntryAfter.HasValue && clock >= NoEntryAfter.Value) reason = $"at/after NoEntryAfter({NoEntryAfter.Value})";
+			else if (FlatBy.HasValue && clock >= FlatBy.Value) reason = $"at/after FlatBy({FlatBy.Value})";
+			else
+			{
+				tmRefresh();
+				if (MaxTradesPerDay > 0 && m_tmEntries >= MaxTradesPerDay) reason = $"MaxTradesPerDay({MaxTradesPerDay}) reached";
+				else if (DailyLossStopCount > 0 && m_tmLosers >= DailyLossStopCount) reason = $"DailyLossStopCount({DailyLossStopCount}) reached: {m_tmLosers} losers";
+				else if (DailyLossStopR > 0 && RiskUnitDollars > 0 && -m_tmNet / RiskUnitDollars >= DailyLossStopR) reason = $"DailyLossStopR({DailyLossStopR}) reached: {m_tmNet / RiskUnitDollars:0.00} R";
+			}
+			if (reason != null && traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "entry blocked: " + reason);
+			return reason == null;
+		}
+
+		/// <summary>CS-7: should the open position be closed now (FlatBy reached or TimeStopBars elapsed)?</summary>
+		protected bool mustFlatten()
+		{
+			if (StrategyInfo.MarketPosition == 0) return false;
+			if (FlatBy.HasValue && sessionClock(Bars.Time[0]) >= FlatBy.Value) return true;
+			if (TimeStopBars > 0)
+			{
+				try
+				{
+					if (CurrentPosition.OpenTrades != null)
+						foreach (var t in CurrentPosition.OpenTrades)
+						{
+							// oldest open entry decides; BarNumber is on the CurrentBar scale
+							if (t != null && t.EntryOrder != null) return Bars.CurrentBar - t.EntryOrder.BarNumber >= TimeStopBars;
+						}
+				}
+				catch { }
+			}
+			return false;
 		}
 
 		// ---- CS-4: sizing API consolidation ----

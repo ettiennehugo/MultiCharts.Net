@@ -565,6 +565,9 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override DateTime tradingDayKey(DateTime barTime) { return GlobexDate(barTime); }
 
+		/// <summary>CS-7: entry windows / FlatBy compare against US Eastern time on futures charts.</summary>
+		protected override TimeSpan sessionClock(DateTime barTime) { return ToEastern(barTime).TimeOfDay; }
+
 		private bool TryWindow(
 				MarketSession session,
 				out TimeSpan start,
