@@ -1776,7 +1776,6 @@ namespace PowerLanguage.Strategy
 		private int m_confluenceBuiltBar2 = int.MinValue;
 		private int m_confluenceBuiltBar3 = int.MinValue;
 		private bool m_volumePctDirty;
-		private double m_tick;   // tickSize() cache, reset in StartCalc
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
 
@@ -1845,7 +1844,6 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_tick = 0;   // re-resolved on first use (VPB-20)
 			validateInputs();
 			unhookStreams();
 			m_streams.Clear();
@@ -2879,32 +2877,7 @@ namespace PowerLanguage.Strategy
 			return bars.Time[ago];
 		}
 
-		/// <summary>
-		/// Minimum price move of Data1 (VPB-20). Resolved once per StartCalc (lazily, so it is valid even if something
-		/// in StartCalc asks first) instead of a try/catch on every call inside per-extra loops. Derived classes use it.
-		/// </summary>
-		protected double tickSize()
-		{
-			if (m_tick <= 0) m_tick = resolveTick();
-			return m_tick;
-		}
-
-		private double resolveTick()
-		{
-			try
-			{
-				double mm = Bars.Info.MinMove;
-				double ps = Bars.Info.PriceScale;
-				if (ps != 0)
-				{
-					double t = Math.Abs(mm / ps);
-					if (t > 0 && !double.IsInfinity(t)) return t;
-				}
-				if (mm > 0) return mm;
-			}
-			catch { }
-			return FALLBACK_TICK;
-		}
+		// tickSize() (VPB-20) lives in _CustomSignal since spec CS-1 (the journal needs ticks); same resolution and cache.
 
 		private bool nodeWideEnough(double low, double high)
 		{

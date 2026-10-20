@@ -25,6 +25,7 @@ namespace PowerLanguage.Strategy
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
 		/// <summary>Spec CS-3: build tag written on the RUN line. Bump by hand (or paste a git hash) when the base classes change.</summary>
 		public const string BUILD_TAG = "base-class-rev2";
+		private const double TICK_FALLBACK = 0.01;   // tickSize() when the symbol reports no usable MinMove/PriceScale
 
 		//types
 		/// <summary>
@@ -36,6 +37,7 @@ namespace PowerLanguage.Strategy
 			Error,
 			Warning,
 			Info,
+			Journal,    //spec CS-1: Info + per-trade journal (MCJournal_<runId>.csv); also on at Verbose/Debug
 			Verbose,
 			Debug,      //extensive logs for debugging purposes
 		}
@@ -151,6 +153,72 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>
+		/// Spec CS-1: per-trade journal of what MultiCharts does not record (initial stop, R, MFE/MAE in R/ticks, planned vs
+		/// fill, tag, context). One CSV per run (MCJournal_&lt;runId&gt;.csv) next to the trace log. Everything else (P&amp;L,
+		/// commission, exit order name, bar numbers, run-up/drawdown in $) is copied from MC's own trade objects.
+		/// </summary>
+		private sealed class TradeJournal
+		{
+			public const string HEADER = "runId,strategy,symbol,tag,side,qty,entryTime,entryPrice,exitTime,exitPrice,exitOrder,barsHeld," +
+				"profit,commission,armed,plannedEntry,entrySlipTicks,initialStop,target,riskPerUnit,riskTicks,riskDollars,rMultiple," +
+				"mfeDollars,maeDollars,mfeTicks,maeTicks,mfeR,maeR,excursionScope,context";
+			private readonly object m_lock = new object();
+			private readonly string m_path;
+			private StreamWriter m_writer;
+
+			public TradeJournal(string runId)
+			{
+				string name = "MCJournal_" + runId + ".csv";
+				try
+				{
+					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
+					Directory.CreateDirectory(dir);
+					m_path = Path.Combine(dir, name);
+				}
+				catch
+				{
+					m_path = Path.Combine(Path.GetTempPath(), name);
+				}
+			}
+
+			public string Path_ { get { return m_path; } }
+
+			public void Write(string csvLine)
+			{
+				lock (m_lock)
+				{
+					if (m_writer == null)
+					{
+						bool fresh = !File.Exists(m_path);
+						var fs = new FileStream(m_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+						m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };
+						if (fresh) m_writer.WriteLine(HEADER);
+					}
+					m_writer.WriteLine(csvLine);
+				}
+			}
+
+			public void Close()
+			{
+				lock (m_lock)
+				{
+					try { if (m_writer != null) m_writer.Dispose(); } catch { }
+					m_writer = null;
+				}
+			}
+		}
+
+		/// <summary>CS-1: what the strategy knew at order send, keyed by entry order name.</summary>
+		private sealed class JournalArm
+		{
+			public string tag;
+			public double plannedEntry;
+			public double initialStop;
+			public double target;
+			public string context;
+		}
+
 		//inputs
 
 		//properties
@@ -255,6 +323,10 @@ namespace PowerLanguage.Strategy
 		private string m_runId;          // CS-3
 		private bool m_runLogged;        // CS-3: RUN line written for this run
 		private bool m_runEndLogged;     // CS-3: RUN-END line written for this run
+		private double m_tick;           // tickSize() cache, reset in StartCalc (VPB-20, moved here by CS-1)
+		private TradeJournal m_journal;  // CS-1, created lazily when ETraceLevel.Journal is on
+		private Dictionary<string, JournalArm> m_journalArms;   // CS-1: by entry order name
+		private HashSet<string> m_journalWritten;              // CS-1: trades already written (identity key)
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
@@ -298,6 +370,8 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void Destroy()
 		{
+			if (m_journal != null) m_journal.Close();
+			m_journal = null;
 			m_logger = null;
 			base.Destroy();
 		}
@@ -325,6 +399,11 @@ namespace PowerLanguage.Strategy
 			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3
 			m_runLogged = false;
 			m_runEndLogged = false;
+			m_tick = 0;   // tickSize() re-resolved on first use
+			if (m_journal != null) m_journal.Close();
+			m_journal = null;                                   // CS-1: one file per run
+			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
+			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -420,6 +499,10 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
+			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
+			if (Bars.Status == EBarState.Close && traceOn(ETraceLevel.Journal))
+				journalScan();
+
 			// CS-3: RUN-END once, on the last historical bar (end of the backtest data range)
 			if (!m_runEndLogged && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
 			{
@@ -468,6 +551,144 @@ namespace PowerLanguage.Strategy
 			foreach (Attribute a in Attribute.GetCustomAttributes(p, true))
 				if (a.GetType().Name == "InputAttribute") return true;
 			return false;
+		}
+
+		/// <summary>
+		/// Minimum price move of Data1 (VPB-20, moved from _VolumeProfileBase by CS-1). Resolved once per StartCalc, lazily.
+		/// </summary>
+		protected double tickSize()
+		{
+			if (m_tick <= 0) m_tick = resolveTick();
+			return m_tick;
+		}
+
+		private double resolveTick()
+		{
+			try
+			{
+				double mm = Bars.Info.MinMove;
+				double ps = Bars.Info.PriceScale;
+				if (ps != 0)
+				{
+					double t = Math.Abs(mm / ps);
+					if (t > 0 && !double.IsInfinity(t)) return t;
+				}
+				if (mm > 0) return mm;
+			}
+			catch { }
+			return TICK_FALLBACK;
+		}
+
+		// ---- CS-1: per-trade journal (gap-only) ----
+
+		/// <summary>True when the per-trade journal is on (TraceLevel Journal, Verbose or Debug).</summary>
+		protected bool journalOn() { return traceOn(ETraceLevel.Journal); }
+
+		/// <summary>
+		/// CS-1: record what the strategy knows at order send for the entry order named <paramref name="entryOrderName"/>
+		/// (exact name match when the trade is written). Call it next to Send(); a later call for the same name replaces it.
+		/// Cheap no-op when the journal is off. Context values are written as key=value pairs separated by '|'.
+		/// </summary>
+		protected void journalArm(string entryOrderName, double plannedEntry, double initialStop, double target, IDictionary<string, string> context = null)
+		{
+			if (!journalOn() || string.IsNullOrEmpty(entryOrderName) || m_journalArms == null) return;
+			string ctx = "";
+			if (context != null && context.Count > 0)
+			{
+				var sb = new StringBuilder();
+				foreach (KeyValuePair<string, string> kv in context)
+				{
+					if (sb.Length > 0) sb.Append('|');
+					sb.Append(kv.Key).Append('=').Append(kv.Value);
+				}
+				ctx = sb.ToString();
+			}
+			m_journalArms[entryOrderName] = new JournalArm { tag = entryOrderName, plannedEntry = plannedEntry, initialStop = initialStop, target = target, context = ctx };
+		}
+
+		// Positions[0] is the current position; [1].. are earlier ones. Scanning the newest three on every closed bar and
+		// de-duplicating by trade identity does not depend on whether a flat CurrentPosition is the closed one or a new empty one.
+		private void journalScan()
+		{
+			if (m_journalWritten == null) return;
+			int n = Math.Min(Positions.Count, 3);
+			for (int i = n - 1; i >= 0; i--)
+			{
+				IMarketPosition pos = Positions[i];
+				if (pos == null || pos.ClosedTrades == null || pos.ClosedTrades.Count == 0) continue;
+				if (pos.OpenTrades != null && pos.OpenTrades.Count > 0) continue;   // write a position once it is flat (scale-outs included)
+				int tradeCount = pos.ClosedTrades.Count;
+				foreach (var t in pos.ClosedTrades)
+				{
+					if (t == null || t.EntryOrder == null || t.ExitOrder == null) continue;
+					string key = t.EntryOrder.Name + "\u001f" + t.EntryOrder.BarNumber + "\u001f" + t.EntryOrder.Time.Ticks + "\u001f" +
+						t.ExitOrder.Name + "\u001f" + t.ExitOrder.BarNumber + "\u001f" + t.ExitOrder.Time.Ticks + "\u001f" + t.ExitOrder.Contracts;
+					if (!m_journalWritten.Add(key)) continue;
+					journalWriteTrade(pos, t.IsLong, t.EntryOrder.Name, t.EntryOrder.Time, t.EntryOrder.Price, t.EntryOrder.BarNumber,
+						t.ExitOrder.Name, t.ExitOrder.Time, t.ExitOrder.Price, t.ExitOrder.BarNumber, t.ExitOrder.Contracts,
+						t.Profit, t.CommissionValue, tradeCount);
+				}
+			}
+		}
+
+		private void journalWriteTrade(IMarketPosition pos, bool isLong, string entryName, DateTime entryTime, double entryPrice, int entryBar,
+			string exitName, DateTime exitTime, double exitPrice, int exitBar, int qty, double profit, double commission, int tradesInPosition)
+		{
+			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+			double bpv = Bars.Info.BigPointValue;
+			double tick = tickSize();
+			JournalArm arm;
+			bool armed = m_journalArms.TryGetValue(entryName ?? "", out arm);
+
+			// What MC lacks: initial risk from the armed stop, R, excursions in ticks/R, planned-vs-fill.
+			double riskPerUnit = armed ? Math.Abs(entryPrice - arm.initialStop) : double.NaN;
+			double riskDollars = armed && bpv > 0 ? riskPerUnit * bpv * qty : double.NaN;
+			double rMultiple = riskDollars > 0 ? profit / riskDollars : double.NaN;
+			double slipTicks = armed && tick > 0 ? (isLong ? entryPrice - arm.plannedEntry : arm.plannedEntry - entryPrice) / tick : double.NaN;   // > 0 = adverse
+
+			// MC exposes run-up/drawdown per position, not per trade: with several trades in one position the excursion is the position's.
+			double mfeDollars = Math.Abs(pos.MaxRunUp);
+			double maeDollars = -Math.Abs(pos.MaxDrawDown);
+			double perTick = bpv > 0 && tick > 0 && qty > 0 ? bpv * tick * qty : double.NaN;
+			double mfeTicks = mfeDollars / perTick, maeTicks = maeDollars / perTick;
+			double mfeR = riskDollars > 0 ? mfeDollars / riskDollars : double.NaN;
+			double maeR = riskDollars > 0 ? maeDollars / riskDollars : double.NaN;
+			string scope = tradesInPosition > 1 ? "position(" + tradesInPosition + " trades)" : "trade";
+
+			var sb = new StringBuilder();
+			Action<string> col = s => { if (sb.Length > 0) sb.Append(','); sb.Append(csvField(s)); };
+			Func<double, string> num = v => double.IsNaN(v) || double.IsInfinity(v) ? "" : v.ToString("0.########", ic);
+			col(RunId); col(GetType().Name); col(Bars.Info.Name); col(armed ? arm.tag : entryName); col(isLong ? "Long" : "Short");
+			col(qty.ToString(ic));
+			col(entryTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(entryPrice));
+			col(exitTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(exitPrice)); col(exitName);
+			col((exitBar - entryBar).ToString(ic));
+			col(num(profit)); col(num(commission)); col(armed ? "1" : "0");
+			col(armed ? num(arm.plannedEntry) : ""); col(num(slipTicks)); col(armed ? num(arm.initialStop) : ""); col(armed ? num(arm.target) : "");
+			col(num(riskPerUnit)); col(num(tick > 0 ? riskPerUnit / tick : double.NaN)); col(num(riskDollars)); col(num(rMultiple));
+			col(num(mfeDollars)); col(num(maeDollars)); col(num(mfeTicks)); col(num(maeTicks)); col(num(mfeR)); col(num(maeR));
+			col(scope); col(armed ? arm.context : "");
+
+			try
+			{
+				if (m_journal == null)
+				{
+					m_journal = new TradeJournal(RunId);
+					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
+				}
+				m_journal.Write(sb.ToString());
+			}
+			catch (Exception e)
+			{
+				trace(ETraceLevel.Warning, $"JOURNAL write failed - {e.Message}");
+			}
+		}
+
+		private static string csvField(string s)
+		{
+			if (string.IsNullOrEmpty(s)) return "";
+			if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return s;
+			return "\"" + s.Replace("\"", "\"\"") + "\"";
 		}
 
 		// ---- CS-3: input validation helpers (moved from _VolumeProfileBase; generic parameter hygiene) ----
