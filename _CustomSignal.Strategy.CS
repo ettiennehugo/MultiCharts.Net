@@ -402,6 +402,7 @@ namespace PowerLanguage.Strategy
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
 			m_fractionWarned = false;
+			m_barTz = null;   // CS-6
 			m_tmDay = DateTime.MinValue; m_tmEntrySeen.Clear(); m_tmExitSeen.Clear(); m_tmEntries = m_tmLosers = 0; m_tmNet = 0;   // CS-7
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
@@ -743,7 +744,11 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
 		/// </summary>
-		protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
+		protected virtual DateTime tradingDayKey(DateTime barTime)
+		{
+			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, Bars.Info.Category.ToString());   // CS-6
+			return barTime.Date;
+		}
 
 		/// <summary>
 		/// Determines the equity available for trading a position based on some custom risk equity per position percentage. If
@@ -817,6 +822,97 @@ namespace PowerLanguage.Strategy
 			}
 
 			return equityAvailable;
+		}
+
+		// ---- CS-6: trading-day roll by asset class and generic time-zone helpers ----
+
+		/// <summary>CS-6: how tradingDayKey rolls the day. Calendar (default) = bar date, today's behaviour. Auto = by Bars.Info.Category.</summary>
+		public enum ETradingDayRoll { Calendar = 0, Auto = 1 }
+
+		/// <summary>
+		/// CS-6: Calendar (default, no change) or Auto: Forex = date of (New York time + 7h), i.e. the 17:00 NY roll; Crypto = UTC
+		/// date; anything else (Stock, ...) = bar date. Futures bases override tradingDayKey (Globex date). Not an [Input].
+		/// </summary>
+		protected ETradingDayRoll TradingDayRoll { get; set; } = ETradingDayRoll.Calendar;
+
+		private TimeZoneInfo m_barTz;
+
+		/// <summary>CS-6: zone of this chart's bar times (resolved once per run from Bars.Info.TimeZone).</summary>
+		protected TimeZoneInfo BarTimeZone
+		{
+			get { if (m_barTz == null) m_barTz = resolveBarTimeZone(Bars.Info); return m_barTz; }
+		}
+
+		/// <summary>CS-6: bar time (chart zone) converted to the zone with Windows or IANA id <paramref name="tzId"/>. DST-aware.</summary>
+		protected DateTime ToZone(DateTime barTime, string tzId)
+		{
+			TimeZoneInfo dst = findTz(tzId);
+			if (barTime.Kind == DateTimeKind.Utc) return TimeZoneInfo.ConvertTimeFromUtc(barTime, dst);
+			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
+			TimeZoneInfo src = BarTimeZone ?? TimeZoneInfo.Local;
+			if (src.Id == dst.Id) return t;
+			if (src.IsInvalidTime(t)) t = t.AddHours(1);   // spring-forward gap
+			return TimeZoneInfo.ConvertTime(t, src, dst);
+		}
+
+		/// <summary>CS-6: current bar time in <paramref name="tzId"/> inside [start, end); a window with end &lt;= start wraps midnight.</summary>
+		protected bool inTimeWindow(TimeSpan start, TimeSpan end, string tzId)
+		{
+			TimeSpan t = ToZone(Bars.Time[0], tzId).TimeOfDay;
+			return end > start ? t >= start && t < end : t >= start || t < end;
+		}
+
+		/// <summary>CS-6: tradingDayKey under ETradingDayRoll.Auto for a category name (Forex / Crypto*; else calendar date).</summary>
+		protected DateTime autoTradingDay(DateTime barTime, string category)
+		{
+			string c = (category ?? "").ToUpperInvariant();
+			if (c.Contains("FOREX") || (c.Contains("CURRENCY") && !c.Contains("CRYPTO"))) return ToZone(barTime, "Eastern Standard Time").AddHours(7).Date;
+			if (c.Contains("CRYPTO")) return ToZone(barTime, "UTC").Date;
+			return barTime.Date;
+		}
+
+		/// <summary>
+		/// VPF-01 / CS-6 (moved from _VolumeProfileFuturesBase). Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
+		/// </summary>
+		protected TimeZoneInfo resolveBarTimeZone(IInstrumentSettings info)
+		{
+			switch (info.TimeZone)
+			{
+				case RequestTimeZone.Local:
+					return TimeZoneInfo.Local;
+				case RequestTimeZone.GMT:
+					return TimeZoneInfo.Utc;
+				case RequestTimeZone.Exchange:
+					string id = exchangeTimeZoneId(info.Exchange);
+					if (id == null)
+						throw new Exception("Exchange '" + info.Exchange + "' has no known time zone: set the chart to Local time or override exchangeTimeZoneId.");
+					return findTz(id);
+				default:
+					return TimeZoneInfo.Local;
+			}
+		}
+
+		/// <summary>
+		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
+		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
+		/// </summary>
+		protected virtual string exchangeTimeZoneId(string exchange)
+		{
+			if (string.IsNullOrWhiteSpace(exchange)) return null;
+			string e = exchange.ToUpperInvariant();
+			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
+			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
+			// New York: NYMEX/COMEX and the US equity exchanges
+			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
+			return null;
+		}
+
+		protected static TimeZoneInfo findTz(string windowsId)
+		{
+			try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
+			catch (TimeZoneNotFoundException) { }
+			if (windowsId == "Central Standard Time") return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+			return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 		}
 
 		// ---- CS-8: signal-event logging and controls (event study / placebo layer). Off unless TraceLevel >= Journal. ----

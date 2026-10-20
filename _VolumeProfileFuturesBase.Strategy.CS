@@ -113,7 +113,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_chartTz = resolveChartTz(Bars.Info);
+			m_chartTz = resolveBarTimeZone(Bars.Info);   // CS-6: zone resolution lives in _CustomSignal
 			m_chartIsEastern = m_chartTz.Id == m_est.Id
 				|| (m_chartTz.BaseUtcOffset == m_est.BaseUtcOffset && m_chartTz.HasSameRules(m_est));
 			m_cacheValid = false;   // zone or session windows may have changed
@@ -122,54 +122,10 @@ namespace PowerLanguage.Strategy
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
-		/// <summary>
-		/// VPF-01. Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
-		/// </summary>
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
-		}
-
-		private TimeZoneInfo resolveChartTz(IInstrumentSettings info)
-		{
-			switch (info.TimeZone)
-			{
-				case RequestTimeZone.Local:
-					return TimeZoneInfo.Local;
-				case RequestTimeZone.GMT:
-					return TimeZoneInfo.Utc;
-				case RequestTimeZone.Exchange:
-					string id = exchangeTimeZoneId(info.Exchange);
-					if (id == null)
-						throw new Exception("Exchange '" + info.Exchange + "' has no known time zone: set the chart to Local time or override exchangeTimeZoneId.");
-					return findTz(id);
-				default:
-					return TimeZoneInfo.Local;
-			}
-		}
-
-		/// <summary>
-		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
-		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
-		/// </summary>
-		protected virtual string exchangeTimeZoneId(string exchange)
-		{
-			if (string.IsNullOrWhiteSpace(exchange)) return null;
-			string e = exchange.ToUpperInvariant();
-			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
-			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
-			// New York: NYMEX/COMEX and the US equity exchanges
-			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
-			return null;
-		}
-
-		private static TimeZoneInfo findTz(string windowsId)
-		{
-			try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
-			catch (TimeZoneNotFoundException) { }
-			if (windowsId == "Central Standard Time") return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
-			return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 		}
 
 		//methods
@@ -196,7 +152,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Bar time (bar time zone from Bars.Info, see resolveChartTz) converted to US Eastern (DST-aware). VPF-01/03.
+		/// Bar time (bar time zone from Bars.Info, see _CustomSignal.resolveBarTimeZone) converted to US Eastern (DST-aware). VPF-01/03.
 		/// Pass bar times only; never pass a value that is already Eastern (use the *Et cores for those, VPF-02).
 		/// </summary>
 		protected DateTime ToEastern(DateTime barTime)
