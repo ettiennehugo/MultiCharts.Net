@@ -28,7 +28,7 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_SMOOTH_TICKS = 3;  // Default smoothing length used for ticks.
 		public const int DEFAULT_MIN_NODE_TICKS = 3;  // min HVN/LVN high-low span in ticks
 		public const double PRICE_EPSILON = 1e-12;  // tolerance for price-span compares; about 1 ULP near 7800, far below a tick
-		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
+		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // default of MaxLvnFractionOfRange: an LVN wider than 12% of the profile range is dropped (one LVN must not swallow the profile)
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
 		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
@@ -1551,8 +1551,17 @@ namespace PowerLanguage.Strategy
 		//properties
 		// [Input] properties are plain auto-properties. Their bounds are checked once in StartCalc.
 		// Non-[Input] properties keep the check in the getter.
-		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes. 0..1, and above LvnPercentile.
-		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes. 0..1, and below HvnPercentile.
+		/// <summary>
+		/// VPB-10: a row is HVN material when its smoothed volume is at or above this percentile of the profile's traded rows
+		/// (not a fraction of the POC volume). 0..1 and >= LvnPercentile. Contiguous runs at or above it that contain a peak
+		/// and are at least MinNodeTicks wide become HVNs.
+		/// </summary>
+		[Input] public double HvnPercentile { get; set; }
+		/// <summary>
+		/// VPB-10: a local trough whose smoothed volume is at or below this percentile of the traded rows is an LVN candidate; it
+		/// is kept only between two HVNs (within DEFAULT_LVN_HVN_MAX_GAP_TICKS) and if no wider than MaxLvnFractionOfRange.
+		/// </summary>
+		[Input] public double LvnPercentile { get; set; }
 		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks. >= 1.
 		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
 		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
@@ -1676,6 +1685,8 @@ namespace PowerLanguage.Strategy
 		/// When true, HVN peaks and LVN troughs (other than the POC) are confluence anchors. Default true.
 		/// </summary>
 		public bool ConfluenceIncludeHvns { get; set; }
+		/// <summary>VPB-10: an LVN wider than this fraction of the profile's range is dropped. (0, 1]. Default DEFAULT_MAX_LVN_PCT_OF_RANGE (0.12). Not an [Input].</summary>
+		public double MaxLvnFractionOfRange { get; set; } = DEFAULT_MAX_LVN_PCT_OF_RANGE;
 		/// <summary>
 		/// When true, live VWAP slots add context_score only (0.5 × slot weight) and never acceptance or rejection credit. Default true.
 		/// </summary>
@@ -1709,6 +1720,7 @@ namespace PowerLanguage.Strategy
 			if (HvnPercentile < LvnPercentile)
 				throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
 			requireAtLeast("MinNodeTicks", MinNodeTicks, 1);
+			if (MaxLvnFractionOfRange <= 0 || MaxLvnFractionOfRange > 1) throw new ArgumentException("MaxLvnFractionOfRange must be in (0, 1].");
 			requireNonNegative("NakedPocTickTolerance", NakedPocTickTolerance);
 			requireAtLeast("Vwap1Length", Vwap1Length, 1);
 			requireAtLeast("Vwap2Length", Vwap2Length, 1);
@@ -2903,6 +2915,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>Slot 1 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwapSigma1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
 		/// <summary>Slot 2 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
+		/// <summary>VPB-10: alias of CurrentVwapSigma1, named like CurrentVwap2Sigma / CurrentVwap3Sigma.</summary>
+		public double CurrentVwap1Sigma { get { return CurrentVwapSigma1; } }
 		public double CurrentVwap2Sigma { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : double.NaN; } }
 		/// <summary>Slot 3 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3Sigma { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : double.NaN; } }
@@ -3902,7 +3916,7 @@ namespace PowerLanguage.Strategy
 				bool hvnAbove = hasHvnAdjacent(extra.hvns, rows[b].price, false, maxGap);
 				if (!hvnBelow || !hvnAbove) continue;   // LVN = valley between two HVNs
 				double width = rows[b].price - rows[a].price;
-				if (width > range * DEFAULT_MAX_LVN_PCT_OF_RANGE) continue;
+				if (width > range * MaxLvnFractionOfRange) continue;
 				extra.lvns.Add(makeNode(rows, vols, a, b, t, pocVol, false));
 				t = b;   // skip the rest of this valley
 			}
