@@ -4,6 +4,6 @@ set -e
 here="$(cd "$(dirname "$0")" && pwd)"; root="$here/../.."
 mkdir -p "$here/Generated"
 { echo "using System; using System.Collections.Generic;"; echo "namespace Extracted {"
-  awk '/\/\/ <profile-math>/ {on=1; next} /\/\/ <\/profile-math>/ {on=0} on' "$root/_VolumeProfileBase.Strategy.CS"
+  awk '/\/\/ <profile-math>/ {on=1; next} /\/\/ <\/profile-math>/ {on=0} on' "$root/_ProfileMath.Function.CS" | sed 's/\b_ProfileMath\b/ProfileMath/g'   # VPB-9: class is _ProfileMath in the study file
   echo "}"; } > "$here/Generated/ProfileMath.cs"
 cd "$here" && dotnet run -c Release
