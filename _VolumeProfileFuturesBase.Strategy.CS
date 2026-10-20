@@ -602,19 +602,31 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// ---- VPF-04: CME holiday hooks (Globex trading date, ET). Exact CME hours vary by year and product: override. ----
+		// ---- VPF-04 / VPF-6: CME holiday hooks (Globex trading date, ET). ----
 
 		/// <summary>
-		/// CME Globex fully closed for this Globex trading date. Default: New Year's Day and Christmas Day (the evening session
-		/// that would open the day before belongs to the closed date and is closed too). Good Friday is NOT included by default:
-		/// CME equity futures have opened briefly on some Good Fridays (e.g. when NFP is released); it is still a no-RTH day
-		/// through IsNoRthDay. Override for observed weekend dates or other products.
+		/// Spec VPF-6: when true (default) the holiday hooks below use the CME Globex equity-index calendar
+		/// (_CmeHolidays.Rules: closures incl. Good Friday, 13:00 ET holiday halts, 13:15 ET early closes, abbreviated
+		/// sessions). Set false in a derived strategy's Create/StartCalc for the pre-table behaviour (New Year / Christmas
+		/// closures only, with the Sunday → Monday observance fix). Products with other holiday hours (CL, GC, ZN, ...)
+		/// should override the hooks. Not an [Input].
+		/// </summary>
+		protected bool UseCmeHolidayTable { get; set; } = true;
+
+		/// <summary>
+		/// CME Globex fully closed for this Globex trading date (the evening session that would open the day before belongs
+		/// to the closed date and is closed too). With UseCmeHolidayTable: New Year, Christmas and Good Friday (except
+		/// abbreviated years), weekend-observed. Without: New Year and Christmas only, Sunday → observed Monday (VPF-6 bug
+		/// fix: Sun 25 Dec 2022 → closed Mon 26 Dec; Sun 1 Jan 2023 → Mon 2 Jan); a Saturday holiday closes nothing.
 		/// </summary>
 		protected virtual bool IsGlobexClosedDay(DateTime globexDate)
 		{
 			DateTime d = globexDate.Date;
-			if (d.Month == 1 && d.Day == 1) return true;
-			if (d.Month == 12 && d.Day == 25) return true;
+			if (UseCmeHolidayTable) return _CmeHolidays.Rules.Get(d).Closed;
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) return false;
+			DateTime ny = new DateTime(d.Year, 1, 1), xmas = new DateTime(d.Year, 12, 25);
+			if (ny.DayOfWeek != DayOfWeek.Saturday && d == _CmeHolidays.Rules.SundayToMonday(ny)) return true;
+			if (xmas.DayOfWeek != DayOfWeek.Saturday && d == _CmeHolidays.Rules.SundayToMonday(xmas)) return true;
 			return false;
 		}
 
@@ -628,22 +640,28 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Early Globex halt (ET) on a holiday session, or null. Default null (not applied). For equity-index futures the
-		/// usual value is 13:00 ET on no-RTH holidays: return IsNoRthDay(globexDate) ? new TimeSpan(13, 0, 0) : (TimeSpan?)null
-		/// after checking the CME holiday calendar for the years you backtest.
+		/// Early Globex halt (ET) for this Globex trading date, or null. With UseCmeHolidayTable: 13:00 ET on holiday
+		/// sessions, 13:15 ET on early-close days, 09:15 / 09:30 ET on abbreviated Good Friday / mourning sessions.
+		/// Without the table: null (pre-VPF-6 behaviour).
 		/// </summary>
 		protected virtual TimeSpan? HolidayHaltEt(DateTime globexDate)
 		{
-			return null;
+			return UseCmeHolidayTable ? _CmeHolidays.Rules.Get(globexDate).HaltEt : null;
 		}
 
 		/// <summary>
-		/// Early RTH close (ET) for this Globex trading date, or null. Default null (not applied). For equity-index futures
-		/// the usual value is 13:15 ET on the day after Thanksgiving and on Dec 24 (and some years Jul 3); verify per year.
+		/// Early RTH close (ET) for this Globex trading date, or null. With UseCmeHolidayTable: 13:15 ET on the day after
+		/// Thanksgiving and on Dec 24 / Jul 3 when they fall Mon-Thu. Without the table: null.
 		/// </summary>
 		protected virtual TimeSpan? RthEarlyCloseEt(DateTime globexDate)
 		{
-			return null;
+			return UseCmeHolidayTable ? _CmeHolidays.Rules.Get(globexDate).RthCloseEt : null;
+		}
+
+		/// <summary>VPF-6: tradingDayCount on a futures chart skips full CME Globex closures (not NYSE-only holidays).</summary>
+		protected override bool isTradingHoliday(DateTime date)
+		{
+			return _CmeHolidays.Rules.Get(date).Closed;
 		}
 
 		private static bool IsSingleFlag(MarketSession session)

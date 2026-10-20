@@ -1013,11 +1013,20 @@ namespace PowerLanguage.Strategy
 
 			while (date.Date > entryDate.Date)
 			{
-				if (!m_holidays.isHoliday(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
+				if (!isTradingHoliday(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
 				date = date.AddDays(-1);
 			}
 
 			return count;
+		}
+
+		/// <summary>
+		/// Spec VPF-6 (Rev 2.1, calendar by asset class): non-trading weekday for tradingDayCount. Default: the NYSE calendar
+		/// (unchanged). _VolumeProfileFuturesBase overrides it with the CME Globex closures.
+		/// </summary>
+		protected virtual bool isTradingHoliday(DateTime date)
+		{
+			return m_holidays.isHoliday(date);
 		}
 
 		/// <summary>
