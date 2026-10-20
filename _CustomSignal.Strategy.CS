@@ -23,6 +23,8 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
 		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = 63;        //look back 3-months of trading orders to discover entry/exit orders
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
+		/// <summary>Spec CS-3: build tag written on the RUN line. Bump by hand (or paste a git hash) when the base classes change.</summary>
+		public const string BUILD_TAG = "base-class-rev2";
 
 		//types
 		/// <summary>
@@ -99,7 +101,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string message)
+			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string runId, string message)
 			{
 				lock (s_lock)
 				{
@@ -111,7 +113,8 @@ namespace PowerLanguage.Strategy
 							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
 						}
 						string csvMessage = escapeCsv(message);
-						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}");
+						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
+						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{runId},{csvMessage}");
 					}
 					catch (Exception ex)
 					{
@@ -203,6 +206,15 @@ namespace PowerLanguage.Strategy
 
 		public Function._Holidays Holidays { get { return m_holidays; } }
 
+		/// <summary>
+		/// Spec CS-3: short id of this calculation run (new in every StartCalc, so every optimisation pass / recalculation
+		/// gets its own id). Written as a column on every trace line and on the RUN line.
+		/// </summary>
+		public string RunId { get { return m_runId ?? ""; } }
+
+		/// <summary>Spec CS-3: build tag on the RUN line; override in a derived strategy to tag its own version.</summary>
+		protected virtual string BuildTag { get { return BUILD_TAG; } }
+
 		protected ITradingData tradingData
 		{
 			get
@@ -240,6 +252,9 @@ namespace PowerLanguage.Strategy
 		private long m_entryCacheSnapshot;
 		private PowerLanguage.Function._NyseHolidays m_holidays;
 		private LogFileSingleton m_logger;
+		private string m_runId;          // CS-3
+		private bool m_runLogged;        // CS-3: RUN line written for this run
+		private bool m_runEndLogged;     // CS-3: RUN-END line written for this run
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
@@ -266,7 +281,7 @@ namespace PowerLanguage.Strategy
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, RunId, message);
 			}
 		}
 
@@ -307,6 +322,9 @@ namespace PowerLanguage.Strategy
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
 			m_entryCacheSnapshot = 0;
+			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3
+			m_runLogged = false;
+			m_runEndLogged = false;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -325,6 +343,13 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void CalcBar()
 		{
+			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
+			if (!m_runLogged)
+			{
+				m_runLogged = true;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, runLine());
+			}
+
 			//ensure latest account equity is available, this method seems to kick off async internal processes
 			//to update interface elements like the Accounts etc, this can be deduced from how the interface looks
 			//with callbacks like OnRefreshComplete etc. If you call it right before accessing the account data
@@ -394,6 +419,88 @@ namespace PowerLanguage.Strategy
 					m_intradayVolume += Bars.Volume[0];
 				}
 			}
+
+			// CS-3: RUN-END once, on the last historical bar (end of the backtest data range)
+			if (!m_runEndLogged && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
+			{
+				m_runEndLogged = true;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"RUN-END id({RunId}) lastBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) realTime({Environment.IsRealTimeCalc})");
+			}
+		}
+
+		/// <summary>
+		/// CS-3: RUN line - run id, build tag, strategy type, symbol, resolution, first calculated bar and every [Input] value
+		/// (reflection over public instance properties carrying an attribute named InputAttribute, sorted by name).
+		/// </summary>
+		protected string runLine()
+		{
+			IInstrumentSettings info = Bars.Info;
+			return $"RUN id({RunId}) build({BuildTag}) strategy({GetType().Name}) symbol({info.Name}) category({info.Category}) " +
+				$"resolution({info.Resolution.ChartType} {info.Resolution.Type} {info.Resolution.Size}) timeZone({info.TimeZone}) " +
+				$"firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) app({Environment.ApplicationCode}) " +
+				$"inputs[{inputSnapshot()}]";
+		}
+
+		/// <summary>CS-3: "Name=value; ..." for every [Input] property of the concrete strategy, invariant culture.</summary>
+		protected string inputSnapshot()
+		{
+			var sb = new StringBuilder();
+			System.Reflection.PropertyInfo[] props = GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+			Array.Sort(props, (a, b) => string.CompareOrdinal(a.Name, b.Name));
+			string last = null;
+			foreach (System.Reflection.PropertyInfo p in props)
+			{
+				if (p.Name == last || !p.CanRead || p.GetIndexParameters().Length != 0 || !isInputProperty(p)) continue;
+				last = p.Name;
+				object value;
+				try { value = p.GetValue(this, null); }
+				catch (Exception e) { value = "<" + e.GetType().Name + ">"; }
+				if (sb.Length > 0) sb.Append("; ");
+				sb.Append(p.Name).Append('=').Append(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture));
+			}
+			return sb.ToString();
+		}
+
+		// Matched by name so the check does not depend on the attribute's namespace; Attribute.GetCustomAttributes honours
+		// inherit for properties (PropertyInfo.GetCustomAttributes ignores it), so overridden inputs are still found.
+		private static bool isInputProperty(System.Reflection.PropertyInfo p)
+		{
+			foreach (Attribute a in Attribute.GetCustomAttributes(p, true))
+				if (a.GetType().Name == "InputAttribute") return true;
+			return false;
+		}
+
+		// ---- CS-3: input validation helpers (moved from _VolumeProfileBase; generic parameter hygiene) ----
+		protected static void requireUnitInterval(string name, double value)
+		{
+			if (value < 0.0 || value > 1.0)
+				throw new ArgumentException(name + " must be between 0.0 and 1.0.");
+		}
+
+		protected static void requireAtLeast(string name, int value, int min)
+		{
+			if (value < min)
+				throw new ArgumentException(name + " must be " + min + " or greater.");
+		}
+
+		protected static void requireNonNegative(string name, double value)
+		{
+			if (value < 0.0)
+				throw new ArgumentException(name + " must be 0.0 or greater.");
+		}
+
+		protected static void requireNonNegative(string name, int value)
+		{
+			if (value < 0)
+				throw new ArgumentException(name + " must be 0 or greater.");
+		}
+
+		protected void requireDataStream(string name, int stream)
+		{
+			if (stream < 1)
+				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
+			if (MaxDataStream >= 1 && stream > MaxDataStream)
+				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
 		}
 
 		/// <summary>

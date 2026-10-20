@@ -1743,37 +1743,7 @@ namespace PowerLanguage.Strategy
 			requireDataStream("Vwap3DataStream", Vwap3DataStream, Vwap3Type);
 		}
 
-		private static void requireUnitInterval(string name, double value)
-		{
-			if (value < 0.0 || value > 1.0)
-				throw new ArgumentException(name + " must be between 0.0 and 1.0.");
-		}
-
-		private static void requireAtLeast(string name, int value, int min)
-		{
-			if (value < min)
-				throw new ArgumentException(name + " must be " + min + " or greater.");
-		}
-
-		private static void requireNonNegative(string name, double value)
-		{
-			if (value < 0.0)
-				throw new ArgumentException(name + " must be 0.0 or greater.");
-		}
-
-		private static void requireNonNegative(string name, int value)
-		{
-			if (value < 0)
-				throw new ArgumentException(name + " must be 0 or greater.");
-		}
-
-		private void requireDataStream(string name, int stream)
-		{
-			if (stream < 1)
-				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
-			if (MaxDataStream >= 1 && stream > MaxDataStream)
-				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
-		}
+		// requireUnitInterval / requireAtLeast / requireNonNegative / requireDataStream(name, stream) live in _CustomSignal (spec CS-3).
 
 		// A disabled VWAP slot is not stepped, so its stream is not required on the chart.
 		private void requireDataStream(string name, int stream, EVwapType type)
