@@ -17,6 +17,9 @@ namespace PowerLanguage.Strategy
 	public abstract class _CustomSignal : PortfolioSignalObject
 	{
 		//constants
+		// Spec CS-0: compile-time only reference (nameof emits a string literal, no run-time use) proving a study
+		// resolves a plain helper class from a separate *.Function.CS file. Remove once CS-1 uses the helper for real.
+		private const string HELPER_FILE_PROBE = nameof(_SignalJournal);
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
 		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = 63;        //look back 3-months of trading orders to discover entry/exit orders
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
