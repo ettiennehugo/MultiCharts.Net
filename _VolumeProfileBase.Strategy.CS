@@ -143,6 +143,7 @@ namespace PowerLanguage.Strategy
 			public bool approximate;   // VPB-1: Own profile built from bars (BarUniform / BarTypical or a non-1-tick source)
 			public bool isOwn;         // VPB-1 / VPB-7: built by this base (Own engine or composite), not read from MultiCharts
 			public bool isPartial;     // VPB-1: Own profile whose window began before the first readable bar
+			public bool crossesRoll;   // VPF-4: the window spans a continuous-contract roll splice (set by the futures base)
 			public bool pocNaked;      // pocComplete and no later bar has traded poc, as of the current calc bar
 			public int pocTouchedBar;  // 1-based first post-close bar whose range covered poc; 0 if none at or before current
 
@@ -2319,6 +2320,194 @@ namespace PowerLanguage.Strategy
 			if (LookaheadAudit)
 				trace(ETraceLevel.Info, $"VPB-3 audit checks({m_auditChecks}) mismatches({m_auditMismatch}) futureStart({m_auditFutureStart}) completedLeak({m_auditCompletedLeak}) plantLeak({AuditPlantLeak})");
 			trace(ETraceLevel.Info, $"VPB-4 developing POC unreadable events({m_pocUnreadableCount})");
+		}
+
+		// ---------------------------------------------------------------------------------------------------------------
+		// VPB-6 completed-profile analytics and VPB-7 composites. Completed profiles only (endBar before the stream's calc
+		// bar); a developing extra returns the neutral value. Read-only: nothing here reads bars after the calc bar.
+		// ---------------------------------------------------------------------------------------------------------------
+
+		private bool isCompleted(VpExtra e)
+		{
+			if (e == null || e.startBar < 1) return false;
+			int cur = streamItemBarIndex(e.dataStream > 0 ? e.dataStream : 1);
+			return cur >= 1 && e.endBar >= e.startBar && e.endBar < cur;
+		}
+
+		private bool denseOf(VpExtra e, out double[] prices, out double[] vols)
+		{
+			prices = vols = null;
+			if (e == null || e.levels.Count == 0) return false;
+			var p = new List<double>(e.levels.Count); var v = new List<double>(e.levels.Count);
+			for (int i = 0; i < e.levels.Count; i++) { p.Add(e.levels[i].price); v.Add(e.levels[i].total); }
+			return ProfileMath.ToDense(p, v, tickSize(), out prices, out vols);
+		}
+
+		private static int indexOf(double[] prices, double price, double tick)
+		{
+			if (prices == null || prices.Length == 0 || tick <= 0) return -1;
+			long i = (long)Math.Round((price - prices[0]) / tick);
+			return i < 0 ? 0 : i >= prices.Length ? prices.Length - 1 : (int)i;
+		}
+
+		/// <summary>VPB-6: Dalton value-area relationship of <paramref name="cur"/> to <paramref name="prev"/> (both completed).</summary>
+		public ProfileMath.ValueRel ValueRelationship(VpExtra prev, VpExtra cur)
+		{
+			if (!isCompleted(prev) || !isCompleted(cur)) return ProfileMath.ValueRel.Unknown;
+			return ProfileMath.Relationship(prev.vah, prev.val, cur.vah, cur.val);
+		}
+
+		/// <summary>VPB-6: poor high — the top row and at least <paramref name="minRows"/> rows below it each hold >= fraction x mean row volume.</summary>
+		public bool IsPoorHigh(VpExtra e, double fraction = 0.5, int minRows = 2)
+		{
+			double[] p, v;
+			return isCompleted(e) && denseOf(e, out p, out v) && ProfileMath.IsPoorExtreme(v, true, fraction, minRows);
+		}
+
+		/// <summary>VPB-6: poor low (mirror of IsPoorHigh).</summary>
+		public bool IsPoorLow(VpExtra e, double fraction = 0.5, int minRows = 2)
+		{
+			double[] p, v;
+			return isCompleted(e) && denseOf(e, out p, out v) && ProfileMath.IsPoorExtreme(v, false, fraction, minRows);
+		}
+
+		/// <summary>VPB-6: unfinished auction — both ask and bid volume traded on the extreme row. False without ask/bid data.</summary>
+		public bool HasUnfinishedAuction(VpExtra e, bool high)
+		{
+			if (!isCompleted(e) || e.levels.Count == 0) return false;
+			LevelVol x = e.levels[0];
+			for (int i = 1; i < e.levels.Count; i++)
+				if (high ? e.levels[i].price > x.price : e.levels[i].price < x.price) x = e.levels[i];
+			return x.ask > 0 && x.bid > 0;
+		}
+
+		/// <summary>
+		/// VPB-6: single-print runs (>= minTicks rows with volume <= the pct-percentile of traded rows) between the value area and
+		/// the extremes. Each entry is { low, high } in price.
+		/// </summary>
+		public List<double[]> SinglePrints(VpExtra e, int minTicks, double pct = 0.2)
+		{
+			var res = new List<double[]>();
+			double[] p, v;
+			if (!isCompleted(e) || e.vah <= 0 || e.val <= 0 || !denseOf(e, out p, out v)) return res;
+			double tick = tickSize();
+			foreach (int[] r in ProfileMath.SinglePrints(v, indexOf(p, e.val, tick), indexOf(p, e.vah, tick), pct, Math.Max(1, minTicks)))
+				res.Add(new[] { p[r[0]], p[r[1]] });
+			return res;
+		}
+
+		/// <summary>VPB-6: profile shape (thresholds: ProfileMath.SHAPE_*).</summary>
+		public ProfileMath.Shape ProfileShape(VpExtra e)
+		{
+			double[] p, v;
+			if (!isCompleted(e) || !denseOf(e, out p, out v)) return ProfileMath.Shape.Unknown;
+			return ProfileMath.ProfileShape(v, ValueAreaPercent);
+		}
+
+		/// <summary>
+		/// VPB-6: true while no bar after <paramref name="e"/> closed, up to <paramref name="asOfBar"/>, has traded
+		/// <paramref name="level"/> (within NakedPocTickTolerance). Use with e.vah / e.val for naked VAH / VAL.
+		/// </summary>
+		public bool IsLevelNaked(VpExtra e, double level, int asOfBar)
+		{
+			if (!isCompleted(e) || level <= 0) return false;
+			int stream = e.dataStream > 0 ? e.dataStream : 1;
+			int cur = streamItemBarIndex(stream);
+			if (asOfBar > cur) asOfBar = cur;
+			if (asOfBar <= e.endBar) return false;
+			IInstrument bars = barsOf(stream);
+			double tick = tickSize();
+			double tol = NakedPocTickTolerance * tick + tick * 1e-6;
+			for (int b = e.endBar + 1; b <= asOfBar; b++)
+			{
+				double h = barPrice(bars, cur, b, 1), l = barPrice(bars, cur, b, 2);
+				if (h <= 0 || l <= 0) continue;
+				if (h >= level - tol && l <= level + tol) return false;
+			}
+			return true;
+		}
+
+		public bool IsNakedVah(VpExtra e, int asOfBar) { return e != null && IsLevelNaked(e, e.vah, asOfBar); }
+		public bool IsNakedVal(VpExtra e, int asOfBar) { return e != null && IsLevelNaked(e, e.val, asOfBar); }
+
+		/// <summary>
+		/// VPB-6: first bar after <paramref name="reference"/> closed at which <paramref name="minCloses"/> consecutive closes were
+		/// above its VAH (above = true) or below its VAL; 0 when not (yet) accepted. Scans closed bars up to the calc bar.
+		/// </summary>
+		public int AcceptanceOutsideValue(VpExtra reference, bool above, int minCloses)
+		{
+			if (!isCompleted(reference) || reference.vah <= 0 || reference.val <= 0 || minCloses < 1) return 0;
+			int stream = reference.dataStream > 0 ? reference.dataStream : 1;
+			int cur = streamItemBarIndex(stream);
+			IInstrument bars = barsOf(stream);
+			int last = bars != null && bars.Status == EBarState.Close ? cur : cur - 1;
+			int run = 0;
+			for (int b = reference.endBar + 1; b <= last; b++)
+			{
+				double c = barPrice(bars, cur, b, 3);
+				if (c <= 0) { run = 0; continue; }
+				run = (above ? c > reference.vah : c < reference.val) ? run + 1 : 0;
+				if (run >= minCloses) return b;
+			}
+			return 0;
+		}
+
+		private VpExtra m_compositeCache;
+		private int m_compositeStream = -1, m_compositeN = -1, m_compositeBar = -1, m_compositeNewest = -1;
+
+		/// <summary>
+		/// VPB-7: merge the levels of the last <paramref name="n"/> completed profiles on <paramref name="stream"/> onto one tick
+		/// grid; POC / VA (ValueAreaMethod; MultiCharts → VolumeExpansion) / HVN / LVN from the merged histogram. Never contains
+		/// the developing profile. Cached per (stream, n, calc bar, newest profile). Null when no completed profile.
+		/// </summary>
+		public VpExtra Composite(int stream, int n)
+		{
+			int cur = streamItemBarIndex(stream);
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, cur);
+			if (src.Count == 0) return null;
+			if (m_compositeCache != null && m_compositeStream == stream && m_compositeN == n && m_compositeBar == cur && m_compositeNewest == src[0].startBar)
+				return m_compositeCache;
+			var p = new List<double>(); var v = new List<double>();
+			var e = new VpExtra { dataStream = stream, isOwn = true, startBar = src[src.Count - 1].startBar, endBar = src[0].endBar };
+			e.open = src[src.Count - 1].open; e.close = src[0].close; e.high = double.MinValue; e.low = double.MaxValue;
+			foreach (VpExtra x in src)
+			{
+				if (x.high > e.high) e.high = x.high;
+				if (x.low > 0 && x.low < e.low) e.low = x.low;
+				e.crossesRoll |= x.crossesRoll;
+				for (int i = 0; i < x.levels.Count; i++) { p.Add(x.levels[i].price); v.Add(x.levels[i].total); }
+			}
+			double[] dp, dv;
+			if (ProfileMath.ToDense(p, v, tickSize(), out dp, out dv)) fillFromHistogram(e, dp, dv);
+			e.pocComplete = e.poc > 0;
+			m_compositeCache = e; m_compositeStream = stream; m_compositeN = n; m_compositeBar = cur; m_compositeNewest = src[0].startBar;
+			return e;
+		}
+
+		/// <summary>VPB-7: the last <paramref name="n"/> completed value areas overlap pairwise by >= minVaOverlap of the narrower.</summary>
+		public bool IsBalanced(int stream, int n, double minVaOverlap = 0.6)
+		{
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			if (src.Count < Math.Max(2, n)) return false;
+			var hi = new List<double>(); var lo = new List<double>();
+			for (int i = src.Count - 1; i >= 0; i--) { hi.Add(src[i].vah); lo.Add(src[i].val); }
+			return ProfileMath.IsBalanced(hi, lo, minVaOverlap);
+		}
+
+		/// <summary>VPB-7: union (or intersection) of the last n completed value areas. False when fewer than n or empty.</summary>
+		public bool BalanceRange(int stream, int n, bool union, out double high, out double low)
+		{
+			high = low = 0;
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			if (src.Count < n || n < 1) return false;
+			high = union ? double.MinValue : double.MaxValue; low = union ? double.MaxValue : double.MinValue;
+			foreach (VpExtra x in src)
+			{
+				if (x.vah <= 0 || x.val <= 0) return false;
+				high = union ? Math.Max(high, x.vah) : Math.Min(high, x.vah);
+				low = union ? Math.Min(low, x.val) : Math.Max(low, x.val);
+			}
+			return high >= low;
 		}
 
 		//interface methods
