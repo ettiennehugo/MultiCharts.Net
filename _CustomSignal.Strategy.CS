@@ -70,7 +70,9 @@ namespace PowerLanguage.Strategy
 			private LogFileSingleton(IOutput output)
 			{
 				m_output = output;
-				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmm}.csv";   //log files are csv's for analysis in Excel
+				// CS-9: seconds + process id so two MultiCharts processes started in the same minute do not share a file. The run id
+				// is per run, but this file is process-wide (every run of every signal), so it is a column, not part of the name.
+				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss}-{System.Diagnostics.Process.GetCurrentProcess().Id}.csv";   //log files are csv's for analysis in Excel
 				try
 				{
 					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
@@ -103,7 +105,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string runId, string message)
+			public void WriteTrace(ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
 			{
 				lock (s_lock)
 				{
@@ -116,7 +118,8 @@ namespace PowerLanguage.Strategy
 						}
 						string csvMessage = escapeCsv(message);
 						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
-						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{runId},{csvMessage}");
+						// CS-9: the bar time's zone (Bars.Info.TimeZone: Local / GMT / Exchange), not the PC offset that "zzz" printed
+						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}");
 					}
 					catch (Exception ex)
 					{
@@ -252,6 +255,7 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayHighTime; }
 		}
 
+		/// <summary>CS-9: close of the trading day's last closed bar; the forming bar is not included, except on the day's first bar, which seeds it as it forms.</summary>
 		public double IntradayClose
 		{
 			get { return m_intradayClose; }
@@ -272,12 +276,19 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayOpenTime; }
 		}
 
+		/// <summary>CS-9: volume of the trading day's closed bars; the forming bar is never included.</summary>
 		public double IntradayVolume
 		{
 			get { return m_intradayVolume; }
 		}
 
 		public Function._Holidays Holidays { get { return m_holidays; } }
+
+		/// <summary>CS-9: zone label of the bar timestamps for the trace file (Bars.Info.TimeZone).</summary>
+		private string barZoneLabel()
+		{
+			try { return Bars.Info.TimeZone.ToString(); } catch { return "?"; }
+		}
 
 		/// <summary>
 		/// Spec CS-3: short id of this calculation run (new in every StartCalc, so every optimisation pass / recalculation
@@ -360,7 +371,7 @@ namespace PowerLanguage.Strategy
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, RunId, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
 			}
 		}
 
@@ -389,10 +400,10 @@ namespace PowerLanguage.Strategy
 		{
 			base.StartCalc();
 			m_currentDay = DateTime.MinValue; // make sure that current day is always set on the first CalcBar iteration
-			m_intradayLowTime = DateTime.Now;
-			m_intradayHighTime = DateTime.Now;
-			m_intradayCloseTime = DateTime.Now;
-			m_intradayOpenTime = DateTime.Now;
+			m_intradayLowTime = DateTime.MinValue;    // CS-9: no PC-clock seed; MinValue = not set yet
+			m_intradayHighTime = DateTime.MinValue;
+			m_intradayCloseTime = DateTime.MinValue;
+			m_intradayOpenTime = DateTime.MinValue;
 			m_intradayBarCount = 0;
 			m_intradayLow = double.MaxValue;
 			m_intradayHigh = double.MinValue;
@@ -535,7 +546,7 @@ namespace PowerLanguage.Strategy
 		protected string runLine()
 		{
 			IInstrumentSettings info = Bars.Info;
-			return $"RUN id({RunId}) build({BuildTag}) strategy({GetType().Name}) symbol({info.Name}) category({info.Category}) " +
+			return $"RUN id({RunId}) build({BuildTag}) strategy({this.GetType().Name}) symbol({info.Name}) category({info.Category}) " +
 				$"resolution({info.Resolution.ChartType} {info.Resolution.Type} {info.Resolution.Size}) timeZone({info.TimeZone}) " +
 				$"firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) app({Environment.ApplicationCode}) " +
 				$"inputs[{inputSnapshot()}]";
@@ -545,7 +556,7 @@ namespace PowerLanguage.Strategy
 		protected string inputSnapshot()
 		{
 			var sb = new StringBuilder();
-			System.Reflection.PropertyInfo[] props = GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+			System.Reflection.PropertyInfo[] props = this.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 			Array.Sort(props, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 			string last = null;
 			foreach (System.Reflection.PropertyInfo p in props)
@@ -675,7 +686,7 @@ namespace PowerLanguage.Strategy
 			var sb = new StringBuilder();
 			Action<string> col = s => { if (sb.Length > 0) sb.Append(','); sb.Append(csvField(s)); };
 			Func<double, string> num = v => double.IsNaN(v) || double.IsInfinity(v) ? "" : v.ToString("0.########", ic);
-			col(RunId); col(GetType().Name); col(Bars.Info.Name); col(armed ? arm.tag : entryName); col(isLong ? "Long" : "Short");
+			col(RunId); col(this.GetType().Name); col(Bars.Info.Name); col(armed ? arm.tag : entryName); col(isLong ? "Long" : "Short");
 			col(qty.ToString(ic));
 			col(entryTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(entryPrice));
 			col(exitTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(exitPrice)); col(exitName);
@@ -1019,7 +1030,7 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Journal, $"EVENTS file({m_eventFile.Path_})");
 			}
 			var sb = new StringBuilder();
-			sb.Append(RunId).Append(',').Append(csvField(GetType().Name)).Append(',').Append(csvField(Bars.Info.Name)).Append(',').Append(csvField(ev.tag)).Append(',')
+			sb.Append(RunId).Append(',').Append(csvField(this.GetType().Name)).Append(',').Append(csvField(Bars.Info.Name)).Append(',').Append(csvField(ev.tag)).Append(',')
 				.Append(ev.direction).Append(',').Append(ev.time.ToString("yyyy-MM-dd HH:mm:ss", ic)).Append(',').Append(ev.bar).Append(',')
 				.Append(ev.price.ToString(ic)).Append(',').Append(ev.stop.ToString(ic)).Append(',').Append(Math.Abs(ev.price - ev.stop).ToString(ic)).Append(',')
 				.Append(ev.taken ? "1" : "0").Append(',').Append(ControlMode);
@@ -1437,9 +1448,10 @@ namespace PowerLanguage.Strategy
 		/// Computes the average true range of the instrument over a given length.
 		/// NOTE: This function is not optimized for performance and should be used cautiosly.
 		/// </summary>
+		/// <remarks>CS-9: reads Close[length], so it needs CurrentBar > length and MaxBarsBack >= length + 1.</remarks>
 		protected double averageTrueRange(IInstrument bars, int length)
 		{
-			if (bars.CurrentBar < length) return 0.0d;
+			if (bars.CurrentBar <= length) return 0.0d;
 
 			double sum = 0.0;
 			for (int i = 0; i < length; i++)
