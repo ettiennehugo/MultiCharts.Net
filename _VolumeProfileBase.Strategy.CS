@@ -32,11 +32,8 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
 		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
-		public const int DEFAULT_CONFLUENCE_MIN_HITS = 2;
 		public const int DEFAULT_CONFLUENCE_TOP_COUNT = 5;
 		public const int DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS = 1;
-		public const double DEFAULT_CONFLUENCE_DECAY = 0.75;
-		public const double DEFAULT_CONFLUENCE_CROSS_BONUS = 0.35;
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_1 = 1.00;  // execution / primary stream
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
@@ -1581,10 +1578,7 @@ namespace PowerLanguage.Strategy
 		private double m_confluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
 		private int m_confluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
 		private int m_confluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
-		private int m_confluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
 		private int m_confluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
-		private double m_confluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
-		private double m_confluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
 		private int m_confluenceTargetClearTicks = DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS;
 		private int m_confluenceTargetCount = DEFAULT_CONFLUENCE_TOP_COUNT;
 
@@ -1666,38 +1660,12 @@ namespace PowerLanguage.Strategy
 			set { requireAtLeast("ConfluenceAlignTicks", value, 1); m_confluenceAlignTicks = value; }
 		}
 		/// <summary>
-		/// Retained for compatibility. Emission does not use it — a single POC is a zone. Valid: ≥ 1. Default 2.
-		/// </summary>
-		public int ConfluenceMinHits
-		{
-			get { return m_confluenceMinHits; }
-			set { requireAtLeast("ConfluenceMinHits", value, 1); m_confluenceMinHits = value; }
-		}
-		/// <summary>
 		/// Default count for GetTopConfluenceZones(). Valid: ≥ 1. Default 5.
 		/// </summary>
 		public int ConfluenceTopCount
 		{
 			get { return m_confluenceTopCount; }
 			set { requireAtLeast("ConfluenceTopCount", value, 1); m_confluenceTopCount = value; }
-		}
-		/// <summary>
-		/// Same-stream age decay is retained but not applied. An older session is its own volume mass;
-		/// Valid: 0.0–1.0. Default 0.75. 1.0 keeps older profiles at full weight.
-		/// </summary>
-		public double ConfluenceSameStreamDecay
-		{
-			get { return m_confluenceSameStreamDecay; }
-			set { requireUnitInterval("ConfluenceSameStreamDecay", value); m_confluenceSameStreamDecay = value; }
-		}
-		/// <summary>
-		/// Retained for compatibility and not applied. A second stream is either an independent
-		/// source or a nested refinement; a bonus would count it again. Valid: ≥ 0. Default 0.35.
-		/// </summary>
-		public double ConfluenceCrossStreamBonus
-		{
-			get { return m_confluenceCrossStreamBonus; }
-			set { requireNonNegative("ConfluenceCrossStreamBonus", value); m_confluenceCrossStreamBonus = value; }
 		}
 		/// <summary>
 		/// When true, HVN peaks and LVN troughs (other than the POC) are confluence anchors. Default true.
@@ -1817,10 +1785,7 @@ namespace PowerLanguage.Strategy
 			ConfluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
 			ConfluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
 			ConfluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
-			ConfluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
 			ConfluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
-			ConfluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
-			ConfluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
 			ConfluenceIncludeHvns = true;
 			ConfluenceIncludeVwapSlots = true;
 			ConfluenceTargetMinZScore = 0;
