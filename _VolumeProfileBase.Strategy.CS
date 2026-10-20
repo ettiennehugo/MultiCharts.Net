@@ -28,15 +28,12 @@ namespace PowerLanguage.Strategy
 		public const int DEFAULT_SMOOTH_TICKS = 3;  // Default smoothing length used for ticks.
 		public const int DEFAULT_MIN_NODE_TICKS = 3;  // min HVN/LVN high-low span in ticks
 		public const double PRICE_EPSILON = 1e-12;  // tolerance for price-span compares; about 1 ULP near 7800, far below a tick
-		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // TBD - Do we need this?? Maximum percentage size of the volume profile a node can be - prevents one LVN from swallowing too much of profile.
+		public const double DEFAULT_MAX_LVN_PCT_OF_RANGE = 0.12; // default of MaxLvnFractionOfRange: an LVN wider than 12% of the profile range is dropped (one LVN must not swallow the profile)
 		public const int DEFAULT_VWAP_LENGTH = 20;
 		public const int DEFAULT_CONFLUENCE_LOOKBACK = 4;
 		public const int DEFAULT_CONFLUENCE_ALIGN_TICKS = 4;
-		public const int DEFAULT_CONFLUENCE_MIN_HITS = 2;
 		public const int DEFAULT_CONFLUENCE_TOP_COUNT = 5;
 		public const int DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS = 1;
-		public const double DEFAULT_CONFLUENCE_DECAY = 0.75;
-		public const double DEFAULT_CONFLUENCE_CROSS_BONUS = 0.35;
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_1 = 1.00;  // execution / primary stream
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_2 = 1.25;  // higher timeframe
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
@@ -140,7 +137,13 @@ namespace PowerLanguage.Strategy
 			public double close;  // close of the profile's last bar (developing bar while the window is open)
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
-			public bool pocComplete;   // window closed relative to the current calc bar, and poc > 0
+			public bool pocComplete;   // window closed relative to the current calc bar, and poc > 0 (VPB-5: independent of TrackNakedPoc)
+			public bool pocStale;      // VPB-4: developing window whose as-of POC could not be read (poc is not the as-of POC)
+			public bool isDeveloping;  // VPB-1: set by DevelopingExtra / the Own engine for a window still open at the calc bar
+			public bool approximate;   // VPB-1: Own profile built from bars (BarUniform / BarTypical or a non-1-tick source)
+			public bool isOwn;         // VPB-1 / VPB-7: built by this base (Own engine or composite), not read from MultiCharts
+			public bool isPartial;     // VPB-1: Own profile whose window began before the first readable bar
+			public bool crossesRoll;   // VPF-4: the window spans a continuous-contract roll splice (set by the futures base)
 			public bool pocNaked;      // pocComplete and no later bar has traded poc, as of the current calc bar
 			public int pocTouchedBar;  // 1-based first post-close bar whose range covered poc; 0 if none at or before current
 
@@ -153,6 +156,7 @@ namespace PowerLanguage.Strategy
 			// nodesBuilt* freezes a closed histogram until the stream generation bumps
 			// (EChanged / StartCalc). A developing profile never freezes.
 			internal int lastNakedScanBar; // last 1-based bar included in the naked scan; 0 if never
+			internal bool nakedTracked;    // VPB-5: stamped with TrackNakedPoc on; IsNakedPoc is false otherwise
 			internal int ohlcStartBar;      // startBar the OHLC cursor belongs to; mismatch resets the fold
 			internal int ohlcFoldedThrough; // last 1-based bar folded into high/low
 			internal int ohlcEndBar;        // endBar last fully folded; equal endBar skips a closed rescan
@@ -174,7 +178,7 @@ namespace PowerLanguage.Strategy
 			/// </summary>
 			public bool IsNakedPoc(int asOfBar)
 			{
-				if (!pocComplete || poc <= 0 || asOfBar <= endBar) return false;
+				if (!nakedTracked || !pocComplete || poc <= 0 || asOfBar <= endBar) return false;
 				return pocTouchedBar == 0 || pocTouchedBar > asOfBar;
 			}
 			public double vah;  // Value area high.
@@ -1547,8 +1551,17 @@ namespace PowerLanguage.Strategy
 		//properties
 		// [Input] properties are plain auto-properties. Their bounds are checked once in StartCalc.
 		// Non-[Input] properties keep the check in the getter.
-		[Input] public double HvnPercentile { get; set; }  // Percentile of POC that would be considered high volume nodes. 0..1, and above LvnPercentile.
-		[Input] public double LvnPercentile { get; set; }  // Percentile of POC that would be considered low volume nodes. 0..1, and below HvnPercentile.
+		/// <summary>
+		/// VPB-10: a row is HVN material when its smoothed volume is at or above this percentile of the profile's traded rows
+		/// (not a fraction of the POC volume). 0..1 and >= LvnPercentile. Contiguous runs at or above it that contain a peak
+		/// and are at least MinNodeTicks wide become HVNs.
+		/// </summary>
+		[Input] public double HvnPercentile { get; set; }
+		/// <summary>
+		/// VPB-10: a local trough whose smoothed volume is at or below this percentile of the traded rows is an LVN candidate; it
+		/// is kept only between two HVNs (within DEFAULT_LVN_HVN_MAX_GAP_TICKS) and if no wider than MaxLvnFractionOfRange.
+		/// </summary>
+		[Input] public double LvnPercentile { get; set; }
 		[Input] public int MinNodeTicks { get; set; }      // Drop HVN/LVN whose high-low span is under this many ticks. >= 1.
 		[Input] public bool TrackNakedPoc { get; set; }        // Stamp pocComplete / pocNaked / pocTouchedBar. Default true.
 		[Input] public int NakedPocTickTolerance { get; set; } // Ticks of range overlap that mitigate a completed POC. >= 0. Default 1. 0 = exact inclusion.
@@ -1579,10 +1592,7 @@ namespace PowerLanguage.Strategy
 		private double m_confluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
 		private int m_confluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
 		private int m_confluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
-		private int m_confluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
 		private int m_confluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
-		private double m_confluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
-		private double m_confluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
 		private int m_confluenceTargetClearTicks = DEFAULT_CONFLUENCE_TARGET_CLEAR_TICKS;
 		private int m_confluenceTargetCount = DEFAULT_CONFLUENCE_TOP_COUNT;
 
@@ -1664,14 +1674,6 @@ namespace PowerLanguage.Strategy
 			set { requireAtLeast("ConfluenceAlignTicks", value, 1); m_confluenceAlignTicks = value; }
 		}
 		/// <summary>
-		/// Retained for compatibility. Emission does not use it — a single POC is a zone. Valid: ≥ 1. Default 2.
-		/// </summary>
-		public int ConfluenceMinHits
-		{
-			get { return m_confluenceMinHits; }
-			set { requireAtLeast("ConfluenceMinHits", value, 1); m_confluenceMinHits = value; }
-		}
-		/// <summary>
 		/// Default count for GetTopConfluenceZones(). Valid: ≥ 1. Default 5.
 		/// </summary>
 		public int ConfluenceTopCount
@@ -1680,27 +1682,11 @@ namespace PowerLanguage.Strategy
 			set { requireAtLeast("ConfluenceTopCount", value, 1); m_confluenceTopCount = value; }
 		}
 		/// <summary>
-		/// Same-stream age decay is retained but not applied. An older session is its own volume mass;
-		/// Valid: 0.0–1.0. Default 0.75. 1.0 keeps older profiles at full weight.
-		/// </summary>
-		public double ConfluenceSameStreamDecay
-		{
-			get { return m_confluenceSameStreamDecay; }
-			set { requireUnitInterval("ConfluenceSameStreamDecay", value); m_confluenceSameStreamDecay = value; }
-		}
-		/// <summary>
-		/// Retained for compatibility and not applied. A second stream is either an independent
-		/// source or a nested refinement; a bonus would count it again. Valid: ≥ 0. Default 0.35.
-		/// </summary>
-		public double ConfluenceCrossStreamBonus
-		{
-			get { return m_confluenceCrossStreamBonus; }
-			set { requireNonNegative("ConfluenceCrossStreamBonus", value); m_confluenceCrossStreamBonus = value; }
-		}
-		/// <summary>
 		/// When true, HVN peaks and LVN troughs (other than the POC) are confluence anchors. Default true.
 		/// </summary>
 		public bool ConfluenceIncludeHvns { get; set; }
+		/// <summary>VPB-10: an LVN wider than this fraction of the profile's range is dropped. (0, 1]. Default DEFAULT_MAX_LVN_PCT_OF_RANGE (0.12). Not an [Input].</summary>
+		public double MaxLvnFractionOfRange { get; set; } = DEFAULT_MAX_LVN_PCT_OF_RANGE;
 		/// <summary>
 		/// When true, live VWAP slots add context_score only (0.5 × slot weight) and never acceptance or rejection credit. Default true.
 		/// </summary>
@@ -1734,6 +1720,7 @@ namespace PowerLanguage.Strategy
 			if (HvnPercentile < LvnPercentile)
 				throw new ArgumentException("HvnPercentile must be larger than LvnPercentile.");
 			requireAtLeast("MinNodeTicks", MinNodeTicks, 1);
+			if (MaxLvnFractionOfRange <= 0 || MaxLvnFractionOfRange > 1) throw new ArgumentException("MaxLvnFractionOfRange must be in (0, 1].");
 			requireNonNegative("NakedPocTickTolerance", NakedPocTickTolerance);
 			requireAtLeast("Vwap1Length", Vwap1Length, 1);
 			requireAtLeast("Vwap2Length", Vwap2Length, 1);
@@ -1743,37 +1730,7 @@ namespace PowerLanguage.Strategy
 			requireDataStream("Vwap3DataStream", Vwap3DataStream, Vwap3Type);
 		}
 
-		private static void requireUnitInterval(string name, double value)
-		{
-			if (value < 0.0 || value > 1.0)
-				throw new ArgumentException(name + " must be between 0.0 and 1.0.");
-		}
-
-		private static void requireAtLeast(string name, int value, int min)
-		{
-			if (value < min)
-				throw new ArgumentException(name + " must be " + min + " or greater.");
-		}
-
-		private static void requireNonNegative(string name, double value)
-		{
-			if (value < 0.0)
-				throw new ArgumentException(name + " must be 0.0 or greater.");
-		}
-
-		private static void requireNonNegative(string name, int value)
-		{
-			if (value < 0)
-				throw new ArgumentException(name + " must be 0 or greater.");
-		}
-
-		private void requireDataStream(string name, int stream)
-		{
-			if (stream < 1)
-				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
-			if (MaxDataStream >= 1 && stream > MaxDataStream)
-				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
-		}
+		// requireUnitInterval / requireAtLeast / requireNonNegative / requireDataStream(name, stream) live in _CustomSignal (spec CS-3).
 
 		// A disabled VWAP slot is not stepped, so its stream is not required on the chart.
 		private void requireDataStream(string name, int stream, EVwapType type)
@@ -1806,9 +1763,909 @@ namespace PowerLanguage.Strategy
 		private int m_confluenceBuiltBar2 = int.MinValue;
 		private int m_confluenceBuiltBar3 = int.MinValue;
 		private bool m_volumePctDirty;
-		private double m_tick;   // tickSize() cache, reset in StartCalc
+		private int m_pocUnreadableCount;   // VPB-4: developing POC unreadable events this run
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
+
+		// <profile-math>
+		/// <summary>
+		/// VPB-1 / VPB-2 / VPB-6 / VPB-7: MultiCharts-free histogram math. Pure functions on a dense, ascending 1-tick grid
+		/// (prices[i] = lowest + i x tick, vols[i] >= 0). tests/ProfileTests extracts this block and tests it off MultiCharts.
+		/// </summary>
+		public static class ProfileMath
+		{
+			public enum ValueRel { Unknown = 0, Higher, Lower, OverlappingHigher, OverlappingLower, Inside, Outside }
+			public enum Shape { Unknown = 0, D, P, b, Thin, Double }
+
+			// VPB-6 ProfileShape thresholds (documented hypothesis, not tuned).
+			public const double SHAPE_SKEW_SHARE = 0.50;      // P / b: >= 50% of the volume in the upper / lower third and the POC in that third
+			public const double SHAPE_THIN_PEAK_TO_MEAN = 1.5; // Thin/Trend: flat histogram, POC volume <= 1.5 x mean traded-row volume
+			public const double SHAPE_DOUBLE_PEAK = 0.60;     // Double: second peak >= 60% of the POC volume ...
+			public const double SHAPE_DOUBLE_VALLEY = 0.50;   // ... with a valley <= 50% of the smaller peak between them ...
+			public const double SHAPE_DOUBLE_SEPARATION = 0.25; // ... and the peaks >= 25% of the range apart
+
+			public static long Key(double price, double tick) { return (long)Math.Round(price / tick); }
+
+			/// <summary>Sparse (price, volume) pairs onto a dense ascending 1-tick grid. Volumes on the same tick add up.</summary>
+			public static bool ToDense(IList<double> prices, IList<double> vols, double tick, out double[] densePrices, out double[] denseVols)
+			{
+				densePrices = new double[0]; denseVols = new double[0];
+				if (prices == null || vols == null || tick <= 0 || prices.Count == 0 || prices.Count != vols.Count) return false;
+				long lo = long.MaxValue, hi = long.MinValue;
+				for (int i = 0; i < prices.Count; i++)
+				{
+					if (vols[i] <= 0) continue;
+					long k = Key(prices[i], tick);
+					if (k < lo) lo = k;
+					if (k > hi) hi = k;
+				}
+				if (lo > hi || hi - lo + 1 > 200000) return false;
+				int n = (int)(hi - lo + 1);
+				densePrices = new double[n]; denseVols = new double[n];
+				for (int i = 0; i < n; i++) densePrices[i] = (lo + i) * tick;
+				for (int i = 0; i < prices.Count; i++)
+					if (vols[i] > 0) denseVols[(int)(Key(prices[i], tick) - lo)] += vols[i];
+				return true;
+			}
+
+			/// <summary>Raw max-volume row. Ties: the row nearest the volume-weighted mean, then the lower row.</summary>
+			public static int PocIndex(double[] vols)
+			{
+				if (vols == null || vols.Length == 0) return -1;
+				double max = 0, sum = 0, wsum = 0;
+				for (int i = 0; i < vols.Length; i++) { if (vols[i] > max) max = vols[i]; sum += vols[i]; wsum += i * vols[i]; }
+				if (max <= 0) return -1;
+				double mean = wsum / sum;
+				int best = -1;
+				for (int i = 0; i < vols.Length; i++)
+					if (vols[i] == max && (best < 0 || Math.Abs(i - mean) < Math.Abs(best - mean))) best = i;
+				return best;
+			}
+
+			/// <summary>
+			/// VPB-2 VolumeExpansion: start at the POC row; compare the next two rows above with the next two below and add the
+			/// larger pair; a tie adds both pairs. A side that has run out of rows offers fewer (or zero) rows. Stops once the
+			/// included volume reaches percent x total. Returns false for an empty histogram.
+			/// </summary>
+			public static bool ValueAreaExpansion(double[] vols, double percent, out int lo, out int hi, out int poc)
+			{
+				lo = hi = poc = PocIndex(vols);
+				if (poc < 0) return false;
+				double total = 0;
+				for (int i = 0; i < vols.Length; i++) total += vols[i];
+				double target = total * percent, acc = vols[poc];
+				int n = vols.Length;
+				while (acc < target && (lo > 0 || hi < n - 1))
+				{
+					int upRows = Math.Min(2, n - 1 - hi), downRows = Math.Min(2, lo);
+					double up = 0, down = 0;
+					for (int k = 1; k <= upRows; k++) up += vols[hi + k];
+					for (int k = 1; k <= downRows; k++) down += vols[lo - k];
+					if (upRows > 0 && (downRows == 0 || up > down)) { hi += upRows; acc += up; }
+					else if (downRows > 0 && (upRows == 0 || down > up)) { lo -= downRows; acc += down; }
+					else { hi += upRows; lo -= downRows; acc += up + down; }
+				}
+				return true;
+			}
+
+			/// <summary>VPB-2 Sigma: volume-weighted mean ± k·σ of the histogram, clamped to the traded range.</summary>
+			public static bool ValueAreaSigma(double[] prices, double[] vols, double k, out double vah, out double val)
+			{
+				vah = val = 0;
+				if (prices == null || vols == null || prices.Length == 0 || prices.Length != vols.Length) return false;
+				double w = 0, m = 0;
+				for (int i = 0; i < vols.Length; i++) { w += vols[i]; m += vols[i] * prices[i]; }
+				if (w <= 0) return false;
+				m /= w;
+				double v = 0;
+				for (int i = 0; i < vols.Length; i++) v += vols[i] * (prices[i] - m) * (prices[i] - m);
+				double sd = Math.Sqrt(v / w);
+				vah = Math.Min(prices[prices.Length - 1], m + k * sd);
+				val = Math.Max(prices[0], m - k * sd);
+				return true;
+			}
+
+			/// <summary>VPB-6 Dalton value-area relationship of the current profile to the previous one.</summary>
+			public static ValueRel Relationship(double prevVah, double prevVal, double curVah, double curVal)
+			{
+				if (prevVah <= 0 || prevVal <= 0 || curVah <= 0 || curVal <= 0 || prevVah < prevVal || curVah < curVal) return ValueRel.Unknown;
+				if (curVal > prevVah) return ValueRel.Higher;
+				if (curVah < prevVal) return ValueRel.Lower;
+				if (curVah <= prevVah && curVal >= prevVal) return ValueRel.Inside;
+				if (curVah > prevVah && curVal < prevVal) return ValueRel.Outside;
+				return curVah > prevVah ? ValueRel.OverlappingHigher : ValueRel.OverlappingLower;
+			}
+
+			/// <summary>
+			/// VPB-6 poor high (top = true) / poor low: the extreme row and at least minRows rows from the extreme each hold
+			/// >= fraction x the mean traded-row volume (no tapering tail).
+			/// </summary>
+			public static bool IsPoorExtreme(double[] vols, bool top, double fraction, int minRows)
+			{
+				if (vols == null || vols.Length < minRows || minRows < 1) return false;
+				double sum = 0; int traded = 0;
+				for (int i = 0; i < vols.Length; i++) if (vols[i] > 0) { sum += vols[i]; traded++; }
+				if (traded == 0) return false;
+				double floor = fraction * sum / traded;
+				int count = 0;
+				for (int j = 0; j < vols.Length; j++)
+				{
+					double vv = vols[top ? vols.Length - 1 - j : j];
+					if (vv >= floor && vv > 0) count++; else break;
+				}
+				return count >= minRows;
+			}
+
+			/// <summary>
+			/// VPB-6 single prints: runs of >= minRows rows with volume <= the pct-percentile of traded rows, between a value-area
+			/// edge and the profile extreme (outside [vaLo, vaHi]). Returns [startIndex, endIndex] pairs, low to high.
+			/// </summary>
+			public static List<int[]> SinglePrints(double[] vols, int vaLo, int vaHi, double pct, int minRows)
+			{
+				var res = new List<int[]>();
+				if (vols == null || vols.Length == 0 || vaLo < 0 || vaHi >= vols.Length || vaLo > vaHi) return res;
+				var traded = new List<double>();
+				for (int i = 0; i < vols.Length; i++) if (vols[i] > 0) traded.Add(vols[i]);
+				if (traded.Count == 0) return res;
+				traded.Sort();
+				double cut = traded[Math.Max(0, Math.Min(traded.Count - 1, (int)Math.Floor(pct * (traded.Count - 1))))];
+				int a = -1;
+				for (int i = 0; i <= vols.Length; i++)
+				{
+					bool inZone = i < vols.Length && (i < vaLo || i > vaHi) && vols[i] <= cut;
+					if (inZone && a < 0) a = i;
+					if (!inZone && a >= 0) { if (i - a >= minRows) res.Add(new[] { a, i - 1 }); a = -1; }
+				}
+				return res;
+			}
+
+			/// <summary>VPB-6 profile shape with the SHAPE_* thresholds above.</summary>
+			public static Shape ProfileShape(double[] vols, double vaPercent)
+			{
+				int n = vols == null ? 0 : vols.Length;
+				if (n < 3) return Shape.Unknown;
+				int lo, hi, poc;
+				if (!ValueAreaExpansion(vols, vaPercent, out lo, out hi, out poc)) return Shape.Unknown;
+				double total = 0, upper = 0, lower = 0;
+				int third = n / 3;
+				for (int i = 0; i < n; i++) { total += vols[i]; if (i >= n - third) upper += vols[i]; if (i < third) lower += vols[i]; }
+				if (total <= 0) return Shape.Unknown;
+				// Double: a second peak far enough from the POC with a deep enough valley between them.
+				for (int i = 1; i < n - 1; i++)
+				{
+					if (i == poc || vols[i] < vols[i - 1] || vols[i] < vols[i + 1]) continue;
+					if (vols[i] < SHAPE_DOUBLE_PEAK * vols[poc] || Math.Abs(i - poc) < SHAPE_DOUBLE_SEPARATION * (n - 1)) continue;
+					double valley = double.MaxValue;
+					for (int j = Math.Min(i, poc) + 1; j < Math.Max(i, poc); j++) valley = Math.Min(valley, vols[j]);
+					if (valley <= SHAPE_DOUBLE_VALLEY * Math.Min(vols[i], vols[poc])) return Shape.Double;
+				}
+				int tradedRows = 0;
+				for (int i = 0; i < n; i++) if (vols[i] > 0) tradedRows++;
+				if (vols[poc] <= SHAPE_THIN_PEAK_TO_MEAN * total / tradedRows) return Shape.Thin;
+				if (third > 0 && upper >= SHAPE_SKEW_SHARE * total && poc >= n - third) return Shape.P;
+				if (third > 0 && lower >= SHAPE_SKEW_SHARE * total && poc < third) return Shape.b;
+				return Shape.D;
+			}
+
+			public enum MigrationState { Unknown = 0, Down, Neutral, Up }
+
+			/// <summary>VPB-6 (Rev 2.4) s(a, b): 0 when |a - b| &lt; d, else sign(a - b).</summary>
+			public static int MigrationStep(double a, double b, double d)
+			{
+				double diff = a - b;
+				if (Math.Abs(diff) < d) return 0;
+				return Math.Sign(diff);
+			}
+
+			/// <summary>
+			/// VPB-6 (Rev 2.4) value-migration score V = sum_{i=0}^{n-1} s(POC_i, POC_{i+1}) (+ s(devPoc, POC_0) when devPoc is
+			/// given). pocsOldestToNewest: completed-session POCs, newest last; only the newest n+1 are used. Returns null
+			/// (Unknown) with fewer than n+1 POCs, n &lt; 1, or a non-finite / negative d.
+			/// </summary>
+			public static int? MigrationScore(IList<double> pocsOldestToNewest, int n, double d, double? devPoc)
+			{
+				if (pocsOldestToNewest == null || n < 1 || pocsOldestToNewest.Count < n + 1 || double.IsNaN(d) || double.IsInfinity(d) || d < 0) return null;
+				int last = pocsOldestToNewest.Count - 1;   // POC_0
+				int v = 0;
+				for (int i = 0; i < n; i++) v += MigrationStep(pocsOldestToNewest[last - i], pocsOldestToNewest[last - i - 1], d);
+				if (devPoc.HasValue && devPoc.Value > 0) v += MigrationStep(devPoc.Value, pocsOldestToNewest[last], d);
+				return v;
+			}
+
+			/// <summary>VPB-6 (Rev 2.4): Up when V >= upAt, Down when V &lt;= -downAt, Neutral otherwise, Unknown when V is null.</summary>
+			public static MigrationState ClassifyMigration(int? v, int upAt = 2, int downAt = 2)
+			{
+				if (!v.HasValue) return MigrationState.Unknown;
+				if (v.Value >= upAt) return MigrationState.Up;
+				if (v.Value <= -downAt) return MigrationState.Down;
+				return MigrationState.Neutral;
+			}
+
+			/// <summary>VPB-7: true when every consecutive pair of value areas overlaps by >= minOverlap of the narrower one.</summary>
+			public static bool IsBalanced(IList<double> vahs, IList<double> vals, double minOverlap)
+			{
+				if (vahs == null || vals == null || vahs.Count < 2 || vahs.Count != vals.Count) return false;
+				for (int i = 1; i < vahs.Count; i++)
+				{
+					double w = Math.Min(vahs[i] - vals[i], vahs[i - 1] - vals[i - 1]);
+					double ov = Math.Min(vahs[i], vahs[i - 1]) - Math.Max(vals[i], vals[i - 1]);
+					if (w < 0 || ov < 0) return false;
+					if (w == 0 ? ov < 0 : ov / w < minOverlap) return false;
+				}
+				return true;
+			}
+
+			/// <summary>
+			/// VPB-6: value-migration score V per final-synthesis section 4.0 (a hypothesis, K4 8.4 "last 3 windows").
+			/// <paramref name="completedPocs"/> holds completed-session POCs oldest first; the last n differences are scored
+			/// (so n + 1 POCs are used). Each term is sign(POC[i] - POC[i-1]), and a change smaller than
+			/// <paramref name="minChange"/> (D = 0.10 x ATR20 daily) counts as 0. When <paramref name="developingPoc"/> > 0 the
+			/// developing term sign(developing POC - newest completed POC) is added, so V is in [-(n+1), n+1] ([-4, +4] at n = 3).
+			/// Returns false (V = 0) when fewer than n + 1 usable POCs exist. Up-migration V >= +2, down V <= -2, neutral |V| <= 1.
+			/// </summary>
+			public static bool ValueMigrationScore(IList<double> completedPocs, int n, double developingPoc, double minChange, out int score)
+			{
+				score = 0;
+				if (completedPocs == null || n < 1 || completedPocs.Count < n + 1 || minChange < 0) return false;
+				int last = completedPocs.Count - 1;
+				for (int i = last - n; i <= last; i++) if (completedPocs[i] <= 0) return false;
+				for (int i = last - n + 1; i <= last; i++) score += migrationTerm(completedPocs[i] - completedPocs[i - 1], minChange);
+				if (developingPoc > 0) score += migrationTerm(developingPoc - completedPocs[last], minChange);
+				return true;
+			}
+
+			private static int migrationTerm(double change, double minChange)
+			{
+				if (Math.Abs(change) < minChange || change == 0) return 0;
+				return change > 0 ? 1 : -1;
+			}
+
+			/// <summary>
+			/// VPB-1 bar-by-bar accumulator on a 1-tick grid. Deterministic: the same bars in the same order give the same
+			/// histogram, so backtest and bar replay agree by construction.
+			/// mode 1 = VolumeAtPrice (whole bar volume at the close: exact on a 1-tick source), 2 = BarUniform (volume spread
+			/// evenly over the ticks low..high), 3 = BarTypical (all volume at (H+L+C)/3 rounded to the tick).
+			/// </summary>
+			public sealed class Accumulator
+			{
+				public readonly SortedDictionary<long, double> rows = new SortedDictionary<long, double>();
+				public double tick;
+				public int bars;
+				public double open, high, low, close;
+				public int firstBar = -1, lastBar = -1;
+				public DateTime firstTime, lastTime;
+
+				public Accumulator(double tick) { this.tick = tick > 0 ? tick : 0.01; }
+
+				public void Reset() { rows.Clear(); bars = 0; open = high = low = close = 0; firstBar = lastBar = -1; firstTime = lastTime = DateTime.MinValue; }
+
+				public void Add(int barIndex, DateTime time, double o, double h, double l, double c, double volume, int mode)
+				{
+					if (h < l || l <= 0) return;
+					if (bars == 0) { open = o; high = h; low = l; firstBar = barIndex; firstTime = time; }
+					if (h > high) high = h;
+					if (l < low) low = l;
+					close = c; lastBar = barIndex; lastTime = time; bars++;
+					if (volume <= 0) return;
+					if (mode == 2)
+					{
+						long a = Key(l, tick), b = Key(h, tick);
+						double each = volume / (b - a + 1);
+						for (long k = a; k <= b; k++) addRow(k, each);
+					}
+					else if (mode == 3) addRow(Key((h + l + c) / 3.0, tick), volume);
+					else addRow(Key(c, tick), volume);
+				}
+
+				private void addRow(long k, double v)
+				{
+					double cur;
+					rows.TryGetValue(k, out cur);
+					rows[k] = cur + v;
+				}
+
+				/// <summary>Dense ascending grid from the lowest to the highest traded row.</summary>
+				public void Dense(out double[] prices, out double[] vols)
+				{
+					prices = new double[0]; vols = new double[0];
+					if (rows.Count == 0) return;
+					long lo = long.MaxValue, hi = long.MinValue;
+					foreach (long k in rows.Keys) { if (k < lo) lo = k; if (k > hi) hi = k; }
+					int n = (int)Math.Min(200000, hi - lo + 1);
+					prices = new double[n]; vols = new double[n];
+					for (int i = 0; i < n; i++) prices[i] = (lo + i) * tick;
+					foreach (var kv in rows) { long i = kv.Key - lo; if (i >= 0 && i < n) vols[i] += kv.Value; }
+				}
+			}
+		}
+		// </profile-math>
+
+		// ---------------------------------------------------------------------------------------------------------------
+		// VPB-1 own developing profile, VPB-2 value area for Own profiles, VPB-3 look-ahead audit.
+		// ---------------------------------------------------------------------------------------------------------------
+
+		/// <summary>VPB-1: where DevelopingExtra() takes the developing profile from.</summary>
+		public enum EDevelopingSource { MultiCharts = 0, Own = 1 }
+		/// <summary>VPB-1: how the Own engine turns a source bar into volume at price. Auto = VolumeAtPrice on a 1-tick source, BarUniform otherwise.</summary>
+		public enum EDevProfileSourceMode { Auto = 0, VolumeAtPrice = 1, BarUniform = 2, BarTypical = 3 }
+		/// <summary>VPB-2: value-area method for Own profiles and composites. MultiCharts = the MC VA for MC profiles; Own profiles then use VolumeExpansion.</summary>
+		public enum EValueAreaMethod { MultiCharts = 0, VolumeExpansion = 1, Sigma = 2 }
+
+		public const double DEFAULT_VALUE_AREA_PERCENT = 0.70;
+		public const double DEFAULT_VALUE_AREA_SIGMA = 1.0;
+		private const int MAX_OWN_COMPLETED = 500;
+		private const int MAX_AUDIT_WARNINGS = 20;
+
+		/// <summary>VPB-1. Default MultiCharts (no change). Switch to Own once the VPB-3 audit is clean (D6).</summary>
+		[Input] public EDevelopingSource DevelopingSource { get; set; }
+		/// <summary>VPB-1. Auto: exact on a 1-tick source, BarUniform (approximate) otherwise.</summary>
+		[Input] public EDevProfileSourceMode DevProfileSourceMode { get; set; }
+		/// <summary>VPB-1. Chart data stream the Own engine reads bars from (1 = Data1). Should be as fine or finer than Data1.</summary>
+		[Input] public int DevProfileDataStream { get; set; }
+		/// <summary>VPB-2. Value-area method for Own profiles and composites.</summary>
+		[Input] public EValueAreaMethod ValueAreaMethod { get; set; }
+		/// <summary>VPB-3. Debug: re-check look-ahead invariants on every closed calc bar. Slow. Default false.</summary>
+		[Input] public bool LookaheadAudit { get; set; }
+
+		/// <summary>VPB-2. Fraction of volume in the value area (VolumeExpansion). (0,1]. Not an input.</summary>
+		public double ValueAreaPercent { get; set; } = DEFAULT_VALUE_AREA_PERCENT;
+		/// <summary>VPB-2. k in mean ± k·σ (Sigma method). > 0. Not an input.</summary>
+		public double ValueAreaSigma { get; set; } = DEFAULT_VALUE_AREA_SIGMA;
+		/// <summary>VPB-3 plant-a-leak test: the audit's MC streaming value reads the profile's end-bar POC. Must be reported.</summary>
+		protected bool AuditPlantLeak { get; set; }
+
+		private ProfileMath.Accumulator m_own;
+		private int m_ownFoldedBar;              // last source bar folded (1-based Status Bar #)
+		private DateTime m_ownPrevTime;
+		private bool m_ownApproximate;
+		private bool m_ownWindowFromStart;
+		private int m_ownMode;
+		private VpExtra m_ownSnapshot;
+		private int m_ownSnapshotBars = -1;
+		private int m_ownSnapshotLast = -1;
+		private readonly List<VpExtra> m_ownCompleted = new List<VpExtra>();
+		private int m_parityProfiles, m_parityPocMatch, m_parityVaMatch, m_parityUnavailable;
+		private int m_auditChecks, m_auditMismatch, m_auditFutureStart, m_auditCompletedLeak, m_auditWarned;
+		private bool m_vpbSummaryDone;
+
+		private bool ownEngineOn() { return DevelopingSource == EDevelopingSource.Own || LookaheadAudit; }
+
+		private void startOwnEngine()
+		{
+			if (ValueAreaPercent <= 0 || ValueAreaPercent > 1) throw new ArgumentException("ValueAreaPercent must be in (0, 1].");
+			if (ValueAreaSigma <= 0) throw new ArgumentException("ValueAreaSigma must be > 0.");
+			m_own = null; m_ownFoldedBar = 0; m_ownWindowFromStart = false; m_ownPrevTime = DateTime.MinValue; m_ownSnapshot = null; m_ownSnapshotBars = -1; m_ownSnapshotLast = -1;
+			m_ownCompleted.Clear();
+			m_parityProfiles = m_parityPocMatch = m_parityVaMatch = m_parityUnavailable = 0;
+			m_auditChecks = m_auditMismatch = m_auditFutureStart = m_auditCompletedLeak = m_auditWarned = 0;
+			m_pocUnreadableCount = 0;
+			m_vpbSummaryDone = false;
+			if (!ownEngineOn()) return;
+			requireDataStream("DevProfileDataStream", DevProfileDataStream);
+			IInstrument src = barsOf(DevProfileDataStream);
+			bool oneTick = false;
+			try { oneTick = src != null && src.Info.Resolution.Type.ToString() == "Tick" && src.Info.Resolution.Size == 1; } catch { }
+			m_ownMode = (int)DevProfileSourceMode;
+			if (DevProfileSourceMode == EDevProfileSourceMode.Auto) m_ownMode = oneTick ? 1 : 2;
+			m_ownApproximate = !(m_ownMode == 1 && oneTick);
+			m_own = new ProfileMath.Accumulator(tickSize());
+			if (traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, $"VPB-1 own profile: source(Data{DevProfileDataStream}) mode({(EDevProfileSourceMode)m_ownMode}) approximate({m_ownApproximate}) " +
+					$"valueArea({ValueAreaMethod} {ValueAreaPercent} sigma {ValueAreaSigma}) audit({LookaheadAudit}). MC VA % is a chart setting, not readable from code - check chart.");
+		}
+
+		/// <summary>
+		/// VPB-1: true when source bar <paramref name="barIndex"/> starts a new profile window. Default: a new MultiCharts
+		/// profile starts on that bar of the source stream. VPF overrides with the Globex / RTH day.
+		/// </summary>
+		protected virtual bool isNewProfileWindow(int stream, int barIndex, DateTime barTime, DateTime prevBarTime)
+		{
+			return IsNewVolumeProfile(stream, barIndex);
+		}
+
+		/// <summary>VPB-1: false drops the bar from the Own profile (VPF uses it for RTH-only profiles). Default true.</summary>
+		protected virtual bool includeBarInProfile(DateTime barTime) { return true; }
+
+		/// <summary>VPB-1: fold every closed source bar up to the calc bar. Only closed bars, so backtest and real time agree.</summary>
+		private void stepOwnEngine()
+		{
+			if (m_own == null) return;
+			IInstrument src = barsOf(DevProfileDataStream);
+			int cur = streamItemBarIndex(DevProfileDataStream);
+			if (src == null || cur < 1) return;
+			int last = src.Status == EBarState.Close ? cur : cur - 1;
+			if (m_ownFoldedBar < 1) m_ownFoldedBar = Math.Max(0, last - ExecInfo.MaxBarsBack);   // history before MaxBarsBack is unreadable
+			for (int b = m_ownFoldedBar + 1; b <= last; b++)
+			{
+				int ago = cur - b;
+				if (ago > ExecInfo.MaxBarsBack) continue;
+				DateTime t = src.Time[ago];
+				bool isNew = isNewProfileWindow(DevProfileDataStream, b, t, m_ownPrevTime);
+				if (isNew && m_own.bars > 0) completeOwnProfile();
+				if (isNew) m_ownWindowFromStart = true;
+				m_ownPrevTime = t;
+				if (!includeBarInProfile(t)) continue;
+				m_own.Add(b, t, src.Open[ago], src.High[ago], src.Low[ago], src.Close[ago], sourceVolume(src, ago), m_ownMode);
+			}
+			if (last > m_ownFoldedBar) m_ownFoldedBar = last;
+		}
+
+		private static double sourceVolume(IInstrument src, int ago)
+		{
+			double v = 0;
+			try { v = src.Volume[ago]; } catch { }
+			if (v <= 0) { try { v = src.Ticks[ago]; } catch { } }
+			return v;
+		}
+
+		private void completeOwnProfile()
+		{
+			VpExtra done = buildOwnExtra(m_own, false);
+			if (done != null)
+			{
+				done.isPartial = !m_ownWindowFromStart;   // first window after the start of history: began mid-window
+				m_ownCompleted.Add(done);
+				if (m_ownCompleted.Count > MAX_OWN_COMPLETED) m_ownCompleted.RemoveAt(0);
+				if (!done.isPartial) parityCheck(done);
+			}
+			m_own.Reset();
+			m_ownSnapshot = null; m_ownSnapshotBars = -1;
+		}
+
+		/// <summary>VPB-1: compare a completed Own profile with MC's completed profile that starts on the same bar.</summary>
+		private void parityCheck(VpExtra own)
+		{
+			if (own == null || own.poc <= 0) return;
+			VpExtra mc = null;
+			try { mc = ExtraVolumeProfileForBar(DevProfileDataStream, own.startBar); } catch { }
+			if (mc == null || mc.poc <= 0 || mc.startBar != own.startBar)
+			{
+				m_parityUnavailable++;
+				return;
+			}
+			double tick = tickSize();
+			m_parityProfiles++;
+			bool pocOk = Math.Abs(mc.poc - own.poc) < tick * 0.5;
+			bool vaOk = mc.vah > 0 && mc.val > 0 && Math.Abs(mc.vah - own.vah) <= tick * 1.5 && Math.Abs(mc.val - own.val) <= tick * 1.5;
+			if (pocOk) m_parityPocMatch++;
+			if (vaOk) m_parityVaMatch++;
+			if ((!pocOk || !vaOk) && traceOn(ETraceLevel.Verbose))
+				trace(ETraceLevel.Verbose, $"VPB-1 parity start({own.startBar}) own poc({own.poc}) vah({own.vah}) val({own.val}) mc poc({mc.poc}) vah({mc.vah}) val({mc.val})");
+		}
+
+		/// <summary>Snapshot of an accumulator as a VpExtra (levels, POC, VA by ValueAreaMethod, HVN/LVN).</summary>
+		private VpExtra buildOwnExtra(ProfileMath.Accumulator acc, bool developing)
+		{
+			if (acc == null || acc.bars == 0) return null;
+			var e = new VpExtra();
+			e.dataStream = DevProfileDataStream;
+			e.startBar = acc.firstBar; e.endBar = acc.lastBar;
+			e.open = acc.open; e.high = acc.high; e.low = acc.low; e.close = acc.close;
+			e.isDeveloping = developing;
+			e.approximate = m_ownApproximate;
+			e.isOwn = true;
+			double[] prices, vols;
+			acc.Dense(out prices, out vols);
+			fillFromHistogram(e, prices, vols);
+			e.pocComplete = !developing && e.poc > 0;
+			e.nakedTracked = false;
+			return e;
+		}
+
+		/// <summary>levels, raw-max POC, value area (VPB-2) and nodes for a histogram that MC did not compute.</summary>
+		protected void fillFromHistogram(VpExtra e, double[] prices, double[] vols)
+		{
+			e.levels.Clear(); e.hvns.Clear(); e.lvns.Clear();
+			e.poc = e.pocVol = e.vah = e.val = 0;
+			if (prices == null || vols == null || prices.Length == 0) return;
+			for (int i = 0; i < prices.Length; i++)
+				if (vols[i] > 0) e.levels.Add(new LevelVol { price = prices[i], total = vols[i] });
+			int lo, hi, poc;
+			if (!ProfileMath.ValueAreaExpansion(vols, ValueAreaPercent, out lo, out hi, out poc)) return;
+			e.poc = prices[poc]; e.pocVol = vols[poc];
+			if (ValueAreaMethod == EValueAreaMethod.Sigma)
+			{
+				double vah, val;
+				if (ProfileMath.ValueAreaSigma(prices, vols, ValueAreaSigma, out vah, out val)) { e.vah = vah; e.val = val; }
+			}
+			else { e.vah = prices[hi]; e.val = prices[lo]; }
+			buildNodesFromLevels(e);
+		}
+
+		/// <summary>
+		/// VPB-1: developing profile on <paramref name="stream"/> as of the calc bar. Own (DevelopingSource = Own and stream =
+		/// DevProfileDataStream): the Own snapshot built from closed source bars only. Otherwise MultiCharts' developing extra.
+		/// isDeveloping is set on the returned extra.
+		/// </summary>
+		public VpExtra DevelopingExtra(int stream)
+		{
+			if (DevelopingSource == EDevelopingSource.Own && stream == DevProfileDataStream && m_own != null)
+				return ownSnapshot();
+			int cur = streamItemBarIndex(stream);
+			VpExtra e = cur >= 1 ? ExtraVolumeProfileForBar(stream, cur) : null;
+			if (e != null) e.isDeveloping = !e.pocComplete;
+			return e;
+		}
+
+		/// <summary>VPB-1: completed Own profiles, newest first (at most MAX_OWN_COMPLETED kept).</summary>
+		public List<VpExtra> OwnCompletedProfiles(int count)
+		{
+			var res = new List<VpExtra>();
+			for (int i = m_ownCompleted.Count - 1; i >= 0 && res.Count < count; i--) res.Add(m_ownCompleted[i]);
+			return res;
+		}
+
+		private VpExtra ownSnapshot()
+		{
+			if (m_own == null) return null;
+			if (m_ownSnapshot == null || m_ownSnapshotBars != m_own.bars || m_ownSnapshotLast != m_own.lastBar)
+			{
+				m_ownSnapshot = buildOwnExtra(m_own, true);
+				m_ownSnapshotBars = m_own.bars; m_ownSnapshotLast = m_own.lastBar;
+			}
+			return m_ownSnapshot;
+		}
+
+		/// <summary>
+		/// VPB-3: on every closed calc bar, (1) no stored extra starts after its stream's calc bar; (2) RecentCompletedProfiles
+		/// only returns profiles with endBar before the calc bar; (3) the Own snapshot equals a from-scratch rebuild over the
+		/// current window's bars; (4) the MC developing POC/VAH/VAL from the streaming extra equals a fresh as-of read.
+		/// </summary>
+		private void runLookaheadAudit()
+		{
+			if (!LookaheadAudit || Bars.Status != EBarState.Close) return;
+			m_auditChecks++;
+			foreach (var kv in m_streams)
+			{
+				StreamPack sp = kv.Value;
+				if (sp == null || sp.extra == null) continue;
+				int cur = streamItemBarIndex(kv.Key);
+				foreach (VpExtra e in sp.extra.Values)
+					if (e != null && cur >= 1 && e.startBar > cur) { m_auditFutureStart++; auditWarn($"extra startBar({e.startBar}) > current({cur}) stream({kv.Key})"); }
+				foreach (VpExtra e in RecentCompletedProfiles(kv.Key, int.MaxValue, cur))
+					if (e.endBar >= cur) { m_auditCompletedLeak++; auditWarn($"completed profile endBar({e.endBar}) >= current({cur}) stream({kv.Key})"); }
+
+				// (4) MC path: streaming developing extra vs a fresh as-of geometry read.
+				IProfile vp = sp.pack != null ? itemForBar(sp, kv.Key, cur) : null;
+				VpExtra streaming = vp != null ? lookupExtra(sp, kv.Key, vp) : null;
+				if (vp != null && streaming != null && profileEndBar(vp) >= cur)
+				{
+					var fresh = new VpExtra { dataStream = kv.Key };
+					int unreadable = m_pocUnreadableCount;
+					applyProfileGeometry(vp, fresh, cur);
+					m_pocUnreadableCount = unreadable;   // the audit read is not a strategy read
+					double sPoc = AuditPlantLeak ? priceForBar(vp, profileEndBar(vp), 0) : streaming.poc;
+					if (!samePrice(sPoc, fresh.poc) || !samePrice(streaming.vah, fresh.vah) || !samePrice(streaming.val, fresh.val))
+					{
+						m_auditMismatch++;
+						auditWarn($"MC developing stream({kv.Key}) start({fresh.startBar}) bar({cur}) streaming poc({sPoc}) vah({streaming.vah}) val({streaming.val}) fresh poc({fresh.poc}) vah({fresh.vah}) val({fresh.val})");
+					}
+				}
+			}
+
+			// (3) Own path: rebuild the current window from its first bar.
+			if (m_own != null && m_own.bars > 0)
+			{
+				IInstrument src = barsOf(DevProfileDataStream);
+				int cur = streamItemBarIndex(DevProfileDataStream);
+				if (src != null && cur >= m_own.lastBar && cur - m_own.firstBar <= ExecInfo.MaxBarsBack)
+				{
+					var acc = new ProfileMath.Accumulator(m_own.tick);
+					for (int b = m_own.firstBar; b <= m_own.lastBar; b++)
+					{
+						int ago = cur - b;
+						DateTime t = src.Time[ago];
+						if (!includeBarInProfile(t)) continue;
+						acc.Add(b, t, src.Open[ago], src.High[ago], src.Low[ago], src.Close[ago], sourceVolume(src, ago), m_ownMode);
+					}
+					VpExtra a = ownSnapshot(), f = buildOwnExtra(acc, true);
+					if (a == null || f == null || !samePrice(a.poc, f.poc) || !samePrice(a.vah, f.vah) || !samePrice(a.val, f.val) || a.hvns.Count != f.hvns.Count)
+					{
+						m_auditMismatch++;
+						auditWarn($"Own developing bar({cur}) streaming poc({a?.poc}) vah({a?.vah}) val({a?.val}) rebuilt poc({f?.poc}) vah({f?.vah}) val({f?.val})");
+					}
+				}
+			}
+		}
+
+		private bool samePrice(double a, double b) { return Math.Abs(a - b) < tickSize() * 0.5; }
+
+		private void auditWarn(string msg)
+		{
+			if (m_auditWarned++ < MAX_AUDIT_WARNINGS && traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "VPB-3 audit: " + msg);
+		}
+
+		/// <summary>Once on the last bar: VPB-1 parity, VPB-3 audit and VPB-4 counters.</summary>
+		private void vpbRunSummary()
+		{
+			if (m_vpbSummaryDone || !Bars.LastBarOnChart || Bars.Status != EBarState.Close) return;
+			m_vpbSummaryDone = true;
+			if (!traceOn(ETraceLevel.Info)) return;
+			if (m_own != null)
+			{
+				string res = "";
+				try { IInstrument src = barsOf(DevProfileDataStream); res = $"{src.Info.Resolution.Type} {src.Info.Resolution.Size}"; } catch { }
+				trace(ETraceLevel.Info, $"VPB-1 parity resolution({res}) approximate({m_ownApproximate}) profiles({m_parityProfiles}) pocMatch({m_parityPocMatch}) " +
+					$"vaMatch1Tick({m_parityVaMatch}) mcUnavailable({m_parityUnavailable})" + (m_parityProfiles > 0 ? $" pocMatchRate({(double)m_parityPocMatch / m_parityProfiles:0.000})" : ""));
+			}
+			if (LookaheadAudit)
+				trace(ETraceLevel.Info, $"VPB-3 audit checks({m_auditChecks}) mismatches({m_auditMismatch}) futureStart({m_auditFutureStart}) completedLeak({m_auditCompletedLeak}) plantLeak({AuditPlantLeak})");
+			trace(ETraceLevel.Info, $"VPB-4 developing POC unreadable events({m_pocUnreadableCount})");
+		}
+
+		// ---------------------------------------------------------------------------------------------------------------
+		// VPB-6 completed-profile analytics and VPB-7 composites. Completed profiles only (endBar before the stream's calc
+		// bar); a developing extra returns the neutral value. Read-only: nothing here reads bars after the calc bar.
+		// ---------------------------------------------------------------------------------------------------------------
+
+		private bool isCompleted(VpExtra e)
+		{
+			if (e == null || e.startBar < 1) return false;
+			int cur = streamItemBarIndex(e.dataStream > 0 ? e.dataStream : 1);
+			return cur >= 1 && e.endBar >= e.startBar && e.endBar < cur;
+		}
+
+		private bool denseOf(VpExtra e, out double[] prices, out double[] vols)
+		{
+			prices = vols = null;
+			if (e == null || e.levels.Count == 0) return false;
+			var p = new List<double>(e.levels.Count); var v = new List<double>(e.levels.Count);
+			for (int i = 0; i < e.levels.Count; i++) { p.Add(e.levels[i].price); v.Add(e.levels[i].total); }
+			return ProfileMath.ToDense(p, v, tickSize(), out prices, out vols);
+		}
+
+		private static int indexOf(double[] prices, double price, double tick)
+		{
+			if (prices == null || prices.Length == 0 || tick <= 0) return -1;
+			long i = (long)Math.Round((price - prices[0]) / tick);
+			return i < 0 ? 0 : i >= prices.Length ? prices.Length - 1 : (int)i;
+		}
+
+		/// <summary>VPB-6: Dalton value-area relationship of <paramref name="cur"/> to <paramref name="prev"/> (both completed).</summary>
+		public ProfileMath.ValueRel ValueRelationship(VpExtra prev, VpExtra cur)
+		{
+			if (!isCompleted(prev) || !isCompleted(cur)) return ProfileMath.ValueRel.Unknown;
+			return ProfileMath.Relationship(prev.vah, prev.val, cur.vah, cur.val);
+		}
+
+		/// <summary>VPB-6: poor high — the top row and at least <paramref name="minRows"/> rows below it each hold >= fraction x mean row volume.</summary>
+		public bool IsPoorHigh(VpExtra e, double fraction = 0.5, int minRows = 2)
+		{
+			double[] p, v;
+			return isCompleted(e) && denseOf(e, out p, out v) && ProfileMath.IsPoorExtreme(v, true, fraction, minRows);
+		}
+
+		/// <summary>VPB-6: poor low (mirror of IsPoorHigh).</summary>
+		public bool IsPoorLow(VpExtra e, double fraction = 0.5, int minRows = 2)
+		{
+			double[] p, v;
+			return isCompleted(e) && denseOf(e, out p, out v) && ProfileMath.IsPoorExtreme(v, false, fraction, minRows);
+		}
+
+		/// <summary>VPB-6: unfinished auction — both ask and bid volume traded on the extreme row. False without ask/bid data.</summary>
+		public bool HasUnfinishedAuction(VpExtra e, bool high)
+		{
+			if (!isCompleted(e) || e.levels.Count == 0) return false;
+			LevelVol x = e.levels[0];
+			for (int i = 1; i < e.levels.Count; i++)
+				if (high ? e.levels[i].price > x.price : e.levels[i].price < x.price) x = e.levels[i];
+			return x.ask > 0 && x.bid > 0;
+		}
+
+		/// <summary>
+		/// VPB-6: single-print runs (>= minTicks rows with volume <= the pct-percentile of traded rows) between the value area and
+		/// the extremes. Each entry is { low, high } in price.
+		/// </summary>
+		public List<double[]> SinglePrints(VpExtra e, int minTicks, double pct = 0.2)
+		{
+			var res = new List<double[]>();
+			double[] p, v;
+			if (!isCompleted(e) || e.vah <= 0 || e.val <= 0 || !denseOf(e, out p, out v)) return res;
+			double tick = tickSize();
+			foreach (int[] r in ProfileMath.SinglePrints(v, indexOf(p, e.val, tick), indexOf(p, e.vah, tick), pct, Math.Max(1, minTicks)))
+				res.Add(new[] { p[r[0]], p[r[1]] });
+			return res;
+		}
+
+		/// <summary>VPB-6: profile shape (thresholds: ProfileMath.SHAPE_*).</summary>
+		public ProfileMath.Shape ProfileShape(VpExtra e)
+		{
+			double[] p, v;
+			if (!isCompleted(e) || !denseOf(e, out p, out v)) return ProfileMath.Shape.Unknown;
+			return ProfileMath.ProfileShape(v, ValueAreaPercent);
+		}
+
+		/// <summary>
+		/// VPB-6: true while no bar after <paramref name="e"/> closed, up to <paramref name="asOfBar"/>, has traded
+		/// <paramref name="level"/> (within NakedPocTickTolerance). Use with e.vah / e.val for naked VAH / VAL.
+		/// </summary>
+		public bool IsLevelNaked(VpExtra e, double level, int asOfBar)
+		{
+			if (!isCompleted(e) || level <= 0) return false;
+			int stream = e.dataStream > 0 ? e.dataStream : 1;
+			int cur = streamItemBarIndex(stream);
+			if (asOfBar > cur) asOfBar = cur;
+			if (asOfBar <= e.endBar) return false;
+			IInstrument bars = barsOf(stream);
+			double tick = tickSize();
+			double tol = NakedPocTickTolerance * tick + tick * 1e-6;
+			for (int b = e.endBar + 1; b <= asOfBar; b++)
+			{
+				double h = barPrice(bars, cur, b, 1), l = barPrice(bars, cur, b, 2);
+				if (h <= 0 || l <= 0) continue;
+				if (h >= level - tol && l <= level + tol) return false;
+			}
+			return true;
+		}
+
+		public bool IsNakedVah(VpExtra e, int asOfBar) { return e != null && IsLevelNaked(e, e.vah, asOfBar); }
+		public bool IsNakedVal(VpExtra e, int asOfBar) { return e != null && IsLevelNaked(e, e.val, asOfBar); }
+
+		/// <summary>
+		/// VPB-6: first bar after <paramref name="reference"/> closed at which <paramref name="minCloses"/> consecutive closes were
+		/// above its VAH (above = true) or below its VAL; 0 when not (yet) accepted. Scans closed bars up to the calc bar.
+		/// </summary>
+		public int AcceptanceOutsideValue(VpExtra reference, bool above, int minCloses)
+		{
+			if (!isCompleted(reference) || reference.vah <= 0 || reference.val <= 0 || minCloses < 1) return 0;
+			int stream = reference.dataStream > 0 ? reference.dataStream : 1;
+			int cur = streamItemBarIndex(stream);
+			IInstrument bars = barsOf(stream);
+			int last = bars != null && bars.Status == EBarState.Close ? cur : cur - 1;
+			int run = 0;
+			for (int b = reference.endBar + 1; b <= last; b++)
+			{
+				double c = barPrice(bars, cur, b, 3);
+				if (c <= 0) { run = 0; continue; }
+				run = (above ? c > reference.vah : c < reference.val) ? run + 1 : 0;
+				if (run >= minCloses) return b;
+			}
+			return 0;
+		}
+
+		/// <summary>
+		/// VPB-6 (Rev 2.4): completed session profiles for value migration, newest first. Default: the stream's completed
+		/// profiles ending before the calc bar. The futures base returns completed Own RTH profiles when OwnProfileWindow = Rth.
+		/// </summary>
+		protected virtual List<VpExtra> migrationProfiles(int stream, int count)
+		{
+			return RecentCompletedProfiles(stream, count, streamItemBarIndex(stream));
+		}
+
+		/// <summary>
+		/// VPB-6 (Rev 2.4) ValueMigrationScore (Keller Book 4 §8.4 coding; a hypothesis, not a measured edge). Settings are
+		/// parameters, not inputs. D = minChangeAtrFraction x ATR, where ATR = dailyAtr when > 0 (caller supplies a daily ATR
+		/// ending at the last completed session), else the mean high-low range of the last atrLen completed sessions. Null
+		/// (Unknown) with fewer than n+1 completed POCs or fewer than atrLen sessions for the fallback ATR. The developing
+		/// term uses DevelopingExtra(stream) (VPB-1 source) as of the calc bar. Range [-n, +n], [-(n+1), +(n+1)] with it.
+		/// </summary>
+		public int? ValueMigrationScore(int stream, int n = 3, double minChangeAtrFraction = 0.10, int atrLen = 20,
+			bool includeDeveloping = true, double dailyAtr = 0)
+		{
+			if (n < 1 || atrLen < 1 || minChangeAtrFraction < 0) return null;
+			List<VpExtra> done = migrationProfiles(stream, Math.Max(n + 1, dailyAtr > 0 ? 0 : atrLen));
+			if (done.Count < n + 1) return null;
+			double atr = dailyAtr;
+			if (!(atr > 0))
+			{
+				if (done.Count < atrLen) return null;
+				double sum = 0;
+				for (int i = 0; i < atrLen; i++)
+				{
+					if (!(done[i].high > 0 && done[i].low > 0)) return null;
+					sum += done[i].high - done[i].low;
+				}
+				atr = sum / atrLen;
+			}
+			var pocs = new List<double>(n + 1);
+			for (int i = n; i >= 0; i--)
+			{
+				if (!(done[i].poc > 0)) return null;
+				pocs.Add(done[i].poc);   // oldest first
+			}
+			double? dev = null;
+			if (includeDeveloping)
+			{
+				VpExtra d = DevelopingExtra(stream);
+				if (d != null && d.poc > 0 && d.startBar > done[0].endBar) dev = d.poc;
+			}
+			return ProfileMath.MigrationScore(pocs, n, minChangeAtrFraction * atr, dev);
+		}
+
+		/// <summary>VPB-6 (Rev 2.4): Up / Down / Neutral from ValueMigrationScore with thresholds (default 2); Unknown when it is null.</summary>
+		public ProfileMath.MigrationState ValueMigrationState(int stream, int n = 3, double minChangeAtrFraction = 0.10, int atrLen = 20,
+			bool includeDeveloping = true, double dailyAtr = 0, int upAt = 2, int downAt = 2)
+		{
+			return ProfileMath.ClassifyMigration(ValueMigrationScore(stream, n, minChangeAtrFraction, atrLen, includeDeveloping, dailyAtr), upAt, downAt);
+		}
+
+		/// <summary>VPF-4 hook: does this profile span a contract-roll splice? Default false; the futures base overrides.</summary>
+		protected virtual bool profileCrossesRoll(VpExtra e) { return false; }
+
+		private VpExtra m_compositeCache;
+		private int m_compositeStream = -1, m_compositeN = -1, m_compositeBar = -1, m_compositeNewest = -1;
+
+		/// <summary>
+		/// VPB-7: merge the levels of the last <paramref name="n"/> completed profiles on <paramref name="stream"/> onto one tick
+		/// grid; POC / VA (ValueAreaMethod; MultiCharts → VolumeExpansion) / HVN / LVN from the merged histogram. Never contains
+		/// the developing profile. Cached per (stream, n, calc bar, newest profile). Null when no completed profile.
+		/// </summary>
+		public VpExtra Composite(int stream, int n)
+		{
+			int cur = streamItemBarIndex(stream);
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, cur);
+			if (src.Count == 0) return null;
+			if (m_compositeCache != null && m_compositeStream == stream && m_compositeN == n && m_compositeBar == cur && m_compositeNewest == src[0].startBar)
+				return m_compositeCache;
+			var p = new List<double>(); var v = new List<double>();
+			var e = new VpExtra { dataStream = stream, isOwn = true, startBar = src[src.Count - 1].startBar, endBar = src[0].endBar };
+			e.open = src[src.Count - 1].open; e.close = src[0].close; e.high = double.MinValue; e.low = double.MaxValue;
+			foreach (VpExtra x in src)
+			{
+				if (x.high > e.high) e.high = x.high;
+				if (x.low > 0 && x.low < e.low) e.low = x.low;
+				x.crossesRoll = profileCrossesRoll(x);
+				e.crossesRoll |= x.crossesRoll;
+				for (int i = 0; i < x.levels.Count; i++) { p.Add(x.levels[i].price); v.Add(x.levels[i].total); }
+			}
+			double[] dp, dv;
+			if (ProfileMath.ToDense(p, v, tickSize(), out dp, out dv)) fillFromHistogram(e, dp, dv);
+			e.pocComplete = e.poc > 0;
+			m_compositeCache = e; m_compositeStream = stream; m_compositeN = n; m_compositeBar = cur; m_compositeNewest = src[0].startBar;
+			return e;
+		}
+
+		/// <summary>VPB-7: the last <paramref name="n"/> completed value areas overlap pairwise by >= minVaOverlap of the narrower.</summary>
+		public bool IsBalanced(int stream, int n, double minVaOverlap = 0.6)
+		{
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			if (src.Count < Math.Max(2, n)) return false;
+			var hi = new List<double>(); var lo = new List<double>();
+			for (int i = src.Count - 1; i >= 0; i--) { hi.Add(src[i].vah); lo.Add(src[i].val); }
+			return ProfileMath.IsBalanced(hi, lo, minVaOverlap);
+		}
+
+		/// <summary>VPB-7: union (or intersection) of the last n completed value areas. False when fewer than n or empty.</summary>
+		public bool BalanceRange(int stream, int n, bool union, out double high, out double low)
+		{
+			high = low = 0;
+			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			if (src.Count < n || n < 1) return false;
+			high = union ? double.MinValue : double.MaxValue; low = union ? double.MaxValue : double.MinValue;
+			foreach (VpExtra x in src)
+			{
+				if (x.vah <= 0 || x.val <= 0) return false;
+				high = union ? Math.Max(high, x.vah) : Math.Min(high, x.vah);
+				low = union ? Math.Min(low, x.val) : Math.Max(low, x.val);
+			}
+			return high >= low;
+		}
+
+		/// <summary>
+		/// VPB-6: value-migration score V (final-synthesis section 4.0) over the last <paramref name="n"/> completed profiles on
+		/// <paramref name="stream"/>, which should be an RTH-session profile stream. <paramref name="atr20Daily"/> is ATR(20) on
+		/// daily bars, supplied by the caller (the base has no daily stream of its own); changes smaller than
+		/// <paramref name="minChangeFraction"/> x atr20Daily score 0. With <paramref name="includeDeveloping"/> the developing
+		/// POC (DevelopingExtra) adds a fourth term; a stale or unreadable developing POC (pocStale / 0) adds nothing.
+		/// Returns 0 when fewer than n + 1 completed profiles are stored. On non-adjusted continuous charts a roll between
+		/// sessions shows as a POC jump; use a back-adjusted series or check crossesRoll / RollDates before trusting V there.
+		/// </summary>
+		public int ValueMigrationScore(int stream, double atr20Daily, int n = 3, double minChangeFraction = 0.10, bool includeDeveloping = true)
+		{
+			if (n < 1 || atr20Daily < 0 || minChangeFraction < 0) return 0;
+			List<VpExtra> src = RecentCompletedProfiles(stream, n + 1, streamItemBarIndex(stream));
+			if (src.Count < n + 1) return 0;
+			var pocs = new List<double>(src.Count);
+			for (int i = src.Count - 1; i >= 0; i--) pocs.Add(src[i].poc);   // oldest first
+			double dev = 0;
+			if (includeDeveloping)
+			{
+				VpExtra d = DevelopingExtra(stream);
+				if (d != null && d.isDeveloping && !d.pocStale && d.poc > 0) dev = d.poc;
+			}
+			int v;
+			return ProfileMath.ValueMigrationScore(pocs, n, dev, minChangeFraction * atr20Daily, out v) ? v : 0;
+		}
 
 		//interface methods
 		public _VolumeProfileBase(object _ctx) : base(_ctx) { }
@@ -1821,6 +2678,11 @@ namespace PowerLanguage.Strategy
 			MinNodeTicks = DEFAULT_MIN_NODE_TICKS;
 			TrackNakedPoc = true;
 			NakedPocTickTolerance = 1;
+			DevelopingSource = EDevelopingSource.MultiCharts;
+			DevProfileSourceMode = EDevProfileSourceMode.Auto;
+			DevProfileDataStream = 1;
+			ValueAreaMethod = EValueAreaMethod.MultiCharts;
+			LookaheadAudit = false;
 
 			Vwap1Type = EVwapType.Session;
 			Vwap1Length = DEFAULT_VWAP_LENGTH;
@@ -1845,10 +2707,7 @@ namespace PowerLanguage.Strategy
 			ConfluenceWeight3 = DEFAULT_CONFLUENCE_STREAM_WEIGHT_3;
 			ConfluenceLookbackProfiles = DEFAULT_CONFLUENCE_LOOKBACK;
 			ConfluenceAlignTicks = DEFAULT_CONFLUENCE_ALIGN_TICKS;
-			ConfluenceMinHits = DEFAULT_CONFLUENCE_MIN_HITS;
 			ConfluenceTopCount = DEFAULT_CONFLUENCE_TOP_COUNT;
-			ConfluenceSameStreamDecay = DEFAULT_CONFLUENCE_DECAY;
-			ConfluenceCrossStreamBonus = DEFAULT_CONFLUENCE_CROSS_BONUS;
 			ConfluenceIncludeHvns = true;
 			ConfluenceIncludeVwapSlots = true;
 			ConfluenceTargetMinZScore = 0;
@@ -1875,7 +2734,6 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_tick = 0;   // re-resolved on first use (VPB-20)
 			validateInputs();
 			unhookStreams();
 			m_streams.Clear();
@@ -1901,6 +2759,7 @@ namespace PowerLanguage.Strategy
 			warnIfLengthExceedsMaxBarsBack(m_vwap1);
 			warnIfLengthExceedsMaxBarsBack(m_vwap2);
 			warnIfLengthExceedsMaxBarsBack(m_vwap3);
+			startOwnEngine();
 		}
 
 		protected override void CalcBar()
@@ -1913,6 +2772,9 @@ namespace PowerLanguage.Strategy
 			stampCurrentExtras();
 			m_confluenceDirty = true;
 			refreshVolumePercentiles();
+			stepOwnEngine();        // VPB-1 (no-op unless DevelopingSource = Own or LookaheadAudit)
+			runLookaheadAudit();    // VPB-3
+			vpbRunSummary();
 		}
 
 		/// <summary>
@@ -2005,13 +2867,16 @@ namespace PowerLanguage.Strategy
 		public List<VpExtra> NakedPocs(int datastream, int asOfBar)
 		{
 			List<VpExtra> hit = new List<VpExtra>();
-			if (m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack sp) || sp == null)
-				return hit;
+			if (!TrackNakedPoc || m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack sp) || sp == null)
+				return hit;   // VPB-5: no naked POCs without naked tracking
 			stampNakedPocs(sp);
 			foreach (VpExtra extra in sp.extra.Values)
 			{
 				if (extra != null && extra.IsNakedPoc(asOfBar))
+				{
+					extra.crossesRoll = profileCrossesRoll(extra);   // VPF-4
 					hit.Add(extra);
+				}
 			}
 			hit.Sort((a, b) => b.startBar.CompareTo(a.startBar));
 			return hit;
@@ -2191,6 +3056,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>Slot 1 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwapSigma1 { get { return m_vwap1 != null && m_vwap1.valid ? m_vwap1.sigma : double.NaN; } }
 		/// <summary>Slot 2 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
+		/// <summary>VPB-10: alias of CurrentVwapSigma1, named like CurrentVwap2Sigma / CurrentVwap3Sigma.</summary>
+		public double CurrentVwap1Sigma { get { return CurrentVwapSigma1; } }
 		public double CurrentVwap2Sigma { get { return m_vwap2 != null && m_vwap2.valid ? m_vwap2.sigma : double.NaN; } }
 		/// <summary>Slot 3 running standard deviation, or NaN when Disabled / not valid yet. Read-only.</summary>
 		public double CurrentVwap3Sigma { get { return m_vwap3 != null && m_vwap3.valid ? m_vwap3.sigma : double.NaN; } }
@@ -2348,19 +3215,6 @@ namespace PowerLanguage.Strategy
 		private void stampNakedPocs(StreamPack sp)
 		{
 			if (sp == null || sp.extra == null) return;
-			if (!TrackNakedPoc)
-			{
-				// Clear once. New extras default to not-naked, and nothing else sets the flags
-				// while this returns early. Turning the input back on clears the flag below.
-				if (sp.nakedSuppressed) return;
-				foreach (VpExtra extra in sp.extra.Values)
-					clearNakedPoc(extra);
-				sp.nakedSuppressed = true;
-				sp.nakedStampedBar = -1;
-				return;
-			}
-			sp.nakedSuppressed = false;
-
 			int current = streamItemBarIndex(sp.datastream);
 			if (current < 1) return;
 			IInstrument bars = barsOf(sp.datastream);
@@ -2369,8 +3223,28 @@ namespace PowerLanguage.Strategy
 			// the stamp whenever it (re)fills or re-stamps a developing extra, so each CalcBar tick still rescans.
 			bool atClose = bars == null || bars.Status == EBarState.Close;
 			if (sp.nakedStampedBar == current && sp.nakedStampedGeneration == sp.generation
-				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose))
+				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose)
+				&& sp.nakedSuppressed == !TrackNakedPoc)
 				return;
+
+			if (!TrackNakedPoc)
+			{
+				// VPB-5 (D4): completeness is a fact about the window and is always stamped; only the touch scan
+				// (pocNaked / pocTouchedBar / IsNakedPoc / NakedPocs) is switched off.
+				foreach (VpExtra extra in sp.extra.Values)
+				{
+					if (extra == null) continue;
+					clearNakedPoc(extra);
+					extra.pocComplete = extra.poc > 0 && extra.endBar >= extra.startBar && extra.endBar < current;
+				}
+				sp.nakedSuppressed = true;
+				sp.nakedStampedBar = current;
+				sp.nakedStampedAtClose = atClose;
+				sp.nakedStampedGeneration = sp.generation;
+				sp.nakedStampedExtraCount = sp.extra.Count;
+				return;
+			}
+			sp.nakedSuppressed = false;
 
 			double tick = tickSize();
 			// Half a micro-tick of slack so an exact touch is never lost to rounding.
@@ -2379,6 +3253,7 @@ namespace PowerLanguage.Strategy
 			foreach (VpExtra extra in sp.extra.Values)
 			{
 				if (extra == null) continue;
+				extra.nakedTracked = true;
 				if (extra.poc <= 0)
 				{
 					clearNakedPoc(extra);
@@ -2438,6 +3313,7 @@ namespace PowerLanguage.Strategy
 			extra.pocNaked = false;
 			extra.pocTouchedBar = 0;
 			extra.lastNakedScanBar = 0;
+			extra.nakedTracked = false;
 		}
 
 		// Read-only lookup (VPB-28: the old extraFor also re-ran applyProfileGeometry as of the queried bar, which rewrote
@@ -2909,32 +3785,7 @@ namespace PowerLanguage.Strategy
 			return bars.Time[ago];
 		}
 
-		/// <summary>
-		/// Minimum price move of Data1 (VPB-20). Resolved once per StartCalc (lazily, so it is valid even if something
-		/// in StartCalc asks first) instead of a try/catch on every call inside per-extra loops. Derived classes use it.
-		/// </summary>
-		protected double tickSize()
-		{
-			if (m_tick <= 0) m_tick = resolveTick();
-			return m_tick;
-		}
-
-		private double resolveTick()
-		{
-			try
-			{
-				double mm = Bars.Info.MinMove;
-				double ps = Bars.Info.PriceScale;
-				if (ps != 0)
-				{
-					double t = Math.Abs(mm / ps);
-					if (t > 0 && !double.IsInfinity(t)) return t;
-				}
-				if (mm > 0) return mm;
-			}
-			catch { }
-			return FALLBACK_TICK;
-		}
+		// tickSize() (VPB-20) lives in _CustomSignal since spec CS-1 (the journal needs ticks); same resolution and cache.
 
 		private bool nodeWideEnough(double low, double high)
 		{
@@ -3127,7 +3978,15 @@ namespace PowerLanguage.Strategy
 			if (vp == null || vp.Values == null) return;
 			readLevels(vp, extra.levels);
 			applyProfileGeometry(vp, extra, chartBar);
+			buildNodesFromLevels(extra);
+		}
 
+		/// <summary>
+		/// POC fallback, pocVol and HVN/LVN nodes from extra.levels alone (no IProfile). Shared by the MultiCharts
+		/// fill and the own developing profile (VPB-1). extra.levels must be sorted by ascending price.
+		/// </summary>
+		protected void buildNodesFromLevels(VpExtra extra)
+		{
 			bool[] traded;
 			List<Row> rows = denseRowsFromLevels(extra.levels, tickSize(), out traded);
 			if (rows.Count == 0) { rows = rowsFromLevels(extra.levels); traded = null; }   // fallback: old sparse behaviour
@@ -3136,6 +3995,10 @@ namespace PowerLanguage.Strategy
 			double[] vols = new double[rows.Count];
 			for (int j = 0; j < rows.Count; j++)
 				vols[j] = rows[j].volume;
+			// VPB-4: the fallback POC is the raw max-volume row, not the smoothed peak (smoothing can move it a tick).
+			int rawPocIdx = 0;
+			for (int k = 1; k < vols.Length; k++)
+				if (vols[k] > vols[rawPocIdx]) rawPocIdx = k;
 			vols = smooth(vols, DEFAULT_SMOOTH_TICKS);
 			int pocIdx = 0;
 			double pocVol = 0;
@@ -3147,7 +4010,7 @@ namespace PowerLanguage.Strategy
 					pocIdx = k;
 				}
 			}
-			if (extra.poc <= 0) extra.poc = rows[pocIdx].price;
+			if (extra.poc <= 0 && !extra.pocStale) extra.poc = rows[rawPocIdx].price;
 			if (extra.pocVol <= 0) extra.pocVol = volumeAtPrice(extra, extra.poc);
 			if (pocVol <= 0) return;
 
@@ -3194,7 +4057,7 @@ namespace PowerLanguage.Strategy
 				bool hvnAbove = hasHvnAdjacent(extra.hvns, rows[b].price, false, maxGap);
 				if (!hvnBelow || !hvnAbove) continue;   // LVN = valley between two HVNs
 				double width = rows[b].price - rows[a].price;
-				if (width > range * DEFAULT_MAX_LVN_PCT_OF_RANGE) continue;
+				if (width > range * MaxLvnFractionOfRange) continue;
 				extra.lvns.Add(makeNode(rows, vols, a, b, t, pocVol, false));
 				t = b;   // skip the rest of this valley
 			}
@@ -3517,12 +4380,20 @@ namespace PowerLanguage.Strategy
 			if (asOf >= 1 && bar > asOf) bar = asOf;
 			bool whole = asOf < 1 || endChart <= asOf;   // VPB-03: never look ahead of the calc bar
 
+			// VPB-4: the first-bar POC is only a fallback for a whole window. On a developing window an unreadable as-of POC
+			// stays 0 and is flagged (pocStale) instead of silently becoming the POC as of the profile's first bar.
 			double poc = firstPositive(
 				priceForBar(vp, bar, 0),
 				priceForBar(vp, bar - 1, 0),
 				whole ? priceForBar(vp, endChart, 0) : 0,
-				priceForBar(vp, startChart, 0),
+				whole ? priceForBar(vp, startChart, 0) : 0,
 				whole ? levelPrice(vp.POC) : 0);
+			extra.pocStale = !whole && poc <= 0;
+			if (extra.pocStale)
+			{
+				m_pocUnreadableCount++;
+				if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"VPB-4 developing POC unreadable stream({extra.dataStream}) start({startChart}) asOf({bar})");
+			}
 			double vah = firstPositive(
 				priceForBar(vp, bar, 1),
 				priceForBar(vp, bar - 1, 1),

@@ -473,8 +473,8 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 
-			// Dollar risk per contract. Do not call stopLossBasedPositionSize — that
-			// treats the raw price distance as dollars and oversizes ES by BigPointValue.
+			// Dollar risk per contract (price distance x BigPointValue). stopLossBasedPositionSize now applies
+			// BigPointValue too and gives the same qty; sizeForRisk (CS-4) is the consolidated API.
 			// qty = floor( equityAvailable(RiskPercent) / dollarRiskPerContract ), round lots off.
 			double dollarRiskPerContract = Math.Round(Math.Abs(close - stopPrice) * pointValue, 2);
 			int qty = riskBasedPositionSize(dollarRiskPerContract, RiskPercent, false);

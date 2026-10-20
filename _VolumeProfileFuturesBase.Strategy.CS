@@ -1,6 +1,7 @@
 ﻿using ATCenterProxy.interop;
 using PowerLanguage.Function;
 using System;
+using System.Collections.Generic;
 
 namespace PowerLanguage.Strategy
 {
@@ -14,6 +15,21 @@ namespace PowerLanguage.Strategy
 	/// 2. All session logic runs in US Eastern; ToEastern converts each bar time once (cached per bar).
 	/// 3. Use the "CME Globex" session template (or equivalent) so the VP base's session VWAP reset agrees with
 	///    the Globex trading day that tradingDayKey/GlobexDate use (18:00 → 17:00 ET).
+	/// 4. VPF-4: continuous futures come from the datafeed. Use non-adjusted data for volume-profile levels near a roll
+	///    splice (back-adjusted prices move every level before the roll), and set RollDetection to flag profiles / naked
+	///    POCs / composites that span a splice (crossesRoll).
+	/// 5. Bar times are close times: VPF-2 session statistics and RTH Own profiles count a bar as RTH when its ET close
+	///    time is in (RthStart, RTH value end], value end 16:00 ET (D5). InSession(Rth) keeps the 09:30-16:15 session flag.
+	///
+	/// VPF-8 notes:
+	/// * _CustomSignal.Intraday* (High/Low/Open/Close/Volume and times) are Globex-day values on futures charts
+	///   (18:00 → 17:00 ET, tradingDayKey = GlobexDate), not RTH values; use Session (VPF-2) for RTH / IB / overnight.
+	/// * ToEastern on a Local-zone chart: in the autumn fall-back hour a wall-clock bar time occurs twice and is ambiguous;
+	///   TimeZoneInfo.ConvertTime resolves it as standard time, so one hour of bars can map 1h off. Exchange or GMT bar
+	///   time avoids this. A spring-forward gap time is moved forward one hour.
+	/// * Accessibility: session queries used by derived strategies (GetSessions, InSession, IsRth, GlobexDate, ...) are
+	///   protected; the pure clock helpers (PrimarySession, TimeSinceOpen, MinutesSinceOpen, TimeUntilClose, SessionLength,
+	///   IsOpeningRange, TrySessionBounds) are public. Left as is to avoid breaking callers; new APIs follow the same split.
 	/// 
 	/// General Notes:
 	/// * Allow entries only when InSession(MarketSession.Rth) - high liquidity confirms moves.
@@ -112,55 +128,21 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_chartTz = resolveChartTz(Bars.Info);
+			m_chartTz = resolveBarTimeZone(Bars.Info);   // CS-6: zone resolution lives in _CustomSignal
 			m_chartIsEastern = m_chartTz.Id == m_est.Id
 				|| (m_chartTz.BaseUtcOffset == m_est.BaseUtcOffset && m_chartTz.HasSameRules(m_est));
 			m_cacheValid = false;   // zone or session windows may have changed
+			m_session = null;       // VPF-2
+			m_sessionBar = -1;
+			m_rollBars.Clear(); m_rollLastDay = DateTime.MinValue; m_rollLastBar = -1; m_rollLastName = null;   // VPF-4
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
-		/// <summary>
-		/// VPF-01. Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
-		/// </summary>
-		private TimeZoneInfo resolveChartTz(IInstrumentSettings info)
+		protected override void CalcBar()
 		{
-			switch (info.TimeZone)
-			{
-				case RequestTimeZone.Local:
-					return TimeZoneInfo.Local;
-				case RequestTimeZone.GMT:
-					return TimeZoneInfo.Utc;
-				case RequestTimeZone.Exchange:
-					string id = exchangeTimeZoneId(info.Exchange);
-					if (id == null)
-						throw new Exception("Exchange '" + info.Exchange + "' has no known time zone: set the chart to Local time or override exchangeTimeZoneId.");
-					return findTz(id);
-				default:
-					return TimeZoneInfo.Local;
-			}
-		}
-
-		/// <summary>
-		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
-		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
-		/// </summary>
-		protected virtual string exchangeTimeZoneId(string exchange)
-		{
-			if (string.IsNullOrWhiteSpace(exchange)) return null;
-			string e = exchange.ToUpperInvariant();
-			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
-			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
-			// New York: NYMEX/COMEX and the US equity exchanges
-			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
-			return null;
-		}
-
-		private static TimeZoneInfo findTz(string windowsId)
-		{
-			try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
-			catch (TimeZoneNotFoundException) { }
-			if (windowsId == "Central Standard Time") return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
-			return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+			base.CalcBar();
+			updateSessionStats();   // VPF-2
+			detectRoll();           // VPF-4
 		}
 
 		//methods
@@ -187,7 +169,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Bar time (bar time zone from Bars.Info, see resolveChartTz) converted to US Eastern (DST-aware). VPF-01/03.
+		/// Bar time (bar time zone from Bars.Info, see _CustomSignal.resolveBarTimeZone) converted to US Eastern (DST-aware). VPF-01/03.
 		/// Pass bar times only; never pass a value that is already Eastern (use the *Et cores for those, VPF-02).
 		/// </summary>
 		protected DateTime ToEastern(DateTime barTime)
@@ -552,9 +534,13 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
-		/// Used in _CustomSignal.CalcBar to determine when to start recalculating the intraday values.
+		/// Used in _CustomSignal.CalcBar to determine when to start recalculating the intraday values, so on futures the
+		/// Intraday* values cover the whole Globex day (VPF-8), and CS-7 daily counters roll at 18:00 ET.
 		/// </summary>
 		protected override DateTime tradingDayKey(DateTime barTime) { return GlobexDate(barTime); }
+
+		/// <summary>CS-7: entry windows / FlatBy compare against US Eastern time on futures charts.</summary>
+		protected override TimeSpan sessionClock(DateTime barTime) { return ToEastern(barTime).TimeOfDay; }
 
 		private bool TryWindow(
 				MarketSession session,
@@ -602,19 +588,264 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// ---- VPF-04: CME holiday hooks (Globex trading date, ET). Exact CME hours vary by year and product: override. ----
+		// ---- VPF-2: session statistics (RTH / ETH / IB) per Globex day ----
 
 		/// <summary>
-		/// CME Globex fully closed for this Globex trading date. Default: New Year's Day and Christmas Day (the evening session
-		/// that would open the day before belongs to the closed date and is closed too). Good Friday is NOT included by default:
-		/// CME equity futures have opened briefly on some Good Fridays (e.g. when NFP is released); it is still a no-RTH day
-		/// through IsNoRthDay. Override for observed weekend dates or other products.
+		/// VPF-2. Statistics of one Globex trading day, updated from closed Data1 bars only (no look-ahead; an intrabar tick
+		/// never changes them). Bars are close-stamped: a bar is RTH when its ET close time is in (RthStart, RthValueEnd]
+		/// (value window, D5: 16:00, or the early RTH close), ETH (overnight) when it closes at or before RthStart, and
+		/// the IB is the RTH bars closing in (RthStart, RthStart + IbMinutes]. 0 means "not seen yet".
+		/// </summary>
+		public sealed class SessionStats
+		{
+			public DateTime globexDate;
+			public double globexHigh, globexLow, globexVolume;
+			public double ethHigh, ethLow, ethVolume;          // overnight: Globex open to the RTH open
+			public double rthOpen, rthHigh, rthLow, rthClose, rthVolume;
+			public double ibHigh, ibLow;
+			public bool ibComplete;                           // true from the first closed bar after the IB end
+			public bool rthComplete;                          // true from the first closed bar after the RTH value end
+			public double priorRthHigh, priorRthLow, priorRthClose;
+			public double priorGlobexHigh, priorGlobexLow;
+			public double IbRange { get { return ibComplete ? ibHigh - ibLow : 0; } }
+			/// <summary>RTH high above the IB high in IB ranges (0 until the IB is complete).</summary>
+			public double IbExtensionUp { get { double r = IbRange; return r > 0 && rthHigh > ibHigh ? (rthHigh - ibHigh) / r : 0; } }
+			/// <summary>IB low minus the RTH low in IB ranges (0 until the IB is complete).</summary>
+			public double IbExtensionDown { get { double r = IbRange; return r > 0 && rthLow > 0 && rthLow < ibLow ? (ibLow - rthLow) / r : 0; } }
+			/// <summary>RTH open minus the prior RTH close (0 when either is unknown).</summary>
+			public double Gap { get { return rthOpen > 0 && priorRthClose > 0 ? rthOpen - priorRthClose : 0; } }
+		}
+
+		/// <summary>VPF-2. Initial balance length in minutes from RthStart. >= 1. Default 60. Not an [Input].</summary>
+		protected int IbMinutes { get; set; } = 60;
+		/// <summary>VPF-2 (D5). End of RTH for value logic (profiles, IB/RTH stats): 16:00 ET. m_rthEnd (16:15) stays the session flag.</summary>
+		protected TimeSpan m_rthValueEnd = DefaultRthValueEnd;
+		public static readonly TimeSpan DefaultRthValueEnd = new TimeSpan(16, 0, 0);
+
+		private SessionStats m_session;
+		private int m_sessionBar = -1;
+
+		/// <summary>VPF-2. Statistics of the Globex day of the last closed Data1 bar (null before the first closed bar).</summary>
+		public SessionStats Session { get { return m_session; } }
+
+		/// <summary>RTH value-window end for a Globex date: the early RTH close when there is one, else m_rthValueEnd.</summary>
+		protected TimeSpan RthValueEndEt(DateTime globexDate)
+		{
+			TimeSpan? early = RthEarlyCloseEt(globexDate);
+			return early.HasValue && early.Value < m_rthValueEnd ? early.Value : m_rthValueEnd;
+		}
+
+		/// <summary>VPF-2/3: the close-stamped bar at ET time <paramref name="et"/> belongs to the RTH value window.</summary>
+		protected bool IsRthValueBarEt(DateTime et)
+		{
+			DateTime gx = globexDateEt(et);
+			if (et.Date != gx.Date || IsGlobexClosedDay(gx) || IsNoRthDay(gx)) return false;
+			TimeSpan t = et.TimeOfDay;
+			return t > m_rthStart && t <= RthValueEndEt(gx);
+		}
+
+		private void updateSessionStats()
+		{
+			if (Bars.Status != EBarState.Close) return;
+			int bar = Bars.FullSymbolData.Current;
+			if (bar == m_sessionBar) return;
+			m_sessionBar = bar;
+			if (IbMinutes < 1) throw new ArgumentException("IbMinutes must be >= 1.");
+
+			DateTime et = ToEastern(Bars.Time[0]);
+			DateTime gx = globexDateEt(et);
+			if (m_session == null || m_session.globexDate != gx)
+			{
+				SessionStats prev = m_session;
+				m_session = new SessionStats { globexDate = gx };
+				if (prev != null)
+				{
+					bool prevHadRth = prev.rthClose > 0;
+					m_session.priorRthHigh = prevHadRth ? prev.rthHigh : prev.priorRthHigh;
+					m_session.priorRthLow = prevHadRth ? prev.rthLow : prev.priorRthLow;
+					m_session.priorRthClose = prevHadRth ? prev.rthClose : prev.priorRthClose;
+					m_session.priorGlobexHigh = prev.globexHigh;
+					m_session.priorGlobexLow = prev.globexLow;
+				}
+			}
+			SessionStats s = m_session;
+			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0], o = Bars.Open[0], v = Bars.Volume[0];
+			if (s.globexHigh == 0 || h > s.globexHigh) s.globexHigh = h;
+			if (s.globexLow == 0 || l < s.globexLow) s.globexLow = l;
+			s.globexVolume += v;
+
+			TimeSpan t = et.TimeOfDay;
+			bool sameCalendarDay = et.Date == gx.Date;
+			bool rth = IsRthValueBarEt(et);
+			TimeSpan ibEnd = m_rthStart + TimeSpan.FromMinutes(IbMinutes);
+			if (rth)
+			{
+				if (s.rthOpen == 0) s.rthOpen = o;
+				if (s.rthHigh == 0 || h > s.rthHigh) s.rthHigh = h;
+				if (s.rthLow == 0 || l < s.rthLow) s.rthLow = l;
+				s.rthClose = c;
+				s.rthVolume += v;
+				if (t <= ibEnd)
+				{
+					if (s.ibHigh == 0 || h > s.ibHigh) s.ibHigh = h;
+					if (s.ibLow == 0 || l < s.ibLow) s.ibLow = l;
+				}
+			}
+			else if (!sameCalendarDay || t <= m_rthStart)
+			{
+				if (s.ethHigh == 0 || h > s.ethHigh) s.ethHigh = h;
+				if (s.ethLow == 0 || l < s.ethLow) s.ethLow = l;
+				s.ethVolume += v;
+			}
+			if (sameCalendarDay && t >= ibEnd && s.ibHigh > 0) s.ibComplete = true;
+			if (sameCalendarDay && t >= RthValueEndEt(gx) && s.rthClose > 0) s.rthComplete = true;
+		}
+
+		// ---- VPF-3: RTH-only and Globex-day Own profiles (VPB-1 hooks) ----
+
+		/// <summary>VPF-3: window of the VPB-1 Own profile on a futures chart.</summary>
+		public enum EOwnProfileWindow { MultiChartsProfile = 0, GlobexDay = 1, Rth = 2 }
+
+		/// <summary>
+		/// VPF-3. MultiChartsProfile (default, VPB behaviour: the MC profile boundaries), GlobexDay (18:00 → 17:00 ET) or Rth
+		/// (Globex day, RTH value-window bars only, 09:30 → 16:00 ET). Set in Create; needs DevelopingSource = Own. Not an [Input].
+		/// </summary>
+		protected EOwnProfileWindow OwnProfileWindow { get; set; } = EOwnProfileWindow.MultiChartsProfile;
+
+		protected override bool isNewProfileWindow(int stream, int barIndex, DateTime barTime, DateTime prevBarTime)
+		{
+			if (OwnProfileWindow == EOwnProfileWindow.MultiChartsProfile)
+				return base.isNewProfileWindow(stream, barIndex, barTime, prevBarTime);
+			if (prevBarTime == DateTime.MinValue) return true;
+			return GlobexDate(barTime) != GlobexDate(prevBarTime);
+		}
+
+		protected override bool includeBarInProfile(DateTime barTime)
+		{
+			if (OwnProfileWindow != EOwnProfileWindow.Rth) return base.includeBarInProfile(barTime);
+			return IsRthValueBarEt(ToEastern(barTime));
+		}
+
+		/// <summary>VPF-3: developing RTH Own profile (OwnProfileWindow = Rth and DevelopingSource = Own), else null.</summary>
+		public VpExtra RthProfile()
+		{
+			return OwnProfileWindow == EOwnProfileWindow.Rth && DevelopingSource == EDevelopingSource.Own ? DevelopingExtra(DevProfileDataStream) : null;
+		}
+
+		/// <summary>VPF-3: developing Globex-day Own profile (OwnProfileWindow = GlobexDay and DevelopingSource = Own), else null.</summary>
+		public VpExtra GlobexProfile()
+		{
+			return OwnProfileWindow == EOwnProfileWindow.GlobexDay && DevelopingSource == EDevelopingSource.Own ? DevelopingExtra(DevProfileDataStream) : null;
+		}
+
+		/// <summary>VPB-6 (Rev 2.4, D5): with OwnProfileWindow = Rth, value migration uses completed Own RTH (09:30-16:00) profiles.</summary>
+		protected override List<VpExtra> migrationProfiles(int stream, int count)
+		{
+			if (OwnProfileWindow == EOwnProfileWindow.Rth && DevelopingSource == EDevelopingSource.Own && stream == DevProfileDataStream)
+			{
+				List<VpExtra> own = OwnCompletedProfiles(count);
+				own.RemoveAll(e => e.isPartial);
+				return own;
+			}
+			return base.migrationProfiles(stream, count);
+		}
+
+		/// <summary>VPF-3: last completed RTH Own profile, or null.</summary>
+		public VpExtra PriorRthProfile()
+		{
+			if (OwnProfileWindow != EOwnProfileWindow.Rth) return null;
+			List<VpExtra> done = OwnCompletedProfiles(1);
+			return done.Count > 0 ? done[0] : null;
+		}
+
+		// ---- VPF-4: roll-splice flag for datafeed continuous futures (Q3) ----
+
+		/// <summary>VPF-4: how rolls are found. Off (default) = never flag.</summary>
+		public enum ERollDetection { Off = 0, Series = 1, Table = 2, SeriesOrTable = 3 }
+
+		/// <summary>VPF-4: roll detection mode. Not an [Input].</summary>
+		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
+		/// <summary>
+		/// VPF-4 Series: a Globex-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
+		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
+		/// </summary>
+		protected int RollGapTicks { get; set; } = 8;
+		/// <summary>VPF-4 Table: Globex trading dates on which the continuous series switched contract (set by the strategy).</summary>
+		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
+
+		private readonly List<int> m_rollBars = new List<int>();   // Data1 bar (Status Bar #) of the first bar of each roll day
+		private DateTime m_rollLastDay = DateTime.MinValue;
+		private int m_rollLastBar = -1;
+		private string m_rollLastName;
+
+		/// <summary>VPF-4: Data1 bars (1-based) on which a roll was detected so far.</summary>
+		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
+
+		private void detectRoll()
+		{
+			if (RollDetection == ERollDetection.Off || Bars.Status != EBarState.Close) return;
+			int bar = Bars.FullSymbolData.Current;
+			if (bar == m_rollLastBar) return;
+			m_rollLastBar = bar;
+			string name = Bars.Info.Name;
+			DateTime gx = GlobexDate(Bars.Time[0]);
+			bool newDay = gx != m_rollLastDay;
+			bool roll = m_rollLastName != null && name != m_rollLastName;
+			if (newDay && m_rollLastDay != DateTime.MinValue && bar > 1)
+			{
+				bool series = RollDetection == ERollDetection.Series || RollDetection == ERollDetection.SeriesOrTable;
+				bool table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
+				if (table && RollDates.Contains(gx.Date)) roll = true;
+				if (series && gx.Month % 3 == 0 && gx.Day <= 21 && RollGapTicks > 0
+					&& Math.Abs(Bars.Open[0] - Bars.Close[1]) >= RollGapTicks * tickSize() - tickSize() * 1e-6) roll = true;
+			}
+			if (roll && (m_rollBars.Count == 0 || m_rollBars[m_rollBars.Count - 1] != bar))
+			{
+				m_rollBars.Add(bar);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected globexDate({gx:yyyy-MM-dd}) bar({bar}) name({name})");
+			}
+			m_rollLastName = name;
+			m_rollLastDay = gx;
+		}
+
+		/// <summary>
+		/// VPF-4: true when a detected roll falls after the profile's first bar and at or before the calc bar: the profile spans
+		/// the splice, or its levels (e.g. a naked POC) are pre-roll prices being used after the roll. Data1 profiles only.
+		/// </summary>
+		protected override bool profileCrossesRoll(VpExtra e)
+		{
+			if (e == null || m_rollBars.Count == 0 || e.dataStream > 1) return false;
+			int cur = Bars.FullSymbolData.Current;
+			for (int i = 0; i < m_rollBars.Count; i++)
+				if (m_rollBars[i] > e.startBar && m_rollBars[i] <= cur) return true;
+			return false;
+		}
+
+		// ---- VPF-04 / VPF-6: CME holiday hooks (Globex trading date, ET). ----
+
+		/// <summary>
+		/// Spec VPF-6: when true (default) the holiday hooks below use the CME Globex equity-index calendar
+		/// (_CmeHolidays.Rules: closures incl. Good Friday, 13:00 ET holiday halts, 13:15 ET early closes, abbreviated
+		/// sessions). Set false in a derived strategy's Create/StartCalc for the pre-table behaviour (New Year / Christmas
+		/// closures only, with the Sunday → Monday observance fix). Products with other holiday hours (CL, GC, ZN, ...)
+		/// should override the hooks. Not an [Input].
+		/// </summary>
+		protected bool UseCmeHolidayTable { get; set; } = true;
+
+		/// <summary>
+		/// CME Globex fully closed for this Globex trading date (the evening session that would open the day before belongs
+		/// to the closed date and is closed too). With UseCmeHolidayTable: New Year, Christmas and Good Friday (except
+		/// abbreviated years), weekend-observed. Without: New Year and Christmas only, Sunday → observed Monday (VPF-6 bug
+		/// fix: Sun 25 Dec 2022 → closed Mon 26 Dec; Sun 1 Jan 2023 → Mon 2 Jan); a Saturday holiday closes nothing.
 		/// </summary>
 		protected virtual bool IsGlobexClosedDay(DateTime globexDate)
 		{
 			DateTime d = globexDate.Date;
-			if (d.Month == 1 && d.Day == 1) return true;
-			if (d.Month == 12 && d.Day == 25) return true;
+			if (UseCmeHolidayTable) return _CmeHolidays.Rules.Get(d).Closed;
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) return false;
+			DateTime ny = new DateTime(d.Year, 1, 1), xmas = new DateTime(d.Year, 12, 25);
+			if (ny.DayOfWeek != DayOfWeek.Saturday && d == _CmeHolidays.Rules.SundayToMonday(ny)) return true;
+			if (xmas.DayOfWeek != DayOfWeek.Saturday && d == _CmeHolidays.Rules.SundayToMonday(xmas)) return true;
 			return false;
 		}
 
@@ -628,22 +859,28 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Early Globex halt (ET) on a holiday session, or null. Default null (not applied). For equity-index futures the
-		/// usual value is 13:00 ET on no-RTH holidays: return IsNoRthDay(globexDate) ? new TimeSpan(13, 0, 0) : (TimeSpan?)null
-		/// after checking the CME holiday calendar for the years you backtest.
+		/// Early Globex halt (ET) for this Globex trading date, or null. With UseCmeHolidayTable: 13:00 ET on holiday
+		/// sessions, 13:15 ET on early-close days, 09:15 / 09:30 ET on abbreviated Good Friday / mourning sessions.
+		/// Without the table: null (pre-VPF-6 behaviour).
 		/// </summary>
 		protected virtual TimeSpan? HolidayHaltEt(DateTime globexDate)
 		{
-			return null;
+			return UseCmeHolidayTable ? _CmeHolidays.Rules.Get(globexDate).HaltEt : null;
 		}
 
 		/// <summary>
-		/// Early RTH close (ET) for this Globex trading date, or null. Default null (not applied). For equity-index futures
-		/// the usual value is 13:15 ET on the day after Thanksgiving and on Dec 24 (and some years Jul 3); verify per year.
+		/// Early RTH close (ET) for this Globex trading date, or null. With UseCmeHolidayTable: 13:15 ET on the day after
+		/// Thanksgiving and on Dec 24 / Jul 3 when they fall Mon-Thu. Without the table: null.
 		/// </summary>
 		protected virtual TimeSpan? RthEarlyCloseEt(DateTime globexDate)
 		{
-			return null;
+			return UseCmeHolidayTable ? _CmeHolidays.Rules.Get(globexDate).RthCloseEt : null;
+		}
+
+		/// <summary>VPF-6: tradingDayCount on a futures chart skips full CME Globex closures (not NYSE-only holidays).</summary>
+		protected override bool isTradingHoliday(DateTime date)
+		{
+			return _CmeHolidays.Rules.Get(date).Closed;
 		}
 
 		private static bool IsSingleFlag(MarketSession session)

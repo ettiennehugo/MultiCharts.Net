@@ -17,9 +17,15 @@ namespace PowerLanguage.Strategy
 	public abstract class _CustomSignal : PortfolioSignalObject
 	{
 		//constants
+		// Spec CS-0: compile-time only reference (nameof emits a string literal, no run-time use) proving a study
+		// resolves a plain helper class from a separate *.Function.CS file. Remove once CS-1 uses the helper for real.
+		private const string HELPER_FILE_PROBE = nameof(_SignalJournal);
 		public const double DEFAULT_ACCOUNT_RECALC_INTERVAL = 5;  //number of seconds after which account info would be recalculated if accounts are not yet loaded
 		public const int DEFAULT_ENTRY_EXIT_LOOKBACK = 63;        //look back 3-months of trading orders to discover entry/exit orders
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
+		/// <summary>Spec CS-3: build tag written on the RUN line. Bump by hand (or paste a git hash) when the base classes change.</summary>
+		public const string BUILD_TAG = "base-class-rev2";
+		private const double TICK_FALLBACK = 0.01;   // tickSize() when the symbol reports no usable MinMove/PriceScale
 
 		//types
 		/// <summary>
@@ -31,6 +37,7 @@ namespace PowerLanguage.Strategy
 			Error,
 			Warning,
 			Info,
+			Journal,    //spec CS-1: Info + per-trade journal (MCJournal_<runId>.csv); also on at Verbose/Debug
 			Verbose,
 			Debug,      //extensive logs for debugging purposes
 		}
@@ -63,7 +70,9 @@ namespace PowerLanguage.Strategy
 			private LogFileSingleton(IOutput output)
 			{
 				m_output = output;
-				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmm}.csv";   //log files are csv's for analysis in Excel
+				// CS-9: seconds + process id so two MultiCharts processes started in the same minute do not share a file. The run id
+				// is per run, but this file is process-wide (every run of every signal), so it is a column, not part of the name.
+				string logFilename = $"MCSignal{DateTime.Now:yyyyMMdd-HHmmss}-{System.Diagnostics.Process.GetCurrentProcess().Id}.csv";   //log files are csv's for analysis in Excel
 				try
 				{
 					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
@@ -96,7 +105,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, DateTime timestamp, string signalName, string symbol, string message)
+			public void WriteTrace(ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
 			{
 				lock (s_lock)
 				{
@@ -108,7 +117,9 @@ namespace PowerLanguage.Strategy
 							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
 						}
 						string csvMessage = escapeCsv(message);
-						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss zzz},{signalName},{symbol},{csvMessage}");
+						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
+						// CS-9: the bar time's zone (Bars.Info.TimeZone: Local / GMT / Exchange), not the PC offset that "zzz" printed
+						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}");
 					}
 					catch (Exception ex)
 					{
@@ -145,6 +156,77 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>
+		/// Spec CS-1: per-trade journal of what MultiCharts does not record (initial stop, R, MFE/MAE in R/ticks, planned vs
+		/// fill, tag, context). One CSV per run (MCJournal_&lt;runId&gt;.csv) next to the trace log. Everything else (P&amp;L,
+		/// commission, exit order name, bar numbers, run-up/drawdown in $) is copied from MC's own trade objects.
+		/// </summary>
+		private sealed class TradeJournal
+		{
+			public const string HEADER = "runId,strategy,symbol,tag,side,qty,entryTime,entryPrice,exitTime,exitPrice,exitOrder,barsHeld," +
+				"profit,commission,armed,plannedEntry,entrySlipTicks,initialStop,target,riskPerUnit,riskTicks,riskDollars,rMultiple," +
+				"mfeDollars,maeDollars,mfeTicks,maeTicks,mfeR,maeR,excursionScope,context";
+			private readonly object m_lock = new object();
+			private readonly string m_path;
+			private readonly string m_header;
+			private StreamWriter m_writer;
+
+			public TradeJournal(string runId) : this(runId, "MCJournal_", HEADER) { }
+
+			/// <summary>CS-8 reuses the writer for MCEvents_&lt;runId&gt;.csv with its own header.</summary>
+			public TradeJournal(string runId, string prefix, string header)
+			{
+				m_header = header;
+				string name = prefix + runId + ".csv";
+				try
+				{
+					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
+					Directory.CreateDirectory(dir);
+					m_path = Path.Combine(dir, name);
+				}
+				catch
+				{
+					m_path = Path.Combine(Path.GetTempPath(), name);
+				}
+			}
+
+			public string Path_ { get { return m_path; } }
+
+			public void Write(string csvLine)
+			{
+				lock (m_lock)
+				{
+					if (m_writer == null)
+					{
+						bool fresh = !File.Exists(m_path);
+						var fs = new FileStream(m_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+						m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };
+						if (fresh) m_writer.WriteLine(m_header);
+					}
+					m_writer.WriteLine(csvLine);
+				}
+			}
+
+			public void Close()
+			{
+				lock (m_lock)
+				{
+					try { if (m_writer != null) m_writer.Dispose(); } catch { }
+					m_writer = null;
+				}
+			}
+		}
+
+		/// <summary>CS-1: what the strategy knew at order send, keyed by entry order name.</summary>
+		private sealed class JournalArm
+		{
+			public string tag;
+			public double plannedEntry;
+			public double initialStop;
+			public double target;
+			public string context;
+		}
+
 		//inputs
 
 		//properties
@@ -173,6 +255,7 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayHighTime; }
 		}
 
+		/// <summary>CS-9: close of the trading day's last closed bar; the forming bar is not included, except on the day's first bar, which seeds it as it forms.</summary>
 		public double IntradayClose
 		{
 			get { return m_intradayClose; }
@@ -193,12 +276,28 @@ namespace PowerLanguage.Strategy
 			get { return m_intradayOpenTime; }
 		}
 
+		/// <summary>CS-9: volume of the trading day's closed bars; the forming bar is never included.</summary>
 		public double IntradayVolume
 		{
 			get { return m_intradayVolume; }
 		}
 
 		public Function._Holidays Holidays { get { return m_holidays; } }
+
+		/// <summary>CS-9: zone label of the bar timestamps for the trace file (Bars.Info.TimeZone).</summary>
+		private string barZoneLabel()
+		{
+			try { return Bars.Info.TimeZone.ToString(); } catch { return "?"; }
+		}
+
+		/// <summary>
+		/// Spec CS-3: short id of this calculation run (new in every StartCalc, so every optimisation pass / recalculation
+		/// gets its own id). Written as a column on every trace line and on the RUN line.
+		/// </summary>
+		public string RunId { get { return m_runId ?? ""; } }
+
+		/// <summary>Spec CS-3: build tag on the RUN line; override in a derived strategy to tag its own version.</summary>
+		protected virtual string BuildTag { get { return BUILD_TAG; } }
 
 		protected ITradingData tradingData
 		{
@@ -228,6 +327,8 @@ namespace PowerLanguage.Strategy
 		private int m_intradayBarCount;
 		private bool m_loadAccounts;
 		private bool m_unknownAppWarned;
+		private bool m_fractionWarned;          // CS-4
+		private bool m_lastEquityFromAccount;   // CS-4: last equityAvailable came from the broker account
 		private bool m_volumeMbbWarned;
 		private bool m_tradingDayWarned;
 		private int m_entryCacheBar;
@@ -237,6 +338,13 @@ namespace PowerLanguage.Strategy
 		private long m_entryCacheSnapshot;
 		private PowerLanguage.Function._NyseHolidays m_holidays;
 		private LogFileSingleton m_logger;
+		private string m_runId;          // CS-3
+		private bool m_runLogged;        // CS-3: RUN line written for this run
+		private bool m_runEndLogged;     // CS-3: RUN-END line written for this run
+		private double m_tick;           // tickSize() cache, reset in StartCalc (VPB-20, moved here by CS-1)
+		private TradeJournal m_journal;  // CS-1, created lazily when ETraceLevel.Journal is on
+		private Dictionary<string, JournalArm> m_journalArms;   // CS-1: by entry order name
+		private HashSet<string> m_journalWritten;              // CS-1: trades already written (identity key)
 
 		//interface methods
 		public _CustomSignal(object _ctx) : base(_ctx) { }
@@ -263,7 +371,7 @@ namespace PowerLanguage.Strategy
 			if (TraceLevel >= traceLevel)
 			{
 				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], this.GetType().Name, this.Bars.Info.Name, message);
+				m_logger.WriteTrace(traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
 			}
 		}
 
@@ -280,6 +388,10 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void Destroy()
 		{
+			if (m_journal != null) m_journal.Close();
+			m_journal = null;
+			if (m_eventFile != null) m_eventFile.Close();   // CS-8
+			m_eventFile = null;
 			m_logger = null;
 			base.Destroy();
 		}
@@ -288,10 +400,10 @@ namespace PowerLanguage.Strategy
 		{
 			base.StartCalc();
 			m_currentDay = DateTime.MinValue; // make sure that current day is always set on the first CalcBar iteration
-			m_intradayLowTime = DateTime.Now;
-			m_intradayHighTime = DateTime.Now;
-			m_intradayCloseTime = DateTime.Now;
-			m_intradayOpenTime = DateTime.Now;
+			m_intradayLowTime = DateTime.MinValue;    // CS-9: no PC-clock seed; MinValue = not set yet
+			m_intradayHighTime = DateTime.MinValue;
+			m_intradayCloseTime = DateTime.MinValue;
+			m_intradayOpenTime = DateTime.MinValue;
 			m_intradayBarCount = 0;
 			m_intradayLow = double.MaxValue;
 			m_intradayHigh = double.MinValue;
@@ -300,10 +412,25 @@ namespace PowerLanguage.Strategy
 			m_intradayVolume = 0.0d;
 			m_loadAccounts = true;
 			m_unknownAppWarned = false;
+			m_fractionWarned = false;
+			m_barTz = null;   // CS-6
+			m_tmDay = DateTime.MinValue; m_tmEntrySeen.Clear(); m_tmExitSeen.Clear(); m_tmEntries = m_tmLosers = 0; m_tmNet = 0;   // CS-7
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
 			m_entryCacheSnapshot = 0;
+			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3
+			m_runLogged = false;
+			m_runEndLogged = false;
+			m_tick = 0;   // tickSize() re-resolved on first use
+			if (m_journal != null) m_journal.Close();
+			m_journal = null;                                   // CS-1: one file per run
+			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
+			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
+			if (m_eventFile != null) m_eventFile.Close();      // CS-8: one events file per run
+			m_eventFile = null;
+			m_events.Clear();
+			m_eventsSteppedBar = -1;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -322,6 +449,13 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void CalcBar()
 		{
+			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
+			if (!m_runLogged)
+			{
+				m_runLogged = true;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, runLine());
+			}
+
 			//ensure latest account equity is available, this method seems to kick off async internal processes
 			//to update interface elements like the Accounts etc, this can be deduced from how the interface looks
 			//with callbacks like OnRefreshComplete etc. If you call it right before accessing the account data
@@ -391,12 +525,241 @@ namespace PowerLanguage.Strategy
 					m_intradayVolume += Bars.Volume[0];
 				}
 			}
+
+			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
+			if (Bars.Status == EBarState.Close && traceOn(ETraceLevel.Journal))
+				journalScan();
+			signalEventsStep();   // CS-8 (no pending events unless logSignal was called at Journal level)
+
+			// CS-3: RUN-END once, on the last historical bar (end of the backtest data range)
+			if (!m_runEndLogged && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
+			{
+				m_runEndLogged = true;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"RUN-END id({RunId}) lastBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) realTime({Environment.IsRealTimeCalc})");
+			}
+		}
+
+		/// <summary>
+		/// CS-3: RUN line - run id, build tag, strategy type, symbol, resolution, first calculated bar and every [Input] value
+		/// (reflection over public instance properties carrying an attribute named InputAttribute, sorted by name).
+		/// </summary>
+		protected string runLine()
+		{
+			IInstrumentSettings info = Bars.Info;
+			return $"RUN id({RunId}) build({BuildTag}) strategy({this.GetType().Name}) symbol({info.Name}) category({info.Category}) " +
+				$"resolution({info.Resolution.ChartType} {info.Resolution.Type} {info.Resolution.Size}) timeZone({info.TimeZone}) " +
+				$"firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) app({Environment.ApplicationCode}) " +
+				$"inputs[{inputSnapshot()}]";
+		}
+
+		/// <summary>CS-3: "Name=value; ..." for every [Input] property of the concrete strategy, invariant culture.</summary>
+		protected string inputSnapshot()
+		{
+			var sb = new StringBuilder();
+			System.Reflection.PropertyInfo[] props = this.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+			Array.Sort(props, (a, b) => string.CompareOrdinal(a.Name, b.Name));
+			string last = null;
+			foreach (System.Reflection.PropertyInfo p in props)
+			{
+				if (p.Name == last || !p.CanRead || p.GetIndexParameters().Length != 0 || !isInputProperty(p)) continue;
+				last = p.Name;
+				object value;
+				try { value = p.GetValue(this, null); }
+				catch (Exception e) { value = "<" + e.GetType().Name + ">"; }
+				if (sb.Length > 0) sb.Append("; ");
+				sb.Append(p.Name).Append('=').Append(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture));
+			}
+			return sb.ToString();
+		}
+
+		// Matched by name so the check does not depend on the attribute's namespace; Attribute.GetCustomAttributes honours
+		// inherit for properties (PropertyInfo.GetCustomAttributes ignores it), so overridden inputs are still found.
+		private static bool isInputProperty(System.Reflection.PropertyInfo p)
+		{
+			foreach (Attribute a in Attribute.GetCustomAttributes(p, true))
+				if (a.GetType().Name == "InputAttribute") return true;
+			return false;
+		}
+
+		/// <summary>
+		/// Minimum price move of Data1 (VPB-20, moved from _VolumeProfileBase by CS-1). Resolved once per StartCalc, lazily.
+		/// </summary>
+		protected double tickSize()
+		{
+			if (m_tick <= 0) m_tick = resolveTick();
+			return m_tick;
+		}
+
+		private double resolveTick()
+		{
+			try
+			{
+				double mm = Bars.Info.MinMove;
+				double ps = Bars.Info.PriceScale;
+				if (ps != 0)
+				{
+					double t = Math.Abs(mm / ps);
+					if (t > 0 && !double.IsInfinity(t)) return t;
+				}
+				if (mm > 0) return mm;
+			}
+			catch { }
+			return TICK_FALLBACK;
+		}
+
+		// ---- CS-1: per-trade journal (gap-only) ----
+
+		/// <summary>True when the per-trade journal is on (TraceLevel Journal, Verbose or Debug).</summary>
+		protected bool journalOn() { return traceOn(ETraceLevel.Journal); }
+
+		/// <summary>
+		/// CS-1: record what the strategy knows at order send for the entry order named <paramref name="entryOrderName"/>
+		/// (exact name match when the trade is written). Call it next to Send(); a later call for the same name replaces it.
+		/// Cheap no-op when the journal is off. Context values are written as key=value pairs separated by '|'.
+		/// </summary>
+		protected void journalArm(string entryOrderName, double plannedEntry, double initialStop, double target, IDictionary<string, string> context = null)
+		{
+			if (!journalOn() || string.IsNullOrEmpty(entryOrderName) || m_journalArms == null) return;
+			string ctx = "";
+			if (context != null && context.Count > 0)
+			{
+				var sb = new StringBuilder();
+				foreach (KeyValuePair<string, string> kv in context)
+				{
+					if (sb.Length > 0) sb.Append('|');
+					sb.Append(kv.Key).Append('=').Append(kv.Value);
+				}
+				ctx = sb.ToString();
+			}
+			m_journalArms[entryOrderName] = new JournalArm { tag = entryOrderName, plannedEntry = plannedEntry, initialStop = initialStop, target = target, context = ctx };
+		}
+
+		// Positions[0] is the current position; [1].. are earlier ones. Scanning the newest three on every closed bar and
+		// de-duplicating by trade identity does not depend on whether a flat CurrentPosition is the closed one or a new empty one.
+		private void journalScan()
+		{
+			if (m_journalWritten == null) return;
+			int n = Math.Min(Positions.Count, 3);
+			for (int i = n - 1; i >= 0; i--)
+			{
+				IMarketPosition pos = Positions[i];
+				if (pos == null || pos.ClosedTrades == null || pos.ClosedTrades.Count == 0) continue;
+				if (pos.OpenTrades != null && pos.OpenTrades.Count > 0) continue;   // write a position once it is flat (scale-outs included)
+				int tradeCount = pos.ClosedTrades.Count;
+				foreach (var t in pos.ClosedTrades)
+				{
+					if (t == null || t.EntryOrder == null || t.ExitOrder == null) continue;
+					string key = t.EntryOrder.Name + "\u001f" + t.EntryOrder.BarNumber + "\u001f" + t.EntryOrder.Time.Ticks + "\u001f" +
+						t.ExitOrder.Name + "\u001f" + t.ExitOrder.BarNumber + "\u001f" + t.ExitOrder.Time.Ticks + "\u001f" + t.ExitOrder.Contracts;
+					if (!m_journalWritten.Add(key)) continue;
+					journalWriteTrade(pos, t.IsLong, t.EntryOrder.Name, t.EntryOrder.Time, t.EntryOrder.Price, t.EntryOrder.BarNumber,
+						t.ExitOrder.Name, t.ExitOrder.Time, t.ExitOrder.Price, t.ExitOrder.BarNumber, t.ExitOrder.Contracts,
+						t.Profit, t.CommissionValue, tradeCount);
+				}
+			}
+		}
+
+		private void journalWriteTrade(IMarketPosition pos, bool isLong, string entryName, DateTime entryTime, double entryPrice, int entryBar,
+			string exitName, DateTime exitTime, double exitPrice, int exitBar, int qty, double profit, double commission, int tradesInPosition)
+		{
+			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+			double bpv = Bars.Info.BigPointValue;
+			double tick = tickSize();
+			JournalArm arm;
+			bool armed = m_journalArms.TryGetValue(entryName ?? "", out arm);
+
+			// What MC lacks: initial risk from the armed stop, R, excursions in ticks/R, planned-vs-fill.
+			double riskPerUnit = armed ? Math.Abs(entryPrice - arm.initialStop) : double.NaN;
+			double riskDollars = armed && bpv > 0 ? riskPerUnit * bpv * qty : double.NaN;
+			double rMultiple = riskDollars > 0 ? profit / riskDollars : double.NaN;
+			double slipTicks = armed && tick > 0 ? (isLong ? entryPrice - arm.plannedEntry : arm.plannedEntry - entryPrice) / tick : double.NaN;   // > 0 = adverse
+
+			// MC exposes run-up/drawdown per position, not per trade: with several trades in one position the excursion is the position's.
+			double mfeDollars = Math.Abs(pos.MaxRunUp);
+			double maeDollars = -Math.Abs(pos.MaxDrawDown);
+			double perTick = bpv > 0 && tick > 0 && qty > 0 ? bpv * tick * qty : double.NaN;
+			double mfeTicks = mfeDollars / perTick, maeTicks = maeDollars / perTick;
+			double mfeR = riskDollars > 0 ? mfeDollars / riskDollars : double.NaN;
+			double maeR = riskDollars > 0 ? maeDollars / riskDollars : double.NaN;
+			string scope = tradesInPosition > 1 ? "position(" + tradesInPosition + " trades)" : "trade";
+
+			var sb = new StringBuilder();
+			Action<string> col = s => { if (sb.Length > 0) sb.Append(','); sb.Append(csvField(s)); };
+			Func<double, string> num = v => double.IsNaN(v) || double.IsInfinity(v) ? "" : v.ToString("0.########", ic);
+			col(RunId); col(this.GetType().Name); col(Bars.Info.Name); col(armed ? arm.tag : entryName); col(isLong ? "Long" : "Short");
+			col(qty.ToString(ic));
+			col(entryTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(entryPrice));
+			col(exitTime.ToString("yyyy-MM-dd HH:mm:ss", ic)); col(num(exitPrice)); col(exitName);
+			col((exitBar - entryBar).ToString(ic));
+			col(num(profit)); col(num(commission)); col(armed ? "1" : "0");
+			col(armed ? num(arm.plannedEntry) : ""); col(num(slipTicks)); col(armed ? num(arm.initialStop) : ""); col(armed ? num(arm.target) : "");
+			col(num(riskPerUnit)); col(num(tick > 0 ? riskPerUnit / tick : double.NaN)); col(num(riskDollars)); col(num(rMultiple));
+			col(num(mfeDollars)); col(num(maeDollars)); col(num(mfeTicks)); col(num(maeTicks)); col(num(mfeR)); col(num(maeR));
+			col(scope); col(armed ? arm.context : "");
+
+			try
+			{
+				if (m_journal == null)
+				{
+					m_journal = new TradeJournal(RunId);
+					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
+				}
+				m_journal.Write(sb.ToString());
+			}
+			catch (Exception e)
+			{
+				trace(ETraceLevel.Warning, $"JOURNAL write failed - {e.Message}");
+			}
+		}
+
+		private static string csvField(string s)
+		{
+			if (string.IsNullOrEmpty(s)) return "";
+			if (s.IndexOfAny(new[] { ',', '"', '\n', '\r' }) < 0) return s;
+			return "\"" + s.Replace("\"", "\"\"") + "\"";
+		}
+
+		// ---- CS-3: input validation helpers (moved from _VolumeProfileBase; generic parameter hygiene) ----
+		protected static void requireUnitInterval(string name, double value)
+		{
+			if (value < 0.0 || value > 1.0)
+				throw new ArgumentException(name + " must be between 0.0 and 1.0.");
+		}
+
+		protected static void requireAtLeast(string name, int value, int min)
+		{
+			if (value < min)
+				throw new ArgumentException(name + " must be " + min + " or greater.");
+		}
+
+		protected static void requireNonNegative(string name, double value)
+		{
+			if (value < 0.0)
+				throw new ArgumentException(name + " must be 0.0 or greater.");
+		}
+
+		protected static void requireNonNegative(string name, int value)
+		{
+			if (value < 0)
+				throw new ArgumentException(name + " must be 0 or greater.");
+		}
+
+		protected void requireDataStream(string name, int stream)
+		{
+			if (stream < 1)
+				throw new ArgumentException(name + " must be a chart data stream index >= 1 (1 = Data1, 2 = Data2, …).");
+			if (MaxDataStream >= 1 && stream > MaxDataStream)
+				throw new ArgumentException(name + " = " + stream + " is not on this chart (MaxDataStream = " + MaxDataStream + ").");
 		}
 
 		/// <summary>
 		/// Trading-day key for a bar. Equities: calendar date. Futures override with GlobexDate.
 		/// </summary>
-		protected virtual DateTime tradingDayKey(DateTime barTime) { return barTime.Date; }
+		protected virtual DateTime tradingDayKey(DateTime barTime)
+		{
+			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, Bars.Info.Category.ToString());   // CS-6
+			return barTime.Date;
+		}
 
 		/// <summary>
 		/// Determines the equity available for trading a position based on some custom risk equity per position percentage. If
@@ -406,6 +769,13 @@ namespace PowerLanguage.Strategy
 		protected double equityAvailable(double maxCustomRiskEquityPerPosPercent = 0.0d)
 		{
 			double equityAvailable = 0.0d;
+			m_lastEquityFromAccount = false;
+			// CS-4: the *Percent parameters are fractions (0.01 = 1%). Warn once on a value that looks like a percentage; no behaviour change.
+			if (maxCustomRiskEquityPerPosPercent > 1.0 && !m_fractionWarned)
+			{
+				m_fractionWarned = true;
+				trace(ETraceLevel.Warning, $"equityAvailable - fraction {maxCustomRiskEquityPerPosPercent} > 1: the *Percent sizing parameters are fractions (0.01 = 1%)");
+			}
 
 			//get equity available from account for trading if we are auto trading
 			if (Environment.IsAutoTradingMode)
@@ -417,6 +787,7 @@ namespace PowerLanguage.Strategy
 					if (account.Name == this.Account)
 					{
 						equityAvailable = account.Equity ?? 0;
+						m_lastEquityFromAccount = equityAvailable != 0.0d;
 						break;
 					}
 				}
@@ -462,6 +833,455 @@ namespace PowerLanguage.Strategy
 			}
 
 			return equityAvailable;
+		}
+
+		// ---- CS-6: trading-day roll by asset class and generic time-zone helpers ----
+
+		/// <summary>CS-6: how tradingDayKey rolls the day. Calendar (default) = bar date, today's behaviour. Auto = by Bars.Info.Category.</summary>
+		public enum ETradingDayRoll { Calendar = 0, Auto = 1 }
+
+		/// <summary>
+		/// CS-6: Calendar (default, no change) or Auto: Forex = date of (New York time + 7h), i.e. the 17:00 NY roll; Crypto = UTC
+		/// date; anything else (Stock, ...) = bar date. Futures bases override tradingDayKey (Globex date). Not an [Input].
+		/// </summary>
+		protected ETradingDayRoll TradingDayRoll { get; set; } = ETradingDayRoll.Calendar;
+
+		private TimeZoneInfo m_barTz;
+
+		/// <summary>CS-6: zone of this chart's bar times (resolved once per run from Bars.Info.TimeZone).</summary>
+		protected TimeZoneInfo BarTimeZone
+		{
+			get { if (m_barTz == null) m_barTz = resolveBarTimeZone(Bars.Info); return m_barTz; }
+		}
+
+		/// <summary>CS-6: bar time (chart zone) converted to the zone with Windows or IANA id <paramref name="tzId"/>. DST-aware.</summary>
+		protected DateTime ToZone(DateTime barTime, string tzId)
+		{
+			TimeZoneInfo dst = findTz(tzId);
+			if (barTime.Kind == DateTimeKind.Utc) return TimeZoneInfo.ConvertTimeFromUtc(barTime, dst);
+			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
+			TimeZoneInfo src = BarTimeZone ?? TimeZoneInfo.Local;
+			if (src.Id == dst.Id) return t;
+			if (src.IsInvalidTime(t)) t = t.AddHours(1);   // spring-forward gap
+			return TimeZoneInfo.ConvertTime(t, src, dst);
+		}
+
+		/// <summary>CS-6: current bar time in <paramref name="tzId"/> inside [start, end); a window with end &lt;= start wraps midnight.</summary>
+		protected bool inTimeWindow(TimeSpan start, TimeSpan end, string tzId)
+		{
+			TimeSpan t = ToZone(Bars.Time[0], tzId).TimeOfDay;
+			return end > start ? t >= start && t < end : t >= start || t < end;
+		}
+
+		/// <summary>CS-6: tradingDayKey under ETradingDayRoll.Auto for a category name (Forex / Crypto*; else calendar date).</summary>
+		protected DateTime autoTradingDay(DateTime barTime, string category)
+		{
+			string c = (category ?? "").ToUpperInvariant();
+			if (c.Contains("FOREX") || (c.Contains("CURRENCY") && !c.Contains("CRYPTO"))) return ToZone(barTime, "Eastern Standard Time").AddHours(7).Date;
+			if (c.Contains("CRYPTO")) return ToZone(barTime, "UTC").Date;
+			return barTime.Date;
+		}
+
+		/// <summary>
+		/// VPF-01 / CS-6 (moved from _VolumeProfileFuturesBase). Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
+		/// </summary>
+		protected TimeZoneInfo resolveBarTimeZone(IInstrumentSettings info)
+		{
+			switch (info.TimeZone)
+			{
+				case RequestTimeZone.Local:
+					return TimeZoneInfo.Local;
+				case RequestTimeZone.GMT:
+					return TimeZoneInfo.Utc;
+				case RequestTimeZone.Exchange:
+					string id = exchangeTimeZoneId(info.Exchange);
+					if (id == null)
+						throw new Exception("Exchange '" + info.Exchange + "' has no known time zone: set the chart to Local time or override exchangeTimeZoneId.");
+					return findTz(id);
+				default:
+					return TimeZoneInfo.Local;
+			}
+		}
+
+		/// <summary>
+		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
+		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
+		/// </summary>
+		protected virtual string exchangeTimeZoneId(string exchange)
+		{
+			if (string.IsNullOrWhiteSpace(exchange)) return null;
+			string e = exchange.ToUpperInvariant();
+			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
+			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
+			// New York: NYMEX/COMEX and the US equity exchanges
+			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
+			return null;
+		}
+
+		protected static TimeZoneInfo findTz(string windowsId)
+		{
+			try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
+			catch (TimeZoneNotFoundException) { }
+			if (windowsId == "Central Standard Time") return TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
+			return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+		}
+
+		// ---- CS-8: signal-event logging and controls (event study / placebo layer). Off unless TraceLevel >= Journal. ----
+
+		/// <summary>CS-8 control modes. None (default) leaves every helper a no-op.</summary>
+		public enum EControlMode { None = 0, RandomEntry = 1, ShiftLevels = 2, DelayEntryBars = 3 }
+
+		/// <summary>CS-8: forward horizons in bars for logSignal MFE/MAE. Default 5/15/30/60. Not an [Input].</summary>
+		protected int[] SignalHorizons { get; set; } = { 5, 15, 30, 60 };
+		/// <summary>CS-8 control layer (protected properties, D7-d). Default None.</summary>
+		protected EControlMode ControlMode { get; set; } = EControlMode.None;
+		protected int ControlSeed { get; set; } = 12345;
+		/// <summary>CS-8 RandomEntry: probability that controlRandomEntry() returns true on a bar.</summary>
+		protected double ControlRandomProbability { get; set; } = 0.5;
+		/// <summary>CS-8 ShiftLevels: ticks added to a level (negative shifts down).</summary>
+		protected int ControlShiftTicks { get; set; }
+		/// <summary>CS-8 DelayEntryBars: bars to delay an entry (the strategy applies it).</summary>
+		protected int ControlDelayBars { get; set; }
+
+		private sealed class SignalEvent
+		{
+			public string tag, context;
+			public int direction, bar, next;
+			public double price, stop, best, worst;
+			public DateTime time, day;
+			public bool taken;
+			public double[] mfeR, maeR;
+		}
+
+		private const string EVENTS_HEADER_BASE = "runId,strategy,symbol,tag,direction,time,bar,price,stop,riskPerUnit,taken,controlMode";
+		private readonly List<SignalEvent> m_events = new List<SignalEvent>();
+		private TradeJournal m_eventFile;
+		private int m_eventsSteppedBar = -1;
+
+		/// <summary>
+		/// CS-8: record a signal (taken or not). The base tracks forward MFE/MAE in R (R = |price - stop|) over the bars after
+		/// the signal bar at SignalHorizons and writes one MCEvents_&lt;runId&gt;.csv row when the last horizon completes, the
+		/// trading day ends, or the run ends. direction: +1 long, -1 short. No-op unless TraceLevel >= Journal.
+		/// </summary>
+		protected void logSignal(string tag, int direction, double price, double stop, IDictionary<string, string> context, bool taken)
+		{
+			if (!journalOn() || direction == 0 || price <= 0) return;
+			int[] h = SignalHorizons ?? new int[0];
+			var ev = new SignalEvent
+			{
+				tag = tag ?? "", direction = direction > 0 ? 1 : -1, bar = Bars.FullSymbolData.Current, price = price, stop = stop,
+				time = Bars.Time[0], day = tradingDayKey(Bars.Time[0]), taken = taken, best = 0, worst = 0,
+				mfeR = new double[h.Length], maeR = new double[h.Length]
+			};
+			for (int i = 0; i < h.Length; i++) ev.mfeR[i] = ev.maeR[i] = double.NaN;
+			if (context != null)
+			{
+				var sb = new StringBuilder();
+				foreach (var kv in context) sb.Append(kv.Key).Append('=').Append(kv.Value).Append(';');
+				ev.context = sb.ToString();
+			}
+			m_events.Add(ev);
+		}
+
+		/// <summary>CS-8: step pending events on each closed bar (called from CalcBar).</summary>
+		private void signalEventsStep()
+		{
+			if (m_events.Count == 0 || Bars.Status != EBarState.Close) return;
+			int cur = Bars.FullSymbolData.Current;
+			if (cur == m_eventsSteppedBar) return;
+			m_eventsSteppedBar = cur;
+			int[] h = SignalHorizons ?? new int[0];
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			bool runEnd = Bars.LastBarOnChart;
+			for (int i = m_events.Count - 1; i >= 0; i--)
+			{
+				SignalEvent ev = m_events[i];
+				int elapsed = cur - ev.bar;
+				if (day != ev.day) { writeEvent(ev, "session"); m_events.RemoveAt(i); continue; }
+				if (elapsed >= 1)
+				{
+					double fav = ev.direction > 0 ? Bars.High[0] - ev.price : ev.price - Bars.Low[0];
+					double adv = ev.direction > 0 ? Bars.Low[0] - ev.price : ev.price - Bars.High[0];
+					if (fav > ev.best) ev.best = fav;
+					if (adv < ev.worst) ev.worst = adv;
+					double r = Math.Abs(ev.price - ev.stop);
+					while (ev.next < h.Length && elapsed >= h[ev.next])
+					{
+						ev.mfeR[ev.next] = r > 0 ? ev.best / r : double.NaN;
+						ev.maeR[ev.next] = r > 0 ? ev.worst / r : double.NaN;
+						ev.next++;
+					}
+				}
+				if (ev.next >= h.Length) { writeEvent(ev, "horizon"); m_events.RemoveAt(i); }
+				else if (runEnd) { writeEvent(ev, "runEnd"); m_events.RemoveAt(i); }
+			}
+		}
+
+		private void writeEvent(SignalEvent ev, string completedBy)
+		{
+			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+			int[] h = SignalHorizons ?? new int[0];
+			if (m_eventFile == null)
+			{
+				var hdr = new StringBuilder(EVENTS_HEADER_BASE);
+				for (int i = 0; i < h.Length; i++) hdr.Append(",mfeR_").Append(h[i]).Append(",maeR_").Append(h[i]);
+				hdr.Append(",completedBy,context");
+				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString());
+				trace(ETraceLevel.Journal, $"EVENTS file({m_eventFile.Path_})");
+			}
+			var sb = new StringBuilder();
+			sb.Append(RunId).Append(',').Append(csvField(this.GetType().Name)).Append(',').Append(csvField(Bars.Info.Name)).Append(',').Append(csvField(ev.tag)).Append(',')
+				.Append(ev.direction).Append(',').Append(ev.time.ToString("yyyy-MM-dd HH:mm:ss", ic)).Append(',').Append(ev.bar).Append(',')
+				.Append(ev.price.ToString(ic)).Append(',').Append(ev.stop.ToString(ic)).Append(',').Append(Math.Abs(ev.price - ev.stop).ToString(ic)).Append(',')
+				.Append(ev.taken ? "1" : "0").Append(',').Append(ControlMode);
+			for (int i = 0; i < h.Length; i++) sb.Append(',').Append(ev.mfeR[i].ToString("0.####", ic)).Append(',').Append(ev.maeR[i].ToString("0.####", ic));
+			sb.Append(',').Append(completedBy).Append(',').Append(csvField(ev.context ?? ""));
+			m_eventFile.Write(sb.ToString());
+		}
+
+		/// <summary>CS-8: deterministic uniform [0,1) from (ControlSeed, bar) — reproducible for a fixed seed, independent of call count.</summary>
+		protected double controlRandom(int bar)
+		{
+			unchecked
+			{
+				ulong z = (ulong)(uint)ControlSeed * 0x9E3779B97F4A7C15UL + (ulong)(uint)bar;
+				z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+				z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+				z ^= z >> 31;
+				return (z >> 11) * (1.0 / 9007199254740992.0);
+			}
+		}
+
+		/// <summary>CS-8 RandomEntry: true with ControlRandomProbability on this bar (always false in other modes).</summary>
+		protected bool controlRandomEntry()
+		{
+			return ControlMode == EControlMode.RandomEntry && controlRandom(Bars.FullSymbolData.Current) < ControlRandomProbability;
+		}
+
+		/// <summary>CS-8 ShiftLevels: level + ControlShiftTicks ticks; unchanged in other modes.</summary>
+		protected double controlAdjustLevel(double level)
+		{
+			return ControlMode == EControlMode.ShiftLevels ? level + ControlShiftTicks * tickSize() : level;
+		}
+
+		/// <summary>CS-8 DelayEntryBars: bars to delay an entry; 0 in other modes.</summary>
+		protected int controlAdjustDelayBars()
+		{
+			return ControlMode == EControlMode.DelayEntryBars ? ControlDelayBars : 0;
+		}
+
+		// ---- CS-7: trade-management primitives (protected properties, not [Input]s - D7-c). The base sends no orders. ----
+
+		/// <summary>CS-7: no new entries before this session-clock time (null = off).</summary>
+		protected TimeSpan? NoEntryBefore { get; set; }
+		/// <summary>CS-7: no new entries at or after this session-clock time (null = off).</summary>
+		protected TimeSpan? NoEntryAfter { get; set; }
+		/// <summary>CS-7: mustFlatten() from this intra-session time (null = off). For the session end use ExitOnClose.</summary>
+		protected TimeSpan? FlatBy { get; set; }
+		/// <summary>CS-7: max entries per trading day (tradingDayKey). 0 = off.</summary>
+		protected int MaxTradesPerDay { get; set; }
+		/// <summary>CS-7: block entries after this many losing closed trades in the trading day. 0 = off.</summary>
+		protected int DailyLossStopCount { get; set; }
+		/// <summary>CS-7: block entries once the day's closed net loss reaches this many R (RiskUnitDollars). 0 = off.</summary>
+		protected double DailyLossStopR { get; set; }
+		/// <summary>CS-7: $ value of 1 R for DailyLossStopR.</summary>
+		protected double RiskUnitDollars { get; set; }
+		/// <summary>CS-7: mustFlatten() once the open position is this many bars old. 0 = off.</summary>
+		protected int TimeStopBars { get; set; }
+
+		private DateTime m_tmDay = DateTime.MinValue;
+		private readonly HashSet<string> m_tmEntrySeen = new HashSet<string>();
+		private readonly HashSet<string> m_tmExitSeen = new HashSet<string>();
+		private int m_tmEntries, m_tmLosers;
+		private double m_tmNet;
+
+		/// <summary>CS-7: time of day the entry window / FlatBy compare against. Default the bar time; the futures base uses ET.</summary>
+		protected virtual TimeSpan sessionClock(DateTime barTime) { return barTime.TimeOfDay; }
+
+		/// <summary>CS-7: entries, losing trades and closed net P&amp;L of the current trading day.</summary>
+		protected int TradesToday { get { tmRefresh(); return m_tmEntries; } }
+		protected int LosersToday { get { tmRefresh(); return m_tmLosers; } }
+		protected double NetProfitToday { get { tmRefresh(); return m_tmNet; } }
+
+		private void tmRefresh()
+		{
+			// No cache: fills can arrive on any tick, and the scan is cheap (newest 10 positions, de-duplicated by key).
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (day != m_tmDay)
+			{
+				m_tmDay = day; m_tmEntries = m_tmLosers = 0; m_tmNet = 0;
+				m_tmEntrySeen.Clear(); m_tmExitSeen.Clear();
+			}
+			int n = Math.Min(Positions.Count, 10);
+			for (int i = n - 1; i >= 0; i--)
+			{
+				IMarketPosition pos = Positions[i];
+				if (pos == null) continue;
+				if (pos.ClosedTrades != null)
+					foreach (var t in pos.ClosedTrades)
+					{
+						if (t == null || t.EntryOrder == null) continue;
+						tmEntry(t.EntryOrder.Name, t.EntryOrder.BarNumber, t.EntryOrder.Time);
+						if (t.ExitOrder == null || tradingDayKey(t.ExitOrder.Time) != m_tmDay) continue;
+						string k = t.EntryOrder.Name + "\u001f" + t.EntryOrder.Time.Ticks + "\u001f" + t.ExitOrder.Name + "\u001f" + t.ExitOrder.Time.Ticks + "\u001f" + t.ExitOrder.Contracts;
+						if (!m_tmExitSeen.Add(k)) continue;
+						m_tmNet += t.Profit;
+						if (t.Profit < 0) m_tmLosers++;
+					}
+				if (pos.OpenTrades != null)
+					foreach (var t in pos.OpenTrades)
+						if (t != null && t.EntryOrder != null) tmEntry(t.EntryOrder.Name, t.EntryOrder.BarNumber, t.EntryOrder.Time);
+			}
+		}
+
+		private void tmEntry(string name, int bar, DateTime time)
+		{
+			if (tradingDayKey(time) != m_tmDay) return;
+			if (m_tmEntrySeen.Add(name + "\u001f" + bar + "\u001f" + time.Ticks)) m_tmEntries++;
+		}
+
+		/// <summary>CS-7: may the strategy enter now? reason names the first rule that blocks (traced at Info).</summary>
+		protected bool entryAllowed(out string reason)
+		{
+			reason = null;
+			TimeSpan clock = sessionClock(Bars.Time[0]);
+			if (NoEntryBefore.HasValue && clock < NoEntryBefore.Value) reason = $"before NoEntryBefore({NoEntryBefore.Value})";
+			else if (NoEntryAfter.HasValue && clock >= NoEntryAfter.Value) reason = $"at/after NoEntryAfter({NoEntryAfter.Value})";
+			else if (FlatBy.HasValue && clock >= FlatBy.Value) reason = $"at/after FlatBy({FlatBy.Value})";
+			else
+			{
+				tmRefresh();
+				if (MaxTradesPerDay > 0 && m_tmEntries >= MaxTradesPerDay) reason = $"MaxTradesPerDay({MaxTradesPerDay}) reached";
+				else if (DailyLossStopCount > 0 && m_tmLosers >= DailyLossStopCount) reason = $"DailyLossStopCount({DailyLossStopCount}) reached: {m_tmLosers} losers";
+				else if (DailyLossStopR > 0 && RiskUnitDollars > 0 && -m_tmNet / RiskUnitDollars >= DailyLossStopR) reason = $"DailyLossStopR({DailyLossStopR}) reached: {m_tmNet / RiskUnitDollars:0.00} R";
+			}
+			if (reason != null && traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "entry blocked: " + reason);
+			return reason == null;
+		}
+
+		/// <summary>CS-7: should the open position be closed now (FlatBy reached or TimeStopBars elapsed)?</summary>
+		protected bool mustFlatten()
+		{
+			if (StrategyInfo.MarketPosition == 0) return false;
+			if (FlatBy.HasValue && sessionClock(Bars.Time[0]) >= FlatBy.Value) return true;
+			if (TimeStopBars > 0)
+			{
+				try
+				{
+					if (CurrentPosition.OpenTrades != null)
+						foreach (var t in CurrentPosition.OpenTrades)
+						{
+							// oldest open entry decides; BarNumber is on the CurrentBar scale
+							if (t != null && t.EntryOrder != null) return Bars.CurrentBar - t.EntryOrder.BarNumber >= TimeStopBars;
+						}
+				}
+				catch { }
+			}
+			return false;
+		}
+
+		// ---- CS-4: sizing API consolidation ----
+
+		/// <summary>
+		/// CS-4 limits for sizeForRisk. All optional (0 / false = no limit).
+		/// maxQty: hard cap. maxNotionalFraction: qty x unitNotional <= equityAvailable(maxNotionalFraction).
+		/// unitNotional: $ per unit for the notional cap; 0 = full contract value entry x BigPointValue (D1: ES by full
+		/// contract value; a stock is its price). minStopTicks: refuse stops closer than this. roundLots: floor to 100s.
+		/// </summary>
+		public struct SizingLimits
+		{
+			public int maxQty;
+			public double maxNotionalFraction;
+			public double unitNotional;
+			public double minStopTicks;
+			public bool roundLots;
+		}
+
+		/// <summary>
+		/// CS-4: units so that |entry - stop| x BigPointValue x units ≈ equity x riskFraction, then the limits. riskFraction is a
+		/// fraction in (0, 1] (0.01 = 1%). Returns 0 with a traced reason (bad BPV, stop too close, zero equity, notional cap).
+		/// With default(SizingLimits) it equals stopLossBasedPositionSize(bars, entry, stop, riskFraction).
+		/// </summary>
+		protected int sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits)
+		{
+			if (bars == null || entry <= 0 || riskFraction <= 0 || riskFraction > 1)
+			{
+				trace(ETraceLevel.Debug, $"sizeForRisk - 0: entry({entry}) riskFraction({riskFraction}) must be > 0 and riskFraction <= 1");
+				return 0;
+			}
+			double bpv = bars.Info.BigPointValue;
+			if (double.IsNaN(bpv) || double.IsInfinity(bpv) || bpv <= 0)
+			{
+				trace(ETraceLevel.Warning, $"sizeForRisk - 0: BigPointValue({bpv}) invalid");
+				return 0;
+			}
+			double distance = Math.Abs(entry - stop);
+			if (limits.minStopTicks > 0 && distance < limits.minStopTicks * tickSize() - tickSize() * 1e-6)
+			{
+				trace(ETraceLevel.Debug, $"sizeForRisk - 0: stop distance {distance / tickSize():0.##} ticks < minStopTicks({limits.minStopTicks})");
+				return 0;
+			}
+			int qty = stopLossBasedPositionSize(bars, entry, stop, riskFraction, false);
+			if (qty <= 0) { trace(ETraceLevel.Debug, "sizeForRisk - 0: risk sizing returned 0 (zero equity or zero risk)"); return 0; }
+			if (limits.maxQty > 0 && qty > limits.maxQty) { trace(ETraceLevel.Debug, $"sizeForRisk - qty({qty}) capped to maxQty({limits.maxQty})"); qty = limits.maxQty; }
+			if (limits.maxNotionalFraction > 0)
+			{
+				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * bpv;
+				qty = capByNotional(qty, unit, limits.maxNotionalFraction);
+				if (qty <= 0) { trace(ETraceLevel.Debug, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
+			}
+			qty = applyRoundLots(qty, limits.roundLots);
+			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
+			return qty;
+		}
+
+		/// <summary>
+		/// CS-4: equityAvailable plus, when includeOpenPnl, the current position's open P&amp;L (scaled by the same fraction) for
+		/// non-account equity (chart / portfolio backtest). Account equity already includes open P&amp;L.
+		/// </summary>
+		protected double equityAvailable(double fraction, bool includeOpenPnl)
+		{
+			double e = equityAvailable(fraction);
+			if (!includeOpenPnl || (Environment.IsAutoTradingMode && m_lastEquityFromAccount)) return e;
+			double open = 0;
+			try { open = CurrentPosition.OpenProfit; } catch { }
+			double scale = fraction > 0 ? fraction
+				: Environment.ApplicationCode == EApplicationCode.Portfolio ? this.Portfolio.MaxRiskEquityPerPosPercent / 100.0d : 1.0;
+			return e + open * scale;
+		}
+
+		// ---- Q1: optional pre-trade cost filter (off by default) ----
+
+		/// <summary>
+		/// Q1: skip a trade when MultiCharts Commission + Slippage for the round trip exceeds this fraction of the planned risk
+		/// (R, $ per contract). 0 = off (default). Not an [Input]; set it in the derived strategy.
+		/// </summary>
+		protected double CostFilterMaxFractionOfR { get; set; } = 0.0;
+
+		/// <summary>
+		/// Q1: MultiCharts Strategy Properties commission and slippage for one contract round trip, in $: 2 x (Commission +
+		/// Slippage), both read as $ per contract per side [PG p17, p45]. Override if the commission rule is per trade.
+		/// </summary>
+		protected virtual double roundTripCostPerContract()
+		{
+			return 2.0 * (this.Commission + this.Slippage);
+		}
+
+		/// <summary>Q1: true when the filter is off or the cost is within CostFilterMaxFractionOfR of R. Reason set when false.</summary>
+		protected bool costFilterPasses(IInstrument bars, double entry, double stop, out string reason)
+		{
+			reason = null;
+			if (CostFilterMaxFractionOfR <= 0 || bars == null) return true;
+			double r = Math.Abs(entry - stop) * bars.Info.BigPointValue;
+			double cost = roundTripCostPerContract();
+			if (r <= 0) { reason = "cost filter: zero risk"; return false; }
+			if (cost / r > CostFilterMaxFractionOfR)
+			{
+				reason = $"cost filter: round-trip cost {cost:0.00} = {cost / r:0.000} R > {CostFilterMaxFractionOfR:0.000} R";
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, reason);
+				return false;
+			}
+			return true;
 		}
 
 		/// <summary>
@@ -628,9 +1448,10 @@ namespace PowerLanguage.Strategy
 		/// Computes the average true range of the instrument over a given length.
 		/// NOTE: This function is not optimized for performance and should be used cautiosly.
 		/// </summary>
+		/// <remarks>CS-9: reads Close[length], so it needs CurrentBar > length and MaxBarsBack >= length + 1.</remarks>
 		protected double averageTrueRange(IInstrument bars, int length)
 		{
-			if (bars.CurrentBar < length) return 0.0d;
+			if (bars.CurrentBar <= length) return 0.0d;
 
 			double sum = 0.0;
 			for (int i = 0; i < length; i++)
@@ -682,11 +1503,20 @@ namespace PowerLanguage.Strategy
 
 			while (date.Date > entryDate.Date)
 			{
-				if (!m_holidays.isHoliday(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
+				if (!isTradingHoliday(date) && date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday) count++;
 				date = date.AddDays(-1);
 			}
 
 			return count;
+		}
+
+		/// <summary>
+		/// Spec VPF-6 (Rev 2.1, calendar by asset class): non-trading weekday for tradingDayCount. Default: the NYSE calendar
+		/// (unchanged). _VolumeProfileFuturesBase overrides it with the CME Globex closures.
+		/// </summary>
+		protected virtual bool isTradingHoliday(DateTime date)
+		{
+			return m_holidays.isHoliday(date);
 		}
 
 		/// <summary>
@@ -809,6 +1639,33 @@ namespace PowerLanguage.Strategy
 		/// <returns></returns>
 		public DateTime orderEntryTimeUncached(params String[] entryOrderNames)
 		{
+			return entryTimeCore(EOrderNameMatch.Contains, entryOrderNames);
+		}
+
+		/// <summary>CS-5: how order names are matched. Contains is today's behaviour ("LE" also matches "LE2").</summary>
+		public enum EOrderNameMatch { Contains = 0, Exact = 1, Prefix = 2 }
+
+		/// <summary>CS-5: order-name match under <paramref name="mode"/> (ordinal, case-sensitive like the existing Contains).</summary>
+		protected static bool orderNameMatches(string orderName, string wanted, EOrderNameMatch mode)
+		{
+			if (string.IsNullOrEmpty(wanted) || orderName == null) return false;
+			switch (mode)
+			{
+				case EOrderNameMatch.Exact: return string.Equals(orderName, wanted, StringComparison.Ordinal);
+				case EOrderNameMatch.Prefix: return orderName.StartsWith(wanted, StringComparison.Ordinal);
+				default: return orderName.Contains(wanted);
+			}
+		}
+
+		/// <summary>CS-5: orderEntryTime with an explicit name match mode (not cached).</summary>
+		public DateTime orderEntryTime(EOrderNameMatch matchMode, params String[] entryOrderNames)
+		{
+			return entryTimeCore(matchMode, entryOrderNames);
+		}
+
+		private DateTime entryTimeCore(EOrderNameMatch matchMode, String[] entryOrderNames)
+		{
+			if (entryOrderNames == null) entryOrderNames = new string[0];
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
 			{
@@ -817,8 +1674,7 @@ namespace PowerLanguage.Strategy
 				{
 					var lastOpenTrade = position.OpenTrades
 							.Where(t => t.EntryOrder != null &&
-													entryOrderNames.Any(name =>
-															!string.IsNullOrEmpty(name) && t.EntryOrder.Name.Contains(name)))
+													entryOrderNames.Any(name => orderNameMatches(t.EntryOrder.Name, name, matchMode)))
 							.OrderByDescending(t => t.EntryOrder?.Time ?? DateTime.MinValue)
 							.FirstOrDefault();
 
@@ -844,7 +1700,7 @@ namespace PowerLanguage.Strategy
 				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 				entryLastFill = td.Orders.Items
 														.Where(o => o.SymbolStr == Bars.Info.Name
-																		 && entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))
+																		 && entryOrderNames.Any(name => orderNameMatches(o.Name, name, matchMode))
 																		 && o.State == ETM_OrderState.eTM_OS_Filled
 																		 && o.LeftContracts == 0)
 														.Select(o => o.FinalDT ?? o.GeneratedDT)
@@ -865,6 +1721,41 @@ namespace PowerLanguage.Strategy
 
 		public DateTime orderExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
 		{
+			return exitTimeCore(side, useFill, DateTime.MinValue, null);
+		}
+
+		/// <summary>
+		/// CS-5: exit time of the current round trip only. Exits before <paramref name="notBefore"/> are ignored (DateTime.MinValue
+		/// = the entry time of the position the exits belong to); when names are given only exits whose name contains one of
+		/// them count. Use this so a real-time query does not return a previous trade's exit.
+		/// Real time: the default notBefore is the position's entry time in bar time; TradeManager fill times (FinalDT) are PC
+		/// local time. On a chart whose time zone is not the PC zone pass notBefore in PC local time.
+		/// </summary>
+		public DateTime orderExitTime(EMarketPositionSide side, EUseFill useFill, DateTime notBefore, params string[] exitOrderNames)
+		{
+			if (notBefore == DateTime.MinValue) notBefore = exitPositionEntryTime();
+			return exitTimeCore(side, useFill, notBefore, exitOrderNames != null && exitOrderNames.Length > 0 ? exitOrderNames : null);
+		}
+
+		/// <summary>CS-5: entry time of the position whose exits orderExitTime reads (open position with partial exits, else the last closed one).</summary>
+		private DateTime exitPositionEntryTime()
+		{
+			IMarketPosition pos = null;
+			try
+			{
+				if (CurrentPosition.ClosedTrades.Count > 0 || CurrentPosition.OpenTrades.Count > 0) pos = CurrentPosition;
+				if ((pos == null || pos.ClosedTrades.Count == 0) && Positions.Count > 1 && CurrentPosition.OpenTrades.Count == 0) pos = Positions[1];
+			}
+			catch { }
+			if (pos == null) return DateTime.MinValue;
+			DateTime first = DateTime.MaxValue;
+			if (pos.OpenTrades != null) foreach (var t in pos.OpenTrades) if (t.EntryOrder != null && t.EntryOrder.Time < first) first = t.EntryOrder.Time;
+			if (pos.ClosedTrades != null) foreach (var t in pos.ClosedTrades) if (t.EntryOrder != null && t.EntryOrder.Time < first) first = t.EntryOrder.Time;
+			return first == DateTime.MaxValue ? DateTime.MinValue : first;
+		}
+
+		private DateTime exitTimeCore(EMarketPositionSide side, EUseFill useFill, DateTime notBefore, string[] exitOrderNames)
+		{
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
 			{
@@ -881,10 +1772,13 @@ namespace PowerLanguage.Strategy
 				{
 					if (t.ExitOrder == null) continue;
 					DateTime x = t.ExitOrder.Time;
+					if (x < notBefore) continue;   // CS-5
+					if (exitOrderNames != null && !exitOrderNames.Any(n => orderNameMatches(t.ExitOrder.Name, n, EOrderNameMatch.Contains))) continue;
 					if (x < first) first = x;
 					if (x > last) last = x;
 				}
 
+				if (last == DateTime.MinValue && (notBefore != DateTime.MinValue || exitOrderNames != null)) return DateTime.MinValue;   // CS-5: every exit filtered out
 				return useFill == EUseFill.First ? first : last;
 			}
 
@@ -917,9 +1811,10 @@ namespace PowerLanguage.Strategy
 								&& o.State == ETM_OrderState.eTM_OS_Filled
 								&& o.Action == orderAction
 								&& o.LeftContracts == 0
+								&& (exitOrderNames == null || exitOrderNames.Any(n => orderNameMatches(o.Name, n, EOrderNameMatch.Contains)))   // CS-5
 						)
 						.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
-						.Where(dt => dt > DateTime.MinValue)
+						.Where(dt => dt > DateTime.MinValue && dt >= notBefore)
 						.OrderBy(dt => dt)                        //sort chronological to find first/last exit
 						.ToList();                                // materialized inside the lock
 				window = $"{td.Orders.IntervalFltr.From},{td.Orders.IntervalFltr.To}";

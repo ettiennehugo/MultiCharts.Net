@@ -508,6 +508,8 @@
     <Compile Include="_Holidays.Function.CS" />
     <Compile Include="_USHolidays.Function.CS" />
     <Compile Include="_NyseHolidays.Function.CS" />
+    <Compile Include="_CmeHolidays.Function.CS" />
+    <Compile Include="_SignalJournal.Function.CS" />
     <Compile Include="_Test1.Indicator.CS" />
     <Compile Include="_Test1.Strategy.CS" />
     <Compile Include="_Test2.Strategy.CS" />
