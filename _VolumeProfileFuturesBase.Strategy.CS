@@ -35,6 +35,10 @@ namespace PowerLanguage.Strategy
 	/// (_CmeSessionClock.Function.CS); every session method here is a one-line delegate to SessionClock. A futures strategy
 	/// that needs no volume profiles can derive from _CustomSignal and own a _CmeSessionClock (see _CmeSessionClockTest).
 	///
+	/// VPF-5: order-flow helpers (BarDelta, AnchoredCvd, DeltaZ, Imbalances, StackedImbalances, UnfinishedAuctionAt,
+	/// AbsorptionSignal) use an APPROXIMATED aggressor side - MultiCharts .NET exposes no aggressor side. Tick rule on
+	/// intrabar ticks (needs IOG), Bars.UpTicks/DownTicks per bar otherwise. Off by default (OrderFlowMode = Off).
+	///
 	/// General Notes:
 	/// * Allow entries only when InSession(MarketSession.Rth) - high liquidity confirms moves.
 	/// * Stand down in Asia unless you are explicitly studying overnight inventory.
@@ -123,6 +127,7 @@ namespace PowerLanguage.Strategy
 			m_session = null;       // VPF-2
 			m_sessionBar = -1;
 			m_rollBars.Clear(); m_rollLastDay = DateTime.MinValue; m_rollLastBar = -1; m_rollLastName = null;   // VPF-4
+			startOrderFlow();       // VPF-5 (Off by default: nothing is computed)
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
@@ -131,6 +136,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
 			detectRoll();           // VPF-4
+			updateOrderFlow();      // VPF-5 (no-op when OrderFlowMode = Off)
 		}
 
 		//methods
@@ -569,6 +575,185 @@ namespace PowerLanguage.Strategy
 			for (int i = 0; i < m_rollBars.Count; i++)
 				if (m_rollBars[i] > e.startBar && m_rollBars[i] <= cur) return true;
 			return false;
+		}
+
+		// ---- VPF-5: order-flow helpers on an APPROXIMATED aggressor side (off by default) ----
+
+		/// <summary>VPF-5: Off (default) = nothing is computed and every helper returns NaN / empty / false / Unknown.</summary>
+		public enum EOrderFlowMode { Off = 0, Approximate = 1 }
+
+		/// <summary>VPF-5: where the cumulative delta (AnchoredCvd) restarts. Manual = only AnchorCvd().</summary>
+		public enum ECvdAnchor { GlobexDay = 0, RthOpen = 1, Manual = 2 }
+
+		/// <summary>
+		/// VPF-5. MultiCharts .NET does not expose the trade aggressor side (also not with dxFeed), so buy/sell volume is an
+		/// APPROXIMATION (see _OrderFlow): with Intrabar Order Generation each Data1 tick calc is classified by the tick rule
+		/// (uptick = buy, downtick = sell, zero tick inherits the previous side; volume = increase of Bars.Volume[0] since
+		/// the previous calc); a bar with no intrabar calc (IOG off, historical bars) falls back to Bars.UpTicks /
+		/// Bars.DownTicks (bar delta only, no per-price footprint). Default Off: no behaviour change. Not an [Input].
+		/// </summary>
+		protected EOrderFlowMode OrderFlowMode { get; set; } = EOrderFlowMode.Off;
+		/// <summary>VPF-5: diagonal imbalance ratio, Ask(p) >= ratio x Bid(p - 1 tick). Default 3.0.</summary>
+		protected double ImbalanceRatio { get; set; } = 3.0;
+		/// <summary>VPF-5: an imbalance row needs at least this approximated volume. Default 1.</summary>
+		protected double ImbalanceMinVolume { get; set; } = 1;
+		/// <summary>VPF-5: consecutive imbalance rows for a stack. Default 3.</summary>
+		protected int StackedMinCount { get; set; } = 3;
+		/// <summary>VPF-5 absorption hypothesis: bar volume percentile rank vs the prior AbsorptionLookback bars. Default 0.9.</summary>
+		protected double AbsorptionMinVolumeRank { get; set; } = 0.9;
+		protected int AbsorptionLookback { get; set; } = 20;
+		/// <summary>VPF-5 absorption hypothesis: max close-to-close progress in the aggressor's direction, ticks. Default 1.</summary>
+		protected int AbsorptionMaxProgressTicks { get; set; } = 1;
+		/// <summary>VPF-5 absorption hypothesis: the bar's max-volume row within this many ticks of the extreme. Default 2.</summary>
+		protected int AbsorptionExtremeTicks { get; set; } = 2;
+		/// <summary>VPF-5: prior sessions in the same-minute delta z. Default 20.</summary>
+		protected int DeltaZSessions { get; set; } = 20;
+		protected ECvdAnchor CvdAnchor { get; set; } = ECvdAnchor.GlobexDay;
+		/// <summary>VPF-5: closed bars whose footprint is kept. Default 500.</summary>
+		protected int FootprintHistory { get; set; } = 500;
+
+		private _OrderFlow.Source m_ofCapability = _OrderFlow.Source.None;
+		private bool m_ofLogged, m_ofWarned;
+		private _OrderFlow.TickRule m_ofRule;
+		private _OrderFlow.Footprint m_ofCur;
+		private int m_ofBar = -1, m_ofCalcs, m_ofClosedBar = -1;
+		private double m_ofLastVol;
+		private readonly List<_OrderFlow.Footprint> m_ofClosed = new List<_OrderFlow.Footprint>();   // oldest first
+		private readonly List<double> m_ofVolumes = new List<double>();
+		private _OrderFlow.DeltaHistory m_ofHistory;
+		private DateTime m_ofLastGx = DateTime.MinValue;
+		private bool m_ofRthAnchored;
+
+		/// <summary>
+		/// VPF-5: None when OrderFlowMode is Off; TickRule when IOG is on (intrabar ticks are seen; bars without intrabar
+		/// calcs still use UpDownTicks); UpDownTicks otherwise. Set in StartCalc, logged once at Info.
+		/// </summary>
+		public _OrderFlow.Source OrderFlowCapability { get { return m_ofCapability; } }
+
+		private void startOrderFlow()
+		{
+			m_ofCapability = _OrderFlow.Source.None;
+			m_ofLogged = m_ofWarned = false;
+			m_ofCur = null; m_ofBar = -1; m_ofCalcs = 0; m_ofClosedBar = -1; m_ofLastVol = 0;
+			m_ofClosed.Clear(); m_ofVolumes.Clear();
+			m_ofLastGx = DateTime.MinValue; m_ofRthAnchored = false;
+			if (OrderFlowMode == EOrderFlowMode.Off) return;
+			m_ofRule = new _OrderFlow.TickRule(tickSize());
+			m_ofHistory = new _OrderFlow.DeltaHistory(Math.Max(FootprintHistory, 1000));
+			m_ofCapability = Environment.IOGEnabled ? _OrderFlow.Source.TickRule : _OrderFlow.Source.UpDownTicks;
+		}
+
+		private void updateOrderFlow()
+		{
+			if (m_ofCapability == _OrderFlow.Source.None) return;
+			if (!m_ofLogged)
+			{
+				m_ofLogged = true;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-5 order flow APPROXIMATED aggressor side: source({m_ofCapability}) " +
+					"(tick rule on intrabar ticks, Bars.UpTicks/DownTicks fallback; MultiCharts exposes no aggressor side)");
+			}
+			int bar = Bars.FullSymbolData.Current;
+			if (bar != m_ofBar)
+			{
+				m_ofBar = bar; m_ofCalcs = 0; m_ofLastVol = 0;
+				m_ofCur = new _OrderFlow.Footprint(tickSize()) { Bar = bar, Source = _OrderFlow.Source.TickRule, Partial = Bars.Status != EBarState.Open };
+			}
+			if (bar == m_ofClosedBar) return;   // a repeated Close calc of the same bar
+			double vol = Bars.Volume[0];
+			double add = vol - m_ofLastVol;
+			m_ofLastVol = vol;
+			double price = Bars.Close[0];
+			m_ofCur.Add(price, add > 0 ? add : 0, m_ofRule.Classify(price));
+			m_ofCalcs++;
+			if (Bars.Status != EBarState.Close) return;
+
+			// bar closed
+			m_ofClosedBar = bar;
+			_OrderFlow.Footprint fp = m_ofCur;
+			fp.Open = Bars.Open[0]; fp.High = Bars.High[0]; fp.Low = Bars.Low[0]; fp.Close = Bars.Close[0];
+			if (m_ofCalcs < 2) { fp.SetBarTotals(Bars.UpTicks[0], Bars.DownTicks[0]); fp.Partial = false; }   // no intrabar ticks seen
+			m_ofClosed.Add(fp);
+			if (m_ofClosed.Count > Math.Max(1, FootprintHistory)) m_ofClosed.RemoveAt(0);
+			m_ofVolumes.Add(vol);
+			if (m_ofVolumes.Count > Math.Max(1, AbsorptionLookback) + 1) m_ofVolumes.RemoveAt(0);
+
+			DateTime et = ToEastern(Bars.Time[0]);
+			DateTime gx = globexDateEt(et);
+			if (gx != m_ofLastGx) { m_ofLastGx = gx; m_ofRthAnchored = false; if (CvdAnchor == ECvdAnchor.GlobexDay) m_ofHistory.Anchor(bar); }
+			if (CvdAnchor == ECvdAnchor.RthOpen && !m_ofRthAnchored && IsRthValueBarEt(et)) { m_ofRthAnchored = true; m_ofHistory.Anchor(bar); }
+			m_ofHistory.Add(bar, fp.Delta, gx, (int)et.TimeOfDay.TotalMinutes);
+		}
+
+		private bool orderFlowOn()
+		{
+			if (m_ofCapability != _OrderFlow.Source.None) return true;
+			if (!m_ofWarned) { m_ofWarned = true; if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "VPF-5 order-flow helper called with OrderFlowMode=Off: NaN / empty"); }
+			return false;
+		}
+
+		/// <summary>VPF-5: approximated footprint, barsAgo 0 = the current bar (developing under IOG), else a closed bar; null if unavailable.</summary>
+		public _OrderFlow.Footprint OrderFlowFootprint(int barsAgo = 0)
+		{
+			if (!orderFlowOn() || barsAgo < 0) return null;
+			if (barsAgo == 0 && m_ofCur != null && m_ofBar == Bars.FullSymbolData.Current) return m_ofCur;
+			int closedAgo = m_ofClosedBar == Bars.FullSymbolData.Current ? barsAgo : barsAgo - 1;
+			int i = m_ofClosed.Count - 1 - closedAgo;
+			return i >= 0 && i < m_ofClosed.Count ? m_ofClosed[i] : null;
+		}
+
+		/// <summary>VPF-5: approximated bar delta (buy - sell volume), NaN if unavailable.</summary>
+		public double BarDelta(int barsAgo = 0)
+		{
+			_OrderFlow.Footprint fp = OrderFlowFootprint(barsAgo);
+			return fp != null ? fp.Delta : double.NaN;
+		}
+
+		/// <summary>VPF-5: approximated cumulative delta of closed bars since the CvdAnchor (Globex day / RTH open / AnchorCvd), NaN if unavailable.</summary>
+		public double AnchoredCvd() { return orderFlowOn() ? m_ofHistory.AnchoredCvd : double.NaN; }
+
+		/// <summary>VPF-5: restart the anchored cumulative delta at the current bar (named-bar anchor).</summary>
+		public void AnchorCvd() { if (orderFlowOn()) m_ofHistory.Anchor(Bars.FullSymbolData.Current); }
+
+		/// <summary>VPF-5: approximated cumulative delta of the closed bars fromBar..current (1-based bar numbers).</summary>
+		public double CvdFrom(int fromBar) { return orderFlowOn() ? m_ofHistory.Cvd(fromBar, Bars.FullSymbolData.Current) : double.NaN; }
+
+		/// <summary>VPF-5: z of the last closed bar's delta vs the same ET clock minute of the prior DeltaZSessions sessions (prior sessions only).</summary>
+		public double DeltaZ()
+		{
+			if (!orderFlowOn() || m_ofClosed.Count == 0) return double.NaN;
+			_OrderFlow.Footprint fp = m_ofClosed[m_ofClosed.Count - 1];
+			DateTime et = ToEastern(Bars.Time[Math.Max(0, Bars.FullSymbolData.Current - fp.Bar)]);
+			return m_ofHistory.SameMinuteZ((int)et.TimeOfDay.TotalMinutes, globexDateEt(et), fp.Delta, DeltaZSessions);
+		}
+
+		/// <summary>VPF-5: diagonal imbalance prices (ImbalanceRatio, ImbalanceMinVolume). Empty without a tick-rule footprint.</summary>
+		public List<double> Imbalances(_OrderFlow.Side side, int barsAgo = 0)
+		{
+			return _OrderFlow.Imbalances(OrderFlowFootprint(barsAgo), side, ImbalanceRatio, ImbalanceMinVolume);
+		}
+
+		/// <summary>VPF-5: stacked imbalances {low, high, count} with at least StackedMinCount rows (default 3).</summary>
+		public List<double[]> StackedImbalances(_OrderFlow.Side side, int barsAgo = 0)
+		{
+			return _OrderFlow.StackedImbalances(OrderFlowFootprint(barsAgo), side, ImbalanceRatio, ImbalanceMinVolume, StackedMinCount);
+		}
+
+		/// <summary>VPF-5: unfinished auction at the bar's high / low (approximated buyers and sellers both traded there).</summary>
+		public bool UnfinishedAuctionAt(bool high, int barsAgo = 1)
+		{
+			return _OrderFlow.UnfinishedAuction(OrderFlowFootprint(barsAgo), high);
+		}
+
+		/// <summary>VPF-5: absorption HYPOTHESIS on the last closed bar (see _OrderFlow.Absorption). Buy = selling absorbed at the low.</summary>
+		public _OrderFlow.Side AbsorptionSignal()
+		{
+			if (!orderFlowOn() || m_ofClosed.Count < 2 || m_ofVolumes.Count < 2) return _OrderFlow.Side.Unknown;
+			_OrderFlow.Footprint fp = m_ofClosed[m_ofClosed.Count - 1];
+			_OrderFlow.Footprint prev = m_ofClosed[m_ofClosed.Count - 2];
+			if (prev.Bar != fp.Bar - 1) return _OrderFlow.Side.Unknown;
+			double cur = m_ofVolumes[m_ofVolumes.Count - 1];
+			double rank = _OrderFlow.PercentRank(m_ofVolumes.GetRange(0, m_ofVolumes.Count - 1), cur);
+			return _OrderFlow.Absorption(fp, prev.Close, rank, AbsorptionMinVolumeRank, AbsorptionMaxProgressTicks, AbsorptionExtremeTicks);
 		}
 
 		// ---- VPF-04 / VPF-6: CME holiday hooks (Globex trading date, ET). ----
