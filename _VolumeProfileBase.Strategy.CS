@@ -140,7 +140,8 @@ namespace PowerLanguage.Strategy
 			public double close;  // close of the profile's last bar (developing bar while the window is open)
 			public double poc;    // Point of control for the volume profile.
 			public double pocVol; // Volume at the point of control.
-			public bool pocComplete;   // window closed relative to the current calc bar, and poc > 0
+			public bool pocComplete;   // window closed relative to the current calc bar, and poc > 0 (VPB-5: independent of TrackNakedPoc)
+			public bool pocStale;      // VPB-4: developing window whose as-of POC could not be read (poc is not the as-of POC)
 			public bool pocNaked;      // pocComplete and no later bar has traded poc, as of the current calc bar
 			public int pocTouchedBar;  // 1-based first post-close bar whose range covered poc; 0 if none at or before current
 
@@ -153,6 +154,7 @@ namespace PowerLanguage.Strategy
 			// nodesBuilt* freezes a closed histogram until the stream generation bumps
 			// (EChanged / StartCalc). A developing profile never freezes.
 			internal int lastNakedScanBar; // last 1-based bar included in the naked scan; 0 if never
+			internal bool nakedTracked;    // VPB-5: stamped with TrackNakedPoc on; IsNakedPoc is false otherwise
 			internal int ohlcStartBar;      // startBar the OHLC cursor belongs to; mismatch resets the fold
 			internal int ohlcFoldedThrough; // last 1-based bar folded into high/low
 			internal int ohlcEndBar;        // endBar last fully folded; equal endBar skips a closed rescan
@@ -174,7 +176,7 @@ namespace PowerLanguage.Strategy
 			/// </summary>
 			public bool IsNakedPoc(int asOfBar)
 			{
-				if (!pocComplete || poc <= 0 || asOfBar <= endBar) return false;
+				if (!nakedTracked || !pocComplete || poc <= 0 || asOfBar <= endBar) return false;
 				return pocTouchedBar == 0 || pocTouchedBar > asOfBar;
 			}
 			public double vah;  // Value area high.
@@ -1776,6 +1778,7 @@ namespace PowerLanguage.Strategy
 		private int m_confluenceBuiltBar2 = int.MinValue;
 		private int m_confluenceBuiltBar3 = int.MinValue;
 		private bool m_volumePctDirty;
+		private int m_pocUnreadableCount;   // VPB-4: developing POC unreadable events this run
 		// Grow-only gather buffers. Shrinking every bar was pure allocation. rankPercentile
 		// takes the filled count so the spare tail is not part of the CDF.
 
@@ -1973,8 +1976,8 @@ namespace PowerLanguage.Strategy
 		public List<VpExtra> NakedPocs(int datastream, int asOfBar)
 		{
 			List<VpExtra> hit = new List<VpExtra>();
-			if (m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack sp) || sp == null)
-				return hit;
+			if (!TrackNakedPoc || m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack sp) || sp == null)
+				return hit;   // VPB-5: no naked POCs without naked tracking
 			stampNakedPocs(sp);
 			foreach (VpExtra extra in sp.extra.Values)
 			{
@@ -2316,19 +2319,6 @@ namespace PowerLanguage.Strategy
 		private void stampNakedPocs(StreamPack sp)
 		{
 			if (sp == null || sp.extra == null) return;
-			if (!TrackNakedPoc)
-			{
-				// Clear once. New extras default to not-naked, and nothing else sets the flags
-				// while this returns early. Turning the input back on clears the flag below.
-				if (sp.nakedSuppressed) return;
-				foreach (VpExtra extra in sp.extra.Values)
-					clearNakedPoc(extra);
-				sp.nakedSuppressed = true;
-				sp.nakedStampedBar = -1;
-				return;
-			}
-			sp.nakedSuppressed = false;
-
 			int current = streamItemBarIndex(sp.datastream);
 			if (current < 1) return;
 			IInstrument bars = barsOf(sp.datastream);
@@ -2337,8 +2327,28 @@ namespace PowerLanguage.Strategy
 			// the stamp whenever it (re)fills or re-stamps a developing extra, so each CalcBar tick still rescans.
 			bool atClose = bars == null || bars.Status == EBarState.Close;
 			if (sp.nakedStampedBar == current && sp.nakedStampedGeneration == sp.generation
-				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose))
+				&& sp.nakedStampedExtraCount == sp.extra.Count && (sp.nakedStampedAtClose || !atClose)
+				&& sp.nakedSuppressed == !TrackNakedPoc)
 				return;
+
+			if (!TrackNakedPoc)
+			{
+				// VPB-5 (D4): completeness is a fact about the window and is always stamped; only the touch scan
+				// (pocNaked / pocTouchedBar / IsNakedPoc / NakedPocs) is switched off.
+				foreach (VpExtra extra in sp.extra.Values)
+				{
+					if (extra == null) continue;
+					clearNakedPoc(extra);
+					extra.pocComplete = extra.poc > 0 && extra.endBar >= extra.startBar && extra.endBar < current;
+				}
+				sp.nakedSuppressed = true;
+				sp.nakedStampedBar = current;
+				sp.nakedStampedAtClose = atClose;
+				sp.nakedStampedGeneration = sp.generation;
+				sp.nakedStampedExtraCount = sp.extra.Count;
+				return;
+			}
+			sp.nakedSuppressed = false;
 
 			double tick = tickSize();
 			// Half a micro-tick of slack so an exact touch is never lost to rounding.
@@ -2347,6 +2357,7 @@ namespace PowerLanguage.Strategy
 			foreach (VpExtra extra in sp.extra.Values)
 			{
 				if (extra == null) continue;
+				extra.nakedTracked = true;
 				if (extra.poc <= 0)
 				{
 					clearNakedPoc(extra);
@@ -2406,6 +2417,7 @@ namespace PowerLanguage.Strategy
 			extra.pocNaked = false;
 			extra.pocTouchedBar = 0;
 			extra.lastNakedScanBar = 0;
+			extra.nakedTracked = false;
 		}
 
 		// Read-only lookup (VPB-28: the old extraFor also re-ran applyProfileGeometry as of the queried bar, which rewrote
@@ -3070,7 +3082,15 @@ namespace PowerLanguage.Strategy
 			if (vp == null || vp.Values == null) return;
 			readLevels(vp, extra.levels);
 			applyProfileGeometry(vp, extra, chartBar);
+			buildNodesFromLevels(extra);
+		}
 
+		/// <summary>
+		/// POC fallback, pocVol and HVN/LVN nodes from extra.levels alone (no IProfile). Shared by the MultiCharts
+		/// fill and the own developing profile (VPB-1). extra.levels must be sorted by ascending price.
+		/// </summary>
+		protected void buildNodesFromLevels(VpExtra extra)
+		{
 			bool[] traded;
 			List<Row> rows = denseRowsFromLevels(extra.levels, tickSize(), out traded);
 			if (rows.Count == 0) { rows = rowsFromLevels(extra.levels); traded = null; }   // fallback: old sparse behaviour
@@ -3079,6 +3099,10 @@ namespace PowerLanguage.Strategy
 			double[] vols = new double[rows.Count];
 			for (int j = 0; j < rows.Count; j++)
 				vols[j] = rows[j].volume;
+			// VPB-4: the fallback POC is the raw max-volume row, not the smoothed peak (smoothing can move it a tick).
+			int rawPocIdx = 0;
+			for (int k = 1; k < vols.Length; k++)
+				if (vols[k] > vols[rawPocIdx]) rawPocIdx = k;
 			vols = smooth(vols, DEFAULT_SMOOTH_TICKS);
 			int pocIdx = 0;
 			double pocVol = 0;
@@ -3090,7 +3114,7 @@ namespace PowerLanguage.Strategy
 					pocIdx = k;
 				}
 			}
-			if (extra.poc <= 0) extra.poc = rows[pocIdx].price;
+			if (extra.poc <= 0 && !extra.pocStale) extra.poc = rows[rawPocIdx].price;
 			if (extra.pocVol <= 0) extra.pocVol = volumeAtPrice(extra, extra.poc);
 			if (pocVol <= 0) return;
 
@@ -3460,12 +3484,20 @@ namespace PowerLanguage.Strategy
 			if (asOf >= 1 && bar > asOf) bar = asOf;
 			bool whole = asOf < 1 || endChart <= asOf;   // VPB-03: never look ahead of the calc bar
 
+			// VPB-4: the first-bar POC is only a fallback for a whole window. On a developing window an unreadable as-of POC
+			// stays 0 and is flagged (pocStale) instead of silently becoming the POC as of the profile's first bar.
 			double poc = firstPositive(
 				priceForBar(vp, bar, 0),
 				priceForBar(vp, bar - 1, 0),
 				whole ? priceForBar(vp, endChart, 0) : 0,
-				priceForBar(vp, startChart, 0),
+				whole ? priceForBar(vp, startChart, 0) : 0,
 				whole ? levelPrice(vp.POC) : 0);
+			extra.pocStale = !whole && poc <= 0;
+			if (extra.pocStale)
+			{
+				m_pocUnreadableCount++;
+				if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"VPB-4 developing POC unreadable stream({extra.dataStream}) start({startChart}) asOf({bar})");
+			}
 			double vah = firstPositive(
 				priceForBar(vp, bar, 1),
 				priceForBar(vp, bar - 1, 1),
