@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Off-MultiCharts unit tests for the VPF-5 order-flow helpers. run.sh extracts the MC-free <order-flow> block of
+  <!-- Off-MultiCharts acceptance tests T1-T8 for the VPF-5 (spec Rev 2.5) order-flow engine. run.sh extracts the MC-free <order-flow> block of
        _OrderFlow.Function.CS into Generated/ before building. Not part of PLStudies.csproj. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

@@ -4,290 +4,409 @@ using System.Collections.Generic;
 namespace PowerLanguage.Function
 {
 	/// <summary>
-	/// Spec VPF-5 (analyst-base-class-spec.md): order-flow helpers on an APPROXIMATED aggressor side.
-	///
-	/// MultiCharts .NET does not expose the trade aggressor side to study code (confirmed by the user, also for feeds such as
-	/// dxFeed). Every buy/sell split here is therefore an APPROXIMATION, never the true aggressor:
-	/// * Tick rule (Lee-Ready style, price only): a trade above the previous trade price is a buy, below is a sell, an
-	///   unchanged price (zero tick) inherits the previous classification. The very first trade of a run has no previous
-	///   price and stays unclassified. Misclassifies trades inside the spread, iceberg / hidden fills and bundled ticks.
-	/// * Fallback per bar: Bars.UpTicks / Bars.DownTicks (MultiCharts' own up/down tick split; depending on the chart's
-	///   "Build volume on" setting these are tick counts or volumes). Bar delta only; no per-price footprint.
-	/// Treat delta, imbalances, stacked imbalances, unfinished auctions and absorption as hypotheses to be tested, not as
-	/// order-book facts. Helper-file convention per the CS-0 probe (plain class in PowerLanguage.Function, class name =
-	/// file name). MultiCharts-free: tests/OrderFlowTests extracts the &lt;order-flow&gt; block.
+	/// Spec VPF-5, Rev 2.5 (analyst-base-class-spec.md): order-flow helpers with a per-bar ranked fallback chain and a quality
+	/// tag on every value. MultiCharts .NET does not expose the trade aggressor side (confirmed by the user, also with dxFeed),
+	/// so every buy/sell split below except the reserved Aggressor rank is an APPROXIMATION:
+	///   1 Aggressor   (Exact)   reserved: native aggressor flag per trade. Not exposed by MC .NET today; never produced.
+	///   2 Quote       (High)    Lee-Ready on 1-tick Trade + Bid + Ask streams (DataLoader): price >= ask BUY, price &lt;= bid SELL,
+	///                           inside the spread -> tick rule. A trade whose bid or ask is older than MaxQuoteAgeMs (default
+	///                           1000 ms), missing or crossed is classified by the tick rule and the bar drops to TickRule.
+	///   3 TickRule    (Medium)  trade ticks with sizes: uptick BUY, downtick SELL, zero tick inherits the previous side. The side
+	///                           carries across bars and sessions; the very first trade ever is BUY (as MC, UM p35).
+	///   4 BarUpDown   (Low)     Bars.UpTicks / DownTicks only, Build Volume On = Trade Volume (set by the caller), and the
+	///                           per-bar T7 check Up + Down == Volume. Bar delta only, no ladder.
+	///   5 Unavailable (Unknown) Tick Count mode, failed T7, IOG history without a 1-tick Bar Magnifier, or no usable data.
+	/// Closed bars only: a bar is built when the caller closes it, from events time-stamped at or before its close; later events
+	/// stay queued. A cumulative value carries the lowest quality of its bars. MultiCharts-free (no MC types): the
+	/// &lt;order-flow&gt; block is extracted by tests/OrderFlowTests (acceptance tests T1-T8). Helper-file convention per the CS-0
+	/// probe (plain class in PowerLanguage.Function, class name = file name).
 	/// </summary>
 	public sealed class _OrderFlow
 	{
 		private _OrderFlow() { }
 
 		// <order-flow>
-		/// <summary>VPF-5: approximated aggressor side. Unknown = not classifiable (first trade of a run).</summary>
+		/// <summary>Rank of the source that produced a bar (lower = better).</summary>
+		public enum FlowSource { Aggressor = 0, Quote = 1, TickRule = 2, BarUpDown = 3, Unavailable = 4 }
+		/// <summary>Quality tag (lower = better). A combined value takes the worst (highest) tag of its parts.</summary>
+		public enum FlowQuality { Exact = 0, High = 1, Medium = 2, Low = 3, Unknown = 4 }
 		public enum Side { Unknown = 0, Buy = 1, Sell = -1 }
-
-		/// <summary>VPF-5: where the approximation of a bar came from.</summary>
-		public enum Source { None = 0, TickRule = 1, UpDownTicks = 2 }
-
-		/// <summary>
-		/// Tick rule classifier: uptick = buy, downtick = sell, zero tick inherits the previous classification.
-		/// APPROXIMATION of the aggressor side (see _OrderFlow).
-		/// </summary>
-		public sealed class TickRule
+		/// <summary>Cumulative delta reset: Globex session open or the first RTH bar (caller supplies the keys).</summary>
+		public enum ResetMode { Session = 0, Rth = 1 }
+		/// <summary>Chart Build Volume On setting (Format Instruments). Not readable from code (unverified), so the caller states it.</summary>
+		public enum VolumeBasis { Unknown = 0, TradeVolume = 1, TickCount = 2 }
+		/// <summary>Per-bar data regime, set by the caller.</summary>
+		public enum Regime
 		{
-			private double m_lastPrice = double.NaN;
-			private Side m_lastSide = Side.Unknown;
-			private readonly double m_eps;
-
-			/// <param name="tick">Instrument tick size; price changes smaller than tick/2 count as a zero tick.</param>
-			public TickRule(double tick) { m_eps = tick > 0 ? tick * 0.5 : 1e-12; }
-
-			public Side LastSide { get { return m_lastSide; } }
-
-			public Side Classify(double price)
-			{
-				Side s;
-				if (double.IsNaN(m_lastPrice)) s = Side.Unknown;
-				else if (price > m_lastPrice + m_eps) s = Side.Buy;
-				else if (price < m_lastPrice - m_eps) s = Side.Sell;
-				else s = m_lastSide;   // zero tick inherits
-				m_lastPrice = price;
-				m_lastSide = s;
-				return s;
-			}
-
-			public void Reset() { m_lastPrice = double.NaN; m_lastSide = Side.Unknown; }
+			TickStream = 0,             // DataLoader 1-tick Trade stream (and Bid/Ask streams if QuotesExpected)
+			IogRealTime = 1,            // IOG tick calls in real time (trade ticks, no quotes: StatusLine bid/ask is not used)
+			IogMagnifierOneTick = 2,    // IOG history with Bar Magnifier = 1 tick (stated by the caller)
+			IogHistoryNoMagnifier = 3,  // IOG history on synthetic OHLC points: no flow
+			BarsOnly = 4                // no tick source: BarUpDown or Unavailable
 		}
 
-		/// <summary>
-		/// Approximated footprint of one bar: buy / sell volume per price row (1 tick). "Ask" = approximated buy volume,
-		/// "Bid" = approximated sell volume, the usual footprint naming.
-		/// </summary>
-		public sealed class Footprint
+		public struct FlowValue
 		{
-			public readonly double Tick;
-			public Source Source;
-			public int Bar;                 // 1-based bar number (caller's)
-			public double Open, High, Low, Close;
-			public double UnclassifiedVolume;
-			public bool Partial;            // the first ticks of the bar were not seen (e.g. calc started mid-bar)
-			private readonly SortedDictionary<long, double[]> m_rows = new SortedDictionary<long, double[]>();
-			private double m_buy, m_sell;
+			public double Value;
+			public FlowSource Source;
+			public FlowQuality Quality;
+			public bool Developing;     // not final yet (e.g. absorption before the next bar closes)
+			public static FlowValue Unavailable(bool developing = false)
+			{
+				return new FlowValue { Value = double.NaN, Source = FlowSource.Unavailable, Quality = FlowQuality.Unknown, Developing = developing };
+			}
+			public bool IsAvailable { get { return Source != FlowSource.Unavailable && !double.IsNaN(Value); } }
+			public override string ToString() { return Value + " " + Source + "/" + Quality + (Developing ? " dev" : ""); }
+		}
 
-			public Footprint(double tick) { Tick = tick > 0 ? tick : 0.01; Open = High = Low = Close = double.NaN; }
+		public sealed class FlowConfig
+		{
+			public double MaxQuoteAgeMs = 1000;
+			public ResetMode ResetMode = ResetMode.Session;
+			/// <summary>false (default): a session mixing Quote and TickRule bars reports the worst of them (session to date, no lookahead).</summary>
+			public bool AllowMixed = false;
+			public bool QuotesExpected = true;        // Bid/Ask tick streams are being fed
+			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume
+			public bool ExcludeExtremesTickRule = true;   // TickRule footprints are wrong at the bar high/low
+			public int MaxBars = 5000;                     // closed bars kept
+		}
 
+		/// <summary>Data the caller has for the bar being closed (Data1 values).</summary>
+		public struct BarInput
+		{
+			public int BarNumber;            // 1-based, increasing
+			public DateTime CloseTime;       // bar time stamp (MC bars are close-stamped); events with time &lt;= CloseTime belong here
+			public DateTime SessionKey;      // e.g. Globex date
+			public DateTime ResetKey;        // CumDelta resets when this changes (Session or RTH key, caller's choice)
+			public Regime Regime;
+			public double High, Low, Close, Volume, UpTicks, DownTicks;
+		}
+
+		public struct Imbalance
+		{
+			public double Price;
+			public Side Side;
+			public double Ratio;             // +Infinity when the diagonal level traded 0
+			public FlowQuality Quality;
+		}
+
+		public sealed class StackedResult
+		{
+			public readonly List<double[]> Runs = new List<double[]>();   // {lowPrice, highPrice, count, side (+1 buy / -1 sell)}, buy runs first, low -> high
+			public FlowQuality Quality = FlowQuality.Unknown;
+			public int Longest { get { int m = 0; foreach (var r in Runs) m = Math.Max(m, (int)r[2]); return m; } }
+			public bool Found { get { return Runs.Count > 0; } }
+		}
+
+		/// <summary>Footprint of one closed bar. Bid = approximated sell volume, Ask = approximated buy volume (footprint naming).</summary>
+		public sealed class FootprintBar
+		{
+			public int BarNumber;
+			public DateTime CloseTime, SessionKey, ResetKey;
+			public FlowSource Source = FlowSource.Unavailable;
+			public FlowQuality Quality = FlowQuality.Unknown;   // after the AllowMixed session rule
+			public double Buy, Sell, Volume;
+			public int Trades, StaleQuoteTrades;
+			public bool FirstAfterConnect;                      // first built bar: ticks before the feed started are missing
+			public double TradeHigh = double.NaN, TradeLow = double.NaN, BarHigh, BarLow, BarClose;
+			internal readonly SortedDictionary<long, double[]> Ladder = new SortedDictionary<long, double[]>();   // row -> {bid, ask}
+			public double Tick;
+			public bool HasLadder { get { return Ladder.Count > 0 && (Source == FlowSource.Quote || Source == FlowSource.TickRule || Source == FlowSource.Aggressor); } }
+			public double Delta { get { return Buy - Sell; } }
 			public long Row(double price) { return (long)Math.Round(price / Tick); }
-			public double PriceOf(long row) { return row * Tick; }
-			public bool HasRows { get { return m_rows.Count > 0; } }
-			public double BuyVolume { get { return m_buy; } }
-			public double SellVolume { get { return m_sell; } }
-			public double Delta { get { return m_buy - m_sell; } }
-			public double TotalVolume { get { return m_buy + m_sell + UnclassifiedVolume; } }
-
-			/// <summary>Add one trade (tick rule path).</summary>
-			public void Add(double price, double volume, Side side)
-			{
-				if (double.IsNaN(Open)) Open = price;
-				if (double.IsNaN(High) || price > High) High = price;
-				if (double.IsNaN(Low) || price < Low) Low = price;
-				Close = price;
-				if (volume <= 0) return;
-				if (side == Side.Unknown) { UnclassifiedVolume += volume; return; }
-				long r = Row(price);
-				double[] v;
-				if (!m_rows.TryGetValue(r, out v)) { v = new double[2]; m_rows[r] = v; }
-				if (side == Side.Buy) { v[0] += volume; m_buy += volume; } else { v[1] += volume; m_sell += volume; }
-			}
-
-			/// <summary>Bar-level fallback: UpTicks / DownTicks, no per-price rows.</summary>
-			public void SetBarTotals(double up, double down)
-			{
-				m_rows.Clear();
-				m_buy = Math.Max(0, up);
-				m_sell = Math.Max(0, down);
-				UnclassifiedVolume = 0;
-				Source = Source.UpDownTicks;
-			}
-
-			public double Ask(double price) { double[] v; return m_rows.TryGetValue(Row(price), out v) ? v[0] : 0; }
-			public double Bid(double price) { double[] v; return m_rows.TryGetValue(Row(price), out v) ? v[1] : 0; }
-
-			/// <summary>Rows low → high: (price, ask = approx. buy, bid = approx. sell).</summary>
+			public double Bid(double price) { double[] v; return Ladder.TryGetValue(Row(price), out v) ? v[0] : 0; }
+			public double Ask(double price) { double[] v; return Ladder.TryGetValue(Row(price), out v) ? v[1] : 0; }
+			/// <summary>Ladder low -> high: {price, bid, ask}, every row from the trade low to the trade high (untraded rows are 0).</summary>
 			public List<double[]> Rows()
 			{
-				var list = new List<double[]>(m_rows.Count);
-				foreach (var kv in m_rows) list.Add(new[] { PriceOf(kv.Key), kv.Value[0], kv.Value[1] });
-				return list;
+				var res = new List<double[]>();
+				if (!HasLadder) return res;
+				for (long r = Row(TradeLow); r <= Row(TradeHigh); r++) { double[] v; Ladder.TryGetValue(r, out v); res.Add(new[] { r * Tick, v != null ? v[0] : 0, v != null ? v[1] : 0 }); }
+				return res;
 			}
-		}
-
-		/// <summary>
-		/// Diagonal imbalances. Buy at p: Ask(p) >= ratio x Bid(p - tick); sell at p: Bid(p) >= ratio x Ask(p + tick).
-		/// A zero opposite side counts when the row's own volume >= minVolume (an "infinite" imbalance). Rows whose own
-		/// volume is below minVolume never count. Returns the imbalance prices low → high; empty without footprint rows.
-		/// </summary>
-		public static List<double> Imbalances(Footprint fp, Side side, double ratio, double minVolume)
-		{
-			var res = new List<double>();
-			if (fp == null || !fp.HasRows || side == Side.Unknown || ratio <= 0) return res;
-			long lo = fp.Row(fp.Low), hi = fp.Row(fp.High);
-			for (long r = lo; r <= hi; r++)
+			internal void add(double price, double size, Side side)
 			{
-				double p = fp.PriceOf(r);
-				double own = side == Side.Buy ? fp.Ask(p) : fp.Bid(p);
-				double opp = side == Side.Buy ? fp.Bid(fp.PriceOf(r - 1)) : fp.Ask(fp.PriceOf(r + 1));
-				if (own <= 0 || own < minVolume) continue;
-				if (own >= ratio * opp) res.Add(p);
+				if (double.IsNaN(TradeHigh) || price > TradeHigh) TradeHigh = price;
+				if (double.IsNaN(TradeLow) || price < TradeLow) TradeLow = price;
+				Trades++;
+				Volume += size;
+				long r = Row(price);
+				double[] v;
+				if (!Ladder.TryGetValue(r, out v)) { v = new double[2]; Ladder[r] = v; }
+				if (side == Side.Buy) { v[1] += size; Buy += size; } else { v[0] += size; Sell += size; }
 			}
-			return res;
 		}
 
-		/// <summary>
-		/// Runs of at least minCount imbalances on consecutive rows. Each run is {lowPrice, highPrice, count}, low → high.
-		/// </summary>
-		public static List<double[]> StackedImbalances(Footprint fp, Side side, double ratio, double minVolume, int minCount = 3)
+		/// <summary>Tick rule with zero-tick inheritance. The first trade ever is BUY. Observe() records a side decided elsewhere (Lee-Ready).</summary>
+		public sealed class TickRule
 		{
-			var res = new List<double[]>();
-			List<double> imb = Imbalances(fp, side, ratio, minVolume);
-			int i = 0;
-			while (i < imb.Count)
+			private double m_last = double.NaN;
+			private Side m_side = Side.Buy;
+			private readonly double m_eps;
+			public TickRule(double tick) { m_eps = tick > 0 ? tick * 0.5 : 1e-9; }
+			public Side Peek(double price)
 			{
-				int j = i;
-				while (j + 1 < imb.Count && fp.Row(imb[j + 1]) == fp.Row(imb[j]) + 1) j++;
-				int n = j - i + 1;
-				if (n >= Math.Max(1, minCount)) res.Add(new[] { imb[i], imb[j], n });
-				i = j + 1;
+				if (double.IsNaN(m_last)) return Side.Buy;
+				if (price > m_last + m_eps) return Side.Buy;
+				if (price < m_last - m_eps) return Side.Sell;
+				return m_side;
 			}
-			return res;
+			public void Observe(double price, Side side) { m_last = price; m_side = side; }
+			public Side Classify(double price) { Side s = Peek(price); Observe(price, s); return s; }
+		}
+
+		private struct Ev { public DateTime Time; public double Price, Size; }
+
+		/// <summary>Event queue of one stream (time-ordered as delivered); consumed from the head.</summary>
+		private sealed class Queue
+		{
+			private readonly List<Ev> m_items = new List<Ev>();
+			private int m_head;
+			public bool HasNext(DateTime upTo) { return m_head < m_items.Count && m_items[m_head].Time <= upTo; }
+			public DateTime NextTime { get { return m_head < m_items.Count ? m_items[m_head].Time : DateTime.MaxValue; } }
+			public Ev Pop() { Ev e = m_items[m_head++]; if (m_head > 4096 && m_head * 2 > m_items.Count) { m_items.RemoveRange(0, m_head); m_head = 0; } return e; }
+			public void Push(Ev e) { m_items.Add(e); }
+			public int Count { get { return m_items.Count - m_head; } }
 		}
 
 		/// <summary>
-		/// Unfinished auction at the bar's high (high=true) or low: both approximated buyers and sellers traded at the
-		/// extreme (a finished auction shows zero on the opposite side there). False without footprint rows.
+		/// The per-bar engine. Feed trades and quotes in any interleaving (each stream in time order), then CloseBar for each
+		/// Data1 bar in order. Not thread-safe: the caller locks when DataLoader callbacks arrive on another thread.
 		/// </summary>
-		public static bool UnfinishedAuction(Footprint fp, bool high, double minVolume = 0)
+		public sealed class FlowEngine
 		{
-			if (fp == null || !fp.HasRows) return false;
-			double p = high ? fp.High : fp.Low;
-			double a = fp.Ask(p), b = fp.Bid(p);
-			return a > 0 && b > 0 && a + b >= minVolume;
-		}
+			public readonly FlowConfig Cfg;
+			public readonly double Tick;
+			private readonly Queue m_trades = new Queue(), m_bids = new Queue(), m_asks = new Queue();
+			private readonly TickRule m_rule;
+			private double m_bid = double.NaN, m_ask = double.NaN;
+			private DateTime m_bidTime = DateTime.MinValue, m_askTime = DateTime.MinValue;
+			private readonly List<FootprintBar> m_bars = new List<FootprintBar>();
+			private readonly Dictionary<int, BarInput> m_inputs = new Dictionary<int, BarInput>();
+			private DateTime m_mixSession = DateTime.MinValue;
+			private FlowQuality m_mixWorst = FlowQuality.Exact;
 
-		/// <summary>
-		/// Absorption HYPOTHESIS (thresholds are parameters, not facts): exceptional bar volume (volumeRank >= minRank, the
-		/// caller's percentile rank of this bar's volume vs prior bars), delta against the move and price progress
-		/// &lt;= maxProgressTicks in the direction of the aggressor, with the bar's max-volume row within extremeTicks of the
-		/// extreme the aggressor pushed into. Returns Buy for absorbed selling at the low (bullish), Sell for absorbed buying at
-		/// the high (bearish), Unknown otherwise. prevClose = close of the previous bar.
-		/// </summary>
-		public static Side Absorption(Footprint fp, double prevClose, double volumeRank, double minRank, int maxProgressTicks, int extremeTicks)
-		{
-			if (fp == null || !fp.HasRows || volumeRank < minRank || double.IsNaN(prevClose)) return Side.Unknown;
-			double poc = double.NaN, pocVol = -1;
-			foreach (var r in fp.Rows()) { double v = r[1] + r[2]; if (v > pocVol) { pocVol = v; poc = r[0]; } }
-			double tol = fp.Tick * 0.5;
-			if (fp.Delta < 0 && prevClose - fp.Close <= maxProgressTicks * fp.Tick + tol && poc - fp.Low <= extremeTicks * fp.Tick + tol)
-				return Side.Buy;    // sellers hit, price did not follow, volume parked at the low
-			if (fp.Delta > 0 && fp.Close - prevClose <= maxProgressTicks * fp.Tick + tol && fp.High - poc <= extremeTicks * fp.Tick + tol)
-				return Side.Sell;   // buyers lifted, price did not follow, volume parked at the high
-			return Side.Unknown;
-		}
+			public FlowEngine(double tick, FlowConfig cfg) { Tick = tick > 0 ? tick : 0.01; Cfg = cfg ?? new FlowConfig(); m_rule = new TickRule(Tick); }
 
-		/// <summary>Percentile rank of x among values (fraction of values &lt;= x), NaN when values is empty.</summary>
-		public static double PercentRank(IList<double> values, double x)
-		{
-			if (values == null || values.Count == 0) return double.NaN;
-			int le = 0;
-			for (int i = 0; i < values.Count; i++) if (values[i] <= x) le++;
-			return (double)le / values.Count;
-		}
-
-		/// <summary>
-		/// Delta z-score of the same clock minute over prior sessions only: history holds one value per prior session (the
-		/// delta at that minute), current = today's delta at that minute. NaN with fewer than minSessions values or zero
-		/// variance.
-		/// </summary>
-		public static double DeltaZ(IList<double> priorSessions, double current, int minSessions = 2)
-		{
-			if (priorSessions == null || priorSessions.Count < Math.Max(2, minSessions)) return double.NaN;
-			double m = 0;
-			foreach (double v in priorSessions) m += v;
-			m /= priorSessions.Count;
-			double ss = 0;
-			foreach (double v in priorSessions) ss += (v - m) * (v - m);
-			double sd = Math.Sqrt(ss / (priorSessions.Count - 1));
-			return sd > 0 ? (current - m) / sd : double.NaN;
-		}
-
-		/// <summary>
-		/// Per-bar delta history with an anchored cumulative delta and the same-minute delta history per session (DeltaZ).
-		/// Bars are added once, when they close. Key = session key (e.g. Globex date) and minute of day (caller's clock).
-		/// </summary>
-		public sealed class DeltaHistory
-		{
-			private readonly int m_capacity;
-			private readonly List<int> m_bars = new List<int>();
-			private readonly List<double> m_deltas = new List<double>();
-			private readonly Dictionary<int, List<KeyValuePair<DateTime, double>>> m_byMinute = new Dictionary<int, List<KeyValuePair<DateTime, double>>>();
-			private int m_anchorBar = -1;
-			private double m_cvd;
-			public int MaxSessionsPerMinute = 60;
-
-			public DeltaHistory(int capacity = 5000) { m_capacity = Math.Max(10, capacity); }
-
+			public void AddTrade(DateTime time, double price, double size) { m_trades.Push(new Ev { Time = time, Price = price, Size = size }); }
+			public void AddQuote(DateTime time, bool isBid, double price) { (isBid ? m_bids : m_asks).Push(new Ev { Time = time, Price = price }); }
+			public int PendingTrades { get { return m_trades.Count; } }
 			public int Count { get { return m_bars.Count; } }
-			public double AnchoredCvd { get { return m_anchorBar < 0 ? double.NaN : m_cvd; } }
-			public int AnchorBar { get { return m_anchorBar; } }
 
-			/// <summary>Start a new cumulative delta at this bar (the bar's own delta is included when it is added).</summary>
-			public void Anchor(int bar) { m_anchorBar = bar; m_cvd = 0; }
-
-			public void Add(int bar, double delta, DateTime sessionKey, int minuteOfDay)
+			/// <summary>The closed bar `ago` bars back from the newest closed bar (0 = newest), or null.</summary>
+			public FootprintBar Closed(int ago) { int i = m_bars.Count - 1 - ago; return ago >= 0 && i >= 0 ? m_bars[i] : null; }
+			public FootprintBar ByNumber(int bar)
 			{
-				if (m_bars.Count > 0 && bar <= m_bars[m_bars.Count - 1]) return;   // once per bar
-				m_bars.Add(bar); m_deltas.Add(delta);
-				if (m_bars.Count > m_capacity) { m_bars.RemoveAt(0); m_deltas.RemoveAt(0); }
-				if (m_anchorBar >= 0 && bar >= m_anchorBar) m_cvd += delta;
-				List<KeyValuePair<DateTime, double>> l;
-				if (!m_byMinute.TryGetValue(minuteOfDay, out l)) { l = new List<KeyValuePair<DateTime, double>>(); m_byMinute[minuteOfDay] = l; }
-				l.Add(new KeyValuePair<DateTime, double>(sessionKey.Date, delta));
-				if (l.Count > MaxSessionsPerMinute + 1) l.RemoveAt(0);
+				for (int i = m_bars.Count - 1; i >= 0; i--) { if (m_bars[i].BarNumber == bar) return m_bars[i]; if (m_bars[i].BarNumber < bar) break; }
+				return null;
 			}
 
-			/// <summary>Delta of a bar (1-based number), NaN if not stored.</summary>
-			public double DeltaOf(int bar)
+			private void applyQuotes(DateTime upTo)
 			{
-				int i = m_bars.BinarySearch(bar);
-				return i >= 0 ? m_deltas[i] : double.NaN;
+				while (m_bids.HasNext(upTo)) { Ev q = m_bids.Pop(); m_bid = q.Price; m_bidTime = q.Time; }
+				while (m_asks.HasNext(upTo)) { Ev q = m_asks.Pop(); m_ask = q.Price; m_askTime = q.Time; }
 			}
 
-			/// <summary>Sum of deltas of stored bars in [fromBar, toBar].</summary>
-			public double Cvd(int fromBar, int toBar)
+			/// <summary>Build the footprint of a closed Data1 bar from the events stamped at or before its close.</summary>
+			public FootprintBar CloseBar(BarInput b)
 			{
-				double s = 0;
-				for (int i = 0; i < m_bars.Count; i++) if (m_bars[i] >= fromBar && m_bars[i] <= toBar) s += m_deltas[i];
-				return s;
+				var fp = new FootprintBar { BarNumber = b.BarNumber, CloseTime = b.CloseTime, SessionKey = b.SessionKey, ResetKey = b.ResetKey, Tick = Tick,
+					BarHigh = b.High, BarLow = b.Low, BarClose = b.Close, FirstAfterConnect = m_bars.Count == 0 };
+				bool tickRegime = b.Regime == Regime.TickStream || b.Regime == Regime.IogRealTime || b.Regime == Regime.IogMagnifierOneTick;
+				bool quotes = b.Regime == Regime.TickStream && Cfg.QuotesExpected;
+				// always consume this bar's events, whatever the regime, so later bars never see them
+				while (m_trades.HasNext(b.CloseTime))
+				{
+					Ev t = m_trades.Pop();
+					Side s;
+					if (quotes)
+					{
+						applyQuotes(t.Time);
+						bool fresh = !double.IsNaN(m_bid) && !double.IsNaN(m_ask) && m_bid < m_ask
+							&& (t.Time - m_bidTime).TotalMilliseconds <= Cfg.MaxQuoteAgeMs && (t.Time - m_askTime).TotalMilliseconds <= Cfg.MaxQuoteAgeMs;
+						if (!fresh) { s = m_rule.Peek(t.Price); fp.StaleQuoteTrades++; }
+						else if (t.Price >= m_ask - Tick * 1e-6) s = Side.Buy;
+						else if (t.Price <= m_bid + Tick * 1e-6) s = Side.Sell;
+						else s = m_rule.Peek(t.Price);   // inside the spread: tick rule
+						m_rule.Observe(t.Price, s);
+					}
+					else s = m_rule.Classify(t.Price);
+					if (tickRegime && t.Size > 0) fp.add(t.Price, t.Size, s);
+					else if (tickRegime) { m_rule.Observe(t.Price, s); }
+				}
+				if (quotes) applyQuotes(b.CloseTime);
+
+				if (b.Regime == Regime.IogHistoryNoMagnifier || Cfg.BuildVolumeOn == VolumeBasis.TickCount)
+					clearToUnavailable(fp);
+				else if (tickRegime && fp.Trades > 0)
+				{
+					fp.Source = quotes && fp.StaleQuoteTrades == 0 ? FlowSource.Quote : FlowSource.TickRule;
+					fp.Quality = fp.Source == FlowSource.Quote ? FlowQuality.High : FlowQuality.Medium;
+				}
+				else if (tickRegime && b.Volume <= 0)
+				{
+					fp.Source = quotes ? FlowSource.Quote : FlowSource.TickRule;   // an empty bar: nothing traded, delta 0
+					fp.Quality = quotes ? FlowQuality.High : FlowQuality.Medium;
+				}
+				else if (BarUpDownQualifies(Cfg.BuildVolumeOn, b.Volume, b.UpTicks, b.DownTicks))
+				{
+					fp.Ladder.Clear(); fp.Trades = 0;
+					fp.Source = FlowSource.BarUpDown; fp.Quality = FlowQuality.Low;
+					fp.Buy = b.UpTicks; fp.Sell = b.DownTicks; fp.Volume = b.Volume;
+				}
+				else clearToUnavailable(fp);
+
+				// AllowMixed = false: Quote/TickRule bars of one session report the worst tag seen so far in that session
+				if (!Cfg.AllowMixed && (fp.Source == FlowSource.Quote || fp.Source == FlowSource.TickRule))
+				{
+					if (fp.SessionKey != m_mixSession) { m_mixSession = fp.SessionKey; m_mixWorst = FlowQuality.Exact; }
+					if (fp.Quality > m_mixWorst) m_mixWorst = fp.Quality;
+					fp.Quality = m_mixWorst;
+				}
+				m_bars.Add(fp);
+				m_inputs[b.BarNumber] = b;
+				if (m_bars.Count > Math.Max(10, Cfg.MaxBars)) { m_inputs.Remove(m_bars[0].BarNumber); m_bars.RemoveAt(0); }
+				return fp;
+			}
+
+			private static void clearToUnavailable(FootprintBar fp)
+			{
+				fp.Ladder.Clear(); fp.Buy = fp.Sell = 0; fp.Trades = 0;
+				fp.Source = FlowSource.Unavailable; fp.Quality = FlowQuality.Unknown;
+			}
+
+			/// <summary>T7 gate: Trade Volume basis and Up + Down == Volume on this bar.</summary>
+			public static bool BarUpDownQualifies(VolumeBasis basis, double volume, double up, double down)
+			{
+				if (basis != VolumeBasis.TradeVolume || volume <= 0 || up < 0 || down < 0) return false;
+				return Math.Abs(up + down - volume) <= 1e-9 * Math.Max(1, volume);
+			}
+
+			public FlowValue BarDelta(int ago)
+			{
+				FootprintBar fp = Closed(ago);
+				if (fp == null || fp.Source == FlowSource.Unavailable) return FlowValue.Unavailable();
+				return new FlowValue { Value = fp.Delta, Source = fp.Source, Quality = fp.Quality };
+			}
+
+			/// <summary>Cumulative delta from the first bar of `ago`'s reset key through `ago`. Any Unavailable bar makes it Unavailable.</summary>
+			public FlowValue CumDelta(int ago)
+			{
+				FootprintBar last = Closed(ago);
+				if (last == null) return FlowValue.Unavailable();
+				double sum = 0; FlowSource src = FlowSource.Aggressor; FlowQuality q = FlowQuality.Exact;
+				for (int i = m_bars.Count - 1 - ago; i >= 0 && m_bars[i].ResetKey == last.ResetKey; i--)
+				{
+					FootprintBar fp = m_bars[i];
+					if (fp.Source == FlowSource.Unavailable) return FlowValue.Unavailable();
+					sum += fp.Delta;
+					if (fp.Source > src) src = fp.Source;
+					if (fp.Quality > q) q = fp.Quality;
+				}
+				return new FlowValue { Value = sum, Source = src, Quality = q };
+			}
+
+			public List<Imbalance> DiagonalImbalances(int ago, double ratio = 3.0, double minVol = 10)
+			{
+				return Imbalances(Closed(ago), ratio, minVol, Cfg.ExcludeExtremesTickRule);
+			}
+
+			public StackedResult StackedImbalances(int ago, double ratio = 3.0, double minVol = 10, int minStack = 3)
+			{
+				return Stacked(Closed(ago), ratio, minVol, minStack, Cfg.ExcludeExtremesTickRule);
 			}
 
 			/// <summary>
-			/// z of `current` against the same minute of the last `sessions` PRIOR sessions (sessionKey earlier than
-			/// `currentSession`; today's own value never enters its baseline).
+			/// Absorption at bar `ago` (Rev 2.5). side = Sell: bids absorbing within edgeTicks of the bar low, Σ Bid >= volMult x the
+			/// mean level volume of the bar, close >= low + holdTicks, and the next bar does not trade below that low. Mirror for
+			/// Buy at the high. Value 1 / 0. Developing until the next bar has closed. Requires quality High or better, so with
+			/// TickRule / BarUpDown it is Unknown.
 			/// </summary>
-			public double SameMinuteZ(int minuteOfDay, DateTime currentSession, double current, int sessions = 20)
+			public FlowValue Absorption(int ago, Side side, int edgeTicks = 2, double volMult = 2.0, int holdTicks = 1)
 			{
-				List<KeyValuePair<DateTime, double>> l;
-				if (!m_byMinute.TryGetValue(minuteOfDay, out l)) return double.NaN;
-				var prior = new List<double>();
-				for (int i = l.Count - 1; i >= 0 && prior.Count < sessions; i--)
-					if (l[i].Key < currentSession.Date) prior.Add(l[i].Value);
-				return DeltaZ(prior, current, 2);
+				FootprintBar fp = Closed(ago);
+				if (fp == null || side == Side.Unknown || !fp.HasLadder || fp.Quality > FlowQuality.High) return FlowValue.Unavailable();
+				List<double[]> rows = fp.Rows();
+				double total = 0; foreach (var r in rows) total += r[1] + r[2];
+				double mean = rows.Count > 0 ? total / rows.Count : 0;
+				double edge = 0, tol = Tick * 1e-6;
+				foreach (var r in rows)
+				{
+					if (side == Side.Sell && r[0] <= fp.TradeLow + edgeTicks * Tick + tol) edge += r[1];
+					if (side == Side.Buy && r[0] >= fp.TradeHigh - edgeTicks * Tick - tol) edge += r[2];
+				}
+				bool ok = mean > 0 && edge >= volMult * mean - tol
+					&& (side == Side.Sell ? fp.BarClose >= fp.TradeLow + holdTicks * Tick - tol : fp.BarClose <= fp.TradeHigh - holdTicks * Tick + tol);
+				FootprintBar next = Closed(ago - 1);
+				bool developing = next == null;
+				if (ok && next != null)
+				{
+					BarInput nb = m_inputs.ContainsKey(next.BarNumber) ? m_inputs[next.BarNumber] : default(BarInput);
+					double nLow = !double.IsNaN(next.TradeLow) && next.HasLadder ? Math.Min(next.TradeLow, nb.Low) : nb.Low;
+					double nHigh = !double.IsNaN(next.TradeHigh) && next.HasLadder ? Math.Max(next.TradeHigh, nb.High) : nb.High;
+					if (side == Side.Sell && nLow < fp.TradeLow - tol) ok = false;
+					if (side == Side.Buy && nHigh > fp.TradeHigh + tol) ok = false;
+				}
+				return new FlowValue { Value = ok ? 1 : 0, Source = fp.Source, Quality = fp.Quality, Developing = developing };
 			}
+		}
 
-			/// <summary>Volumes are not stored here; this returns the last n bar deltas (oldest first).</summary>
-			public List<double> LastDeltas(int n)
+		/// <summary>
+		/// Diagonal imbalances (Rev 2.5): buy at p when Ask[p] >= ratio x Bid[p - 1 tick] and Ask[p] >= minVol; sell at p when
+		/// Bid[p] >= ratio x Ask[p + 1 tick] and Bid[p] >= minVol. A zero diagonal (inside the ladder) counts as +Infinity; a
+		/// missing diagonal level (ladder edge) never counts. ratio is floored at 3.0 and minVol at 1. Under TickRule the
+		/// quality is Low and the bar high/low levels are excluded when excludeExtremes. Empty without a ladder.
+		/// </summary>
+		public static List<Imbalance> Imbalances(FootprintBar fp, double ratio, double minVol, bool excludeExtremes)
+		{
+			var res = new List<Imbalance>();
+			if (fp == null || !fp.HasLadder) return res;
+			ratio = Math.Max(3.0, ratio);
+			minVol = Math.Max(1.0, minVol);
+			bool tr = fp.Source == FlowSource.TickRule;
+			FlowQuality q = tr ? FlowQuality.Low : fp.Quality;
+			long lo = fp.Row(fp.TradeLow), hi = fp.Row(fp.TradeHigh);
+			for (long r = lo; r <= hi; r++)
 			{
-				int from = Math.Max(0, m_deltas.Count - n);
-				return m_deltas.GetRange(from, m_deltas.Count - from);
+				if (tr && excludeExtremes && (r == lo || r == hi)) continue;
+				double p = r * fp.Tick;
+				double ask = fp.Ask(p), bid = fp.Bid(p);
+				if (r > lo && ask >= minVol)
+				{
+					double d = fp.Bid(p - fp.Tick);
+					if (ask >= ratio * d) res.Add(new Imbalance { Price = p, Side = Side.Buy, Ratio = d > 0 ? ask / d : double.PositiveInfinity, Quality = q });
+				}
+				if (r < hi && bid >= minVol)
+				{
+					double d = fp.Ask(p + fp.Tick);
+					if (bid >= ratio * d) res.Add(new Imbalance { Price = p, Side = Side.Sell, Ratio = d > 0 ? bid / d : double.PositiveInfinity, Quality = q });
+				}
 			}
+			return res;
+		}
+
+		/// <summary>Stacked imbalances: runs of >= minStack (floored at 3) consecutive same-side imbalance prices, both sides.</summary>
+		public static StackedResult Stacked(FootprintBar fp, double ratio, double minVol, int minStack, bool excludeExtremes)
+		{
+			var res = new StackedResult();
+			if (fp == null || !fp.HasLadder) return res;
+			minStack = Math.Max(3, minStack);
+			res.Quality = fp.Source == FlowSource.TickRule ? FlowQuality.Low : fp.Quality;
+			List<Imbalance> all = Imbalances(fp, ratio, minVol, excludeExtremes);
+			foreach (Side side in new[] { Side.Buy, Side.Sell })
+			{
+				var px = new List<long>();
+				foreach (var i in all) if (i.Side == side) px.Add(fp.Row(i.Price));
+				int a = 0;
+				while (a < px.Count)
+				{
+					int b = a;
+					while (b + 1 < px.Count && px[b + 1] == px[b] + 1) b++;
+					if (b - a + 1 >= minStack) res.Runs.Add(new double[] { px[a] * fp.Tick, px[b] * fp.Tick, b - a + 1, (int)side });
+					a = b + 1;
+				}
+			}
+			return res;
 		}
 		// </order-flow>
 	}
