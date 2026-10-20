@@ -1,6 +1,7 @@
 ﻿using ATCenterProxy.interop;
 using PowerLanguage.Function;
 using System;
+using System.Collections.Generic;
 
 namespace PowerLanguage.Strategy
 {
@@ -116,12 +117,20 @@ namespace PowerLanguage.Strategy
 			m_chartIsEastern = m_chartTz.Id == m_est.Id
 				|| (m_chartTz.BaseUtcOffset == m_est.BaseUtcOffset && m_chartTz.HasSameRules(m_est));
 			m_cacheValid = false;   // zone or session windows may have changed
+			m_session = null;       // VPF-2
+			m_sessionBar = -1;
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
 		/// <summary>
 		/// VPF-01. Zone of the bar timestamps from the instrument settings (PR #1 review: no input parameter).
 		/// </summary>
+		protected override void CalcBar()
+		{
+			base.CalcBar();
+			updateSessionStats();   // VPF-2
+		}
+
 		private TimeZoneInfo resolveChartTz(IInstrumentSettings info)
 		{
 			switch (info.TimeZone)
@@ -600,6 +609,164 @@ namespace PowerLanguage.Strategy
 				default:
 					return false;
 			}
+		}
+
+		// ---- VPF-2: session statistics (RTH / ETH / IB) per Globex day ----
+
+		/// <summary>
+		/// VPF-2. Statistics of one Globex trading day, updated from closed Data1 bars only (no look-ahead; an intrabar tick
+		/// never changes them). Bars are close-stamped: a bar is RTH when its ET close time is in (RthStart, RthValueEnd]
+		/// (value window, D5: 16:00, or the early RTH close), ETH (overnight) when it closes at or before RthStart, and
+		/// the IB is the RTH bars closing in (RthStart, RthStart + IbMinutes]. 0 means "not seen yet".
+		/// </summary>
+		public sealed class SessionStats
+		{
+			public DateTime globexDate;
+			public double globexHigh, globexLow, globexVolume;
+			public double ethHigh, ethLow, ethVolume;          // overnight: Globex open to the RTH open
+			public double rthOpen, rthHigh, rthLow, rthClose, rthVolume;
+			public double ibHigh, ibLow;
+			public bool ibComplete;                           // true from the first closed bar after the IB end
+			public bool rthComplete;                          // true from the first closed bar after the RTH value end
+			public double priorRthHigh, priorRthLow, priorRthClose;
+			public double priorGlobexHigh, priorGlobexLow;
+			public double IbRange { get { return ibComplete ? ibHigh - ibLow : 0; } }
+			/// <summary>RTH high above the IB high in IB ranges (0 until the IB is complete).</summary>
+			public double IbExtensionUp { get { double r = IbRange; return r > 0 && rthHigh > ibHigh ? (rthHigh - ibHigh) / r : 0; } }
+			/// <summary>IB low minus the RTH low in IB ranges (0 until the IB is complete).</summary>
+			public double IbExtensionDown { get { double r = IbRange; return r > 0 && rthLow > 0 && rthLow < ibLow ? (ibLow - rthLow) / r : 0; } }
+			/// <summary>RTH open minus the prior RTH close (0 when either is unknown).</summary>
+			public double Gap { get { return rthOpen > 0 && priorRthClose > 0 ? rthOpen - priorRthClose : 0; } }
+		}
+
+		/// <summary>VPF-2. Initial balance length in minutes from RthStart. >= 1. Default 60. Not an [Input].</summary>
+		protected int IbMinutes { get; set; } = 60;
+		/// <summary>VPF-2 (D5). End of RTH for value logic (profiles, IB/RTH stats): 16:00 ET. m_rthEnd (16:15) stays the session flag.</summary>
+		protected TimeSpan m_rthValueEnd = DefaultRthValueEnd;
+		public static readonly TimeSpan DefaultRthValueEnd = new TimeSpan(16, 0, 0);
+
+		private SessionStats m_session;
+		private int m_sessionBar = -1;
+
+		/// <summary>VPF-2. Statistics of the Globex day of the last closed Data1 bar (null before the first closed bar).</summary>
+		public SessionStats Session { get { return m_session; } }
+
+		/// <summary>RTH value-window end for a Globex date: the early RTH close when there is one, else m_rthValueEnd.</summary>
+		protected TimeSpan RthValueEndEt(DateTime globexDate)
+		{
+			TimeSpan? early = RthEarlyCloseEt(globexDate);
+			return early.HasValue && early.Value < m_rthValueEnd ? early.Value : m_rthValueEnd;
+		}
+
+		/// <summary>VPF-2/3: the close-stamped bar at ET time <paramref name="et"/> belongs to the RTH value window.</summary>
+		protected bool IsRthValueBarEt(DateTime et)
+		{
+			DateTime gx = globexDateEt(et);
+			if (et.Date != gx.Date || IsGlobexClosedDay(gx) || IsNoRthDay(gx)) return false;
+			TimeSpan t = et.TimeOfDay;
+			return t > m_rthStart && t <= RthValueEndEt(gx);
+		}
+
+		private void updateSessionStats()
+		{
+			if (Bars.Status != EBarState.Close) return;
+			int bar = Bars.FullSymbolData.Current;
+			if (bar == m_sessionBar) return;
+			m_sessionBar = bar;
+			if (IbMinutes < 1) throw new ArgumentException("IbMinutes must be >= 1.");
+
+			DateTime et = ToEastern(Bars.Time[0]);
+			DateTime gx = globexDateEt(et);
+			if (m_session == null || m_session.globexDate != gx)
+			{
+				SessionStats prev = m_session;
+				m_session = new SessionStats { globexDate = gx };
+				if (prev != null)
+				{
+					bool prevHadRth = prev.rthClose > 0;
+					m_session.priorRthHigh = prevHadRth ? prev.rthHigh : prev.priorRthHigh;
+					m_session.priorRthLow = prevHadRth ? prev.rthLow : prev.priorRthLow;
+					m_session.priorRthClose = prevHadRth ? prev.rthClose : prev.priorRthClose;
+					m_session.priorGlobexHigh = prev.globexHigh;
+					m_session.priorGlobexLow = prev.globexLow;
+				}
+			}
+			SessionStats s = m_session;
+			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0], o = Bars.Open[0], v = Bars.Volume[0];
+			if (s.globexHigh == 0 || h > s.globexHigh) s.globexHigh = h;
+			if (s.globexLow == 0 || l < s.globexLow) s.globexLow = l;
+			s.globexVolume += v;
+
+			TimeSpan t = et.TimeOfDay;
+			bool sameCalendarDay = et.Date == gx.Date;
+			bool rth = IsRthValueBarEt(et);
+			TimeSpan ibEnd = m_rthStart + TimeSpan.FromMinutes(IbMinutes);
+			if (rth)
+			{
+				if (s.rthOpen == 0) s.rthOpen = o;
+				if (s.rthHigh == 0 || h > s.rthHigh) s.rthHigh = h;
+				if (s.rthLow == 0 || l < s.rthLow) s.rthLow = l;
+				s.rthClose = c;
+				s.rthVolume += v;
+				if (t <= ibEnd)
+				{
+					if (s.ibHigh == 0 || h > s.ibHigh) s.ibHigh = h;
+					if (s.ibLow == 0 || l < s.ibLow) s.ibLow = l;
+				}
+			}
+			else if (!sameCalendarDay || t <= m_rthStart)
+			{
+				if (s.ethHigh == 0 || h > s.ethHigh) s.ethHigh = h;
+				if (s.ethLow == 0 || l < s.ethLow) s.ethLow = l;
+				s.ethVolume += v;
+			}
+			if (sameCalendarDay && t >= ibEnd && s.ibHigh > 0) s.ibComplete = true;
+			if (sameCalendarDay && t >= RthValueEndEt(gx) && s.rthClose > 0) s.rthComplete = true;
+		}
+
+		// ---- VPF-3: RTH-only and Globex-day Own profiles (VPB-1 hooks) ----
+
+		/// <summary>VPF-3: window of the VPB-1 Own profile on a futures chart.</summary>
+		public enum EOwnProfileWindow { MultiChartsProfile = 0, GlobexDay = 1, Rth = 2 }
+
+		/// <summary>
+		/// VPF-3. MultiChartsProfile (default, VPB behaviour: the MC profile boundaries), GlobexDay (18:00 → 17:00 ET) or Rth
+		/// (Globex day, RTH value-window bars only, 09:30 → 16:00 ET). Set in Create; needs DevelopingSource = Own. Not an [Input].
+		/// </summary>
+		protected EOwnProfileWindow OwnProfileWindow { get; set; } = EOwnProfileWindow.MultiChartsProfile;
+
+		protected override bool isNewProfileWindow(int stream, int barIndex, DateTime barTime, DateTime prevBarTime)
+		{
+			if (OwnProfileWindow == EOwnProfileWindow.MultiChartsProfile)
+				return base.isNewProfileWindow(stream, barIndex, barTime, prevBarTime);
+			if (prevBarTime == DateTime.MinValue) return true;
+			return GlobexDate(barTime) != GlobexDate(prevBarTime);
+		}
+
+		protected override bool includeBarInProfile(DateTime barTime)
+		{
+			if (OwnProfileWindow != EOwnProfileWindow.Rth) return base.includeBarInProfile(barTime);
+			return IsRthValueBarEt(ToEastern(barTime));
+		}
+
+		/// <summary>VPF-3: developing RTH Own profile (OwnProfileWindow = Rth and DevelopingSource = Own), else null.</summary>
+		public VpExtra RthProfile()
+		{
+			return OwnProfileWindow == EOwnProfileWindow.Rth && DevelopingSource == EDevelopingSource.Own ? DevelopingExtra(DevProfileDataStream) : null;
+		}
+
+		/// <summary>VPF-3: developing Globex-day Own profile (OwnProfileWindow = GlobexDay and DevelopingSource = Own), else null.</summary>
+		public VpExtra GlobexProfile()
+		{
+			return OwnProfileWindow == EOwnProfileWindow.GlobexDay && DevelopingSource == EDevelopingSource.Own ? DevelopingExtra(DevProfileDataStream) : null;
+		}
+
+		/// <summary>VPF-3: last completed RTH Own profile, or null.</summary>
+		public VpExtra PriorRthProfile()
+		{
+			if (OwnProfileWindow != EOwnProfileWindow.Rth) return null;
+			List<VpExtra> done = OwnCompletedProfiles(1);
+			return done.Count > 0 ? done[0] : null;
 		}
 
 		// ---- VPF-04 / VPF-6: CME holiday hooks (Globex trading date, ET). ----
