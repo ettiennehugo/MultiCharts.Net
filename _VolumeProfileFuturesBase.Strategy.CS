@@ -119,6 +119,7 @@ namespace PowerLanguage.Strategy
 			m_cacheValid = false;   // zone or session windows may have changed
 			m_session = null;       // VPF-2
 			m_sessionBar = -1;
+			m_rollBars.Clear(); m_rollLastDay = DateTime.MinValue; m_rollLastBar = -1; m_rollLastName = null;   // VPF-4
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
 
@@ -126,6 +127,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
+			detectRoll();           // VPF-4
 		}
 
 		//methods
@@ -726,6 +728,69 @@ namespace PowerLanguage.Strategy
 			if (OwnProfileWindow != EOwnProfileWindow.Rth) return null;
 			List<VpExtra> done = OwnCompletedProfiles(1);
 			return done.Count > 0 ? done[0] : null;
+		}
+
+		// ---- VPF-4: roll-splice flag for datafeed continuous futures (Q3) ----
+
+		/// <summary>VPF-4: how rolls are found. Off (default) = never flag.</summary>
+		public enum ERollDetection { Off = 0, Series = 1, Table = 2, SeriesOrTable = 3 }
+
+		/// <summary>VPF-4: roll detection mode. Not an [Input].</summary>
+		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
+		/// <summary>
+		/// VPF-4 Series: a Globex-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
+		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
+		/// </summary>
+		protected int RollGapTicks { get; set; } = 8;
+		/// <summary>VPF-4 Table: Globex trading dates on which the continuous series switched contract (set by the strategy).</summary>
+		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
+
+		private readonly List<int> m_rollBars = new List<int>();   // Data1 bar (Status Bar #) of the first bar of each roll day
+		private DateTime m_rollLastDay = DateTime.MinValue;
+		private int m_rollLastBar = -1;
+		private string m_rollLastName;
+
+		/// <summary>VPF-4: Data1 bars (1-based) on which a roll was detected so far.</summary>
+		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
+
+		private void detectRoll()
+		{
+			if (RollDetection == ERollDetection.Off || Bars.Status != EBarState.Close) return;
+			int bar = Bars.FullSymbolData.Current;
+			if (bar == m_rollLastBar) return;
+			m_rollLastBar = bar;
+			string name = Bars.Info.Name;
+			DateTime gx = GlobexDate(Bars.Time[0]);
+			bool newDay = gx != m_rollLastDay;
+			bool roll = m_rollLastName != null && name != m_rollLastName;
+			if (newDay && m_rollLastDay != DateTime.MinValue && bar > 1)
+			{
+				bool series = RollDetection == ERollDetection.Series || RollDetection == ERollDetection.SeriesOrTable;
+				bool table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
+				if (table && RollDates.Contains(gx.Date)) roll = true;
+				if (series && gx.Month % 3 == 0 && gx.Day <= 21 && RollGapTicks > 0
+					&& Math.Abs(Bars.Open[0] - Bars.Close[1]) >= RollGapTicks * tickSize() - tickSize() * 1e-6) roll = true;
+			}
+			if (roll && (m_rollBars.Count == 0 || m_rollBars[m_rollBars.Count - 1] != bar))
+			{
+				m_rollBars.Add(bar);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected globexDate({gx:yyyy-MM-dd}) bar({bar}) name({name})");
+			}
+			m_rollLastName = name;
+			m_rollLastDay = gx;
+		}
+
+		/// <summary>
+		/// VPF-4: true when a detected roll falls after the profile's first bar and at or before the calc bar: the profile spans
+		/// the splice, or its levels (e.g. a naked POC) are pre-roll prices being used after the roll. Data1 profiles only.
+		/// </summary>
+		protected override bool profileCrossesRoll(VpExtra e)
+		{
+			if (e == null || m_rollBars.Count == 0 || e.dataStream > 1) return false;
+			int cur = Bars.FullSymbolData.Current;
+			for (int i = 0; i < m_rollBars.Count; i++)
+				if (m_rollBars[i] > e.startBar && m_rollBars[i] <= cur) return true;
+			return false;
 		}
 
 		// ---- VPF-04 / VPF-6: CME holiday hooks (Globex trading date, ET). ----

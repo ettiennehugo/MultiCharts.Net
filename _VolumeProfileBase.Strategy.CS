@@ -2452,6 +2452,9 @@ namespace PowerLanguage.Strategy
 			return 0;
 		}
 
+		/// <summary>VPF-4 hook: does this profile span a contract-roll splice? Default false; the futures base overrides.</summary>
+		protected virtual bool profileCrossesRoll(VpExtra e) { return false; }
+
 		private VpExtra m_compositeCache;
 		private int m_compositeStream = -1, m_compositeN = -1, m_compositeBar = -1, m_compositeNewest = -1;
 
@@ -2474,6 +2477,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (x.high > e.high) e.high = x.high;
 				if (x.low > 0 && x.low < e.low) e.low = x.low;
+				x.crossesRoll = profileCrossesRoll(x);
 				e.crossesRoll |= x.crossesRoll;
 				for (int i = 0; i < x.levels.Count; i++) { p.Add(x.levels[i].price); v.Add(x.levels[i].total); }
 			}
@@ -2716,7 +2720,10 @@ namespace PowerLanguage.Strategy
 			foreach (VpExtra extra in sp.extra.Values)
 			{
 				if (extra != null && extra.IsNakedPoc(asOfBar))
+				{
+					extra.crossesRoll = profileCrossesRoll(extra);   // VPF-4
 					hit.Add(extra);
+				}
 			}
 			hit.Sort((a, b) => b.startBar.CompareTo(a.startBar));
 			return hit;
