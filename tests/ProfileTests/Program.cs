@@ -75,6 +75,19 @@ static class Program
 		Check(PM.IsBalanced(new double[] { 110, 111, 109 }, new double[] { 100, 101, 100 }, 0.6), "balanced");
 		Check(!PM.IsBalanced(new double[] { 110, 120 }, new double[] { 100, 112 }, 0.6), "not balanced (overlap below 60%)");
 
+		// VPB-6 value-migration score (synthesis 4.0): D = 1.0; POCs oldest first.
+		int vm;
+		Check(PM.ValueMigrationScore(new double[] { 100, 102, 104, 106 }, 3, 108, 1.0, out vm) && vm == 4, "migration +4 got " + vm);
+		Check(PM.ValueMigrationScore(new double[] { 106, 104, 102, 100 }, 3, 98, 1.0, out vm) && vm == -4, "migration -4 got " + vm);
+		// +2, -0.5 (below D -> 0), +3, developing -1.5 -> +1 + 0 + 1 - 1 = +1 (neutral).
+		Check(PM.ValueMigrationScore(new double[] { 100, 102, 101.5, 104.5 }, 3, 103, 1.0, out vm) && vm == 1, "migration neutral got " + vm);
+		// change exactly D counts; no developing term (0) -> 3 terms only.
+		Check(PM.ValueMigrationScore(new double[] { 100, 101, 102, 103 }, 3, 0, 1.0, out vm) && vm == 3, "migration no developing got " + vm);
+		// only the last n differences are scored (older POCs ignored).
+		Check(PM.ValueMigrationScore(new double[] { 50, 100, 102, 104, 106 }, 3, 0, 1.0, out vm) && vm == 3, "migration window got " + vm);
+		Check(!PM.ValueMigrationScore(new double[] { 100, 102, 104 }, 3, 0, 1.0, out vm) && vm == 0, "migration needs n + 1 POCs");
+		Check(!PM.ValueMigrationScore(new double[] { 100, 0, 104, 106 }, 3, 0, 1.0, out vm), "migration rejects a missing POC");
+
 		// VPB-1 accumulator: modes, determinism and truncation (prefix + continue == one pass; rebuild == stream).
 		var bars = new List<double[]>();
 		var rnd = new Random(7);

@@ -1962,6 +1962,31 @@ namespace PowerLanguage.Strategy
 			}
 
 			/// <summary>
+			/// VPB-6: value-migration score V per final-synthesis section 4.0 (a hypothesis, K4 8.4 "last 3 windows").
+			/// <paramref name="completedPocs"/> holds completed-session POCs oldest first; the last n differences are scored
+			/// (so n + 1 POCs are used). Each term is sign(POC[i] - POC[i-1]), and a change smaller than
+			/// <paramref name="minChange"/> (D = 0.10 x ATR20 daily) counts as 0. When <paramref name="developingPoc"/> > 0 the
+			/// developing term sign(developing POC - newest completed POC) is added, so V is in [-(n+1), n+1] ([-4, +4] at n = 3).
+			/// Returns false (V = 0) when fewer than n + 1 usable POCs exist. Up-migration V >= +2, down V <= -2, neutral |V| <= 1.
+			/// </summary>
+			public static bool ValueMigrationScore(IList<double> completedPocs, int n, double developingPoc, double minChange, out int score)
+			{
+				score = 0;
+				if (completedPocs == null || n < 1 || completedPocs.Count < n + 1 || minChange < 0) return false;
+				int last = completedPocs.Count - 1;
+				for (int i = last - n; i <= last; i++) if (completedPocs[i] <= 0) return false;
+				for (int i = last - n + 1; i <= last; i++) score += migrationTerm(completedPocs[i] - completedPocs[i - 1], minChange);
+				if (developingPoc > 0) score += migrationTerm(developingPoc - completedPocs[last], minChange);
+				return true;
+			}
+
+			private static int migrationTerm(double change, double minChange)
+			{
+				if (Math.Abs(change) < minChange || change == 0) return 0;
+				return change > 0 ? 1 : -1;
+			}
+
+			/// <summary>
 			/// VPB-1 bar-by-bar accumulator on a 1-tick grid. Deterministic: the same bars in the same order give the same
 			/// histogram, so backtest and bar replay agree by construction.
 			/// mode 1 = VolumeAtPrice (whole bar volume at the close: exact on a 1-tick source), 2 = BarUniform (volume spread
@@ -2524,6 +2549,32 @@ namespace PowerLanguage.Strategy
 				low = union ? Math.Min(low, x.val) : Math.Max(low, x.val);
 			}
 			return high >= low;
+		}
+
+		/// <summary>
+		/// VPB-6: value-migration score V (final-synthesis section 4.0) over the last <paramref name="n"/> completed profiles on
+		/// <paramref name="stream"/>, which should be an RTH-session profile stream. <paramref name="atr20Daily"/> is ATR(20) on
+		/// daily bars, supplied by the caller (the base has no daily stream of its own); changes smaller than
+		/// <paramref name="minChangeFraction"/> x atr20Daily score 0. With <paramref name="includeDeveloping"/> the developing
+		/// POC (DevelopingExtra) adds a fourth term; a stale or unreadable developing POC (pocStale / 0) adds nothing.
+		/// Returns 0 when fewer than n + 1 completed profiles are stored. On non-adjusted continuous charts a roll between
+		/// sessions shows as a POC jump; use a back-adjusted series or check crossesRoll / RollDates before trusting V there.
+		/// </summary>
+		public int ValueMigrationScore(int stream, double atr20Daily, int n = 3, double minChangeFraction = 0.10, bool includeDeveloping = true)
+		{
+			if (n < 1 || atr20Daily < 0 || minChangeFraction < 0) return 0;
+			List<VpExtra> src = RecentCompletedProfiles(stream, n + 1, streamItemBarIndex(stream));
+			if (src.Count < n + 1) return 0;
+			var pocs = new List<double>(src.Count);
+			for (int i = src.Count - 1; i >= 0; i--) pocs.Add(src[i].poc);   // oldest first
+			double dev = 0;
+			if (includeDeveloping)
+			{
+				VpExtra d = DevelopingExtra(stream);
+				if (d != null && d.isDeveloping && !d.pocStale && d.poc > 0) dev = d.poc;
+			}
+			int v;
+			return ProfileMath.ValueMigrationScore(pocs, n, dev, minChangeFraction * atr20Daily, out v) ? v : 0;
 		}
 
 		//interface methods
