@@ -2630,14 +2630,10 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// Unfiltered ItemForBar for a 1-based chart bar. Tries the native 0-based
-		/// index (barIndex - 1) first, then the 1-based Status index, because some
-		/// builds accept the Status index directly. Does not check that the returned
-		/// profile owns the bar — itemForBar / considerProfile do that.
-		/// VPB-21: bars after the stream's calc bar are never probed (they throw in real time and are
-		/// future objects in a backtest); the 1-based fallback is only tried when its native index
-		/// (barIndex) is not past the calc bar either. Removing the fallback entirely waits on the
-		/// VPB-07 diagnostic (ItemForBar(Current - 1) returns the current profile).
+		/// Unfiltered ItemForBar for a 1-based chart bar, probed at the native 0-based index (barIndex - 1) only.
+		/// Does not check that the returned profile owns the bar — itemForBar / considerProfile do that.
+		/// VPB-21: bars after the stream's calc bar are never probed (they throw in real time and are future
+		/// objects in a backtest). The old 1-based retry is gone: BarsInterval.First is confirmed correct (VPB-07).
 		/// </summary>
 		/// <param name="barIndex">1-based chart bar. Converted to native 0-based for pack.ItemForBar.</param>
 		private IProfile rawItemForBar(StreamPack streamPack, int datastream, int barIndex)
@@ -2646,18 +2642,13 @@ namespace PowerLanguage.Strategy
 			int current = streamItemBarIndex(datastream);
 			if (current >= 1 && barIndex > current) return null;   // not built yet / future: never probe
 			int native = toNativeItemBar(barIndex);
-			IProfile vp = rawNativeItemForBar(streamPack, datastream, native);
-			if (vp != null) return vp;
-			// Some builds accept the 1-based Status index directly (native index barIndex == chart bar barIndex + 1).
-			if (current >= 1 && barIndex >= current) return null;
-			return rawNativeItemForBar(streamPack, datastream, barIndex);
+			return rawNativeItemForBar(streamPack, datastream, native);
 		}
 
 		/// <summary>
 		/// pack.ItemForBar(nativeBar). Swallows the exception MultiCharts throws when
 		/// the index is out of range, the pack is disposed, or no profile is registered
-		/// for that bar yet. Index convention is the caller's problem: rawItemForBar
-		/// passes both the 0-based and the 1-based index.
+		/// for that bar yet. rawItemForBar passes the native 0-based index.
 		/// </summary>
 		/// <param name="nativeBar">Index passed straight through to ItemForBar.</param>
 		private IProfile rawNativeItemForBar(StreamPack streamPack, int datastream, int nativeBar)
