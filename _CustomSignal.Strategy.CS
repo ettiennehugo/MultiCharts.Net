@@ -165,11 +165,16 @@ namespace PowerLanguage.Strategy
 				"mfeDollars,maeDollars,mfeTicks,maeTicks,mfeR,maeR,excursionScope,context";
 			private readonly object m_lock = new object();
 			private readonly string m_path;
+			private readonly string m_header;
 			private StreamWriter m_writer;
 
-			public TradeJournal(string runId)
+			public TradeJournal(string runId) : this(runId, "MCJournal_", HEADER) { }
+
+			/// <summary>CS-8 reuses the writer for MCEvents_&lt;runId&gt;.csv with its own header.</summary>
+			public TradeJournal(string runId, string prefix, string header)
 			{
-				string name = "MCJournal_" + runId + ".csv";
+				m_header = header;
+				string name = prefix + runId + ".csv";
 				try
 				{
 					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
@@ -193,7 +198,7 @@ namespace PowerLanguage.Strategy
 						bool fresh = !File.Exists(m_path);
 						var fs = new FileStream(m_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
 						m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };
-						if (fresh) m_writer.WriteLine(HEADER);
+						if (fresh) m_writer.WriteLine(m_header);
 					}
 					m_writer.WriteLine(csvLine);
 				}
@@ -374,6 +379,8 @@ namespace PowerLanguage.Strategy
 		{
 			if (m_journal != null) m_journal.Close();
 			m_journal = null;
+			if (m_eventFile != null) m_eventFile.Close();   // CS-8
+			m_eventFile = null;
 			m_logger = null;
 			base.Destroy();
 		}
@@ -408,6 +415,10 @@ namespace PowerLanguage.Strategy
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
 			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
+			if (m_eventFile != null) m_eventFile.Close();      // CS-8: one events file per run
+			m_eventFile = null;
+			m_events.Clear();
+			m_eventsSteppedBar = -1;
 			//NOTE: Based on real-time history matching the zero index in the bars can change. When real-time history matching is
 			//      enabled 0-index is the previous fully formed day and when it is disabled 0-index is the current forming day.
 
@@ -506,6 +517,7 @@ namespace PowerLanguage.Strategy
 			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
 			if (Bars.Status == EBarState.Close && traceOn(ETraceLevel.Journal))
 				journalScan();
+			signalEventsStep();   // CS-8 (no pending events unless logSignal was called at Journal level)
 
 			// CS-3: RUN-END once, on the last historical bar (end of the backtest data range)
 			if (!m_runEndLogged && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
@@ -805,6 +817,150 @@ namespace PowerLanguage.Strategy
 			}
 
 			return equityAvailable;
+		}
+
+		// ---- CS-8: signal-event logging and controls (event study / placebo layer). Off unless TraceLevel >= Journal. ----
+
+		/// <summary>CS-8 control modes. None (default) leaves every helper a no-op.</summary>
+		public enum EControlMode { None = 0, RandomEntry = 1, ShiftLevels = 2, DelayEntryBars = 3 }
+
+		/// <summary>CS-8: forward horizons in bars for logSignal MFE/MAE. Default 5/15/30/60. Not an [Input].</summary>
+		protected int[] SignalHorizons { get; set; } = { 5, 15, 30, 60 };
+		/// <summary>CS-8 control layer (protected properties, D7-d). Default None.</summary>
+		protected EControlMode ControlMode { get; set; } = EControlMode.None;
+		protected int ControlSeed { get; set; } = 12345;
+		/// <summary>CS-8 RandomEntry: probability that controlRandomEntry() returns true on a bar.</summary>
+		protected double ControlRandomProbability { get; set; } = 0.5;
+		/// <summary>CS-8 ShiftLevels: ticks added to a level (negative shifts down).</summary>
+		protected int ControlShiftTicks { get; set; }
+		/// <summary>CS-8 DelayEntryBars: bars to delay an entry (the strategy applies it).</summary>
+		protected int ControlDelayBars { get; set; }
+
+		private sealed class SignalEvent
+		{
+			public string tag, context;
+			public int direction, bar, next;
+			public double price, stop, best, worst;
+			public DateTime time, day;
+			public bool taken;
+			public double[] mfeR, maeR;
+		}
+
+		private const string EVENTS_HEADER_BASE = "runId,strategy,symbol,tag,direction,time,bar,price,stop,riskPerUnit,taken,controlMode";
+		private readonly List<SignalEvent> m_events = new List<SignalEvent>();
+		private TradeJournal m_eventFile;
+		private int m_eventsSteppedBar = -1;
+
+		/// <summary>
+		/// CS-8: record a signal (taken or not). The base tracks forward MFE/MAE in R (R = |price - stop|) over the bars after
+		/// the signal bar at SignalHorizons and writes one MCEvents_&lt;runId&gt;.csv row when the last horizon completes, the
+		/// trading day ends, or the run ends. direction: +1 long, -1 short. No-op unless TraceLevel >= Journal.
+		/// </summary>
+		protected void logSignal(string tag, int direction, double price, double stop, IDictionary<string, string> context, bool taken)
+		{
+			if (!journalOn() || direction == 0 || price <= 0) return;
+			int[] h = SignalHorizons ?? new int[0];
+			var ev = new SignalEvent
+			{
+				tag = tag ?? "", direction = direction > 0 ? 1 : -1, bar = Bars.FullSymbolData.Current, price = price, stop = stop,
+				time = Bars.Time[0], day = tradingDayKey(Bars.Time[0]), taken = taken, best = 0, worst = 0,
+				mfeR = new double[h.Length], maeR = new double[h.Length]
+			};
+			for (int i = 0; i < h.Length; i++) ev.mfeR[i] = ev.maeR[i] = double.NaN;
+			if (context != null)
+			{
+				var sb = new StringBuilder();
+				foreach (var kv in context) sb.Append(kv.Key).Append('=').Append(kv.Value).Append(';');
+				ev.context = sb.ToString();
+			}
+			m_events.Add(ev);
+		}
+
+		/// <summary>CS-8: step pending events on each closed bar (called from CalcBar).</summary>
+		private void signalEventsStep()
+		{
+			if (m_events.Count == 0 || Bars.Status != EBarState.Close) return;
+			int cur = Bars.FullSymbolData.Current;
+			if (cur == m_eventsSteppedBar) return;
+			m_eventsSteppedBar = cur;
+			int[] h = SignalHorizons ?? new int[0];
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			bool runEnd = Bars.LastBarOnChart;
+			for (int i = m_events.Count - 1; i >= 0; i--)
+			{
+				SignalEvent ev = m_events[i];
+				int elapsed = cur - ev.bar;
+				if (day != ev.day) { writeEvent(ev, "session"); m_events.RemoveAt(i); continue; }
+				if (elapsed >= 1)
+				{
+					double fav = ev.direction > 0 ? Bars.High[0] - ev.price : ev.price - Bars.Low[0];
+					double adv = ev.direction > 0 ? Bars.Low[0] - ev.price : ev.price - Bars.High[0];
+					if (fav > ev.best) ev.best = fav;
+					if (adv < ev.worst) ev.worst = adv;
+					double r = Math.Abs(ev.price - ev.stop);
+					while (ev.next < h.Length && elapsed >= h[ev.next])
+					{
+						ev.mfeR[ev.next] = r > 0 ? ev.best / r : double.NaN;
+						ev.maeR[ev.next] = r > 0 ? ev.worst / r : double.NaN;
+						ev.next++;
+					}
+				}
+				if (ev.next >= h.Length) { writeEvent(ev, "horizon"); m_events.RemoveAt(i); }
+				else if (runEnd) { writeEvent(ev, "runEnd"); m_events.RemoveAt(i); }
+			}
+		}
+
+		private void writeEvent(SignalEvent ev, string completedBy)
+		{
+			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
+			int[] h = SignalHorizons ?? new int[0];
+			if (m_eventFile == null)
+			{
+				var hdr = new StringBuilder(EVENTS_HEADER_BASE);
+				for (int i = 0; i < h.Length; i++) hdr.Append(",mfeR_").Append(h[i]).Append(",maeR_").Append(h[i]);
+				hdr.Append(",completedBy,context");
+				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString());
+				trace(ETraceLevel.Journal, $"EVENTS file({m_eventFile.Path_})");
+			}
+			var sb = new StringBuilder();
+			sb.Append(RunId).Append(',').Append(csvField(GetType().Name)).Append(',').Append(csvField(Bars.Info.Name)).Append(',').Append(csvField(ev.tag)).Append(',')
+				.Append(ev.direction).Append(',').Append(ev.time.ToString("yyyy-MM-dd HH:mm:ss", ic)).Append(',').Append(ev.bar).Append(',')
+				.Append(ev.price.ToString(ic)).Append(',').Append(ev.stop.ToString(ic)).Append(',').Append(Math.Abs(ev.price - ev.stop).ToString(ic)).Append(',')
+				.Append(ev.taken ? "1" : "0").Append(',').Append(ControlMode);
+			for (int i = 0; i < h.Length; i++) sb.Append(',').Append(ev.mfeR[i].ToString("0.####", ic)).Append(',').Append(ev.maeR[i].ToString("0.####", ic));
+			sb.Append(',').Append(completedBy).Append(',').Append(csvField(ev.context ?? ""));
+			m_eventFile.Write(sb.ToString());
+		}
+
+		/// <summary>CS-8: deterministic uniform [0,1) from (ControlSeed, bar) — reproducible for a fixed seed, independent of call count.</summary>
+		protected double controlRandom(int bar)
+		{
+			unchecked
+			{
+				ulong z = (ulong)(uint)ControlSeed * 0x9E3779B97F4A7C15UL + (ulong)(uint)bar;
+				z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+				z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+				z ^= z >> 31;
+				return (z >> 11) * (1.0 / 9007199254740992.0);
+			}
+		}
+
+		/// <summary>CS-8 RandomEntry: true with ControlRandomProbability on this bar (always false in other modes).</summary>
+		protected bool controlRandomEntry()
+		{
+			return ControlMode == EControlMode.RandomEntry && controlRandom(Bars.FullSymbolData.Current) < ControlRandomProbability;
+		}
+
+		/// <summary>CS-8 ShiftLevels: level + ControlShiftTicks ticks; unchanged in other modes.</summary>
+		protected double controlAdjustLevel(double level)
+		{
+			return ControlMode == EControlMode.ShiftLevels ? level + ControlShiftTicks * tickSize() : level;
+		}
+
+		/// <summary>CS-8 DelayEntryBars: bars to delay an entry; 0 in other modes.</summary>
+		protected int controlAdjustDelayBars()
+		{
+			return ControlMode == EControlMode.DelayEntryBars ? ControlDelayBars : 0;
 		}
 
 		// ---- CS-7: trade-management primitives (protected properties, not [Input]s - D7-c). The base sends no orders. ----
