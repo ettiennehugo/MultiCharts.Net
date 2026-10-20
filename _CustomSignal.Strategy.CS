@@ -1531,6 +1531,33 @@ namespace PowerLanguage.Strategy
 		/// <returns></returns>
 		public DateTime orderEntryTimeUncached(params String[] entryOrderNames)
 		{
+			return entryTimeCore(EOrderNameMatch.Contains, entryOrderNames);
+		}
+
+		/// <summary>CS-5: how order names are matched. Contains is today's behaviour ("LE" also matches "LE2").</summary>
+		public enum EOrderNameMatch { Contains = 0, Exact = 1, Prefix = 2 }
+
+		/// <summary>CS-5: order-name match under <paramref name="mode"/> (ordinal, case-sensitive like the existing Contains).</summary>
+		protected static bool orderNameMatches(string orderName, string wanted, EOrderNameMatch mode)
+		{
+			if (string.IsNullOrEmpty(wanted) || orderName == null) return false;
+			switch (mode)
+			{
+				case EOrderNameMatch.Exact: return string.Equals(orderName, wanted, StringComparison.Ordinal);
+				case EOrderNameMatch.Prefix: return orderName.StartsWith(wanted, StringComparison.Ordinal);
+				default: return orderName.Contains(wanted);
+			}
+		}
+
+		/// <summary>CS-5: orderEntryTime with an explicit name match mode (not cached).</summary>
+		public DateTime orderEntryTime(EOrderNameMatch matchMode, params String[] entryOrderNames)
+		{
+			return entryTimeCore(matchMode, entryOrderNames);
+		}
+
+		private DateTime entryTimeCore(EOrderNameMatch matchMode, String[] entryOrderNames)
+		{
+			if (entryOrderNames == null) entryOrderNames = new string[0];
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
 			{
@@ -1539,8 +1566,7 @@ namespace PowerLanguage.Strategy
 				{
 					var lastOpenTrade = position.OpenTrades
 							.Where(t => t.EntryOrder != null &&
-													entryOrderNames.Any(name =>
-															!string.IsNullOrEmpty(name) && t.EntryOrder.Name.Contains(name)))
+													entryOrderNames.Any(name => orderNameMatches(t.EntryOrder.Name, name, matchMode)))
 							.OrderByDescending(t => t.EntryOrder?.Time ?? DateTime.MinValue)
 							.FirstOrDefault();
 
@@ -1566,7 +1592,7 @@ namespace PowerLanguage.Strategy
 				td.Orders.SymbolFltr.CurrentValue = this.Bars.Info.Name;
 				entryLastFill = td.Orders.Items
 														.Where(o => o.SymbolStr == Bars.Info.Name
-																		 && entryOrderNames.Any(name => !String.IsNullOrEmpty(name) && o.Name.Contains(name))
+																		 && entryOrderNames.Any(name => orderNameMatches(o.Name, name, matchMode))
 																		 && o.State == ETM_OrderState.eTM_OS_Filled
 																		 && o.LeftContracts == 0)
 														.Select(o => o.FinalDT ?? o.GeneratedDT)
@@ -1587,6 +1613,41 @@ namespace PowerLanguage.Strategy
 
 		public DateTime orderExitTime(EMarketPositionSide side, EUseFill useFill = EUseFill.Last)
 		{
+			return exitTimeCore(side, useFill, DateTime.MinValue, null);
+		}
+
+		/// <summary>
+		/// CS-5: exit time of the current round trip only. Exits before <paramref name="notBefore"/> are ignored (DateTime.MinValue
+		/// = the entry time of the position the exits belong to); when names are given only exits whose name contains one of
+		/// them count. Use this so a real-time query does not return a previous trade's exit.
+		/// Real time: the default notBefore is the position's entry time in bar time; TradeManager fill times (FinalDT) are PC
+		/// local time. On a chart whose time zone is not the PC zone pass notBefore in PC local time.
+		/// </summary>
+		public DateTime orderExitTime(EMarketPositionSide side, EUseFill useFill, DateTime notBefore, params string[] exitOrderNames)
+		{
+			if (notBefore == DateTime.MinValue) notBefore = exitPositionEntryTime();
+			return exitTimeCore(side, useFill, notBefore, exitOrderNames != null && exitOrderNames.Length > 0 ? exitOrderNames : null);
+		}
+
+		/// <summary>CS-5: entry time of the position whose exits orderExitTime reads (open position with partial exits, else the last closed one).</summary>
+		private DateTime exitPositionEntryTime()
+		{
+			IMarketPosition pos = null;
+			try
+			{
+				if (CurrentPosition.ClosedTrades.Count > 0 || CurrentPosition.OpenTrades.Count > 0) pos = CurrentPosition;
+				if ((pos == null || pos.ClosedTrades.Count == 0) && Positions.Count > 1 && CurrentPosition.OpenTrades.Count == 0) pos = Positions[1];
+			}
+			catch { }
+			if (pos == null) return DateTime.MinValue;
+			DateTime first = DateTime.MaxValue;
+			if (pos.OpenTrades != null) foreach (var t in pos.OpenTrades) if (t.EntryOrder != null && t.EntryOrder.Time < first) first = t.EntryOrder.Time;
+			if (pos.ClosedTrades != null) foreach (var t in pos.ClosedTrades) if (t.EntryOrder != null && t.EntryOrder.Time < first) first = t.EntryOrder.Time;
+			return first == DateTime.MaxValue ? DateTime.MinValue : first;
+		}
+
+		private DateTime exitTimeCore(EMarketPositionSide side, EUseFill useFill, DateTime notBefore, string[] exitOrderNames)
+		{
 			//add special handling for backtesting just returning entry order time of last open trade
 			if (!Environment.IsRealTimeCalc)
 			{
@@ -1603,10 +1664,13 @@ namespace PowerLanguage.Strategy
 				{
 					if (t.ExitOrder == null) continue;
 					DateTime x = t.ExitOrder.Time;
+					if (x < notBefore) continue;   // CS-5
+					if (exitOrderNames != null && !exitOrderNames.Any(n => orderNameMatches(t.ExitOrder.Name, n, EOrderNameMatch.Contains))) continue;
 					if (x < first) first = x;
 					if (x > last) last = x;
 				}
 
+				if (last == DateTime.MinValue && (notBefore != DateTime.MinValue || exitOrderNames != null)) return DateTime.MinValue;   // CS-5: every exit filtered out
 				return useFill == EUseFill.First ? first : last;
 			}
 
@@ -1639,9 +1703,10 @@ namespace PowerLanguage.Strategy
 								&& o.State == ETM_OrderState.eTM_OS_Filled
 								&& o.Action == orderAction
 								&& o.LeftContracts == 0
+								&& (exitOrderNames == null || exitOrderNames.Any(n => orderNameMatches(o.Name, n, EOrderNameMatch.Contains)))   // CS-5
 						)
 						.Select(o => o.FinalDT ?? o.GeneratedDT)  //FinalDT = actual broker fill time
-						.Where(dt => dt > DateTime.MinValue)
+						.Where(dt => dt > DateTime.MinValue && dt >= notBefore)
 						.OrderBy(dt => dt)                        //sort chronological to find first/last exit
 						.ToList();                                // materialized inside the lock
 				window = $"{td.Orders.IntervalFltr.From},{td.Orders.IntervalFltr.To}";
