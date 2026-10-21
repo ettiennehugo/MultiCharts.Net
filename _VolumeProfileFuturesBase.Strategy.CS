@@ -477,6 +477,34 @@ namespace PowerLanguage.Strategy
 			return GlobexDate(barTime) != GlobexDate(prevBarTime);
 		}
 
+		/// <summary>M-TOD: minutes since the 18:00 ET Globex open (bar end time in ET).</summary>
+		protected override int todMinuteOfSession(DateTime barTime)
+		{
+			int m = (int)ToEastern(barTime).TimeOfDay.TotalMinutes - (int)m_globexOpen.TotalMinutes;
+			return m < 0 ? m + 1440 : m;
+		}
+
+		/// <summary>M-TOD: holiday / early-close / no-RTH Globex dates are excluded from the norms.</summary>
+		protected override bool todHalfDay(DateTime sessionDate)
+		{
+			return IsNoRthDay(sessionDate) || HolidayHaltEt(sessionDate) != null || RthEarlyCloseEt(sessionDate) != null;
+		}
+
+		/// <summary>M-TOD delta (Q1): the VPF-5 footprint of this closed Data1 bar. Brings the flow engine up to date first (it is
+		/// idempotent per tick and per closed bar). BarUpDown / Unavailable are never used for signals: NaN.</summary>
+		protected override double todDelta(out int tier)
+		{
+			tier = -1;
+			if (m_flow == null) return double.NaN;
+			updateOrderFlow();
+			_OrderFlow.FootprintBar fb;
+			lock (m_flowLock) fb = m_flow.Closed(0);
+			if (fb == null || fb.BarNumber != Bars.FullSymbolData.Current) return double.NaN;
+			if (fb.Source == _OrderFlow.FlowSource.BarUpDown || fb.Source == _OrderFlow.FlowSource.Unavailable) return double.NaN;
+			tier = (int)fb.Quality;
+			return fb.Delta;
+		}
+
 		/// <summary>M-AVWAP GapOpen: CME RTH value bars (close-stamped RTH rule, VPF-8).</summary>
 		protected override bool isRthBar(DateTime barTime) { return IsRthValueBarEt(ToEastern(barTime)); }
 
