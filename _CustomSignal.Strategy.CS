@@ -419,6 +419,68 @@ namespace PowerLanguage.Strategy
 		/// <summary>M-AVWAP GapOpen: is the bar in regular trading hours? Default true (every bar); the futures base uses the CME RTH window.</summary>
 		protected virtual bool isRthBar(DateTime barTime) { return true; }
 
+		// ---- M-MTF (§3): higher timeframes from extra chart series. Default for every HTF rule: closed bars only (VPB-8). ----
+
+		/// <summary>M-MTF: HTF streams this strategy reads (e.g. { 2 } for Data2 = ES 60-min). Empty (default) = no checks.
+		/// StartCalc fails loudly if a stream is missing or carries another instrument root (§3 rule 6).</summary>
+		protected int[] HtfStreams { get; set; } = new int[0];
+		private DateTime[] m_htfMappedSession;
+		private bool m_htfFormingWarned;
+
+		/// <summary>M-MTF rule 1: the bar of stream ds that is the ago-th CLOSED bar (bar 0 when it is closed, else bar 1), as a bars-ago index.</summary>
+		protected int HtfClosedIndex(int ds, int ago = 0) { return _MtfMath.ClosedIndex(BarsOfData(ds).Status == EBarState.Close, ago); }
+		/// <summary>M-MTF: close of the ago-th closed bar of stream ds.</summary>
+		protected double HtfClosed(int ds, int ago = 0) { return BarsOfData(ds).Close[HtfClosedIndex(ds, ago)]; }
+		/// <summary>M-MTF: the ago-th closed bar of stream ds (time, OHLCV).</summary>
+		protected void HtfClosedBar(int ds, int ago, out DateTime time, out double open, out double high, out double low, out double close, out double volume)
+		{
+			IInstrument b = BarsOfData(ds); int i = _MtfMath.ClosedIndex(b.Status == EBarState.Close, ago);
+			time = b.Time[i]; open = b.Open[i]; high = b.High[i]; low = b.Low[i]; close = b.Close[i]; volume = b.Volume[i];
+		}
+
+		/// <summary>M-MTF: explicit access to the FORMING bar 0 of stream ds (values change intrabar). Journaled once per run.</summary>
+		protected double HtfForming(int ds)
+		{
+			if (!m_htfFormingWarned) { m_htfFormingWarned = true; if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"MTF forming-bar access on Data{ds} (not closedBarsOnly)"); }
+			return BarsOfData(ds).Close[0];
+		}
+
+		/// <summary>
+		/// M-MTF rule 3: bars-ago index of the latest closed bar of stream ds with Time &lt;= Data1 time, or -1 if none within maxBack.
+		/// The first mapping per session is a Journal fact. Whether MC stamps HTF bars with their end time is Probe P2.
+		/// </summary>
+		protected int htfMapped(int ds, int maxBack = 2)
+		{
+			IInstrument b = BarsOfData(ds); DateTime t = Bars.Time[0];
+			int i = _MtfMath.MapIndex(k => b.Time[k], _MtfMath.ClosedIndex(b.Status == EBarState.Close, 0), t, maxBack);
+			if (m_htfMappedSession != null && ds < m_htfMappedSession.Length && Bars.Status == EBarState.Close)
+			{
+				DateTime day = tradingDayKey(t);
+				if (m_htfMappedSession[ds] != day)
+				{
+					m_htfMappedSession[ds] = day;
+					if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, i < 0 ? $"MTF Data{ds} first mapping {t:yyyy-MM-dd HH:mm:ss}: no closed bar <= Data1 time"
+						: $"MTF Data{ds} first mapping {t:yyyy-MM-dd HH:mm:ss} -> {b.Time[i]:yyyy-MM-dd HH:mm:ss} (ago {i}, status {b.Status})");
+				}
+			}
+			return i;
+		}
+
+		private void startMtf()
+		{
+			m_htfFormingWarned = false;
+			m_htfMappedSession = new DateTime[MaxDataStream + 1];
+			if (HtfStreams == null) return;
+			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
+			foreach (int ds in HtfStreams)
+			{
+				requireDataStream("HtfStreams", ds);
+				IInstrumentSettings info = BarsOfData(ds).Info;
+				if (_MtfMath.SymbolRoot(info.Name) != root)
+					throw new ArgumentException($"HtfStreams: Data{ds} is {info.Name}, Data1 is {Bars.Info.Name}; an HTF stream must carry the Data1 instrument (use XmktLegs for other markets)");
+			}
+		}
+
 		/// <summary>§0.3: true on the first bar of a new contract on stream ds (unadjusted continuous futures). The base never
 		/// detects rolls; _VolumeProfileFuturesBase overrides it with the VPF-4 detector (Data1 only).</summary>
 		protected virtual bool rollOn(int ds) { return false; }
@@ -449,6 +511,7 @@ namespace PowerLanguage.Strategy
 				m_pa = pa;
 			}
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
+			startMtf();
 		}
 
 		private void startAvwap(bool needsPa)

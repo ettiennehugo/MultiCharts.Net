@@ -516,9 +516,11 @@
     <Compile Include="_VpConfluenceEngine.Function.CS" />
     <Compile Include="_CmeSessionClock.Function.CS" />
     <Compile Include="_CmeSessionClockTest.Strategy.CS" />
+    <Compile Include="_MtfProbe.Strategy.CS" />
     <Compile Include="_OrderFlow.Function.CS" />
     <Compile Include="_PriceActionEngine.Function.CS" />
     <Compile Include="_AvwapManager.Function.CS" />
+    <Compile Include="_MtfMath.Function.CS" />
     <Compile Include="_Test1.Indicator.CS" />
     <Compile Include="_Test1.Strategy.CS" />
     <Compile Include="_Test2.Strategy.CS" />
