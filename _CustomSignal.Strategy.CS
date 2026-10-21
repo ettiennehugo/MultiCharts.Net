@@ -570,6 +570,90 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// ---- M-XMKT (§6): cross-market legs on extra chart streams (bar resolutions). Orders stay on Data1. ----
+
+		/// <summary>M-XMKT legs (role -> stream, staleness, windows, leader swing). Empty (default) = no legs created.
+		/// Add in a derived Create()/ctor, e.g. XmktLegs.Add(new XmktLegConfig { role = "NQ", dataStream = 2 }).</summary>
+		protected List<XmktLegConfig> XmktLegs { get; } = new List<XmktLegConfig>();
+		private _XmktLeg[] m_xmkt;
+		private _PriceActionEngine[] m_xmktPa;
+		private bool m_xmktQueryWarned;
+
+		/// <summary>M-XMKT leg by role, or null (not configured). Check Available before using a signal from it.</summary>
+		internal _XmktLeg XmktLeg(string role)
+		{
+			if (m_xmkt != null) foreach (var l in m_xmkt) if (l.config.role == role) return l;
+			if (!m_xmktQueryWarned) { m_xmktQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"XmktLeg({role}) queried but no such leg is configured"); }
+			return null;
+		}
+
+		/// <summary>M-XMKT leader swing engine of a leg (XmktLegConfig.leaderSwing), or null.</summary>
+		internal _PriceActionEngine XmktLeaderSwing(string role)
+		{
+			if (m_xmkt != null) for (int i = 0; i < m_xmkt.Length; i++) if (m_xmkt[i].config.role == role) return m_xmktPa[i];
+			return null;
+		}
+
+		/// <summary>2 x the bar size of a time-based resolution; zero (staleness off) for tick/volume-based bars.</summary>
+		private static TimeSpan twoBars(Resolution r)
+		{
+			double s;
+			switch (r.Type.ToString())
+			{
+				case "Second": s = r.Size; break;
+				case "Minute": s = r.Size * 60.0; break;
+				case "Hour": s = r.Size * 3600.0; break;
+				case "Day": s = r.Size * 86400.0; break;
+				case "Week": s = r.Size * 7 * 86400.0; break;
+				default: return TimeSpan.Zero;
+			}
+			return TimeSpan.FromSeconds(2 * s);
+		}
+
+		private void startXmkt()
+		{
+			m_xmktQueryWarned = false;
+			m_xmkt = null; m_xmktPa = null;
+			if (XmktLegs.Count == 0) return;
+			m_xmkt = new _XmktLeg[XmktLegs.Count]; m_xmktPa = new _PriceActionEngine[XmktLegs.Count];
+			for (int i = 0; i < XmktLegs.Count; i++)
+			{
+				XmktLegConfig c = XmktLegs[i];
+				requireDataStream("XmktLegs[" + c.role + "].dataStream", c.dataStream);
+				IInstrumentSettings info = BarsOfData(c.dataStream).Info;
+				var leg = new _XmktLeg { config = c, journal = engineSink(ETraceLevel.Journal),
+					maxStale = c.maxStaleSec > 0 ? TimeSpan.FromSeconds(c.maxStaleSec) : twoBars(info.Resolution) };
+				string err = leg.Configure();
+				if (err != null) throw new ArgumentException(err);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"XMKT leg {c.role} Data{c.dataStream} symbol({info.Name}) resolution({info.Resolution.Type} {info.Resolution.Size}) dataFeed({info.DataFeed}) maxStale({leg.maxStale})");
+				if (leg.maxStale == TimeSpan.Zero && traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"XMKT leg {c.role}: non-time bars, staleness check off (set maxStaleSec)");
+				if (c.leaderSwing)
+				{
+					var pc = new PriceActionConfig { enabled = true, dataStream = c.dataStream, tieRule = PriceActionConfig.tieRule, volumeIncludesCurrent = PriceActionConfig.volumeIncludesCurrent,
+						strength = PriceActionConfig.strength, layers = PriceActionConfig.layers, candles = false };
+					var pa = new _PriceActionEngine { config = pc, label = "PA" + c.dataStream + "-" + c.role, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+					string perr = pa.Configure();
+					if (perr != null) throw new ArgumentException(perr);
+					m_xmktPa[i] = pa;
+				}
+				m_xmkt[i] = leg;
+			}
+		}
+
+		private void stepXmkt()
+		{
+			for (int i = 0; i < m_xmkt.Length; i++)
+			{
+				int ds = m_xmkt[i].config.dataStream;
+				IInstrument b = BarsOfData(ds);
+				if (m_xmktPa[i] != null) m_xmktPa[i].Step(b);   // leader swing: the leg's own closed bars
+				if (Bars.Status != EBarState.Close) continue;
+				int idx = htfMapped(ds);
+				if (idx >= 0) m_xmkt[i].Step(Bars.Time[0], Bars.Close[0], b.CurrentBar - idx, b.Time[idx], b.Close[idx]);
+				else m_xmkt[i].Step(Bars.Time[0], Bars.Close[0], -1, DateTime.MinValue, double.NaN);
+			}
+		}
+
 		// ---- M-MTF (§3): higher timeframes from extra chart series. Default for every HTF rule: closed bars only (VPB-8). ----
 
 		/// <summary>M-MTF: HTF streams this strategy reads (e.g. { 2 } for Data2 = ES 60-min). Empty (default) = no checks.
@@ -663,6 +747,7 @@ namespace PowerLanguage.Strategy
 			}
 			startTod();
 			startDaily();
+			startXmkt();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
 		}
@@ -725,6 +810,7 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
 			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
 			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
@@ -737,6 +823,8 @@ namespace PowerLanguage.Strategy
 			m_avwapPa = null;
 			m_tod = null;
 			m_daily = null;
+			m_xmkt = null;
+			m_xmktPa = null;
 		}
 
 		protected override void StopCalc()
