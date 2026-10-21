@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Off-MultiCharts unit tests for _CmeSessionClock (spec VPF-7). run.sh copies the clock file and extracts the calendar Rules and the
+       pre-VPF-7 session code (legacy oracle, pinned to main 4d18771) into Generated/. Not part of PLStudies.csproj. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
