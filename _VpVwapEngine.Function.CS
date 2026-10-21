@@ -64,6 +64,7 @@ namespace PowerLanguage.Function
 			m_lenBar = int.MinValue;
 			m_curBar = int.MinValue;
 			m_curLastInSession = false;
+			m_periodKey = long.MinValue;
 			clearProvisional();
 			m_gapWarned = false;
 			value = double.NaN;
@@ -89,7 +90,48 @@ namespace PowerLanguage.Function
 				case EVwapType.AdaptiveFromDate:
 					stepFromDate(bars);
 					break;
+				case EVwapType.Week:
+				case EVwapType.Month:
+				case EVwapType.Quarter:
+				case EVwapType.RollDate:
+					stepPeriod(bars);
+					break;
 			}
+		}
+
+		// M-AVWAP (spec rev 4 §2): Week / Month / Quarter reset at the first bar whose exchange-session date is in a new period;
+		// RollDate resets when the roll detector fires on the closing roll bar (the committed sums are dropped, the roll bar stays).
+		private long m_periodKey = long.MinValue;
+		private void stepPeriod(IInstrument bars)
+		{
+			int bar = bars.FullSymbolData.Current;
+			if (bar != m_curBar)
+			{
+				bool reset = m_curBar == int.MinValue;
+				if (type != EVwapType.RollDate)
+				{
+					long key = _AvwapCalendar.PeriodKey(type == EVwapType.Week ? EAvwapPeriod.Week : type == EVwapType.Month ? EAvwapPeriod.Month : EAvwapPeriod.Quarter,
+						parent.vwapSessionDate(bars.Time[0]));
+					if (key != m_periodKey) { reset = true; m_periodKey = key; }
+				}
+				if (reset)
+				{
+					if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting {type} VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+					clearSums();
+					clearProvisional();
+				}
+				else
+					commitProvisional();
+				warnIfGap(bar);
+				m_curBar = bar;
+			}
+			if (type == EVwapType.RollDate && bars.Status == EBarState.Close && parent.vwapRollOn(datastream))
+			{
+				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting RollDate VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+				clearSums();
+			}
+			setProvisional(priceAt(bars, 0), volume(bars, 0));
+			finish();
 		}
 
 		private void stepSession(IInstrument bars)

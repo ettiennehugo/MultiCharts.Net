@@ -65,7 +65,12 @@ namespace PowerLanguage.Strategy
 			Disabled = 0,          // skip — not computed, not used
 			Session = 1,           // reset on first bar of the session
 			Length = 2,            // rolling last VwapLength / Vwap2Length / Vwap3Length bars
-			AdaptiveFromDate = 3   // accumulate from VwapFromDate / Vwap2FromDate / Vwap3FromDate
+			AdaptiveFromDate = 3,  // accumulate from VwapFromDate / Vwap2FromDate / Vwap3FromDate
+			// M-AVWAP (missing-functionality spec rev 4 §2): single-anchor calendar resets. Values 0-3 unchanged.
+			Week = 4,              // reset on the first bar whose exchange-session date is in a new (Monday-start) week
+			Month = 5,             // ... in a new month
+			Quarter = 6,           // ... in a new calendar quarter
+			RollDate = 7           // reset on the VPF-4 roll bar (futures base, Data1 stream only; RollDetection must be on)
 		}
 
 		/// <summary>
@@ -658,6 +663,11 @@ namespace PowerLanguage.Strategy
 		}
 
 		// requireUnitInterval / requireAtLeast / requireNonNegative / requireDataStream(name, stream) live in _CustomSignal (spec CS-3).
+
+		/// <summary>M-AVWAP: exchange-session date of a bar (the trading-day key: Globex date on futures) for the Week/Month/Quarter VWAP resets.</summary>
+		internal DateTime vwapSessionDate(DateTime barTime) { return tradingDayKey(barTime); }
+		/// <summary>M-AVWAP: roll signal for the RollDate VWAP reset (§0.3).</summary>
+		internal bool vwapRollOn(int stream) { return rollOn(stream); }
 
 		// A disabled VWAP slot is not stepped, so its stream is not required on the chart.
 		private void requireDataStream(string name, int stream, EVwapType type)

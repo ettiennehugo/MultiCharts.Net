@@ -398,6 +398,27 @@ namespace PowerLanguage.Strategy
 		/// <summary>§0.1 rule 3: lazy dependents (M-AVWAP swing/breakout anchors, M-XMKT leader swing) force the engine on.</summary>
 		protected virtual bool priceActionRequired() { return false; }
 
+		/// <summary>M-AVWAP (§2): event anchors to maintain. None (default) = manager not created. Set in a derived Create()/ctor.</summary>
+		protected EAvwapAnchor AvwapEvents { get; set; } = EAvwapAnchor.None;
+		/// <summary>M-AVWAP limits (maxAnchors, maxAgeSessions, bands, slope, stream, gap/climax thresholds).</summary>
+		protected AvwapLimits AvwapLimits { get; } = new AvwapLimits();
+		private _AvwapManager m_avwap;
+		private _PriceActionEngine m_avwapPa;   // PRICEACTION instance feeding the anchors (shared with m_pa when on the same stream)
+		private bool m_avwapQueryWarned;
+
+		/// <summary>M-AVWAP manager, or null when AvwapEvents == None.</summary>
+		internal _AvwapManager AvwapManager
+		{
+			get
+			{
+				if (m_avwap == null && !m_avwapQueryWarned) { m_avwapQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "AvwapManager queried but AvwapEvents is None (manager not created)"); }
+				return m_avwap;
+			}
+		}
+
+		/// <summary>M-AVWAP GapOpen: is the bar in regular trading hours? Default true (every bar); the futures base uses the CME RTH window.</summary>
+		protected virtual bool isRthBar(DateTime barTime) { return true; }
+
 		/// <summary>§0.3: true on the first bar of a new contract on stream ds (unadjusted continuous futures). The base never
 		/// detects rolls; _VolumeProfileFuturesBase overrides it with the VPF-4 detector (Data1 only).</summary>
 		protected virtual bool rollOn(int ds) { return false; }
@@ -413,7 +434,11 @@ namespace PowerLanguage.Strategy
 		{
 			m_paQueryWarned = false;
 			m_pa = null;
-			if (PriceActionConfig.enabled || priceActionRequired())
+			m_avwapQueryWarned = false;
+			m_avwap = null;
+			m_avwapPa = null;
+			bool avwapPa = (AvwapEvents & (EAvwapAnchor.Swing | EAvwapAnchor.Breakout)) != 0;
+			if (PriceActionConfig.enabled || priceActionRequired() || (avwapPa && AvwapLimits.dataStream == PriceActionConfig.dataStream))
 			{
 				if (!PriceActionConfig.enabled) PriceActionConfig.enabled = true;   // lazy dependent: candles/settings as configured
 				requireDataStream("PriceActionConfig.dataStream", PriceActionConfig.dataStream);
@@ -423,6 +448,54 @@ namespace PowerLanguage.Strategy
 				if (err != null) throw new ArgumentException(err);
 				m_pa = pa;
 			}
+			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
+		}
+
+		private void startAvwap(bool needsPa)
+		{
+			requireDataStream("AvwapLimits.dataStream", AvwapLimits.dataStream);
+			if (needsPa)
+			{
+				if (m_pa != null && PriceActionConfig.dataStream == AvwapLimits.dataStream) m_avwapPa = m_pa;
+				else
+				{
+					// §0.1 rule 3: lazy dependency on the manager's stream; candles off unless the strategy enabled them on that stream
+					var cfg = new PriceActionConfig { enabled = true, dataStream = AvwapLimits.dataStream, tieRule = PriceActionConfig.tieRule,
+						volumeIncludesCurrent = PriceActionConfig.volumeIncludesCurrent, strength = PriceActionConfig.strength, candles = (AvwapEvents & EAvwapAnchor.Breakout) != 0 };
+					m_avwapPa = new _PriceActionEngine { config = cfg, label = "PA" + cfg.dataStream + "-AV", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+					string perr = m_avwapPa.Configure();
+					if (perr != null) throw new ArgumentException(perr);
+				}
+				if (m_avwapPa.config.pivotMode == EPivotMode.Fractal) AvwapLimits.backfillBars = Math.Max(AvwapLimits.backfillBars, m_avwapPa.config.strength + 1);
+			}
+			var m = new _AvwapManager { limits = AvwapLimits, events = AvwapEvents, tickSize = tickSize(), label = "AV" + AvwapLimits.dataStream,
+				journal = engineSink(ETraceLevel.Journal), trace = engineSink(ETraceLevel.Debug), warnOnce = engineSink(ETraceLevel.Warning) };
+			string err = m.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_avwap = m;
+		}
+
+		private void stepAvwap()
+		{
+			IInstrument bars = BarsOfData(AvwapLimits.dataStream);
+			if (bars.Status != EBarState.Close || bars.CurrentBar == m_avwap.LastBar) return;
+			bool roll = rollOn(AvwapLimits.dataStream);
+			var ev = new AvwapPaEvents();
+			if (m_avwapPa != null)
+			{
+				if (m_avwapPa != m_pa) { if (roll) m_avwapPa.OnRoll(bars.Time[0]); m_avwapPa.Step(bars); }
+				if (m_avwapPa.LastBarTime == bars.Time[0])
+				{
+					_Pivot ph = m_avwapPa.NewPivotHigh ? m_avwapPa.LastHigh(0) : null, pl = m_avwapPa.NewPivotLow ? m_avwapPa.LastLow(0) : null;
+					if (ph != null) { ev.swingHigh = true; ev.swingHighBar = ph.extremeBar; ev.swingHighTime = ph.extremeTime; }
+					if (pl != null) { ev.swingLow = true; ev.swingLowBar = pl.extremeBar; ev.swingLowTime = pl.extremeTime; }
+					ev.breakoutUp = m_avwapPa.BosUp || m_avwapPa.Has(ECandle.BreakoutUp);
+					ev.breakoutDown = m_avwapPa.BosDown || m_avwapPa.Has(ECandle.BreakoutDown);
+				}
+			}
+			if (roll) m_avwap.OnRoll(bars.Time[0]);
+			m_avwap.Add(new AvwapBar { bar = bars.CurrentBar, time = bars.Time[0], o = bars.Open[0], h = bars.High[0], l = bars.Low[0], c = bars.Close[0], v = bars.Volume[0],
+				sessionDate = tradingDayKey(bars.Time[0]), rth = isRthBar(bars.Time[0]) }, ev);
 		}
 
 		/// <summary>Steps the enabled engines once per CalcBar; each engine commits on its own stream's closed bar only.</summary>
@@ -434,11 +507,14 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
 		}
 
 		private void stopEngines()
 		{
 			m_pa = null;
+			m_avwap = null;
+			m_avwapPa = null;
 		}
 
 		protected override void StopCalc()
