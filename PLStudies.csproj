@@ -522,6 +522,7 @@
     <Compile Include="_AvwapManager.Function.CS" />
     <Compile Include="_MtfMath.Function.CS" />
     <Compile Include="_TodNormaliser.Function.CS" />
+    <Compile Include="_DailyContext.Function.CS" />
     <Compile Include="_Test1.Indicator.CS" />
     <Compile Include="_Test1.Strategy.CS" />
     <Compile Include="_Test2.Strategy.CS" />
