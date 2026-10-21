@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Off-MultiCharts tests for _PriceActionEngine (spec missing-functionality §1.7). run.sh copies the engine file into Generated/
+       and compiles it against the minimal McShim.cs (IInstrument/EBarState only). Not part of PLStudies.csproj. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+</Project>

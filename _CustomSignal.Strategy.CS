@@ -375,6 +375,78 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// ---- Missing-functionality engines (spec missing-functionality-specs.md rev 4, §0.1). ----
+		// Every engine is a plain internal sealed class, created in StartCalc only when a derived strategy enabled it through a
+		// protected configuration property (never an [Input], D7), and null otherwise. Defaults keep the current behaviour.
+
+		/// <summary>PRICEACTION (§1): price-action engine configuration. enabled = false (engine not created). A derived strategy sets
+		/// PriceActionConfig.enabled = true (plus any per-field override) in its Create() or ctor; futures bases apply the Futures preset.</summary>
+		protected PriceActionConfig PriceActionConfig { get; } = new PriceActionConfig();
+		private _PriceActionEngine m_pa;
+		private bool m_paQueryWarned;
+
+		/// <summary>PRICEACTION engine on PriceActionConfig.dataStream, or null when not enabled (and not required by a lazy dependent).</summary>
+		internal _PriceActionEngine PriceActionEngine
+		{
+			get
+			{
+				if (m_pa == null && !m_paQueryWarned) { m_paQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "PriceActionEngine queried but PriceActionConfig.enabled is false (engine not created)"); }
+				return m_pa;
+			}
+		}
+
+		/// <summary>§0.1 rule 3: lazy dependents (M-AVWAP swing/breakout anchors, M-XMKT leader swing) force the engine on.</summary>
+		protected virtual bool priceActionRequired() { return false; }
+
+		/// <summary>§0.3: true on the first bar of a new contract on stream ds (unadjusted continuous futures). The base never
+		/// detects rolls; _VolumeProfileFuturesBase overrides it with the VPF-4 detector (Data1 only).</summary>
+		protected virtual bool rollOn(int ds) { return false; }
+
+		/// <summary>Sink for engine Journal facts: null when the level is filtered, so the engine formats no strings (§0.2).</summary>
+		protected Action<string> engineSink(ETraceLevel level)
+		{
+			if (!traceOn(level)) return null;
+			return s => trace(level, s);
+		}
+
+		private void startEngines()
+		{
+			m_paQueryWarned = false;
+			m_pa = null;
+			if (PriceActionConfig.enabled || priceActionRequired())
+			{
+				if (!PriceActionConfig.enabled) PriceActionConfig.enabled = true;   // lazy dependent: candles/settings as configured
+				requireDataStream("PriceActionConfig.dataStream", PriceActionConfig.dataStream);
+				var pa = new _PriceActionEngine { config = PriceActionConfig, label = "PA" + PriceActionConfig.dataStream,
+					trace = engineSink(ETraceLevel.Debug), journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+				string err = pa.Configure();   // validate once; report, never clamp
+				if (err != null) throw new ArgumentException(err);
+				m_pa = pa;
+			}
+		}
+
+		/// <summary>Steps the enabled engines once per CalcBar; each engine commits on its own stream's closed bar only.</summary>
+		private void stepEngines()
+		{
+			if (m_pa != null)
+			{
+				IInstrument bars = BarsOfData(PriceActionConfig.dataStream);
+				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
+				m_pa.Step(bars);
+			}
+		}
+
+		private void stopEngines()
+		{
+			m_pa = null;
+		}
+
+		protected override void StopCalc()
+		{
+			stopEngines();   // §0.1 rule 6: re-calc starts clean
+			base.StopCalc();
+		}
+
 		protected override void Create()
 		{
 			base.Create();
@@ -442,6 +514,7 @@ namespace PowerLanguage.Strategy
 					_ = BarsOfData(i);
 				}
 			}
+			startEngines();   // lazy engines (§0.1); null unless enabled
 		}
 
 		/// <summary>
@@ -525,6 +598,8 @@ namespace PowerLanguage.Strategy
 					m_intradayVolume += Bars.Volume[0];
 				}
 			}
+
+			stepEngines();   // lazy engines (§0.1): no-op unless enabled
 
 			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
 			if (Bars.Status == EBarState.Close && traceOn(ETraceLevel.Journal))

@@ -115,6 +115,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			PriceActionConfig.ApplyPreset(EPriceActionPreset.Futures);   // spec §1.8: enabled stays false (still lazy until a derived strategy enables it)
 			configureSessions();
 			m_clock = null;
 			clock();   // VPF-7: resolves US Eastern, as before
@@ -536,6 +537,15 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>VPF-4: Data1 bars (1-based) on which a roll was detected so far.</summary>
 		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
+
+		/// <summary>§0.3: roll signal for the lazy engines. Data1 only (VPF-4 runs on Data1); other streams never report a roll.
+		/// Runs the detector early (it is idempotent per bar), so engines stepped in _CustomSignal.CalcBar see this bar's roll.</summary>
+		protected override bool rollOn(int ds)
+		{
+			if (ds != 1 || RollDetection == ERollDetection.Off) return false;
+			detectRoll();
+			return m_rollBars.Count > 0 && m_rollBars[m_rollBars.Count - 1] == Bars.FullSymbolData.Current;
+		}
 
 		private void detectRoll()
 		{
