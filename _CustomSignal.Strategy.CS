@@ -483,6 +483,93 @@ namespace PowerLanguage.Strategy
 				m_todPrevClose = c;
 		}
 
+		// ---- M-DAILY (§5): daily / weekly context. ----
+
+		/// <summary>M-DAILY: set true by a consumer (derived strategy) to create the daily context. Default false = engine not created.</summary>
+		protected bool NeedsDaily { get; set; } = false;
+		/// <summary>M-DAILY configuration (dataStream 0 = aggregate Data1 per trading day; weeklyStream; ATR/SMA/RSI/TSMOM lengths).</summary>
+		protected DailyConfig DailyConfig { get; } = new DailyConfig();
+		private _DailyContext m_daily;
+		private bool m_dailyQueryWarned;
+		private int m_dailyLastStreamBar, m_dailyLastWeekBar;
+		private DateTime m_dailyAggDay; private double m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC;
+		private double m_dailyTodayOpen = double.NaN; private DateTime m_dailyTodayKey = DateTime.MinValue;
+
+		/// <summary>M-DAILY context, or null when NeedsDaily is false.</summary>
+		internal _DailyContext DailyContext
+		{
+			get
+			{
+				if (m_daily == null && !m_dailyQueryWarned) { m_dailyQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "DailyContext queried but NeedsDaily is false (engine not created)"); }
+				return m_daily;
+			}
+		}
+
+		/// <summary>M-DAILY: today's gap vs the (roll-adjusted) previous daily close; NaN when not available.</summary>
+		protected double DailyGapPct { get { return m_daily == null ? double.NaN : m_daily.GapPct(m_dailyTodayOpen); } }
+
+		private void startDaily()
+		{
+			m_dailyQueryWarned = false;
+			m_daily = null;
+			m_dailyLastStreamBar = m_dailyLastWeekBar = int.MinValue;
+			m_dailyAggDay = DateTime.MinValue; m_dailyTodayOpen = double.NaN; m_dailyTodayKey = DateTime.MinValue;
+			if (!NeedsDaily) return;
+			if (DailyConfig.dataStream > 0) requireDataStream("DailyConfig.dataStream", DailyConfig.dataStream);
+			if (DailyConfig.weeklyStream > 0) requireDataStream("DailyConfig.weeklyStream", DailyConfig.weeklyStream);
+			var d = new _DailyContext { config = DailyConfig, label = "DAILY", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+			string err = d.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_daily = d;
+		}
+
+		/// <summary>Data1 closed bar: today's open, roll flag, and (fallback) the per-trading-day aggregate; or the daily stream's closed bar.</summary>
+		private void stepDaily()
+		{
+			if (Bars.Status != EBarState.Close) return;
+			DateTime t = Bars.Time[0], key = tradingDayKey(t);
+			bool roll = rollOn(1);
+			if (key != m_dailyTodayKey) { m_dailyTodayKey = key; m_dailyTodayOpen = Bars.Open[0]; }
+			if (DailyConfig.dataStream <= 0)
+			{
+				if (key != m_dailyAggDay)
+				{
+					if (m_dailyAggDay != DateTime.MinValue) m_daily.AddDay(m_dailyAggDay, m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC);
+					m_dailyAggDay = key; m_dailyAggO = Bars.Open[0]; m_dailyAggH = Bars.High[0]; m_dailyAggL = Bars.Low[0];
+				}
+				else { m_dailyAggH = Math.Max(m_dailyAggH, Bars.High[0]); m_dailyAggL = Math.Min(m_dailyAggL, Bars.Low[0]); }
+				m_dailyAggC = Bars.Close[0];
+			}
+			else
+			{
+				// a daily bar completed before this Data1 bar is added first, so the roll adjusts the last old-contract day
+				IInstrument pb = BarsOfData(DailyConfig.dataStream);
+				int pi = HtfClosedIndex(DailyConfig.dataStream), pno = pb.CurrentBar - pi;
+				if (pno > m_dailyLastStreamBar && tradingDayKey(pb.Time[pi]) < key) { m_dailyLastStreamBar = pno; m_daily.AddDay(tradingDayKey(pb.Time[pi]), pb.Open[pi], pb.High[pi], pb.Low[pi], pb.Close[pi]); }
+			}
+			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close)
+			if (roll && m_daily.Days > 0) m_daily.OnRoll(key, Bars.Open[0] - m_daily.PrevClose);
+			if (DailyConfig.dataStream > 0)
+			{
+				IInstrument db = BarsOfData(DailyConfig.dataStream);
+				int idx = HtfClosedIndex(DailyConfig.dataStream), barNo = db.CurrentBar - idx;
+				if (barNo > m_dailyLastStreamBar)
+				{
+					if (m_dailyLastStreamBar != int.MinValue && barNo > m_dailyLastStreamBar + 1 && traceOn(ETraceLevel.Warning))
+						trace(ETraceLevel.Warning, $"DAILY Data{DailyConfig.dataStream} advanced {barNo - m_dailyLastStreamBar} bars between Data1 bars; only the latest is used");
+					m_dailyLastStreamBar = barNo;
+					// already roll-adjusted history; a daily bar of the roll day itself is in the new contract
+					m_daily.AddDay(tradingDayKey(db.Time[idx]), db.Open[idx], db.High[idx], db.Low[idx], db.Close[idx]);
+				}
+			}
+			if (DailyConfig.weeklyStream > 0)
+			{
+				IInstrument wb = BarsOfData(DailyConfig.weeklyStream);
+				int wi = HtfClosedIndex(DailyConfig.weeklyStream), wno = wb.CurrentBar - wi;
+				if (wno != m_dailyLastWeekBar) { m_dailyLastWeekBar = wno; m_daily.SetPrevWeek(wb.High[wi], wb.Low[wi]); }
+			}
+		}
+
 		// ---- M-MTF (§3): higher timeframes from extra chart series. Default for every HTF rule: closed bars only (VPB-8). ----
 
 		/// <summary>M-MTF: HTF streams this strategy reads (e.g. { 2 } for Data2 = ES 60-min). Empty (default) = no checks.
@@ -575,6 +662,7 @@ namespace PowerLanguage.Strategy
 				m_pa = pa;
 			}
 			startTod();
+			startDaily();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
 		}
@@ -599,6 +687,7 @@ namespace PowerLanguage.Strategy
 			var m = new _AvwapManager { limits = AvwapLimits, events = AvwapEvents, tickSize = tickSize(), label = "AV" + AvwapLimits.dataStream,
 				journal = engineSink(ETraceLevel.Journal), trace = engineSink(ETraceLevel.Debug), warnOnce = engineSink(ETraceLevel.Warning) };
 			if (m_tod != null && AvwapLimits.dataStream == 1) { _TodNormaliser tod = m_tod; m.volumeZ = () => tod.Z(ETodMetric.Volume); }   // NaN while not valid -> 20-bar fallback
+			if (m_daily != null) { _DailyContext daily = m_daily; m.dailyAtr = () => daily.Atr20d; }   // GapOpen: 0.5 x ATR20d when valid, else the SMA-TR fallback
 			string err = m.Configure();
 			if (err != null) throw new ArgumentException(err);
 			m_avwap = m;
@@ -636,6 +725,7 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
 			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
 			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
 		}
@@ -646,6 +736,7 @@ namespace PowerLanguage.Strategy
 			m_avwap = null;
 			m_avwapPa = null;
 			m_tod = null;
+			m_daily = null;
 		}
 
 		protected override void StopCalc()
