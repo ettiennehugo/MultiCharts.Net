@@ -461,7 +461,7 @@ namespace PowerLanguage.Strategy
 			if ((AvwapEvents & EAvwapAnchor.VolumeClimax) != 0 && AvwapLimits.dataStream == 1) metrics |= ETodMetric.Volume;   // §0.1 rule 3
 			if (metrics == ETodMetric.None) return;
 			int bucket = TodBucketMinutes;
-			if (bucket <= 0) { Resolution r = Bars.Info.Resolution; bucket = r.Type == EResolution.Minute && r.Size > 0 ? r.Size : 1; }
+			if (bucket <= 0) { Resolution r = Bars.Info.Resolution; bucket = r.Type == EResolution.Minute && r.Size > 0 ? (int)r.Size : 1; }   // Resolution.Size is uint
 			var t = new _TodNormaliser { metrics = metrics, sessions = TodSessions, minSessions = TodMinSessions, bucketMinutes = bucket, label = "TOD",
 				journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
 			string err = t.Configure();
@@ -691,13 +691,34 @@ namespace PowerLanguage.Strategy
 			switch (r.Event)
 			{
 				case DataLoadedEvent.History:
-					if (r.Data != null) foreach (Bar b in r.Data) t.Enqueue(b.Time, b.Close, b.TotalVolume);
+					if (r.Data != null) foreach (Bar b in r.Data) enqueueTick(t, b);
 					if (r.IsCompleted) t.MarkHistoryComplete();
 					break;
 				case DataLoadedEvent.RTNewBar:
-					if (r.RTData.HasValue) { Bar b = r.RTData.Value; t.Enqueue(b.Time, b.Close, b.TotalVolume); }
+					if (r.RTData.HasValue) enqueueTick(t, r.RTData.Value);
 					break;
 			}
+		}
+
+		// Bar members are not named in the Programming Guide: read by reflection like VPF-5's flowTick (verify in the editor).
+		private System.Reflection.MemberInfo m_tickBarTime, m_tickBarClose, m_tickBarSize;
+		private void enqueueTick(_TickStream t, Bar b)
+		{
+			object o = b;
+			t.Enqueue((DateTime)tickBarMember(o, ref m_tickBarTime, "Time"), Convert.ToDouble(tickBarMember(o, ref m_tickBarClose, "Close")),
+				Convert.ToDouble(tickBarMember(o, ref m_tickBarSize, "TotalVolume", "Volume", "Ticks")));
+		}
+		private static object tickBarMember(object o, ref System.Reflection.MemberInfo cache, params string[] names)
+		{
+			if (cache == null)
+				foreach (string n in names)
+				{
+					cache = (System.Reflection.MemberInfo)o.GetType().GetProperty(n) ?? o.GetType().GetField(n);
+					if (cache != null) break;
+				}
+			if (cache is System.Reflection.PropertyInfo) return ((System.Reflection.PropertyInfo)cache).GetValue(o, null);
+			if (cache is System.Reflection.FieldInfo) return ((System.Reflection.FieldInfo)cache).GetValue(o);
+			throw new InvalidOperationException("M-TICK: Bar has none of " + string.Join("/", names));
 		}
 
 		private void stepTick()
