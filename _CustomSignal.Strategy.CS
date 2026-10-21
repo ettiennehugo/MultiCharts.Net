@@ -654,6 +654,66 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// ---- M-TICK (§7): lazy DataLoader 1-tick Trade stream for the Data1 symbol; no tick chart stream (§6). ----
+
+		/// <summary>M-TICK configuration; enabled=false (default) = no DataLoader request, TickStats null.</summary>
+		protected TickConfig TickConfig { get; } = new TickConfig();
+		private _TickStream m_tickStream;
+		private IDataLoaderResult m_tickReq;
+		private int m_tickLastBar = -1;
+
+		/// <summary>M-TICK aggregate of the last closed Data1 bar, or null when M-TICK is off. Check valid; size fields stay
+		/// parked (NaN / null) until TickConfig.sizeOutputsVerified (rev 2.7 §E6).</summary>
+		internal TickBarStats TickStats { get { return m_tickStream != null ? m_tickStream.Last : null; } }
+
+		private void startTick()
+		{
+			m_tickStream = null; m_tickReq = null; m_tickLastBar = -1;
+			if (!TickConfig.enabled) return;
+			var t = new _TickStream { config = TickConfig, journal = engineSink(ETraceLevel.Journal) };
+			string err = t.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_tickStream = t;
+			InstrumentDataRequest req = Bars.Request;   // same symbol / feed / session as Data1 (PG p72-73)
+			req.Resolution = new Resolution(EResolution.Tick, 1);
+			req.QuoteField = RequestQuoteField.Trade;
+			req.Subscribe2RT = TickConfig.realTime;
+			req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks };
+			m_tickReq = DataLoader.BeginLoadData(req, onTickData, null);
+			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, {TickConfig.historyTicks} ticks back, RT={TickConfig.realTime}");
+		}
+
+		/// <summary>DataLoader callback (separate thread, PG p72): buffer only.</summary>
+		private void onTickData(IDataLoaderResult r)
+		{
+			_TickStream t = m_tickStream;
+			if (t == null) return;
+			switch (r.Event)
+			{
+				case DataLoadedEvent.History:
+					if (r.Data != null) foreach (Bar b in r.Data) t.Enqueue(b.Time, b.Close, b.TotalVolume);
+					if (r.IsCompleted) t.MarkHistoryComplete();
+					break;
+				case DataLoadedEvent.RTNewBar:
+					if (r.RTData.HasValue) { Bar b = r.RTData.Value; t.Enqueue(b.Time, b.Close, b.TotalVolume); }
+					break;
+			}
+		}
+
+		private void stepTick()
+		{
+			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_tickLastBar) return;
+			m_tickLastBar = Bars.CurrentBar;
+			DateTime start = Bars.CurrentBar > 1 ? Bars.Time[1] : Bars.Time[0] - Bars.Info.Resolution.Duration();
+			m_tickStream.Aggregate(start, Bars.Time[0]);
+		}
+
+		private void stopTick()
+		{
+			if (m_tickReq != null) { try { DataLoader.EndLoadData(m_tickReq); } catch (Exception) { } }
+			m_tickReq = null; m_tickStream = null;
+		}
+
 		// ---- M-MTF (§3): higher timeframes from extra chart series. Default for every HTF rule: closed bars only (VPB-8). ----
 
 		/// <summary>M-MTF: HTF streams this strategy reads (e.g. { 2 } for Data2 = ES 60-min). Empty (default) = no checks.
@@ -748,6 +808,7 @@ namespace PowerLanguage.Strategy
 			startTod();
 			startDaily();
 			startXmkt();
+			startTick();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
 		}
@@ -810,6 +871,7 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_tickStream != null) stepTick();
 			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
 			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
@@ -825,6 +887,7 @@ namespace PowerLanguage.Strategy
 			m_daily = null;
 			m_xmkt = null;
 			m_xmktPa = null;
+			stopTick();
 		}
 
 		protected override void StopCalc()
