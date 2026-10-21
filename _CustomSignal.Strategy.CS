@@ -419,6 +419,70 @@ namespace PowerLanguage.Strategy
 		/// <summary>M-AVWAP GapOpen: is the bar in regular trading hours? Default true (every bar); the futures base uses the CME RTH window.</summary>
 		protected virtual bool isRthBar(DateTime barTime) { return true; }
 
+		// ---- M-TOD (§4): time-of-day normalisers on Data1 closed bars. ----
+
+		/// <summary>M-TOD metrics to normalise (None = engine not created, unless an M-AVWAP VolumeClimax anchor needs Volume).</summary>
+		protected ETodMetric TodMetrics { get; set; } = ETodMetric.None;
+		/// <summary>M-TOD: completed sessions kept per bucket (20).</summary>
+		protected int TodSessions { get; set; } = 20;
+		/// <summary>M-TOD: sessions needed before a bucket norm is valid (10).</summary>
+		protected int TodMinSessions { get; set; } = 10;
+		/// <summary>M-TOD bucket size in minutes; 0 (default) = the Data1 bar size for minute charts, else 1 (clock minute).</summary>
+		protected int TodBucketMinutes { get; set; } = 0;
+		private _TodNormaliser m_tod;
+		private bool m_todQueryWarned;
+		private double m_todPrevClose = double.NaN;
+
+		/// <summary>M-TOD normaliser, or null when not enabled.</summary>
+		internal _TodNormaliser TodNormaliser
+		{
+			get
+			{
+				if (m_tod == null && !m_todQueryWarned) { m_todQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "TodNormaliser queried but TodMetrics is None (engine not created)"); }
+				return m_tod;
+			}
+		}
+
+		/// <summary>M-TOD: minutes since the exchange session open for a bar (end) time. Default: the sessionClock() time of day;
+		/// the futures base counts from the 18:00 ET Globex open.</summary>
+		protected virtual int todMinuteOfSession(DateTime barTime) { return (int)sessionClock(barTime).TotalMinutes; }
+		/// <summary>M-TOD: session excluded from the norms (half-day / holiday session). Default false; the futures base uses the CME table.</summary>
+		protected virtual bool todHalfDay(DateTime sessionDate) { return false; }
+		/// <summary>M-TOD: delta of the current closed Data1 bar and its FlowQuality tier (lower = better); NaN when unavailable.
+		/// Default: no order flow. The futures base reads the VPF-5 engine (OrderFlowEnabled) and never uses BarUpDown.</summary>
+		protected virtual double todDelta(out int tier) { tier = -1; return double.NaN; }
+
+		private void startTod()
+		{
+			m_todQueryWarned = false;
+			m_tod = null;
+			m_todPrevClose = double.NaN;
+			ETodMetric metrics = TodMetrics;
+			if ((AvwapEvents & EAvwapAnchor.VolumeClimax) != 0 && AvwapLimits.dataStream == 1) metrics |= ETodMetric.Volume;   // §0.1 rule 3
+			if (metrics == ETodMetric.None) return;
+			int bucket = TodBucketMinutes;
+			if (bucket <= 0) { Resolution r = Bars.Info.Resolution; bucket = r.Type == EResolution.Minute && r.Size > 0 ? r.Size : 1; }
+			var t = new _TodNormaliser { metrics = metrics, sessions = TodSessions, minSessions = TodMinSessions, bucketMinutes = bucket, label = "TOD",
+				journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+			string err = t.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_tod = t;
+		}
+
+		private void stepTod()
+		{
+			if (Bars.Status != EBarState.Close) return;
+			DateTime time = Bars.Time[0], day = tradingDayKey(time);
+			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
+			bool splice = rollOn(1);
+			double tr = double.IsNaN(m_todPrevClose) ? h - l : Math.Max(h, m_todPrevClose) - Math.Min(l, m_todPrevClose);
+			int tier = -1;
+			double delta = (TodMetrics & ETodMetric.Delta) != 0 ? todDelta(out tier) : double.NaN;
+			if (m_tod.Add(Bars.CurrentBar, new TodSample { sessionDate = day, minuteOfSession = todMinuteOfSession(time), halfDay = todHalfDay(day), splice = splice,
+				volume = Bars.Volume[0], delta = delta, range = h - l, trueRange = tr, deltaTier = tier }))
+				m_todPrevClose = c;
+		}
+
 		// ---- M-MTF (§3): higher timeframes from extra chart series. Default for every HTF rule: closed bars only (VPB-8). ----
 
 		/// <summary>M-MTF: HTF streams this strategy reads (e.g. { 2 } for Data2 = ES 60-min). Empty (default) = no checks.
@@ -510,6 +574,7 @@ namespace PowerLanguage.Strategy
 				if (err != null) throw new ArgumentException(err);
 				m_pa = pa;
 			}
+			startTod();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
 		}
@@ -533,6 +598,7 @@ namespace PowerLanguage.Strategy
 			}
 			var m = new _AvwapManager { limits = AvwapLimits, events = AvwapEvents, tickSize = tickSize(), label = "AV" + AvwapLimits.dataStream,
 				journal = engineSink(ETraceLevel.Journal), trace = engineSink(ETraceLevel.Debug), warnOnce = engineSink(ETraceLevel.Warning) };
+			if (m_tod != null && AvwapLimits.dataStream == 1) { _TodNormaliser tod = m_tod; m.volumeZ = () => tod.Z(ETodMetric.Volume); }   // NaN while not valid -> 20-bar fallback
 			string err = m.Configure();
 			if (err != null) throw new ArgumentException(err);
 			m_avwap = m;
@@ -570,6 +636,7 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
 			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
 		}
 
@@ -578,6 +645,7 @@ namespace PowerLanguage.Strategy
 			m_pa = null;
 			m_avwap = null;
 			m_avwapPa = null;
+			m_tod = null;
 		}
 
 		protected override void StopCalc()
