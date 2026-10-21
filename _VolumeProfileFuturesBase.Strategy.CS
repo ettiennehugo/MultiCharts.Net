@@ -477,6 +477,9 @@ namespace PowerLanguage.Strategy
 			return GlobexDate(barTime) != GlobexDate(prevBarTime);
 		}
 
+		/// <summary>M-AVWAP GapOpen: CME RTH value bars (close-stamped RTH rule, VPF-8).</summary>
+		protected override bool isRthBar(DateTime barTime) { return IsRthValueBarEt(ToEastern(barTime)); }
+
 		protected override bool includeBarInProfile(DateTime barTime)
 		{
 			if (OwnProfileWindow != EOwnProfileWindow.Rth) return base.includeBarInProfile(barTime);
