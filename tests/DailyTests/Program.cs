@@ -27,7 +27,7 @@ static class Program
 
 	static void Main()
 	{
-		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder();
+		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay();
 		Console.WriteLine($"DailyTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -111,5 +111,90 @@ static class Program
 	{
 		var w = new List<string>(); var d = Ctx(); d.warnOnce = s => w.Add(s);
 		Check(d.AddDay(D0.AddDays(2), 1, 2, 0, 1) && !d.AddDay(D0.AddDays(2), 1, 2, 0, 1) && !d.AddDay(D0.AddDays(1), 1, 2, 0, 1) && w.Count == 1 && d.Days == 1, "duplicate / out-of-order days ignored, warned once");
+	}
+
+	// ---- Spec S2: HV / ROC1 / LBR ----
+	static void Feed(_DailyContext d, IList<double> closes, int start = 0)
+	{
+		for (int i = 0; i < closes.Count; i++) { DateTime t = D0.AddDays(start + i); while (t.DayOfWeek == DayOfWeek.Saturday || t.DayOfWeek == DayOfWeek.Sunday) { start++; t = D0.AddDays(start + i); } d.AddDay(t, closes[i], closes[i], closes[i], closes[i]); }
+	}
+	static void S2Hv()
+	{
+		var d = Ctx(c => c.hvLengths = new[] { 6, 20 });
+		var cl = new List<double>(); for (int i = 0; i < 7; i++) cl.Add(100 * Math.Pow(1.01, i));
+		Feed(d, cl.Take(6).ToList());
+		Check(double.IsNaN(d.Hv(6)), "S2 HV6 NaN with 6 closes (needs 7)");
+		Feed(d, cl.Skip(6).ToList(), 9);
+		Check(Near(d.Hv(6), 0, 1e-12), "S2 constant 1% return -> HV6 = 0 got " + d.Hv(6));
+		Check(double.IsNaN(d.Hv(20)) && double.IsNaN(d.Hv(100)), "S2 HV20 NaN early, unconfigured length NaN");
+		// alternating +/-0.01 log returns: sample SD over 6 = sqrt(6e-4/5); x sqrt(252)
+		var a = Ctx(c => c.hvLengths = new[] { 6 });
+		var al = new List<double> { 100 }; for (int i = 1; i <= 6; i++) al.Add(al[i - 1] * Math.Exp(i % 2 == 1 ? 0.01 : -0.01));
+		Feed(a, al);
+		Check(Near(a.Hv(6), Math.Sqrt(252) * Math.Sqrt(6e-4 / 5), 1e-12), "S2 alternating +/-1% -> sqrt(252) x sample SD got " + a.Hv(6));
+		var off = Ctx(); var w = new List<string>(); off.warnOnce = x => w.Add(x); Feed(off, cl);
+		Check(double.IsNaN(off.Hv(6)) && double.IsNaN(off.Lbr) && w.Count == 1, "S2 off by default: NaN and one warning");
+	}
+	static void S2Lbr()
+	{
+		// closes 100,102,101,104,103,107,105,106,110,108 -> ROC1 2,-1,3,-1,4,-2,1,4,-2 -> d = -3,4,-4,5,-6,3,3,-6
+		// seed (5th close): up 4/3, dn 7/3 -> 36.3636; then 62.1622, 35.9375, 51.3353, 64.2312, 35.7837
+		var d = Ctx(c => c.lbrRsiLength = 3);
+		double[] c10 = { 100, 102, 101, 104, 103, 107, 105, 106, 110, 108 };
+		double[] exp = { double.NaN, double.NaN, double.NaN, double.NaN, 36.36363636363636, 62.16216216216216, 35.9375, 51.33531157270029, 64.23118865866957, 35.78371810449575 };
+		bool ok = true; DateTime t = D0;
+		for (int i = 0; i < 10; i++)
+		{
+			d.AddDay(t, c10[i], c10[i], c10[i], c10[i]); t = t.AddDays(t.DayOfWeek == DayOfWeek.Friday ? 3 : 1);
+			ok &= double.IsNaN(exp[i]) ? double.IsNaN(d.Lbr) : Near(d.Lbr, exp[i], 1e-9);
+		}
+		Check(ok, "S2 LBR = Wilder RSI(3) of ROC1, 5-close warmup, hand series");
+		Check(Near(d.Roc1, -2) && Near(d.RthClosePrev, 108), "S2 ROC1 and RthClosePrev");
+	}
+	static void S2Roll()
+	{
+		// new contract trades at k x the old: with offset = old close x (k - 1) the ratio-adjusted HV equals the unrolled series
+		var r = new Random(7); var cl = new List<double> { 4000 }; for (int i = 1; i < 40; i++) cl.Add(cl[i - 1] * Math.Exp((r.NextDouble() - 0.5) * 0.02));
+		var plain = Ctx(c => c.hvLengths = new[] { 6, 20 }); Feed(plain, cl);
+		var rolled = Ctx(c => c.hvLengths = new[] { 6, 20 }); double k = 1.003; DateTime t = D0;
+		for (int i = 0; i < cl.Count; i++)
+		{
+			double v = i >= 25 ? cl[i] * k : cl[i];
+			rolled.AddDay(t, v, v, v, v, i == 25, i == 25 ? cl[24] * (k - 1) : double.NaN);
+			t = t.AddDays(t.DayOfWeek == DayOfWeek.Friday ? 3 : 1);
+		}
+		Check(Near(plain.Hv(6), rolled.Hv(6), 1e-12) && Near(plain.Hv(20), rolled.Hv(20), 1e-12), "S2 roll offset -> same HV as the gap-free series");
+	}
+	static void S2Pct()
+	{
+		var d = Ctx(c => { c.hvLengths = new[] { 2 }; c.hvPctLookback = 4; });
+		// closes giving HV2 history; check today's mid-rank against the previous 4 HV2 values computed by HvOf
+		double[] cl = { 100, 101, 100, 102, 101, 101.5, 103, 100 };
+		var hv = new List<double>(); DateTime t = D0;
+		for (int i = 0; i < cl.Length; i++) { d.AddDay(t, cl[i], cl[i], cl[i], cl[i]); t = t.AddDays(t.DayOfWeek == DayOfWeek.Friday ? 3 : 1); hv.Add(d.Hv(2)); }
+		double cur = hv[hv.Count - 1]; var prev = hv.Skip(hv.Count - 5).Take(4).ToList();
+		double expPct = 100.0 * (prev.Count(x => x < cur) + 0.5 * prev.Count(x => x == cur)) / 4;
+		Check(prev.All(x => !double.IsNaN(x)) && Near(d.HvPercentile(2), expPct), "S2 HvPercentile mid-rank among the previous 4 got " + d.HvPercentile(2) + " exp " + expPct);
+		var e = Ctx(c => { c.hvLengths = new[] { 2 }; c.hvPctLookback = 4; }); Feed(e, new double[] { 100, 101, 102, 101, 103 });
+		Check(double.IsNaN(e.HvPercentile(2)), "S2 HvPercentile NaN until lookback is full");
+		var j = new List<string>(); var f = Ctx(c => { c.hvLengths = new[] { 2 }; c.hvPctLookback = 2; }, j);
+		DateTime tt = D0; var dates = new List<DateTime>();
+		foreach (double x in new double[] { 100, 101, 102, 101, 103, 104, 102 }) { f.AddDay(tt, x, x, x, x); dates.Add(tt); tt = tt.AddDays(tt.DayOfWeek == DayOfWeek.Friday ? 3 : 1); }
+		var fv = j.Where(s => s.Contains("hv2 first valid")).ToList(); var fp = j.Where(s => s.Contains("hv2pct first valid")).ToList();
+		Check(fv.Count == 1 && fv[0].Contains(dates[2].ToString("yyyy-MM-dd")), "L3 hv2 first valid journalled once on the 3rd close: " + string.Join("|", fv));
+		Check(fp.Count == 1 && fp[0].Contains(dates[4].ToString("yyyy-MM-dd")), "L3 hv2pct first valid journalled once after 2 more days: " + string.Join("|", fp));
+	}
+	static void S2HalfDay()
+	{
+		// day after Thanksgiving 2024 (Globex date 2024-11-29): RTH value window ends 13:15 ET via the early-close hook
+		var clock = new _CmeSessionClock(TimeZoneInfo.Utc) { RthEarlyCloseHook = g => g == new DateTime(2024, 11, 29) ? new TimeSpan(13, 15, 0) : (TimeSpan?)null };
+		var sel = new _RthCloseSelector(); DateTime day = new DateTime(2024, 11, 29);
+		double[] tod = { 9.5, 10, 13, 13.25, 13.5, 16 }; double[] px = { 1, 2, 3, 4, 5, 6 };
+		for (int i = 0; i < tod.Length; i++) { DateTime et = day.AddHours(tod[i]); sel.Observe(day, clock.IsRthValueBarEt(et), px[i]); }
+		double done = sel.Observe(day.AddDays(3), false, 7);
+		Check(Near(done, 4), "S2 half day: RTH close = last bar stamped <= 13:15 ET got " + done);
+		var normal = new _RthCloseSelector(); DateTime nd = new DateTime(2024, 11, 26);
+		for (int i = 0; i < tod.Length; i++) normal.Observe(nd, clock.IsRthValueBarEt(nd.AddHours(tod[i])), px[i]);
+		Check(Near(normal.Observe(nd.AddDays(1), false, 0), 6), "S2 normal day: RTH close = the 16:00 bar");
 	}
 }

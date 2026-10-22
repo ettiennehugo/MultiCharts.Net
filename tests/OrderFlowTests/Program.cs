@@ -237,6 +237,55 @@ static class Program
 		e9.CloseBar(Bar(1, Ms(100), Regime.IogMagnifierOneTick, vol: 7));
 		Check(e9.BarDelta(0).Source == Src.TickRule && Near(e9.BarDelta(0).Value, 3), "IOG magnifier 1-tick -> TickRule");
 
+		// ---- S1 McBidAsk tier ----
+		Check((int)Src.Aggressor == 0 && (int)Src.McBidAsk == 1 && (int)Src.Quote == 2 && (int)Src.TickRule == 3 && (int)Src.BarUpDown == 4 && (int)Src.Unavailable == 5, "S1 enum order Aggressor < McBidAsk < Quote < TickRule < BarUpDown < Unavailable");
+		Check(OF.McBidAskMethod.Contains("quote-classified, not aggressor"), "S1 method tag says quote-classified, not aggressor");
+		{
+			// worst-of: an McBidAsk bar followed by a Quote bar -> CumDelta source Quote
+			var cfg = new OF.FlowConfig { QuotesExpected = true, McBidAsk = OF.EMcBidAsk.Prefer, AllowMixed = true };
+			var em = new OF.FlowEngine(TICK, cfg);
+			em.AddMcLevels(Ms(1000), new[] { 100.00, 100.25 }, new[] { 3.0, 5.0 }, new[] { 4.0, 0.0 });
+			var m1 = em.CloseBar(Bar(1, Ms(1000), vol: 12));
+			Check(m1.Source == Src.McBidAsk && m1.Quality == Q.High && Near(m1.Buy, 8) && Near(m1.Sell, 4) && m1.HasLadder, "S1 exact-volume MC set overrides the chain: McBidAsk/High, buy 8 sell 4");
+			Check(Near(m1.Bid(100.00), 4) && Near(m1.Ask(100.00), 3) && Near(m1.Ask(100.25), 5) && Near(m1.McDelta, 4), "S1 MC ladder rows and McDelta");
+			em.AddQuote(Ms(1100), true, 100.00); em.AddQuote(Ms(1100), false, 100.25);
+			em.AddTrade(Ms(1200), 100.25, 2);
+			var m2 = em.CloseBar(Bar(2, Ms(2000), vol: 2));
+			Check(m2.Source == Src.Quote && m2.McMiss == "missing" && em.McMissing == 1, "S1 missing MC set falls through to Quote and is counted");
+			var cd = em.CumDelta(0);
+			Check(cd.Source == Src.Quote && Near(cd.Value, 6), "S1 worst-of McBidAsk + Quote -> Quote got " + cd);
+			// tolerance miss
+			em.AddMcLevels(Ms(3000), new[] { 100.00 }, new[] { 5.0 }, new[] { 4.0 });   // 9 vs bar 10 -> 10% > 0.5%
+			em.AddQuote(Ms(2400), true, 100.00); em.AddQuote(Ms(2400), false, 100.25);
+			em.AddTrade(Ms(2500), 100.25, 10);
+			var m3 = em.CloseBar(Bar(3, Ms(3000), vol: 10));
+			Check(m3.Source == Src.Quote && m3.McMiss == "volMismatch" && em.McVolMismatch == 1 && double.IsNaN(m3.McDelta), "S1 tolerance miss falls through to Quote");
+			// within tolerance (0.4%)
+			em.AddMcLevels(Ms(4000), new[] { 100.00 }, new[] { 250.0 }, new[] { 251.0 });
+			em.AddQuote(Ms(3400), true, 100.00); em.AddQuote(Ms(3400), false, 100.25);
+			em.AddTrade(Ms(3500), 100.25, 503);
+			var m4 = em.CloseBar(Bar(4, Ms(4000), vol: 503));
+			Check(m4.Source == Src.McBidAsk && Near(m4.Delta, -1) && Near(m4.ChainDelta, 503), "S1 0.4% volume mismatch accepted, chain delta kept for T9");
+			// a set stamped at another time never matches; older sets are dropped
+			em.AddMcLevels(Ms(4500), new[] { 100.00 }, new[] { 1.0 }, new[] { 0.0 });
+			var m5 = em.CloseBar(Bar(5, Ms(5000), vol: 0));
+			Check(m5.McMiss == "missing" && em.PendingMcSets == 0, "S1 off-stamp set does not match and is dropped");
+			// CrossCheckOnly: recorded, source stays Quote
+			var ec = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = true, McBidAsk = OF.EMcBidAsk.CrossCheckOnly });
+			ec.AddQuote(Ms(0), true, 100.00); ec.AddQuote(Ms(0), false, 100.25);
+			ec.AddTrade(Ms(100), 100.25, 4);
+			ec.AddMcLevels(Ms(1000), new[] { 100.25 }, new[] { 3.0 }, new[] { 1.0 });
+			var c1 = ec.CloseBar(Bar(1, Ms(1000), vol: 4));
+			Check(c1.Source == Src.Quote && Near(c1.Delta, 4) && Near(c1.McDelta, 2), "S1 CrossCheckOnly: Quote stays the source, MC delta recorded");
+			// Off: sets ignored
+			var eo = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false });
+			eo.AddMcLevels(Ms(1000), new[] { 100.25 }, new[] { 3.0 }, new[] { 1.0 });
+			eo.AddTrade(Ms(100), 100.25, 4);
+			var o1 = eo.CloseBar(Bar(1, Ms(1000), vol: 4));
+			Check(o1.Source == Src.TickRule && double.IsNaN(o1.McDelta) && o1.McMiss == null, "S1 Off (default): MC sets ignored");
+			Check(new OF.FlowConfig().McBidAsk == OF.EMcBidAsk.Off && Near(new OF.FlowConfig().mcVolTolerance, 0.005), "S1 defaults Off, tolerance 0.005");
+		}
+
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
 	}

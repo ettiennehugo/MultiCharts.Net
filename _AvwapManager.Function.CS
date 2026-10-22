@@ -45,6 +45,11 @@ namespace PowerLanguage.Function
 		}
 	}
 
+	/// <summary>Spec S3: AVWAP placebo twins. P1 = unweighted mean TP from the anchor; P2 = volume-shuffled AVWAP (each bar's volume
+	/// replaced by a seeded draw from the same clock-minute slot of earlier sessions). P3 (EMA20) needs no engine work.</summary>
+	[Flags]
+	public enum EAvwapPlacebo { None = 0, P1 = 1, P2 = 2 }
+
 	/// <summary>Protected AvwapLimits on _CustomSignal (no [Input]). Defaults per spec §2.</summary>
 	public sealed class AvwapLimits
 	{
@@ -59,6 +64,8 @@ namespace PowerLanguage.Function
 		public double climaxZ = 3;
 		public int fallbackLength = 20;           // SMA-TR and volume-z fallback window
 		public int backfillBars = 2;              // PV ring for swing back-fill; owner sets PRICEACTION strength + 1
+		public EAvwapPlacebo placebos = EAvwapPlacebo.None;   // S3: twin accumulators (off by default)
+		public int p2MinPool = 10;                // S3: fewer same-slot values -> P2 uses the bar's own volume (p2Degraded)
 
 		public string Validate()
 		{
@@ -74,6 +81,7 @@ namespace PowerLanguage.Function
 			if (!(climaxZ > 0)) e.Add($"climaxZ={climaxZ}");
 			if (fallbackLength < 2) e.Add($"fallbackLength={fallbackLength}");
 			if (backfillBars < 1) e.Add($"backfillBars={backfillBars}");
+			if (p2MinPool < 1) e.Add($"p2MinPool={p2MinPool}");
 			return e.Count == 0 ? null : "AvwapLimits invalid: " + string.Join(", ", e);
 		}
 	}
@@ -86,6 +94,7 @@ namespace PowerLanguage.Function
 		public double o, h, l, c, v;
 		public DateTime sessionDate;  // exchange-session date (trading-day key)
 		public bool rth;              // bar is in RTH (true for every bar on non-futures)
+		public int slot;              // S3: clock-minute slot of the session (M-TOD minuteOfSession); used by P2 only
 	}
 
 	/// <summary>Events of the bar from PRICEACTION (layer 0). Extreme bar/time of a confirmed pivot are used for the back-fill.</summary>
@@ -101,6 +110,19 @@ namespace PowerLanguage.Function
 	public sealed class _Avwap
 	{
 		internal double sPV, sP2V, sV;
+		internal double tS, tS2; internal int tN;          // S3 P1: sum TP, sum TP^2, bars
+		internal double qPV, qP2V, qV;                      // S3 P2: shuffled-volume sums
+		internal bool p2Journaled;
+		/// <summary>S3 P1: unweighted mean TP from the anchor (NaN when P1 is off).</summary>
+		public double P1 { get; internal set; } = double.NaN;
+		public double P1Sigma { get; internal set; } = double.NaN;
+		/// <summary>S3 P2: TP weighted by same-slot volumes drawn from earlier sessions (NaN when P2 is off).</summary>
+		public double P2 { get; internal set; } = double.NaN;
+		public double P2Sigma { get; internal set; } = double.NaN;
+		/// <summary>S3: at least one bar used its own volume because the slot pool had fewer than p2MinPool values.</summary>
+		public bool p2Degraded { get; internal set; }
+		/// <summary>S3 trade tag of a placebo arm: AV:{type}:{yyyyMMddHHmm}:P1|P2.</summary>
+		public string TagFor(EAvwapPlacebo arm) { return arm == EAvwapPlacebo.P1 ? Tag + ":P1" : arm == EAvwapPlacebo.P2 ? Tag + ":P2" : Tag; }
 		internal double[] hist; internal int histCount, histNext;   // last slopeBars+1 committed values
 		public int Id { get; internal set; }
 		public EAvwapAnchor Type { get; internal set; }
@@ -135,6 +157,8 @@ namespace PowerLanguage.Function
 		public Action<string> warnOnce;
 		public Func<double> dailyAtr;      // M-DAILY Atr20d (NaN when not valid) -> GapOpen fallback otherwise
 		public Func<double> volumeZ;       // M-TOD clock-minute volume z (NaN when not valid) -> 20-bar z otherwise
+		/// <summary>S3: same-slot volumes of earlier COMPLETED sessions (never the current one), oldest first; null = no pool.</summary>
+		public Func<int, IList<double>> volumePool;
 
 		public bool Configured { get; private set; }
 		public int LastBar { get { return m_lastBar; } }
@@ -145,6 +169,7 @@ namespace PowerLanguage.Function
 		private bool m_warned;
 		// PV ring for swing back-fill (bar, price, vol)
 		private int[] m_rBar; private double[] m_rP, m_rV; private DateTime[] m_rT; private int m_rCount, m_rNext;
+		private IList<double>[] m_rPool;   // S3: the slot pool each ring bar saw, so a back-filled P2 equals a forward-built one
 		// fallback stats
 		private double[] m_tr, m_vol; private int m_fCount, m_fNext; private double m_trSum, m_vSum, m_v2Sum, m_prevClose = double.NaN;
 		private bool m_skipTr;
@@ -154,13 +179,22 @@ namespace PowerLanguage.Function
 		private double m_lastRthClose = double.NaN;
 		private DateTime m_lastRthSession = DateTime.MinValue, m_rthOpenedSession = DateTime.MinValue;
 
+		/// <summary>S3 ruling 3: StartCalc error (null = fine) when P2 is on but the Data1 M-TOD volume pool is unavailable.</summary>
+		public static string P2PoolError(EAvwapPlacebo placebos, int dataStream, bool todRunning)
+		{
+			if ((placebos & EAvwapPlacebo.P2) == 0 || (dataStream == 1 && todRunning)) return null;
+			return $"AvwapLimits.placebos P2 on Data{dataStream} has no M-TOD volume pool" + (dataStream == 1 ? " (M-TOD not running)" : "") +
+				": AvwapLimits.placebos P2 needs AvwapLimits.dataStream = 1 (M-TOD slots are Data1); every P2 bar would use its own volume (p2Degraded). " +
+				"Refusing to start: set AvwapLimits.dataStream = 1 or remove P2.";
+		}
+
 		public string Configure()
 		{
 			string err = limits.Validate();
 			if (err != null) { Configured = false; return err; }
 			if (!(tickSize > 0)) { Configured = false; return $"AvwapManager tickSize={tickSize}"; }
 			int n = limits.backfillBars + 1;
-			m_rBar = new int[n]; m_rP = new double[n]; m_rV = new double[n]; m_rT = new DateTime[n];
+			m_rBar = new int[n]; m_rP = new double[n]; m_rV = new double[n]; m_rT = new DateTime[n]; m_rPool = new IList<double>[n];
 			m_tr = new double[limits.fallbackLength]; m_vol = new double[limits.fallbackLength];
 			Configured = true;
 			Reset();
@@ -209,6 +243,7 @@ namespace PowerLanguage.Function
 			if (b.bar < m_lastBar) { warn($"{label}: out-of-order bar {b.bar} < {m_lastBar} at {b.time:yyyy-MM-dd HH:mm:ss} ignored"); return false; }
 			m_lastBar = b.bar;
 			double price = (b.h > 0 && b.l > 0) ? (b.h + b.l + b.c) / 3.0 : b.c;
+			IList<double> pool = (limits.placebos & EAvwapPlacebo.P2) != 0 && volumePool != null ? volumePool(b.slot) : null;
 
 			// fallback stats: z uses the prior bars only (the climax bar must not dilute its own norm)
 			double zFallback = double.NaN;
@@ -228,11 +263,11 @@ namespace PowerLanguage.Function
 			foreach (var a in m_live)
 			{
 				if (!double.IsNaN(a.Value) && b.l <= a.Value && b.h >= a.Value) { a.Touched = true; a.TouchCount++; }
-				addTo(a, price, b.v); a.AgeBars++; finish(a, trAvgBefore);
+				addTo(a, price, b.v); addTwins(a, price, b.v, b.time, pool); a.AgeBars++; finish(a, trAvgBefore);
 			}
 
 			// ring for back-fill (after the update so the current bar is in it)
-			m_rBar[m_rNext] = b.bar; m_rP[m_rNext] = price; m_rV[m_rNext] = b.v; m_rT[m_rNext] = b.time; m_rNext = (m_rNext + 1) % m_rBar.Length; if (m_rCount < m_rBar.Length) m_rCount++;
+			m_rBar[m_rNext] = b.bar; m_rP[m_rNext] = price; m_rV[m_rNext] = b.v; m_rT[m_rNext] = b.time; m_rPool[m_rNext] = pool; m_rNext = (m_rNext + 1) % m_rBar.Length; if (m_rCount < m_rBar.Length) m_rCount++;
 
 			// calendar anchors
 			long wk = _AvwapCalendar.PeriodKey(EAvwapPeriod.Week, b.sessionDate), mo = _AvwapCalendar.PeriodKey(EAvwapPeriod.Month, b.sessionDate), qt = _AvwapCalendar.PeriodKey(EAvwapPeriod.Quarter, b.sessionDate);
@@ -285,6 +320,31 @@ namespace PowerLanguage.Function
 			a.sPV += price * vol; a.sP2V += price * price * vol; a.sV += vol;
 		}
 
+		// S3 twins: P1 counts every bar (a V = 0 bar too); P2 weights TP by a seeded same-slot draw (deterministic, no lookahead)
+		private void addTwins(_Avwap a, double price, double vol, DateTime time, IList<double> pool)
+		{
+			if (limits.placebos == EAvwapPlacebo.None || !(price > 0)) return;
+			if ((limits.placebos & EAvwapPlacebo.P1) != 0)
+			{
+				a.tS += price; a.tS2 += price * price; a.tN++;
+				double m = a.tS / a.tN, var = a.tS2 / a.tN - m * m;
+				a.P1 = m; a.P1Sigma = var > 0 ? Math.Sqrt(var) : 0;
+			}
+			if ((limits.placebos & EAvwapPlacebo.P2) != 0)
+			{
+				double v;
+				if (pool != null && pool.Count >= limits.p2MinPool) v = pool[new _Rng(_Rng.Seed(a.Id, time.Ticks, 2)).NextInt(pool.Count)];
+				else
+				{
+					v = vol; a.p2Degraded = true;
+					if (!a.p2Journaled) { a.p2Journaled = true; journal?.Invoke($"{label} p2Degraded {a.Tag} at {time:yyyy-MM-dd HH:mm:ss}: slot pool {(pool == null ? 0 : pool.Count)} < {limits.p2MinPool}, own volume used"); }
+				}
+				if (v > 0) { a.qPV += price * v; a.qP2V += price * price * v; a.qV += v; }
+				if (a.qV > 0) { double m = a.qPV / a.qV, var = a.qP2V / a.qV - m * m; a.P2 = m; a.P2Sigma = var > 0 ? Math.Sqrt(var) : 0; }
+			}
+		}
+
+
 		private void finish(_Avwap a, double atr)
 		{
 			if (a.sV <= 0) return;
@@ -311,7 +371,7 @@ namespace PowerLanguage.Function
 		private void create(EAvwapAnchor type, AvwapBar b, int dir, double price)
 		{
 			var a = newAnchor(type, b.time, b.bar, b.time, dir);
-			addTo(a, price, b.v); finish(a, FallbackTrAvg);
+			addTo(a, price, b.v); addTwins(a, price, b.v, b.time, m_rPool[(m_rNext - 1 + m_rPool.Length) % m_rPool.Length]); finish(a, FallbackTrAvg);
 			admit(a, b.time);
 		}
 
@@ -329,7 +389,7 @@ namespace PowerLanguage.Function
 			{
 				int i = (m_rNext - 1 - k + 2 * m_rBar.Length) % m_rBar.Length;
 				if (m_rBar[i] < extremeBar) continue;
-				addTo(a, m_rP[i], m_rV[i]); a.AgeBars++;
+				addTo(a, m_rP[i], m_rV[i]); addTwins(a, m_rP[i], m_rV[i], m_rT[i], m_rPool[i]); a.AgeBars++;
 				if (m_rBar[i] != b.bar) finish(a, FallbackTrAvg);   // history for the slope, bar by bar
 			}
 			a.AgeBars--; finish(a, FallbackTrAvg);
@@ -347,7 +407,16 @@ namespace PowerLanguage.Function
 				expire(victim, "evicted", t);
 			}
 			m_live.Add(a);
-			journal?.Invoke($"{label} created {a.Tag} usable={a.UsableFrom:yyyy-MM-dd HH:mm:ss} value={a.Value:0.#####}");
+			journal?.Invoke($"{label} created {a.Tag} usable={a.UsableFrom:yyyy-MM-dd HH:mm:ss} value={a.Value:0.#####}" + placeboNote());
+		}
+
+		private string placeboNote()
+		{
+			if (limits.placebos == EAvwapPlacebo.None) return "";
+			var p = new List<string>();
+			if ((limits.placebos & EAvwapPlacebo.P1) != 0) p.Add("P1");
+			if ((limits.placebos & EAvwapPlacebo.P2) != 0) p.Add("P2");
+			return $" placebos({string.Join(",", p)})" + ((limits.placebos & EAvwapPlacebo.P2) != 0 ? " p2seed(_Rng.Seed(anchorId, barTime.Ticks, 2))" : "");
 		}
 
 		private void expire(int i, string why, DateTime t)

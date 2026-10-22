@@ -9,7 +9,7 @@ namespace PowerLanguage.Function
 	// Pure C# (tests/VpHelperTests); hosted lazily by _VolumeProfileBase (BarLadders.enabled, default false).
 	// Bid = sell-classified volume, Ask = buy-classified volume (footprint naming). These are CLASSIFIED volumes
 	// (Lee-Ready / tick rule), never an aggressor flag: MC .NET exposes none (BCS §A3).
-	// S1 (McBidAsk tier) is not built yet; HasBidAsk relies on FlowSource order (sources up to TickRule carry bid/ask).
+	// HasBidAsk relies on FlowSource order: Aggressor, McBidAsk, Quote, TickRule carry bid/ask (re-checked after S1 inserted McBidAsk).
 	// ============================================================================================
 
 	// <bar-ladder>

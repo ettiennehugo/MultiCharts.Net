@@ -8,4 +8,15 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_CmeSessionClock.Function.CS" Link="Linked\_CmeSessionClock.cs" />
+  </ItemGroup>
+  <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -8,4 +8,17 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_DailyContext.Function.CS" Link="Linked\_DailyContext.cs" />
+    <Compile Include="..\..\_AvwapManager.Function.CS" Link="Linked\_AvwapManager.cs" />
+    <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_CmeSessionClock.Function.CS" Link="Linked\_CmeSessionClock.cs" />
+  </ItemGroup>
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

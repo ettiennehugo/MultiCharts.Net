@@ -8,4 +8,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_XmktLeg.Function.CS" Link="Linked\_XmktLeg.cs" />
+    <Compile Include="..\..\_MtfMath.Function.CS" Link="Linked\_MtfMath.cs" />
+  </ItemGroup>
 </Project>

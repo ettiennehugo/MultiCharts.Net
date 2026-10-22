@@ -8,4 +8,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_TickStream.Function.CS" Link="Linked\_TickStream.cs" />
+  </ItemGroup>
 </Project>

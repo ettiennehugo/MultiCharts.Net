@@ -69,11 +69,15 @@ namespace PowerLanguage.Function
 		public int history = 50;             // pivots kept per layer
 		public bool candles = true;          // candle classifier on/off (pivots still run)
 		public EPriceActionPreset preset = EPriceActionPreset.Library;   // informational; set by ApplyPreset
+		/// <summary>Phase 3 S5: consumer role of a hosted Data n instance (label PA{ds}-{role}); not part of Canon().</summary>
+		public string role = "";
+		/// <summary>Phase 3 S5: true once ApplyPreset was called on this config (the host then never re-applies a base preset).</summary>
+		public bool presetApplied;
 
 		/// <summary>Applies a preset over the current values (only the fields the preset owns); returns this for chaining.</summary>
 		public PriceActionConfig ApplyPreset(EPriceActionPreset p)
 		{
-			preset = p;
+			preset = p; presetApplied = true;
 			switch (p)
 			{
 				case EPriceActionPreset.Library: tieRule = EPivotTieRule.Strict; volumeIncludesCurrent = true; break;
@@ -81,10 +85,32 @@ namespace PowerLanguage.Function
 			}
 			return this;
 		}
+		/// <summary>Phase 3 S5 (ruling 1): per-field preset defaults for a host-applied base preset. Every preset-owned field still at its
+		/// Library default takes the preset's value; a field the caller changed stays its own. No-op once ApplyPreset was called (the caller
+		/// took over completely). Returns this.</summary>
+		public PriceActionConfig ApplyPresetDefaults(EPriceActionPreset p)
+		{
+			if (presetApplied || p == EPriceActionPreset.Library) return this;
+			var lib = new PriceActionConfig(); var pre = new PriceActionConfig().ApplyPreset(p);
+			if (tieRule == lib.tieRule) tieRule = pre.tieRule;
+			if (volumeIncludesCurrent == lib.volumeIncludesCurrent) volumeIncludesCurrent = pre.volumeIncludesCurrent;
+			preset = p;   // informational; presetApplied stays false (host-applied)
+			return this;
+		}
 		/// <summary>New config with the Futures preset (still enabled=false until a consumer enables it).</summary>
 		public static PriceActionConfig Futures() { return new PriceActionConfig().ApplyPreset(EPriceActionPreset.Futures); }
 		/// <summary>New config with library-parity defaults.</summary>
 		public static PriceActionConfig Library() { return new PriceActionConfig(); }
+
+		/// <summary>Phase 3 S5: every field that changes the engine's output (not enabled / preset / role / presetApplied). Two configs with
+		/// the same dataStream and Canon() produce identical engines, so the host shares one instance.</summary>
+		public string Canon()
+		{
+			var ic = System.Globalization.CultureInfo.InvariantCulture;
+			return string.Format(ic, "ds={0}|pm={1}|tie={2}|L={3}|s={4}|atr={5}|vol={6}|vic={7}|am={8:R}|fd={9:R}|fc={10:R}|fs={11:R}|fe={12:R}|eq={13:R}|lp={14}|mbl={15}|bns={16}|h={17}|c={18}",
+				dataStream, (int)pivotMode, (int)tieRule, layers, strength, atrLength, volumeLength, volumeIncludesCurrent ? 1 : 0, atrMultiple, factorDoji, factorClose,
+				factorStrong, factorEpsilon, equalFactor, lookbackPivots, minBreakoutLayer, breakoutNeedsStrong ? 1 : 0, history, candles ? 1 : 0);
+		}
 
 		/// <summary>Null when valid; else every bad value.</summary>
 		public string Validate()
@@ -173,6 +199,8 @@ namespace PowerLanguage.Function
 		public bool ChochUp { get; private set; }                    // BOS against the structure BEFORE the break
 		public bool ChochDown { get; private set; }
 		public DateTime LastBarTime { get; private set; }
+		/// <summary>Phase 3 S5: bar number of the last committed bar (int.MinValue before the first).</summary>
+		public int LastBar { get { return m_lastClosedBar; } }
 
 		//state
 		private _Ring<_PaBar> m_bars;                                // window = max(2*strength+1, 3) bars

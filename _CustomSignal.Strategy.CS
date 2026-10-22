@@ -395,6 +395,102 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>Phase 3 S5: extra PRICEACTION instances (e.g. a Data2 swing structure), empty by default. Each entry needs enabled = true,
+		/// a dataStream and a non-empty unique role; label PA{ds}-{role}. Futures bases apply the Futures preset PER FIELD (ruling 1): each
+		/// preset-owned field (tieRule, volumeIncludesCurrent) the entry left at its Library default takes the Futures value, a field the entry
+		/// changed stays its own; an explicit ApplyPreset(...) on the entry means it took over completely and the base preset is skipped. Entries equal in (dataStream, Canon()) to the main, the AVWAP or
+		/// another entry share one instance. Steps on its own stream's closed bars; OnRoll when rollOn(dataStream).</summary>
+		protected List<PriceActionConfig> ExtraPriceAction { get; } = new List<PriceActionConfig>();
+		private List<KeyValuePair<string, _PriceActionEngine>> m_paExtra;   // role -> engine (may be m_pa or another entry's engine)
+		private List<_PriceActionEngine> m_paHosted;                         // distinct engines stepped by stepExtraPa (never m_pa)
+		private List<string> m_paCreatedLog;                                 // journalled on the first CalcBar (no trace in StartCalc)
+		private bool m_paForWarned;
+
+		/// <summary>Futures bases override to apply their preset to ExtraPriceAction entries.</summary>
+		protected virtual void presetExtraPriceAction(PriceActionConfig c) { }
+
+		/// <summary>PRICEACTION instance by stream and role: role null/empty = the main engine when on that stream; else the ExtraPriceAction
+		/// entry with that role on that stream. Null (one-time warning) when none.</summary>
+		internal _PriceActionEngine PriceActionFor(int dataStream, string role = null)
+		{
+			if (string.IsNullOrEmpty(role)) { if (m_pa != null && PriceActionConfig.dataStream == dataStream) return m_pa; }
+			else if (m_paExtra != null) foreach (var kv in m_paExtra) if (kv.Key == role && kv.Value.config.dataStream == dataStream) return kv.Value;
+			if (!m_paForWarned) { m_paForWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"PriceActionFor(Data{dataStream}, {(string.IsNullOrEmpty(role) ? "main" : role)}) queried but no such instance exists"); }
+			return null;
+		}
+
+		/// <summary>Shared lookup over the main engine and the hosted extras by (dataStream, Canon()).</summary>
+		private _PriceActionEngine findSharedPa(PriceActionConfig c, bool includeMain)
+		{
+			string canon = c.Canon();
+			if (includeMain && m_pa != null && m_pa.config.dataStream == c.dataStream && m_pa.config.Canon() == canon) return m_pa;
+			if (m_paHosted != null) foreach (var e in m_paHosted) if (e.config.dataStream == c.dataStream && e.config.Canon() == canon) return e;
+			return null;
+		}
+
+		private void startExtraPa()
+		{
+			m_paExtra = null; m_paHosted = null; m_paCreatedLog = null; m_paForWarned = false;
+			if (ExtraPriceAction.Count == 0) return;
+			m_paExtra = new List<KeyValuePair<string, _PriceActionEngine>>(); m_paHosted = new List<_PriceActionEngine>(); m_paCreatedLog = new List<string>();
+			var roles = new HashSet<string>();
+			foreach (var c in ExtraPriceAction)
+			{
+				if (c == null) throw new ArgumentException("ExtraPriceAction: null entry");
+				if (!c.enabled) throw new ArgumentException($"ExtraPriceAction({c.role}): enabled=false");
+				if (string.IsNullOrEmpty(c.role)) throw new ArgumentException("ExtraPriceAction: role is required");
+				if (!roles.Add(c.role)) throw new ArgumentException($"ExtraPriceAction: duplicate role {c.role}");
+				requireDataStream("ExtraPriceAction(" + c.role + ").dataStream", c.dataStream);
+				if (!c.presetApplied) presetExtraPriceAction(c);   // per field (ruling 1)
+				string verr = c.Validate();
+				if (verr != null) throw new ArgumentException($"ExtraPriceAction({c.role}): {verr}");
+				var pa = findSharedPa(c, true);
+				bool shared = pa != null;
+				if (pa == null)
+				{
+					pa = new _PriceActionEngine { config = c, label = "PA" + c.dataStream + "-" + c.role,
+						trace = engineSink(ETraceLevel.Debug), journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+					string err = pa.Configure();
+					if (err != null) throw new ArgumentException(err);
+					m_paHosted.Add(pa);
+				}
+				m_paExtra.Add(new KeyValuePair<string, _PriceActionEngine>(c.role, pa));
+				m_paCreatedLog.Add($"PA{c.dataStream}-{c.role} created strength({c.strength}) layers({c.layers}) shared({(shared ? 1 : 0)})" + (shared ? $" with({pa.label})" : ""));
+			}
+		}
+
+		private void stepExtraPa()
+		{
+			if (m_paCreatedLog != null)
+			{
+				Action<string> j = engineSink(ETraceLevel.Journal);
+				if (j != null) foreach (var l in m_paCreatedLog) j(l);
+				m_paCreatedLog = null;
+			}
+			foreach (var pa in m_paHosted)
+			{
+				IInstrument b = BarsOfData(pa.config.dataStream);
+				if (b.Status == EBarState.Close && b.CurrentBar != pa.LastBar && rollOn(pa.config.dataStream))
+				{
+					pa.OnRoll(b.Time[0]);   // engine journals "{label} roll reset at ..."
+					Action<string> j = engineSink(ETraceLevel.Journal);   // ruling 2: name every consumer of the shared instance
+					if (j != null) j($"{pa.label} roll reset Data{pa.config.dataStream} at {b.Time[0]:yyyy-MM-dd HH:mm:ss} consumers({paConsumers(pa)})");
+				}
+				pa.Step(b);
+			}
+		}
+
+		private string paConsumers(_PriceActionEngine pa)
+		{
+			var l = new List<string>();
+			foreach (var kv in m_paExtra) if (kv.Value == pa) l.Add(kv.Key);
+			if (pa == m_avwapPa) l.Add("AVWAP");
+			if (m_xmkt != null) for (int i = 0; i < m_xmkt.Length; i++) if (m_xmktPa[i] == pa) l.Add("XMKT-" + m_xmkt[i].config.role);
+			return string.Join(",", l);
+		}
+
+		private bool paHosted(_PriceActionEngine e) { return m_paHosted != null && m_paHosted.Contains(e); }
+
 		/// <summary>§0.1 rule 3: lazy dependents (M-AVWAP swing/breakout anchors, M-XMKT leader swing) force the engine on.</summary>
 		protected virtual bool priceActionRequired() { return false; }
 
@@ -459,6 +555,7 @@ namespace PowerLanguage.Strategy
 			m_todPrevClose = double.NaN;
 			ETodMetric metrics = TodMetrics;
 			if ((AvwapEvents & EAvwapAnchor.VolumeClimax) != 0 && AvwapLimits.dataStream == 1) metrics |= ETodMetric.Volume;   // §0.1 rule 3
+			if ((AvwapEvents != EAvwapAnchor.None) && (AvwapLimits.placebos & EAvwapPlacebo.P2) != 0 && AvwapLimits.dataStream == 1) metrics |= ETodMetric.Volume;   // S3: P2 slot pools
 			if (metrics == ETodMetric.None) return;
 			int bucket = TodBucketMinutes;
 			if (bucket <= 0) { Resolution r = Bars.Info.Resolution; bucket = r.Type == EResolution.Minute && r.Size > 0 ? (int)r.Size : 1; }   // Resolution.Size is uint
@@ -494,6 +591,8 @@ namespace PowerLanguage.Strategy
 		private int m_dailyLastStreamBar, m_dailyLastWeekBar;
 		private DateTime m_dailyAggDay; private double m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC;
 		private double m_dailyTodayOpen = double.NaN; private DateTime m_dailyTodayKey = DateTime.MinValue;
+		private readonly _RthCloseSelector m_dailyRth = new _RthCloseSelector();   // S2: RTH close of the aggregated day
+		private bool m_dailyBasisLogged;
 
 		/// <summary>M-DAILY context, or null when NeedsDaily is false.</summary>
 		internal _DailyContext DailyContext
@@ -514,6 +613,7 @@ namespace PowerLanguage.Strategy
 			m_daily = null;
 			m_dailyLastStreamBar = m_dailyLastWeekBar = int.MinValue;
 			m_dailyAggDay = DateTime.MinValue; m_dailyTodayOpen = double.NaN; m_dailyTodayKey = DateTime.MinValue;
+			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false;
 			if (!NeedsDaily) return;
 			if (DailyConfig.dataStream > 0) requireDataStream("DailyConfig.dataStream", DailyConfig.dataStream);
 			if (DailyConfig.weeklyStream > 0) requireDataStream("DailyConfig.weeklyStream", DailyConfig.weeklyStream);
@@ -530,11 +630,18 @@ namespace PowerLanguage.Strategy
 			DateTime t = Bars.Time[0], key = tradingDayKey(t);
 			bool roll = rollOn(1);
 			if (key != m_dailyTodayKey) { m_dailyTodayKey = key; m_dailyTodayOpen = Bars.Open[0]; }
+			if (!m_dailyBasisLogged)
+			{
+				m_dailyBasisLogged = true;
+				if (DailyConfig.dataStream > 0 && DailyConfig.closeBasis == EDailyClose.RthValue && (DailyConfig.HvOn || DailyConfig.lbrRsiLength > 0))
+					engineSink(ETraceLevel.Journal)?.Invoke($"DAILY closeBasis=Bar (P3 unverified): Data{DailyConfig.dataStream} daily close used for HV / ROC1 / LBR");
+			}
 			if (DailyConfig.dataStream <= 0)
 			{
+				double rthDone = m_dailyRth.Observe(key, isRthBar(t), Bars.Close[0]);   // S2: RTH close (half days via the session clock)
 				if (key != m_dailyAggDay)
 				{
-					if (m_dailyAggDay != DateTime.MinValue) m_daily.AddDay(m_dailyAggDay, m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC);
+					if (m_dailyAggDay != DateTime.MinValue) m_daily.AddDay(m_dailyAggDay, m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC, rthClose: rthDone);
 					m_dailyAggDay = key; m_dailyAggO = Bars.Open[0]; m_dailyAggH = Bars.High[0]; m_dailyAggL = Bars.Low[0];
 				}
 				else { m_dailyAggH = Math.Max(m_dailyAggH, Bars.High[0]); m_dailyAggL = Math.Min(m_dailyAggL, Bars.Low[0]); }
@@ -631,9 +738,13 @@ namespace PowerLanguage.Strategy
 				{
 					var pc = new PriceActionConfig { enabled = true, dataStream = c.dataStream, tieRule = PriceActionConfig.tieRule, volumeIncludesCurrent = PriceActionConfig.volumeIncludesCurrent,
 						strength = PriceActionConfig.strength, layers = PriceActionConfig.layers, candles = false };
-					var pa = new _PriceActionEngine { config = pc, label = "PA" + c.dataStream + "-" + c.role, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
-					string perr = pa.Configure();
-					if (perr != null) throw new ArgumentException(perr);
+					var pa = findSharedPa(pc, false);   // S5: share a hosted ExtraPriceAction twin (none by default)
+					if (pa == null)
+					{
+						pa = new _PriceActionEngine { config = pc, label = "PA" + c.dataStream + "-" + c.role, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+						string perr = pa.Configure();
+						if (perr != null) throw new ArgumentException(perr);
+					}
 					m_xmktPa[i] = pa;
 				}
 				m_xmkt[i] = leg;
@@ -646,7 +757,7 @@ namespace PowerLanguage.Strategy
 			{
 				int ds = m_xmkt[i].config.dataStream;
 				IInstrument b = BarsOfData(ds);
-				if (m_xmktPa[i] != null) m_xmktPa[i].Step(b);   // leader swing: the leg's own closed bars
+				if (m_xmktPa[i] != null && !paHosted(m_xmktPa[i])) m_xmktPa[i].Step(b);   // leader swing: the leg's own closed bars
 				if (Bars.Status != EBarState.Close) continue;
 				int idx = htfMapped(ds);
 				if (idx >= 0) m_xmkt[i].Step(Bars.Time[0], Bars.Close[0], b.CurrentBar - idx, b.Time[idx], b.Close[idx]);
@@ -869,6 +980,7 @@ namespace PowerLanguage.Strategy
 
 		private void stepVpHelpers()
 		{
+			if (m_rollWindow == null && RollDetection != ERollDetection.Off) m_rollWindow = new _RollWindow();   // S4 + review M2: roll session +-1 on any base
 			if (m_rollWindow == null) return;
 			if (Bars.Status == EBarState.Close && Bars.CurrentBar != m_rollWindowLastBar)
 			{
@@ -1114,9 +1226,84 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		/// <summary>§0.3: true on the first bar of a new contract on stream ds (unadjusted continuous futures). The base never
-		/// detects rolls; _VolumeProfileFuturesBase overrides it with the VPF-4 detector (Data1 only).</summary>
-		protected virtual bool rollOn(int ds) { return false; }
+		// ---- Phase 3 S4: roll detection on any base (moved from _VolumeProfileFuturesBase VPF-4; off by default) ----
+
+		/// <summary>VPF-4 / S4: how rolls are found. Off (default) = never flag.</summary>
+		public enum ERollDetection { Off = 0, Series = 1, Table = 2, SeriesOrTable = 3 }
+
+		/// <summary>VPF-4 / S4: roll detection mode. Not an [Input].</summary>
+		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
+		/// <summary>
+		/// VPF-4 Series: a trading-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
+		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
+		/// </summary>
+		protected int RollGapTicks { get; set; } = 8;
+		/// <summary>VPF-4 Table: trading dates (tradingDayKey) on which the continuous series switched contract (set by the strategy).</summary>
+		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
+
+		private readonly _RollDetector m_rollDet = new _RollDetector();
+		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
+		private bool m_rollWarned;
+
+		/// <summary>VPF-4: Data1 bars (1-based, Bars.FullSymbolData.Current) on which a roll was detected so far.</summary>
+		public IList<int> RollBars { get { return m_rollDet.RollBars; } }
+
+		private void startRollDetector()
+		{
+			m_rollDet.Reset();
+			m_rollPending = null;
+			m_rollWarned = false;
+		}
+
+		// settings are read live (derived StartCalc may set them after base.StartCalc, as VPF-4 allowed)
+		private void configureRollDetector()
+		{
+			m_rollDet.series = RollDetection == ERollDetection.Series || RollDetection == ERollDetection.SeriesOrTable;
+			m_rollDet.table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
+			m_rollDet.gapTicks = RollGapTicks;
+			m_rollDet.dates = RollDates;
+			if (m_rollPending != null) return;
+			m_rollPending = new _RollPending[MaxDataStream + 1];
+			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
+			for (int ds = 2; ds <= MaxDataStream; ds++)
+				if (IsExist(ds) && _MtfMath.SymbolRoot(BarsOfData(ds).Info.Name) == root) m_rollPending[ds] = new _RollPending();   // a different root never inherits (S4.3)
+		}
+
+		/// <summary>S4: run the Data1 detector on this closed bar (idempotent per bar); arms the Data n pending flags on a roll.</summary>
+		protected void stepRollDetector()
+		{
+			if (RollDetection == ERollDetection.Off)
+			{
+				// S4.4 / probe P-R1: the futures category name is unverified; ToString() keeps this compile-safe and silent if wrong
+				if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category.ToString() == "Future") { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w("RollDetection is Off on a futures symbol: rolls are not detected (AVWAP / PRICEACTION / roll-window flags never fire)"); } }
+				return;
+			}
+			if (Bars.Status != EBarState.Close) return;
+			configureRollDetector();
+			int bar = Bars.FullSymbolData.Current;
+			string name = Bars.Info.Name;
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
+			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
+			{
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name})");
+				if (m_rollPending != null) foreach (_RollPending p in m_rollPending) if (p != null) p.Arm(Bars.Time[0]);
+			}
+		}
+
+		/// <summary>§0.3 / S4: true on the first bar of a new contract on stream ds (unadjusted continuous futures). Data1: the
+		/// detector (idempotent per bar). Data n with the Data1 root: the first closed bar with Time >= the Data1 roll bar time.
+		/// Other roots: never (a cross-market leg needs its own detector). Always false when RollDetection is Off.</summary>
+		protected virtual bool rollOn(int ds)
+		{
+			if (RollDetection == ERollDetection.Off) return false;
+			stepRollDetector();
+			if (ds == 1) return m_rollDet.LastRollBar == Bars.FullSymbolData.Current;
+			if (m_rollPending == null || ds < 2 || ds >= m_rollPending.Length || m_rollPending[ds] == null) return false;
+			IInstrument b = BarsOfData(ds);
+			if (b.Status != EBarState.Close) return false;
+			return m_rollPending[ds].Fire(b.FullSymbolData.Current, b.Time[0]);
+		}
 
 		/// <summary>Sink for engine Journal facts: null when the level is filtered, so the engine formats no strings (§0.2).</summary>
 		protected Action<string> engineSink(ETraceLevel level)
@@ -1127,6 +1314,7 @@ namespace PowerLanguage.Strategy
 
 		private void startEngines()
 		{
+			startRollDetector();   // S4 (Off by default: nothing is detected)
 			m_paQueryWarned = false;
 			m_pa = null;
 			m_avwapQueryWarned = false;
@@ -1143,6 +1331,7 @@ namespace PowerLanguage.Strategy
 				if (err != null) throw new ArgumentException(err);
 				m_pa = pa;
 			}
+			startExtraPa();   // S5: before XMKT/AVWAP so they can share a hosted twin (empty by default)
 			startTod();
 			startDaily();
 			startXmkt();
@@ -1163,15 +1352,22 @@ namespace PowerLanguage.Strategy
 					// §0.1 rule 3: lazy dependency on the manager's stream; candles off unless the strategy enabled them on that stream
 					var cfg = new PriceActionConfig { enabled = true, dataStream = AvwapLimits.dataStream, tieRule = PriceActionConfig.tieRule,
 						volumeIncludesCurrent = PriceActionConfig.volumeIncludesCurrent, strength = PriceActionConfig.strength, candles = (AvwapEvents & EAvwapAnchor.Breakout) != 0 };
+					m_avwapPa = findSharedPa(cfg, false);   // S5: a hosted ExtraPriceAction twin (none by default)
+					if (m_avwapPa == null)
+					{
 					m_avwapPa = new _PriceActionEngine { config = cfg, label = "PA" + cfg.dataStream + "-AV", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
 					string perr = m_avwapPa.Configure();
 					if (perr != null) throw new ArgumentException(perr);
+					}
 				}
 				if (m_avwapPa.config.pivotMode == EPivotMode.Fractal) AvwapLimits.backfillBars = Math.Max(AvwapLimits.backfillBars, m_avwapPa.config.strength + 1);
 			}
 			var m = new _AvwapManager { limits = AvwapLimits, events = AvwapEvents, tickSize = tickSize(), label = "AV" + AvwapLimits.dataStream,
 				journal = engineSink(ETraceLevel.Journal), trace = engineSink(ETraceLevel.Debug), warnOnce = engineSink(ETraceLevel.Warning) };
 			if (m_tod != null && AvwapLimits.dataStream == 1) { _TodNormaliser tod = m_tod; m.volumeZ = () => tod.Z(ETodMetric.Volume); }   // NaN while not valid -> 20-bar fallback
+			string p2err = _AvwapManager.P2PoolError(AvwapLimits.placebos, AvwapLimits.dataStream, m_tod != null);
+			if (p2err != null) throw new ArgumentException(p2err);   // S3 ruling 3: refuse to start
+			if ((AvwapLimits.placebos & EAvwapPlacebo.P2) != 0) { _TodNormaliser tod = m_tod; m.volumePool = slot => tod.VolumePool(slot); }
 			if (m_daily != null) { _DailyContext daily = m_daily; m.dailyAtr = () => daily.Atr20d; }   // GapOpen: 0.5 x ATR20d when valid, else the SMA-TR fallback
 			string err = m.Configure();
 			if (err != null) throw new ArgumentException(err);
@@ -1186,7 +1382,7 @@ namespace PowerLanguage.Strategy
 			var ev = new AvwapPaEvents();
 			if (m_avwapPa != null)
 			{
-				if (m_avwapPa != m_pa) { if (roll) m_avwapPa.OnRoll(bars.Time[0]); m_avwapPa.Step(bars); }
+				if (m_avwapPa != m_pa && !paHosted(m_avwapPa)) { if (roll) m_avwapPa.OnRoll(bars.Time[0]); m_avwapPa.Step(bars); }
 				if (m_avwapPa.LastBarTime == bars.Time[0])
 				{
 					_Pivot ph = m_avwapPa.NewPivotHigh ? m_avwapPa.LastHigh(0) : null, pl = m_avwapPa.NewPivotLow ? m_avwapPa.LastLow(0) : null;
@@ -1198,12 +1394,13 @@ namespace PowerLanguage.Strategy
 			}
 			if (roll) m_avwap.OnRoll(bars.Time[0]);
 			m_avwap.Add(new AvwapBar { bar = bars.CurrentBar, time = bars.Time[0], o = bars.Open[0], h = bars.High[0], l = bars.Low[0], c = bars.Close[0], v = bars.Volume[0],
-				sessionDate = tradingDayKey(bars.Time[0]), rth = isRthBar(bars.Time[0]) }, ev);
+				sessionDate = tradingDayKey(bars.Time[0]), rth = isRthBar(bars.Time[0]), slot = m_avwap.volumePool != null ? todMinuteOfSession(bars.Time[0]) : -1 }, ev);
 		}
 
 		/// <summary>Steps the enabled engines once per CalcBar; each engine commits on its own stream's closed bar only.</summary>
 		private void stepEngines()
 		{
+			stepRollDetector();   // S4: Data1 roll first (no-op when RollDetection is Off), so every rollOn(ds) below sees it
 			stepVpHelpers();   // Phase 3: rings first, so every engine below reads this bar (no-op unless a helper is enabled)
 			if (m_pa != null)
 			{
@@ -1211,6 +1408,7 @@ namespace PowerLanguage.Strategy
 				if (bars.Status == EBarState.Close && rollOn(PriceActionConfig.dataStream)) m_pa.OnRoll(bars.Time[0]);
 				m_pa.Step(bars);
 			}
+			if (m_paHosted != null) stepExtraPa();   // S5: after the main PA, before XMKT/AVWAP readers
 			if (m_tickStream != null) stepTick();
 			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
@@ -1227,6 +1425,7 @@ namespace PowerLanguage.Strategy
 			m_daily = null;
 			m_xmkt = null;
 			m_xmktPa = null;
+			m_paExtra = null; m_paHosted = null; m_paCreatedLog = null;
 			stopTick();
 		}
 

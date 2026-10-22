@@ -41,6 +41,7 @@ static class Program
 	{
 		Validation(); Presets(); Warmup(); IndicatorsMatchNaive(); FlatTops(); LabelsAndEqual(); Breakouts(); Bos(); OutOfOrder();
 		ResetEqualsFresh(); Roll(); MonotonicAndImmutable(); CandleRules(); ChangedXor(); StepClosedOnly(); ZigZag();
+		ExtraCanon(); ExtraIndependent(); ExtraSharing(); ExtraRollOnData2(); PresetPerField();
 		Console.WriteLine($"PriceActionTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -336,5 +337,93 @@ static class Program
 		for (int i = 0; i < 6; i++) Mid(e, n++, 110 - 2 * i);   // down 10
 		for (int i = 0; i < 6; i++) Mid(e, n++, 100 + 2 * i);
 		Check(e.PivotCount(0, true) >= 1 && e.PivotCount(0, false) >= 1 && e.LastHigh().price == 111, "AtrZigZag alternates high/low pivots");
+	}
+
+	// ---------------------------------------------------------------- Phase 3 S5: a second PRICEACTION instance
+	static void ExtraCanon()
+	{
+		var a = Cfg(); var b = Cfg(k => { k.role = "D2"; k.preset = EPriceActionPreset.Futures; });
+		Check(a.Canon() == b.Canon(), "S5 Canon ignores role / preset label");
+		Check(a.Canon() != Cfg(k => k.strength = 2).Canon(), "S5 Canon sees strength");
+		Check(a.Canon() != Cfg(k => k.dataStream = 2).Canon(), "S5 Canon sees dataStream");
+		Check(a.Canon() != Cfg(k => k.factorDoji = 0.1000001).Canon(), "S5 Canon round-trips doubles");
+		Check(!new PriceActionConfig().presetApplied && PriceActionConfig.Futures().presetApplied, "S5 presetApplied set by ApplyPreset only");
+	}
+
+	// Two instances on the same bars with different settings never touch each other's state.
+	static void ExtraIndependent()
+	{
+		var bars = RandomBars(400, 7);
+		var main = Eng(Cfg()); var extra = Eng(Cfg(k => { k.strength = 3; k.role = "D2"; }));
+		var solo = Eng(Cfg());
+		bool same = true; int extraPivots = 0, mainPivots = 0;
+		for (int i = 0; i < bars.Count; i++)
+		{
+			var b = bars[i];
+			main.Add(i, T0.AddMinutes(i), b[0], b[1], b[2], b[3], b[4]);
+			extra.Add(i, T0.AddMinutes(i), b[0], b[1], b[2], b[3], b[4]);
+			solo.Add(i, T0.AddMinutes(i), b[0], b[1], b[2], b[3], b[4]);
+			if (main.NewPivotHigh) mainPivots++; if (extra.NewPivotHigh) extraPivots++;
+			same &= main.NewPivotHigh == solo.NewPivotHigh && main.NewPivotLow == solo.NewPivotLow && main.Candle == solo.Candle && main.Structure() == solo.Structure();
+		}
+		Check(same, "S5 main output identical with and without an extra instance");
+		Check(extraPivots > 0 && extraPivots < mainPivots, $"S5 extra (strength 3) runs its own pivots ({extraPivots} < {mainPivots})");
+		Check(extra.LastBar == bars.Count - 1, "S5 LastBar exposes the committed bar");
+	}
+
+	// Host model of _CustomSignal.findSharedPa: (dataStream, Canon()) -> one reference.
+	static void ExtraSharing()
+	{
+		var pool = new List<_PriceActionEngine>();
+		Func<PriceActionConfig, _PriceActionEngine> get = c =>
+		{
+			foreach (var e in pool) if (e.config.dataStream == c.dataStream && e.config.Canon() == c.Canon()) return e;
+			var n = Eng(c); pool.Add(n); return n;
+		};
+		var x = get(Cfg(k => { k.dataStream = 2; k.role = "A"; }));
+		var y = get(Cfg(k => { k.dataStream = 2; k.role = "B"; }));
+		var z = get(Cfg(k => { k.dataStream = 2; k.role = "C"; k.strength = 2; }));
+		var w = get(Cfg(k => { k.dataStream = 3; k.role = "D"; }));
+		Check(ReferenceEquals(x, y), "S5 equal (ds, Canon) share one reference");
+		Check(!ReferenceEquals(x, z) && !ReferenceEquals(x, w) && pool.Count == 3, "S5 different settings or stream get their own instance");
+		Mid(x, 1, 100); Mid(y, 1, 100);   // second step of the same bar through the other role is a no-op
+		Check(x.LastBar == 1, "S5 shared instance dedupes the same closed bar");
+	}
+
+	// Data2 instance resets through the same-root pending flag, once, on its own first bar at/after the Data1 roll.
+	static void ExtraRollOnData2()
+	{
+		var j = new List<string>();
+		var e = Eng(Cfg(k => { k.dataStream = 2; k.role = "D2"; }), j);
+		var pend = new _RollPending();
+		int resets = 0;
+		for (int i = 0; i < 30; i++)
+		{
+			DateTime t = T0.AddMinutes(5 * i);
+			if (i == 20) pend.Arm(t.AddMinutes(-2));   // Data1 rolled between Data2 bars 19 and 20
+			for (int tick = 0; tick < 2; tick++)          // the host can see the same closed bar twice (stepExtraPa order)
+			{
+				if (e.LastBar != i && pend.Fire(i, t)) { e.OnRoll(t); resets++; }
+				e.Add(i, t, 100 + i, 101 + i, 99 + i, 100 + i, 100);
+			}
+		}
+		Check(resets == 1 && j.Count(s => s.Contains("roll reset")) == 1, $"S5 Data2 OnRoll fires exactly once via the pending flag ({resets})");
+		Check(!pend.Armed, "S5 pending flag cleared after firing");
+		Check(e.IsWarm == false || e.LastHigh() == null || e.LastHigh().confirmBar >= 20, "S5 no pre-roll pivot survives the reset");
+	}
+
+	// Ruling 1: host-applied Futures preset is per field; explicit ApplyPreset means the entry took over.
+	static void PresetPerField()
+	{
+		var a = Cfg().ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(a.tieRule == EPivotTieRule.LeftInclusive && !a.volumeIncludesCurrent && a.preset == EPriceActionPreset.Futures, "R1 untouched entry gets every Futures field");
+		var b = Cfg(k => { k.tieRule = EPivotTieRule.LeftInclusive; k.strength = 3; }).ApplyPresetDefaults(EPriceActionPreset.Futures);
+		var c = Cfg(k => k.volumeIncludesCurrent = false).ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(c.tieRule == EPivotTieRule.LeftInclusive && !c.volumeIncludesCurrent, "R1 changed volumeIncludesCurrent kept, tieRule takes Futures");
+		Check(b.tieRule == EPivotTieRule.LeftInclusive && !b.volumeIncludesCurrent && b.strength == 3, "R1 changed fields kept, volumeIncludesCurrent takes Futures, non-preset fields untouched");
+		var d = Cfg(); d.ApplyPreset(EPriceActionPreset.Library); d.ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(d.tieRule == EPivotTieRule.Strict && d.volumeIncludesCurrent && d.preset == EPriceActionPreset.Library, "R1 explicit ApplyPreset skips the base preset");
+		var e = Cfg().ApplyPresetDefaults(EPriceActionPreset.Library);
+		Check(e.tieRule == EPivotTieRule.Strict && e.volumeIncludesCurrent && !e.presetApplied, "R1 Library base preset is a no-op");
 	}
 }

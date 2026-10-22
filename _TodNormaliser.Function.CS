@@ -104,6 +104,19 @@ namespace PowerLanguage.Function
 		/// <summary>Completed sessions currently in the norm of a metric.</summary>
 		public int Sessions(ETodMetric m) { int k = idx(m); return Configured && k >= 0 ? m_done[k] : 0; }
 
+		/// <summary>Spec S3: Volume values of the bucket holding <paramref name="minuteOfSession"/> from the last COMPLETED sessions
+		/// (never the current one; half-days excluded), oldest first, as a fresh copy. Null when Volume is not tracked.</summary>
+		public IList<double> VolumePool(int minuteOfSession)
+		{
+			if (!Configured || !has(0)) return null;
+			Hist h;
+			if (!m_hist[0].TryGetValue(Math.Max(0, minuteOfSession) / bucketMinutes, out h)) return new double[0];
+			var r = new double[h.count];
+			int n = h.v.Length, start = h.count < n ? 0 : h.next;
+			for (int i = 0; i < h.count; i++) r[i] = h.v[(start + i) % n];
+			return r;
+		}
+
 		public bool Add(int barNumber, TodSample s)
 		{
 			if (!Configured) return false;

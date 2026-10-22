@@ -29,7 +29,7 @@ static class Program
 
 	static void Main()
 	{
-		Validation(); NormFromPriorSessionsOnly(); HalfDayExcluded(); RingWindow(); Buckets(); DeltaTier(); Splice(); Cumulative();
+		Validation(); NormFromPriorSessionsOnly(); HalfDayExcluded(); RingWindow(); Buckets(); DeltaTier(); Splice(); Cumulative(); VolumePool();
 		Console.WriteLine($"TodTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -114,5 +114,20 @@ static class Program
 		Session(t, 2, new[] { 15.0, 15, 30 });
 		// cum at minute 3: prior 30 and 60 (mean 45, sd 15); today 60 -> 1
 		Check(Near(t.ZCum(ETodMetric.Volume), 1) && Near(t.Z(ETodMetric.Volume), 3), $"ZCum session-to-date vs same-minute cumulative norm ({t.ZCum(ETodMetric.Volume)}, z {t.Z(ETodMetric.Volume)})");
+	}
+
+	// Spec S3: same-slot pool = completed sessions only, oldest first, ring-bounded
+	static void VolumePool()
+	{
+		var t = Tod(ETodMetric.Volume, 3, 2);
+		Check(Tod(ETodMetric.Range, 3, 2).VolumePool(0) == null, "S3 VolumePool null without Volume");
+		int n = 0; var d = new DateTime(2024, 3, 4);
+		for (int k = 0; k < 4; k++) t.Add(n++, new TodSample { sessionDate = d.AddDays(k), minuteOfSession = 5, volume = 100 + k });
+		var p = t.VolumePool(5);
+		Check(p.Count == 3 && p[0] == 100 && p[1] == 101 && p[2] == 102, "S3 VolumePool: completed sessions only (current 103 excluded), oldest first");
+		t.Add(n++, new TodSample { sessionDate = d.AddDays(4), minuteOfSession = 5, volume = 9 });
+		p = t.VolumePool(5);
+		Check(p.Count == 3 && p[0] == 101 && p[2] == 103, "S3 VolumePool ring-bounded by sessions");
+		Check(t.VolumePool(6).Count == 0, "S3 VolumePool empty for an unseen slot");
 	}
 }
