@@ -298,6 +298,9 @@ namespace PowerLanguage.Function
 				else addRow(Key(c, tick), volume);
 			}
 
+			/// <summary>Phase 3 VP-1: add volume to one 1-tick row (ladder rows, merges). Does not touch bars/OHLC.</summary>
+			public void AddRow(long k, double v) { addRow(k, v); }
+
 			private void addRow(long k, double v)
 			{
 				double cur;

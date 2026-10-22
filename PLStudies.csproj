@@ -526,6 +526,14 @@
     <Compile Include="_XmktLeg.Function.CS" />
     <Compile Include="_TickStream.Function.CS" />
     <Compile Include="_LevelStudy.Function.CS" />
+    <Compile Include="_Rng.Function.CS" />
+    <Compile Include="_BarRing.Function.CS" />
+    <Compile Include="_LevelRef.Function.CS" />
+    <Compile Include="_BarLadder.Function.CS" />
+    <Compile Include="_RangeProfile.Function.CS" />
+    <Compile Include="_WeeklyProfiles.Function.CS" />
+    <Compile Include="_ProfileStats.Function.CS" />
+    <Compile Include="_FvgDetector.Function.CS" />
     <Compile Include="_PortMM.Function.CS" />
     <Compile Include="_PortfolioRiskManager.Strategy.CS" />
     <Compile Include="_Test1.Indicator.CS" />
