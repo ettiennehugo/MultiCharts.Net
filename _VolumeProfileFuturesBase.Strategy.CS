@@ -128,6 +128,7 @@ namespace PowerLanguage.Strategy
 			m_session = null;       // VPF-2
 			m_sessionBar = -1;
 			m_rollBars.Clear(); m_rollLastDay = DateTime.MinValue; m_rollLastBar = -1; m_rollLastName = null;   // VPF-4
+			if (BarLadders.enabled) OrderFlowEnabled = true;   // Phase 3 VP-3: the per-bar ladder reads the flow engine
 			startOrderFlow();       // VPF-5 (OrderFlowEnabled = false by default: nothing is computed)
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
 		}
@@ -791,6 +792,16 @@ namespace PowerLanguage.Strategy
 			if (barsAgo == 0 && m_flowClosedBar != cur) return -1;
 			return m_flowClosedBar == cur ? barsAgo : barsAgo - 1;
 		}
+
+		/// <summary>Phase 3 VP-3: footprint of Data1 bar `barNumber` (1-based) from the flow engine, or null.</summary>
+		protected override _OrderFlow.FootprintBar footprintForLadder(int barNumber)
+		{
+			if (m_flow == null) return null;
+			lock (m_flowLock) return m_flow.ByNumber(barNumber);
+		}
+		protected override bool ladderHasFlow { get { return m_flow != null; } }
+		/// <summary>Phase 3 VP-1 coverage: the Globex clock is open in the slot (skips the daily halt, weekends, holidays and early closes).</summary>
+		protected override bool sessionOpenAt(DateTime slotStart) { return GetGlobexState(slotStart) == GlobexState.Open; }
 
 		/// <summary>VPF-5: footprint of a closed bar (null when unavailable). Check Source / Quality / HasLadder.</summary>
 		public _OrderFlow.FootprintBar Footprint(int barsAgo)

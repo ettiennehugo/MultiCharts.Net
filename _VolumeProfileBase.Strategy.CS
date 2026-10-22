@@ -1388,6 +1388,7 @@ namespace PowerLanguage.Strategy
 			warnIfLengthExceedsMaxBarsBack(m_vwap2);
 			warnIfLengthExceedsMaxBarsBack(m_vwap3);
 			startOwnEngine();
+			startVpbHelpers();      // Phase 3 VP-1..VP-4 / VP-6 (no-op unless enabled)
 		}
 
 		protected override void CalcBar()
@@ -1403,6 +1404,7 @@ namespace PowerLanguage.Strategy
 			stepOwnEngine();        // VPB-1 (no-op unless DevelopingSource = Own or LookaheadAudit)
 			runLookaheadAudit();    // VPB-3
 			vpbRunSummary();
+			stepVpbHelpers();       // Phase 3 VP-1..VP-3 handles / weekly sessions (no-op unless enabled)
 		}
 
 		/// <summary>
@@ -2934,5 +2936,498 @@ namespace PowerLanguage.Strategy
 			return bars.Close[ago];
 		}
 
+
+		// ==== Phase 3 VP helpers (phase3-specs.md VP-1..VP-4, VP-6 host; all off by default, no new [Input]s) ====
+
+		/// <summary>VP-1 range / composite profiles over arbitrary closed-bar windows (enabled=false: no ring, no work).</summary>
+		protected RangeProfileConfig RangeProfiles { get; } = new RangeProfileConfig();
+		/// <summary>VP-2 weekly profile stream (enabled=false: not created).</summary>
+		protected WeeklyProfileConfig WeeklyProfiles { get; } = new WeeklyProfileConfig();
+		/// <summary>VP-4 / VP-6 host accessors (the static _ProfileStats math needs no switch); enabled forces the Data1 ring.</summary>
+		protected ProfileStatsConfig ProfileStats { get; } = new ProfileStatsConfig();
+		/// <summary>VP-3 per-bar ladder (enabled=false: not created; on the futures base it forces OrderFlowEnabled).</summary>
+		protected BarLadderConfig BarLadders { get; } = new BarLadderConfig();
+
+		private bool m_rangeOn;
+		private readonly List<RangeProfileHandle> m_rangeHandles = new List<RangeProfileHandle>();
+		private readonly Dictionary<RangeProfileHandle, int> m_rangeHandleClosedSession = new Dictionary<RangeProfileHandle, int>();
+		private sealed class RangeCacheEntry { public int stream, lastBar; public DateTime t0, t1; public bool excl; public VpExtra extra; public RangeStats stats; }
+		private readonly List<RangeCacheEntry> m_rangeCache = new List<RangeCacheEntry>();
+		private readonly Dictionary<VpExtra, RangeStats> m_rangeStats = new Dictionary<VpExtra, RangeStats>();
+		private bool m_rangeQueryWarned, m_rangeHandleWarned;
+		private int m_vpSessionNo; private DateTime m_vpSessionDay = DateTime.MinValue; private int m_vpSessionLastBar = -1;
+
+		private _WeeklyProfiles m_weekly;
+		private _ProfileMath.Accumulator m_weekSession;
+		private DateTime m_weekSessionDay = DateTime.MinValue;
+		private bool m_weekSessionRoll, m_weekSessionPartial;
+		private int m_weekLastBar = -1;
+		private readonly Dictionary<WeekProfile, VpExtra> m_weekExtras = new Dictionary<WeekProfile, VpExtra>();
+		private bool m_weeklyQueryWarned;
+
+		private _BarLadderStore m_ladders;
+		private readonly Dictionary<long, LadderBar> m_htfLadders = new Dictionary<long, LadderBar>();
+		private bool m_ladderQueryWarned, m_ladderNoFlowWarned;
+		private Func<RingBar, LadderBar> m_ladderFn;
+
+		/// <summary>VP-1 coverage: is the session clock open in the slot starting at slotStart (chart time)? Base: always; the futures base uses the Globex clock.</summary>
+		protected virtual bool sessionOpenAt(DateTime slotStart) { return true; }
+		/// <summary>VP-3: footprint of a Data1 bar (1-based bar number) for the ladder. Base: none (BarUpDown only); the futures base reads its flow engine.</summary>
+		protected virtual _OrderFlow.FootprintBar footprintForLadder(int barNumber) { return null; }
+		/// <summary>VP-3: true when footprintForLadder can return order-flow ladders.</summary>
+		protected virtual bool ladderHasFlow { get { return false; } }
+
+		private void startVpbHelpers()
+		{
+			m_rangeOn = false; m_rangeHandles.Clear(); m_rangeHandleClosedSession.Clear(); m_rangeCache.Clear(); m_rangeStats.Clear();
+			m_rangeQueryWarned = m_rangeHandleWarned = false; m_vpSessionNo = 0; m_vpSessionDay = DateTime.MinValue; m_vpSessionLastBar = -1;
+			m_weekly = null; m_weekSession = null; m_weekSessionDay = DateTime.MinValue; m_weekLastBar = -1; m_weekExtras.Clear(); m_weeklyQueryWarned = false;
+			m_ladders = null; m_htfLadders.Clear(); m_ladderQueryWarned = m_ladderNoFlowWarned = false; m_ladderFn = null;
+			string err;
+			if (BarLadders.enabled)
+			{
+				if ((err = BarLadders.Validate()) != null) throw new ArgumentException(err);
+				m_ladders = new _BarLadderStore(BarLadders, tickSize());
+				requireRing(1, BarLadders.keepBars, "VP-3");
+				foreach (int ds in BarLadders.htfStreams) requireDataStream("BarLadders.htfStreams", ds);
+				_BarLadderStore store = m_ladders;
+				m_ladderFn = rb => store.Get(rb, footprintForLadder(rb.bar), rb.bar < newestRingBar(1));
+			}
+			if (RangeProfiles.enabled)
+			{
+				if ((err = RangeProfiles.Validate()) != null) throw new ArgumentException(err);
+				foreach (int ds in RangeProfiles.streams) requireRing(ds, RangeProfiles.ringBars, "VP-1");
+				m_rangeOn = true;
+			}
+			if (ProfileStats.enabled)
+			{
+				if ((err = ProfileStats.Validate()) != null) throw new ArgumentException(err);
+				requireRing(1, ProfileStats.ringBars, "VP-4/6");
+				m_rangeOn = true;   // VP-4 / VP-6 build their histograms through VP-1
+				if (!RangeProfiles.enabled) { RangeProfiles.enabled = true; if (Array.IndexOf(RangeProfiles.streams, 1) < 0) RangeProfiles.streams = new[] { 1 }; }
+			}
+			if (WeeklyProfiles.enabled)
+			{
+				if ((err = WeeklyProfiles.Validate()) != null) throw new ArgumentException(err);
+				requireDataStream("WeeklyProfiles.dataStream", WeeklyProfiles.dataStream);
+				m_weekly = new _WeeklyProfiles(WeeklyProfiles, tickSize()) { journal = engineSink(ETraceLevel.Journal) };
+			}
+		}
+
+		private int newestRingBar(int ds) { _BarRing r = Ring(ds); return r != null ? r.LastBarNumber : -1; }
+
+		private void stepVpbHelpers()
+		{
+			if (!m_rangeOn && m_weekly == null && m_ladders == null) return;
+			if (Bars.Status == EBarState.Close && Bars.CurrentBar != m_vpSessionLastBar)
+			{
+				m_vpSessionLastBar = Bars.CurrentBar;
+				DateTime day = tradingDayKey(Bars.Time[0]);
+				if (day != m_vpSessionDay) { m_vpSessionDay = day; m_vpSessionNo++; }
+			}
+			if (m_ladders != null && !ladderHasFlow && !m_ladderNoFlowWarned)
+			{
+				m_ladderNoFlowWarned = true;
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "BarLadders enabled on a non-futures base: only the BarUpDown tier (totals, no bid/ask) is available");
+			}
+			if (m_rangeOn) stepRangeHandles();
+			if (m_weekly != null) stepWeekly();
+		}
+
+		// ---------------- VP-1 ----------------
+
+		private bool rangeStreamOk(int stream)
+		{
+			if (!m_rangeOn || Array.IndexOf(RangeProfiles.streams, stream) < 0 || Ring(stream) == null)
+			{
+				if (!m_rangeQueryWarned) { m_rangeQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"RangeProfile queried for Data{stream} but RangeProfiles is not enabled for it"); }
+				return false;
+			}
+			return true;
+		}
+
+		private TimeSpan streamResolution(int stream) { return BarsOfData(stream).Info.Resolution.Duration(); }
+
+		/// <summary>VP-1: profile of the closed bars with t0 &lt;= time &lt;= t1 on `stream` (null when none, Reject across a roll, or disabled).</summary>
+		public VpExtra RangeProfile(int stream, DateTime t0, DateTime t1) { return rangeProfile(stream, t0, t1, false); }
+
+		/// <summary>VP-1 / A2-30: profile of the closed bars with t0 &lt; time &lt;= t1 (exclusive start, e.g. (t - 30m, t]).</summary>
+		public VpExtra RangeProfileAfter(int stream, DateTime t0, DateTime t1) { return rangeProfile(stream, t0, t1, true); }
+
+		private VpExtra rangeProfile(int stream, DateTime t0, DateTime t1, bool excl)
+		{
+			if (!rangeStreamOk(stream)) return null;
+			_BarRing ring = Ring(stream);
+			int last = ring.LastBarNumber;
+			for (int i = 0; i < m_rangeCache.Count; i++)
+			{
+				RangeCacheEntry c = m_rangeCache[i];
+				if (c.stream == stream && c.lastBar == last && c.t0 == t0 && c.t1 == t1 && c.excl == excl)
+				{
+					if (i != m_rangeCache.Count - 1) { m_rangeCache.RemoveAt(i); m_rangeCache.Add(c); }
+					return c.extra;
+				}
+			}
+			RangeHistogram h = RangeProfileBuilder.Build(ring, t0, t1, tickSize(), RangeProfiles, stream == 1 ? m_ladderFn : null, excl, RangeProfileBuilder.Tag(t0, t1));
+			VpExtra e = rangeExtra(h, stream);
+			RangeStats st = RangeProfileBuilder.Stats(h, RangeProfileBuilder.ExpectedSlots(t0, t1, streamResolution(stream), sessionOpenAt, excl));
+			if (e != null) rememberStats(e, st);
+			if (RangeProfiles.cacheSize > 0)
+			{
+				m_rangeCache.Add(new RangeCacheEntry { stream = stream, lastBar = last, t0 = t0, t1 = t1, excl = excl, extra = e, stats = st });
+				while (m_rangeCache.Count > RangeProfiles.cacheSize) m_rangeCache.RemoveAt(0);
+			}
+			if (e != null && traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, rangeLine(h.tag, stream, t0, t1, e, st));
+			return e;
+		}
+
+		/// <summary>VP-1: profile of `count` ring bars ending `barsBack` bars before the newest closed bar.</summary>
+		public VpExtra RangeProfileBars(int stream, int barsBack, int count)
+		{
+			if (!rangeStreamOk(stream)) return null;
+			RangeHistogram h = RangeProfileBuilder.BuildBars(Ring(stream), barsBack, count, tickSize(), RangeProfiles, stream == 1 ? m_ladderFn : null);
+			VpExtra e = rangeExtra(h, stream);
+			if (e != null) rememberStats(e, RangeProfileBuilder.Stats(h, count));
+			return e;
+		}
+
+		/// <summary>VP-1: anchored handle that grows with each closed bar from t0 (backfilled from the ring). Null when disabled or maxOpenHandles is reached.</summary>
+		public RangeProfileHandle OpenRange(int stream, DateTime t0, string tag)
+		{
+			if (!rangeStreamOk(stream)) return null;
+			int open = 0;
+			foreach (RangeProfileHandle x in m_rangeHandles) if (!x.IsClosed) open++;
+			if (open >= RangeProfiles.maxOpenHandles)
+			{
+				if (!m_rangeHandleWarned) { m_rangeHandleWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"OpenRange: maxOpenHandles ({RangeProfiles.maxOpenHandles}) reached"); }
+				return null;
+			}
+			var h = new RangeProfileHandle(stream, t0, tag, tickSize(), RangeProfiles);
+			h.Backfill(Ring(stream), stream == 1 ? m_ladderFn : null);
+			h.beforeRead = hh => catchUpHandle(hh, true);
+			m_rangeHandles.Add(h);
+			if (h.IsClosed) onHandleClosed(h);
+			return h;
+		}
+
+		/// <summary>VP-1: freeze a handle at t1 and journal it (RP build ...).</summary>
+		public void CloseRange(RangeProfileHandle h, DateTime t1)
+		{
+			if (h == null || h.IsClosed) return;
+			catchUpHandle(h, true);
+			if (!h.IsClosed) { h.Close(t1); onHandleClosed(h); }
+		}
+
+		/// <summary>VP-1: the VpExtra of a handle (rebuilt lazily when dirty).</summary>
+		public VpExtra RangeHandleProfile(RangeProfileHandle h)
+		{
+			if (h == null) return null;
+			RangeHistogram hist = h.Profile;
+			VpExtra e = rangeExtra(hist, h.stream);
+			if (e != null) rememberStats(e, RangeProfileBuilder.Stats(hist, RangeProfileBuilder.ExpectedSlots(h.t0, h.IsClosed ? h.ClosedAt : hist.lastTime, streamResolution(h.stream), sessionOpenAt)));
+			return e;
+		}
+
+		/// <summary>VP-1: {bars, expectedBars, coverage, ladderBars, rows, totalVol} of a range VpExtra (null when unknown).</summary>
+		public RangeStats RangeStatsOf(VpExtra e)
+		{
+			RangeStats st;
+			return e != null && m_rangeStats.TryGetValue(e, out st) ? st : null;
+		}
+
+		/// <summary>VP-1 / §0.6: POC / VAH / VAL of a range VpExtra as LevelRefs (isRollWindow from the window's last trading day).</summary>
+		public List<LevelRef> RangeLevels(VpExtra e, DateTime t0, DateTime t1, string tag)
+		{
+			var res = new List<LevelRef>();
+			if (e == null || !(e.poc > 0)) return res;
+			DateTime created = Bars.Time[0];
+			res.Add(LevelRef.Line(ELevelKind.RangePoc, e.poc, created, t0, t1, e.dataStream, tag));
+			res.Add(LevelRef.Line(ELevelKind.RangeVah, e.vah, created, t0, t1, e.dataStream, tag));
+			res.Add(LevelRef.Line(ELevelKind.RangeVal, e.val, created, t0, t1, e.dataStream, tag));
+			bool rw = IsRollWindow(tradingDayKey(t1));
+			foreach (LevelRef r in res) { r.crossesRoll = e.crossesRoll; r.isRollWindow = rw; }
+			return res;
+		}
+
+		private void rememberStats(VpExtra e, RangeStats st)
+		{
+			if (st == null) return;
+			if (m_rangeStats.Count > 256) m_rangeStats.Clear();
+			m_rangeStats[e] = st;
+		}
+
+		private void catchUpHandle(RangeProfileHandle h, bool includeNewest)
+		{
+			_BarRing ring = Ring(h.stream);
+			if (ring == null || ring.Count == 0 || h.IsClosed) return;
+			int newest = ring.Count - 1, upTo = includeNewest ? newest : newest - 1;
+			int i = upTo;
+			while (i >= 0 && ring.At(i).bar > h.LastBar) i--;
+			Func<RingBar, LadderBar> lf = h.stream == 1 && RangeProfiles.useTickLadder ? m_ladderFn : null;
+			for (int k = i + 1; k <= upTo && !h.IsClosed; k++)
+			{
+				RingBar b = ring.At(k);
+				if (h.Step(b, lf != null ? lf(b) : null)) onHandleClosed(h);
+			}
+		}
+
+		private void onHandleClosed(RangeProfileHandle h)
+		{
+			m_rangeHandleClosedSession[h] = m_vpSessionNo;
+			Action<string> j = engineSink(ETraceLevel.Journal);
+			if (j == null) return;
+			RangeHistogram hist = h.Profile;
+			VpExtra e = rangeExtra(hist, h.stream);
+			RangeStats st = RangeProfileBuilder.Stats(hist, RangeProfileBuilder.ExpectedSlots(h.t0, h.ClosedAt, streamResolution(h.stream), sessionOpenAt));
+			j(rangeLine(h.Tag, h.stream, h.t0, h.ClosedAt, e, st));
+			if (st != null && st.coverage < 0.95) j($"RP coverage {h.Tag} Data{h.stream} {st}");
+		}
+
+		private static string rangeLine(string tag, int stream, DateTime t0, DateTime t1, VpExtra e, RangeStats st)
+		{
+			return string.Format(System.Globalization.CultureInfo.InvariantCulture, "RP build {0} Data{1} [{2:yyyy-MM-dd HH:mm:ss}..{3:yyyy-MM-dd HH:mm:ss}] bars({4}/{5}) poc({6}) va({7}-{8}) approx({9}) roll({10})",
+				tag, stream, t0, t1, st != null ? st.bars : 0, st != null ? st.expectedBars : 0, e != null ? e.poc : 0, e != null ? e.val : 0, e != null ? e.vah : 0,
+				e != null && e.approximate ? 1 : 0, e != null && e.crossesRoll ? 1 : 0);
+		}
+
+		private void stepRangeHandles()
+		{
+			bool lad = RangeProfiles.useTickLadder && m_ladders != null;
+			for (int i = m_rangeHandles.Count - 1; i >= 0; i--)
+			{
+				RangeProfileHandle h = m_rangeHandles[i];
+				if (!h.IsClosed) catchUpHandle(h, !(lad && h.stream == 1));   // the newest Data1 ladder may not be built yet: read-time catch-up adds it
+				int at;
+				if (h.IsClosed && m_rangeHandleClosedSession.TryGetValue(h, out at) && m_vpSessionNo - at > 5) { m_rangeHandles.RemoveAt(i); m_rangeHandleClosedSession.Remove(h); }
+			}
+		}
+
+		/// <summary>RangeHistogram -> VpExtra through fillFromHistogram (POC / VA / HVN / LVN exactly as Composite), ask / bid on the levels when known.</summary>
+		private VpExtra rangeExtra(RangeHistogram h, int stream)
+		{
+			if (h == null || h.tooManyRows || h.Rows == 0) return null;
+			var e = new VpExtra { dataStream = stream, isOwn = true, approximate = h.approximate, isPartial = h.isPartial, crossesRoll = h.crossesRoll,
+				startBar = h.startBar, endBar = h.endBar, open = h.open, high = h.high, low = h.low, close = h.close };
+			fillWithVa(e, h.prices, h.vols, RangeProfiles.valueAreaPercent);
+			setLevelSides(e, h.prices, h.vols, h.ask, h.bid);
+			e.pocComplete = e.poc > 0;
+			return e;
+		}
+
+		private void fillWithVa(VpExtra e, double[] prices, double[] vols, double vaPercent)
+		{
+			double saved = ValueAreaPercent;
+			if (!double.IsNaN(vaPercent)) ValueAreaPercent = vaPercent;
+			try { fillFromHistogram(e, prices, vols); }
+			finally { ValueAreaPercent = saved; }
+		}
+
+		private static void setLevelSides(VpExtra e, double[] prices, double[] vols, double[] ask, double[] bid)
+		{
+			int j = 0;
+			for (int i = 0; i < prices.Length && j < e.levels.Count; i++)
+			{
+				if (!(vols[i] > 0)) continue;
+				LevelVol lv = e.levels[j];
+				lv.ask = ask != null ? ask[i] : double.NaN; lv.bid = bid != null ? bid[i] : double.NaN;
+				e.levels[j++] = lv;
+			}
+		}
+
+		// ---------------- VP-2 ----------------
+
+		private _WeeklyProfiles weekly()
+		{
+			if (m_weekly == null && !m_weeklyQueryWarned) { m_weeklyQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "Weekly profile queried but WeeklyProfiles.enabled is false"); }
+			return m_weekly;
+		}
+
+		private void stepWeekly()
+		{
+			IInstrument b = BarsOfData(WeeklyProfiles.dataStream);
+			if (b.Status != EBarState.Close || b.CurrentBar == m_weekLastBar) return;
+			m_weekLastBar = b.CurrentBar;
+			DateTime t = b.Time[0], day = tradingDayKey(t);
+			bool roll = rollOn(WeeklyProfiles.dataStream);
+			if (day != m_weekSessionDay)
+			{
+				completeWeekSession();
+				m_weekSessionPartial = m_weekSessionDay == DateTime.MinValue;   // the first session seen may have started before the chart
+				m_weekSessionDay = day; m_weekSessionRoll = false;
+				m_weekSession = new _ProfileMath.Accumulator(tickSize());
+			}
+			if (roll) m_weekSessionRoll = true;
+			if (WeeklyProfiles.source == EWeeklySource.RthSessions && !isRthBar(t)) return;
+			m_weekSession.Add(b.FullSymbolData.Current, t, b.Open[0], b.High[0], b.Low[0], b.Close[0], b.Volume[0], WeeklyProfiles.distribution);
+		}
+
+		private void completeWeekSession()
+		{
+			if (m_weekSession == null || m_weekSessionDay == DateTime.MinValue) return;
+			var rows = new Dictionary<long, double[]>();
+			foreach (var kv in m_weekSession.rows) rows[kv.Key] = new[] { kv.Value, double.NaN, double.NaN };
+			_ProfileMath.Accumulator a = m_weekSession;
+			m_weekly.AddSession(m_weekSessionDay, rows, m_weekSessionRoll, m_weekSessionPartial, a.open, a.high, a.low, a.close, a.bars, IsRollWindow(m_weekSessionDay));
+			m_weekly.RefreshRollWindow(IsRollWindow);
+			m_weekExtras.Clear();
+		}
+
+		/// <summary>VP-2: weekly profile (0 = developing week: its completed sessions, plus the developing session when includeDeveloping).</summary>
+		public VpExtra Week(int weeksAgo)
+		{
+			_WeeklyProfiles w = weekly();
+			if (w == null) return null;
+			WeekProfile wp = w.Week(weeksAgo);
+			if (weeksAgo == 0 && WeeklyProfiles.includeDeveloping && m_weekSession != null && m_weekSession.rows.Count > 0)
+			{
+				var dev = new WeekProfile { key = _WeeklyProfiles.WeekKeyOf(m_weekSessionDay), tick = tickSize(), bidAskValid = false };
+				if (wp != null && wp.key == dev.key) { foreach (var kv in wp.rows) { double[] v; if (!dev.rows.TryGetValue(kv.Key, out v)) { v = new double[3]; dev.rows[kv.Key] = v; } v[0] += kv.Value[0]; } dev.sessions.AddRange(wp.sessions); dev.isPartial = wp.isPartial; dev.high = wp.high; dev.low = wp.low; dev.open = wp.open; }
+				foreach (var kv in m_weekSession.rows) { double[] v; if (!dev.rows.TryGetValue(kv.Key, out v)) { v = new double[3]; dev.rows[kv.Key] = v; } v[0] += kv.Value; }
+				if (m_weekSession.high > dev.high) dev.high = m_weekSession.high;
+				if (m_weekSession.low > 0 && m_weekSession.low < dev.low) dev.low = m_weekSession.low;
+				if (double.IsNaN(dev.open)) dev.open = m_weekSession.open;
+				dev.close = m_weekSession.close;
+				VpExtra de = weekExtra(dev);
+				if (de != null) de.isDeveloping = true;
+				return de;
+			}
+			VpExtra e = weekExtra(wp);
+			if (e != null && weeksAgo == 0) e.isDeveloping = true;
+			return e;
+		}
+
+		/// <summary>VP-2: the last nWeeks COMPLETED weeks merged; null if fewer than nWeeks after the last roll.</summary>
+		public VpExtra WeeklyComposite(int nWeeks)
+		{
+			_WeeklyProfiles w = weekly();
+			return w != null ? weekExtra(w.Composite(nWeeks)) : null;
+		}
+
+		public int CompletedWeeks { get { return m_weekly != null ? m_weekly.CompletedWeeks : 0; } }
+		public DateTime WeekKey(int weeksAgo) { return m_weekly != null ? m_weekly.WeekKey(weeksAgo) : DateTime.MinValue; }
+
+		/// <summary>VP-2 / §0.6: weekly POC / VAH / VAL as LevelRefs (tag WK:yyyy-MM-dd; isRollWindow when any session of the week is in a roll window).</summary>
+		public List<LevelRef> WeekLevels(int weeksAgo)
+		{
+			var res = new List<LevelRef>();
+			WeekProfile wp = m_weekly != null ? m_weekly.Week(weeksAgo) : null;
+			VpExtra e = Week(weeksAgo);
+			if (wp == null || e == null || !(e.poc > 0)) return res;
+			DateTime t0 = wp.sessions.Count > 0 ? wp.sessions[0].day : wp.key, t1 = wp.sessions.Count > 0 ? wp.sessions[wp.sessions.Count - 1].day : wp.key, created = Bars.Time[0];
+			res.Add(LevelRef.Line(ELevelKind.WeekPoc, e.poc, created, t0, t1, WeeklyProfiles.dataStream, wp.Tag));
+			res.Add(LevelRef.Line(ELevelKind.WeekVah, e.vah, created, t0, t1, WeeklyProfiles.dataStream, wp.Tag));
+			res.Add(LevelRef.Line(ELevelKind.WeekVal, e.val, created, t0, t1, WeeklyProfiles.dataStream, wp.Tag));
+			foreach (LevelRef r in res) { r.crossesRoll = wp.crossesRoll; r.isRollWindow = wp.IsRollWindow; }
+			return res;
+		}
+
+		private VpExtra weekExtra(WeekProfile wp)
+		{
+			if (wp == null) return null;
+			VpExtra e;
+			if (m_weekExtras.TryGetValue(wp, out e)) return e;
+			double[] p, tot, ask, bid;
+			if (!wp.Dense(out p, out tot, out ask, out bid)) return null;
+			e = new VpExtra { dataStream = WeeklyProfiles.dataStream, isOwn = true, approximate = true, isPartial = wp.isPartial, crossesRoll = wp.crossesRoll,
+				open = wp.open, high = wp.high, low = wp.low, close = wp.close };
+			fillFromHistogram(e, p, tot);
+			setLevelSides(e, p, tot, ask, bid);
+			e.pocComplete = wp.complete && e.poc > 0;
+			if (m_weekExtras.Count > 64) m_weekExtras.Clear();
+			m_weekExtras[wp] = e;
+			return e;
+		}
+
+		// ---------------- VP-3 ----------------
+
+		private bool laddersOk()
+		{
+			if (m_ladders == null && !m_ladderQueryWarned) { m_ladderQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "Ladder queried but BarLadders.enabled is false"); }
+			return m_ladders != null;
+		}
+
+		/// <summary>VP-3: ladder of the Data1 closed bar `ago` (0 = the newest closed bar); null when disabled / not in the ring / worse than minQuality.</summary>
+		public LadderBar Ladder(int ago) { return Ladder(ago, BarLadders.minQuality); }
+
+		public LadderBar Ladder(int ago, _OrderFlow.FlowQuality minQuality)
+		{
+			if (!laddersOk()) return null;
+			_BarRing r = Ring(1);
+			if (r == null || ago < 0 || ago >= r.Count) return null;
+			LadderBar lb = m_ladderFn(r[ago]);
+			return lb != null && lb.quality <= minQuality ? lb : null;
+		}
+
+		/// <summary>VP-3: ladder of the Data1 bar stamped barTime (null when not in the ring).</summary>
+		public LadderBar LadderAt(DateTime barTime)
+		{
+			if (!laddersOk()) return null;
+			_BarRing r = Ring(1);
+			int i = r != null ? r.IndexAtOrBefore(barTime) : -1;
+			return i >= 0 && r.At(i).time == barTime ? m_ladderFn(r.At(i)) : null;
+		}
+
+		/// <summary>VP-3: aggregate of the Data1 ladders in (prevHtfTime, htfTime] for the closed Data n bar `ago` (HtfClosed). Assumes MC close stamps (Probe P2).</summary>
+		public LadderBar HtfLadder(int htfStream, int ago)
+		{
+			if (!laddersOk()) return null;
+			if (Array.IndexOf(BarLadders.htfStreams, htfStream) < 0) { if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"HtfLadder: Data{htfStream} not in BarLadders.htfStreams"); return null; }
+			IInstrument hb = BarsOfData(htfStream);
+			int i = HtfClosedIndex(htfStream, ago);
+			if (i < 0 || hb.CurrentBar <= i + 1) return null;
+			DateTime t = hb.Time[i], prev = hb.Time[i + 1];
+			long key = ((long)htfStream << 56) ^ t.Ticks;
+			LadderBar lb;
+			if (m_htfLadders.TryGetValue(key, out lb)) return lb;
+			_BarRing r = Ring(1);
+			if (r == null || !r.Covers(prev)) return null;
+			List<RingBar> win = r.Window(prev, t, true);
+			var parts = new List<LadderBar>(win.Count);
+			foreach (RingBar rb in win) parts.Add(m_ladderFn(rb));
+			int expected = RangeProfileBuilder.ExpectedSlots(prev, t, streamResolution(1), sessionOpenAt, true);
+			lb = _BarLadderStore.Merge(parts, win, expected, hb.FullSymbolData.Current - (hb.Status == EBarState.Close ? ago : ago + 1), t, tickSize());
+			if (m_htfLadders.Count > 512) m_htfLadders.Clear();
+			m_htfLadders[key] = lb;
+			if (lb.coverage < 1) { Action<string> j = engineSink(ETraceLevel.Journal); if (j != null) j($"LADDER HTF Data{htfStream} {t:yyyy-MM-dd HH:mm:ss} coverage({lb.coverage:0.###}) -> totals-only"); }
+			return lb;
+		}
+
+		/// <summary>VP-3: a ladder's rows through fillFromHistogram, so HVN / LVN nodes match the session logic (PS-12).</summary>
+		public VpExtra LadderProfile(LadderBar b)
+		{
+			double[] p, v;
+			if (!_BarLadderStore.Dense(b, out p, out v)) return null;
+			var e = new VpExtra { dataStream = 1, isOwn = true, approximate = !b.HasBidAsk, crossesRoll = b.crossesRoll, startBar = b.bar, endBar = b.bar, high = b.High, low = b.Low };
+			fillFromHistogram(e, p, v);
+			if (b.HasBidAsk)
+			{
+				var ask = new double[p.Length]; var bid = new double[p.Length];
+				long lo = b.rows[0];
+				for (int i = 0; i < b.rows.Length; i++) { ask[b.rows[i] - lo] += b.ask[i]; bid[b.rows[i] - lo] += b.bid[i]; }
+				setLevelSides(e, p, v, ask, bid);
+			}
+			else setLevelSides(e, p, v, null, null);
+			e.pocComplete = e.poc > 0;
+			return e;
+		}
+
+		// ---------------- VP-4 / VP-6 convenience ----------------
+
+		/// <summary>VP-4: entropy of a profile's dense 1-tick histogram with the configured row basis; mmN = Miller-Madow N (contributing bars by default).</summary>
+		public EntropyResult ProfileEntropy(VpExtra e, double mmN)
+		{
+			var p = new List<double>(); var v = new List<double>();
+			if (e != null) foreach (LevelVol l in e.levels) { p.Add(l.price); v.Add(l.total); }
+			double[] dp, dv;
+			if (!ProfileMath.ToDense(p, v, tickSize(), out dp, out dv)) return _ProfileStats.Entropy(null, ProfileStats.entropyRows, mmN);
+			return _ProfileStats.Entropy(dv, ProfileStats.entropyRows, mmN);
+		}
+
+		/// <summary>VP-4 / VP-6: Data1 ring bars of one trading day (RTH only when rthOnly), oldest first; empty when ProfileStats / RangeProfiles are off.</summary>
+		public List<RingBar> SessionBars(DateTime tradingDay, bool rthOnly)
+		{
+			_BarRing r = Ring(1);
+			return r != null ? r.Session(tradingDay, rthOnly) : new List<RingBar>();
+		}
 	}
 }

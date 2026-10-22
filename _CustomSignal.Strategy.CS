@@ -795,6 +795,130 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// ---- Phase 3 §0.2 / §0.6 / VP-5: closed-bar rings, roll-session window, FVG detector (all off by default) ----
+
+		/// <summary>Phase 3 §0.2: ring capacity (0 = auto: the sum of the consumers' needs, capped at 40,000 bars).</summary>
+		protected BarRingConfig BarRings { get; } = new BarRingConfig();
+		/// <summary>Phase 3 VP-5: FVG detector configuration; enabled=false (default) = not created.</summary>
+		protected FvgConfig Fvgs { get; } = new FvgConfig();
+		private readonly Dictionary<int, int> m_ringNeed = new Dictionary<int, int>();
+		private readonly Dictionary<int, List<string>> m_ringConsumers = new Dictionary<int, List<string>>();
+		private readonly Dictionary<int, _BarRing> m_rings = new Dictionary<int, _BarRing>();
+		private readonly Dictionary<int, int> m_ringLastBar = new Dictionary<int, int>();
+		private bool m_ringsLogged;
+		private _RollWindow m_rollWindow;
+		private int m_rollWindowLastBar = -1;
+		private _FvgDetector m_fvg;
+		private int m_fvgLastBar = -1;
+		private bool m_fvgQueryWarned;
+
+		/// <summary>
+		/// Phase 3 §0.2: ask the host to keep a closed-bar ring of at least `bars` bars on stream ds (call from StartCalc after
+		/// base.StartCalc()). Rings are created only for streams some enabled helper asks for, and filled once per closed bar.
+		/// </summary>
+		protected void requireRing(int ds, int bars, string consumer)
+		{
+			requireDataStream("ring Data" + ds, ds);
+			int cur; m_ringNeed.TryGetValue(ds, out cur);
+			m_ringNeed[ds] = cur + Math.Max(1, bars);
+			List<string> l;
+			if (!m_ringConsumers.TryGetValue(ds, out l)) { l = new List<string>(); m_ringConsumers[ds] = l; }
+			l.Add(consumer);
+			m_rings.Remove(ds);   // (re)sized on the next step
+			if (m_rollWindow == null) m_rollWindow = new _RollWindow();
+		}
+
+		/// <summary>Phase 3 §0.2: the closed-bar ring of stream ds, or null when no helper asked for it.</summary>
+		protected _BarRing Ring(int ds)
+		{
+			_BarRing r;
+			if (m_rings.TryGetValue(ds, out r)) return r;
+			int need;
+			if (!m_ringNeed.TryGetValue(ds, out need)) return null;
+			int cap = BarRings.capacityBars > 0 ? BarRings.capacityBars : Math.Min(BarRingConfig.MaxAutoBars, need);
+			r = new _BarRing(cap);
+			m_rings[ds] = r;
+			return r;
+		}
+
+		/// <summary>Review M2 (A2-39c): true when the trading day is a roll session or the session just before / after one.
+		/// False when no Phase 3 helper is enabled (the roll window is tracked only alongside rings / FVGs).</summary>
+		protected bool IsRollWindow(DateTime tradingDay) { return m_rollWindow != null && m_rollWindow.IsRollWindow(tradingDay); }
+
+		/// <summary>Phase 3: the closed bar `ago` of stream ds as a ring record (ago 0 = this bar; call on a closed bar).</summary>
+		protected RingBar ringBarOf(int ds, int ago = 0)
+		{
+			IInstrument b = BarsOfData(ds);
+			DateTime t = b.Time[ago];
+			return new RingBar { bar = b.FullSymbolData.Current - ago, time = t, tradingDay = tradingDayKey(t), o = b.Open[ago], h = b.High[ago], l = b.Low[ago], c = b.Close[ago],
+				v = b.Volume[ago], up = b.UpTicks[ago], down = b.DownTicks[ago], rth = isRthBar(t), rollBar = ago == 0 && rollOn(ds) };
+		}
+
+		private void startVpHelpers()
+		{
+			m_ringNeed.Clear(); m_ringConsumers.Clear(); m_rings.Clear(); m_ringLastBar.Clear(); m_ringsLogged = false;
+			m_rollWindow = null; m_rollWindowLastBar = -1;
+			m_fvg = null; m_fvgLastBar = -1; m_fvgQueryWarned = false;
+			if (!Fvgs.enabled) return;
+			string err = Fvgs.Validate();
+			if (err != null) throw new ArgumentException(err);
+			requireDataStream("Fvgs.dataStream", Fvgs.dataStream);
+			m_rollWindow = new _RollWindow();
+			m_fvg = new _FvgDetector(Fvgs, tickSize(), BarsOfData(Fvgs.dataStream).Info.Resolution.Duration()) { journal = engineSink(ETraceLevel.Journal) };
+		}
+
+		private void stepVpHelpers()
+		{
+			if (m_rollWindow == null) return;
+			if (Bars.Status == EBarState.Close && Bars.CurrentBar != m_rollWindowLastBar)
+			{
+				m_rollWindowLastBar = Bars.CurrentBar;
+				m_rollWindow.Observe(tradingDayKey(Bars.Time[0]), rollOn(1));
+			}
+			if (!m_ringsLogged && m_ringNeed.Count > 0)
+			{
+				m_ringsLogged = true;
+				Action<string> j = engineSink(ETraceLevel.Journal);
+				if (j != null) foreach (var kv in m_ringNeed) j($"RING Data{kv.Key} capacity({Ring(kv.Key).Capacity}) consumers({string.Join(",", m_ringConsumers[kv.Key])})");
+			}
+			foreach (int ds in m_ringNeed.Keys)
+			{
+				IInstrument b = BarsOfData(ds);
+				int last;
+				if (b.Status != EBarState.Close || (m_ringLastBar.TryGetValue(ds, out last) && last == b.CurrentBar)) continue;
+				m_ringLastBar[ds] = b.CurrentBar;
+				Ring(ds).Add(ringBarOf(ds));
+			}
+			if (m_fvg != null)
+			{
+				IInstrument fb = BarsOfData(Fvgs.dataStream);
+				if (fb.Status == EBarState.Close && fb.CurrentBar != m_fvgLastBar)
+				{
+					m_fvgLastBar = fb.CurrentBar;
+					m_fvg.Add(ringBarOf(Fvgs.dataStream));
+				}
+			}
+		}
+
+		/// <summary>Phase 3 VP-5: the FVG detector, or null when Fvgs.enabled is false (one Warning).</summary>
+		internal _FvgDetector FvgDetector
+		{
+			get
+			{
+				if (m_fvg == null && !m_fvgQueryWarned) { m_fvgQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "FvgDetector queried but Fvgs.enabled is false (detector not created)"); }
+				return m_fvg;
+			}
+		}
+
+		/// <summary>Phase 3 VP-5 / §0.6: a gap as a LevelRef, stamped with the roll-session window flag (review M2).</summary>
+		protected LevelRef fvgLevel(Fvg f, bool startEdge)
+		{
+			if (m_fvg == null || f == null) return null;
+			LevelRef r = m_fvg.ToLevel(f, startEdge, Fvgs.dataStream);
+			r.isRollWindow = IsRollWindow(f.createdDay);
+			return r;
+		}
+
 		// ---- M-PORT (specs/m-port-spec.md §3): publish pm.* keys into MyPortfolioData for _PortfolioRiskManager ----
 
 		/// <summary>M-PORT: publish portfolio keys. True only in Portfolio Trader (no [Input]); chart runs publish nothing.</summary>
@@ -1025,6 +1149,7 @@ namespace PowerLanguage.Strategy
 			startTick();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
+			startVpHelpers();   // Phase 3 rings / roll window / FVG (off by default)
 		}
 
 		private void startAvwap(bool needsPa)
@@ -1079,6 +1204,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>Steps the enabled engines once per CalcBar; each engine commits on its own stream's closed bar only.</summary>
 		private void stepEngines()
 		{
+			stepVpHelpers();   // Phase 3: rings first, so every engine below reads this bar (no-op unless a helper is enabled)
 			if (m_pa != null)
 			{
 				IInstrument bars = BarsOfData(PriceActionConfig.dataStream);
