@@ -735,6 +735,63 @@ namespace PowerLanguage.Strategy
 			m_tickReq = null; m_tickStream = null;
 		}
 
+		// ---- A2-33 (catalogue §3.0, Gate 0 G0-d): level persistence vs matched controls ----
+
+		/// <summary>A2-33 harness configuration; enabled=false (default) = not created. Set in a derived strategy (e.g. _Test1).</summary>
+		protected LevelStudyConfig LevelStudyConfig { get; } = new LevelStudyConfig();
+		private _LevelStudy m_levelStudy;
+		private DateTime m_levelStudyDay = DateTime.MinValue;
+		private int m_levelStudyLastBar = -1;
+		private bool m_levelStudyQueryWarned;
+
+		private void startLevelStudy()
+		{
+			m_levelStudy = null; m_levelStudyDay = DateTime.MinValue; m_levelStudyLastBar = -1; m_levelStudyQueryWarned = false;
+			if (!LevelStudyConfig.enabled) return;
+			var ls = new _LevelStudy { config = LevelStudyConfig, tickSize = tickSize(), journal = engineSink(ETraceLevel.Journal) };
+			string err = ls.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_levelStudy = ls;
+		}
+
+		private void stepLevelStudy()
+		{
+			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_levelStudyLastBar) return;
+			m_levelStudyLastBar = Bars.CurrentBar;
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (day != m_levelStudyDay) { m_levelStudyDay = day; m_levelStudy.BeginSession(day); }
+			m_levelStudy.Bar(Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0]);
+		}
+
+		/// <summary>
+		/// A2-33: register a prior-session level for today's session (call from the derived CalcBar on the first bar of the session,
+		/// after base.CalcBar()). type = level type (POC, VAH, VAL, HVN, LVN, nPOC, ONH, ONL, IBH, IBL, ...), ageSessions 1..maxAge,
+		/// quality for terciles (NaN = none), key = stable identity across sessions for the Kaplan-Meier level death (default type@price).
+		/// The reference price is the close of the bar it is called on. No-op when the harness is off.
+		/// </summary>
+		protected bool levelStudyAdd(string type, double price, int ageSessions, double quality = double.NaN, string key = null)
+		{
+			if (m_levelStudy == null)
+			{
+				if (!m_levelStudyQueryWarned) { m_levelStudyQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "levelStudyAdd called but LevelStudyConfig.enabled is false"); }
+				return false;
+			}
+			return m_levelStudy.AddLevel(type, price, ageSessions, quality, key);
+		}
+
+		private void finishLevelStudy()
+		{
+			if (m_levelStudy == null) return;
+			List<LevelTypeResult> res = m_levelStudy.Finish();
+			if (traceOn(ETraceLevel.Info))
+			{
+				trace(ETraceLevel.Info, $"A2-33 RESULT events({m_levelStudy.Events.Count}) types({res.Count}) window({LevelStudyConfig.from:yyyy-MM-dd}..{LevelStudyConfig.to:yyyy-MM-dd})");
+				foreach (LevelTypeResult r in res) trace(ETraceLevel.Info, _LevelStudy.Summary(r));
+			}
+			if (!string.IsNullOrEmpty(LevelStudyConfig.csvPath))
+			{
+				try { using (var w = new StreamWriter(LevelStudyConfig.csvPath, false)) m_levelStudy.WriteCsv(w); }
+				catch (Exception ex) { trace(ETraceLevel.Warning, $"A2-33 CSV write failed ({LevelStudyConfig.csvPath}): {ex.Message}"); }
 		// ---- M-PORT (specs/m-port-spec.md §3): publish pm.* keys into MyPortfolioData for _PortfolioRiskManager ----
 
 		/// <summary>M-PORT: publish portfolio keys. True only in Portfolio Trader (no [Input]); chart runs publish nothing.</summary>
@@ -1047,6 +1104,7 @@ namespace PowerLanguage.Strategy
 		protected override void StopCalc()
 		{
 			stopEngines();   // §0.1 rule 6: re-calc starts clean
+			m_levelStudy = null;
 			m_portOn = false;
 			base.StopCalc();
 		}
@@ -1119,6 +1177,7 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			startEngines();   // lazy engines (§0.1); null unless enabled
+			startLevelStudy();   // A2-33 harness (off by default)
 			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
 		}
 
@@ -1205,6 +1264,7 @@ namespace PowerLanguage.Strategy
 			}
 
 			stepEngines();   // lazy engines (§0.1): no-op unless enabled
+			if (m_levelStudy != null) stepLevelStudy();
 			if (m_portOn) portfolioBar();   // M-PORT: position/equity keys; the derived strategy arms after base.CalcBar()
 
 			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
@@ -1216,6 +1276,7 @@ namespace PowerLanguage.Strategy
 			if (!m_runEndLogged && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
 			{
 				m_runEndLogged = true;
+				finishLevelStudy();
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"RUN-END id({RunId}) lastBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) realTime({Environment.IsRealTimeCalc})");
 			}
 		}
