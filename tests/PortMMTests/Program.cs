@@ -133,6 +133,45 @@ static class Program
 		// exits are never part of a decision: PortDecision has no exit flags; forceClose only from kill/flatten
 		Check(typeof(PortDecision).GetFields().All(f => !f.Name.ToLower().Contains("exit")), "no exit gating in decisions");
 
+		// ---- JSON config (PortMmConfigLoader) ----
+		{
+			var def = new PortMmConfig();
+			var w = new List<string>();
+			var pc = PortMmConfigLoader.Parse("{ \"heatCap\": 0.03, \"Sizing\": \"codesize\", \"_note\": \"x\" }", def, w);
+			Check(pc != def && Near(pc.heatCap, 0.03) && pc.sizing == EPortSizing.CodeSize && Near(pc.clusterCap, 0.02) && w.Count == 0, "partial JSON overrides only present fields (case-insensitive, _comments ok)");
+			Check(Near(def.heatCap, 0.04) && def.sizing == EPortSizing.RiskParity, "defaults object not mutated");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"heatCap\": 0.03, \"bogus\": 1 }", def, w);
+			Check(Near(pc.heatCap, 0.03) && w.Count == 1 && w[0].Contains("unknown field 'bogus'"), "unknown field -> warning");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"heatCap\": -1, \"maxPositions\": 2.5, \"sizing\": \"Kelly\", \"riskPerTrade\": \"x\", \"riskPertrade2\": 0 }", def, w);
+			Check(Near(pc.heatCap, 0.04) && pc.maxPositions == 6 && pc.sizing == EPortSizing.RiskParity && w.Count(x => x.Contains("bad value")) == 4, "bad values -> warning, field keeps default");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"ddSteps\": [ {\"dd\":0.1,\"mult\":0.5}, {\"dd\":0.05,\"mult\":0.25} ] }", def, w);
+			Check(pc.ddSteps.Length == 3 && Near(pc.ddSteps[0].dd, 0.05) && w.Count == 1 && w[0].Contains("ddSteps"), "ddSteps must ascend");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"ddSteps\": [ {\"dd\":0.04,\"mult\":0.6}, {\"dd\":0.2,\"mult\":0} ] }", def, w);
+			Check(pc.ddSteps.Length == 2 && Near(pc.ddSteps[1].dd, 0.2) && w.Count == 0, "valid ddSteps replace the default list");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"dailyLossStop\": 0.04, \"dailyLossFlatten\": 0.03 }", def, w);
+			Check(pc == def && w.Count == 1 && w[0].Contains("rejected"), "daily stop must be < flatten: whole file rejected -> defaults");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"clusterCap\": 0.05 }", def, w);
+			Check(pc == def && w[0].Contains("rejected"), "clusterCap > heatCap rejected");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ not json", def, w);
+			Check(pc == def && w.Count == 1 && w[0].Contains("not valid JSON"), "malformed JSON -> defaults");
+			w.Clear(); pc = PortMmConfigLoader.Parse("[1,2]", def, w);
+			Check(pc == def && w[0].Contains("not a JSON object"), "non-object -> defaults");
+			w.Clear(); pc = PortMmConfigLoader.Parse("{ \"stratKillR\": 3, \"rhoWin\": 2 }", def, w);
+			Check(Near(pc.stratKillR, -8) && pc.rhoWin == 60 && w.Count == 2, "kill R must be negative, windows >= 3");
+			var info = new List<string>(); w.Clear();
+			Check(PortMmConfigLoader.LoadFile(null, def, w, info) == def && PortMmConfigLoader.LoadFile("", def, w, info) == def && w.Count == 0 && info.Count == 0, "no path -> defaults silently");
+			Check(PortMmConfigLoader.LoadFile("/nonexistent/x.json", def, w, info) == def && w.Count == 1 && w[0].Contains("not found"), "missing file -> warning + defaults");
+			string tmp = System.IO.Path.GetTempFileName(); System.IO.File.WriteAllText(tmp, "{ \"maxPositions\": 3 }"); w.Clear();
+			pc = PortMmConfigLoader.LoadFile(tmp, def, w, info);
+			Check(pc.maxPositions == 3 && w.Count == 0 && info.Count == 1 && info[0].Contains("maxPositions(3)"), "file load logs the effective config at Info");
+			System.IO.File.Delete(tmp);
+			string sample = System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../samples/PortMmConfig.example.json");
+			w.Clear(); info.Clear(); pc = PortMmConfigLoader.LoadFile(sample, def, w, info);
+			Check(w.Count == 0 && info.Count == 1 && pc.ToString() == def.ToString() && Near(pc.idmCap, def.idmCap) && pc.rhoMinDays == def.rhoMinDays && pc.ddRecoverHighDays == def.ddRecoverHighDays && Near(pc.bookVolTarget, def.bookVolTarget),
+				$"samples/PortMmConfig.example.json parses cleanly and equals the code defaults ({string.Join(" | ", w)})");
+			var cp = def.Copy(); cp.ddSteps[0].dd = 0.07; Check(Near(def.ddSteps[0].dd, 0.05), "Copy is deep");
+		}
+
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

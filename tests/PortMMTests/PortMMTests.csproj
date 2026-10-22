@@ -8,4 +8,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The PowerLanguage editor references Newtonsoft.Json; the tests use the real parser. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
 </Project>

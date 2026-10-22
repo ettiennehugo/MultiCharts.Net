@@ -24,12 +24,28 @@ namespace PowerLanguage.Strategy
 		/// <summary>Effective configuration (code defaults). Override in a subclass for another profile.</summary>
 		protected virtual PortMmConfig Config { get { return new PortMmConfig(); } }
 
+		/// <summary>
+		/// Optional JSON file that overrides Config field by field (spec §5.1; example samples/PortMmConfig.example.json).
+		/// Null/empty (default) = Config as is. Override in a subclass. A missing/unreadable file or bad values log a Warning
+		/// and fall back to the defaults; the signal never throws because of the file.
+		/// </summary>
+		protected virtual string ConfigPath { get { return null; } }
+
 		protected override void StartCalc()
 		{
-			m_mm = new _PortMM { config = Config };
+			PortMmConfig defaults = Config;
+			string err = defaults.Validate();
+			if (err != null) { Output.WriteLine($"PORT Warning: code Config invalid ({err}), using built-in defaults"); defaults = new PortMmConfig(); }
+			var warnings = new List<string>(); var info = new List<string>();
+			string path = null;
+			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.Message}), using code defaults"); }
+			PortMmConfig cfg = defaults;
+			try { cfg = PortMmConfigLoader.LoadFile(path, defaults, warnings, info); }
+			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using code defaults"); cfg = defaults; }
+			foreach (string w in warnings) Output.WriteLine("PORT Warning: " + w);
+			foreach (string i in info) Output.WriteLine("PORT Info: " + i);
+			m_mm = new _PortMM { config = cfg };
 			m_mm.journal = s => Output.WriteLine(s);
-			string err = m_mm.Configure();
-			if (err != null) throw new ArgumentException(err);
 			m_runLogged = m_currencyLogged = false; m_logged.Clear();
 		}
 
