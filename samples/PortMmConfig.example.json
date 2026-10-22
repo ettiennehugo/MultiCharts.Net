@@ -1,0 +1,61 @@
+{
+  "_comment": "M-PORT money-management config for _PortfolioRiskManager (specs/m-port-spec.md §5.1). Every field is optional: a missing field keeps its code default (shown here). Keys starting with '_' are comments. Unknown keys log a warning; a bad value logs a warning and keeps the default; a file that fails validation as a whole is ignored (code defaults).",
+
+  "_sizing": "CodeSize (EntryContracts = -1, the strategy's own CS-4 size) | RiskParity (equal $ risk per entry) | VolTarget (equal share of book vol x IDM)",
+  "sizing": "RiskParity",
+
+  "_bookVolTarget": "VolTarget only: annualised book volatility target, (0, 5)",
+  "bookVolTarget": 0.10,
+
+  "_riskPerTrade": "RiskParity: book fraction risked per new entry at multiplier 1, (0, 1)",
+  "riskPerTrade": 0.005,
+
+  "_heatCap": "max (open risk + new risk) / book equity, (0, 1]",
+  "heatCap": 0.04,
+
+  "_clusterCap": "max risk per correlation cluster / book equity, (0, 1] and <= heatCap",
+  "clusterCap": 0.02,
+
+  "_rhoMerge": "clusters merge when max(rho, stressed rho) >= rhoMerge, (0, 1]",
+  "rhoMerge": 0.9,
+
+  "_rhoWin": "rolling correlation window in sessions, integer >= 3",
+  "rhoWin": 60,
+
+  "_rhoMinDays": "minimum common days for a correlation (falls back to underlying returns below), 3..rhoWin",
+  "rhoMinDays": 40,
+
+  "_maxPositions": "max concurrent open positions across the portfolio, integer >= 1",
+  "maxPositions": 6,
+
+  "_ddSteps": "drawdown-from-peak throttle: dd ascending in (0,1), mult non-increasing in [0,1]; mult 0 = entries off",
+  "ddSteps": [
+    { "dd": 0.05, "mult": 0.5 },
+    { "dd": 0.10, "mult": 0.25 },
+    { "dd": 0.15, "mult": 0.0 }
+  ],
+
+  "_ddRecoverHighDays": "throttle steps down at a new N-session equity high (or dd < half the step), integer >= 1",
+  "ddRecoverHighDays": 20,
+
+  "_dailyLossStop": "book loss today / book at session open that blocks new entries for the session, (0, 1)",
+  "dailyLossStop": 0.02,
+
+  "_dailyLossFlatten": "book loss today that force-closes every open position; must be > dailyLossStop and < 1",
+  "dailyLossFlatten": 0.03,
+
+  "_stratKillR": "strategy kill: cumulative R over the last stratKillTrades trades <= this (negative) -> flatten, then pause",
+  "stratKillR": -8,
+
+  "_stratKillTrades": "trades in the kill window, integer >= 1",
+  "stratKillTrades": 20,
+
+  "_staleBars": "a publisher whose pm.stamp is older than its own bar staleBars back is denied entries, integer >= 1",
+  "staleBars": 3,
+
+  "_minContracts": "below this size after scaling the entry is denied, integer >= 1",
+  "minContracts": 1,
+
+  "_idmCap": "VolTarget: cap on the diversification multiplier, [1, 10]",
+  "idmCap": 2.5
+}

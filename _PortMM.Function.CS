@@ -1,5 +1,9 @@
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 
 namespace PowerLanguage.Function
 {
@@ -90,7 +94,7 @@ namespace PowerLanguage.Function
 				if (!(ddSteps[i].dd > 0 && ddSteps[i].dd < 1) || ddSteps[i].mult < 0 || ddSteps[i].mult > 1 || (i > 0 && !(ddSteps[i].dd > ddSteps[i - 1].dd && ddSteps[i].mult <= ddSteps[i - 1].mult)))
 				{ e.Add($"ddSteps[{i}]=({ddSteps[i].dd},{ddSteps[i].mult}) (dd ascending in (0,1), mult non-increasing in [0,1])"); break; }
 			if (ddRecoverHighDays < 1) e.Add($"ddRecoverHighDays={ddRecoverHighDays}");
-			if (!(dailyLossStop > 0) || !(dailyLossFlatten >= dailyLossStop)) e.Add($"dailyLossStop={dailyLossStop} dailyLossFlatten={dailyLossFlatten}");
+			if (!(dailyLossStop > 0) || !(dailyLossFlatten > dailyLossStop) || !(dailyLossFlatten < 1)) e.Add($"dailyLossStop={dailyLossStop} dailyLossFlatten={dailyLossFlatten} (0 < stop < flatten < 1)");
 			if (!(stratKillR < 0) || stratKillTrades < 1) e.Add($"stratKillR={stratKillR} stratKillTrades={stratKillTrades}");
 			if (staleBars < 1) e.Add($"staleBars={staleBars}");
 			if (minContracts < 1) e.Add($"minContracts={minContracts}");
@@ -98,11 +102,155 @@ namespace PowerLanguage.Function
 			return e.Count == 0 ? null : "PortMmConfig invalid: " + string.Join(", ", e);
 		}
 
+		/// <summary>Deep copy (ddSteps cloned).</summary>
+		public PortMmConfig Copy()
+		{
+			var c = (PortMmConfig)MemberwiseClone();
+			if (ddSteps != null) { c.ddSteps = new PortDdStep[ddSteps.Length]; for (int i = 0; i < ddSteps.Length; i++) c.ddSteps[i] = new PortDdStep(ddSteps[i].dd, ddSteps[i].mult); }
+			return c;
+		}
+
 		public override string ToString()
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
 			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
 				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts})";
+		}
+	}
+
+	/// <summary>
+	/// M-PORT JSON configuration (spec §5.1 "Loaded from ConfigPath JSON if given; else defaults"). Field names are the
+	/// PortMmConfig field names (case-insensitive); see samples/PortMmConfig.example.json. Partial JSON overrides only the
+	/// fields present. Unknown fields, bad values and unreadable files produce warnings and fall back to the defaults: a bad
+	/// field keeps its default; if the merged result fails PortMmConfig.Validate() the whole file is rejected (defaults).
+	/// Never throws.
+	/// </summary>
+	public static class PortMmConfigLoader
+	{
+		/// <summary>Load from a file. Empty path = defaults (no warning). Returns the config to use (never null).</summary>
+		public static PortMmConfig LoadFile(string path, PortMmConfig defaults, List<string> warnings, List<string> info)
+		{
+			if (string.IsNullOrWhiteSpace(path)) return defaults;
+			string json;
+			try
+			{
+				if (!File.Exists(path)) { warnings.Add($"PortMmConfig: file not found '{path}', using code defaults"); return defaults; }
+				json = File.ReadAllText(path);
+			}
+			catch (Exception ex) { warnings.Add($"PortMmConfig: cannot read '{path}' ({ex.GetType().Name}: {ex.Message}), using code defaults"); return defaults; }
+			PortMmConfig c = Parse(json, defaults, warnings, path);
+			if (!ReferenceEquals(c, defaults)) info.Add($"PortMmConfig loaded from '{path}': {c}");
+			return c;
+		}
+
+		/// <summary>Merge the JSON text onto a copy of the defaults. Returns defaults itself when the text is rejected as a whole.</summary>
+		public static PortMmConfig Parse(string json, PortMmConfig defaults, List<string> warnings, string source = "json")
+		{
+			JObject o;
+			try
+			{
+				JToken t = JToken.Parse(json ?? "");
+				o = t as JObject;
+				if (o == null) { warnings.Add($"PortMmConfig: {source} is not a JSON object, using code defaults"); return defaults; }
+			}
+			catch (JsonException ex) { warnings.Add($"PortMmConfig: {source} is not valid JSON ({ex.Message}), using code defaults"); return defaults; }
+
+			PortMmConfig c = Clone(defaults);
+			foreach (JProperty p in o.Properties())
+			{
+				string n = p.Name.ToLowerInvariant();
+				JToken v = p.Value;
+				switch (n)
+				{
+					case "sizing":
+						{
+							EPortSizing sz;
+							if (v.Type == JTokenType.String && Enum.TryParse((string)v, true, out sz) && Enum.IsDefined(typeof(EPortSizing), sz)) c.sizing = sz;
+							else bad(warnings, p, "CodeSize | RiskParity | VolTarget");
+							break;
+						}
+					case "bookvoltarget": num(warnings, p, 0, 5, false, ref c.bookVolTarget); break;
+					case "riskpertrade": num(warnings, p, 0, 1, false, ref c.riskPerTrade); break;
+					case "heatcap": num(warnings, p, 0, 1, true, ref c.heatCap); break;
+					case "clustercap": num(warnings, p, 0, 1, true, ref c.clusterCap); break;
+					case "rhomerge": num(warnings, p, 0, 1, true, ref c.rhoMerge); break;
+					case "rhowin": integer(warnings, p, 3, 10000, ref c.rhoWin); break;
+					case "rhomindays": integer(warnings, p, 3, 10000, ref c.rhoMinDays); break;
+					case "maxpositions": integer(warnings, p, 1, 1000, ref c.maxPositions); break;
+					case "ddsteps": ddSteps(warnings, p, c); break;
+					case "ddrecoverhighdays": integer(warnings, p, 1, 1000, ref c.ddRecoverHighDays); break;
+					case "dailylossstop": num(warnings, p, 0, 1, false, ref c.dailyLossStop); break;
+					case "dailylossflatten": num(warnings, p, 0, 1, false, ref c.dailyLossFlatten); break;
+					case "stratkillr":
+						{
+							double x = c.stratKillR;
+							if (tryNum(v, out x) && x < 0) c.stratKillR = x; else bad(warnings, p, "a negative number of R");
+							break;
+						}
+					case "stratkilltrades": integer(warnings, p, 1, 10000, ref c.stratKillTrades); break;
+					case "stalebars": integer(warnings, p, 1, 10000, ref c.staleBars); break;
+					case "mincontracts": integer(warnings, p, 1, 100000, ref c.minContracts); break;
+					case "idmcap": { double x; if (tryNum(v, out x) && x >= 1 && x <= 10) c.idmCap = x; else bad(warnings, p, "a number in [1, 10]"); break; }
+					default:
+						if (!n.StartsWith("_") && !n.StartsWith("$")) warnings.Add($"PortMmConfig: unknown field '{p.Name}' ignored");   // "_comment"-style keys are allowed
+						break;
+				}
+			}
+			string err = c.Validate();
+			if (err != null) { warnings.Add($"PortMmConfig: {source} rejected ({err}), using code defaults"); return defaults; }
+			return c;
+		}
+
+		public static PortMmConfig Clone(PortMmConfig d)
+		{
+			return d.Copy();
+		}
+
+		private static bool tryNum(JToken v, out double x)
+		{
+			x = double.NaN;
+			if (v.Type == JTokenType.Float || v.Type == JTokenType.Integer) { x = v.Value<double>(); return !double.IsNaN(x) && !double.IsInfinity(x); }
+			return false;
+		}
+
+		private static void num(List<string> w, JProperty p, double lo, double hi, bool hiInclusive, ref double field)
+		{
+			double x;
+			if (tryNum(p.Value, out x) && x > lo && (hiInclusive ? x <= hi : x < hi)) field = x;
+			else bad(w, p, string.Format(CultureInfo.InvariantCulture, "a number in ({0}, {1}{2}", lo, hi, hiInclusive ? "]" : ")"));
+		}
+
+		private static void integer(List<string> w, JProperty p, int lo, int hi, ref int field)
+		{
+			if (p.Value.Type == JTokenType.Integer)
+			{
+				long x = p.Value.Value<long>();
+				if (x >= lo && x <= hi) { field = (int)x; return; }
+			}
+			bad(w, p, $"an integer in [{lo}, {hi}]");
+		}
+
+		private static void ddSteps(List<string> w, JProperty p, PortMmConfig c)
+		{
+			var a = p.Value as JArray;
+			if (a == null) { bad(w, p, "an array of { \"dd\": x, \"mult\": y }"); return; }
+			var steps = new List<PortDdStep>();
+			foreach (JToken t in a)
+			{
+				var s = t as JObject; double dd, mult;
+				if (s == null || s["dd"] == null || s["mult"] == null || !tryNum(s["dd"], out dd) || !tryNum(s["mult"], out mult))
+				{ bad(w, p, "an array of { \"dd\": x, \"mult\": y }"); return; }
+				steps.Add(new PortDdStep(dd, mult));
+			}
+			var tmp = new PortMmConfig { ddSteps = steps.ToArray() };
+			string err = tmp.Validate();
+			if (err != null && err.Contains("ddSteps")) { bad(w, p, "dd ascending in (0,1), mult non-increasing in [0,1]"); return; }
+			c.ddSteps = steps.ToArray();
+		}
+
+		private static void bad(List<string> w, JProperty p, string expected)
+		{
+			w.Add($"PortMmConfig: bad value for '{p.Name}' ({p.Value.ToString(Formatting.None)}); expected {expected}; keeping the default");
 		}
 	}
 
