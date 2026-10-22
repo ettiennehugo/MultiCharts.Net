@@ -7,4 +7,22 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
+    <Compile Include="..\..\_BarLadder.Function.CS" Link="Linked\_BarLadder.cs" />
+    <Compile Include="..\..\_RangeProfile.Function.CS" Link="Linked\_RangeProfile.cs" />
+    <Compile Include="..\..\_WeeklyProfiles.Function.CS" Link="Linked\_WeeklyProfiles.cs" />
+    <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
+    <Compile Include="..\..\_FvgDetector.Function.CS" Link="Linked\_FvgDetector.cs" />
+  </ItemGroup>
+  <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

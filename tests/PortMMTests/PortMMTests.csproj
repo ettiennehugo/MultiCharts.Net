@@ -12,4 +12,8 @@
     <!-- The PowerLanguage editor references Newtonsoft.Json; the tests use the real parser. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_PortMM.Function.CS" Link="Linked\_PortMM.cs" />
+  </ItemGroup>
 </Project>
