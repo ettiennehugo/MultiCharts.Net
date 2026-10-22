@@ -58,7 +58,8 @@ namespace PowerLanguage.Strategy
 	//   Also set the inherited trace level input to Journal (ETraceLevel.Journal) or nothing is printed.
 	//
 	// MODE
-	//   Strategy   : same as EventStudy (the default; no positions). Kept so the Mode list matches the Gate-0 plan.
+	//   Strategy   : NOT RUNNABLE - StartCalc throws "use EventStudy/Control*/Canary". Kept only so the Mode list matches
+	//                the Gate-0 plan. The default Mode is EventStudy.
 	//   EventStudy : the real level families of Variant, each with one matched _Rng placebo, through _LevelStudy.
 	//   ControlRT  : negative control, "random time": every level is replaced by the 1m close at a random bar of the
 	//                prior RTH session (same family label prefixed RT:). Expected verdict: PARK. A PASS = bug.
@@ -128,7 +129,7 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_leLmt, m_seLmt, m_leStp, m_seStp, m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
 
-		public _TestGate0(object _ctx) : base(_ctx) { Mode = EGate0Mode.Strategy; Variant = 1; }
+		public _TestGate0(object _ctx) : base(_ctx) { Mode = EGate0Mode.EventStudy; Variant = 1; }
 
 		protected override void Create()
 		{
@@ -151,7 +152,10 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
+			if (Mode == EGate0Mode.Strategy)
+				throw new ArgumentException("_TestGate0: Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary");
 			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal) };
+			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0;
 			string err = m_g0.Configure();
 			if (!string.IsNullOrEmpty(err)) throw new ArgumentException("_TestGate0: " + err);
 			m_done = false; m_configured = true;
@@ -172,7 +176,32 @@ namespace PowerLanguage.Strategy
 			int mp = Math.Sign(StrategyInfo.MarketPosition);
 			if (!m_done) m_g0.Bar(b, mp);
 			if (!m_done && (b.day >= Gate0Engine.DevEnd || Bars.LastBarOnChart)) finish();
-			if (Mode == EGate0Mode.Canary) route(mp);
+			if (Mode == EGate0Mode.Canary) { route(mp); journalTrades(); }
+		}
+
+		private HashSet<string> m_tradeKeys; private double m_gross, m_net;
+
+		/// <summary>Canary: one journal line per closed trade with GROSS (price move x big point value, no costs) and NET (MC trade
+		/// profit, after the commission/slippage set in Strategy Properties), plus running totals.</summary>
+		private void journalTrades()
+		{
+			int n = Math.Min(Positions.Count, 3);
+			for (int i = n - 1; i >= 0; i--)
+			{
+				IMarketPosition pos = Positions[i];
+				if (pos == null || pos.ClosedTrades == null) continue;
+				foreach (var t in pos.ClosedTrades)
+				{
+					if (t == null || t.EntryOrder == null || t.ExitOrder == null) continue;
+					string key = t.EntryOrder.Name + "|" + t.EntryOrder.BarNumber + "|" + t.ExitOrder.Name + "|" + t.ExitOrder.BarNumber + "|" + t.ExitOrder.Contracts;
+					if (!m_tradeKeys.Add(key)) continue;
+					double gross = (t.ExitOrder.Price - t.EntryOrder.Price) * (t.IsLong ? 1 : -1) * t.ExitOrder.Contracts * Bars.Info.BigPointValue;
+					m_gross += gross; m_net += t.Profit;
+					if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+						"G0-b trade {0} {1} {2:yyyy-MM-dd HH:mm} {3} -> {4:yyyy-MM-dd HH:mm} {5} gross({6:F2}) net({7:F2}) cumGross({8:F2}) cumNet({9:F2})",
+						(EGate0Canary)Variant, t.IsLong ? "L" : "S", t.EntryOrder.Time, t.EntryOrder.Price, t.ExitOrder.Time, t.ExitOrder.Price, gross, t.Profit, m_gross, m_net));
+				}
+			}
 		}
 
 		private void finish()
@@ -180,7 +209,7 @@ namespace PowerLanguage.Strategy
 			m_done = true;
 			if (Mode == EGate0Mode.Canary)
 			{
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"G0-b canary({(EGate0Canary)Variant}) entries({m_g0.Trades}) — read NET profit factor in the Strategy Performance Report; > 1.0 = BUG");
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"G0-b canary({(EGate0Canary)Variant}) entries({m_g0.Trades}) rollSkips({m_g0.RollSkips}) cumGross({m_gross:F2}) cumNet({m_net:F2}) — read NET profit factor in the Strategy Performance Report; > 1.0 = BUG");
 				return;
 			}
 			List<Gate0Result> r = m_g0.Finish();

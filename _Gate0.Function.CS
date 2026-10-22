@@ -185,13 +185,17 @@ namespace PowerLanguage.Function
 	public sealed class Gate0Result
 	{
 		public string type = ""; public int levels, touches, holds, placeboTouches, placeboHolds, sessions;
-		public double holdRate = double.NaN, placeboHoldRate = double.NaN, adjusted = double.NaN, ciLo = double.NaN, ciHi = double.NaN;
+		// descriptive only (ruling on PR #20): binary hold = touched with positive rejection asymmetry, vs the random-price placebo
+		public double holdRate = double.NaN, placeboHoldRate = double.NaN, adjusted = double.NaN;
+		// G0-d decision metric (A2-33 verbatim): edge = E[reaction R | type] - E[reaction R | matched controls], paired per level
+		public int pairs; public double edge = double.NaN, t = double.NaN, pHolm = double.NaN, ciLo = double.NaN, ciHi = double.NaN;
+		public string a2Verdict = "";
 		public string verdict = "";
 		public string Line()
 		{
 			return string.Format(CultureInfo.InvariantCulture,
-				"G0 type({0}) levels({1}) touches({2}) holds({3}) holdRate({4:0.000}) placebo touches({5}) holds({6}) rate({7:0.000}) adj({8:+0.000;-0.000;0.000}) ci95[{9:0.000},{10:0.000}] sessions({11}) => {12}",
-				type, levels, touches, holds, holdRate, placeboTouches, placeboHolds, placeboHoldRate, adjusted, ciLo, ciHi, sessions, verdict);
+				"G0 type({0}) levels({1}) pairs({2}) edgeR({3:+0.000;-0.000;0.000}) t({4:0.00}) holm({5:0.0000}) ci95[{6:0.000},{7:0.000}] sessions({8}) A2-33({9}) | descriptive: touches({10}) holds({11}) holdRate({12:0.000}) placebo touches({13}) holds({14}) rate({15:0.000}) adj({16:+0.000;-0.000;0.000}) => {17}",
+				type, levels, pairs, edge, t, pHolm, ciLo, ciHi, sessions, a2Verdict, touches, holds, holdRate, placeboTouches, placeboHolds, placeboHoldRate, adjusted, verdict);
 		}
 	}
 
@@ -219,6 +223,8 @@ namespace PowerLanguage.Function
 		public readonly List<DateTime> rollDays = new List<DateTime>();
 		public readonly List<DateTime> sessionDays = new List<DateTime>();
 		public int Trades { get; private set; }
+		/// <summary>Canary: sessions skipped because they are a roll day or the session right after a roll splice.</summary>
+		public int RollSkips { get; private set; }
 
 		// ---- state ----
 		private readonly List<Gate0Session> m_hist = new List<Gate0Session>();   // completed sessions since the last roll, oldest first
@@ -227,7 +233,8 @@ namespace PowerLanguage.Function
 		private readonly Gate0Bucket m_b1 = new Gate0Bucket(1), m_b5 = new Gate0Bucket(5), m_b30 = new Gate0Bucket(30);
 		private readonly Gate0Atr m_atr5 = new Gate0Atr(14), m_atr30 = new Gate0Atr(14), m_atrD = new Gate0Atr(20);
 		private readonly List<double> m_dailyRets = new List<double>(); private double m_prevDailyClose = double.NaN; private bool m_rollSplice;
-		private readonly Gate0Vwap m_avWeek = new Gate0Vwap(), m_avMonth = new Gate0Vwap(), m_wkVwap = new Gate0Vwap();
+		private readonly Gate0Vwap m_avWeek = new Gate0Vwap(), m_avMonth = new Gate0Vwap(), m_wkVwap = new Gate0Vwap(), m_avPc = new Gate0Vwap();
+		private bool m_prevRth;   // AVWAP anchored at the prior RTH close: reset on the first bar after the RTH close
 		private double m_lastStudyClose = double.NaN, m_lastC = double.NaN;
 		private List<Gate0Profile> m_weekProfiles = new List<Gate0Profile>(), m_lastWeek; private int m_lastWeekAge; private DateTime m_weekKey;
 		private Gate0Profile m_block; private double m_blockH, m_blockL; private readonly List<double> m_block30Ranges = new List<double>(); private readonly List<double[]> m_blocks = new List<double[]>();
@@ -270,7 +277,9 @@ namespace PowerLanguage.Function
 			if (m_b5.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on5m(e, o, h, l, c, v);
 			if (m_b30.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on30m(e, o, h, l, c, v);
 			double tp = (b.h + b.l + b.c) / 3;
-			m_wkVwap.Add(tp, b.v); m_avWeek.Add(tp, b.v); m_avMonth.Add(tp, b.v);
+			if (!rth && m_prevRth) m_avPc.Reset();
+			m_prevRth = rth;
+			m_wkVwap.Add(tp, b.v); m_avWeek.Add(tp, b.v); m_avMonth.Add(tp, b.v); m_avPc.Add(tp, b.v);
 			if (rth)
 			{
 				if (!m_rthOn) rthOpen(b);
@@ -280,6 +289,8 @@ namespace PowerLanguage.Function
 				s.avHi.Add(tp, b.v); s.avLo.Add(tp, b.v);
 				s.rthC = b.c; s.vwap.Add(tp, b.v); s.profile.Add(b.h, b.l, b.v);
 				if (t <= new TimeSpan(10, 30, 0)) { if (b.h > s.ibH) s.ibH = b.h; if (b.l < s.ibL) s.ibL = b.l; }
+				// range profile window (09:30, 11:30]: half-open per the PR #18 ruling (bars are end-stamped). The 11:30 end has NO
+				// spec basis (A2 gives no window for a Gate-0 range profile) - Coder-defined, flagged in PR #20 pending Analyst 2.
 				if (t <= new TimeSpan(11, 30, 0)) s.opening.Add(b.h, b.l, b.v);
 				if (m_block == null) { m_block = new Gate0Profile(tick); m_blockH = double.MinValue; m_blockL = double.MaxValue; }
 				m_block.Add(b.h, b.l, b.v); if (b.h > m_blockH) m_blockH = b.h; if (b.l < m_blockL) m_blockL = b.l;
@@ -330,7 +341,7 @@ namespace PowerLanguage.Function
 			if (rollDays.Count == 0 || rollDays[rollDays.Count - 1] != day) rollDays.Add(day);
 			if (m_cur != null) m_cur.roll = true;
 			// A2-39 Reset: forget every multi-session source built on the old contract
-			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset();
+			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
 			m_atrD.ResetPrev(); m_rollSplice = true;
 			m_lastStudyClose = double.NaN;
 		}
@@ -356,7 +367,7 @@ namespace PowerLanguage.Function
 			double poc, vah, val;
 			if (s.profile.ValueArea(vaPct, out poc, out vah, out val)) { s.poc = poc; s.vah = vah; s.val = val; }
 			closeBlock();
-			// DV clusters: 30m blocks with a narrow range whose POC row is >= 2x the block's median row volume
+			// DV clusters (CODER-DEFINED, pending Analyst 2: no spec rule exists; no separate accumulation rule): 30m blocks with a narrow range whose POC row is >= 2x the block's median row volume
 			double meanR = 0; foreach (var r in m_block30Ranges) meanR += r; meanR = m_block30Ranges.Count > 0 ? meanR / m_block30Ranges.Count : double.NaN;
 			for (int i = 0; i < m_blockProfiles.Count; i++)
 			{
@@ -412,6 +423,11 @@ namespace PowerLanguage.Function
 				add("AV_PH", p1.avHi.Value, 1); add("AV_PL", p1.avLo.Value, 1);
 				if (m_avWeek.Ready) add("AV_WK", m_avWeek.Value, 1);
 				if (m_avMonth.Ready) add("AV_MO", m_avMonth.Value, 1);
+				// ruling on PR #20: also the session-open anchor (prior RTH session's open-anchored AVWAP; same price as that
+				// session's VWAP, kept separately so the AVWAP family is complete) and the prior-RTH-close anchor (VWAP of every bar
+				// since the prior RTH close, through the overnight, as of today's first RTH bar)
+				if (p1.vwap.Ready) add("AV_OPEN", p1.vwap.Value, 1);
+				if (m_avPc.Ready) add("AV_PC", m_avPc.Value, 1);
 			}
 			if (p1 != null && Fam(EGate0Family.Vwap) && p1.vwap.Ready)
 			{ double vw = p1.vwap.Value, sd = p1.vwap.Sigma; add("VWAP", vw, 1); if (sd > 0) { add("VWAP+1", vw + sd, 1); add("VWAP-1", vw - sd, 1); } }
@@ -476,7 +492,8 @@ namespace PowerLanguage.Function
 			return false;
 		}
 
-		/// <summary>Finish the study and score every level type against its _Rng placebo. Also journals the A2-33 summary.</summary>
+		/// <summary>Finish the study and score every level type with A2-33's reaction edge vs its 20 matched controls (KM level
+		/// death and Holm across types come from _LevelStudy.Analyse). The seeded random-price placebo hold rate is descriptive only.</summary>
 		public List<Gate0Result> Finish()
 		{
 			var res = new List<Gate0Result>();
@@ -484,77 +501,115 @@ namespace PowerLanguage.Function
 			study.Finish();
 			var kept = new List<LevelEvent>();
 			foreach (var e in study.Events) if (e.day < DevEnd && !InRollWindow(e.day)) kept.Add(e);
-			if (journal != null)
-				foreach (var r in _LevelStudy.Analyse(kept, study.config)) journal("A2-33 " + _LevelStudy.Summary(r));
+			var real = new List<LevelEvent>();
+			foreach (var e in kept) if (!e.type.StartsWith(PlaceboPrefix)) real.Add(e);
+			var a2 = new Dictionary<string, LevelTypeResult>(StringComparer.Ordinal);
+			foreach (var r in _LevelStudy.Analyse(real, study.config)) { a2[r.type] = r; if (journal != null) journal(_LevelStudy.Summary(r)); }
 			var placebo = new Dictionary<string, LevelEvent>();
 			foreach (var e in kept) if (!e.control && e.type.StartsWith(PlaceboPrefix)) placebo[e.day.Ticks + "|" + e.key] = e;
 			var byType = new SortedDictionary<string, List<KeyValuePair<LevelEvent, LevelEvent>>>(StringComparer.Ordinal);
-			foreach (var e in kept)
+			var ctlBy = new Dictionary<string, List<LevelEvent>>();
+			foreach (var e in real)
 			{
-				if (e.control || e.type.StartsWith(PlaceboPrefix)) continue;
+				if (!e.control) continue;
+				string k = e.type + "|" + e.day.Ticks + "|" + e.levelNo; List<LevelEvent> c;
+				if (!ctlBy.TryGetValue(k, out c)) ctlBy[k] = c = new List<LevelEvent>(); c.Add(e);
+			}
+			var diffs = new Dictionary<string, List<KeyValuePair<DateTime, double>>>(StringComparer.Ordinal);
+			foreach (var e in real)
+			{
+				if (e.control) continue;
 				LevelEvent pb; placebo.TryGetValue(e.day.Ticks + "|PB:" + e.key, out pb);
 				List<KeyValuePair<LevelEvent, LevelEvent>> l;
 				if (!byType.TryGetValue(e.type, out l)) byType[e.type] = l = new List<KeyValuePair<LevelEvent, LevelEvent>>();
 				l.Add(new KeyValuePair<LevelEvent, LevelEvent>(e, pb));
+				List<LevelEvent> ctl; ctlBy.TryGetValue(e.type + "|" + e.day.Ticks + "|" + e.levelNo, out ctl);
+				double d = PairedReaction(e, ctl);
+				if (double.IsNaN(d)) continue;
+				List<KeyValuePair<DateTime, double>> dl;
+				if (!diffs.TryGetValue(e.type, out dl)) diffs[e.type] = dl = new List<KeyValuePair<DateTime, double>>();
+				dl.Add(new KeyValuePair<DateTime, double>(e.day, d));
 			}
 			foreach (var kv in byType)
 			{
-				var r = Score(kv.Key, kv.Value, seed);
+				var r = Score(kv.Key, kv.Value, seed);   // descriptive hold counts
+				List<KeyValuePair<DateTime, double>> dl; diffs.TryGetValue(kv.Key, out dl);
+				LevelTypeResult lr; a2.TryGetValue(kv.Key, out lr);
+				ScoreEdge(r, dl ?? new List<KeyValuePair<DateTime, double>>(), lr, seed);
 				res.Add(r);
 				if (journal != null) journal(r.Line());
 			}
 			return res;
 		}
 
+		/// <summary>A2-33 paired difference: level reaction R minus the mean R of its touched matched controls (NaN if either is missing).</summary>
+		public static double PairedReaction(LevelEvent lv, IList<LevelEvent> ctl)
+		{
+			if (lv == null || !lv.touched || double.IsNaN(lv.reaction) || ctl == null) return double.NaN;
+			double s = 0; int n = 0;
+			foreach (var c in ctl) if (c.touched && !double.IsNaN(c.reaction)) { s += c.reaction; n++; }
+			return n == 0 ? double.NaN : lv.reaction - s / n;
+		}
+
+		/// <summary>Descriptive only: binary hold = touched with positive rejection asymmetry.</summary>
 		public static bool Hold(LevelEvent e) { return e != null && e.touched && e.asymmetry > 0; }
 
-		/// <summary>Placebo-adjusted hold rate = holds/touches(level) - holds/touches(placebo), with a 95% CI from a moving
-		/// block bootstrap over sessions (500 draws, blocks of 5 consecutive sessions, _Rng seeded), and the §2.3 verdict.</summary>
+		/// <summary>Descriptive hold counts vs the random-price placebo (not used for the verdict).</summary>
 		public static Gate0Result Score(string type, IList<KeyValuePair<LevelEvent, LevelEvent>> pairs, long seed)
 		{
 			var r = new Gate0Result { type = type, levels = pairs.Count };
-			// per-session sums {touches, holds, pbTouches, pbHolds}
-			var days = new SortedDictionary<DateTime, double[]>();
 			foreach (var p in pairs)
 			{
-				double[] a; if (!days.TryGetValue(p.Key.day, out a)) days[p.Key.day] = a = new double[4];
-				if (p.Key.touched) { a[0]++; r.touches++; } if (Hold(p.Key)) { a[1]++; r.holds++; }
-				if (p.Value != null && p.Value.touched) { a[2]++; r.placeboTouches++; } if (Hold(p.Value)) { a[3]++; r.placeboHolds++; }
+				if (p.Key.touched) r.touches++; if (Hold(p.Key)) r.holds++;
+				if (p.Value != null && p.Value.touched) r.placeboTouches++; if (Hold(p.Value)) r.placeboHolds++;
 			}
-			var s = new List<double[]>(days.Values); r.sessions = s.Count;
 			r.holdRate = r.touches > 0 ? (double)r.holds / r.touches : double.NaN;
 			r.placeboHoldRate = r.placeboTouches > 0 ? (double)r.placeboHolds / r.placeboTouches : double.NaN;
 			r.adjusted = r.holdRate - r.placeboHoldRate;
-			if (s.Count > 0 && !double.IsNaN(r.adjusted))
+			return r;
+		}
+
+		/// <summary>G0-d decision: the A2-33 reaction edge (paired vs matched controls) with a 95% percentile CI from a moving block
+		/// bootstrap over sessions (500 draws, blocks of 5 consecutive sessions, _Rng seeded), then the verdict.</summary>
+		public static void ScoreEdge(Gate0Result r, IList<KeyValuePair<DateTime, double>> diffs, LevelTypeResult a2, long seed)
+		{
+			r.pairs = diffs.Count;
+			var days = new SortedDictionary<DateTime, double[]>();   // per session {sum d, n}
+			foreach (var kv in diffs) { double[] a; if (!days.TryGetValue(kv.Key, out a)) days[kv.Key] = a = new double[2]; a[0] += kv.Value; a[1]++; }
+			var s = new List<double[]>(days.Values); r.sessions = s.Count;
+			double sum = 0; foreach (var kv in diffs) sum += kv.Value;
+			r.edge = diffs.Count > 0 ? sum / diffs.Count : double.NaN;
+			if (a2 != null) { r.t = a2.t; r.pHolm = a2.pHolm; r.a2Verdict = a2.verdict; }
+			if (s.Count > 0)
 			{
-				var rng = new _Rng(_Rng.Seed(seed, _Rng.Hash("Gate0"), _Rng.Hash(type)));
+				var rng = new _Rng(_Rng.Seed(seed, _Rng.Hash("Gate0"), _Rng.Hash(r.type)));
 				var draws = new List<double>(BootstrapDraws);
 				int nb = (s.Count + BootstrapBlock - 1) / BootstrapBlock, starts = Math.Max(1, s.Count - BootstrapBlock + 1);
 				for (int d = 0; d < BootstrapDraws; d++)
 				{
-					double t = 0, h = 0, pt = 0, ph = 0;
+					double t = 0, n = 0;
 					for (int k = 0; k < nb; k++)
 					{
 						int st = rng.NextInt(starts);
-						for (int j = st; j < Math.Min(s.Count, st + BootstrapBlock); j++) { t += s[j][0]; h += s[j][1]; pt += s[j][2]; ph += s[j][3]; }
+						for (int j = st; j < Math.Min(s.Count, st + BootstrapBlock); j++) { t += s[j][0]; n += s[j][1]; }
 					}
-					if (t > 0 && pt > 0) draws.Add(h / t - ph / pt);
+					if (n > 0) draws.Add(t / n);
 				}
 				draws.Sort();
 				if (draws.Count >= 20) { r.ciLo = draws[(int)Math.Floor(0.025 * (draws.Count - 1))]; r.ciHi = draws[(int)Math.Ceiling(0.975 * (draws.Count - 1))]; }
 			}
-			r.verdict = Verdict(r.touches, r.adjusted, r.ciLo);
-			return r;
+			r.verdict = Verdict(r.pairs, r.t, r.a2Verdict);
 		}
 
-		/// <summary>§2.3 kill criteria on the touch count n.</summary>
-		public static string Verdict(int n, double adjusted, double ciLo)
+		/// <summary>G0-d verdict. §2.3 sample-size gates on the paired n, then A2-33's decision rule (|t| &lt; 2 -> not traded; Holm
+		/// across level types; half-life and top-tercile restrictions) as computed by _LevelStudy.Verdict.</summary>
+		public static string Verdict(int n, double t, string a2)
 		{
 			if (n < 30) return "PARK (no evaluation: n<30)";
 			if (n < 150) return "PARK (inconclusive: 30<=n<150)";
-			if (double.IsNaN(adjusted) || adjusted <= 0) return "PARK (kill: adjusted hold rate <= 0)";
-			if (double.IsNaN(ciLo) || ciLo <= 0) return "PARK (kill: CI of lift over placebo includes 0)";
-			return "PASS";
+			if (double.IsNaN(t) || Math.Abs(t) < 2) return "PARK (kill: edge ~ 0, |t| < 2 - level type not traded)";
+			if (a2 != null && (a2.StartsWith("keep") || a2.StartsWith("trade"))) return "PASS (" + a2 + ")";
+			return "PARK (kill: " + (string.IsNullOrEmpty(a2) ? "A2-33 drop" : a2) + ")";
 		}
 
 		// ================================ canaries =================================
@@ -581,6 +636,7 @@ namespace PowerLanguage.Function
 			bool rollDay = m_cur.roll, afterRoll = sessionDays.Count >= 2 && rollDays.Contains(sessionDays[sessionDays.Count - 2]);
 			m_skipDay = b.day >= DevEnd || rollDay || afterRoll || m_prior == null || !(m_atrD.Value > 0);
 			m_rthLive = !m_skipDay;
+			if (rollDay || afterRoll) { RollSkips++; if (journal != null) journal(string.Format(CultureInfo.InvariantCulture, "G0-b roll-skip {0:yyyy-MM-dd} total({1})", b.day, RollSkips)); }
 			m_sessHi = b.h; m_sessLo = b.l;
 			m_priorClose = m_prior != null ? m_prior.rthC : double.NaN;
 			m_gap = m_prior != null ? (b.o - m_priorClose) / m_priorClose : 0;
@@ -647,6 +703,9 @@ namespace PowerLanguage.Function
 					if (c > vw) enter(1, EGate0Entry.Market, double.NaN, double.NaN, double.NaN, "VW08L");
 					else if (c < vw) enter(-1, EGate0Entry.Market, double.NaN, double.NaN, double.NaN, "VW08S");
 					break;
+				// A2-24 (catalogue VW-08 entry, verbatim): (i) fade the first sVWAP touch 1R/1R - R = ATR14 on 5m is Coder-defined (spec silent);
+				// (ii) fade a 2-sigma band close, target = sVWAP FROZEN AT ENTRY (intent.target is set once in enter() and never moved);
+				// stop = mirror distance (Coder-defined); (iii) 2xATR-from-VWAP fade, ATR = ATR14 on 5m, stop mirror distance (Coder-defined).
 				case EGate0Canary.A2_24_i:
 					if (m_touched1 || double.IsNaN(vwBefore) || end.TimeOfDay < new TimeSpan(9, 35, 0)) break;
 					if (l <= vwBefore && vwBefore <= h)

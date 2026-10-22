@@ -33,11 +33,13 @@ static class Program
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 35, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "end-stamped bar on a boundary stays in its bucket");
 
 		// ---- verdicts (catalogue 2.3) ----
-		Check(Gate0Engine.Verdict(29, 0.2, 0.1).StartsWith("PARK (no evaluation"), "n<30 no evaluation");
-		Check(Gate0Engine.Verdict(100, 0.2, 0.1).StartsWith("PARK (inconclusive"), "30<=n<150 inconclusive");
-		Check(Gate0Engine.Verdict(200, 0.0, 0.1).Contains("kill: adjusted"), "adjusted <= 0 kills");
-		Check(Gate0Engine.Verdict(200, 0.1, -0.01).Contains("kill: CI"), "CI including 0 kills");
-		Check(Gate0Engine.Verdict(200, 0.1, 0.02) == "PASS", "pass");
+		Check(Gate0Engine.Verdict(29, 5, "keep").StartsWith("PARK (no evaluation"), "n<30 no evaluation");
+		Check(Gate0Engine.Verdict(100, 5, "keep").StartsWith("PARK (inconclusive"), "30<=n<150 inconclusive");
+		Check(Gate0Engine.Verdict(200, 1.5, "keep").Contains("|t| < 2"), "|t| < 2 kills (A2-33)");
+		Check(Gate0Engine.Verdict(200, double.NaN, "keep").Contains("kill"), "NaN t kills");
+		Check(Gate0Engine.Verdict(200, 3, "drop (negative edge)").Contains("kill: drop"), "A2-33 drop kills");
+		Check(Gate0Engine.Verdict(200, -3, "keep") == "PASS (keep)", "pass on A2-33 keep");
+		Check(Gate0Engine.Verdict(200, 3, "trade top-quality tercile only").StartsWith("PASS"), "pass on tercile restriction");
 
 		// ---- scoring + block bootstrap ----
 		Check(Gate0Engine.BootstrapDraws == 500 && Gate0Engine.BootstrapBlock == 5, "500 draws, block size 5");
@@ -47,14 +49,22 @@ static class Program
 			var day = d0.AddDays(d);
 			pairs.Add(new KeyValuePair<LevelEvent, LevelEvent>(Ev(day, true, d % 4 != 0 ? 1 : -1), Ev(day, true, d % 2 == 0 ? 1 : -1)));
 		}
-		var r1 = Gate0Engine.Score("T", pairs, 33); var r2 = Gate0Engine.Score("T", pairs, 33); var r3 = Gate0Engine.Score("T", pairs, 34);
-		Check(r1.touches == 200 && r1.holds == 150 && r1.placeboHolds == 100, "touch and hold counts");
-		Check(Near(r1.adjusted, 0.75 - 0.5), "placebo-adjusted hold rate = level rate - placebo rate");
+		var r1 = Gate0Engine.Score("T", pairs, 33);
+		Check(r1.touches == 200 && r1.holds == 150 && r1.placeboHolds == 100, "touch and hold counts (descriptive)");
+		Check(Near(r1.adjusted, 0.75 - 0.5), "placebo-adjusted hold rate = level rate - placebo rate (descriptive)");
+		var diffs = new List<KeyValuePair<DateTime, double>>();
+		for (int d = 0; d < 200; d++) diffs.Add(new KeyValuePair<DateTime, double>(d0.AddDays(d), 0.5 + (d % 3 - 1) * 0.1));
+		var a2 = new LevelTypeResult { type = "T", t = 4.0, pHolm = 0.001, verdict = "keep" };
+		Gate0Engine.ScoreEdge(r1, diffs, a2, 33);
+		var r2 = Gate0Engine.Score("T", pairs, 33); Gate0Engine.ScoreEdge(r2, diffs, a2, 33);
+		var r3 = Gate0Engine.Score("T", pairs, 34); Gate0Engine.ScoreEdge(r3, diffs, a2, 34);
+		Check(r1.pairs == 200 && Near(r1.edge, diffs.Average(kv => kv.Value)), "paired reaction edge = mean difference");
 		Check(r1.ciLo == r2.ciLo && r1.ciHi == r2.ciHi, "bootstrap reproducible for the same seed");
-		Check(!double.IsNaN(r3.ciLo) && r1.ciLo <= r1.adjusted && r1.ciHi >= r1.adjusted, "CI brackets the estimate");
-		Check(r1.verdict == "PASS", "clear lift passes (" + r1.verdict + ")");
-		var flat = pairs.Select(kv => new KeyValuePair<LevelEvent, LevelEvent>(kv.Value, kv.Value)).ToList();
-		Check(Gate0Engine.Score("T", flat, 33).verdict.Contains("kill"), "no lift over placebo is killed");
+		Check(!double.IsNaN(r3.ciLo) && r1.ciLo <= r1.edge && r1.ciHi >= r1.edge, "CI brackets the edge");
+		Check(r1.verdict.StartsWith("PASS"), "A2-33 keep with |t| >= 2 passes (" + r1.verdict + ")");
+		var r4 = Gate0Engine.Score("T", pairs, 33); Gate0Engine.ScoreEdge(r4, diffs, new LevelTypeResult { type = "T", t = 0.5, verdict = "drop (|t| < 2)" }, 33);
+		Check(r4.verdict.Contains("kill"), "edge ~ 0 is killed even with a hold-rate lift");
+		Check(!string.IsNullOrEmpty(r1.Line()), "result journal line");
 		Check(!Gate0Engine.Hold(null) && !Gate0Engine.Hold(Ev(d0, false, 1)) && Gate0Engine.Hold(Ev(d0, true, 0.5)), "hold = touched with positive asymmetry");
 
 		// ---- roll window (+-1 session) ----
