@@ -89,6 +89,16 @@ namespace PowerLanguage.Function
 	{
 		public EKdeVerdict verdict = EKdeVerdict.Unknown;
 		public double sigma = double.NaN, maxJ = double.NaN, medJ = double.NaN, range = double.NaN, hCv = double.NaN, cvPoc = double.NaN;
+		public ECvFolding folding = ECvFolding.Contiguous;   // scheme that produced hCv / cvPoc (ruling 1: Contiguous default)
+		public double hCvAlt = double.NaN;                   // h_cv under the other fold scheme (ruling 1: journal both; Interleaved = sensitivity arm)
+		public double HcvContiguous { get { return folding == ECvFolding.Contiguous ? hCv : hCvAlt; } }
+		public double HcvInterleaved { get { return folding == ECvFolding.Interleaved ? hCv : hCvAlt; } }
+		/// <summary>Journal line: PSTAT KDE {verdict} maxJ medJ range cvPoc hcvC hcvI (h_cv under BOTH fold schemes).</summary>
+		public string Journal()
+		{
+			return string.Format(CultureInfo.InvariantCulture, "PSTAT KDE {0} maxJ({1}) medJ({2}) range({3}) cvPoc({4}) hcvC({5:0.######}) hcvI({6:0.######}) fold({7})",
+				verdict.ToString().ToUpperInvariant(), maxJ, medJ, range, cvPoc, HcvContiguous, HcvInterleaved, folding);
+		}
 		public bool disagree;
 		public double[] h = new double[0], poc = new double[0];        // POC-stability sweep (30 points)
 		public double[] cvH = new double[0], cvLL = new double[0];     // CV grid (25 points) and summed held-out log-likelihood
@@ -157,6 +167,15 @@ namespace PowerLanguage.Function
 			double[] p = new double[n], q = new double[n];
 			scatter(pPrices, pVols, tick, lo, p); scatter(qPrices, qVols, tick, lo, q);
 			return klDense(p, q, eps);
+		}
+
+		/// <summary>
+		/// Ruling 2 default for A2-31: KL on KDE densities with h = the PRIOR trading day's h_cv (no lookahead), the same h for both P and Q.
+		/// priorHcv comes from _PriorDayValue.Before(today). NaN when there is no prior h_cv.
+		/// </summary>
+		public static double KLKdePrior(double[] pPrices, double[] pVols, double[] qPrices, double[] qVols, double tick, double priorHcv, double eps)
+		{
+			return KLKde(pPrices, pVols, qPrices, qVols, tick, priorHcv, eps);
 		}
 
 		/// <summary>
@@ -246,6 +265,9 @@ namespace PowerLanguage.Function
 
 		public static double ParkinsonPerBar(IList<RingBar> bars) { int n; return ParkinsonPerBar(bars, out n); }
 
+		// Ruling 4 (G-P scope, not built here): the A2-32 20-session sigma pool CROSSES rolls (sigma-space is centred per session on that
+		// session's sVWAP, review M1) and excludes only the roll session itself, which is flagged (_RollWindow.IsRollDay); sessions with
+		// fewer than parkinsonMinBars RTH 5m bars are dropped and the pool is filled from older sessions.
 		/// <summary>Session-scale Parkinson in price units: refPrice x sigma_bar x sqrt(n). NaN with fewer than minBars usable bars (A2-32: 60 RTH 5m bars; a
 		/// shorter session, e.g. a 13:00 half day, is dropped from the pool rather than NaN-ing the composite).</summary>
 		public static double ParkinsonSessionPrice(IList<RingBar> bars, double refPrice, int minBars)
@@ -459,9 +481,11 @@ namespace PowerLanguage.Function
 			KdeResult r = KdeSweep(p, v, tick, medFloorTicks);
 			if (!(r.sigma > 0)) return r;
 			r.cvH = KdeCvGrid(r.sigma);
+			r.folding = folding;
 			r.cvLL = CvLogLik(bars, tick, distribution, r.cvH, folds, folding);
-			int best = -1;
-			for (int k = 0; k < r.cvLL.Length; k++) if (!double.IsNaN(r.cvLL[k]) && (best < 0 || r.cvLL[k] > r.cvLL[best])) best = k;
+			int best = argmaxLL(r.cvLL);
+			int alt = argmaxLL(CvLogLik(bars, tick, distribution, r.cvH, folds, folding == ECvFolding.Contiguous ? ECvFolding.Interleaved : ECvFolding.Contiguous));
+			if (alt >= 0) r.hCvAlt = r.cvH[alt];
 			if (best >= 0)
 			{
 				r.hCv = r.cvH[best];
@@ -469,6 +493,13 @@ namespace PowerLanguage.Function
 				r.disagree = !double.IsNaN(mcPoc) && Math.Abs(mcPoc - r.cvPoc) > 4 * tick + 1e-9 * tick;
 			}
 			return r;
+		}
+
+		private static int argmaxLL(double[] ll)
+		{
+			int best = -1;
+			for (int k = 0; k < ll.Length; k++) if (!double.IsNaN(ll[k]) && (best < 0 || ll[k] > ll[best])) best = k;
+			return best;
 		}
 
 		/// <summary>The POC-stability sweep and verdict on a dense histogram (no CV: hCv / cvPoc stay NaN).</summary>
@@ -599,6 +630,25 @@ namespace PowerLanguage.Function
 			if (vt == null) return res;
 			for (int i = 0; i < vt.prices.Count; i++) res.Add(LevelRef.Line(ELevelKind.VtPrice, vt.prices[i], created, t0, t1, stream, tag, vt.ratios[i]));
 			return res;
+		}
+	}
+
+	/// <summary>Per-trading-day value store for "use yesterday's value today" (ruling 2: the prior day's h_cv for KL on KDE densities).</summary>
+	public sealed class _PriorDayValue
+	{
+		private readonly SortedList<DateTime, double> m_v = new SortedList<DateTime, double>();
+		public int keep = 30;
+		public void Set(DateTime day, double x)
+		{
+			if (double.IsNaN(x)) return;
+			m_v[day.Date] = x;
+			while (m_v.Count > keep) m_v.RemoveAt(0);
+		}
+		/// <summary>Value of the newest day strictly before `day` (no lookahead), NaN when none.</summary>
+		public double Before(DateTime day)
+		{
+			for (int i = m_v.Count - 1; i >= 0; i--) if (m_v.Keys[i] < day.Date) return m_v.Values[i];
+			return double.NaN;
 		}
 	}
 

@@ -3048,10 +3048,12 @@ namespace PowerLanguage.Strategy
 
 		private TimeSpan streamResolution(int stream) { return BarsOfData(stream).Info.Resolution.Duration(); }
 
-		/// <summary>VP-1: profile of the closed bars with t0 &lt;= time &lt;= t1 on `stream` (null when none, Reject across a roll, or disabled).</summary>
+		/// <summary>VP-1: profile of the closed bars with t0 &lt;= time &lt;= t1 on `stream` (inclusive start, for explicit callers; null when none,
+		/// Reject across a roll, or disabled). Bars are assumed end-stamped, pending Probe P2.</summary>
 		public VpExtra RangeProfile(int stream, DateTime t0, DateTime t1) { return rangeProfile(stream, t0, t1, false); }
 
-		/// <summary>VP-1 / A2-30: profile of the closed bars with t0 &lt; time &lt;= t1 (exclusive start, e.g. (t - 30m, t]).</summary>
+		/// <summary>VP-1 / A2-30: profile of the closed bars with t0 &lt; time &lt;= t1 (exclusive start, e.g. (t - 30m, t]). Ruling 3: A2-30 consumers
+		/// use this form; bars are assumed end-stamped (MC close stamps), pending Probe P2.</summary>
 		public VpExtra RangeProfileAfter(int stream, DateTime t0, DateTime t1) { return rangeProfile(stream, t0, t1, true); }
 
 		private VpExtra rangeProfile(int stream, DateTime t0, DateTime t1, bool excl)

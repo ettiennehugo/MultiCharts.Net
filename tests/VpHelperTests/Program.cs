@@ -186,6 +186,14 @@ static class Program
 		for (int k = 0; k < 3; k++) for (int i = 0; i < 5; i++) cm.AddSession(D0.AddDays(7 * k + i), Rows(1, 1), k == 1 && i == 2, false, 1, 1, 1, 1, 1);
 		cm.Flush();
 		Check(cm.CompletedWeeks == 4 && cm.Composite(3) == null && cm.Composite(2) != null && cm.Composite(2).isPartial && !cm.Composite(1).isPartial, "VP-2 composite null across a mid-week roll; post-roll part is partial");
+		// ruling 5: a roll on Monday starts a FULL week; the composite still refuses to span it
+		var mo = new _WeeklyProfiles(new WeeklyProfileConfig(), 0.25);
+		for (int k = 0; k < 3; k++) for (int i = 0; i < 5; i++) mo.AddSession(D0.AddDays(7 * k + i), Rows(1, 1), k == 1 && i == 0, false, 1, 1, 1, 1, 1);
+		mo.Flush();
+		Check(mo.CompletedWeeks == 3 && !mo.Week(2).isPartial && !mo.Week(2).crossesRoll && mo.Week(2).Sessions == 5 && !mo.Week(3).crossesRoll && !mo.Week(3).isPartial,
+			"VP-2 ruling 5: Monday roll -> full week, prior week untouched");
+		Check(mo.Composite(2) != null && !mo.Composite(2).isPartial && mo.Composite(3) == null, "VP-2 ruling 5: composite refuses to span a Monday roll");
+		Check(cm.Week(2).isPartial && cm.Week(2).Sessions == 3 && cm.Week(3).crossesRoll && cm.Week(3).Sessions == 2, "VP-2 ruling 5: mid-week roll -> pre-roll crossesRoll, post-roll segment partial");
 		cm.RefreshRollWindow(d => d == D0.AddDays(9));
 		Check(cm.Week(2).sessions[0].isRollWindow && cm.Week(2).IsRollWindow, "VP-2 session record carries isRollWindow (review M2)");
 	}
@@ -410,6 +418,14 @@ static class Program
 		var single = _ProfileStats.KdeSweep(new List<RingBar> { B(1, D0, 1, 1, 1, 1, 5) }, 0.25, 1);
 		Check(single.verdict == EKdeVerdict.Stable, "VP-6 single row -> STABLE");
 		var inter = _ProfileStats.KdeSweep(g, 0.25, 1, double.NaN, 1, 5, ECvFolding.Interleaved);
+		Check(r.folding == ECvFolding.Contiguous && !double.IsNaN(r.HcvContiguous) && !double.IsNaN(r.HcvInterleaved) && r.HcvContiguous == r.hCv
+			&& inter.HcvInterleaved == inter.hCv && inter.HcvContiguous == r.hCv && inter.HcvInterleaved == r.HcvInterleaved, "VP-6 ruling 1: h_cv under both fold schemes");
+		Check(r.Journal().Contains("hcvC(") && r.Journal().Contains("hcvI(") && r.Journal().StartsWith("PSTAT KDE STABLE"), "VP-6 ruling 1: KDE journal carries both h_cv");
+		var prior = new _PriorDayValue(); prior.Set(D0, 0.5); prior.Set(D0.AddDays(1), 0.9);
+		Check(Near(prior.Before(D0.AddDays(1)), 0.5) && double.IsNaN(prior.Before(D0)) && Near(prior.Before(D0.AddDays(3)), 0.9), "VP-4 ruling 2: prior-day h_cv, no lookahead");
+		double[] pq = { 100, 100.25 };
+		Check(Near(_ProfileStats.KLKdePrior(pq, new double[] { 1, 3 }, pq, new double[] { 3, 1 }, 0.25, 0.5, 1e-6), _ProfileStats.KLKde(pq, new double[] { 1, 3 }, pq, new double[] { 3, 1 }, 0.25, 0.5, 1e-6))
+			&& double.IsNaN(_ProfileStats.KLKdePrior(pq, new double[] { 1, 3 }, pq, new double[] { 3, 1 }, 0.25, double.NaN, 1e-6)), "VP-4 ruling 2: one h for both densities; NaN without a prior h_cv");
 		Check(!double.IsNaN(inter.hCv), "VP-6 interleaved folding option");
 	}
 

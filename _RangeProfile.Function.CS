@@ -135,6 +135,8 @@ namespace PowerLanguage.Function
 	public static class RangeProfileBuilder
 	{
 		/// <summary>
+		/// Ruling 3: bars are assumed END-stamped (MC close stamps; pending Probe P2), so a bar stamped t covers (t - res, t]. A2-30
+		/// consumers use the exclusive start (t0, t1] (t0Exclusive = true, host RangeProfileAfter); the inclusive form is for explicit callers.
 		/// One-shot profile of the ring bars with t0 &lt;= time &lt;= t1 (t0 &lt; time when t0Exclusive, e.g. the A2-30 (t-30m, t] window).
 		/// Null when no bar is in the window or rollPolicy = Reject and a roll bar lies inside (t0, t1] (a roll on the first bar is fine).
 		/// Truncate starts at the newest roll bar and sets isPartial. isPartial is also set when the ring has dropped bars at or after t0.

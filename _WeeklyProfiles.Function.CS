@@ -10,6 +10,8 @@ namespace PowerLanguage.Function
 	// happens per bar. Week key = Monday-start week of the trading day (same key as _AvwapManager's Week reset).
 	// Roll policy Reset (A2-39a): the week containing a roll is split; the pre-roll part is crossesRoll (not usable), the post-
 	// roll part starts a new partial week; a composite never spans a roll. CashTerms / BackAdjusted are reserved, not built (Q3).
+	// Ruling 5: a roll on the week's first session gives a FULL (non-partial) week; a mid-week roll marks the post-roll segment partial;
+	// a composite never spans a roll.
 	// Review M2: each session record carries isRollWindow (roll session +-1). Pure C# (tests/VpHelperTests).
 	// ============================================================================================
 
