@@ -179,6 +179,15 @@ namespace PowerLanguage.Function
 		private double m_lastRthClose = double.NaN;
 		private DateTime m_lastRthSession = DateTime.MinValue, m_rthOpenedSession = DateTime.MinValue;
 
+		/// <summary>S3 ruling 3: StartCalc error (null = fine) when P2 is on but the Data1 M-TOD volume pool is unavailable.</summary>
+		public static string P2PoolError(EAvwapPlacebo placebos, int dataStream, bool todRunning)
+		{
+			if ((placebos & EAvwapPlacebo.P2) == 0 || (dataStream == 1 && todRunning)) return null;
+			return $"AvwapLimits.placebos P2 on Data{dataStream} has no M-TOD volume pool" + (dataStream == 1 ? " (M-TOD not running)" : "") +
+				": AvwapLimits.placebos P2 needs AvwapLimits.dataStream = 1 (M-TOD slots are Data1); every P2 bar would use its own volume (p2Degraded). " +
+				"Refusing to start: set AvwapLimits.dataStream = 1 or remove P2.";
+		}
+
 		public string Configure()
 		{
 			string err = limits.Validate();

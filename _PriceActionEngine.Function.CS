@@ -85,6 +85,18 @@ namespace PowerLanguage.Function
 			}
 			return this;
 		}
+		/// <summary>Phase 3 S5 (ruling 1): per-field preset defaults for a host-applied base preset. Every preset-owned field still at its
+		/// Library default takes the preset's value; a field the caller changed stays its own. No-op once ApplyPreset was called (the caller
+		/// took over completely). Returns this.</summary>
+		public PriceActionConfig ApplyPresetDefaults(EPriceActionPreset p)
+		{
+			if (presetApplied || p == EPriceActionPreset.Library) return this;
+			var lib = new PriceActionConfig(); var pre = new PriceActionConfig().ApplyPreset(p);
+			if (tieRule == lib.tieRule) tieRule = pre.tieRule;
+			if (volumeIncludesCurrent == lib.volumeIncludesCurrent) volumeIncludesCurrent = pre.volumeIncludesCurrent;
+			preset = p;   // informational; presetApplied stays false (host-applied)
+			return this;
+		}
 		/// <summary>New config with the Futures preset (still enabled=false until a consumer enables it).</summary>
 		public static PriceActionConfig Futures() { return new PriceActionConfig().ApplyPreset(EPriceActionPreset.Futures); }
 		/// <summary>New config with library-parity defaults.</summary>

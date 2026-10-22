@@ -396,8 +396,9 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>Phase 3 S5: extra PRICEACTION instances (e.g. a Data2 swing structure), empty by default. Each entry needs enabled = true,
-		/// a dataStream and a non-empty unique role; label PA{ds}-{role}. Futures bases apply the Futures preset to an entry that did not call
-		/// ApplyPreset and still has the Library tieRule / volumeIncludesCurrent. Entries equal in (dataStream, Canon()) to the main, the AVWAP or
+		/// a dataStream and a non-empty unique role; label PA{ds}-{role}. Futures bases apply the Futures preset PER FIELD (ruling 1): each
+		/// preset-owned field (tieRule, volumeIncludesCurrent) the entry left at its Library default takes the Futures value, a field the entry
+		/// changed stays its own; an explicit ApplyPreset(...) on the entry means it took over completely and the base preset is skipped. Entries equal in (dataStream, Canon()) to the main, the AVWAP or
 		/// another entry share one instance. Steps on its own stream's closed bars; OnRoll when rollOn(dataStream).</summary>
 		protected List<PriceActionConfig> ExtraPriceAction { get; } = new List<PriceActionConfig>();
 		private List<KeyValuePair<string, _PriceActionEngine>> m_paExtra;   // role -> engine (may be m_pa or another entry's engine)
@@ -440,7 +441,7 @@ namespace PowerLanguage.Strategy
 				if (string.IsNullOrEmpty(c.role)) throw new ArgumentException("ExtraPriceAction: role is required");
 				if (!roles.Add(c.role)) throw new ArgumentException($"ExtraPriceAction: duplicate role {c.role}");
 				requireDataStream("ExtraPriceAction(" + c.role + ").dataStream", c.dataStream);
-				if (!c.presetApplied && c.tieRule == EPivotTieRule.Strict && c.volumeIncludesCurrent) presetExtraPriceAction(c);
+				if (!c.presetApplied) presetExtraPriceAction(c);   // per field (ruling 1)
 				string verr = c.Validate();
 				if (verr != null) throw new ArgumentException($"ExtraPriceAction({c.role}): {verr}");
 				var pa = findSharedPa(c, true);
@@ -469,9 +470,23 @@ namespace PowerLanguage.Strategy
 			foreach (var pa in m_paHosted)
 			{
 				IInstrument b = BarsOfData(pa.config.dataStream);
-				if (b.Status == EBarState.Close && b.CurrentBar != pa.LastBar && rollOn(pa.config.dataStream)) pa.OnRoll(b.Time[0]);
+				if (b.Status == EBarState.Close && b.CurrentBar != pa.LastBar && rollOn(pa.config.dataStream))
+				{
+					pa.OnRoll(b.Time[0]);   // engine journals "{label} roll reset at ..."
+					Action<string> j = engineSink(ETraceLevel.Journal);   // ruling 2: name every consumer of the shared instance
+					if (j != null) j($"{pa.label} roll reset Data{pa.config.dataStream} at {b.Time[0]:yyyy-MM-dd HH:mm:ss} consumers({paConsumers(pa)})");
+				}
 				pa.Step(b);
 			}
+		}
+
+		private string paConsumers(_PriceActionEngine pa)
+		{
+			var l = new List<string>();
+			foreach (var kv in m_paExtra) if (kv.Value == pa) l.Add(kv.Key);
+			if (pa == m_avwapPa) l.Add("AVWAP");
+			if (m_xmkt != null) for (int i = 0; i < m_xmkt.Length; i++) if (m_xmktPa[i] == pa) l.Add("XMKT-" + m_xmkt[i].config.role);
+			return string.Join(",", l);
 		}
 
 		private bool paHosted(_PriceActionEngine e) { return m_paHosted != null && m_paHosted.Contains(e); }
@@ -1350,11 +1365,9 @@ namespace PowerLanguage.Strategy
 			var m = new _AvwapManager { limits = AvwapLimits, events = AvwapEvents, tickSize = tickSize(), label = "AV" + AvwapLimits.dataStream,
 				journal = engineSink(ETraceLevel.Journal), trace = engineSink(ETraceLevel.Debug), warnOnce = engineSink(ETraceLevel.Warning) };
 			if (m_tod != null && AvwapLimits.dataStream == 1) { _TodNormaliser tod = m_tod; m.volumeZ = () => tod.Z(ETodMetric.Volume); }   // NaN while not valid -> 20-bar fallback
-			if ((AvwapLimits.placebos & EAvwapPlacebo.P2) != 0)
-			{
-				if (m_tod != null && AvwapLimits.dataStream == 1) { _TodNormaliser tod = m_tod; m.volumePool = slot => tod.VolumePool(slot); }
-				else { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w($"AvwapLimits.placebos P2 needs AvwapLimits.dataStream = 1 (M-TOD slots are Data1); every P2 bar uses its own volume (p2Degraded)"); }
-			}
+			string p2err = _AvwapManager.P2PoolError(AvwapLimits.placebos, AvwapLimits.dataStream, m_tod != null);
+			if (p2err != null) throw new ArgumentException(p2err);   // S3 ruling 3: refuse to start
+			if ((AvwapLimits.placebos & EAvwapPlacebo.P2) != 0) { _TodNormaliser tod = m_tod; m.volumePool = slot => tod.VolumePool(slot); }
 			if (m_daily != null) { _DailyContext daily = m_daily; m.dailyAtr = () => daily.Atr20d; }   // GapOpen: 0.5 x ATR20d when valid, else the SMA-TR fallback
 			string err = m.Configure();
 			if (err != null) throw new ArgumentException(err);

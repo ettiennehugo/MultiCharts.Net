@@ -219,6 +219,10 @@ static class Program
 		var m3 = Mgr(EAvwapAnchor.VolumeClimax, l => l.placebos = EAvwapPlacebo.P2, j2); m3.volumeZ = () => 4; m3.volumePool = s2 => new double[] { 1, 2, 3 };
 		m3.Add(bs[0], new AvwapPaEvents()); m3.volumeZ = () => double.NaN; m3.Add(bs[2], new AvwapPaEvents());
 		Check(m3.Anchors[0].p2Degraded && Near(m3.Anchors[0].P2, m3.Anchors[0].Value) && j2.Count(s => s.Contains("p2Degraded")) == 1, "S3 pool < p2MinPool -> own volume, p2Degraded journaled once");
+		string pe = _AvwapManager.P2PoolError(EAvwapPlacebo.P2, 2, true);
+		Check(pe != null && pe.Contains("Data2") && pe.Contains("needs AvwapLimits.dataStream = 1 (M-TOD slots are Data1)") && pe.Contains("p2Degraded"), "S3 ruling 3: P2 on Data2 refuses to start, names the stream, keeps the old text");
+		Check(_AvwapManager.P2PoolError(EAvwapPlacebo.P2, 1, false) != null, "S3 ruling 3: P2 on Data1 without M-TOD refuses");
+		Check(_AvwapManager.P2PoolError(EAvwapPlacebo.P2, 1, true) == null && _AvwapManager.P2PoolError(EAvwapPlacebo.P1, 3, false) == null && _AvwapManager.P2PoolError(EAvwapPlacebo.None, 2, false) == null, "S3 ruling 3: Data1 with M-TOD, P1-only and off all start");
 
 		// back-filled swing twins equal a forward build (ring carries TP, time and the pool each bar saw)
 		var mb = Mgr(EAvwapAnchor.SwingLow, l => { l.backfillBars = 3; l.placebos = EAvwapPlacebo.P1 | EAvwapPlacebo.P2; });

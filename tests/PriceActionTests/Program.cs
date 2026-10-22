@@ -41,7 +41,7 @@ static class Program
 	{
 		Validation(); Presets(); Warmup(); IndicatorsMatchNaive(); FlatTops(); LabelsAndEqual(); Breakouts(); Bos(); OutOfOrder();
 		ResetEqualsFresh(); Roll(); MonotonicAndImmutable(); CandleRules(); ChangedXor(); StepClosedOnly(); ZigZag();
-		ExtraCanon(); ExtraIndependent(); ExtraSharing(); ExtraRollOnData2();
+		ExtraCanon(); ExtraIndependent(); ExtraSharing(); ExtraRollOnData2(); PresetPerField();
 		Console.WriteLine($"PriceActionTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -410,5 +410,20 @@ static class Program
 		Check(resets == 1 && j.Count(s => s.Contains("roll reset")) == 1, $"S5 Data2 OnRoll fires exactly once via the pending flag ({resets})");
 		Check(!pend.Armed, "S5 pending flag cleared after firing");
 		Check(e.IsWarm == false || e.LastHigh() == null || e.LastHigh().confirmBar >= 20, "S5 no pre-roll pivot survives the reset");
+	}
+
+	// Ruling 1: host-applied Futures preset is per field; explicit ApplyPreset means the entry took over.
+	static void PresetPerField()
+	{
+		var a = Cfg().ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(a.tieRule == EPivotTieRule.LeftInclusive && !a.volumeIncludesCurrent && a.preset == EPriceActionPreset.Futures, "R1 untouched entry gets every Futures field");
+		var b = Cfg(k => { k.tieRule = EPivotTieRule.LeftInclusive; k.strength = 3; }).ApplyPresetDefaults(EPriceActionPreset.Futures);
+		var c = Cfg(k => k.volumeIncludesCurrent = false).ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(c.tieRule == EPivotTieRule.LeftInclusive && !c.volumeIncludesCurrent, "R1 changed volumeIncludesCurrent kept, tieRule takes Futures");
+		Check(b.tieRule == EPivotTieRule.LeftInclusive && !b.volumeIncludesCurrent && b.strength == 3, "R1 changed fields kept, volumeIncludesCurrent takes Futures, non-preset fields untouched");
+		var d = Cfg(); d.ApplyPreset(EPriceActionPreset.Library); d.ApplyPresetDefaults(EPriceActionPreset.Futures);
+		Check(d.tieRule == EPivotTieRule.Strict && d.volumeIncludesCurrent && d.preset == EPriceActionPreset.Library, "R1 explicit ApplyPreset skips the base preset");
+		var e = Cfg().ApplyPresetDefaults(EPriceActionPreset.Library);
+		Check(e.tieRule == EPivotTieRule.Strict && e.volumeIncludesCurrent && !e.presetApplied, "R1 Library base preset is a no-op");
 	}
 }

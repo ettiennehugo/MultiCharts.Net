@@ -121,8 +121,8 @@ namespace PowerLanguage.Strategy
 			clock();   // VPF-7: resolves US Eastern, as before
 		}
 
-		/// <summary>Phase 3 S5: ExtraPriceAction entries get the Futures preset unless they chose their own.</summary>
-		protected override void presetExtraPriceAction(PriceActionConfig c) { c.ApplyPreset(EPriceActionPreset.Futures); }
+		/// <summary>Phase 3 S5 (ruling 1): Futures preset per field; fields the entry changed stay its own; skipped after an explicit ApplyPreset.</summary>
+		protected override void presetExtraPriceAction(PriceActionConfig c) { c.ApplyPresetDefaults(EPriceActionPreset.Futures); }
 
 		protected override void StartCalc()
 		{
