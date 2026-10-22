@@ -1,0 +1,440 @@
+using System;
+using System.Collections.Generic;
+
+namespace PowerLanguage.Function
+{
+	// ============================================================================================
+	// M-PORT (specs/m-port-spec.md rev 1): portfolio money management for MultiCharts .NET Portfolio Trader.
+	// Pure C# (no MultiCharts types) so the whole allocator is unit-tested off-MC (tests/PortMMTests).
+	// _CustomSignal publishes the pm.* keys (_PortKeys) into MyPortfolioData; _PortfolioRiskManager (the PT money-management
+	// signal) maps PortfolioStrategies to PortStratView, calls _PortMM.Decide and applies the PortDecisions
+	// (AllowEntries*, EntryContracts, ForceClosePosition, Paused, Status). Exits are never blocked.
+	// ============================================================================================
+
+	/// <summary>Standard portfolio-data keys (spec §3).</summary>
+	public static class _PortKeys
+	{
+		public const int Version = 1;
+		public const string Ver = "pm.ver", Id = "pm.id", Family = "pm.family", Cluster = "pm.cluster";
+		public const string Eq = "pm.eq", Pnl = "pm.pnl", Ret = "pm.ret", URet = "pm.uRet", Vol = "pm.vol";
+		public const string RDollar = "pm.R$", QtyCode = "pm.qtyCode", RiskNew = "pm.riskNew", RiskOpen = "pm.riskOpen", OpenR = "pm.openR";
+		public const string State = "pm.state", Side = "pm.side", Regime = "pm.regime", Score = "pm.score", Stamp = "pm.stamp", Day = "pm.day", Pos = "pm.pos";
+		// book-level values written by the MM into CommonPortfolioData
+		public const string Mult = "pm.mult", Heat = "pm.heat", Dd = "pm.dd", Rho = "pm.rho";
+	}
+
+	public enum EPortState { Flat = 0, Armed = 1, Long = 2, Short = 3, Exiting = 4, Halted = 5 }
+	public enum EPortSizing { CodeSize = 0, RiskParity = 1, VolTarget = 2 }
+
+	/// <summary>Immutable ring of (day, value) daily returns; Append returns a new instance (copy-on-write, safe to share).</summary>
+	public sealed class _PortReturns
+	{
+		public const int DefaultCapacity = 260;
+		private readonly DateTime[] m_day; private readonly double[] m_val;
+		public int Count { get { return m_day.Length; } }
+		public int Capacity { get; private set; }
+		public DateTime LastDay { get { return m_day.Length == 0 ? DateTime.MinValue : m_day[m_day.Length - 1]; } }
+		public _PortReturns(int capacity = DefaultCapacity) { Capacity = Math.Max(1, capacity); m_day = new DateTime[0]; m_val = new double[0]; }
+		private _PortReturns(int capacity, DateTime[] d, double[] v) { Capacity = capacity; m_day = d; m_val = v; }
+		public DateTime Day(int i) { return m_day[i]; }
+		public double Value(int i) { return m_val[i]; }
+		/// <summary>New instance with (day, value) appended (oldest dropped beyond Capacity). A day not after LastDay replaces nothing and returns this.</summary>
+		public _PortReturns Append(DateTime day, double value)
+		{
+			if (double.IsNaN(value) || double.IsInfinity(value) || (m_day.Length > 0 && day <= LastDay)) return this;
+			int keep = Math.Min(m_day.Length, Capacity - 1), skip = m_day.Length - keep;
+			var d = new DateTime[keep + 1]; var v = new double[keep + 1];
+			Array.Copy(m_day, skip, d, 0, keep); Array.Copy(m_val, skip, v, 0, keep);
+			d[keep] = day.Date; v[keep] = value;
+			return new _PortReturns(Capacity, d, v);
+		}
+		public Dictionary<DateTime, double> ToMap() { var m = new Dictionary<DateTime, double>(); for (int i = 0; i < m_day.Length; i++) m[m_day[i]] = m_val[i]; return m; }
+	}
+
+	public sealed class PortDdStep { public double dd; public double mult; public PortDdStep(double dd, double mult) { this.dd = dd; this.mult = mult; } }
+
+	/// <summary>M-PORT configuration (spec §5.1). Code defaults; no [Input]. Override _PortfolioRiskManager.Config in a subclass to change.</summary>
+	public sealed class PortMmConfig
+	{
+		public EPortSizing sizing = EPortSizing.RiskParity;
+		public double bookVolTarget = 0.10;
+		public double riskPerTrade = 0.005;
+		public double heatCap = 0.04;
+		public double clusterCap = 0.02;
+		public double rhoMerge = 0.9;
+		public int rhoWin = 60;
+		public int rhoMinDays = 40;
+		public int maxPositions = 6;
+		public PortDdStep[] ddSteps = { new PortDdStep(0.05, 0.5), new PortDdStep(0.10, 0.25), new PortDdStep(0.15, 0.0) };
+		public int ddRecoverHighDays = 20;
+		public double dailyLossStop = 0.02;
+		public double dailyLossFlatten = 0.03;
+		public double stratKillR = -8;
+		public int stratKillTrades = 20;
+		public int staleBars = 3;
+		public int minContracts = 1;
+		public double idmCap = 2.5;
+
+		public string Validate()
+		{
+			var e = new List<string>();
+			if (!(bookVolTarget > 0)) e.Add($"bookVolTarget={bookVolTarget}");
+			if (!(riskPerTrade > 0 && riskPerTrade < 1)) e.Add($"riskPerTrade={riskPerTrade}");
+			if (!(heatCap > 0 && heatCap <= 1)) e.Add($"heatCap={heatCap}");
+			if (!(clusterCap > 0 && clusterCap <= heatCap)) e.Add($"clusterCap={clusterCap} (0 < clusterCap <= heatCap)");
+			if (!(rhoMerge > 0 && rhoMerge <= 1)) e.Add($"rhoMerge={rhoMerge}");
+			if (rhoWin < 3 || rhoMinDays < 3 || rhoMinDays > rhoWin) e.Add($"rhoWin={rhoWin} rhoMinDays={rhoMinDays}");
+			if (maxPositions < 1) e.Add($"maxPositions={maxPositions}");
+			if (ddSteps == null) e.Add("ddSteps null");
+			else for (int i = 0; i < ddSteps.Length; i++)
+				if (!(ddSteps[i].dd > 0 && ddSteps[i].dd < 1) || ddSteps[i].mult < 0 || ddSteps[i].mult > 1 || (i > 0 && !(ddSteps[i].dd > ddSteps[i - 1].dd && ddSteps[i].mult <= ddSteps[i - 1].mult)))
+				{ e.Add($"ddSteps[{i}]=({ddSteps[i].dd},{ddSteps[i].mult}) (dd ascending in (0,1), mult non-increasing in [0,1])"); break; }
+			if (ddRecoverHighDays < 1) e.Add($"ddRecoverHighDays={ddRecoverHighDays}");
+			if (!(dailyLossStop > 0) || !(dailyLossFlatten >= dailyLossStop)) e.Add($"dailyLossStop={dailyLossStop} dailyLossFlatten={dailyLossFlatten}");
+			if (!(stratKillR < 0) || stratKillTrades < 1) e.Add($"stratKillR={stratKillR} stratKillTrades={stratKillTrades}");
+			if (staleBars < 1) e.Add($"staleBars={staleBars}");
+			if (minContracts < 1) e.Add($"minContracts={minContracts}");
+			if (!(idmCap >= 1)) e.Add($"idmCap={idmCap}");
+			return e.Count == 0 ? null : "PortMmConfig invalid: " + string.Join(", ", e);
+		}
+
+		public override string ToString()
+		{
+			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
+			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
+				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts})";
+		}
+	}
+
+	/// <summary>One strategy as the MM sees it this calculation (built by _PortfolioRiskManager from the published keys + IStrategy).</summary>
+	public sealed class PortStratView
+	{
+		public int index;
+		public string id = "";
+		public bool publishes;          // pm.ver == _PortKeys.Version
+		public bool stale;              // pm.stamp older than staleBars of its own bars
+		public bool currencyOk = true;  // StrategyCurrencyCode == USD
+		public bool paused;
+		public EPortState state;
+		public int side;                // pending entry side (+1/-1)
+		public double rDollar = double.NaN;   // $ per contract of 1R
+		public int qtyCode;
+		public double riskOpen;
+		public double vol = double.NaN; // $ daily vol per contract
+		public string cluster = "";
+		public int position;            // signed contracts (PositionSide x |CurrentPosition|), from IStrategy
+		public double pnl;              // closed + open P&L in $
+		public double score = double.NaN;
+		public _PortReturns ret, uRet;
+	}
+
+	public sealed class PortDecision
+	{
+		public int index;
+		public bool allowEntries, allowLong, allowShort;
+		public int entryContracts = -1;  // ALWAYS applied: -1 = code size (entries denied anyway when allowEntries is false)
+		public bool forceClose, pause;
+		public string status = "";
+		public string reason = "";
+	}
+
+	/// <summary>Pure M-PORT math (spec §5.3, §5.5).</summary>
+	public static class _PortMath
+	{
+		/// <summary>Pearson rho over the last `win` common days of two return maps (needs >= minDays common days, else NaN).</summary>
+		public static double Pearson(_PortReturns a, _PortReturns b, int win, int minDays, Func<DateTime, bool> dayFilter = null)
+		{
+			if (a == null || b == null) return double.NaN;
+			var mb = b.ToMap(); var xs = new List<double>(); var ys = new List<double>();
+			for (int i = a.Count - 1; i >= 0 && xs.Count < win; i--)
+			{
+				double y; DateTime d = a.Day(i);
+				if (mb.TryGetValue(d, out y) && (dayFilter == null || dayFilter(d))) { xs.Add(a.Value(i)); ys.Add(y); }
+			}
+			if (xs.Count < minDays) return double.NaN;
+			return Corr(xs, ys);
+		}
+
+		public static double Corr(IList<double> x, IList<double> y)
+		{
+			int n = x.Count; if (n < 2) return double.NaN;
+			double mx = 0, my = 0; for (int i = 0; i < n; i++) { mx += x[i]; my += y[i]; } mx /= n; my /= n;
+			double sxy = 0, sxx = 0, syy = 0; for (int i = 0; i < n; i++) { double dx = x[i] - mx, dy = y[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+			return sxx > 0 && syy > 0 ? sxy / Math.Sqrt(sxx * syy) : double.NaN;
+		}
+
+		/// <summary>Union-find cluster ids: same seed always merges; pairs with rho[i,j] >= threshold merge (NaN never merges).</summary>
+		public static int[] Clusters(string[] seeds, double[,] rho, double threshold)
+		{
+			int n = seeds.Length; var p = new int[n]; for (int i = 0; i < n; i++) p[i] = i;
+			Func<int, int> find = null; find = i => p[i] == i ? i : (p[i] = find(p[i]));
+			for (int i = 0; i < n; i++)
+				for (int j = i + 1; j < n; j++)
+					if ((!string.IsNullOrEmpty(seeds[i]) && seeds[i] == seeds[j]) || (rho != null && rho[i, j] >= threshold)) p[find(i)] = find(j);
+			var id = new int[n]; for (int i = 0; i < n; i++) id[i] = find(i);
+			return id;
+		}
+
+		/// <summary>Instrument diversification multiplier 1/sqrt(w'Rw), equal weights; missing rho = 0 (same cluster id = 1); capped.</summary>
+		public static double Idm(int[] active, double[,] rho, int[] cluster, double cap)
+		{
+			int k = active.Length; if (k <= 1) return 1;
+			double w = 1.0 / k, s = 0;
+			for (int a = 0; a < k; a++)
+				for (int b = 0; b < k; b++)
+				{
+					int i = active[a], j = active[b];
+					double r = i == j ? 1 : (rho != null && !double.IsNaN(rho[i, j]) ? rho[i, j] : (cluster != null && cluster[i] == cluster[j] ? 1 : 0));
+					s += w * w * r;
+				}
+			return s > 0 ? Math.Min(cap, 1 / Math.Sqrt(s)) : cap;
+		}
+
+		/// <summary>Drawdown stage implied by dd (0 = no throttle, i = ddSteps[i-1] hit).</summary>
+		public static int DdStage(PortDdStep[] steps, double dd)
+		{
+			int st = 0; for (int i = 0; i < steps.Length; i++) if (dd >= steps[i].dd - 1e-12) st = i + 1; return st;
+		}
+
+		/// <summary>Contracts for a new entry (spec §5.3); -1 = code size; 0 = none.</summary>
+		public static int Size(PortMmConfig c, double mult, double book, double rDollar, int qtyCode, double vol, int k, double idm)
+		{
+			switch (c.sizing)
+			{
+				case EPortSizing.CodeSize: return mult > 0 ? -1 : 0;
+				case EPortSizing.VolTarget:
+					if (!(vol > 0) || k < 1) return 0;
+					return (int)Math.Floor(mult * (c.bookVolTarget / Math.Sqrt(252)) * book * idm / (k * vol) + 1e-9);
+				default:
+					if (!(rDollar > 0)) return 0;
+					return (int)Math.Floor(mult * c.riskPerTrade * book / rDollar + 1e-9);
+			}
+		}
+	}
+
+	/// <summary>M-PORT allocator state + per-calc decision (spec §5.2, §5.4). One instance per MM run.</summary>
+	internal sealed class _PortMM
+	{
+		public PortMmConfig config = new PortMmConfig();
+		public Action<string> journal;
+
+		private double m_peak = double.NaN, m_lastBook = double.NaN, m_dayOpenBook = double.NaN;
+		private DateTime m_day = DateTime.MinValue;
+		private int m_ddStage;
+		private bool m_dayStopped, m_dayFlattened;
+		private _PortReturns m_bookRet = new _PortReturns();
+		private readonly List<double> m_dailyCloses = new List<double>();
+		private readonly Dictionary<int, KillTracker> m_kill = new Dictionary<int, KillTracker>();
+		private double[,] m_rho; private int[] m_clusterId; private string[] m_seeds; private DateTime m_rhoDay = DateTime.MinValue; private int m_rhoN = -1;
+
+		private sealed class KillTracker
+		{
+			public int lastPos; public double pnlAtOpen; public double riskAtOpen; public readonly Queue<double> r = new Queue<double>(); public bool killed; public string reason = "";
+		}
+
+		public double Mult { get; private set; } = 1;
+		public double Heat { get; private set; }
+		public double Drawdown { get; private set; }
+		public double Book { get; private set; }
+		public double[,] Rho { get { return m_rho; } }
+		public int DdStageNow { get { return m_ddStage; } }
+		public bool DayStopped { get { return m_dayStopped; } }
+
+		public string Configure() { return config.Validate(); }
+
+		/// <summary>
+		/// One MM calculation. day = trading-day key of the step; initialCapital = book starting capital; currencyOk = portfolio
+		/// currency is USD. Returns one decision per view (same order). Never touches exits.
+		/// </summary>
+		public PortDecision[] Decide(DateTime day, double initialCapital, bool currencyOk, IList<PortStratView> v)
+		{
+			int n = v.Count; var d = new PortDecision[n];
+			for (int i = 0; i < n; i++) d[i] = new PortDecision { index = v[i].index };   // deny-all (Rank/Rotation pattern)
+
+			double book = initialCapital; foreach (var s in v) if (s.publishes && !double.IsNaN(s.pnl)) book += s.pnl;
+			Book = book;
+			newDay(day.Date, book);
+			if (double.IsNaN(m_peak) || book > m_peak) m_peak = book;
+			Drawdown = m_peak > 0 ? Math.Max(0, 1 - book / m_peak) : 0;
+			updateDdStage();
+			double dayPnl = book - m_dayOpenBook;
+			if (!m_dayStopped && dayPnl <= -config.dailyLossStop * m_dayOpenBook) { m_dayStopped = true; journal?.Invoke($"PORT daily loss stop {day:yyyy-MM-dd}: dayPnL({dayPnl:0}) <= -{config.dailyLossStop:P1} of {m_dayOpenBook:0} -> entries denied for the session"); }
+			if (!m_dayFlattened && dayPnl <= -config.dailyLossFlatten * m_dayOpenBook) { m_dayFlattened = true; journal?.Invoke($"PORT daily loss flatten {day:yyyy-MM-dd}: dayPnL({dayPnl:0}) <= -{config.dailyLossFlatten:P1} -> ForceClosePosition all"); }
+			double mult = m_ddStage == 0 ? 1 : config.ddSteps[m_ddStage - 1].mult;
+			if (m_dayStopped) mult = 0;
+			Mult = mult;
+
+			updateKills(v);
+			updateClusters(day.Date, v);
+
+			double heat = 0; var clHeat = new Dictionary<int, double>(); int open = 0;
+			for (int i = 0; i < n; i++)
+			{
+				var s = v[i]; double r = s.publishes && s.riskOpen > 0 ? s.riskOpen : 0;
+				heat += r; int c = m_clusterId[i]; double h; clHeat.TryGetValue(c, out h); clHeat[c] = h + r;
+				if (s.position != 0) open++;
+			}
+
+			// kill switches first: flatten, pause once flat
+			for (int i = 0; i < n; i++)
+			{
+				var s = v[i]; KillTracker k = tracker(s.index);
+				bool kill = k.killed || (s.publishes && s.state == EPortState.Halted);
+				if (m_dayFlattened && s.position != 0) { d[i].forceClose = true; d[i].reason = "daily flatten"; }
+				if (kill)
+				{
+					if (!k.killed) { k.killed = true; k.reason = s.state == EPortState.Halted ? "own halt" : k.reason; journal?.Invoke($"PORT kill {s.id}#{s.index}: {k.reason}"); }
+					if (s.position != 0) { d[i].forceClose = true; d[i].reason = "kill: " + k.reason; } else if (!s.paused) d[i].pause = true;
+				}
+			}
+
+			// candidates: Armed, valid publisher, not stale, not paused/killed, flat
+			var cand = new List<int>();
+			for (int i = 0; i < n; i++)
+			{
+				var s = v[i];
+				string why = s.publishes ? null : "no pm.ver";
+				if (why == null && s.stale) why = "stale";
+				if (why == null && (!currencyOk || !s.currencyOk)) why = "currency not USD";
+				if (why == null && (s.paused || tracker(s.index).killed)) why = "paused/killed";
+				if (why == null && s.state != EPortState.Armed) why = s.state.ToString();
+				if (why == null && s.position != 0) why = "in position";
+				if (why == null && (s.side != 1 && s.side != -1)) why = "no side";
+				if (why == null && config.sizing != EPortSizing.CodeSize && !(s.rDollar > 0)) why = "no R$";
+				if (why != null) { if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why; continue; }
+				cand.Add(i);
+			}
+			cand.Sort((a, b) =>
+			{
+				double sa = v[a].score, sb = v[b].score;
+				bool na = double.IsNaN(sa), nb = double.IsNaN(sb);
+				if (na != nb) return na ? 1 : -1;
+				if (!na && sa != sb) return sb.CompareTo(sa);
+				return v[a].index.CompareTo(v[b].index);
+			});
+
+			int[] active = activeIdx(v);
+			double idm = config.sizing == EPortSizing.VolTarget ? _PortMath.Idm(active, m_rho, m_clusterId, config.idmCap) : 1;
+			foreach (int i in cand)
+			{
+				var s = v[i];
+				if (mult <= 0) { d[i].reason = m_dayStopped ? "daily stop" : "dd throttle"; continue; }
+				if (open >= config.maxPositions) { d[i].reason = "maxPositions"; continue; }
+				int q = _PortMath.Size(config, mult, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
+				double rUnit = s.rDollar > 0 ? s.rDollar : double.NaN;
+				if (q == -1)
+				{   // CodeSize: heat/cluster checks on the code quantity when R$ is known
+					if (!double.IsNaN(rUnit) && s.qtyCode > 0)
+					{
+						double r = rUnit * s.qtyCode; int c = m_clusterId[i];
+						if (heat + r > config.heatCap * book + 1e-9) { d[i].reason = "heat cap"; continue; }
+						if (clHeat[c] + r > config.clusterCap * book + 1e-9) { d[i].reason = "cluster cap"; continue; }
+						heat += r; clHeat[c] += r;
+					}
+				}
+				else
+				{
+					if (q < config.minContracts) { d[i].reason = "size < minContracts"; continue; }
+					int c = m_clusterId[i];
+					double room = Math.Min(config.heatCap * book - heat, config.clusterCap * book - clHeat[c]);
+					int qMax = room > 0 ? (int)Math.Floor(room / rUnit + 1e-9) : 0;
+					if (q > qMax) q = qMax;
+					if (q < config.minContracts) { d[i].reason = heat + rUnit > config.heatCap * book ? "heat cap" : "cluster cap"; continue; }
+					heat += q * rUnit; clHeat[c] += q * rUnit;
+				}
+				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
+				open++;
+			}
+			Heat = book > 0 ? heat / book : double.NaN;
+
+			for (int i = 0; i < n; i++)
+			{
+				var s = v[i];
+				d[i].status = $"{s.state} n={(d[i].allowEntries ? d[i].entryContracts.ToString() : "-")} mult={mult:0.00} cl={m_clusterId[i]} {d[i].reason}";
+			}
+			m_lastBook = book;
+			return d;
+		}
+
+		private int[] activeIdx(IList<PortStratView> v)
+		{
+			var a = new List<int>(); for (int i = 0; i < v.Count; i++) if (v[i].publishes && !tracker(v[i].index).killed) a.Add(i); return a.ToArray();
+		}
+
+		private KillTracker tracker(int index) { KillTracker k; if (!m_kill.TryGetValue(index, out k)) { k = new KillTracker(); m_kill[index] = k; } return k; }
+
+		private void newDay(DateTime day, double book)
+		{
+			if (day == m_day) return;
+			if (m_day != DateTime.MinValue && !double.IsNaN(m_lastBook))
+			{
+				if (m_dayOpenBook > 0) m_bookRet = m_bookRet.Append(m_day, m_lastBook / m_dayOpenBook - 1);
+				m_dailyCloses.Add(m_lastBook); if (m_dailyCloses.Count > config.ddRecoverHighDays) m_dailyCloses.RemoveAt(0);
+			}
+			m_day = day; m_dayOpenBook = double.IsNaN(m_lastBook) ? book : m_lastBook; m_dayStopped = m_dayFlattened = false;
+		}
+
+		/// <summary>Stage rises immediately; falls to the dd-implied stage only at a new ddRecoverHighDays high or when dd is below half the current step.</summary>
+		private void updateDdStage()
+		{
+			int implied = _PortMath.DdStage(config.ddSteps, Drawdown);
+			if (implied > m_ddStage) { m_ddStage = implied; journal?.Invoke($"PORT drawdown {Drawdown:P1} -> stage {m_ddStage} mult {config.ddSteps[m_ddStage - 1].mult}"); return; }
+			if (implied == m_ddStage || m_ddStage == 0) return;
+			bool newHigh = m_dailyCloses.Count > 0 && Book >= max(m_dailyCloses);
+			bool halfStep = Drawdown < config.ddSteps[m_ddStage - 1].dd / 2;
+			if (newHigh || halfStep) { m_ddStage = implied; journal?.Invoke($"PORT drawdown recovered ({(newHigh ? "new high" : "dd < half step")}) dd {Drawdown:P1} -> stage {m_ddStage}"); }
+		}
+
+		private static double max(List<double> a) { double m = double.MinValue; foreach (var x in a) if (x > m) m = x; return m; }
+
+		/// <summary>Closed-trade R per strategy: on position open remember pnl and initial risk (R$ x |position|); on flat, R = dPnl / risk.</summary>
+		private void updateKills(IList<PortStratView> v)
+		{
+			foreach (var s in v)
+			{
+				if (!s.publishes) continue;
+				KillTracker k = tracker(s.index);
+				if (k.lastPos == 0 && s.position != 0)
+				{
+					k.pnlAtOpen = s.pnl;
+					k.riskAtOpen = s.rDollar > 0 ? s.rDollar * Math.Abs(s.position) : double.NaN;
+				}
+				else if (k.lastPos != 0 && s.position == 0 && k.riskAtOpen > 0)
+				{
+					k.r.Enqueue((s.pnl - k.pnlAtOpen) / k.riskAtOpen); while (k.r.Count > config.stratKillTrades) k.r.Dequeue();
+					double sum = 0; foreach (var x in k.r) sum += x;
+					if (!k.killed && sum <= config.stratKillR) { k.killed = true; k.reason = $"cumulative {sum:0.0}R over last {k.r.Count} trades <= {config.stratKillR}R"; journal?.Invoke($"PORT kill {s.id}#{s.index}: {k.reason}"); }
+				}
+				k.lastPos = s.position;
+			}
+		}
+
+		private void updateClusters(DateTime day, IList<PortStratView> v)
+		{
+			int n = v.Count;
+			if (n == m_rhoN && day == m_rhoDay && m_clusterId != null) return;
+			m_rhoN = n; m_rhoDay = day;
+			m_seeds = new string[n]; for (int i = 0; i < n; i++) m_seeds[i] = v[i].cluster ?? "";
+			m_rho = new double[n, n];
+			var bm = m_bookRet.ToMap(); double sd = 0, mean = 0; int bc = m_bookRet.Count;
+			if (bc > 1) { for (int i = 0; i < bc; i++) mean += m_bookRet.Value(i); mean /= bc; for (int i = 0; i < bc; i++) sd += Math.Pow(m_bookRet.Value(i) - mean, 2); sd = Math.Sqrt(sd / bc); }
+			Func<DateTime, bool> stressed = dd => { double r; return sd > 0 && bm.TryGetValue(dd, out r) && r < mean - sd; };
+			for (int i = 0; i < n; i++)
+			{
+				m_rho[i, i] = 1;
+				for (int j = i + 1; j < n; j++)
+				{
+					_PortReturns a = pick(v[i]), b = pick(v[j]);
+					double r = _PortMath.Pearson(a, b, config.rhoWin, config.rhoMinDays);
+					double rs = _PortMath.Pearson(a, b, config.rhoWin, 10, stressed);
+					double m = double.IsNaN(rs) ? r : (double.IsNaN(r) ? rs : Math.Max(r, rs));
+					m_rho[i, j] = m_rho[j, i] = m;
+				}
+			}
+			m_clusterId = _PortMath.Clusters(m_seeds, m_rho, config.rhoMerge);
+		}
+
+		/// <summary>Strategy returns when it has >= rhoMinDays of them, else the underlying's (spec §5.5).</summary>
+		private _PortReturns pick(PortStratView s) { return s.ret != null && s.ret.Count >= config.rhoMinDays ? s.ret : s.uRet; }
+	}
+}

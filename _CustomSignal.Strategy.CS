@@ -792,6 +792,136 @@ namespace PowerLanguage.Strategy
 			{
 				try { using (var w = new StreamWriter(LevelStudyConfig.csvPath, false)) m_levelStudy.WriteCsv(w); }
 				catch (Exception ex) { trace(ETraceLevel.Warning, $"A2-33 CSV write failed ({LevelStudyConfig.csvPath}): {ex.Message}"); }
+		// ---- M-PORT (specs/m-port-spec.md §3): publish pm.* keys into MyPortfolioData for _PortfolioRiskManager ----
+
+		/// <summary>M-PORT: publish portfolio keys. True only in Portfolio Trader (no [Input]); chart runs publish nothing.</summary>
+		protected virtual bool PortfolioPublish { get { return Environment.ApplicationCode == EApplicationCode.Portfolio; } }
+		/// <summary>M-PORT: catalogue family (PS, VW, PF ...); empty = unknown.</summary>
+		protected virtual string PortfolioFamily { get { return ""; } }
+		/// <summary>M-PORT: regime tag published at session close (0 = unknown).</summary>
+		protected virtual int PortfolioRegime { get { return 0; } }
+		/// <summary>M-PORT: rank/priority for the MM (NaN = PT table order).</summary>
+		protected virtual double PortfolioScore { get { return double.NaN; } }
+		/// <summary>M-PORT: the strategy's own kill rule fired (pm.state = Halted; the MM flattens and pauses it).</summary>
+		protected virtual bool PortfolioHalted { get { return false; } }
+		/// <summary>M-PORT: correlation-cluster seed from the symbol root (ES/MES/NQ/MNQ/YM/MYM/RTY/M2K = EQIDX ...).</summary>
+		protected virtual string PortfolioCluster
+		{
+			get
+			{
+				string root = _MtfMath.SymbolRoot(Bars.Info.Name).ToUpperInvariant();
+				switch (root)
+				{
+					case "ES": case "MES": case "NQ": case "MNQ": case "YM": case "MYM": case "RTY": case "M2K": return "EQIDX";
+					case "ZN": case "ZB": case "ZF": case "ZT": case "UB": case "TN": return "RATES";
+					case "CL": case "MCL": case "NG": case "RB": case "HO": case "QM": return "ENERGY";
+					case "GC": case "MGC": case "SI": case "SIL": case "HG": case "PL": return "METALS";
+					default: return root;
+				}
+			}
+		}
+
+		private bool m_portOn;
+		private _PortReturns m_portRet, m_portURet;
+		private DateTime m_portDay = DateTime.MinValue;
+		private double m_portDayStartPnl = double.NaN, m_portLastPnl = double.NaN, m_portDayClose = double.NaN, m_portPrevDayClose = double.NaN;
+		private bool m_portRollToday;
+		private double m_portRDollar = double.NaN, m_portStop = double.NaN, m_portMult = double.NaN;
+		private int m_portArmBar = -1;
+
+		private void startPortfolio()
+		{
+			m_portOn = false;
+			try { m_portOn = PortfolioPublish; } catch (Exception) { m_portOn = false; }
+			m_portRet = new _PortReturns(); m_portURet = new _PortReturns();
+			m_portDay = DateTime.MinValue; m_portDayStartPnl = m_portLastPnl = m_portDayClose = m_portPrevDayClose = double.NaN; m_portRollToday = false;
+			m_portRDollar = m_portStop = m_portMult = double.NaN; m_portArmBar = -1;
+			if (!m_portOn) return;
+			MyPortfolioData[_PortKeys.Ver] = _PortKeys.Version;
+			MyPortfolioData[_PortKeys.Id] = Name + "@" + Bars.Info.Name;
+			MyPortfolioData[_PortKeys.Family] = PortfolioFamily ?? "";
+			MyPortfolioData[_PortKeys.Cluster] = PortfolioCluster ?? "";
+			MyPortfolioData[_PortKeys.Ret] = m_portRet;
+			MyPortfolioData[_PortKeys.URet] = m_portURet;
+			MyPortfolioData[_PortKeys.RiskNew] = 0.0;
+			MyPortfolioData[_PortKeys.State] = (int)EPortState.Flat;
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"PORT publish on: id({Name}@{Bars.Info.Name}) family({PortfolioFamily}) cluster({PortfolioCluster})");
+		}
+
+		/// <summary>
+		/// M-PORT: declare the pending entry of this bar (call next to the entry Send; sizeForRisk calls it for Data1 automatically).
+		/// side +1/-1, qtyCode = contracts the code would trade. No-op outside Portfolio Trader.
+		/// </summary>
+		protected void portfolioArm(int side, double entry, double stop, int qtyCode)
+		{
+			if (!m_portOn) return;
+			double bpv = Bars.Info.BigPointValue;
+			double rd = Math.Abs(entry - stop) * bpv;
+			if (!(rd > 0) || double.IsNaN(rd) || double.IsInfinity(rd)) return;
+			m_portRDollar = rd; m_portStop = stop; m_portArmBar = Bars.CurrentBar;
+			MyPortfolioData[_PortKeys.RDollar] = rd;
+			MyPortfolioData[_PortKeys.QtyCode] = qtyCode;
+			MyPortfolioData[_PortKeys.RiskNew] = rd * Math.Max(0, qtyCode);
+			MyPortfolioData[_PortKeys.Side] = side > 0 ? 1 : -1;
+			if (StrategyInfo.MarketPosition == 0) MyPortfolioData[_PortKeys.State] = (int)EPortState.Armed;
+		}
+
+		/// <summary>M-PORT: the active protective stop of the open position (for pm.riskOpen). Defaults to the armed stop.</summary>
+		protected void portfolioStop(double stop) { if (m_portOn) m_portStop = stop; }
+
+		private void portfolioBar()
+		{
+			IPortfolioData pd = MyPortfolioData;
+			int pos = StrategyInfo.MarketPosition;
+			double open = 0; try { open = CurrentPosition.OpenProfit; } catch (Exception) { }
+			double pnl = this.NetProfit + open;
+			double bpv = Bars.Info.BigPointValue;
+			DateTime day = tradingDayKey(Bars.Time[0]);
+
+			// session close = first bar of a new trading day: daily returns of strategy equity and of the underlying
+			if (day != m_portDay)
+			{
+				if (m_portDay != DateTime.MinValue)
+				{
+					double eq0 = this.InitialCapital + m_portDayStartPnl;
+					if (eq0 > 0 && !double.IsNaN(m_portLastPnl)) { m_portRet = m_portRet.Append(m_portDay, (m_portLastPnl - m_portDayStartPnl) / eq0); pd[_PortKeys.Ret] = m_portRet; }
+					if (m_portPrevDayClose > 0 && m_portDayClose > 0 && !m_portRollToday) { m_portURet = m_portURet.Append(m_portDay, Math.Log(m_portDayClose / m_portPrevDayClose)); pd[_PortKeys.URet] = m_portURet; }
+					m_portPrevDayClose = m_portDayClose;
+					pd[_PortKeys.Vol] = m_daily != null ? m_daily.Atr20d * bpv : double.NaN;
+					pd[_PortKeys.Regime] = PortfolioRegime;
+				}
+				m_portDay = day; m_portDayStartPnl = double.IsNaN(m_portLastPnl) ? pnl : m_portLastPnl; m_portRollToday = false;
+			}
+			if (Bars.Status == EBarState.Close) { m_portDayClose = Bars.Close[0]; if (rollOn(1)) m_portRollToday = true; }
+			m_portLastPnl = pnl;
+
+			EPortState st = PortfolioHalted ? EPortState.Halted : pos > 0 ? EPortState.Long : pos < 0 ? EPortState.Short : EPortState.Flat;
+			double riskOpen = 0, openR = double.NaN;
+			if (pos != 0 && !double.IsNaN(m_portStop) && bpv > 0)
+			{
+				double avg = StrategyInfo.AvgEntryPrice, px = Bars.Close[0];
+				bool beyondBe = pos > 0 ? m_portStop >= avg : m_portStop <= avg;
+				riskOpen = beyondBe ? 0 : Math.Max(0, (pos > 0 ? px - m_portStop : m_portStop - px)) * bpv * Math.Abs(pos);
+			}
+			if (pos != 0 && m_portRDollar > 0) openR = open / (m_portRDollar * Math.Abs(pos));
+			pd[_PortKeys.Eq] = this.InitialCapital + pnl;
+			pd[_PortKeys.Pnl] = pnl;
+			pd[_PortKeys.Pos] = pos;
+			pd[_PortKeys.State] = (int)st;
+			pd[_PortKeys.RiskOpen] = riskOpen;
+			pd[_PortKeys.OpenR] = openR;
+			pd[_PortKeys.Score] = PortfolioScore;
+			pd[_PortKeys.Stamp] = Bars.Time[0];
+			pd[_PortKeys.Day] = day;
+			if (m_portArmBar != Bars.CurrentBar) { pd[_PortKeys.RiskNew] = 0.0; pd[_PortKeys.Side] = 0; }   // re-armed below by the strategy this bar
+			if (pos == 0 && m_portArmBar != Bars.CurrentBar) m_portStop = double.NaN;
+
+			// book multiplier from the MM: journal only (sizing is applied by the MM through EntryContracts)
+			object m = CommonPortfolioData.ContainsKey(_PortKeys.Mult) ? CommonPortfolioData[_PortKeys.Mult] : null;
+			if (m is double && (double)m != m_portMult)
+			{
+				m_portMult = (double)m;
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"PORT book multiplier {m_portMult:0.00} at {Bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 			}
 		}
 
@@ -975,6 +1105,7 @@ namespace PowerLanguage.Strategy
 		{
 			stopEngines();   // §0.1 rule 6: re-calc starts clean
 			m_levelStudy = null;
+			m_portOn = false;
 			base.StopCalc();
 		}
 
@@ -1047,6 +1178,7 @@ namespace PowerLanguage.Strategy
 			}
 			startEngines();   // lazy engines (§0.1); null unless enabled
 			startLevelStudy();   // A2-33 harness (off by default)
+			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
 		}
 
 		/// <summary>
@@ -1133,6 +1265,7 @@ namespace PowerLanguage.Strategy
 
 			stepEngines();   // lazy engines (§0.1): no-op unless enabled
 			if (m_levelStudy != null) stepLevelStudy();
+			if (m_portOn) portfolioBar();   // M-PORT: position/equity keys; the derived strategy arms after base.CalcBar()
 
 			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)
 			if (Bars.Status == EBarState.Close && traceOn(ETraceLevel.Journal))
@@ -1841,6 +1974,7 @@ namespace PowerLanguage.Strategy
 			}
 			qty = applyRoundLots(qty, limits.roundLots);
 			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
+			else if (m_portOn && bars == Bars) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty);   // M-PORT: the code size of the pending entry
 			return qty;
 		}
 
