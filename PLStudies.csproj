@@ -525,6 +525,8 @@
     <Compile Include="_DailyContext.Function.CS" />
     <Compile Include="_XmktLeg.Function.CS" />
     <Compile Include="_TickStream.Function.CS" />
+    <Compile Include="_PortMM.Function.CS" />
+    <Compile Include="_PortfolioRiskManager.Strategy.CS" />
     <Compile Include="_Test1.Indicator.CS" />
     <Compile Include="_Test1.Strategy.CS" />
     <Compile Include="_Test2.Strategy.CS" />
