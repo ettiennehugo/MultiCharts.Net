@@ -121,13 +121,15 @@ namespace PowerLanguage.Strategy
 			clock();   // VPF-7: resolves US Eastern, as before
 		}
 
+		/// <summary>Phase 3 S5: ExtraPriceAction entries get the Futures preset unless they chose their own.</summary>
+		protected override void presetExtraPriceAction(PriceActionConfig c) { c.ApplyPreset(EPriceActionPreset.Futures); }
+
 		protected override void StartCalc()
 		{
 			base.StartCalc();
 			clock().BarTimeZone = resolveBarTimeZone(Bars.Info);   // CS-6: zone resolution lives in _CustomSignal; VPF-7: clears the clock cache
 			m_session = null;       // VPF-2
 			m_sessionBar = -1;
-			m_rollBars.Clear(); m_rollLastDay = DateTime.MinValue; m_rollLastBar = -1; m_rollLastName = null;   // VPF-4
 			if (BarLadders.enabled) OrderFlowEnabled = true;   // Phase 3 VP-3: the per-bar ladder reads the flow engine
 			startOrderFlow();       // VPF-5 (OrderFlowEnabled = false by default: nothing is computed)
 			// (no trace here: trace() stamps Bars.Time[0], which is not readable before the first CalcBar)
@@ -137,7 +139,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
-			detectRoll();           // VPF-4
+			stepRollDetector();     // VPF-4 (detector in _CustomSignal since S4; idempotent per bar)
 			updateOrderFlow();      // VPF-5 (no-op when OrderFlowEnabled = false)
 		}
 
@@ -549,62 +551,8 @@ namespace PowerLanguage.Strategy
 
 		// ---- VPF-4: roll-splice flag for datafeed continuous futures (Q3) ----
 
-		/// <summary>VPF-4: how rolls are found. Off (default) = never flag.</summary>
-		public enum ERollDetection { Off = 0, Series = 1, Table = 2, SeriesOrTable = 3 }
-
-		/// <summary>VPF-4: roll detection mode. Not an [Input].</summary>
-		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
-		/// <summary>
-		/// VPF-4 Series: a Globex-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
-		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
-		/// </summary>
-		protected int RollGapTicks { get; set; } = 8;
-		/// <summary>VPF-4 Table: Globex trading dates on which the continuous series switched contract (set by the strategy).</summary>
-		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
-
-		private readonly List<int> m_rollBars = new List<int>();   // Data1 bar (Status Bar #) of the first bar of each roll day
-		private DateTime m_rollLastDay = DateTime.MinValue;
-		private int m_rollLastBar = -1;
-		private string m_rollLastName;
-
-		/// <summary>VPF-4: Data1 bars (1-based) on which a roll was detected so far.</summary>
-		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
-
-		/// <summary>§0.3: roll signal for the lazy engines. Data1 only (VPF-4 runs on Data1); other streams never report a roll.
-		/// Runs the detector early (it is idempotent per bar), so engines stepped in _CustomSignal.CalcBar see this bar's roll.</summary>
-		protected override bool rollOn(int ds)
-		{
-			if (ds != 1 || RollDetection == ERollDetection.Off) return false;
-			detectRoll();
-			return m_rollBars.Count > 0 && m_rollBars[m_rollBars.Count - 1] == Bars.FullSymbolData.Current;
-		}
-
-		private void detectRoll()
-		{
-			if (RollDetection == ERollDetection.Off || Bars.Status != EBarState.Close) return;
-			int bar = Bars.FullSymbolData.Current;
-			if (bar == m_rollLastBar) return;
-			m_rollLastBar = bar;
-			string name = Bars.Info.Name;
-			DateTime gx = GlobexDate(Bars.Time[0]);
-			bool newDay = gx != m_rollLastDay;
-			bool roll = m_rollLastName != null && name != m_rollLastName;
-			if (newDay && m_rollLastDay != DateTime.MinValue && bar > 1)
-			{
-				bool series = RollDetection == ERollDetection.Series || RollDetection == ERollDetection.SeriesOrTable;
-				bool table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
-				if (table && RollDates.Contains(gx.Date)) roll = true;
-				if (series && gx.Month % 3 == 0 && gx.Day <= 21 && RollGapTicks > 0
-					&& Math.Abs(Bars.Open[0] - Bars.Close[1]) >= RollGapTicks * tickSize() - tickSize() * 1e-6) roll = true;
-			}
-			if (roll && (m_rollBars.Count == 0 || m_rollBars[m_rollBars.Count - 1] != bar))
-			{
-				m_rollBars.Add(bar);
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected globexDate({gx:yyyy-MM-dd}) bar({bar}) name({name})");
-			}
-			m_rollLastName = name;
-			m_rollLastDay = gx;
-		}
+		// VPF-4 settings (RollDetection, RollGapTicks, RollDates, RollBars) and the detector moved to _CustomSignal (Phase 3 S4);
+		// tradingDayKey (GlobexDate here) gives the detector its trading day, so futures behaviour is unchanged.
 
 		/// <summary>
 		/// VPF-4: true when a detected roll falls after the profile's first bar and at or before the calc bar: the profile spans
@@ -612,10 +560,11 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override bool profileCrossesRoll(VpExtra e)
 		{
-			if (e == null || m_rollBars.Count == 0 || e.dataStream > 1) return false;
+			IList<int> rolls = RollBars;
+			if (e == null || rolls.Count == 0 || e.dataStream > 1) return false;
 			int cur = Bars.FullSymbolData.Current;
-			for (int i = 0; i < m_rollBars.Count; i++)
-				if (m_rollBars[i] > e.startBar && m_rollBars[i] <= cur) return true;
+			for (int i = 0; i < rolls.Count; i++)
+				if (rolls[i] > e.startBar && rolls[i] <= cur) return true;
 			return false;
 		}
 
@@ -649,6 +598,12 @@ namespace PowerLanguage.Strategy
 		private int m_flowClosedBar = -1, m_flowIogBar = -1;
 		private double m_flowIogLastVol;
 		private System.Reflection.MemberInfo m_barTime, m_barClose, m_barVolume;
+		/// <summary>Spec S1, PROBE P-BA1: the ChartType member name for Volume Delta (the PG names it only in prose). Parsed at
+		/// StartCalc of the level request; an unknown name logs one Warning and the McBidAsk tier stays empty.</summary>
+		protected string McBidAskChartTypeName { get; set; } = "VolumeDelta";
+		private int m_mcLoaded; private DateTime m_mcFirst = DateTime.MaxValue, m_mcLast = DateTime.MinValue;
+		private bool m_mcHistoryDone, m_mcLoadedLogged;
+		private DateTime m_mcSession = DateTime.MinValue; private int m_mcSessBars, m_mcSessAgree, m_mcSessCover, m_mcSessCmp; private bool m_mcSessFellLogged;
 
 		/// <summary>VPF-5: the engine (null when OrderFlowEnabled is false). Lock-free reads are safe from CalcBar.</summary>
 		protected _OrderFlow.FlowEngine Flow { get { return m_flow; } }
@@ -657,6 +612,8 @@ namespace PowerLanguage.Strategy
 		{
 			stopOrderFlowLoads();
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
+			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false;
+			m_mcSession = DateTime.MinValue; m_mcSessBars = m_mcSessAgree = m_mcSessCover = m_mcSessCmp = 0; m_mcSessFellLogged = false;
 			m_flowClosedBar = -1; m_flowIogBar = -1; m_flowIogLastVol = 0;
 			for (int i = 0; i < m_flowHistoryDone.Length; i++) m_flowHistoryDone[i] = false;
 			if (!OrderFlowEnabled) return;
@@ -696,6 +653,104 @@ namespace PowerLanguage.Strategy
 				req.Subscribe2RT = true;
 				IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, i);
 				lock (m_flowLock) m_flowLoads.Add(r);
+			}
+			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off) startMcLevelLoader(from);
+		}
+
+		// Spec S1 ingestion: one more request, a copy of Bars.Request with the Volume Delta chart type. PROBES P-BA1..P-BA4 open,
+		// so the chart type is parsed by name and Data2 / RTData2 / BarPriceLevels / PriceLevel members are read by reflection.
+		private void startMcLevelLoader(DateTime from)
+		{
+			ChartType ct;
+			try { ct = (ChartType)Enum.Parse(typeof(ChartType), McBidAskChartTypeName); }
+			catch { if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"OF McBidAsk chartType({McBidAskChartTypeName}) unknown (PROBE P-BA1): tier disabled"); return; }
+			InstrumentDataRequest req = Bars.Request;
+			Resolution res = req.Resolution;
+			res.ChartType = ct;
+			req.Resolution = res;
+			req.From = from;
+			req.To = DateTime.Now.AddDays(1);
+			req.Subscribe2RT = true;
+			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, 3);
+			lock (m_flowLock) m_flowLoads.Add(r);
+		}
+
+		private void onMcLevels(IDataLoaderResult result)
+		{
+			lock (m_flowLock)
+			{
+				if (m_flow == null) return;
+				try
+				{
+					if (result.Event == DataLoadedEvent.History)
+					{
+						var data = reflectMember(result, "Data2") as System.Collections.IEnumerable;
+						if (data != null) foreach (object bpl in data) mcSet(bpl);
+						if (result.IsCompleted) m_mcHistoryDone = true;
+					}
+					else if (result.Event == DataLoadedEvent.RTNewBar)
+					{
+						object rt = reflectMember(result, "RTData2");
+						if (rt != null) mcSet(rt);
+					}
+				}
+				catch { /* member names unverified (P-BA2): bars fall through to Quote / TickRule and count as missing */ }
+			}
+		}
+
+		private void mcSet(object bpl)
+		{
+			if (bpl == null) return;
+			DateTime t = (DateTime)reflectMember(bpl, "Time");   // PROBE P-BA3: equals the Data1 bar stamp (unverified)
+			var levels = reflectMember(bpl, "Levels") as System.Collections.IEnumerable;
+			if (levels == null) return;
+			var px = new List<double>(); var ask = new List<double>(); var bid = new List<double>();
+			foreach (object l in levels)
+			{
+				px.Add(Convert.ToDouble(reflectMember(l, "Price")));
+				ask.Add(Convert.ToDouble(reflectMember(l, "AskTradedValue")));   // PROBE P-BA2: names as VP ILevel (unverified)
+				bid.Add(Convert.ToDouble(reflectMember(l, "BidTradedValue")));
+			}
+			m_flow.AddMcLevels(t, px.ToArray(), ask.ToArray(), bid.ToArray());
+			m_mcLoaded++;
+			if (t < m_mcFirst) m_mcFirst = t;
+			if (t > m_mcLast) m_mcLast = t;
+		}
+
+		private static object reflectMember(object o, string name)
+		{
+			if (o == null) return null;
+			var p = o.GetType().GetProperty(name);
+			if (p != null) return p.GetValue(o, null);
+			var f = o.GetType().GetField(name);
+			return f != null ? f.GetValue(o) : null;
+		}
+
+		// S1 journal: loaded line once, T9 per session, tier fall-through once per session
+		private void mcJournal(_OrderFlow.FootprintBar fp)
+		{
+			if (FlowCfg.McBidAsk == _OrderFlow.EMcBidAsk.Off || fp == null) return;
+			if (!m_mcLoadedLogged && m_mcHistoryDone)
+			{
+				m_mcLoadedLogged = true;
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk loaded bars({m_mcLoaded}) first({m_mcFirst:yyyy-MM-dd HH:mm}) last({m_mcLast:yyyy-MM-dd HH:mm}) method({_OrderFlow.McBidAskMethod})");
+			}
+			if (fp.SessionKey != m_mcSession)
+			{
+				if (m_mcSessBars > 0)
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF T9 session({m_mcSession:yyyy-MM-dd}) signAgree({(m_mcSessCmp > 0 ? 100.0 * m_mcSessAgree / m_mcSessCmp : double.NaN):F1}) bars({m_mcSessBars}) mcCover({100.0 * m_mcSessCover / m_mcSessBars:F1})");
+				m_mcSession = fp.SessionKey; m_mcSessBars = m_mcSessAgree = m_mcSessCover = m_mcSessCmp = 0; m_mcSessFellLogged = false;
+			}
+			m_mcSessBars++;
+			if (!double.IsNaN(fp.McDelta))
+			{
+				m_mcSessCover++;
+				if (!double.IsNaN(fp.ChainDelta)) { m_mcSessCmp++; if (Math.Sign(fp.McDelta) == Math.Sign(fp.ChainDelta)) m_mcSessAgree++; }
+			}
+			else if (fp.McMiss != null && !m_mcSessFellLogged && FlowCfg.McBidAsk == _OrderFlow.EMcBidAsk.Prefer)
+			{
+				m_mcSessFellLogged = true;
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF tier McBidAsk->{fp.Source} reason({fp.McMiss})");
 			}
 		}
 
@@ -776,11 +831,12 @@ namespace PowerLanguage.Strategy
 				DateTime et = ToEastern(Bars.Time[0]);
 				DateTime gx = globexDateEt(et);
 				DateTime reset = FlowCfg.ResetMode == _OrderFlow.ResetMode.Rth ? (IsRthValueBarEt(et) ? gx : gx.AddTicks(1)) : gx;
-				m_flow.CloseBar(new _OrderFlow.BarInput
+				_OrderFlow.FootprintBar closedFp = m_flow.CloseBar(new _OrderFlow.BarInput
 				{
 					BarNumber = bar, CloseTime = Bars.Time[0], SessionKey = gx, ResetKey = reset, Regime = regime,
 					High = Bars.High[0], Low = Bars.Low[0], Close = Bars.Close[0], Volume = Bars.Volume[0], UpTicks = Bars.UpTicks[0], DownTicks = Bars.DownTicks[0]
 				});
+				mcJournal(closedFp);
 			}
 		}
 

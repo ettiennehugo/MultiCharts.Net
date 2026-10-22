@@ -8,14 +8,16 @@ namespace PowerLanguage.Function
 	/// tag on every value. MultiCharts .NET does not expose the trade aggressor side (confirmed by the user, also with dxFeed),
 	/// so every buy/sell split below except the reserved Aggressor rank is an APPROXIMATION:
 	///   1 Aggressor   (Exact)   reserved: native aggressor flag per trade. Not exposed by MC .NET today; never produced.
-	///   2 Quote       (High)    Lee-Ready on 1-tick Trade + Bid + Ask streams (DataLoader): price >= ask BUY, price &lt;= bid SELL,
+	///   2 McBidAsk    (High)    Spec S1 (rev 2.7): MC's own Ask/Bid-traded split from Volume Delta levels. QUOTE-CLASSIFIED, NOT
+	///                           AGGRESSOR (MC rule: inside-spread trade -> last recorded side). Off by default (FlowConfig.McBidAsk).
+	///   3 Quote       (High)    Lee-Ready on 1-tick Trade + Bid + Ask streams (DataLoader): price >= ask BUY, price &lt;= bid SELL,
 	///                           inside the spread -> tick rule. A trade whose bid or ask is older than MaxQuoteAgeMs (default
 	///                           1000 ms), missing or crossed is classified by the tick rule and the bar drops to TickRule.
-	///   3 TickRule    (Medium)  trade ticks with sizes: uptick BUY, downtick SELL, zero tick inherits the previous side. The side
+	///   4 TickRule    (Medium)  trade ticks with sizes: uptick BUY, downtick SELL, zero tick inherits the previous side. The side
 	///                           carries across bars and sessions; the very first trade ever is BUY (as MC, UM p35).
-	///   4 BarUpDown   (Low)     Bars.UpTicks / DownTicks only, Build Volume On = Trade Volume (set by the caller), and the
+	///   5 BarUpDown   (Low)     Bars.UpTicks / DownTicks only, Build Volume On = Trade Volume (set by the caller), and the
 	///                           per-bar T7 check Up + Down == Volume. Bar delta only, no ladder.
-	///   5 Unavailable (Unknown) Tick Count mode, failed T7, IOG history without a 1-tick Bar Magnifier, or no usable data.
+	///   6 Unavailable (Unknown) Tick Count mode, failed T7, IOG history without a 1-tick Bar Magnifier, or no usable data.
 	/// Closed bars only: a bar is built when the caller closes it, from events time-stamped at or before its close; later events
 	/// stay queued. A cumulative value carries the lowest quality of its bars. MultiCharts-free (no MC types): the
 	/// &lt;order-flow&gt; block is extracted by tests/OrderFlowTests (acceptance tests T1-T8). Helper-file convention per the CS-0
@@ -27,7 +29,11 @@ namespace PowerLanguage.Function
 
 		// <order-flow>
 		/// <summary>Rank of the source that produced a bar (lower = better).</summary>
-		public enum FlowSource { Aggressor = 0, Quote = 1, TickRule = 2, BarUpDown = 3, Unavailable = 4 }
+		public enum FlowSource { Aggressor = 0, McBidAsk = 1, Quote = 2, TickRule = 3, BarUpDown = 4, Unavailable = 5 }
+		/// <summary>Spec S1: MultiCharts' own Ask/Bid-traded split (Volume Delta levels). Off until probes P-BA1..4 pass.</summary>
+		public enum EMcBidAsk { Off = 0, Prefer = 1, CrossCheckOnly = 2 }
+		/// <summary>Method tag of the McBidAsk tier: quote-classified by MC, NOT aggressor.</summary>
+		public const string McBidAskMethod = "McBidAsk(quote-classified, not aggressor; MC rule: inside-spread trade -> last recorded side, UM p35/p159)";
 		/// <summary>Quality tag (lower = better). A combined value takes the worst (highest) tag of its parts.</summary>
 		public enum FlowQuality { Exact = 0, High = 1, Medium = 2, Low = 3, Unknown = 4 }
 		public enum Side { Unknown = 0, Buy = 1, Sell = -1 }
@@ -69,6 +75,11 @@ namespace PowerLanguage.Function
 			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume
 			public bool ExcludeExtremesTickRule = true;   // TickRule footprints are wrong at the bar high/low
 			public int MaxBars = 5000;                     // closed bars kept
+			/// <summary>Spec S1: MC Volume Delta levels. Off (default): never requested. Prefer: a matching level set becomes the
+			/// ladder. CrossCheckOnly: levels are matched and their delta recorded (T9) but Quote/TickRule stays the source.</summary>
+			public EMcBidAsk McBidAsk = EMcBidAsk.Off;
+			/// <summary>|sum(ask + bid) - bar volume| / bar volume must be within this for a level set to be used.</summary>
+			public double mcVolTolerance = 0.005;
 		}
 
 		/// <summary>Data the caller has for the bar being closed (Data1 values).</summary>
@@ -107,11 +118,14 @@ namespace PowerLanguage.Function
 			public FlowQuality Quality = FlowQuality.Unknown;   // after the AllowMixed session rule
 			public double Buy, Sell, Volume;
 			public int Trades, StaleQuoteTrades;
+			public double McDelta = double.NaN;                 // S1: MC level-set delta (ask - bid) when matched (Prefer or CrossCheckOnly)
+			public double ChainDelta = double.NaN;              // S1: delta of the Quote/TickRule/BarUpDown chain before an MC set replaced it (T9 cross-check)
+			public string McMiss;                               // S1: null, "missing" or "volMismatch" when McBidAsk is on and no set was used
 			public bool FirstAfterConnect;                      // first built bar: ticks before the feed started are missing
 			public double TradeHigh = double.NaN, TradeLow = double.NaN, BarHigh, BarLow, BarClose;
 			internal readonly SortedDictionary<long, double[]> Ladder = new SortedDictionary<long, double[]>();   // row -> {bid, ask}
 			public double Tick;
-			public bool HasLadder { get { return Ladder.Count > 0 && (Source == FlowSource.Quote || Source == FlowSource.TickRule || Source == FlowSource.Aggressor); } }
+			public bool HasLadder { get { return Ladder.Count > 0 && (Source == FlowSource.McBidAsk || Source == FlowSource.Quote || Source == FlowSource.TickRule || Source == FlowSource.Aggressor); } }
 			public double Delta { get { return Buy - Sell; } }
 			public long Row(double price) { return (long)Math.Round(price / Tick); }
 			public double Bid(double price) { double[] v; return Ladder.TryGetValue(Row(price), out v) ? v[0] : 0; }
@@ -186,6 +200,57 @@ namespace PowerLanguage.Function
 			private DateTime m_mixSession = DateTime.MinValue;
 			private FlowQuality m_mixWorst = FlowQuality.Exact;
 
+			private readonly SortedDictionary<DateTime, double[][]> m_mc = new SortedDictionary<DateTime, double[][]>();
+			/// <summary>S1 counters: bars that used an MC set, bars with no set, bars whose set missed the volume tolerance.</summary>
+			public int McUsed, McMissing, McVolMismatch;
+
+			/// <summary>Spec S1: queue one MC level set (price, ask-traded, bid-traded per level) for the bar stamped barTime.</summary>
+			public void AddMcLevels(DateTime barTime, double[] price, double[] ask, double[] bid)
+			{
+				if (price == null || ask == null || bid == null || price.Length != ask.Length || price.Length != bid.Length) return;
+				m_mc[barTime] = new[] { (double[])price.Clone(), (double[])ask.Clone(), (double[])bid.Clone() };
+			}
+			public int PendingMcSets { get { return m_mc.Count; } }
+
+			// drop sets older than the bar; return the set stamped exactly at the bar close (or null)
+			private double[][] takeMc(DateTime closeTime)
+			{
+				double[][] hit = null;
+				var drop = new List<DateTime>();
+				foreach (var kv in m_mc) { if (kv.Key > closeTime) break; drop.Add(kv.Key); if (kv.Key == closeTime) hit = kv.Value; }
+				foreach (var k in drop) m_mc.Remove(k);
+				return hit;
+			}
+
+			private void applyMc(FootprintBar fp, BarInput b)
+			{
+				fp.ChainDelta = fp.Source == FlowSource.Quote || fp.Source == FlowSource.TickRule || fp.Source == FlowSource.BarUpDown ? fp.Buy - fp.Sell : double.NaN;
+				double[][] set = takeMc(b.CloseTime);
+				if (set == null) { fp.McMiss = "missing"; McMissing++; return; }
+				double ask = 0, bid = 0;
+				for (int i = 0; i < set[0].Length; i++) { ask += set[1][i]; bid += set[2][i]; }
+				double vol = b.Volume;
+				if (!(vol > 0) || Math.Abs(ask + bid - vol) / vol > Cfg.mcVolTolerance) { fp.McMiss = "volMismatch"; McVolMismatch++; return; }
+				fp.McDelta = ask - bid;
+				if (Cfg.McBidAsk != EMcBidAsk.Prefer) return;
+				McUsed++;
+				fp.Ladder.Clear(); fp.Buy = fp.Sell = 0; fp.Volume = 0;
+				fp.TradeHigh = fp.TradeLow = double.NaN;
+				for (int i = 0; i < set[0].Length; i++)
+				{
+					double p = set[0][i];
+					if (set[1][i] <= 0 && set[2][i] <= 0) continue;
+					if (double.IsNaN(fp.TradeHigh) || p > fp.TradeHigh) fp.TradeHigh = p;
+					if (double.IsNaN(fp.TradeLow) || p < fp.TradeLow) fp.TradeLow = p;
+					long r = fp.Row(p);
+					double[] v;
+					if (!fp.Ladder.TryGetValue(r, out v)) { v = new double[2]; fp.Ladder[r] = v; }
+					v[0] += set[2][i]; v[1] += set[1][i];
+				}
+				fp.Buy = ask; fp.Sell = bid; fp.Volume = ask + bid;
+				fp.Source = FlowSource.McBidAsk; fp.Quality = FlowQuality.High;
+			}
+
 			public FlowEngine(double tick, FlowConfig cfg) { Tick = tick > 0 ? tick : 0.01; Cfg = cfg ?? new FlowConfig(); m_rule = new TickRule(Tick); }
 
 			public void AddTrade(DateTime time, double price, double size) { m_trades.Push(new Ev { Time = time, Price = price, Size = size }); }
@@ -255,9 +320,10 @@ namespace PowerLanguage.Function
 					fp.Buy = b.UpTicks; fp.Sell = b.DownTicks; fp.Volume = b.Volume;
 				}
 				else clearToUnavailable(fp);
+				if (Cfg.McBidAsk != EMcBidAsk.Off && b.Regime != Regime.IogHistoryNoMagnifier && Cfg.BuildVolumeOn != VolumeBasis.TickCount) applyMc(fp, b);
 
 				// AllowMixed = false: Quote/TickRule bars of one session report the worst tag seen so far in that session
-				if (!Cfg.AllowMixed && (fp.Source == FlowSource.Quote || fp.Source == FlowSource.TickRule))
+				if (!Cfg.AllowMixed && (fp.Source == FlowSource.McBidAsk || fp.Source == FlowSource.Quote || fp.Source == FlowSource.TickRule))
 				{
 					if (fp.SessionKey != m_mixSession) { m_mixSession = fp.SessionKey; m_mixWorst = FlowQuality.Exact; }
 					if (fp.Quality > m_mixWorst) m_mixWorst = fp.Quality;

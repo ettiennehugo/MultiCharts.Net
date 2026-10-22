@@ -25,7 +25,7 @@ static class Program
 
 	static void Main()
 	{
-		Calendar(); Validation(); SwingBackfill(); BackfillOutOfRing(); ReplaceEvictExpire(); Roll(); Gap(); Climax(); PeriodOpens(); TouchSlopeBands(); Breakout();
+		Calendar(); Validation(); SwingBackfill(); BackfillOutOfRing(); ReplaceEvictExpire(); Roll(); Gap(); Climax(); PeriodOpens(); TouchSlopeBands(); Breakout(); Placebos();
 		Console.WriteLine($"AvwapTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -179,5 +179,66 @@ static class Program
 		var none = Mgr(EAvwapAnchor.SwingHigh);
 		none.Add(Bar(0, D0, 100, 101, 99, 100, 10), new AvwapPaEvents { breakoutDown = true });
 		Check(none.Anchors.Count == 0, "events not in AvwapEvents are ignored");
+	}
+
+	// Spec S3: P1 / P2 placebo twins
+	static void Placebos()
+	{
+		var off = Mgr(EAvwapAnchor.VolumeClimax); off.volumeZ = () => 4;
+		off.Add(Bar(0, D0, 100, 101, 99, 100, 10), new AvwapPaEvents());
+		Check(double.IsNaN(off.Anchors[0].P1) && double.IsNaN(off.Anchors[0].P2) && !off.Anchors[0].p2Degraded, "S3 default off: P1/P2 NaN");
+		Check(new AvwapLimits { p2MinPool = 0 }.Validate().Contains("p2MinPool=0"), "S3 p2MinPool validated");
+
+		// P1: unweighted mean TP, a V = 0 bar counts
+		var j = new List<string>();
+		var m = Mgr(EAvwapAnchor.VolumeClimax, l => { l.placebos = EAvwapPlacebo.P1 | EAvwapPlacebo.P2; l.replaceSameType = false; l.maxAnchors = 10; }, j);
+		double z = 4; m.volumeZ = () => z;
+		var pool = new List<double>(); for (int k = 0; k < 12; k++) pool.Add(50);   // constant pool -> P2 weights equal -> P2 == P1
+		m.volumePool = slot => pool;
+		var bs = new[] { Bar(0, D0, 100, 102, 99, 101, 10), Bar(1, D0.AddMinutes(1), 101, 104, 100, 103, 0), Bar(2, D0.AddMinutes(2), 103, 106, 102, 105, 500) };
+		m.Add(bs[0], new AvwapPaEvents()); z = double.NaN; m.Add(bs[1], new AvwapPaEvents()); m.Add(bs[2], new AvwapPaEvents());
+		var a = m.Anchors[0];
+		double p1 = (Tp(bs[0]) + Tp(bs[1]) + Tp(bs[2])) / 3;
+		Check(Near(a.P1, p1) && !Near(a.P1, a.Value, 1e-3), "S3 P1 = mean TP incl. a V=0 bar (differs from the VWAP)");
+		Check(Near(a.P2, p1) && !a.p2Degraded, "S3 P2 with a constant slot pool equals P1");
+		Check(a.TagFor(EAvwapPlacebo.P1) == a.Tag + ":P1" && a.TagFor(EAvwapPlacebo.P2) == a.Tag + ":P2", "S3 placebo trade tags");
+		Check(j.Any(s => s.Contains("created") && s.Contains("placebos(P1,P2)") && s.Contains("p2seed")), "S3 create journal names the twins and the seed");
+
+		// P2 deterministic draw, seeded per (anchor id, bar time)
+		var pv = new List<double>(); for (int k = 0; k < 15; k++) pv.Add(10 + 7 * k);
+		Func<_AvwapManager> mk = () => { var x = Mgr(EAvwapAnchor.VolumeClimax, l => l.placebos = EAvwapPlacebo.P2); x.volumeZ = () => 4; x.volumePool = s2 => pv; return x; };
+		var m1 = mk(); var m2 = mk();
+		foreach (var b in bs) { m1.Add(b, new AvwapPaEvents()); m2.Add(b, new AvwapPaEvents()); }
+		var a1 = m1.Anchors[0];
+		double sw = 0, swp = 0;
+		foreach (var b in new[] { bs[2] }) { double v = pv[new _Rng(_Rng.Seed(a1.Id, b.time.Ticks, 2)).NextInt(pv.Count)]; sw += v; swp += v * Tp(b); }
+		Check(Near(a1.P2, m2.Anchors[0].P2) && Near(a1.P2, swp / sw), "S3 P2 reproducible and equals the hand-drawn seeded value");
+
+		// small pool -> own volume, flagged and journaled once
+		var j2 = new List<string>();
+		var m3 = Mgr(EAvwapAnchor.VolumeClimax, l => l.placebos = EAvwapPlacebo.P2, j2); m3.volumeZ = () => 4; m3.volumePool = s2 => new double[] { 1, 2, 3 };
+		m3.Add(bs[0], new AvwapPaEvents()); m3.volumeZ = () => double.NaN; m3.Add(bs[2], new AvwapPaEvents());
+		Check(m3.Anchors[0].p2Degraded && Near(m3.Anchors[0].P2, m3.Anchors[0].Value) && j2.Count(s => s.Contains("p2Degraded")) == 1, "S3 pool < p2MinPool -> own volume, p2Degraded journaled once");
+
+		// back-filled swing twins equal a forward build (ring carries TP, time and the pool each bar saw)
+		var mb = Mgr(EAvwapAnchor.SwingLow, l => { l.backfillBars = 3; l.placebos = EAvwapPlacebo.P1 | EAvwapPlacebo.P2; });
+		int seen = 0; mb.volumePool = s2 => { seen++; var r = new List<double>(); for (int k = 0; k < 12; k++) r.Add(seen * 10 + k); return r; };
+		var sb = new List<AvwapBar>(); double[] lows = { 100, 99, 97, 98, 99.5 };
+		for (int i = 0; i < lows.Length; i++) sb.Add(Bar(i, D0.AddMinutes(i), lows[i] + 1, lows[i] + 2, lows[i], lows[i] + 1.5, 100 + 10 * i));
+		for (int i = 0; i < 4; i++) mb.Add(sb[i], new AvwapPaEvents());
+		mb.Add(sb[4], new AvwapPaEvents { swingLow = true, swingLowBar = 2, swingLowTime = sb[2].time });
+		var sa = mb.Latest(EAvwapAnchor.SwingLow);
+		double q = 0, qp = 0, t1 = 0;
+		for (int i = 2; i <= 4; i++)
+		{
+			var poolI = new List<double>(); for (int k = 0; k < 12; k++) poolI.Add((i + 1) * 10 + k);   // the pool bar i saw
+			double v = poolI[new _Rng(_Rng.Seed(sa.Id, sb[i].time.Ticks, 2)).NextInt(12)];
+			q += v; qp += v * Tp(sb[i]); t1 += Tp(sb[i]);
+		}
+		Check(Near(sa.P2, qp / q) && Near(sa.P1, t1 / 3), "S3 back-filled swing P1/P2 equal the forward build (per-bar pool kept in the ring)");
+
+		// roll clears the twins with the anchors
+		m.OnRoll(D0.AddMinutes(5));
+		Check(m.Anchors.Count == 0 && a.Expired, "S3 roll clears placebo twins with their anchors");
 	}
 }

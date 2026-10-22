@@ -4,4 +4,5 @@ set -e
 here="$(cd "$(dirname "$0")" && pwd)"; root="$here/../.."
 mkdir -p "$here/Generated"
 cp "$root/_AvwapManager.Function.CS" "$here/Generated/AvwapManager.cs"
+cp "$root/_Rng.Function.CS" "$here/Generated/Rng.cs"
 cd "$here" && dotnet run -c Release

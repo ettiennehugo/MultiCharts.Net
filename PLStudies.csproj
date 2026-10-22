@@ -529,6 +529,7 @@
     <Compile Include="_Rng.Function.CS" />
     <Compile Include="_BarRing.Function.CS" />
     <Compile Include="_LevelRef.Function.CS" />
+    <Compile Include="_RollDetector.Function.CS" />
     <Compile Include="_BarLadder.Function.CS" />
     <Compile Include="_RangeProfile.Function.CS" />
     <Compile Include="_WeeklyProfiles.Function.CS" />
