@@ -792,6 +792,9 @@ namespace PowerLanguage.Strategy
 			{
 				try { using (var w = new StreamWriter(LevelStudyConfig.csvPath, false)) m_levelStudy.WriteCsv(w); }
 				catch (Exception ex) { trace(ETraceLevel.Warning, $"A2-33 CSV write failed ({LevelStudyConfig.csvPath}): {ex.Message}"); }
+			}
+		}
+
 		// ---- M-PORT (specs/m-port-spec.md §3): publish pm.* keys into MyPortfolioData for _PortfolioRiskManager ----
 
 		/// <summary>M-PORT: publish portfolio keys. True only in Portfolio Trader (no [Input]); chart runs publish nothing.</summary>
