@@ -124,7 +124,7 @@ Same latch and usability test at the RSI(2) entry close; **new entries disabled 
 2. Shift it circularly by s days, **separately within dev and within holdout** (never across the boundary), and apply the same rule (Label 2 → off) to U's trades. This keeps the base rate, every run length and the transitions exactly.
 3. **Excluded shifts:** |s| ≤ max(63, median run length of that period's path), wrapping both ends, since a near-zero shift is nearly the real path.
 4. **Draws:** dev, 1000 admissible shifts drawn without replacement when available (dev ≈ 1500 days); holdout (≈ 450 days), **all** admissible shifts. N is the number of shifts used; it is journaled.
-5. p = (1 + #{P ≥ G}) / (N + 1) on net PF, one-sided.
+5. p is computed exactly as the binding formula in §6, on net PF, one-sided; N is journaled.
 
 **Report-only null: semi-Markov resample.** Run-length pools per label and the jump matrix between labels, estimated on the **dev** path and **frozen at sign-off** (hash journaled); the same frozen dev law is used for the holdout draws (holdout statistics are never used; they are too few runs). 1000 draws per period. Not a decision input.
 
