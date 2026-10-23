@@ -526,6 +526,7 @@
     <Compile Include="_XmktLeg.Function.CS" />
     <Compile Include="_TickStream.Function.CS" />
     <Compile Include="_LevelStudy.Function.CS" />
+    <Compile Include="_Gate0.Function.CS" />
     <Compile Include="_Rng.Function.CS" />
     <Compile Include="_BarRing.Function.CS" />
     <Compile Include="_LevelRef.Function.CS" />
@@ -548,6 +549,7 @@
     <Compile Include="_Test8.Strategy.CS" />
     <Compile Include="_Test9.Strategy.CS" />
     <Compile Include="_Test10.Strategy.CS" />
+    <Compile Include="_TestGate0.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

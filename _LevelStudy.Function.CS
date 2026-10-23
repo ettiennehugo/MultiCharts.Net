@@ -31,6 +31,8 @@ namespace PowerLanguage.Function
 		public int seed = 33;
 		public DateTime from = DateTime.MinValue, to = DateTime.MaxValue;   // decision window (in-sample years); sessions outside are skipped
 		public string csvPath = "";            // optional per-event CSV written at the end of the run
+		public bool controlsEitherSide = false; // A2-33 "either side": each control gets a random sign (false = same side as the level)
+		public bool reactionAfterTouch = false; // true: R is measured over the K bars AFTER the touch bar (k = 1..K), not including it
 
 		public string Validate()
 		{
@@ -63,7 +65,7 @@ namespace PowerLanguage.Function
 		public double touchEdge = double.NaN, touchT = double.NaN;     // touch rate: level - controls
 		public double edge = double.NaN, t = double.NaN, p = double.NaN, pHolm = double.NaN;   // reaction R, paired
 		public double asymEdge = double.NaN, volEdge = double.NaN;
-		public double[] edgeByAge = new double[0]; public int[] nByAge = new int[0];
+		public double[] edgeByAge = new double[0]; public int[] nByAge = new int[0]; public double[] tByAge = new double[0];
 		public double halfLife = double.NaN;                           // sessions; NaN = no decay measured
 		public double[] edgeByTercile = { double.NaN, double.NaN, double.NaN }; public double[] tByTercile = { double.NaN, double.NaN, double.NaN };
 		public double[] kmSurvival = new double[0];                    // S(age) for age 1..maxAge
@@ -83,6 +85,7 @@ namespace PowerLanguage.Function
 		private int m_bar; private double m_lastClose = double.NaN, m_sigma = double.NaN;
 		private readonly List<double> m_prevDiffs = new List<double>(), m_curDiffs = new List<double>();
 		private double m_volSum; private int m_volBars; private int m_levelNo;
+		private double m_refOverride = double.NaN, m_sigmaOverride = double.NaN;
 
 		public IReadOnlyList<LevelEvent> Events { get { return m_all; } }
 		public string Configure() { return config.Validate(); }
@@ -92,25 +95,31 @@ namespace PowerLanguage.Function
 		{
 			closeSession();
 			m_prevDiffs.Clear(); m_prevDiffs.AddRange(m_curDiffs); m_curDiffs.Clear();
-			m_sigma = sigmaOf(m_prevDiffs);
+			m_sigma = sigmaOf(m_prevDiffs); m_refOverride = m_sigmaOverride = double.NaN;
 			m_day = day.Date; m_dayOn = day >= config.from && day <= config.to; m_bar = 0; m_volSum = 0; m_volBars = 0;
 		}
+
+		/// <summary>Freeze this session's reference price (distance origin for the controls) and sigma (R denominator) at registration;
+		/// NaN keeps the default (last close / prior-session close-change sigma). Call after BeginSession, before AddLevel.</summary>
+		public void SetSessionReference(double refPrice, double sigma) { m_refOverride = refPrice; m_sigmaOverride = sigma; }
 
 		/// <summary>Register a prior-session level for the current session (and its matched controls). Returns false when skipped.</summary>
 		public bool AddLevel(string type, double price, int ageSessions, double quality = double.NaN, string key = null)
 		{
-			if (!m_dayOn || ageSessions < 1 || ageSessions > config.maxAge || !(price > 0) || double.IsNaN(m_lastClose) || !(m_sigma > 0)) return false;
-			double refPx = m_lastClose, dist = price - refPx;
+			double refPx = double.IsNaN(m_refOverride) ? m_lastClose : m_refOverride, sig = double.IsNaN(m_sigmaOverride) ? m_sigma : m_sigmaOverride;
+			if (!m_dayOn || ageSessions < 1 || ageSessions > config.maxAge || !(price > 0) || double.IsNaN(refPx) || !(sig > 0)) return false;
+			double dist = price - refPx;
 			int no = ++m_levelNo;
 			var lv = make(type, key ?? (type + "@" + price.ToString("R", CultureInfo.InvariantCulture)), ageSessions, quality, false, no, price, refPx);
-			m_open.Add(lv); m_all.Add(lv);
+			lv.sigma = sig; m_open.Add(lv); m_all.Add(lv);
 			var rnd = new Random(unchecked(config.seed * 397 ^ m_day.GetHashCode() ^ (type ?? "").GetHashCode() * 31 ^ price.GetHashCode()));
 			for (int i = 0; i < config.controls; i++)
 			{
 				double u = config.distLo + rnd.NextDouble() * (config.distHi - config.distLo);
-				double cp = refPx + dist * u;
+				double sign = config.controlsEitherSide && rnd.Next(2) == 0 ? -1 : 1;
+				double cp = refPx + sign * dist * u;
 				if (tickSize > 0) cp = Math.Round(cp / tickSize) * tickSize;
-				var c = make(type, lv.key, ageSessions, quality, true, no, cp, refPx);
+				var c = make(type, lv.key, ageSessions, quality, true, no, cp, refPx); c.sigma = sig;
 				m_open.Add(c); m_all.Add(c);
 			}
 			return true;
@@ -137,6 +146,7 @@ namespace PowerLanguage.Function
 						e.touched = true; e.touchBar = m_bar; e.fromAbove = prevClose >= e.price ? 1 : -1;
 						double sessVol = m_volBars > 1 ? (m_volSum - v) / (m_volBars - 1) : v;
 						e.volAttraction = sessVol > 0 ? 1.0 / sessVol : double.NaN;   // completed below
+						if (config.reactionAfterTouch) continue;   // k = 1..K start on the next bar
 					}
 					else continue;
 				}
@@ -192,11 +202,12 @@ namespace PowerLanguage.Function
 				meanT(pairs.Select(x => x.a).Where(x => !double.IsNaN(x)).ToList(), out r.asymEdge, out dummy);
 				meanT(pairs.Select(x => x.v).Where(x => !double.IsNaN(x)).ToList(), out r.volEdge, out dummy);
 				// by age
-				r.edgeByAge = new double[cfg.maxAge]; r.nByAge = new int[cfg.maxAge];
+				r.edgeByAge = new double[cfg.maxAge]; r.nByAge = new int[cfg.maxAge]; r.tByAge = new double[cfg.maxAge];
 				for (int a = 1; a <= cfg.maxAge; a++)
 				{
 					var da = pairs.Where(x => x.lv.age == a).Select(x => x.d).ToList();
-					r.nByAge[a - 1] = da.Count; r.edgeByAge[a - 1] = da.Count > 0 ? da.Average() : double.NaN;
+					double ma, ta; meanT(da, out ma, out ta);
+					r.nByAge[a - 1] = da.Count; r.edgeByAge[a - 1] = ma; r.tByAge[a - 1] = ta;
 				}
 				r.halfLife = HalfLife(r.edgeByAge, r.nByAge);
 				// quality terciles (levels with a quality value)
