@@ -760,8 +760,19 @@ namespace PowerLanguage.Strategy
 		{
 			TimeZoneInfo tz = BarTimeZone;
 			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
+			// A stamp inside the spring-forward gap does not exist in the bar zone (ConvertTimeToUtc would throw); the feed means
+			// the instant one hour later (the wall clock skipped ahead), so shift +1h. Same guard as ToZone.
 			if (tz.IsInvalidTime(t)) t = t.AddHours(1);
 			return TimeZoneInfo.ConvertTimeToUtc(t, tz);
+		}
+
+		/// <summary>EV-4.6/4.7 (R2.1-h): first bar of the data series in UTC for the engine's coverage check; a table kind starting
+		/// after it disables the engine with an Error line on the first Step (never a throw). MinValue when unavailable (the
+		/// engine then checks against the first Step's bar). PROBE: FullSymbolData.Time in StartCalc.</summary>
+		private DateTime eventFirstBarUtc()
+		{
+			try { return eventUtc(Bars.FullSymbolData.Time[Bars.FullSymbolData.Current - 1]); }
+			catch (Exception) { try { return eventUtc(Bars.Time[0]); } catch (Exception) { return DateTime.MinValue; } }
 		}
 
 		private void startEvent()
@@ -772,7 +783,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan dur = TimeSpan.Zero;
 			try { if (Bars.Info.Resolution.Type != EResolution.Tick) dur = Bars.Info.Resolution.Duration(); } catch (Exception) { dur = TimeSpan.Zero; }   // PROBE: Duration() on non-time bars
 			if (dur < TimeSpan.Zero) dur = TimeSpan.Zero;
-			var e = new _EventCalendar { config = EventConfig, label = "EVENT", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning), barDuration = dur };
+			var e = new _EventCalendar { config = EventConfig, label = "EVENT", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning), barDuration = dur, error = engineSink(ETraceLevel.Error), firstBarUtc = eventFirstBarUtc() };
 			string err = e.Configure();
 			if (err != null) throw new ArgumentException(err);
 			m_event = e;
@@ -799,7 +810,8 @@ namespace PowerLanguage.Strategy
 				m_eventPubDay = m_event.TradingDay;
 				EventDay d = m_event.Classify(m_eventPubDay);
 				pd[_PortKeys.EvtTier] = (double)(int)d.maxTier;
-				pd[_PortKeys.EvtMask] = (double)(d.kindsMask & ((1UL << 53) - 1));   // exact in a double (kinds <= 62 fit after PR B; bit 62 = Custom dropped)
+				pd[_PortKeys.EvtMask] = (double)(d.kindsMask & ((1UL << 53) - 1));   // bits < 53 only: a double holds integers exactly up to 2^53, so higher bits would round. Custom (kind 62, CSV-defined
+				// names) is dropped on purpose: its bit has no stable meaning across runs; consumers read EventsOn for Custom rows.
 			}
 			if (Bars.Status == EBarState.Close)
 			{
@@ -1923,7 +1935,7 @@ namespace PowerLanguage.Strategy
 				// minutes since the last macro event (EventConfig.minTier) at entry.
 				DateTime entryUtc = eventUtc(entryTime);
 				col(((int)m_event.Classify(m_event.TradingDayOf(entryUtc)).maxTier).ToString(ic));
-				col(num(m_event.MinutesSinceAt(entryUtc, EEventTier.T3)));
+				col(num(m_event.MinutesSinceAt(entryUtc, EventConfig.minTier)));
 			}
 
 			try
