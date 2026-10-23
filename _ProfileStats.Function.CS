@@ -337,8 +337,8 @@ namespace PowerLanguage.Function
 		public static double ParkinsonPerBar(IList<RingBar> bars) { int n; return ParkinsonPerBar(bars, out n); }
 
 		// SUPERSEDED for G-P (GMM PR, Ettienne): the A2-32 window stays inside ONE contract - a roll in the window gives NaN + an
-	// "insufficient window" journal line (see _ProfileStats.SigmaMixture). Original note kept for the record:
-	// Ruling 4 (G-P scope, not built here): the A2-32 20-session sigma pool CROSSES rolls (sigma-space is centred per session on that
+		// "insufficient window" journal line (see _ProfileStats.SigmaMixture). Original note kept for the record:
+		// Ruling 4 (G-P scope, not built here): the A2-32 20-session sigma pool CROSSES rolls (sigma-space is centred per session on that
 		// session's sVWAP, review M1) and excludes only the roll session itself, which is flagged (_RollWindow.IsRollDay); sessions with
 		// fewer than parkinsonMinBars RTH 5m bars are dropped and the pool is filled from older sessions.
 		/// <summary>Session-scale Parkinson in price units: refPrice x sigma_bar x sqrt(n). NaN with fewer than minBars usable bars (A2-32: 60 RTH 5m bars; a
@@ -731,15 +731,6 @@ namespace PowerLanguage.Function
 			if (mode == EGmmNeff.Rows) return rows;
 			if (mode == EGmmNeff.Contracts) return sum;
 			return bars;
-		}
-
-		/// <summary>
-		/// Spec signature. Without a bar count N_eff falls back to Rows (rows with volume); the tick grid is the smallest positive row
-		/// spacing. Hosts with the bar count use the full overload (N_eff = Bars, the default scaling).
-		/// </summary>
-		public static ProfileMixtureResult ProfileMixture(double[] prices, double[] vols, int kMax, ulong seed)
-		{
-			return ProfileMixture(prices, vols, kMax, seed, EGmmNeff.Rows, 0, double.NaN);
 		}
 
 		/// <summary>

@@ -681,28 +681,37 @@ namespace PowerLanguage.Function
 			return r;
 		}
 
+		/// <summary>A2-32 input row set of one Gate-0 session for the shared _ProfileStats.SigmaMixture path: rows = the RTH profile
+		/// (raw volume), sVWAP = the session VWAP, sigma = SigmaPrice, N = RTH 1m bars. m_hist restarts at a roll, so one contract.</summary>
+		public static GmmSession ToGmmSession(Gate0Session s, double tick)
+		{
+			var g = new GmmSession { day = s.day, contract = "gate0", roll = false, bars = s.bars1m, sVwap = s.vwap.Ready ? s.vwap.Value : double.NaN, sigma = s.SigmaPrice };
+			var p = new List<double>(); var v = new List<double>();
+			foreach (var kv in s.profile.rows) if (kv.Value > 0) { p.Add(kv.Key * tick); v.Add(kv.Value); }
+			g.prices = p.ToArray(); g.vols = v.ToArray(); g.totalVol = s.profile.total;
+			return g;
+		}
+
+		/// <summary>A2-32 on the SAME helper path as G-P (_ProfileStats.SigmaMixture: raw pooled volume, z rounded AwayFromZero,
+		/// sigma-hat = EwmaForecast(span 10), K &lt;= 4, seed = MixtureSeed(newest day)). hist = completed sessions since the roll, oldest first.</summary>
+		public static SigmaMixtureResult SigmaCompositeFit(IList<Gate0Session> hist, double tick)
+		{
+			var ses = new List<GmmSession>(hist.Count);
+			foreach (var s in hist) ses.Add(ToGmmSession(s, tick));
+			if (ses.Count == 0) return new SigmaMixtureResult { reason = "no sessions" };
+			return _ProfileStats.SigmaMixture(ses, _ProfileStats.MixtureSeed(ses[ses.Count - 1].day), SigmaCompositeSessions, SigmaEwmaSpan, _ProfileStats.A232_BIN, GmmMaxK);
+		}
+
 		/// <summary>A2-32: pool the last 20 valid sessions (current contract) in z = (p - sVWAP)/sigma_session, fit the GMM (K <= 4, BIC),
-		/// translate to price with the prior VWAP and sigma-hat = EWMA(10) of the session sigmas.</summary>
+		/// translate to price with the prior VWAP and sigma-hat = EWMA(10) of the session sigmas (shared helper, see SigmaCompositeFit).</summary>
 		private void sigmaComposite(Action<string, double, int, double> addQ)
 		{
-			var ses = new List<Gate0Session>();
-			for (int i = m_hist.Count - 1; i >= 0 && ses.Count < SigmaCompositeSessions; i--) if (m_hist[i].SigmaPrice > 0) ses.Add(m_hist[i]);
-			if (ses.Count < SigmaCompositeSessions) return;
-			const double bin = 0.05; var hist = new SortedDictionary<long, double>(); double nEff = 0;
-			foreach (var s in ses)
-			{
-				double vw = s.vwap.Value, sg = s.SigmaPrice; nEff += s.bars1m;
-				foreach (var kv in s.profile.rows) { long z = (long)Math.Round((kv.Key * tick - vw) / sg / bin); double x; hist.TryGetValue(z, out x); hist[z] = x + kv.Value / s.profile.total; }
-			}
-			var xs = new List<double>(); var ws = new List<double>(); foreach (var kv in hist) { xs.Add(kv.Key * bin); ws.Add(kv.Value); }
-			var g = _ProfileStats.ProfileMixture(xs.ToArray(), ws.ToArray(), GmmMaxK, _ProfileStats.MixtureSeed(ses[0].day), EGmmNeff.Bars, (int)nEff, bin); if (g.model == null) return;   // shared _Gmm core
-			var sig = new List<double>(); for (int i = ses.Count - 1; i >= 0; i--) sig.Add(ses[i].SigmaPrice);   // oldest first
-			double a = 2.0 / (SigmaEwmaSpan + 1), sh = double.NaN; int st = Math.Max(0, sig.Count - SigmaEwmaSpan);
-			for (int i = st; i < sig.Count; i++) sh = double.IsNaN(sh) ? sig[i] : a * sig[i] + (1 - a) * sh;
-			double vp = ses[0].vwap.Value;
+			var r = SigmaCompositeFit(m_hist, tick);
+			if (!r.ok) return;
+			double vp = r.priorVwap, sh = r.sigmaHat; var g = r.mix;
 			for (int k = 0; k < g.K; k++)
 			{
-				addQ("SIG_MU", vp + g.mu[k] * sh, 1, g.pi[k]);
+				addQ("SIG_MU", r.levels[k], 1, g.pi[k]);
 				addQ("SIG_EDGE", vp + (g.mu[k] - g.sd[k]) * sh, 1, g.pi[k]); addQ("SIG_EDGE", vp + (g.mu[k] + g.sd[k]) * sh, 1, g.pi[k]);
 			}
 		}
