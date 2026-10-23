@@ -56,3 +56,5 @@ Final pins (FNV-1a 64, tested in `tests/RegimeGateTests`):
 | U | `26b38655261cc0bf` |
 | G | `9c1da7b123ca9441` |
 | A | `3d9814a5f264c353` |
+
+Prereg history: 377bd18 committed a pre-sign-off draft of placebo step 5; 54d9188 replaced it with the signed rev 2 text (sha256 66ae7bb5…) before any code was committed.

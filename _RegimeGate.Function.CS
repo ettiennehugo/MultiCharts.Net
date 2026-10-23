@@ -112,7 +112,7 @@ namespace PowerLanguage.Function
 			{
 				d.asOf = s.AsOf; d.label = s.Label; d.raw = s.RawArgmax; d.fb = s.UsingFallback;
 				if (s.Probs != null && s.Label >= 0 && s.Label < s.Probs.Length) d.pFilt = s.Probs[s.Label];
-				d.usable = s.Valid && s.Label >= 0 && s.AsOf != DateTime.MinValue && s.AsOf.Date < session.Date && (arm == ERegimeGateArm.A || !s.UsingFallback);
+				d.usable = s.Valid && s.Label >= 0 && s.Probs != null && s.Label < s.Probs.Length && s.AsOf != DateTime.MinValue && s.AsOf.Date < session.Date && (arm == ERegimeGateArm.A || !s.UsingFallback);
 			}
 			bool warm = s == null || !s.Valid || s.Label < 0 || s.AsOf == DateTime.MinValue;
 			bool fbOnly = !warm && s.UsingFallback && arm != ERegimeGateArm.A && s.AsOf.Date < session.Date && s.Label < (s.Probs == null ? 0 : s.Probs.Length);

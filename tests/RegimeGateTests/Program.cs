@@ -322,17 +322,27 @@ static class Program
 		Check(RegimeGate.Decide(ERegimeGateArm.A, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Ok, "A fallback = ok");
 		var l = RegimeGate.Line(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t.AddDays(-1), true), t, 1), true, "h", 1);
 		Check(l.Contains(" why(Fallback) "), "REGGATE why(Fallback)");
+		foreach (var arm in new[] { ERegimeGateArm.U, ERegimeGateArm.G, ERegimeGateArm.A })
+		{
+			var ob = RegimeGate.Decide(arm, St(true, 3, t.AddDays(-1), false), t, 1);
+			Check(!ob.usable && !ob.wouldBlock && ob.allow && ob.reason == ERegimeGateReason.Invalid, arm + ": label >= Probs.Length = not usable (invalid)");
+		}
 		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t, true), t, 1).reason == ERegimeGateReason.Invalid, "fallback with AsOf == t = invalid (lookahead first)");
 		// union check (ruling a): the G no-usable set = warm-up + invalid + fallback; A's is warm-up + invalid; the offline view drops the union
 		var days2 = Market(1300, 13);
 		var gD = Decisions(days2, ERegimeGateArm.G, new RegimeConfig()); var aD = Decisions(days2, ERegimeGateArm.A, new RegimeConfig());
 		var union = new HashSet<DateTime>(gD.Where(x => !x.usable).Select(x => x.session).Concat(aD.Where(x => !x.usable).Select(x => x.session)));
-		Check(union.Count == gD.Count(x => !x.usable) && aD.Where(x => !x.usable).All(x => union.Contains(x.session)), "union of no-usable days = G's set (A's warm-up within it): " + union.Count);
+		Check(union.Count == gD.Count(x => !x.usable) && aD.Where(x => !x.usable).All(x => union.Contains(x.session)), "A's no-usable days are a subset of G's (union = G's set): " + union.Count);
+		var gDrop = new HashSet<DateTime>(gD.Select(x => x.session).Where(union.Contains)); var aDrop = new HashSet<DateTime>(aD.Select(x => x.session).Where(union.Contains));
+		Check(gD.Select(x => x.session).SequenceEqual(aD.Select(x => x.session)) && gDrop.SetEquals(aDrop) && gDrop.SetEquals(union), "offline union drop removes the same day set from G and A: " + gDrop.Count);
 		// ruling b: noRth counted; half days are not noRth
-		var cnt = new RegimeGateCounts(); var ok = RegimeGate.Decide(ERegimeGateArm.U, St(true, 0, t.AddDays(-1), false), t, 0);
-		foreach (var day in new[] { new DateTime(2024, 7, 3), new DateTime(2024, 7, 4), new DateTime(2024, 11, 28), new DateTime(2024, 11, 29), new DateTime(2024, 12, 24), new DateTime(2024, 1, 15) })
-			cnt.Add(ok, Extracted.Cme.Rules.Get(day).NoRth);
-		Check(cnt.noRth == 3 && cnt.sessions == 6, "noRth counted on halt days only (Jul 4, Thanksgiving, MLK), not half days: " + cnt.Suffix());
+		foreach (var arm in new[] { ERegimeGateArm.U, ERegimeGateArm.G, ERegimeGateArm.A })
+		{
+			var cnt = new RegimeGateCounts(); var ok = RegimeGate.Decide(arm, St(true, 0, t.AddDays(-1), false), t, 0);
+			foreach (var day in new[] { new DateTime(2024, 7, 3), new DateTime(2024, 7, 4), new DateTime(2024, 11, 28), new DateTime(2024, 11, 29), new DateTime(2024, 12, 24), new DateTime(2024, 1, 15) })
+				cnt.Add(ok, Extracted.Cme.Rules.Get(day).NoRth);
+			Check(cnt.noRth == 3 && cnt.sessions == 6, arm + ": noRth counted on halt days only (Jul 4, Thanksgiving, MLK), not half days: " + cnt.Suffix());
+		}
 		var cc = new RegimeGateCounts(); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1)); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, t.AddDays(-1), false), t, 2));
 		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0)", "counts suffix: " + cc.Suffix());
 	}
@@ -359,5 +369,5 @@ static class Program
 		}
 	}
 
-	const string PinnedU = "26b38655261cc0bf", PinnedG = "9c1da7b123ca9441", PinnedA = "3d9814a5f264c353";   // re-pin only with a new trial (ruling 5: named-field hash)   // re-pin only with a new trial
+	const string PinnedU = "26b38655261cc0bf", PinnedG = "9c1da7b123ca9441", PinnedA = "3d9814a5f264c353";   // re-pin only with a new trial (ruling 5: named-field hash)
 }
