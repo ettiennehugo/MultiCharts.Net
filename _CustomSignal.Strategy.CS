@@ -731,6 +731,95 @@ namespace PowerLanguage.Strategy
 			m_regime.AddDay(d, m_daily.RthCloseAdj, m_daily.Hv(20), m_daily.Hv(63), m_daily.PrevHigh, m_daily.PrevLow, m_daily.Atr20d, d == m_regimeRollDay);
 		}
 
+		// ---- M-EVENT (specs/m-event-spec.md rev 2): scheduled-event calendar, _EventCalendar.Function.CS. Off by default
+		// (EventConfig.enabled = false, no [Input]). Exposes EventBlackout / EventFlattenNow only: the base never blocks orders.
+
+		/// <summary>M-EVENT configuration (no [Input]); set fields in a derived Create()/ctor. enabled = false: nothing is created.</summary>
+		protected EventConfig EventConfig { get; } = new EventConfig();
+		private _EventCalendar m_event;
+		private bool m_eventQueryWarned;
+		private int m_eventLastBar = -1;
+		private DateTime m_eventPrevCloseUtc = DateTime.MinValue, m_eventPubDay = DateTime.MinValue;
+
+		/// <summary>The M-EVENT engine, or null when EventConfig.enabled is false (one-time warning on the first null query).</summary>
+		internal _EventCalendar EventCalendar
+		{
+			get
+			{
+				if (m_event == null && !m_eventQueryWarned) { m_eventQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "EventCalendar queried but EventConfig.enabled is false (engine not created): null"); }
+				return m_event;
+			}
+		}
+		/// <summary>The current bar overlaps a blackout window (EventConfig.blackoutPreMin/PostMin/blackoutTier). False when disabled.</summary>
+		protected bool EventBlackout { get { var e = EventCalendar; return e != null && e.EventBlackout; } }
+		/// <summary>First bar of a blackout with EventConfig.blackoutFlatten. The base never acts on it.</summary>
+		protected bool EventFlattenNow { get { var e = EventCalendar; return e != null && e.EventFlattenNow; } }
+
+		/// <summary>Bar CLOSE instant in UTC (EV-3.3): Bars.Time in the bar time zone, a DST-gap stamp moved forward.</summary>
+		private DateTime eventUtc(DateTime barTime)
+		{
+			TimeZoneInfo tz = BarTimeZone;
+			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
+			// A stamp inside the spring-forward gap does not exist in the bar zone (ConvertTimeToUtc would throw); the feed means
+			// the instant one hour later (the wall clock skipped ahead), so shift +1h. Same guard as ToZone.
+			if (tz.IsInvalidTime(t)) t = t.AddHours(1);
+			return TimeZoneInfo.ConvertTimeToUtc(t, tz);
+		}
+
+		/// <summary>EV-4.6/4.7 (R2.1-h): first bar of the data series in UTC for the engine's coverage check; a table kind starting
+		/// after it disables the engine with an Error line on the first Step (never a throw). MinValue when unavailable (the
+		/// engine then checks against the first Step's bar). PROBE: FullSymbolData.Time in StartCalc.</summary>
+		private DateTime eventFirstBarUtc()
+		{
+			try { return eventUtc(Bars.FullSymbolData.Time[Bars.FullSymbolData.Current - 1]); }
+			catch (Exception) { try { return eventUtc(Bars.Time[0]); } catch (Exception) { return DateTime.MinValue; } }
+		}
+
+		private void startEvent()
+		{
+			m_event = null; m_eventQueryWarned = false; m_eventLastBar = -1;
+			m_eventPrevCloseUtc = m_eventPubDay = DateTime.MinValue;
+			if (!EventConfig.enabled) return;
+			TimeSpan dur = TimeSpan.Zero;
+			try { if (Bars.Info.Resolution.Type != EResolution.Tick) dur = Bars.Info.Resolution.Duration(); } catch (Exception) { dur = TimeSpan.Zero; }   // PROBE: Duration() on non-time bars
+			if (dur < TimeSpan.Zero) dur = TimeSpan.Zero;
+			var e = new _EventCalendar { config = EventConfig, label = "EVENT", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning), barDuration = dur, error = engineSink(ETraceLevel.Error), firstBarUtc = eventFirstBarUtc() };
+			string err = e.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_event = e;
+		}
+
+		/// <summary>After stepRegime, before portfolioBar: one Step per closed bar with [open, close) in UTC and the roll splice flag.</summary>
+		private void stepEvent()
+		{
+			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_eventLastBar) return;
+			m_eventLastBar = Bars.CurrentBar;
+			DateTime close = eventUtc(Bars.Time[0]);
+			DateTime open = m_event.barDuration > TimeSpan.Zero ? close - m_event.barDuration : (m_eventPrevCloseUtc != DateTime.MinValue ? m_eventPrevCloseUtc : close);
+			m_eventPrevCloseUtc = close;
+			m_event.Step(Bars.Time[0], open, close, rollOn(1));
+		}
+
+		/// <summary>EV-7.1 optional keys (PortfolioPublish &amp;&amp; EventConfig.publish &amp;&amp; m_event != null): pm.evtTier / pm.evtMask once per
+		/// trading day, pm.evtWin / pm.evtNext every closed bar.</summary>
+		private void publishEvent(IPortfolioData pd)
+		{
+			if (m_event == null || !EventConfig.publish || m_event.TradingDay == DateTime.MinValue) return;
+			if (m_event.TradingDay != m_eventPubDay)
+			{
+				m_eventPubDay = m_event.TradingDay;
+				EventDay d = m_event.Classify(m_eventPubDay);
+				pd[_PortKeys.EvtTier] = (double)(int)d.maxTier;
+				pd[_PortKeys.EvtMask] = (double)(d.kindsMask & ((1UL << 53) - 1));   // bits < 53 only: a double holds integers exactly up to 2^53, so higher bits would round. Custom (kind 62, CSV-defined
+				// names) is dropped on purpose: its bit has no stable meaning across runs; consumers read EventsOn for Custom rows.
+			}
+			if (Bars.Status == EBarState.Close)
+			{
+				pd[_PortKeys.EvtWin] = m_event.EventBlackout ? 1.0 : 0.0;
+				pd[_PortKeys.EvtNext] = m_event.MinutesTo(EventConfig.blackoutTier);
+			}
+		}
+
 		// ---- M-XMKT (§6): cross-market legs on extra chart streams (bar resolutions). Orders stay on Data1. ----
 
 		/// <summary>M-XMKT legs (role -> stream, staleness, windows, leader swing). Empty (default) = no legs created.
@@ -1197,6 +1286,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (Bars.Status == EBarState.Close) { m_portDayClose = Bars.Close[0]; if (rollOn(1)) m_portRollToday = true; }
 			m_portLastPnl = pnl;
+			if (m_event != null && EventConfig.publish) publishEvent(pd);   // M-EVENT optional keys (EV-7.1)
 
 			EPortState st = PortfolioHalted ? EPortState.Halted : pos > 0 ? EPortState.Long : pos < 0 ? EPortState.Short : EPortState.Flat;
 			double riskOpen = 0, openR = double.NaN;
@@ -1400,6 +1490,7 @@ namespace PowerLanguage.Strategy
 			prepareRegime();   // G-R: lazy M-DAILY + HV {20, 63}, only when RegimeConfig.enabled
 			startDaily();
 			startRegime();
+			startEvent();      // M-EVENT (EV-6.2): right after startRegime
 			startXmkt();
 			startTick();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
@@ -1479,6 +1570,7 @@ namespace PowerLanguage.Strategy
 			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
 			if (m_regime != null) stepRegime();   // G-R: after M-DAILY, before portfolioBar publishes pm.regime
+			if (m_event != null) stepEvent();     // M-EVENT (EV-6.2): right after stepRegime, before portfolioBar
 			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
 			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
 		}
@@ -1491,6 +1583,7 @@ namespace PowerLanguage.Strategy
 			m_tod = null;
 			m_daily = null;
 			m_regime = null;
+			m_event = null;
 			m_xmkt = null;
 			m_xmktPa = null;
 			m_paExtra = null; m_paHosted = null; m_paCreatedLog = null;
@@ -1681,13 +1774,15 @@ namespace PowerLanguage.Strategy
 		/// CS-3: RUN line - run id, build tag, strategy type, symbol, resolution, first calculated bar and every [Input] value
 		/// (reflection over public instance properties carrying an attribute named InputAttribute, sorted by name).
 		/// </summary>
+		private const string EVENT_JOURNAL_COLS = "evtDayTier,evtMinSince";   // M-EVENT CS-1 extra columns (enabled only)
+
 		protected string runLine()
 		{
 			IInstrumentSettings info = Bars.Info;
 			return $"RUN id({RunId}) build({BuildTag}) strategy({this.GetType().Name}) symbol({info.Name}) category({info.Category}) " +
 				$"resolution({info.Resolution.ChartType} {info.Resolution.Type} {info.Resolution.Size}) timeZone({info.TimeZone}) " +
 				$"firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) app({Environment.ApplicationCode}) " +
-				$"inputs[{inputSnapshot()}]";
+				$"inputs[{inputSnapshot()}]" + (m_event != null ? $" event[{EventConfig.Canon()}] journalSchema(CS-1+{EVENT_JOURNAL_COLS})" : "");
 		}
 
 		/// <summary>CS-3: "Name=value; ..." for every [Input] property of the concrete strategy, invariant culture.</summary>
@@ -1834,12 +1929,20 @@ namespace PowerLanguage.Strategy
 			col(num(riskPerUnit)); col(num(tick > 0 ? riskPerUnit / tick : double.NaN)); col(num(riskDollars)); col(num(rMultiple));
 			col(num(mfeDollars)); col(num(maeDollars)); col(num(mfeTicks)); col(num(maeTicks)); col(num(mfeR)); col(num(maeR));
 			col(scope); col(armed ? arm.context : "");
+			if (m_event != null)
+			{
+				// M-EVENT CS-1 extra columns (only when enabled): the entry trading day's tier (as-of its session open) and the
+				// minutes since the last macro event (EventConfig.minTier) at entry.
+				DateTime entryUtc = eventUtc(entryTime);
+				col(((int)m_event.Classify(m_event.TradingDayOf(entryUtc)).maxTier).ToString(ic));
+				col(num(m_event.MinutesSinceAt(entryUtc, EventConfig.minTier)));
+			}
 
 			try
 			{
 				if (m_journal == null)
 				{
-					m_journal = new TradeJournal(RunId);
+					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS) : new TradeJournal(RunId);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
 				m_journal.Write(sb.ToString());

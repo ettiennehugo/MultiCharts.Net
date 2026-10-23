@@ -516,6 +516,7 @@
     <Compile Include="_VpConfluenceEngine.Function.CS" />
     <Compile Include="_CmeSessionClock.Function.CS" />
     <Compile Include="_CmeSessionClockTest.Strategy.CS" />
+    <Compile Include="_EventCalendarTest.Strategy.CS" />
     <Compile Include="_MtfProbe.Strategy.CS" />
     <Compile Include="_OrderFlow.Function.CS" />
     <Compile Include="_PriceActionEngine.Function.CS" />
@@ -536,6 +537,7 @@
     <Compile Include="_WeeklyProfiles.Function.CS" />
     <Compile Include="_ProfileStats.Function.CS" />
     <Compile Include="_Gmm.Function.CS" />
+    <Compile Include="_EventCalendar.Function.CS" />
     <Compile Include="_RegimeEngine.Function.CS" />
     <Compile Include="_FvgDetector.Function.CS" />
     <Compile Include="_PortMM.Function.CS" />
