@@ -59,24 +59,30 @@ namespace PowerLanguage.Function
 		public int label, raw, atrTercile;
 		public double pFilt;
 		public bool fb, usable, wouldBlock, allow;
-		/// <summary>Why the day is not usable: Ok, Warmup (engine not yet Valid / no label: warm-up or never fitted), Invalid (state Valid
-		/// but not usable for this arm: AsOf not before t, UsingFallback in arm G, label or posteriors out of range).</summary>
+		/// <summary>Why the day is not usable: Ok, Warmup (engine not yet Valid / no label: warm-up or never fitted), Fallback (state Valid
+		/// but the engine is on the RG-03 ATR fallback, in arms U/G; in arm A the fallback IS the gate and counts as Ok), Invalid (state
+		/// Valid but otherwise not usable: AsOf not before t, label or posteriors out of range).</summary>
 		public ERegimeGateReason reason;
 	}
 
-	public enum ERegimeGateReason { Ok = 0, Warmup = 1, Invalid = 2 }
+	public enum ERegimeGateReason { Ok = 0, Warmup = 1, Invalid = 2, Fallback = 3 }
 
-	/// <summary>Per-arm running count of sessions and of days with no usable regime (ruling 3), split into warm-up and invalid-label days.</summary>
+	/// <summary>Per-arm running count of sessions and of days with no usable regime (rulings 3 / a), split into warm-up, invalid-label
+	/// and ATR-fallback days (usable + warmup + invalid + fallback = sessions), plus CME no-RTH (holiday-halt) days (ruling b).</summary>
 	public sealed class RegimeGateCounts
 	{
-		public int sessions, usable, warmup, invalid, blocked;
-		public void Add(RegimeGateDecision d)
+		public int sessions, usable, warmup, invalid, fallback, blocked, noRth;
+		public void Add(RegimeGateDecision d, bool noRthDay = false)
 		{
 			sessions++;
-			if (d.reason == ERegimeGateReason.Ok) usable++; else if (d.reason == ERegimeGateReason.Warmup) warmup++; else invalid++;
+			if (d.reason == ERegimeGateReason.Ok) usable++;
+			else if (d.reason == ERegimeGateReason.Warmup) warmup++;
+			else if (d.reason == ERegimeGateReason.Fallback) fallback++;
+			else invalid++;
 			if (d.wouldBlock) blocked++;
+			if (noRthDay) noRth++;
 		}
-		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nBlock(" + blocked + ")"; }
+		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nFb(" + fallback + ") nBlock(" + blocked + ") nNoRth(" + noRth + ")"; }
 	}
 
 	public static class RegimeGate
@@ -109,7 +115,8 @@ namespace PowerLanguage.Function
 				d.usable = s.Valid && s.Label >= 0 && s.AsOf != DateTime.MinValue && s.AsOf.Date < session.Date && (arm == ERegimeGateArm.A || !s.UsingFallback);
 			}
 			bool warm = s == null || !s.Valid || s.Label < 0 || s.AsOf == DateTime.MinValue;
-			d.reason = d.usable ? ERegimeGateReason.Ok : warm ? ERegimeGateReason.Warmup : ERegimeGateReason.Invalid;
+			bool fbOnly = !warm && s.UsingFallback && arm != ERegimeGateArm.A && s.AsOf.Date < session.Date && s.Label < (s.Probs == null ? 0 : s.Probs.Length);
+			d.reason = d.usable ? ERegimeGateReason.Ok : warm ? ERegimeGateReason.Warmup : fbOnly ? ERegimeGateReason.Fallback : ERegimeGateReason.Invalid;
 			d.wouldBlock = d.usable && d.label == BlockedLabel;
 			d.allow = arm == ERegimeGateArm.U || !d.wouldBlock;
 			return d;

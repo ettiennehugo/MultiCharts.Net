@@ -241,6 +241,8 @@ static class Program
 		var miss = new Dictionary<string, string>(fields); miss.Remove("rg.switchProb"); bool threw = false;
 		try { RegimeGate.Hash(miss); } catch (ArgumentException) { threw = true; }
 		Check(threw, "missing named field throws");
+		Check(RegimeGate.HashFields.Contains("v") && RegimeGate.Version == "A263-RG-2" && RegimeGate.Canon(fields).Contains(";v=A263-RG-2;"), "version tag A263-RG-2 inside the hashed named-field record");
+		var noV = new Dictionary<string, string>(fields); noV["v"] = "A263-RG-1"; Check(RegimeGate.Hash(noV) != PinnedU, "hash sensitive to the version tag");
 		Check(RegimeGate.Canon(fields).StartsWith("gate.arm=U;gate.blocked=2;gate.seed=20261022;host.activeEnd=15:30:00;"), "canon sorted by name: " + RegimeGate.Canon(fields).Substring(0, 60));
 	}
 	// ---------------- ruling 1: ATR20d over completed prior sessions only ----------------
@@ -282,6 +284,14 @@ static class Program
 		var hol = Extracted.Cme.Rules.Get(new DateTime(2024, 7, 4));
 		var ch = new A263Core(cfg); ch.Latch(new DateTime(2024, 7, 4, 9, 35, 0), 5000, 40, new DateTime(2024, 7, 3), true, hol.RthCloseEt, hol.NoRth);
 		Check(hol.NoRth && !ch.HasSignal && ch.Suffix().Contains("noRth(1)"), "CME no-RTH day (Independence Day halt): no entry");
+		foreach (var hd in new[] { new DateTime(2024, 11, 28), new DateTime(2024, 1, 15), new DateTime(2024, 5, 27) })
+		{
+			var hr = Extracted.Cme.Rules.Get(hd); var hc = new A263Core(cfg); hc.Latch(hd.AddHours(9).AddMinutes(35), 5000, 40, hd.AddDays(-1), true, hr.RthCloseEt, hr.NoRth);
+			Check(hr.NoRth && !hc.HasSignal && !hc.Step(hd.AddHours(10), false).sendStop, "halt day no entry " + hd.ToString("yyyy-MM-dd"));
+		}
+		var half = Extracted.Cme.Rules.Get(new DateTime(2024, 11, 29)); var hcore = new A263Core(cfg);
+		hcore.Latch(new DateTime(2024, 11, 29, 9, 35, 0), 5000, 40, new DateTime(2024, 11, 27), true, half.RthCloseEt, half.NoRth);
+		Check(!half.NoRth && hcore.HasSignal && hcore.Step(new DateTime(2024, 11, 29, 10, 0, 0), false).sendStop && hcore.ExitAt == new TimeSpan(13, 10, 0), "half day (not a halt) still trades, exit 13:10");
 		// DST: exchange wall-clock windows are the same on either side of the March/November switches
 		foreach (var day in new[] { new DateTime(2024, 3, 8), new DateTime(2024, 3, 11), new DateTime(2024, 11, 1), new DateTime(2024, 11, 4) })
 		{
@@ -298,18 +308,33 @@ static class Program
 		foreach (var arm in new[] { ERegimeGateArm.U, ERegimeGateArm.G, ERegimeGateArm.A })
 		{
 			var d = Decisions(days, arm, new RegimeConfig()); var c = new RegimeGateCounts(); foreach (var x in d) c.Add(x);
-			Check(c.sessions == days.Count && c.usable + c.warmup + c.invalid == c.sessions, arm + ": counts add up " + c.Suffix());
+			Check(c.sessions == days.Count && c.usable + c.warmup + c.invalid + c.fallback == c.sessions, arm + ": counts add up " + c.Suffix());
 			Check(d.Where(x => !x.usable).All(x => x.allow && !x.wouldBlock), arm + ": every no-usable day is allowed");
 			Check(c.warmup > 0, arm + ": warm-up days counted (" + c.warmup + ")");
+			Check(arm == ERegimeGateArm.A ? c.fallback == 0 : c.fallback > 0, arm + ": ATR-fallback days counted separately (" + c.fallback + ")");
+			Check(d.Count(x => x.reason == ERegimeGateReason.Fallback) == c.fallback && d.Where(x => x.reason == ERegimeGateReason.Fallback).All(x => x.fb && !x.usable && x.allow), arm + ": why(Fallback) days are fallback, allowed");
 			Console.WriteLine("arm " + arm + c.Suffix());
 		}
 		DateTime t = new DateTime(2020, 3, 10);
 		Check(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1).reason == ERegimeGateReason.Warmup, "neutral state = warm-up");
-		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Invalid, "G fallback = invalid label");
+		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Fallback, "G fallback = Fallback");
 		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t, false), t, 1).reason == ERegimeGateReason.Invalid, "AsOf == t = invalid label");
 		Check(RegimeGate.Decide(ERegimeGateArm.A, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Ok, "A fallback = ok");
+		var l = RegimeGate.Line(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t.AddDays(-1), true), t, 1), true, "h", 1);
+		Check(l.Contains(" why(Fallback) "), "REGGATE why(Fallback)");
+		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t, true), t, 1).reason == ERegimeGateReason.Invalid, "fallback with AsOf == t = invalid (lookahead first)");
+		// union check (ruling a): the G no-usable set = warm-up + invalid + fallback; A's is warm-up + invalid; the offline view drops the union
+		var days2 = Market(1300, 13);
+		var gD = Decisions(days2, ERegimeGateArm.G, new RegimeConfig()); var aD = Decisions(days2, ERegimeGateArm.A, new RegimeConfig());
+		var union = new HashSet<DateTime>(gD.Where(x => !x.usable).Select(x => x.session).Concat(aD.Where(x => !x.usable).Select(x => x.session)));
+		Check(union.Count == gD.Count(x => !x.usable) && aD.Where(x => !x.usable).All(x => union.Contains(x.session)), "union of no-usable days = G's set (A's warm-up within it): " + union.Count);
+		// ruling b: noRth counted; half days are not noRth
+		var cnt = new RegimeGateCounts(); var ok = RegimeGate.Decide(ERegimeGateArm.U, St(true, 0, t.AddDays(-1), false), t, 0);
+		foreach (var day in new[] { new DateTime(2024, 7, 3), new DateTime(2024, 7, 4), new DateTime(2024, 11, 28), new DateTime(2024, 11, 29), new DateTime(2024, 12, 24), new DateTime(2024, 1, 15) })
+			cnt.Add(ok, Extracted.Cme.Rules.Get(day).NoRth);
+		Check(cnt.noRth == 3 && cnt.sessions == 6, "noRth counted on halt days only (Jul 4, Thanksgiving, MLK), not half days: " + cnt.Suffix());
 		var cc = new RegimeGateCounts(); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1)); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, t.AddDays(-1), false), t, 2));
-		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nBlock(1)", "counts suffix: " + cc.Suffix());
+		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0)", "counts suffix: " + cc.Suffix());
 	}
 
 	// ---------------- ruling 4: the label used on day D does not change when day D's bars are removed ----------------

@@ -18,7 +18,7 @@ Timing stays as built. All times are exchange (ET) wall-clock times, so the wind
 ## (3) Days with no usable regime
 These days **trade** in G and A, so the day set traded on them is identical across arms (equal to U).
 
-- Each arm journals running counts on every REGGATE line: `nSess`, `nUsable`, `nWarm` (warm-up: engine not Valid / no label), `nInv` (invalid label: state Valid but not usable for the arm, i.e. AsOf not before t, UsingFallback in G, label out of range) and `nBlock`. The last line holds the totals. Each line also carries `why(Ok|Warmup|Invalid)`.
+- Each arm journals running counts on every REGGATE line: `nSess`, `nUsable`, `nWarm` (warm-up: engine not Valid / no label), `nInv` (invalid label: state Valid but AsOf not before t or label out of range), `nFb` (ATR fallback, arms U/G; see (a)), `nBlock` and `nNoRth` (see (b)). The last line holds the totals. Each line also carries `why(Ok|Warmup|Invalid|Fallback)`.
 - The **offline secondary view drops those days from G and A together**: the union of both arms' no-usable days is dropped from both arms (and from U), so G and A are compared on the same day set.
 
 ## (4) Label timing
@@ -31,3 +31,28 @@ Fine as built. The config hash (FNV-1a 64) is computed over the **named prereg f
 
 - Fields not on the list do not change the hash. A missing named field throws.
 - Test: the hash is pinned with extra fields appended and with reversed field order.
+
+# Final answers on PR #26 (Analyst 1, Analyst 2)
+
+## (a) Union of no-usable-regime days
+The offline view drops the **union** of the no-usable-regime days from G and A together.
+
+- The dropped days are journaled as three separate per-arm counts so the union can be checked: `nWarm` (warm-up), `nInv` (invalid label) and `nFb` (ATR fallback, with `why(Fallback)`).
+- In arm A the ATR fallback is the gate itself, so those days count as usable and A's `nFb` is 0.
+- Precedence when a day matches more than one: warm-up, then invalid (AsOf not before t comes before the fallback check), then fallback.
+
+## (b) Holiday-halt days vs half-days
+- Holiday-halt days with no RTH (`_CmeHolidays.Rules` `NoRth`) still get **no entry**, and each arm counts them as `nNoRth`.
+- Half-days are distinct from halt days. They are not `NoRth`, still trade, and exit at the early close minus 5m (13:10 ET).
+- Tests cover both cases: halt days on Jul 4, Thanksgiving, MLK and Memorial Day, and the day after Thanksgiving, Dec 24 and Jul 3 as half-days.
+
+## (c) Version and hash pins
+The version stays `A263-RG-2`. The version tag is field `v` of the hashed named-field record (`RegimeGate.HashFields`, canon `...;v=A263-RG-2;`), and changing it changes the hash.
+
+Final pins (FNV-1a 64, tested in `tests/RegimeGateTests`):
+
+| Arm | Hash |
+|---|---|
+| U | `26b38655261cc0bf` |
+| G | `9c1da7b123ca9441` |
+| A | `3d9814a5f264c353` |

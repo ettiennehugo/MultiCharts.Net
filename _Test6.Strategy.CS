@@ -28,7 +28,7 @@ namespace PowerLanguage.Strategy
 	// JOURNAL (TraceLevel = Journal): one REGGATE line per RTH session in EVERY arm, also on days with no entry signal:
 	//   REGGATE {date} arm() asOf() label() raw() pFilt() fb() usable() allow() atrT() wouldBlock() why() signal() cfg() seed()
 	//   + host fields O() atr20d() atrAsOf() atrOk() thr() exitAt() halfDay() noRth() and the arm's running counts nSess() nUsable()
-	//   nWarm() nInv() nBlock() (no-usable-regime days split warm-up / invalid label; the last line holds the totals);
+	//   nWarm() nInv() nFb() nBlock() nNoRth() (no-usable-regime days split warm-up / invalid label / ATR fallback, why(); CME no-RTH days; the last line holds the totals);
 	//   a REGGATE header line (canonical config + FNV-1a hash) on the first session, the engine's REGIME lines, and the
 	//   per-trade MCJournal context column with the session's REGGATE fields (arm, label, pFilt, cfg, seed, ...).
 	//
@@ -100,7 +100,7 @@ namespace PowerLanguage.Strategy
 				// ruling 2: CME early close -> exit on the first bar closing at or after the early close minus 5m; no-RTH days: no entry
 				_CmeHolidays.Rules.Day cme = _CmeHolidays.Rules.Get(et.Date);
 				RegimeGateDecision d = RegimeGate.Decide(RegimeGateConfig.arm, Regime, et.Date, m_terc.LastDate == atrAsOf ? m_terc.Tercile : -1);
-				m_counts.Add(d);
+				m_counts.Add(d, cme.NoRth);
 				m_core.Latch(et, Bars.Open[0], atr, atrAsOf, d.allow, cme.RthCloseEt, cme.NoRth);
 				if (journalOn())
 				{
