@@ -15,4 +15,14 @@
     <Compile Include="..\..\_Gmm.Function.CS" Link="Linked\_Gmm.cs" />
     <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+  </ItemGroup>
+  <!-- Extracts the MC-free CME calendar rules into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

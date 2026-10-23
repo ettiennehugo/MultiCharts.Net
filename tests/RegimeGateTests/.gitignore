@@ -2,3 +2,4 @@ gv/
 .venv/
 bin/
 obj/
+Generated/

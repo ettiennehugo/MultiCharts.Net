@@ -21,6 +21,10 @@ static class Program
 		NoLookahead();
 		HostTradesAndArms();
 		HashStability();
+		AtrPriorOnly();
+		HalfDaysAndDst();
+		NoUsableDaysAndCounts();
+		LabelIgnoresDayD();
 		Console.WriteLine($"RegimeGateTests: {pass} passed, {fail} failed");
 		return fail == 0 ? 0 : 1;
 	}
@@ -53,7 +57,7 @@ static class Program
 		Check(RegimeGate.Decide(ERegimeGateArm.G, St(false, 2, y, false), t, 2).allow, "invalid label 2 allowed");
 		// line format
 		var line = RegimeGate.Line(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, y, false), t, 1), true, "00112233aabbccdd", RegimeGate.PlaceboSeed);
-		Check(line == "REGGATE 2020-03-10 arm(G) asOf(2020-03-09) label(2) raw(2) pFilt(0.5) fb(0) usable(1) allow(0) atrT(1) wouldBlock(1) signal(1) cfg(00112233aabbccdd) seed(20261022)", "REGGATE line: " + line);
+		Check(line == "REGGATE 2020-03-10 arm(G) asOf(2020-03-09) label(2) raw(2) pFilt(0.5) fb(0) usable(1) allow(0) atrT(1) wouldBlock(1) why(Ok) signal(1) cfg(00112233aabbccdd) seed(20261022)", "REGGATE line: " + line);
 		var tf = RegimeGate.TradeFields(RegimeGate.Decide(ERegimeGateArm.U, St(true, 0, y, false), t, 0), "h", 20261022);
 		Check(tf["arm"] == "U" && tf["label"] == "0" && tf["cfg"] == "h" && tf["seed"] == "20261022" && tf.ContainsKey("pFilt"), "trade fields");
 		// ApplyArm
@@ -132,8 +136,9 @@ static class Program
 	// 5m RTH bars 09:35..16:00 ET (close stamps) for each day, a random walk from the prior close
 	static List<Bar> Intraday(Day d, double prevClose, _Rng r, double sd)
 	{
-		var bars = new List<Bar>(); double p = prevClose;
-		for (var t = d.date.AddHours(9).AddMinutes(35); t <= d.date.AddHours(16); t = t.AddMinutes(5))
+		var bars = new List<Bar>(); double p = prevClose; var cme = Extracted.Cme.Rules.Get(d.date);
+		DateTime end = d.date + (cme.RthCloseEt ?? cme.HaltEt ?? new TimeSpan(16, 0, 0));
+		for (var t = d.date.AddHours(9).AddMinutes(35); t <= end; t = t.AddMinutes(5))
 		{
 			double o = p, c = o + sd * Gauss(r), h = Math.Max(o, c) + Math.Abs(sd * Gauss(r)) * 0.5, l = Math.Min(o, c) - Math.Abs(sd * Gauss(r)) * 0.5;
 			bars.Add(new Bar { close = t, o = o, h = h, l = l, c = c }); p = c;
@@ -152,7 +157,7 @@ static class Program
 				if (pendExit) { cur.exit = b.o; cur.exitTime = b.close; trades.Add(cur); isLong = false; }
 				else if (!double.IsNaN(pendStop) && b.h >= pendStop) { cur = new Trade { entry = Math.Max(b.o, pendStop), entryTime = b.close }; isLong = true; }
 				pendStop = double.NaN; pendExit = false;
-				if (core.IsLatchBar(b.close)) core.Latch(b.close, b.o, i > 0 ? days[i - 1].atr : double.NaN, dec[i].allow);   // M-DAILY Atr20d = through PrevDate
+				if (core.IsLatchBar(b.close)) { var cme = Extracted.Cme.Rules.Get(b.close.Date); core.Latch(b.close, b.o, i > 0 ? days[i - 1].atr : double.NaN, i > 0 ? days[i - 1].date : DateTime.MinValue, dec[i].allow, cme.RthCloseEt, cme.NoRth); }   // M-DAILY Atr20d = through PrevDate
 				var a = core.Step(b.close, isLong);
 				if (a.exit) pendExit = true; else if (a.sendStop) pendStop = a.stop;
 			}
@@ -167,12 +172,14 @@ static class Program
 		for (int i = 1; i < days.Count; i++)
 		{
 			var bars = intraday[i]; double atr = days[i - 1].atr; if (double.IsNaN(atr)) continue;
+			var cme = Extracted.Cme.Rules.Get(days[i].date); if (cme.NoRth) continue;
+			var exitClose = cme.RthCloseEt.HasValue ? cme.RthCloseEt.Value : new TimeSpan(16, 0, 0);   // the bar after the one closing at exit time
 			double thr = bars[0].o + 0.5 * atr;
 			for (int j = 1; j < bars.Count; j++)
 			{
 				var open = bars[j].close.AddMinutes(-5).TimeOfDay;
-				if (open >= new TimeSpan(15, 30, 0)) break;
-				if (bars[j].h >= thr) { var x = bars.First(b => b.close.TimeOfDay == new TimeSpan(16, 0, 0)); trades.Add(new Trade { entry = Math.Max(bars[j].o, thr), entryTime = bars[j].close, exit = x.o, exitTime = x.close }); break; }
+				if (open >= new TimeSpan(15, 30, 0) || open >= exitClose - new TimeSpan(0, 10, 0)) break;
+				if (bars[j].h >= thr) { var x = bars.First(b => b.close.TimeOfDay == exitClose); trades.Add(new Trade { entry = Math.Max(bars[j].o, thr), entryTime = bars[j].close, exit = x.o, exitTime = x.close }); break; }
 			}
 		}
 		return trades;
@@ -189,7 +196,8 @@ static class Program
 		Check(tU.Count > 100, "U trades > 100 (" + tU.Count + ")");
 		Check(tU.Select(x => x.ToString()).SequenceEqual(tRef.Select(x => x.ToString())) && tU.Select(x => x.exit).SequenceEqual(tRef.Select(x => x.exit)), "Arm U == ungated host reference (" + tU.Count + " vs " + tRef.Count + ")");
 		Check(dU.All(d => d.allow), "U never blocks");
-		Check(tU.All(x => x.entryTime.Date == x.exitTime.Date && x.exitTime.TimeOfDay == new TimeSpan(16, 0, 0)), "one entry per day, flat by the 15:55 order");
+		Check(tU.All(x => x.entryTime.Date == x.exitTime.Date && (x.exitTime.TimeOfDay == new TimeSpan(16, 0, 0) || x.exitTime.TimeOfDay == new TimeSpan(13, 15, 0))), "one entry per day, flat by the 15:55 (half day 13:10) order");
+		Check(tU.Any(x => x.exitTime.TimeOfDay == new TimeSpan(13, 15, 0)), "some half-day trades in the sample");
 		Check(tU.GroupBy(x => x.entryTime.Date).All(g => g.Count() == 1), "max one entry per day");
 
 		var tG = RunCore(days, intraday, dG); var blockedG = new HashSet<DateTime>(dG.Where(d => d.wouldBlock).Select(d => d.session));
@@ -223,6 +231,108 @@ static class Program
 		rc2 = new RegimeConfig(); RegimeGate.ApplyArm(gc, rc2);
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { k = 0.6 }) != u, "hash sensitive to host core");
 		Check(RegimeGate.Hash(rc2, new RegimeGateConfig { placeboSeed = 1 }, new A263Config()) != u, "hash sensitive to placebo seed");
+		// ruling 5: the hash is over the NAMED prereg field list, not field order or record length
+		var fields = RegimeGate.CanonFields(rc2, gc, new A263Config());
+		var extra = new Dictionary<string, string>(fields); extra["zz.appended"] = "1"; extra["host.futureField"] = "x"; extra["aa.first"] = "2";
+		Check(RegimeGate.Hash(extra) == PinnedU, "hash pinned with extra fields appended");
+		var rev = new Dictionary<string, string>(StringComparer.Ordinal); foreach (var k in fields.Keys.Reverse()) rev[k] = fields[k];
+		Check(RegimeGate.Hash(rev) == PinnedU, "hash independent of field order");
+		Check(RegimeGate.HashFields.All(fields.ContainsKey) && RegimeGate.HashFields.Distinct().Count() == RegimeGate.HashFields.Length, "every named field produced, no duplicates");
+		var miss = new Dictionary<string, string>(fields); miss.Remove("rg.switchProb"); bool threw = false;
+		try { RegimeGate.Hash(miss); } catch (ArgumentException) { threw = true; }
+		Check(threw, "missing named field throws");
+		Check(RegimeGate.Canon(fields).StartsWith("gate.arm=U;gate.blocked=2;gate.seed=20261022;host.activeEnd=15:30:00;"), "canon sorted by name: " + RegimeGate.Canon(fields).Substring(0, 60));
 	}
-	const string PinnedU = "5d3311a5c01cb357", PinnedG = "dff52021fedecef9", PinnedA = "e7bfcd1401bd19ab";   // re-pin only with a new trial
+	// ---------------- ruling 1: ATR20d over completed prior sessions only ----------------
+	static void AtrPriorOnly()
+	{
+		var core = new A263Core(new A263Config()); DateTime d = new DateTime(2024, 3, 12);
+		core.Latch(d.AddHours(9).AddMinutes(35), 5000, 40, d.AddDays(-1), true);
+		Check(core.HasSignal && core.Threshold == 5020 && !core.AtrRejected, "threshold O + 0.5 x ATR from the prior session");
+		core.Latch(d.AddDays(1).AddHours(9).AddMinutes(35), 5000, 40, d.AddDays(1), true);
+		Check(!core.HasSignal && core.AtrRejected, "ATR including today's session rejected (no entry)");
+		core.Latch(d.AddDays(2).AddHours(9).AddMinutes(35), 5000, 40, DateTime.MinValue, true);
+		Check(!core.HasSignal, "ATR with no as-of date rejected");
+		core.Latch(d.AddDays(3).AddHours(9).AddMinutes(35), 5000, double.NaN, d.AddDays(2), true);
+		Check(!core.HasSignal, "NaN ATR: no entry");
+		core.Latch(d.AddDays(4).AddHours(9).AddMinutes(35), 5000, 40, d.AddDays(3), true);
+		Check(core.Suffix().Contains(" atr20d(40) atrAsOf(2024-03-15) atrOk(1) thr(5020) exitAt(15:55) halfDay(0) noRth(0)"), "ATR journaled at the open: " + core.Suffix());
+	}
+
+	// ---------------- ruling 2: half days (CME calendar helper), no-RTH days, DST ----------------
+	static void HalfDaysAndDst()
+	{
+		var cfg = new A263Config();
+		foreach (var day in new[] { new DateTime(2024, 11, 29), new DateTime(2024, 12, 24), new DateTime(2024, 7, 3), new DateTime(2019, 7, 3) })
+		{
+			var cme = Extracted.Cme.Rules.Get(day);
+			Check(cme.RthCloseEt == new TimeSpan(13, 15, 0) && !cme.NoRth, "CME early close 13:15 ET on " + day.ToString("yyyy-MM-dd"));
+			var core = new A263Core(cfg);
+			core.Latch(day.AddHours(9).AddMinutes(35), 5000, 40, day.AddDays(-1), true, cme.RthCloseEt, cme.NoRth);
+			Check(core.ExitAt == new TimeSpan(13, 10, 0) && core.Suffix().Contains("exitAt(13:10) halfDay(1)"), "half-day exit at early close - 5m");
+			Check(!core.Step(day.AddHours(13).AddMinutes(5), true).exit && core.Step(day.AddHours(13).AddMinutes(10), true).exit, "exit on the first bar closing >= 13:10");
+			var c2 = new A263Core(cfg); c2.Latch(day.AddHours(9).AddMinutes(35), 5000, 40, day.AddDays(-1), true, cme.RthCloseEt, cme.NoRth);
+			Check(c2.Step(day.AddHours(13).AddMinutes(5), false).sendStop && !c2.Step(day.AddHours(13).AddMinutes(10), false).sendStop, "no stop at/after the half-day exit time");
+			var c1 = new A263Core(cfg); c1.Latch(day.AddHours(9).AddMinutes(31), 5000, 40, day.AddDays(-1), true, cme.RthCloseEt, cme.NoRth);
+			Check(c1.Step(day.AddHours(13).AddMinutes(10), true).exit && !c1.Step(day.AddHours(13).AddMinutes(9), true).exit, "1m: exit on the 13:10 close bar");
+		}
+		var normal = Extracted.Cme.Rules.Get(new DateTime(2024, 11, 27));
+		var cn = new A263Core(cfg); cn.Latch(new DateTime(2024, 11, 27, 9, 35, 0), 5000, 40, new DateTime(2024, 11, 26), true, normal.RthCloseEt, normal.NoRth);
+		Check(cn.ExitAt == new TimeSpan(15, 55, 0) && !cn.Step(new DateTime(2024, 11, 27, 15, 50, 0), true).exit && cn.Step(new DateTime(2024, 11, 27, 15, 55, 0), true).exit, "normal day exit 15:55");
+		var hol = Extracted.Cme.Rules.Get(new DateTime(2024, 7, 4));
+		var ch = new A263Core(cfg); ch.Latch(new DateTime(2024, 7, 4, 9, 35, 0), 5000, 40, new DateTime(2024, 7, 3), true, hol.RthCloseEt, hol.NoRth);
+		Check(hol.NoRth && !ch.HasSignal && ch.Suffix().Contains("noRth(1)"), "CME no-RTH day (Independence Day halt): no entry");
+		// DST: exchange wall-clock windows are the same on either side of the March/November switches
+		foreach (var day in new[] { new DateTime(2024, 3, 8), new DateTime(2024, 3, 11), new DateTime(2024, 11, 1), new DateTime(2024, 11, 4) })
+		{
+			var c = new A263Core(cfg); Check(c.IsLatchBar(day.AddHours(9).AddMinutes(35)) && !c.IsLatchBar(day.AddHours(9).AddMinutes(30)), "DST: latch on the 09:35 close " + day.ToString("MM-dd"));
+			c.Latch(day.AddHours(9).AddMinutes(35), 5000, 40, day.AddDays(-3), true);
+			Check(c.Step(day.AddHours(15).AddMinutes(25), false).sendStop && !c.Step(day.AddHours(15).AddMinutes(30), false).sendStop && c.Step(day.AddHours(15).AddMinutes(55), true).exit, "DST: windows hold " + day.ToString("MM-dd"));
+		}
+	}
+
+	// ---------------- ruling 3: no-usable-regime days trade in G and A; per-arm counts ----------------
+	static void NoUsableDaysAndCounts()
+	{
+		var days = Market(1300, 13);
+		foreach (var arm in new[] { ERegimeGateArm.U, ERegimeGateArm.G, ERegimeGateArm.A })
+		{
+			var d = Decisions(days, arm, new RegimeConfig()); var c = new RegimeGateCounts(); foreach (var x in d) c.Add(x);
+			Check(c.sessions == days.Count && c.usable + c.warmup + c.invalid == c.sessions, arm + ": counts add up " + c.Suffix());
+			Check(d.Where(x => !x.usable).All(x => x.allow && !x.wouldBlock), arm + ": every no-usable day is allowed");
+			Check(c.warmup > 0, arm + ": warm-up days counted (" + c.warmup + ")");
+			Console.WriteLine("arm " + arm + c.Suffix());
+		}
+		DateTime t = new DateTime(2020, 3, 10);
+		Check(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1).reason == ERegimeGateReason.Warmup, "neutral state = warm-up");
+		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Invalid, "G fallback = invalid label");
+		Check(RegimeGate.Decide(ERegimeGateArm.G, St(true, 1, t, false), t, 1).reason == ERegimeGateReason.Invalid, "AsOf == t = invalid label");
+		Check(RegimeGate.Decide(ERegimeGateArm.A, St(true, 1, t.AddDays(-1), true), t, 1).reason == ERegimeGateReason.Ok, "A fallback = ok");
+		var cc = new RegimeGateCounts(); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1)); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, t.AddDays(-1), false), t, 2));
+		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nBlock(1)", "counts suffix: " + cc.Suffix());
+	}
+
+	// ---------------- ruling 4: the label used on day D does not change when day D's bars are removed ----------------
+	static void LabelIgnoresDayD()
+	{
+		var days = Market(1300, 17);
+		foreach (var arm in new[] { ERegimeGateArm.G, ERegimeGateArm.A })
+		{
+			var full = Decisions(days, arm, new RegimeConfig()); bool ok = true; int checkedUsable = 0;
+			foreach (int D in new[] { 300, 700, 1001, 1150, 1299 })
+			{
+				var cut = Decisions(days.Take(D).ToList(), arm, new RegimeConfig());   // day D and later never fed
+				var rc = new RegimeConfig(); RegimeGate.ApplyArm(new RegimeGateConfig { arm = arm }, rc);
+				var eng = new _RegimeEngine(); eng.config = rc; eng.Configure(); var terc = new AtrTercileTracker(rc.atrPctLookback, rc.K);
+				for (int i = 0; i < D; i++) { var x = days[i]; eng.AddDay(x.date, x.close, x.hv20, x.hv63, x.high, x.low, x.atr, false); terc.AddDay(x.date, x.atr); }
+				var dd = RegimeGate.Decide(arm, eng.State, days[D].date, terc.LastDate == days[D - 1].date ? terc.Tercile : -1);
+				ok &= dd.label == full[D].label && dd.allow == full[D].allow && Same(dd.pFilt, full[D].pFilt) && dd.asOf == days[D - 1].date && dd.atrTercile == full[D].atrTercile && cut.Count == D;
+				if (dd.usable) checkedUsable++;
+			}
+			Check(ok, arm + ": label on day D identical without day D's bars, AsOf = D-1");
+			Check(checkedUsable >= 3, arm + ": checked on usable days (" + checkedUsable + ")");
+		}
+	}
+
+	const string PinnedU = "26b38655261cc0bf", PinnedG = "9c1da7b123ca9441", PinnedA = "3d9814a5f264c353";   // re-pin only with a new trial (ruling 5: named-field hash)   // re-pin only with a new trial
 }

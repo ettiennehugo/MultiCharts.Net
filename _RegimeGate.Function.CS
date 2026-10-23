@@ -47,6 +47,8 @@ namespace PowerLanguage.Function
 		public TimeSpan exitTime = new TimeSpan(15, 55, 0);       // flat at 15:55 ET
 		public TimeSpan rthClose = new TimeSpan(16, 0, 0);
 		public int contracts = 1;
+		/// <summary>CME early-close days (ruling 2): exit on the first bar closing at or after the early close minus this.</summary>
+		public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
 	}
 
 	/// <summary>One session's gate decision, read once at the 09:30 latch and held for the session.</summary>
@@ -57,6 +59,24 @@ namespace PowerLanguage.Function
 		public int label, raw, atrTercile;
 		public double pFilt;
 		public bool fb, usable, wouldBlock, allow;
+		/// <summary>Why the day is not usable: Ok, Warmup (engine not yet Valid / no label: warm-up or never fitted), Invalid (state Valid
+		/// but not usable for this arm: AsOf not before t, UsingFallback in arm G, label or posteriors out of range).</summary>
+		public ERegimeGateReason reason;
+	}
+
+	public enum ERegimeGateReason { Ok = 0, Warmup = 1, Invalid = 2 }
+
+	/// <summary>Per-arm running count of sessions and of days with no usable regime (ruling 3), split into warm-up and invalid-label days.</summary>
+	public sealed class RegimeGateCounts
+	{
+		public int sessions, usable, warmup, invalid, blocked;
+		public void Add(RegimeGateDecision d)
+		{
+			sessions++;
+			if (d.reason == ERegimeGateReason.Ok) usable++; else if (d.reason == ERegimeGateReason.Warmup) warmup++; else invalid++;
+			if (d.wouldBlock) blocked++;
+		}
+		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nBlock(" + blocked + ")"; }
 	}
 
 	public static class RegimeGate
@@ -64,7 +84,7 @@ namespace PowerLanguage.Function
 		public const int BlockedLabel = 2;                  // stressed (highest f2 mean) / ATR tercile 2
 		public const ulong PlaceboSeed = 20261022;          // prereg §4.1
 		public const int ArmAFitSessions = 100000;          // prereg §2.3: never fitted -> AtrTercile fallback every day
-		public const string Version = "A263-RG-1";
+		public const string Version = "A263-RG-2";
 
 		/// <summary>Prereg §2.1 / §2.3: enabled, publish off; arm A forces fitSessions = minSessions = 100000. Nothing else changes.</summary>
 		public static void ApplyArm(RegimeGateConfig g, RegimeConfig r)
@@ -88,6 +108,8 @@ namespace PowerLanguage.Function
 				if (s.Probs != null && s.Label >= 0 && s.Label < s.Probs.Length) d.pFilt = s.Probs[s.Label];
 				d.usable = s.Valid && s.Label >= 0 && s.AsOf != DateTime.MinValue && s.AsOf.Date < session.Date && (arm == ERegimeGateArm.A || !s.UsingFallback);
 			}
+			bool warm = s == null || !s.Valid || s.Label < 0 || s.AsOf == DateTime.MinValue;
+			d.reason = d.usable ? ERegimeGateReason.Ok : warm ? ERegimeGateReason.Warmup : ERegimeGateReason.Invalid;
 			d.wouldBlock = d.usable && d.label == BlockedLabel;
 			d.allow = arm == ERegimeGateArm.U || !d.wouldBlock;
 			return d;
@@ -102,7 +124,7 @@ namespace PowerLanguage.Function
 		{
 			return "REGGATE " + D(d.session) + " arm(" + d.arm + ") asOf(" + D(d.asOf) + ") label(" + d.label + ") raw(" + d.raw + ") pFilt(" + P(d.pFilt) +
 				") fb(" + (d.fb ? 1 : 0) + ") usable(" + (d.usable ? 1 : 0) + ") allow(" + (d.allow ? 1 : 0) + ") atrT(" + d.atrTercile +
-				") wouldBlock(" + (d.wouldBlock ? 1 : 0) + ") signal(" + (entrySignal ? 1 : 0) + ") cfg(" + cfgHash + ") seed(" + placeboSeed.ToString(IC) + ")";
+				") wouldBlock(" + (d.wouldBlock ? 1 : 0) + ") why(" + d.reason + ") signal(" + (entrySignal ? 1 : 0) + ") cfg(" + cfgHash + ") seed(" + placeboSeed.ToString(IC) + ")";
 		}
 
 		/// <summary>Per-trade fields (prereg §7: the REGGATE fields of its session), for journalArm's context column.</summary>
@@ -112,31 +134,61 @@ namespace PowerLanguage.Function
 			{
 				{ "arm", d.arm.ToString() }, { "asOf", D(d.asOf) }, { "label", d.label.ToString(IC) }, { "raw", d.raw.ToString(IC) },
 				{ "pFilt", P(d.pFilt) }, { "fb", d.fb ? "1" : "0" }, { "usable", d.usable ? "1" : "0" }, { "atrT", d.atrTercile.ToString(IC) },
-				{ "wouldBlock", d.wouldBlock ? "1" : "0" }, { "cfg", cfgHash }, { "seed", placeboSeed.ToString(IC) },
+				{ "wouldBlock", d.wouldBlock ? "1" : "0" }, { "why", d.reason.ToString() }, { "cfg", cfgHash }, { "seed", placeboSeed.ToString(IC) },
 			};
 		}
 
-		/// <summary>Canonical config string (prereg §7 / P3 §0.5): every RegimeConfig field, the gate and the host core, fixed order, invariant culture.</summary>
-		public static string Canon(RegimeConfig r, RegimeGateConfig g, A263Config h)
+		/// <summary>
+		/// Prereg §7 / P3 §0.5 hash field list: the named fields the config hash covers (RegimeConfig + gate arm/seed + host core).
+		/// The hash is over exactly these names, sorted ordinally, as "name=value;" (invariant culture). It does NOT depend on the
+		/// order fields are produced in, and fields added later (not in this list) do not change it. Changing this list is a new trial.
+		/// </summary>
+		public static readonly string[] HashFields =
 		{
-			var sb = new StringBuilder();
-			Action<string, string> f = (k, v) => { sb.Append(k).Append('=').Append(v).Append(';'); };
+			"v",
+			"rg.enabled", "rg.method", "rg.K", "rg.kSelect", "rg.features", "rg.fitSessions", "rg.minSessions", "rg.refit", "rg.refitEveryN",
+			"rg.restarts", "rg.maxIter", "rg.tol", "rg.regCovar", "rg.transPrior", "rg.warmFilter", "rg.switchProb", "rg.switchMargin", "rg.seed",
+			"rg.fallback", "rg.publish", "rg.atrPctLookback", "rg.parkinsonBars", "rg.bicDiagnostic", "rg.rollSuspectZ", "rg.gapBusinessDays",
+			"gate.arm", "gate.blocked", "gate.seed",
+			"host.k", "host.atrLength", "host.rthOpen", "host.activeEnd", "host.exitTime", "host.rthClose", "host.contracts", "host.halfDayExitBefore",
+		};
+
+		/// <summary>All config fields by name (a superset of HashFields is allowed; extras are journaled, not hashed).</summary>
+		public static Dictionary<string, string> CanonFields(RegimeConfig r, RegimeGateConfig g, A263Config h)
+		{
+			var f = new Dictionary<string, string>(StringComparer.Ordinal);
 			Func<double, string> n = v => v.ToString("R", IC);
-			f("v", Version);
-			f("rg.enabled", r.enabled ? "1" : "0"); f("rg.method", r.method.ToString()); f("rg.K", r.K.ToString(IC)); f("rg.kSelect", r.kSelect.ToString());
+			f["v"] = Version;
+			f["rg.enabled"] = r.enabled ? "1" : "0"; f["rg.method"] = r.method.ToString(); f["rg.K"] = r.K.ToString(IC); f["rg.kSelect"] = r.kSelect.ToString();
 			var fs = new List<string>(); if (r.features != null) foreach (var x in r.features) fs.Add(x.ToString());
-			f("rg.features", string.Join(",", fs));
-			f("rg.fitSessions", r.fitSessions.ToString(IC)); f("rg.minSessions", r.minSessions.ToString(IC)); f("rg.refit", r.refit.ToString());
-			f("rg.refitEveryN", r.refitEveryN.ToString(IC)); f("rg.restarts", r.restarts.ToString(IC)); f("rg.maxIter", r.maxIter.ToString(IC));
-			f("rg.tol", n(r.tol)); f("rg.regCovar", n(r.regCovar)); f("rg.transPrior", n(r.transPrior)); f("rg.warmFilter", r.warmFilter.ToString(IC));
-			f("rg.switchProb", n(r.switchProb)); f("rg.switchMargin", n(r.switchMargin)); f("rg.seed", r.seed.ToString(IC)); f("rg.fallback", r.fallback.ToString());
-			f("rg.publish", r.publish ? "1" : "0"); f("rg.atrPctLookback", r.atrPctLookback.ToString(IC)); f("rg.parkinsonBars", r.parkinsonBars.ToString(IC));
-			f("rg.bicDiagnostic", r.bicDiagnostic ? "1" : "0"); f("rg.rollSuspectZ", n(r.rollSuspectZ)); f("rg.gapBusinessDays", r.gapBusinessDays.ToString(IC));
-			f("gate.arm", g.arm.ToString()); f("gate.blocked", BlockedLabel.ToString(IC)); f("gate.seed", g.placeboSeed.ToString(IC));
-			f("host.k", n(h.k)); f("host.atrLength", h.atrLength.ToString(IC)); f("host.rthOpen", h.rthOpen.ToString("c", IC)); f("host.activeEnd", h.activeEnd.ToString("c", IC));
-			f("host.exitTime", h.exitTime.ToString("c", IC)); f("host.rthClose", h.rthClose.ToString("c", IC)); f("host.contracts", h.contracts.ToString(IC));
+			f["rg.features"] = string.Join(",", fs);
+			f["rg.fitSessions"] = r.fitSessions.ToString(IC); f["rg.minSessions"] = r.minSessions.ToString(IC); f["rg.refit"] = r.refit.ToString();
+			f["rg.refitEveryN"] = r.refitEveryN.ToString(IC); f["rg.restarts"] = r.restarts.ToString(IC); f["rg.maxIter"] = r.maxIter.ToString(IC);
+			f["rg.tol"] = n(r.tol); f["rg.regCovar"] = n(r.regCovar); f["rg.transPrior"] = n(r.transPrior); f["rg.warmFilter"] = r.warmFilter.ToString(IC);
+			f["rg.switchProb"] = n(r.switchProb); f["rg.switchMargin"] = n(r.switchMargin); f["rg.seed"] = r.seed.ToString(IC); f["rg.fallback"] = r.fallback.ToString();
+			f["rg.publish"] = r.publish ? "1" : "0"; f["rg.atrPctLookback"] = r.atrPctLookback.ToString(IC); f["rg.parkinsonBars"] = r.parkinsonBars.ToString(IC);
+			f["rg.bicDiagnostic"] = r.bicDiagnostic ? "1" : "0"; f["rg.rollSuspectZ"] = n(r.rollSuspectZ); f["rg.gapBusinessDays"] = r.gapBusinessDays.ToString(IC);
+			f["gate.arm"] = g.arm.ToString(); f["gate.blocked"] = BlockedLabel.ToString(IC); f["gate.seed"] = g.placeboSeed.ToString(IC);
+			f["host.k"] = n(h.k); f["host.atrLength"] = h.atrLength.ToString(IC); f["host.rthOpen"] = h.rthOpen.ToString("c", IC); f["host.activeEnd"] = h.activeEnd.ToString("c", IC);
+			f["host.exitTime"] = h.exitTime.ToString("c", IC); f["host.rthClose"] = h.rthClose.ToString("c", IC); f["host.contracts"] = h.contracts.ToString(IC);
+			f["host.halfDayExitBefore"] = h.halfDayExitBefore.ToString("c", IC);
+			return f;
+		}
+
+		/// <summary>Canonical string over the named HashFields (sorted ordinally); throws if a named field is missing.</summary>
+		public static string Canon(IDictionary<string, string> fields)
+		{
+			var names = new List<string>(HashFields); names.Sort(StringComparer.Ordinal);
+			var sb = new StringBuilder();
+			foreach (var k in names)
+			{
+				string v; if (!fields.TryGetValue(k, out v)) throw new ArgumentException("config hash field missing: " + k);
+				sb.Append(k).Append('=').Append(v).Append(';');
+			}
 			return sb.ToString();
 		}
+
+		public static string Canon(RegimeConfig r, RegimeGateConfig g, A263Config h) { return Canon(CanonFields(r, g, h)); }
 
 		/// <summary>FNV-1a 64 over the UTF-8 bytes of s, as 16 lower-case hex digits.</summary>
 		public static string Fnv1a64(string s)
@@ -147,6 +199,7 @@ namespace PowerLanguage.Function
 		}
 
 		public static string Hash(RegimeConfig r, RegimeGateConfig g, A263Config h) { return Fnv1a64(Canon(r, g, h)); }
+		public static string Hash(IDictionary<string, string> fields) { return Fnv1a64(Canon(fields)); }
 	}
 
 	/// <summary>
@@ -178,10 +231,14 @@ namespace PowerLanguage.Function
 	}
 
 	/// <summary>
-	/// A2-63 core per closed bar. etClose = bar CLOSE time in ET (MC bar stamps). The session latches on the first bar whose close
-	/// is in (rthOpen, rthClose] on a new ET date: O = that bar's open, stop = O + k x atr20d (NaN atr: no entry that day). The stop
-	/// is sent on every closed bar with close time in [latch, activeEnd) while flat and not yet entered today and allowed by the gate.
-	/// The exit is sent on the first closed bar with close time >= exitTime while long, or on any later bar while long (catch-up).
+	/// A2-63 core per closed bar. All times are exchange (ET) wall-clock times from the bar CLOSE stamp, so the windows hold through
+	/// DST. The session latches on the first bar whose close is in (rthOpen, rthClose] on a new ET date: O = that bar's open,
+	/// stop = O + k x atr20d. atr20d must be the M-DAILY Wilder ATR over COMPLETED PRIOR sessions only: if atrAsOf is not before the
+	/// session date (or ATR is not finite, or the day has no RTH) there is no entry that day. The stop is sent on every closed bar
+	/// with close time in [latch, min(activeEnd, ExitAt)) while flat, not yet entered today and allowed by the gate. ExitAt = exitTime,
+	/// or on a CME early-close day min(exitTime, earlyClose - halfDayExitBefore). The exit is sent on the first closed bar with close
+	/// time >= ExitAt while long, or on any later bar while long (catch-up). Known limitation: the stop works from the bar AFTER
+	/// the latch bar, so a breakout inside the first bar is missed (small on 5m/1m).
 	/// </summary>
 	public sealed class A263Core
 	{
@@ -189,7 +246,13 @@ namespace PowerLanguage.Function
 		public A263Core(A263Config c) { config = c ?? new A263Config(); }
 		public DateTime Session { get; private set; } = DateTime.MinValue;
 		public double Open { get; private set; } = double.NaN;
+		public double Atr { get; private set; } = double.NaN;
+		public DateTime AtrAsOf { get; private set; } = DateTime.MinValue;
 		public double Threshold { get; private set; } = double.NaN;
+		public TimeSpan ExitAt { get; private set; }
+		public TimeSpan? EarlyClose { get; private set; }
+		public bool NoRth { get; private set; }
+		public bool AtrRejected { get; private set; }   // ATR not from completed prior sessions (atrAsOf >= session)
 		public bool Entered { get; private set; }
 		public bool Allowed { get; private set; } = true;
 
@@ -200,10 +263,15 @@ namespace PowerLanguage.Function
 			return etClose.Date != Session && t > config.rthOpen && t <= config.rthClose;
 		}
 
-		public void Latch(DateTime etClose, double barOpen, double atr20d, bool allow)
+		/// <param name="earlyCloseEt">CME RTH early close (ET) for the session, null on a normal day (_CmeHolidays.Rules.Get(date).RthCloseEt).</param>
+		/// <param name="noRth">CME day without an RTH session (holiday halt): no entry.</param>
+		public void Latch(DateTime etClose, double barOpen, double atr20d, DateTime atrAsOf, bool allow, TimeSpan? earlyCloseEt = null, bool noRth = false)
 		{
-			Session = etClose.Date; Open = barOpen; Entered = false; Allowed = allow;
-			Threshold = atr20d > 0 && !double.IsInfinity(atr20d) && barOpen > 0 ? barOpen + config.k * atr20d : double.NaN;
+			Session = etClose.Date; Open = barOpen; Atr = atr20d; AtrAsOf = atrAsOf; Entered = false; Allowed = allow; EarlyClose = earlyCloseEt; NoRth = noRth;
+			ExitAt = config.exitTime;
+			if (earlyCloseEt.HasValue && earlyCloseEt.Value - config.halfDayExitBefore < ExitAt) ExitAt = earlyCloseEt.Value - config.halfDayExitBefore;
+			AtrRejected = atrAsOf == DateTime.MinValue || atrAsOf.Date >= Session;
+			Threshold = !noRth && !AtrRejected && atr20d > 0 && !double.IsInfinity(atr20d) && barOpen > 0 ? barOpen + config.k * atr20d : double.NaN;
 		}
 
 		/// <summary>Would the ungated core place an entry today (a valid threshold exists)? Journaled as signal().</summary>
@@ -214,10 +282,20 @@ namespace PowerLanguage.Function
 			var a = new A263Action { stop = double.NaN };
 			if (isLong && etClose.Date == Session) Entered = true;
 			TimeSpan t = etClose.TimeOfDay;
-			if (isLong) { if (etClose.Date != Session || t >= config.exitTime) a.exit = true; return a; }
+			if (isLong) { if (etClose.Date != Session || t >= ExitAt) a.exit = true; return a; }
 			if (etClose.Date != Session || Entered || !Allowed || double.IsNaN(Threshold)) return a;
-			if (t >= config.rthOpen && t < config.activeEnd) { a.sendStop = true; a.stop = Threshold; }
+			if (t >= config.rthOpen && t < config.activeEnd && t < ExitAt) { a.sendStop = true; a.stop = Threshold; }
 			return a;
+		}
+
+		/// <summary>Host fields for the REGGATE line (ruling 1/2: ATR at the open, its as-of date, the session's exit time).</summary>
+		public string Suffix()
+		{
+			var ic = CultureInfo.InvariantCulture;
+			return " O(" + (double.IsNaN(Open) ? "NaN" : Open.ToString("R", ic)) + ") atr20d(" + (double.IsNaN(Atr) ? "NaN" : Atr.ToString("R", ic)) + ") atrAsOf(" +
+				(AtrAsOf == DateTime.MinValue ? "-" : AtrAsOf.ToString("yyyy-MM-dd", ic)) + ") atrOk(" + (AtrRejected ? 0 : 1) + ") thr(" +
+				(double.IsNaN(Threshold) ? "NaN" : Threshold.ToString("R", ic)) + ") exitAt(" + ExitAt.ToString(@"hh\:mm", ic) + ") halfDay(" +
+				(EarlyClose.HasValue ? 1 : 0) + ") noRth(" + (NoRth ? 1 : 0) + ")";
 		}
 	}
 }
