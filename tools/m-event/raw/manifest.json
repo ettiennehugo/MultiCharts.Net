@@ -1,0 +1,230 @@
+{
+ "alfred_10.txt": {
+  "bytes": 12167,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "3f1aa6890bd07d49ac61204a29796fc9ed9765e3f78cc2bfab55ae9d0b5ee774",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=10&ff=txt"
+ },
+ "alfred_180.txt": {
+  "bytes": 11789,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "db4d35accccee0819cf196c1456b6668c913354386f4631e363f49828dc0f0ba",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt"
+ },
+ "alfred_192.txt": {
+  "bytes": 3979,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "404e5797f315d589cb30f466528fbf9fe55952fbca881c0ac7758736bfd1d9d0",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=192&ff=txt"
+ },
+ "alfred_46.txt": {
+  "bytes": 8350,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "99bf88b0224a35dfa1695125deb03e928b06acdcc5e3c521f57dfa46864bde72",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=46&ff=txt"
+ },
+ "alfred_50.txt": {
+  "bytes": 11221,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "9f71eb2b522c7a2ea4a1a5fde4523662c561fc52f915c93a75393b3a87321269",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=50&ff=txt"
+ },
+ "alfred_53.txt": {
+  "bytes": 12311,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "fc6dd6a6fe1344dd17a50ab7ad7bd648235bfda7f8bcfbb4cd880bc8b08c2c73",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=53&ff=txt"
+ },
+ "alfred_54.txt": {
+  "bytes": 10002,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "c85741e67e24a0ef294f8391120f14c6df30ca3c88c5cce08857a8ef5cb19692",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=54&ff=txt"
+ },
+ "alfred_9.txt": {
+  "bytes": 12425,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "9559c918ae7eb120ca02fad7f9609882791389c532033f1fcaf903ea09e9ce39",
+  "url": "https://alfred.stlouisfed.org/release/downloaddates?rid=9&ff=txt"
+ },
+ "bea_2025.html": {
+  "bytes": 120946,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "e9a06518036503c62147017cb5fde7f9efbc2d00e525b470da3efeac6c0c78f1",
+  "url": "https://www.bea.gov/news/schedule/full-2025"
+ },
+ "bea_2026.html": {
+  "bytes": 126433,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "4ad3c61cf17ceba09bbef2f90927229dca908777a6825a69250e140bd152da79",
+  "url": "https://www.bea.gov/news/schedule/full"
+ },
+ "bea_2027.html": {
+  "bytes": 107062,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "d3a9e7d193f61db7b7a5bbb503a67d37f6bfaf3ec1f4e6d7f98ab7fe5f081928",
+  "url": "https://www.bea.gov/news/schedule/next-year"
+ },
+ "bls_2016.html": {
+  "bytes": 96677,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "da838eb21650da1f7aa3ae3355bdb9b5e1cd190a467232e74ae28621453a6c0a",
+  "url": "https://www.bls.gov/schedule/2016/home.htm"
+ },
+ "bls_2017.html": {
+  "bytes": 95284,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "cefc78608ffdf1cf295ca6ce29b60a34171b2be679aa4ff003defa56eb5dd781",
+  "url": "https://www.bls.gov/schedule/2017/home.htm"
+ },
+ "bls_2018.html": {
+  "bytes": 98266,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "0508017239cb944b6a865537e86706e89579347cd5703cfac73abc4116f70655",
+  "url": "https://www.bls.gov/schedule/2018/home.htm"
+ },
+ "bls_2019.html": {
+  "bytes": 99273,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "79d544badfec76a4e3687076a831e8ba4fb69c211898828f5edd173ba8e401fd",
+  "url": "https://www.bls.gov/schedule/2019/home.htm"
+ },
+ "bls_2020.html": {
+  "bytes": 93767,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "0ee7b9af2cdef3b326eb3924154d916f89b917a0f91ffc8b0046157dbf5c9e9e",
+  "url": "https://www.bls.gov/schedule/2020/home.htm"
+ },
+ "bls_2021.html": {
+  "bytes": 98083,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "c09deb50d5817890974a16ed7cf0c0847a55059ed1459646ab7c38f0db07ae56",
+  "url": "https://www.bls.gov/schedule/2021/home.htm"
+ },
+ "bls_2022.html": {
+  "bytes": 100417,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "0fa59a88a3a60572e0f70d5627db9e426f97d033501fd43c710b95b1f0cedc29",
+  "url": "https://www.bls.gov/schedule/2022/home.htm"
+ },
+ "bls_2023.html": {
+  "bytes": 99872,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "7e2fc48b29ddf437ba21ab6a8f893fa21a364ede0d66dd1b7f36bc5df4abbbf9",
+  "url": "https://www.bls.gov/schedule/2023/home.htm"
+ },
+ "bls_2024.html": {
+  "bytes": 101145,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "87b2a4ce0bc7e2ac84c6c5cdadabc23b7649265e753862c0263862e3a677105c",
+  "url": "https://www.bls.gov/schedule/2024/home.htm"
+ },
+ "bls_2025.html": {
+  "bytes": 96414,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "e2739b849e058c1124cc32a498bd895576feb39d871263efb933acddac1a6ca4",
+  "url": "https://www.bls.gov/schedule/2025/home.htm"
+ },
+ "bls_2026.html": {
+  "bytes": 100563,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "1bfb9d805fb7b419504962aa22773506b558534daac3b47d72c9de99fd16acac",
+  "url": "https://www.bls.gov/schedule/2026/home.htm"
+ },
+ "bls_2027.html": {
+  "bytes": 76893,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "adc95365efa2f193c5f41a7cdc4221fc7ce89cebe831f33c7cc56c89082437cc",
+  "url": "https://www.bls.gov/schedule/2027/home.htm"
+ },
+ "bls_lapse.html": {
+  "bytes": 61476,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "66a58a4ded748779939df9d7e2c92b0d8c308492b8355621375a4a996ab985c9",
+  "url": "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm"
+ },
+ "cboe_vx_specs.html": {
+  "bytes": 466647,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "91f6df94a630974e02a148b95425367efe9de1dd169576ec37d7031abf3bac19",
+  "url": "https://www.cboe.com/tradable_products/vix/vix_futures/specifications/"
+ },
+ "census_marts.xlsx": {
+  "bytes": 15851,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "110fa24643b1a33bf8abb2643f09b5130fd8ed9d78d223f63dd51c71439cfa52",
+  "url": "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx"
+ },
+ "cme_es_calendar.json": {
+  "bytes": 10219,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "49ae6c22f53d3181669488630cbbc244f02fb0e4dcbf840d12d30a8f2c45b700",
+  "url": "https://www.cmegroup.com/CmeWS/mvc/ProductCalendar/Future/133"
+ },
+ "cme_rolldates.html": {
+  "bytes": 159212,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "849521bc08efc29fcfeaacc6c9dec1df19a620a936fa924b91624d1def2a72c1",
+  "url": "https://www.cmegroup.com/trading/equity-index/rolldates.html"
+ },
+ "dol_claims.html": {
+  "bytes": 14421,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "80e78de786a55636aec60c2bdb23773c237ef973eee33293b136016294ce3ded",
+  "url": "https://oui.doleta.gov/unemploy/claims_arch.asp"
+ },
+ "eia_wpsr_archive.html": {
+  "bytes": 176038,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "ba0146a95af8afd7d235d53da86e1e423f39f18b0dce9acd25ff16cae5a84f7d",
+  "url": "https://www.eia.gov/petroleum/supply/weekly/archive/"
+ },
+ "fed_calendars.html": {
+  "bytes": 165751,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "72b771bb425faedbcc3b357672d4b00cf7c238da5d421c99ab86a598a5acea23",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+ },
+ "fed_hist_2016.html": {
+  "bytes": 95829,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "32fe32a3d2210d1b05c6e24788f375bb4a486418c3a63be5c5f36d90940e5802",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2016.htm"
+ },
+ "fed_hist_2017.html": {
+  "bytes": 95200,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "1bab7926c61554f7fcc8f757b231d8d143f59a24992a5695c6584a630dc3b746",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2017.htm"
+ },
+ "fed_hist_2018.html": {
+  "bytes": 95705,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "f649bafd0c92588633e43cb38c1e1b031473b4ce69388afabc0f0f588bfc9bb9",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2018.htm"
+ },
+ "fed_hist_2019.html": {
+  "bytes": 97344,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "4fd85441c17a28e9b2d126311914af03cd74d5d7986baba2096197192dfa7dde",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2019.htm"
+ },
+ "fed_hist_2020.html": {
+  "bytes": 98555,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "686ec7998d50e8c055a55a4f5b3e59a76695ac8aab076f62b72f3f3f61ce4b35",
+  "url": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm"
+ },
+ "fed_pr_20200303.html": {
+  "bytes": 80778,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "caa2e79d587296b809ff514e25cef976af88f53821d453ca57c892a8913e5abe",
+  "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20200303a.htm"
+ },
+ "fed_pr_20200315.html": {
+  "bytes": 85154,
+  "fetched_utc": "2026-10-23 16:36",
+  "sha256": "f6914aa595895b7236a84ae66b02021c36a4f7f26d193598d33d6588eb9a6d90",
+  "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20200315a.htm"
+ }
+}

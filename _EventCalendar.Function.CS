@@ -12,10 +12,10 @@ namespace PowerLanguage.Function
 	// events (§1.2) and the EIA weekly petroleum report (class Energy only). Pure managed C#, MC-free (System only):
 	// tests/EventTests extracts the regions below as is.
 	//
-	// PR A scope: rules, types, engine and API. The generated `// <event-table>` region (FOMC, CPI, NFP, ... from the official
-	// sources, EV-4.2) and s_corrections (EV-5) are EMPTY until PR B (tools/m-event/build_table.py). With an empty table the
-	// engine never throws: table kinds give neutral outputs (NaN / false / not present), Configure journals
-	// "EVENT table missing: <kinds>" and every rule kind still generates.
+	// The generated `// <event-table>` region (FOMC, CPI, NFP, ... from the official sources, EV-4.2) and s_corrections (EV-5)
+	// are written by tools/m-event/build_table.py (PR B). A table kind with no row in a year gives neutral outputs
+	// (NaN / false / not present), Configure journals "EVENT table kinds missing: <kinds>" (R2.1-a) and every rule kind
+	// still generates.
 	//
 	// Times: rows are ET wall clock, converted with "Eastern Standard Time" (no DateTime.Now anywhere). Bars are intervals
 	// [barOpenUtc, barCloseUtc) (EV-3.3), windows are half-open, lookups are as-of the current bar close (EV-5) by default.
@@ -164,13 +164,18 @@ namespace PowerLanguage.Function
 		public static readonly TimeSpan T0830 = new TimeSpan(8, 30, 0), T0930 = new TimeSpan(9, 30, 0), T1000 = new TimeSpan(10, 0, 0),
 			T1030 = new TimeSpan(10, 30, 0), T1600 = new TimeSpan(16, 0, 0);
 
-		/// <summary>Monday-before-third-Friday roll rule applies from this date (CME rolldates page; earlier years use the
-		/// "Thursday eight calendar days before expiration" wording). VERIFY the cutover from archived CME pages in PR B.</summary>
-		public static readonly DateTime RollRuleMondayFrom = new DateTime(2023, 1, 1);
+		/// <summary>Monday-before-third-Friday roll rule applies from this date; earlier contracts use the "Thursday eight calendar
+		/// days before expiration" wording. Wayback (CDX listing of https://www.cmegroup.com/trading/equity-index/rolldates.html):
+		/// capture 20220609055445 still shows the Thursday rule (ESM22 roll Thu 2022-06-09, ESU22 Thu 2022-09-08); capture
+		/// 20220610060819 (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html)
+		/// is the first with the Monday rule. ESM22 therefore rolled Thu 06-09 and the Monday rule starts with ESU22 (Mon 2022-09-12);
+		/// cutover 2022-07-01 sits between them.</summary>
+		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 7, 1);
 
 		// ISM Report On Business release calendar. Source: https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/
 		// (fetched 2026-10-22; 2026: Mfg Jan 5 ... Dec 1, Svc Jan 7 ... Dec 3, 10:00 ET). The 1st / 3rd NYSE business day rule reproduces
-		// every 2026 date except January (ISM holiday Jan 2), listed here. Other years are RuleOnly (TODO PR B: archived calendars).
+		// every 2026 date except January (ISM holiday Jan 2), listed here. Other years are RuleOnly: PR B found no archived ISM
+		// calendar reachable from the official site (Wayback blocked), so pre-2026 / post-2026 dates are refused as table rows.
 		static readonly int[] s_ismPublishedYears = { 2026 };
 		static readonly long[] s_ismExceptions = {   // kind, yyyyMMdd
 			(long)EEventKind.IsmMfg, 20260105,
@@ -179,7 +184,9 @@ namespace PowerLanguage.Function
 
 		// EIA Weekly Petroleum Status Report alternate release schedule. Source: https://www.eia.gov/petroleum/supply/weekly/schedule.php
 		// (fetched 2026-10-22). Pairs: original Wednesday (data week ending + 5 days) yyyyMMdd, alternate release yyyyMMddHHmm ET.
-		// Releases before 2025-01-01 or after 2026-11-30 are RuleOnly (TODO PR B: Wayback captures of the same page).
+		// Releases before 2025-01-01 or after 2026-11-30 are RuleOnly: the EIA WPSR archive
+		// (https://www.eia.gov/petroleum/supply/weekly/archive/) lists release dates but no times, and Wayback captures of the
+		// schedule page were not reachable in PR B, so earlier exceptions are refused rather than guessed.
 		static readonly DateTime s_eiaPublishedFrom = new DateTime(2025, 1, 1), s_eiaPublishedTo = new DateTime(2026, 11, 30);
 		static readonly long[] s_eiaExceptions = {
 			20250101, 202501021100,   // week ending 2024-12-27
@@ -200,7 +207,8 @@ namespace PowerLanguage.Function
 
 		// Initial Claims: Thursday 08:30 ET; a federal holiday on Thursday moves it to Wednesday. Source: DOL ETA
 		// https://oui.doleta.gov/unemploy/claims_arch.asp (fetched 2026-10-22: Wed 2026-11-25, Wed 2027-11-10, Wed 2027-11-24 — all
-		// reproduced by the rule). RuleOnly until PR B checks the archive.
+		// reproduced by the rule). PR B checks the rule against ALFRED release dates (rid 180); every differing date is emitted
+		// by build_table.py as a generated Claims correction in s_corrections.
 
 		public static EEventTier DefaultTier(EEventKind k)
 		{
@@ -263,27 +271,13 @@ namespace PowerLanguage.Function
 		/// <summary>Standard (AM) SPX options expiry (MonthlyOpex, VixExpiry): third Friday, or the preceding NYSE business day when
 		/// it is an NYSE holiday (Cboe follows the NYSE calendar).</summary>
 		public static DateTime OpexDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
-		/// <summary>Equity-index futures expiry (QuarterlyExpiry, RollWeek, SessionsToExpiry), R2.1-d: third Friday, moved back only
-		/// over CME Globex closures (_CmeHolidays: New Year, Christmas, Good Friday), never for a federal/NYSE holiday CME trades
-		/// through (e.g. 2027-06-18, Juneteenth observed: CME lists expiry 06-18). Then s_expiryOverrides (CME's calendar wins).</summary>
-		public static DateTime ExpiryDate(int y, int m)
-		{
-			long key = y * 100L + m;
-			for (int i = 0; i < s_expiryOverrides.Length; i += 2) if (s_expiryOverrides[i] == key) return FromYmdhm(s_expiryOverrides[i + 1] * 10000L);
-			return RuleExpiryDate(y, m);
-		}
-		/// <summary>The R2.1-d rule alone (no overrides), for the rule-vs-CME mismatch check.</summary>
-		public static DateTime RuleExpiryDate(int y, int m)
-		{
-			DateTime d = ThirdFriday(y, m);
-			while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || _CmeHolidays.Rules.Get(d).Closed) d = d.AddDays(-1);
-			return d;
-		}
-		/// <summary>R2.1-d exchange-calendar overrides: yyyyMM, yyyyMMdd. One row per date where CME's published expiry differs from
-		/// RuleExpiryDate; each row cites its CME source. Every row is re-checked by EventTests (rule != override).</summary>
-		public static readonly long[] s_expiryOverrides = {
-			202606, 20260618,   // Juneteenth Fri 06-19 (CME halt, not closed); CME lists ES expiry Thu 06-18: https://www.cmegroup.com/trading/equity-index/rolldates.html
-		};
+		/// <summary>Equity-index futures expiry (QuarterlyExpiry, RollWeek, SessionsToExpiry), R2.1-d as amended (PR27 review) and
+		/// EV-1.20: third Friday, moved back to the preceding NYSE business day when NYSE is closed (the SOQ needs an NYSE open).
+		/// Authority: CME's per-contract calendar (CmeWS/mvc/ProductCalendar/Future/133), e.g. ESM26 Thu 2026-06-18, ESM27 Thu
+		/// 2027-06-17 (Juneteenth), ESH08 Thu 2008-03-20 (Good Friday). Not rolldates.html (stale customary dates). No overrides.</summary>
+		public static DateTime ExpiryDate(int y, int m) { return RuleExpiryDate(y, m); }
+		/// <summary>The R2.1-d rule (same as OpexDate); kept as a name for the build_table.py rule-vs-CME check.</summary>
+		public static DateTime RuleExpiryDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
 		/// <summary>Customary roll date (EV §1.2): Monday before the third Friday (from RollRuleMondayFrom), else the Thursday eight
 		/// calendar days before it.</summary>
 		public static DateTime RollDate(int y, int m)
@@ -291,17 +285,23 @@ namespace PowerLanguage.Function
 			DateTime f = ThirdFriday(y, m);
 			return f >= RollRuleMondayFrom ? f.AddDays(-4) : f.AddDays(-8);
 		}
-		/// <summary>VIX futures final settlement: the Wednesday 30 days before the next month's standard SPX expiry (holiday:
-		/// the preceding business day is used, then a holiday Wednesday moves to the preceding business day). VERIFY (PR B).</summary>
+		/// <summary>VIX futures final settlement (Cboe VX contract specs, https://www.cboe.com/tradable_products/vix/vix_futures/specifications/):
+		/// "the Wednesday that is 30 days prior to the third Friday of the calendar month immediately following the month in which
+		/// the contract expires. If that Wednesday or the Friday that is 30 days following that Wednesday is a Cboe Options holiday,
+		/// the final settlement date ... shall be on the business day immediately preceding that Wednesday."</summary>
 		public static DateTime VixExpiry(int y, int m)
 		{
 			DateTime n = new DateTime(y, m, 1).AddMonths(1);
-			DateTime w = OpexDate(n.Year, n.Month).AddDays(-30);
-			return PrevBusinessDayOrSelf(w);
+			DateTime f = ThirdFriday(n.Year, n.Month), w = f.AddDays(-30);
+			return IsNyseHoliday(w) || IsNyseHoliday(f) ? PrevBusinessDayOrSelf(w.AddDays(-1)) : w;
 		}
 
 		static bool contains(int[] a, int v) { return Array.IndexOf(a, v) >= 0; }
-		public static DateTime FromYmdhm(long v) { return new DateTime((int)(v / 100000000), (int)(v / 1000000 % 100), (int)(v / 10000 % 100), (int)(v / 100 % 100), (int)(v % 100), 0); }
+		public static DateTime FromYmdhm(long v)
+		{
+			if (v < 100000000000L || v > 999999999999L) throw new ArgumentException("FromYmdhm expects 12-digit yyyyMMddHHmm, got " + v);
+			return new DateTime((int)(v / 100000000), (int)(v / 1000000 % 100), (int)(v / 10000 % 100), (int)(v / 100 % 100), (int)(v % 100), 0);
+		}
 		public static long ToYmdhm(DateTime d) { return d.Year * 100000000L + d.Month * 1000000L + d.Day * 10000L + d.Hour * 100L + d.Minute; }
 
 		/// <summary>All rule-kind records whose ET start falls in the year (unsorted, utc not yet set).</summary>
@@ -339,6 +339,8 @@ namespace PowerLanguage.Function
 				r.Add(EventRec.Make(EEventKind.MonthlyOpex, o + T1600, EEventTier.C, EEventFlags.Pm | (q ? EEventFlags.Quad : EEventFlags.None)));
 				if (q)
 				{
+					// 09:30 marks the open on expiry day (SOQ calculation begins), NOT a settlement instant: the final settlement
+					// price is the Special Opening Quotation, published after all components open.
 					r.Add(EventRec.Make(EEventKind.QuarterlyExpiry, x + T0930, EEventTier.C, EEventFlags.Quad));
 					r.Add(EventRec.Make(EEventKind.IndexRebalance, o + T1600, EEventTier.C));   // index rebalance at the NYSE close
 					EventRec s = EventRec.Make(EEventKind.RollWeek, RollDate(y, m), EEventTier.C);
@@ -369,6 +371,14 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Decoded generated table (EV-4.2). Empty in PR A.</summary>
+		/// <summary>EV-4.6 coverage holes of the generated table: triples kind, first ET minute, last ET minute.</summary>
+		public static long[] CoverageHoles() { return (long[])s_coverageHoles.Clone(); }
+		public static string HoleWhyFor(long kind, long fromEt, long toEt)
+		{
+			for (int i = 0; i + 2 < s_coverageHoles.Length; i += 3)
+				if (s_coverageHoles[i] == kind && s_coverageHoles[i + 1] == fromEt && s_coverageHoles[i + 2] == toEt) return s_coverageHoleWhy[i / 3];
+			return null;
+		}
 		public static List<EventRec> Table()
 		{
 			var r = new List<EventRec>(s_yyyymmddhhmm.Length);
@@ -386,26 +396,677 @@ namespace PowerLanguage.Function
 		static string s_tableSha;
 		public static string TableSha()
 		{
-			if (s_tableSha != null) return s_tableSha;
-			var sb = new StringBuilder();
-			for (int i = 0; i < s_yyyymmddhhmm.Length; ++i) sb.Append(s_yyyymmddhhmm[i]).Append(',').Append(s_kind[i]).Append(',').Append(s_flags[i]).Append(',').Append(s_ref[i]).Append(';');
-			foreach (var c in s_corrections) sb.Append(c.kind).Append(',').Append(c.originalEt).Append(',').Append(c.actualEt).Append(',').Append(c.announcedEt).Append(',').Append(c.canceledSinceEt).Append(',').Append((int)c.flags).Append(';');
-			s_tableSha = Sha256(Encoding.UTF8.GetBytes(sb.ToString())).Substring(0, 16);
+			if (s_tableSha == null) s_tableSha = ComputeTableSha(s_yyyymmddhhmm, s_kind, s_flags, s_ref, s_corrections, s_coverageHoles);
 			return s_tableSha;
+		}
+		/// <summary>Hash of table rows, corrections and coverage holes (any one changing changes the config hash).</summary>
+		public static string ComputeTableSha(long[] et, byte[] kind, ushort[] flags, string[] refs, EventCorrection[] corr, long[] holes)
+		{
+			var sb = new StringBuilder();
+			for (int i = 0; i < et.Length; ++i) sb.Append(et[i]).Append(',').Append(kind[i]).Append(',').Append(flags[i]).Append(',').Append(refs[i]).Append(';');
+			foreach (var c in corr) sb.Append(c.kind).Append(',').Append(c.originalEt).Append(',').Append(c.actualEt).Append(',').Append(c.announcedEt).Append(',').Append(c.canceledSinceEt).Append(',').Append((int)c.flags).Append(';');
+			if (holes != null && holes.Length > 0) { sb.Append("holes"); foreach (var h in holes) sb.Append(',').Append(h); }
+			return Sha256(Encoding.UTF8.GetBytes(sb.ToString())).Substring(0, 16);
 		}
 		public static string Sha256(byte[] b) { using (var h = SHA256.Create()) { var d = h.ComputeHash(b); var sb = new StringBuilder(64); foreach (var x in d) sb.Append(x.ToString("x2")); return sb.ToString(); } }
 	}
 	// </event-rules>
 
 	// <event-table>
-	// GENERATED by tools/m-event/build_table.py (PR B) from the official sources (EV-4.2). EMPTY in PR A.
+	// GENERATED by tools/m-event/build_table.py v1.1.0 (EV-4.5) -- do not edit by hand; re-run the script.
+	// Pages fetched 2026-10-23 16:36 .. 2026-10-23 16:36 UTC (raw copies + manifest: tools/m-event/raw/). Source sha256[:16]:
+	//   alfred_10.txt              3f1aa6890bd07d49  https://alfred.stlouisfed.org/release/downloaddates?rid=10&ff=txt
+	//   alfred_180.txt             db4d35accccee081  https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt
+	//   alfred_192.txt             404e5797f315d589  https://alfred.stlouisfed.org/release/downloaddates?rid=192&ff=txt
+	//   alfred_46.txt              99bf88b0224a35df  https://alfred.stlouisfed.org/release/downloaddates?rid=46&ff=txt
+	//   alfred_50.txt              9f71eb2b522c7a2e  https://alfred.stlouisfed.org/release/downloaddates?rid=50&ff=txt
+	//   alfred_53.txt              fc6dd6a6fe1344dd  https://alfred.stlouisfed.org/release/downloaddates?rid=53&ff=txt
+	//   alfred_54.txt              c85741e67e24a0ef  https://alfred.stlouisfed.org/release/downloaddates?rid=54&ff=txt
+	//   alfred_9.txt               9559c918ae7eb120  https://alfred.stlouisfed.org/release/downloaddates?rid=9&ff=txt
+	//   bea_2025.html              e9a06518036503c6  https://www.bea.gov/news/schedule/full-2025
+	//   bea_2026.html              4ad3c61cf17ceba0  https://www.bea.gov/news/schedule/full
+	//   bea_2027.html              d3a9e7d193f61db7  https://www.bea.gov/news/schedule/next-year
+	//   bls_2016.html              da838eb21650da1f  https://www.bls.gov/schedule/2016/home.htm
+	//   bls_2017.html              cefc78608ffdf1cf  https://www.bls.gov/schedule/2017/home.htm
+	//   bls_2018.html              0508017239cb944b  https://www.bls.gov/schedule/2018/home.htm
+	//   bls_2019.html              79d544badfec76a4  https://www.bls.gov/schedule/2019/home.htm
+	//   bls_2020.html              0ee7b9af2cdef3b3  https://www.bls.gov/schedule/2020/home.htm
+	//   bls_2021.html              c09deb50d5817890  https://www.bls.gov/schedule/2021/home.htm
+	//   bls_2022.html              0fa59a88a3a60572  https://www.bls.gov/schedule/2022/home.htm
+	//   bls_2023.html              7e2fc48b29ddf437  https://www.bls.gov/schedule/2023/home.htm
+	//   bls_2024.html              87b2a4ce0bc7e2ac  https://www.bls.gov/schedule/2024/home.htm
+	//   bls_2025.html              e2739b849e058c11  https://www.bls.gov/schedule/2025/home.htm
+	//   bls_2026.html              1bfb9d805fb7b419  https://www.bls.gov/schedule/2026/home.htm
+	//   bls_2027.html              adc95365efa2f193  https://www.bls.gov/schedule/2027/home.htm
+	//   bls_lapse.html             66a58a4ded748779  https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm
+	//   cboe_vx_specs.html         91f6df94a630974e  https://www.cboe.com/tradable_products/vix/vix_futures/specifications/
+	//   census_marts.xlsx          110fa24643b1a33b  https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx
+	//   cme_es_calendar.json       49ae6c22f53d3181  https://www.cmegroup.com/CmeWS/mvc/ProductCalendar/Future/133
+	//   cme_rolldates.html         849521bc08efc29f  https://www.cmegroup.com/trading/equity-index/rolldates.html
+	//   dol_claims.html            80e78de786a55636  https://oui.doleta.gov/unemploy/claims_arch.asp
+	//   eia_wpsr_archive.html      ba0146a95af8afd7  https://www.eia.gov/petroleum/supply/weekly/archive/
+	//   fed_calendars.html         72b771bb425faedb  https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+	//   fed_hist_2016.html         32fe32a3d2210d1b  https://www.federalreserve.gov/monetarypolicy/fomchistorical2016.htm
+	//   fed_hist_2017.html         1bab7926c61554f7  https://www.federalreserve.gov/monetarypolicy/fomchistorical2017.htm
+	//   fed_hist_2018.html         f649bafd0c925886  https://www.federalreserve.gov/monetarypolicy/fomchistorical2018.htm
+	//   fed_hist_2019.html         4fd85441c17a28e9  https://www.federalreserve.gov/monetarypolicy/fomchistorical2019.htm
+	//   fed_hist_2020.html         686ec7998d50e8c0  https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm
+	//   fed_pr_20200303.html       caa2e79d587296b8  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200303a.htm
+	//   fed_pr_20200315.html       f6914aa595895b72  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200315a.htm
+	//   wayback 2022-06-10 06:08:19 UTC (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html): first capture with the Monday rule: 2022-09 roll Mon 9/12; 2022-12 Mon 12/12 (ESM22 had already rolled Thu 6/9)
+	//   wayback 2022-06-09 05:54:45 UTC (https://web.archive.org/web/20220609055445/https://www.cmegroup.com/trading/equity-index/rolldates.html): last capture with the Thursday rule: 2022-06 roll Thu 6/9; 2022-09 Thu 9/8
+	// NOTE time assumed 08:30 (not in the source): BEA GdpAdvance/GdpSecond/GdpThird/Pce rows 2016-2024 (ALFRED dates only) and every RetailSales row (Census sheet has dates only).
+	// NOTE GdpSecond 2019-02-28 (2018Q4): (m-1)%3 tags it Second; it was the shutdown 'Initial' estimate. s_corrections moves GdpAdvance 2018Q4 to 02-28 and cancels GdpSecond 2018Q4.
+	// NOTE FomcMinutes 2020-04-08 (ref 2020-03-15) is flagged Unscheduled: minutes of an unscheduled meeting, known only at the instant.
+	// NOTE FomcDecision 2020-03-18 (canceled in s_corrections) carries no Sep flag: the Fed's 2020 page lists it only as 'March 17-18 (cancelled)' with no SEP; it was a scheduled SEP meeting (EV-8.2 counts 2020 published SEP = 3). Canceled, so the flag has no runtime effect.
+	// Coverage holes (EV-4.6, s_coverageHoles): 80 refused spans; with allowPartialCoverage=false a bar inside one disables the engine.
 	public static partial class EventRules
 	{
-		static readonly long[] s_yyyymmddhhmm = { };
-		static readonly byte[] s_kind = { };
-		static readonly ushort[] s_flags = { };
-		static readonly string[] s_ref = { };
-		static readonly EventCorrection[] s_corrections = { };
+		static readonly long[] s_yyyymmddhhmm = {
+			201601080830, 201601121000, 201601150830, 201601150830, 201601200830, 201601271400, 201601290830, 201602050830,
+			201602091000, 201602120830, 201602170830, 201602171400, 201602190830, 201602260830, 201603040830, 201603150830,
+			201603150830, 201603160830, 201603161400, 201603161430, 201603171000, 201603250830, 201603280830, 201604010830,
+			201604051000, 201604061400, 201604130830, 201604130830, 201604140830, 201604271400, 201604280830, 201604290830,
+			201605060830, 201605101000, 201605130830, 201605130830, 201605170830, 201605181400, 201605270830, 201605310830,
+			201606030830, 201606081000, 201606140830, 201606150830, 201606151400, 201606151430, 201606160830, 201606280830,
+			201606290830, 201607061400, 201607080830, 201607121000, 201607140830, 201607150830, 201607150830, 201607271400,
+			201607290830, 201608050830, 201608101000, 201608120830, 201608120830, 201608160830, 201608171400, 201609020830,
+			201609071000, 201609150830, 201609150830, 201609160830, 201609211400, 201609211430, 201609300830, 201610070830,
+			201610121000, 201610121400, 201610140830, 201610140830, 201610180830, 201610280830, 201610310830, 201611021400,
+			201611040830, 201611081000, 201611150830, 201611160830, 201611170830, 201611231400, 201611300830, 201612020830,
+			201612071000, 201612140830, 201612140830, 201612141400, 201612141430, 201612150830, 201612220830, 201701041400,
+			201701060830, 201701101000, 201701130830, 201701130830, 201701180830, 201701270830, 201701300830, 201702011400,
+			201702030830, 201702071000, 201702140830, 201702150830, 201702150830, 201702221400, 201702280830, 201703100830,
+			201703140830, 201703150830, 201703150830, 201703151400, 201703151430, 201703161000, 201703300830, 201704051400,
+			201704070830, 201704111000, 201704130830, 201704140830, 201704140830, 201704280830, 201705031400, 201705050830,
+			201705091000, 201705110830, 201705120830, 201705120830, 201705241400, 201705260830, 201706020830, 201706061000,
+			201706130830, 201706140830, 201706140830, 201706141400, 201706141430, 201706290830, 201706300830, 201707051400,
+			201707070830, 201707111000, 201707130830, 201707140830, 201707140830, 201707261400, 201707280830, 201708040830,
+			201708081000, 201708100830, 201708110830, 201708150830, 201708161400, 201709010830, 201709121000, 201709130830,
+			201709140830, 201709150830, 201709201400, 201709201430, 201709280830, 201709290830, 201710060830, 201710111000,
+			201710111400, 201710120830, 201710130830, 201710130830, 201710300830, 201711011400, 201711030830, 201711071000,
+			201711140830, 201711150830, 201711150830, 201711221400, 201711300830, 201712080830, 201712111000, 201712120830,
+			201712130830, 201712131400, 201712131430, 201712140830, 201712210830, 201712220830, 201801031400, 201801050830,
+			201801091000, 201801110830, 201801120830, 201801120830, 201801260830, 201801290830, 201801311400, 201802020830,
+			201802061000, 201802140830, 201802140830, 201802150830, 201802211400, 201802280830, 201803090830, 201803130830,
+			201803140830, 201803140830, 201803161000, 201803211400, 201803211430, 201803280830, 201804060830, 201804100830,
+			201804110830, 201804111400, 201804131000, 201804160830, 201804270830, 201804300830, 201805021400, 201805040830,
+			201805081000, 201805090830, 201805100830, 201805150830, 201805231400, 201805300830, 201805310830, 201806010830,
+			201806051000, 201806120830, 201806130830, 201806131400, 201806131430, 201806140830, 201806280830, 201806290830,
+			201807051400, 201807060830, 201807101000, 201807110830, 201807120830, 201807160830, 201808011400, 201808030830,
+			201808071000, 201808090830, 201808100830, 201808150830, 201808221400, 201808290830, 201808300830, 201809070830,
+			201809111000, 201809120830, 201809130830, 201809140830, 201809261400, 201809261430, 201809270830, 201809280830,
+			201810050830, 201810100830, 201810110830, 201810150830, 201810161000, 201810171400, 201810260830, 201810290830,
+			201811020830, 201811061000, 201811081400, 201811090830, 201811140830, 201811150830, 201811280830, 201811290830,
+			201811291400, 201812070830, 201812101000, 201812110830, 201812120830, 201812140830, 201812191400, 201812191430,
+			201812210830, 201901040830, 201901081000, 201901091400, 201901110830, 201901150830, 201901160830, 201901300830,
+			201901301400, 201901301430, 201902010830, 201902121000, 201902130830, 201902140830, 201902201400, 201902280830,
+			201903080830, 201903120830, 201903130830, 201903151000, 201903201400, 201903201430, 201903280830, 201904050830,
+			201904091000, 201904100830, 201904101400, 201904110830, 201904260830, 201904290830, 201905011400, 201905011430,
+			201905030830, 201905071000, 201905090830, 201905100830, 201905150830, 201905221400, 201905300830, 201905310830,
+			201906070830, 201906101000, 201906110830, 201906120830, 201906140830, 201906191400, 201906191430, 201906270830,
+			201906280830, 201907050830, 201907091000, 201907101400, 201907110830, 201907120830, 201907160830, 201907260830,
+			201907300830, 201907311400, 201907311430, 201908020830, 201908061000, 201908090830, 201908130830, 201908150830,
+			201908211400, 201908290830, 201908300830, 201909060830, 201909101000, 201909110830, 201909120830, 201909130830,
+			201909181400, 201909181430, 201909260830, 201909270830, 201910040830, 201910080830, 201910091000, 201910091400,
+			201910100830, 201910160830, 201910300830, 201910301400, 201910301430, 201910310830, 201911010830, 201911051000,
+			201911130830, 201911140830, 201911150830, 201911201400, 201911270830, 201912060830, 201912110830, 201912111400,
+			201912111430, 201912120830, 201912130830, 201912171000, 201912200830, 202001031400, 202001100830, 202001140830,
+			202001150830, 202001160830, 202001171000, 202001291400, 202001291430, 202001300830, 202001310830, 202002070830,
+			202002111000, 202002130830, 202002140830, 202002190830, 202002191400, 202002270830, 202002280830, 202003031000,
+			202003060830, 202003110830, 202003120830, 202003151700, 202003170830, 202003171000, 202003181400, 202003181430,
+			202003260830, 202003270830, 202004030830, 202004071000, 202004081400, 202004090830, 202004100830, 202004150830,
+			202004290830, 202004291400, 202004291430, 202004300830, 202005080830, 202005120830, 202005130830, 202005150830,
+			202005151000, 202005201400, 202005280830, 202005290830, 202006050830, 202006091000, 202006100830, 202006101400,
+			202006101430, 202006110830, 202006160830, 202006250830, 202006260830, 202007011400, 202007020830, 202007071000,
+			202007100830, 202007140830, 202007160830, 202007291400, 202007291430, 202007300830, 202007310830, 202008070830,
+			202008101000, 202008110830, 202008120830, 202008140830, 202008191400, 202008270830, 202008280830, 202009040830,
+			202009091000, 202009100830, 202009110830, 202009160830, 202009161400, 202009161430, 202010020830, 202010061000,
+			202010071400, 202010130830, 202010140830, 202010160830, 202010290830, 202011051400, 202011051430, 202011060830,
+			202011101000, 202011120830, 202011130830, 202011170830, 202011251400, 202012040830, 202012091000, 202012100830,
+			202012110830, 202012160830, 202012161400, 202012161430, 202012220830, 202012230830, 202101061400, 202101080830,
+			202101121000, 202101130830, 202101150830, 202101150830, 202101271400, 202101271430, 202101280830, 202101290830,
+			202102050830, 202102091000, 202102100830, 202102170830, 202102170830, 202102171400, 202102250830, 202102260830,
+			202103050830, 202103100830, 202103111000, 202103120830, 202103160830, 202103171400, 202103171430, 202103250830,
+			202103260830, 202104020830, 202104061000, 202104071400, 202104090830, 202104130830, 202104150830, 202104281400,
+			202104281430, 202104290830, 202104300830, 202105070830, 202105111000, 202105120830, 202105130830, 202105140830,
+			202105191400, 202105270830, 202105280830, 202106040830, 202106081000, 202106100830, 202106150830, 202106150830,
+			202106161400, 202106161430, 202106240830, 202106250830, 202107020830, 202107071000, 202107071400, 202107130830,
+			202107140830, 202107160830, 202107281400, 202107281430, 202107290830, 202107300830, 202108060830, 202108091000,
+			202108110830, 202108120830, 202108170830, 202108181400, 202108270830, 202109030830, 202109081000, 202109100830,
+			202109140830, 202109160830, 202109221400, 202109221430, 202110080830, 202110121000, 202110130830, 202110131400,
+			202110140830, 202110150830, 202111031400, 202111031430, 202111050830, 202111090830, 202111100830, 202111121000,
+			202111160830, 202111240830, 202111241400, 202112030830, 202112081000, 202112100830, 202112140830, 202112150830,
+			202112151400, 202112151430, 202112220830, 202112230830, 202201041000, 202201051400, 202201070830, 202201120830,
+			202201130830, 202201140830, 202201261400, 202201261430, 202201270830, 202201280830, 202202011000, 202202040830,
+			202202100830, 202202150830, 202202160830, 202202161400, 202202240830, 202202250830, 202203040830, 202203091000,
+			202203100830, 202203150830, 202203160830, 202203161400, 202203161430, 202203291000, 202203300830, 202203310830,
+			202204010830, 202204061400, 202204120830, 202204130830, 202204140830, 202204280830, 202204290830, 202205031000,
+			202205041400, 202205041430, 202205060830, 202205110830, 202205120830, 202205170830, 202205251400, 202205260830,
+			202205270830, 202206011000, 202206030830, 202206100830, 202206140830, 202206150830, 202206151400, 202206151430,
+			202206290830, 202206300830, 202207061000, 202207061400, 202207080830, 202207130830, 202207140830, 202207150830,
+			202207271400, 202207271430, 202207280830, 202207290830, 202208021000, 202208050830, 202208100830, 202208110830,
+			202208170830, 202208171400, 202208250830, 202208260830, 202208301000, 202209020830, 202209130830, 202209140830,
+			202209150830, 202209211400, 202209211430, 202209290830, 202209300830, 202210041000, 202210070830, 202210120830,
+			202210121400, 202210130830, 202210140830, 202210280830, 202211011000, 202211021400, 202211021430, 202211040830,
+			202211100830, 202211150830, 202211160830, 202211231400, 202211300830, 202211301000, 202212020830, 202212090830,
+			202212130830, 202212141400, 202212141430, 202212150830, 202212220830, 202301041000, 202301041400, 202301060830,
+			202301120830, 202301180830, 202301180830, 202301260830, 202301270830, 202302011000, 202302011400, 202302011430,
+			202302030830, 202302140830, 202302150830, 202302160830, 202302221400, 202302230830, 202302240830, 202303081000,
+			202303100830, 202303140830, 202303150830, 202303150830, 202303221400, 202303221430, 202303300830, 202303310830,
+			202304041000, 202304070830, 202304120830, 202304121400, 202304130830, 202304140830, 202304270830, 202304280830,
+			202305021000, 202305031400, 202305031430, 202305050830, 202305100830, 202305110830, 202305160830, 202305241400,
+			202305250830, 202305260830, 202305311000, 202306020830, 202306130830, 202306140830, 202306141400, 202306141430,
+			202306150830, 202306290830, 202306300830, 202307051400, 202307061000, 202307070830, 202307120830, 202307130830,
+			202307180830, 202307261400, 202307261430, 202307270830, 202307280830, 202308011000, 202308040830, 202308100830,
+			202308110830, 202308150830, 202308161400, 202308291000, 202308300830, 202308310830, 202309010830, 202309130830,
+			202309140830, 202309140830, 202309201400, 202309201430, 202309280830, 202309290830, 202310031000, 202310060830,
+			202310110830, 202310111400, 202310120830, 202310170830, 202310260830, 202310270830, 202311011000, 202311011400,
+			202311011430, 202311030830, 202311140830, 202311150830, 202311150830, 202311211400, 202311300830, 202312051000,
+			202312080830, 202312120830, 202312130830, 202312131400, 202312131430, 202312140830, 202312210830, 202312220830,
+			202401031000, 202401031400, 202401050830, 202401110830, 202401120830, 202401170830, 202401250830, 202401260830,
+			202401301000, 202401311400, 202401311430, 202402020830, 202402130830, 202402150830, 202402160830, 202402211400,
+			202402280830, 202402290830, 202403061000, 202403080830, 202403120830, 202403140830, 202403140830, 202403201400,
+			202403201430, 202403280830, 202403290830, 202404021000, 202404050830, 202404100830, 202404101400, 202404110830,
+			202404150830, 202404250830, 202404260830, 202405011000, 202405011400, 202405011430, 202405030830, 202405140830,
+			202405150830, 202405150830, 202405221400, 202405300830, 202405310830, 202406041000, 202406070830, 202406120830,
+			202406121400, 202406121430, 202406130830, 202406180830, 202406270830, 202406280830, 202407021000, 202407031400,
+			202407050830, 202407110830, 202407120830, 202407160830, 202407250830, 202407260830, 202407301000, 202407311400,
+			202407311430, 202408020830, 202408130830, 202408140830, 202408150830, 202408211400, 202408290830, 202408300830,
+			202409041000, 202409060830, 202409110830, 202409120830, 202409170830, 202409181400, 202409181430, 202409260830,
+			202409270830, 202410011000, 202410040830, 202410091400, 202410100830, 202410110830, 202410170830, 202410291000,
+			202410310830, 202411010830, 202411071400, 202411071430, 202411130830, 202411140830, 202411150830, 202411261400,
+			202411270830, 202412031000, 202412060830, 202412110830, 202412120830, 202412170830, 202412181400, 202412181430,
+			202412190830, 202412200830, 202501071000, 202501081400, 202501100830, 202501140830, 202501150830, 202501160830,
+			202501291400, 202501291430, 202501300830, 202501310830, 202502041000, 202502070830, 202502120830, 202502130830,
+			202502140830, 202502191400, 202502270830, 202502280830, 202503070830, 202503111000, 202503120830, 202503130830,
+			202503170830, 202503191400, 202503191430, 202503270830, 202503280830, 202504011000, 202504040830, 202504091400,
+			202504100830, 202504110830, 202504160830, 202504291000, 202504300830, 202504301000, 202505020830, 202505071400,
+			202505071430, 202505130830, 202505150830, 202505150830, 202505281400, 202505290830, 202505300830, 202506031000,
+			202506060830, 202506110830, 202506120830, 202506170830, 202506181400, 202506181430, 202506260830, 202506270830,
+			202507011000, 202507030830, 202507091400, 202507150830, 202507160830, 202507170830, 202507291000, 202507300830,
+			202507301400, 202507301430, 202507310830, 202508010830, 202508120830, 202508140830, 202508150830, 202508201400,
+			202508280830, 202508290830, 202509031000, 202509050830, 202509100830, 202509110830, 202509160830, 202509171400,
+			202509171430, 202509250830, 202509260830, 202509301000, 202510030830, 202510081400, 202510150830, 202510160830,
+			202510291400, 202510291430, 202510300830, 202511041000, 202511070830, 202511130830, 202511140830, 202511191400,
+			202512021000, 202512050830, 202512100830, 202512101400, 202512101430, 202512110830, 202512301400, 202601071000,
+			202601090830, 202601130830, 202601140830, 202601281400, 202602051000, 202602060830, 202602110830, 202602120830,
+			202602181400, 202602200830, 202602200830, 202603060830, 202603110830, 202603120830, 202603130830, 202603130830,
+			202603131000, 202603181400, 202603181430, 202603311000, 202604030830, 202604081400, 202604090830, 202604090830,
+			202604100830, 202604140830, 202604291400, 202604291430, 202604300830, 202604300830, 202605051000, 202605080830,
+			202605120830, 202605130830, 202605140830, 202605201400, 202605280830, 202605280830, 202606021000, 202606050830,
+			202606100830, 202606110830, 202606170830, 202606171400, 202606171430, 202606250830, 202606250830, 202606301000,
+			202607020830, 202607081400, 202607140830, 202607150830, 202607160830, 202607291400, 202607291430, 202607300830,
+			202607300830, 202608041000, 202608070830, 202608120830, 202608130830, 202608140830, 202608191400, 202608260830,
+			202608260830, 202609011000, 202609040830, 202609100830, 202609110830, 202609160830, 202609161400, 202609161430,
+			202609291000, 202609300830, 202609300830, 202610020830, 202610071400, 202610140830, 202610150830, 202610150830,
+			202610281400, 202610290830, 202610290830, 202611031000, 202611060830, 202611100830, 202611130830, 202611170830,
+			202611181400, 202611250830, 202611250830, 202612011000, 202612040830, 202612091400, 202612100830, 202612150830,
+			202612160830, 202612230830, 202612230830, 202612301400, 202701080830, 202701130830, 202701140830, 202701150830,
+			202701271400, 202701280830, 202701280830, 202702050830, 202702110830, 202702120830, 202702170830, 202702171400,
+			202702250830, 202702250830, 202703050830, 202703100830, 202703120830, 202703160830, 202703171400, 202703310830,
+			202703310830, 202704020830, 202704071400, 202704130830, 202704140830, 202704160830, 202704281400, 202704290830,
+			202704290830, 202705070830, 202705120830, 202705130830, 202705140830, 202705191400, 202705270830, 202705270830,
+			202706040830, 202706091400, 202706100830, 202706110830, 202706160830, 202706250830, 202706250830, 202706301400,
+			202707020830, 202707140830, 202707150830, 202707160830, 202707281400, 202707290830, 202707290830, 202708060830,
+			202708100830, 202708110830, 202708160830, 202708181400, 202708250830, 202708250830, 202709030830, 202709100830,
+			202709140830, 202709151400, 202709160830, 202709300830, 202709300830, 202710061400, 202710080830, 202710140830,
+			202710150830, 202710150830, 202710271400, 202710280830, 202710280830, 202711050830, 202711100830, 202711120830,
+			202711160830, 202711171400, 202711240830, 202711240830, 202712030830, 202712081400, 202712081430, 202712100830,
+			202712150830, 202712150830, 202712220830, 202712220830, 202712291400,
+		};
+		static readonly byte[] s_kind = {
+			6, 7, 5, 13, 4, 1, 10, 6, 7, 13, 5, 3, 4, 11, 6, 5, 13, 4, 1, 2, 7, 12, 9, 6,
+			7, 3, 5, 13, 4, 1, 10, 9, 6, 7, 5, 13, 4, 3, 11, 9, 6, 7, 13, 5, 1, 2, 4, 12,
+			9, 3, 6, 7, 5, 4, 13, 1, 10, 6, 7, 5, 13, 4, 3, 6, 7, 5, 13, 4, 1, 2, 9, 6,
+			7, 3, 5, 13, 4, 10, 9, 1, 6, 7, 13, 5, 4, 3, 9, 6, 7, 5, 13, 1, 2, 4, 12, 3,
+			6, 7, 5, 13, 4, 10, 9, 1, 6, 7, 5, 4, 13, 3, 11, 6, 5, 4, 13, 1, 2, 7, 12, 3,
+			6, 7, 5, 4, 13, 10, 1, 6, 7, 5, 4, 13, 3, 11, 6, 7, 5, 4, 13, 1, 2, 12, 9, 3,
+			6, 7, 5, 4, 13, 1, 10, 6, 7, 5, 4, 13, 3, 6, 7, 5, 4, 13, 1, 2, 12, 9, 6, 7,
+			3, 5, 4, 13, 9, 1, 6, 7, 5, 4, 13, 3, 9, 6, 7, 5, 4, 1, 2, 13, 12, 9, 3, 6,
+			7, 5, 4, 13, 10, 9, 1, 6, 7, 4, 13, 5, 3, 11, 6, 4, 5, 13, 7, 1, 2, 12, 6, 5,
+			4, 3, 7, 13, 10, 9, 1, 6, 7, 5, 4, 13, 3, 11, 9, 6, 7, 4, 5, 1, 2, 13, 12, 9,
+			3, 6, 7, 5, 4, 13, 1, 6, 7, 5, 4, 13, 3, 11, 9, 6, 7, 5, 4, 13, 1, 2, 12, 9,
+			6, 5, 4, 13, 7, 3, 10, 9, 6, 7, 1, 5, 4, 13, 11, 9, 3, 6, 7, 5, 4, 13, 1, 2,
+			12, 6, 7, 3, 4, 5, 13, 10, 1, 2, 6, 7, 4, 5, 3, 11, 6, 4, 5, 7, 1, 2, 12, 6,
+			7, 4, 3, 5, 10, 9, 1, 2, 6, 7, 5, 4, 13, 3, 11, 9, 6, 7, 5, 4, 13, 1, 2, 12,
+			9, 6, 7, 3, 4, 5, 13, 10, 9, 1, 2, 6, 7, 5, 4, 13, 3, 11, 9, 6, 7, 5, 4, 13,
+			1, 2, 12, 9, 6, 5, 7, 3, 4, 13, 10, 1, 2, 9, 6, 7, 4, 5, 13, 3, 11, 6, 4, 1,
+			2, 5, 13, 7, 12, 3, 6, 4, 5, 13, 7, 1, 2, 10, 9, 6, 7, 4, 13, 5, 3, 11, 9, 1,
+			6, 4, 5, 1, 13, 7, 1, 2, 12, 9, 6, 7, 3, 5, 4, 13, 10, 1, 2, 9, 6, 4, 5, 13,
+			7, 3, 11, 9, 6, 7, 4, 1, 2, 5, 13, 12, 9, 3, 6, 7, 5, 4, 13, 1, 2, 10, 9, 6,
+			7, 5, 4, 13, 3, 11, 9, 6, 7, 5, 4, 13, 1, 2, 6, 7, 3, 4, 5, 13, 10, 1, 2, 6,
+			7, 4, 5, 13, 3, 6, 7, 4, 5, 13, 1, 2, 12, 9, 3, 6, 7, 4, 5, 13, 1, 2, 10, 9,
+			6, 7, 4, 5, 13, 3, 11, 9, 6, 4, 7, 5, 13, 1, 2, 12, 9, 6, 7, 3, 5, 4, 13, 1,
+			2, 10, 9, 6, 7, 4, 5, 13, 3, 11, 9, 6, 7, 4, 5, 13, 1, 2, 12, 9, 6, 7, 3, 4,
+			5, 13, 1, 2, 10, 9, 6, 7, 4, 5, 13, 3, 9, 6, 7, 5, 4, 13, 1, 2, 6, 7, 4, 3,
+			5, 13, 1, 2, 6, 5, 4, 7, 13, 11, 3, 6, 7, 4, 5, 13, 1, 2, 12, 9, 7, 3, 6, 4,
+			5, 13, 1, 2, 10, 9, 7, 6, 4, 5, 13, 3, 11, 9, 6, 7, 4, 5, 13, 1, 2, 7, 12, 9,
+			6, 3, 4, 5, 13, 10, 9, 7, 1, 2, 6, 4, 5, 13, 3, 11, 9, 7, 6, 4, 5, 13, 1, 2,
+			12, 9, 7, 3, 6, 4, 5, 13, 1, 2, 10, 9, 7, 6, 4, 5, 13, 3, 11, 9, 7, 6, 4, 5,
+			13, 1, 2, 12, 9, 7, 6, 5, 3, 4, 13, 9, 7, 1, 2, 6, 4, 5, 13, 3, 11, 7, 6, 5,
+			4, 1, 2, 13, 12, 7, 3, 6, 4, 5, 13, 10, 9, 7, 1, 2, 6, 4, 13, 5, 3, 11, 9, 7,
+			6, 4, 5, 13, 1, 2, 12, 9, 7, 6, 4, 3, 5, 13, 10, 9, 7, 1, 2, 6, 4, 5, 13, 3,
+			11, 9, 7, 6, 4, 5, 1, 2, 13, 12, 9, 3, 7, 6, 4, 5, 13, 1, 2, 10, 9, 7, 6, 4,
+			5, 13, 3, 7, 11, 9, 6, 4, 5, 13, 1, 2, 12, 9, 7, 6, 5, 3, 4, 13, 10, 9, 7, 1,
+			2, 6, 4, 5, 13, 3, 9, 7, 6, 4, 5, 1, 2, 13, 12, 9, 7, 3, 6, 4, 5, 13, 10, 9,
+			7, 1, 2, 6, 4, 13, 5, 3, 11, 9, 7, 6, 4, 5, 13, 1, 2, 12, 9, 7, 6, 4, 3, 5,
+			13, 10, 9, 7, 1, 2, 6, 5, 4, 13, 3, 11, 9, 7, 6, 4, 1, 2, 5, 13, 12, 9, 7, 3,
+			6, 4, 5, 13, 10, 9, 7, 1, 2, 6, 5, 4, 13, 3, 11, 9, 7, 6, 4, 5, 13, 1, 2, 12,
+			9, 7, 6, 3, 4, 5, 13, 7, 9, 6, 1, 2, 4, 5, 13, 3, 11, 7, 6, 4, 5, 13, 1, 2,
+			12, 9, 7, 3, 6, 5, 4, 13, 1, 2, 10, 9, 7, 6, 4, 5, 13, 3, 11, 9, 6, 7, 4, 5,
+			13, 1, 2, 12, 9, 7, 6, 3, 4, 5, 13, 7, 10, 9, 6, 1, 2, 4, 5, 13, 3, 11, 9, 7,
+			6, 4, 5, 13, 1, 2, 12, 9, 7, 6, 3, 4, 5, 13, 7, 10, 1, 2, 9, 6, 4, 5, 13, 3,
+			11, 9, 7, 6, 5, 4, 13, 1, 2, 12, 9, 7, 6, 3, 4, 5, 1, 2, 10, 7, 6, 4, 5, 3,
+			7, 6, 4, 1, 2, 5, 3, 7, 6, 4, 5, 1, 7, 6, 4, 5, 3, 9, 10, 6, 4, 5, 9, 11,
+			7, 1, 2, 7, 6, 3, 9, 12, 4, 5, 1, 2, 9, 10, 7, 6, 4, 5, 13, 3, 9, 11, 7, 6,
+			4, 5, 13, 1, 2, 9, 12, 7, 6, 3, 4, 5, 13, 1, 2, 9, 10, 7, 6, 4, 5, 13, 3, 9,
+			11, 7, 6, 5, 4, 13, 1, 2, 7, 9, 12, 6, 3, 4, 5, 13, 1, 9, 10, 7, 6, 4, 5, 13,
+			3, 9, 11, 7, 6, 1, 4, 5, 13, 9, 12, 3, 6, 4, 5, 13, 1, 9, 10, 6, 4, 5, 13, 3,
+			9, 11, 6, 4, 5, 13, 1, 9, 12, 6, 3, 4, 5, 13, 1, 9, 10, 6, 4, 5, 13, 3, 9, 11,
+			6, 1, 4, 5, 13, 9, 12, 3, 6, 4, 5, 13, 1, 9, 10, 6, 5, 4, 13, 3, 9, 11, 6, 5,
+			4, 1, 13, 9, 12, 3, 6, 4, 5, 13, 1, 9, 10, 6, 4, 5, 13, 3, 9, 11, 6, 1, 2, 4,
+			5, 13, 9, 12, 3,
+		};
+		static readonly ushort[] s_flags = {
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+			0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			0, 0, 0, 0, 0,
+		};
+		static readonly string[] s_ref = {
+			"2015-12", "2015-11", "2015-12", "2015-12", "2015-12", "2016-01-27", "2015Q4", "2016-01",
+			"2015-12", "2016-01", "2016-01", "2016-01-27", "2016-01", "2015Q4", "2016-02", "2016-02",
+			"2016-02", "2016-02", "2016-03-16", "2016-03-16", "2016-01", "2015Q4", "2016-02", "2016-03",
+			"2016-02", "2016-03-16", "2016-03", "2016-03", "2016-03", "2016-04-27", "2016Q1", "2016-03",
+			"2016-04", "2016-03", "2016-04", "2016-04", "2016-04", "2016-04-27", "2016Q1", "2016-04",
+			"2016-05", "2016-04", "2016-05", "2016-05", "2016-06-15", "2016-06-15", "2016-05", "2016Q1",
+			"2016-05", "2016-06-15", "2016-06", "2016-05", "2016-06", "2016-06", "2016-06", "2016-07-27",
+			"2016Q2", "2016-07", "2016-06", "2016-07", "2016-07", "2016-07", "2016-07-27", "2016-08",
+			"2016-07", "2016-08", "2016-08", "2016-08", "2016-09-21", "2016-09-21", "2016-08", "2016-09",
+			"2016-08", "2016-09-21", "2016-09", "2016-09", "2016-09", "2016Q3", "2016-09", "2016-11-02",
+			"2016-10", "2016-09", "2016-10", "2016-10", "2016-10", "2016-11-02", "2016-10", "2016-11",
+			"2016-10", "2016-11", "2016-11", "2016-12-14", "2016-12-14", "2016-11", "2016Q3", "2016-12-14",
+			"2016-12", "2016-11", "2016-12", "2016-12", "2016-12", "2016Q4", "2016-12", "2017-02-01",
+			"2017-01", "2016-12", "2017-01", "2017-01", "2017-01", "2017-02-01", "2016Q4", "2017-02",
+			"2017-02", "2017-02", "2017-02", "2017-03-15", "2017-03-15", "2017-01", "2016Q4", "2017-03-15",
+			"2017-03", "2017-02", "2017-03", "2017-03", "2017-03", "2017Q1", "2017-05-03", "2017-04",
+			"2017-03", "2017-04", "2017-04", "2017-04", "2017-05-03", "2017Q1", "2017-05", "2017-04",
+			"2017-05", "2017-05", "2017-05", "2017-06-14", "2017-06-14", "2017Q1", "2017-05", "2017-06-14",
+			"2017-06", "2017-05", "2017-06", "2017-06", "2017-06", "2017-07-26", "2017Q2", "2017-07",
+			"2017-06", "2017-07", "2017-07", "2017-07", "2017-07-26", "2017-08", "2017-07", "2017-08",
+			"2017-08", "2017-08", "2017-09-20", "2017-09-20", "2017Q2", "2017-08", "2017-09", "2017-08",
+			"2017-09-20", "2017-09", "2017-09", "2017-09", "2017-09", "2017-11-01", "2017-10", "2017-09",
+			"2017-10", "2017-10", "2017-10", "2017-11-01", "2017-10", "2017-11", "2017-10", "2017-11",
+			"2017-11", "2017-12-13", "2017-12-13", "2017-11", "2017Q3", "2017-11", "2017-12-13", "2017-12",
+			"2017-11", "2017-12", "2017-12", "2017-12", "2017Q4", "2017-12", "2018-01-31", "2018-01",
+			"2017-12", "2018-01", "2018-01", "2018-01", "2018-01-31", "2017Q4", "2018-02", "2018-02",
+			"2018-02", "2018-02", "2018-01", "2018-03-21", "2018-03-21", "2017Q4", "2018-03", "2018-03",
+			"2018-03", "2018-03-21", "2018-02", "2018-03", "2018Q1", "2018-03", "2018-05-02", "2018-04",
+			"2018-03", "2018-04", "2018-04", "2018-04", "2018-05-02", "2018Q1", "2018-04", "2018-05",
+			"2018-04", "2018-05", "2018-05", "2018-06-13", "2018-06-13", "2018-05", "2018Q1", "2018-05",
+			"2018-06-13", "2018-06", "2018-05", "2018-06", "2018-06", "2018-06", "2018-08-01", "2018-07",
+			"2018-06", "2018-07", "2018-07", "2018-07", "2018-08-01", "2018Q2", "2018-07", "2018-08",
+			"2018-07", "2018-08", "2018-08", "2018-08", "2018-09-26", "2018-09-26", "2018Q2", "2018-08",
+			"2018-09", "2018-09", "2018-09", "2018-09", "2018-08", "2018-09-26", "2018Q3", "2018-09",
+			"2018-10", "2018-09", "2018-11-08", "2018-10", "2018-10", "2018-10", "2018Q3", "2018-10",
+			"2018-11-08", "2018-11", "2018-10", "2018-11", "2018-11", "2018-11", "2018-12-19", "2018-12-19",
+			"2018Q3", "2018-12", "2018-11", "2018-12-19", "2018-12", "2018-12", "2018-12", "2018Q4",
+			"2019-01-30", "2019-01-30", "2019-01", "2018-12", "2019-01", "2019-01", "2019-01-30", "2018Q4",
+			"2019-02", "2019-02", "2019-02", "2019-01", "2019-03-20", "2019-03-20", "2018Q4", "2019-03",
+			"2019-02", "2019-03", "2019-03-20", "2019-03", "2019Q1", "2019-03", "2019-05-01", "2019-05-01",
+			"2019-04", "2019-03", "2019-04", "2019-04", "2019-04", "2019-05-01", "2019Q1", "2019-04",
+			"2019-05", "2019-04", "2019-05", "2019-05", "2019-05", "2019-06-19", "2019-06-19", "2019Q1",
+			"2019-05", "2019-06", "2019-05", "2019-06-19", "2019-06", "2019-06", "2019-06", "2019Q2",
+			"2019-06", "2019-07-31", "2019-07-31", "2019-07", "2019-06", "2019-07", "2019-07", "2019-07",
+			"2019-07-31", "2019Q2", "2019-07", "2019-08", "2019-07", "2019-08", "2019-08", "2019-08",
+			"2019-09-18", "2019-09-18", "2019Q2", "2019-08", "2019-09", "2019-09", "2019-08", "2019-09-18",
+			"2019-09", "2019-09", "2019Q3", "2019-10-30", "2019-10-30", "2019-09", "2019-10", "2019-09",
+			"2019-10", "2019-10", "2019-10", "2019-10-30", "2019Q3", "2019-11", "2019-11", "2019-12-11",
+			"2019-12-11", "2019-11", "2019-11", "2019-10", "2019Q3", "2019-12-11", "2019-12", "2019-12",
+			"2019-12", "2019-12", "2019-11", "2020-01-29", "2020-01-29", "2019Q4", "2019-12", "2020-01",
+			"2019-12", "2020-01", "2020-01", "2020-01", "2020-01-29", "2019Q4", "2020-01", "2020-03-03",
+			"2020-02", "2020-02", "2020-02", "2020-03-15", "2020-02", "2020-01", "2020-03-18", "2020-03-18",
+			"2019Q4", "2020-02", "2020-03", "2020-02", "2020-03-15", "2020-03", "2020-03", "2020-03",
+			"2020Q1", "2020-04-29", "2020-04-29", "2020-03", "2020-04", "2020-04", "2020-04", "2020-04",
+			"2020-03", "2020-04-29", "2020Q1", "2020-04", "2020-05", "2020-04", "2020-05", "2020-06-10",
+			"2020-06-10", "2020-05", "2020-05", "2020Q1", "2020-05", "2020-06-10", "2020-06", "2020-05",
+			"2020-06", "2020-06", "2020-06", "2020-07-29", "2020-07-29", "2020Q2", "2020-06", "2020-07",
+			"2020-06", "2020-07", "2020-07", "2020-07", "2020-07-29", "2020Q2", "2020-07", "2020-08",
+			"2020-07", "2020-08", "2020-08", "2020-08", "2020-09-16", "2020-09-16", "2020-09", "2020-08",
+			"2020-09-16", "2020-09", "2020-09", "2020-09", "2020Q3", "2020-11-05", "2020-11-05", "2020-10",
+			"2020-09", "2020-10", "2020-10", "2020-10", "2020-11-05", "2020-11", "2020-10", "2020-11",
+			"2020-11", "2020-11", "2020-12-16", "2020-12-16", "2020Q3", "2020-11", "2020-12-16", "2020-12",
+			"2020-11", "2020-12", "2020-12", "2020-12", "2021-01-27", "2021-01-27", "2020Q4", "2020-12",
+			"2021-01", "2020-12", "2021-01", "2021-01", "2021-01", "2021-01-27", "2020Q4", "2021-01",
+			"2021-02", "2021-02", "2021-01", "2021-02", "2021-02", "2021-03-17", "2021-03-17", "2020Q4",
+			"2021-02", "2021-03", "2021-02", "2021-03-17", "2021-03", "2021-03", "2021-03", "2021-04-28",
+			"2021-04-28", "2021Q1", "2021-03", "2021-04", "2021-03", "2021-04", "2021-04", "2021-04",
+			"2021-04-28", "2021Q1", "2021-04", "2021-05", "2021-04", "2021-05", "2021-05", "2021-05",
+			"2021-06-16", "2021-06-16", "2021Q1", "2021-05", "2021-06", "2021-05", "2021-06-16", "2021-06",
+			"2021-06", "2021-06", "2021-07-28", "2021-07-28", "2021Q2", "2021-06", "2021-07", "2021-06",
+			"2021-07", "2021-07", "2021-07", "2021-07-28", "2021-07", "2021-08", "2021-07", "2021-08",
+			"2021-08", "2021-08", "2021-09-22", "2021-09-22", "2021-09", "2021-08", "2021-09", "2021-09-22",
+			"2021-09", "2021-09", "2021-11-03", "2021-11-03", "2021-10", "2021-10", "2021-10", "2021-09",
+			"2021-10", "2021Q3", "2021-11-03", "2021-11", "2021-10", "2021-11", "2021-11", "2021-11",
+			"2021-12-15", "2021-12-15", "2021Q3", "2021-11", "2021-11", "2021-12-15", "2021-12", "2021-12",
+			"2021-12", "2021-12", "2022-01-26", "2022-01-26", "2021Q4", "2021-12", "2021-12", "2022-01",
+			"2022-01", "2022-01", "2022-01", "2022-01-26", "2021Q4", "2022-01", "2022-02", "2022-01",
+			"2022-02", "2022-02", "2022-02", "2022-03-16", "2022-03-16", "2022-02", "2021Q4", "2022-02",
+			"2022-03", "2022-03-16", "2022-03", "2022-03", "2022-03", "2022Q1", "2022-03", "2022-03",
+			"2022-05-04", "2022-05-04", "2022-04", "2022-04", "2022-04", "2022-04", "2022-05-04", "2022Q1",
+			"2022-04", "2022-04", "2022-05", "2022-05", "2022-05", "2022-05", "2022-06-15", "2022-06-15",
+			"2022Q1", "2022-05", "2022-05", "2022-06-15", "2022-06", "2022-06", "2022-06", "2022-06",
+			"2022-07-27", "2022-07-27", "2022Q2", "2022-06", "2022-06", "2022-07", "2022-07", "2022-07",
+			"2022-07", "2022-07-27", "2022Q2", "2022-07", "2022-07", "2022-08", "2022-08", "2022-08",
+			"2022-08", "2022-09-21", "2022-09-21", "2022Q2", "2022-08", "2022-08", "2022-09", "2022-09",
+			"2022-09-21", "2022-09", "2022-09", "2022-09", "2022-09", "2022-11-02", "2022-11-02", "2022-10",
+			"2022-10", "2022-10", "2022-10", "2022-11-02", "2022Q3", "2022-10", "2022-11", "2022-11",
+			"2022-11", "2022-12-14", "2022-12-14", "2022-11", "2022Q3", "2022-11", "2022-12-14", "2022-12",
+			"2022-12", "2022-12", "2022-12", "2022Q4", "2022-12", "2022-12", "2023-02-01", "2023-02-01",
+			"2023-01", "2023-01", "2023-01", "2023-01", "2023-02-01", "2022Q4", "2023-01", "2023-01",
+			"2023-02", "2023-02", "2023-02", "2023-02", "2023-03-22", "2023-03-22", "2022Q4", "2023-02",
+			"2023-02", "2023-03", "2023-03", "2023-03-22", "2023-03", "2023-03", "2023Q1", "2023-03",
+			"2023-03", "2023-05-03", "2023-05-03", "2023-04", "2023-04", "2023-04", "2023-04", "2023-05-03",
+			"2023Q1", "2023-04", "2023-04", "2023-05", "2023-05", "2023-05", "2023-06-14", "2023-06-14",
+			"2023-05", "2023Q1", "2023-05", "2023-06-14", "2023-05", "2023-06", "2023-06", "2023-06",
+			"2023-06", "2023-07-26", "2023-07-26", "2023Q2", "2023-06", "2023-06", "2023-07", "2023-07",
+			"2023-07", "2023-07", "2023-07-26", "2023-07", "2023Q2", "2023-07", "2023-08", "2023-08",
+			"2023-08", "2023-08", "2023-09-20", "2023-09-20", "2023Q2", "2023-08", "2023-08", "2023-09",
+			"2023-09", "2023-09-20", "2023-09", "2023-09", "2023Q3", "2023-09", "2023-09", "2023-11-01",
+			"2023-11-01", "2023-10", "2023-10", "2023-10", "2023-10", "2023-11-01", "2023-10", "2023-10",
+			"2023-11", "2023-11", "2023-11", "2023-12-13", "2023-12-13", "2023-11", "2023Q3", "2023-11",
+			"2023-11", "2023-12-13", "2023-12", "2023-12", "2023-12", "2023-12", "2023Q4", "2023-12",
+			"2023-12", "2024-01-31", "2024-01-31", "2024-01", "2024-01", "2024-01", "2024-01", "2024-01-31",
+			"2023Q4", "2024-01", "2024-01", "2024-02", "2024-02", "2024-02", "2024-02", "2024-03-20",
+			"2024-03-20", "2023Q4", "2024-02", "2024-02", "2024-03", "2024-03", "2024-03-20", "2024-03",
+			"2024-03", "2024Q1", "2024-03", "2024-03", "2024-05-01", "2024-05-01", "2024-04", "2024-04",
+			"2024-04", "2024-04", "2024-05-01", "2024Q1", "2024-04", "2024-04", "2024-05", "2024-05",
+			"2024-06-12", "2024-06-12", "2024-05", "2024-05", "2024Q1", "2024-05", "2024-05", "2024-06-12",
+			"2024-06", "2024-06", "2024-06", "2024-06", "2024Q2", "2024-06", "2024-06", "2024-07-31",
+			"2024-07-31", "2024-07", "2024-07", "2024-07", "2024-07", "2024-07-31", "2024Q2", "2024-07",
+			"2024-07", "2024-08", "2024-08", "2024-08", "2024-08", "2024-09-18", "2024-09-18", "2024Q2",
+			"2024-08", "2024-08", "2024-09", "2024-09-18", "2024-09", "2024-09", "2024-09", "2024-09",
+			"2024-09", "2024-10", "2024-11-07", "2024-11-07", "2024-10", "2024-10", "2024-10", "2024-11-07",
+			"2024Q3", "2024-10", "2024-11", "2024-11", "2024-11", "2024-11", "2024-12-18", "2024-12-18",
+			"2024Q3", "2024-11", "2024-11", "2024-12-18", "2024-12", "2024-12", "2024-12", "2024-12",
+			"2025-01-29", "2025-01-29", "2024Q4", "2024-12", "2024-12", "2025-01", "2025-01", "2025-01",
+			"2025-01", "2025-01-29", "2024Q4", "2025-01", "2025-02", "2025-01", "2025-02", "2025-02",
+			"2025-02", "2025-03-19", "2025-03-19", "2024Q4", "2025-02", "2025-02", "2025-03", "2025-03-19",
+			"2025-03", "2025-03", "2025-03", "2025-03", "2025Q1", "2025-03", "2025-04", "2025-05-07",
+			"2025-05-07", "2025-04", "2025-04", "2025-04", "2025-05-07", "2025Q1", "2025-04", "2025-04",
+			"2025-05", "2025-05", "2025-05", "2025-05", "2025-06-18", "2025-06-18", "2025Q1", "2025-05",
+			"2025-05", "2025-06", "2025-06-18", "2025-06", "2025-06", "2025-06", "2025-06", "2025Q2",
+			"2025-07-30", "2025-07-30", "2025-06", "2025-07", "2025-07", "2025-07", "2025-07", "2025-07-30",
+			"2025Q2", "2025-07", "2025-07", "2025-08", "2025-08", "2025-08", "2025-08", "2025-09-17",
+			"2025-09-17", "2025Q2", "2025-08", "2025-08", "2025-09", "2025-09-17", "2025-09", "2025-09",
+			"2025-10-29", "2025-10-29", "2025Q3", "2025-09", "2025-10", "2025-10", "2025-10", "2025-10-29",
+			"2025-10", "2025-11", "2025-11", "2025-12-10", "2025-12-10", "2025-11", "2025-12-10", "2025-11",
+			"2025-12", "2025-12", "2025-12", "2026-01-28", "2025-12", "2026-01", "2026-01", "2026-01",
+			"2026-01-28", "2025-12", "2025Q4", "2026-02", "2026-02", "2026-02", "2026-01", "2025Q4",
+			"2026-01", "2026-03-18", "2026-03-18", "2026-02", "2026-03", "2026-03-18", "2026-02", "2025Q4",
+			"2026-03", "2026-03", "2026-04-29", "2026-04-29", "2026-03", "2026Q1", "2026-03", "2026-04",
+			"2026-04", "2026-04", "2026-04", "2026-04-29", "2026-04", "2026Q1", "2026-04", "2026-05",
+			"2026-05", "2026-05", "2026-05", "2026-06-17", "2026-06-17", "2026-05", "2026Q1", "2026-05",
+			"2026-06", "2026-06-17", "2026-06", "2026-06", "2026-06", "2026-07-29", "2026-07-29", "2026-06",
+			"2026Q2", "2026-06", "2026-07", "2026-07", "2026-07", "2026-07", "2026-07-29", "2026-07",
+			"2026Q2", "2026-07", "2026-08", "2026-08", "2026-08", "2026-08", "2026-09-16", "2026-09-16",
+			"2026-08", "2026-08", "2026Q2", "2026-09", "2026-09-16", "2026-09", "2026-09", "2026-09",
+			"2026-10-28", "2026-09", "2026Q3", "2026-09", "2026-10", "2026-10", "2026-10", "2026-10",
+			"2026-10-28", "2026-10", "2026Q3", "2026-10", "2026-11", "2026-12-09", "2026-11", "2026-11",
+			"2026-11", "2026-11", "2026Q3", "2026-12-09", "2026-12", "2026-12", "2026-12", "2026-12",
+			"2027-01-27", "2026-12", "2026Q4", "2027-01", "2027-01", "2027-01", "2027-01", "2027-01-27",
+			"2027-01", "2026Q4", "2027-02", "2027-02", "2027-02", "2027-02", "2027-03-17", "2027-02",
+			"2026Q4", "2027-03", "2027-03-17", "2027-03", "2027-03", "2027-03", "2027-04-28", "2027-03",
+			"2027Q1", "2027-04", "2027-04", "2027-04", "2027-04", "2027-04-28", "2027-04", "2027Q1",
+			"2027-05", "2027-06-09", "2027-05", "2027-05", "2027-05", "2027-05", "2027Q1", "2027-06-09",
+			"2027-06", "2027-06", "2027-06", "2027-06", "2027-07-28", "2027-06", "2027Q2", "2027-07",
+			"2027-07", "2027-07", "2027-07", "2027-07-28", "2027-07", "2027Q2", "2027-08", "2027-08",
+			"2027-08", "2027-09-15", "2027-08", "2027-08", "2027Q2", "2027-09-15", "2027-09", "2027-09",
+			"2027-09", "2027-09", "2027-10-27", "2027-09", "2027Q3", "2027-10", "2027-10", "2027-10",
+			"2027-10", "2027-10-27", "2027-10", "2027Q3", "2027-11", "2027-12-08", "2027-12-08", "2027-11",
+			"2027-11", "2027-11", "2027-11", "2027Q3", "2027-12-08",
+		};
+		/// <summary>EV-4.6 coverage holes from refused items: kind, first ET minute, last ET minute (yyyyMMddHHmm).</summary>
+		static readonly long[] s_coverageHoles = {
+			9, 201602010000, 201602292359, 9, 201608010000, 201608312359, 10, 201608010000, 201608312359, 11, 201608010000, 201608312359,
+			12, 201608010000, 201608312359, 10, 201609010000, 201609302359, 11, 201609010000, 201609302359, 12, 201609010000, 201609302359,
+			10, 201611010000, 201611302359, 11, 201611010000, 201611302359, 12, 201611010000, 201611302359, 9, 201612220000, 201612222359,
+			9, 201703010000, 201703312359, 9, 201705010000, 201705312359, 9, 201708010000, 201708312359, 10, 201708010000, 201708312359,
+			11, 201708010000, 201708312359, 12, 201708010000, 201708312359, 10, 201710010000, 201710312359, 11, 201710010000, 201710312359,
+			12, 201710010000, 201710312359, 10, 201711010000, 201711302359, 11, 201711010000, 201711302359, 12, 201711010000, 201711302359,
+			9, 201803010000, 201803312359, 10, 201807010000, 201807312359, 11, 201807010000, 201807312359, 12, 201807010000, 201807312359,
+			9, 201807310000, 201807312359, 9, 201812210000, 201812212359, 11, 201901010000, 201901312359, 12, 201901010000, 201901312359,
+			9, 201903010000, 201903312359, 1, 201910110000, 201910112359, 9, 201911270000, 201911272359, 9, 201912200000, 201912202359,
+			2, 202003030000, 202003032359, 2, 202003150000, 202003152359, 10, 202009010000, 202009302359, 11, 202009010000, 202009302359,
+			12, 202009010000, 202009302359, 9, 202010010000, 202010312359, 10, 202011010000, 202011302359, 11, 202011010000, 202011302359,
+			12, 202011010000, 202011302359, 9, 202011250000, 202011252359, 10, 202108010000, 202108312359, 11, 202108010000, 202108312359,
+			12, 202108010000, 202108312359, 10, 202109010000, 202109302359, 11, 202109010000, 202109302359, 12, 202109010000, 202109302359,
+			9, 202110010000, 202110312359, 10, 202110010000, 202110312359, 11, 202110010000, 202110312359, 12, 202110010000, 202110312359,
+			9, 202111240000, 202111242359, 10, 202210010000, 202210312359, 11, 202210010000, 202210312359, 12, 202210010000, 202210312359,
+			9, 202212010000, 202212312359, 10, 202311010000, 202311302359, 11, 202311010000, 202311302359, 12, 202311010000, 202311302359,
+			10, 202410010000, 202410312359, 11, 202410010000, 202410312359, 12, 202410010000, 202410312359, 9, 202411270000, 202411272359,
+			10, 202601220000, 202601222359, 11, 202601220000, 202601222359, 12, 202601220000, 202601222359, 2, 202610280000, 202610282359,
+			2, 202612090000, 202612092359, 2, 202701270000, 202701272359, 2, 202703170000, 202703172359, 2, 202704280000, 202704282359,
+			2, 202706090000, 202706092359, 2, 202707280000, 202707282359, 2, 202709150000, 202709152359, 2, 202710270000, 202710272359,
+		};
+		static readonly string[] s_coverageHoleWhy = {
+			"PCE 2016-02: ALFRED lists 2 dates (2016-02-01,2016-02-26)",
+			"PCE 2016-08: ALFRED lists 2 dates (2016-08-02,2016-08-29)",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"PCE 2016-12-22: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2017-03: ALFRED lists 2 dates (2017-03-01,2017-03-31)",
+			"PCE 2017-05: ALFRED lists 2 dates (2017-05-01,2017-05-30)",
+			"PCE 2017-08: ALFRED lists 2 dates (2017-08-01,2017-08-31)",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"PCE 2018-03: ALFRED lists 2 dates (2018-03-01,2018-03-29)",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"PCE 2018-07-31: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2018-12-21: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2019-01: no ALFRED date in the month",
+			"GDP 2019-01: no ALFRED date in the month",
+			"PCE 2019-03: ALFRED lists 2 dates (2019-03-01,2019-03-29)",
+			"FomcDecision 2019-10-04 (unscheduled): statement released 2019-10-11, no time on the page; not a rate decision",
+			"PCE 2019-11-27: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2019-12-20: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"FomcPress 2020-03-03 (unscheduled): fomcpresconf page carries no time",
+			"FomcPress 2020-03-15 (unscheduled): fomcpresconf page carries no time",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"PCE 2020-10: ALFRED lists 2 dates (2020-10-01,2020-10-30)",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"PCE 2020-11-25: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"PCE 2021-10: ALFRED lists 2 dates (2021-10-01,2021-10-29)",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"PCE 2021-11-24: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"PCE 2022-12: ALFRED lists 2 dates (2022-12-01,2022-12-23)",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"PCE 2024-11-27: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"FomcPress 2026-10-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2026-12-09: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-01-27: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-03-17: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-04-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-06-09: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-07-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-09-15: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-10-27: future meeting: the calendar page lists no press conference yet (no source)",
+		};
+		static readonly EventCorrection[] s_corrections = {
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2018-12", originalEt = 201901160830, actualEt = 201902140830, announcedEt = 201901302359, canceledSinceEt = 201901302359, flags = EEventFlags.None,
+				source = "https://www.census.gov/newsroom/press-releases/2019/revised-indicator-calendar.html (first issued 2019-01-30)" },
+			new EventCorrection { kind = EEventKind.GdpAdvance, refPeriod = "2018Q4", originalEt = 201901300830, actualEt = 201902280830, announcedEt = 201902062359, canceledSinceEt = 201902062359, flags = EEventFlags.None,
+				source = "https://www.bea.gov/news/blog/2019-02-06/new-dates-set-gdp-personal-income-and-international-trade; https://www.bea.gov/news/2019/initial-gross-domestic-product-4th-quarter-and-annual-2018" },
+			new EventCorrection { kind = EEventKind.GdpSecond, refPeriod = "2018Q4", originalEt = 201902280830, actualEt = 0, announcedEt = 201902062359, canceledSinceEt = 201902062359, flags = EEventFlags.None,
+				source = "https://www.bea.gov/news/blog/2019-02-06/new-dates-set-gdp-personal-income-and-international-trade (second estimate replaced by the initial estimate)" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-01", originalEt = 0, actualEt = 201903110830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-02", originalEt = 0, actualEt = 201904010830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-03", originalEt = 0, actualEt = 201904180830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.FomcDecision, refPeriod = "2020-03-18", originalEt = 202003181400, actualEt = 0, announcedEt = 0, canceledSinceEt = 202003151700, flags = EEventFlags.None,
+				source = "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm (March 17-18 (cancelled)); canceledSince = 03-15 17:00 statement (EV-5.5c design choice)" },
+			new EventCorrection { kind = EEventKind.FomcPress, refPeriod = "2020-03-18", originalEt = 202003181430, actualEt = 0, announcedEt = 0, canceledSinceEt = 202003151700, flags = EEventFlags.None,
+				source = "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm (March 17-18 (cancelled))" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2020-12-24", originalEt = 202012240830, actualEt = 202012230830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt (DOL ETA weekly claims; announcement time unknown: known at the instant)" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-01-09", originalEt = 202501090830, actualEt = 202501080830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt (DOL ETA weekly claims; announcement time unknown: known at the instant)" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-10-02", originalEt = 202510020830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2025-09", originalEt = 202510030830, actualEt = 202511200830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-10-09", originalEt = 202510090830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Cpi, refPeriod = "2025-09", originalEt = 202510150830, actualEt = 202510240830, announcedEt = 202510102359, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://www.bls.gov/bls/092025-cpi-reschedule-notice.htm (last modified 2025-10-10); https://www.bls.gov/news.release/archives/cpi_10242025.htm" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-09", originalEt = 202510160830, actualEt = 202511250830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-10-16", originalEt = 202510160830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-10-23", originalEt = 202510230830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-10-30", originalEt = 202510300830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.GdpAdvance, refPeriod = "2025Q3", originalEt = 202510300830, actualEt = 202512230830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bea.gov/news/schedule/full-2025 (original never released, lapse; announcement of the new date not capturable: known at the instant)" },
+			new EventCorrection { kind = EEventKind.Jolts, refPeriod = "2025-09", originalEt = 202511041000, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-11-06", originalEt = 202511060830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2025-10", originalEt = 202511070830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm" },
+			new EventCorrection { kind = EEventKind.Cpi, refPeriod = "2025-10", originalEt = 202511130830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm" },
+			new EventCorrection { kind = EEventKind.Claims, refPeriod = "week of 2025-11-13", originalEt = 202511130830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://oui.doleta.gov/unemploy/claims_arch.asp (no releases 2025-10-02..11-13, lapse); https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-10", originalEt = 202511140830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-09", originalEt = 0, actualEt = 202511250830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Jolts, refPeriod = "2025-10", originalEt = 202512021000, actualEt = 202512091000, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2025-11", originalEt = 202512050830, actualEt = 202512160830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Pce, refPeriod = "2025-09", originalEt = 0, actualEt = 202512051000, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bea.gov/news/schedule/full-2025 (lapse-delayed; original date not on the page: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Cpi, refPeriod = "2025-11", originalEt = 202512100830, actualEt = 202512180830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-11", originalEt = 202512110830, actualEt = 202601140830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-10", originalEt = 0, actualEt = 202512160830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-12", originalEt = 202601140830, actualEt = 202601300830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-11", originalEt = 0, actualEt = 202601140830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Pce, refPeriod = "2025-10/11", originalEt = 0, actualEt = 202601221000, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bea.gov/news/schedule/full (lapse-delayed; original date not on the page: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2026-01", originalEt = 202602060830, actualEt = 202602110830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-12", originalEt = 0, actualEt = 202602100830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Cpi, refPeriod = "2026-01", originalEt = 202602110830, actualEt = 202602130830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2026-01", originalEt = 202602120830, actualEt = 202602270830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-01", originalEt = 0, actualEt = 202603060830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2026-02", originalEt = 202603120830, actualEt = 202603180830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-02", originalEt = 0, actualEt = 202604010830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-03", originalEt = 0, actualEt = 202604210830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+		};
 	}
 	// </event-table>
 
@@ -428,6 +1089,9 @@ namespace PowerLanguage.Function
 		/// <summary>Test seams: replace the generated table / corrections (null = EventRules).</summary>
 		public List<EventRec> table;
 		public EventCorrection[] corrections;
+		/// <summary>Test seam: coverage-hole triples (kind, fromEt, toEt yyyyMMddHHmm). null = EventRules holes when table is null,
+		/// none when the table seam is set.</summary>
+		public long[] coverageHoles;
 
 		sealed class Year
 		{
@@ -453,6 +1117,12 @@ namespace PowerLanguage.Function
 		bool m_configured, m_dailyWarned;
 		bool m_disabled;              // R2.1-h: coverage shortfall; every query is neutral
 		string m_coverageFail;        // set by Configure when firstBarUtc is known, reported on the first Step
+		// EV-4.6 interior gaps / end of coverage (allowPartialCoverage = false): checked on every bar against m_nextCovUtc
+		struct CovHole { public EEventKind kind; public DateTime fromUtc, toUtc; public string why; }
+		List<CovHole> m_holes = new List<CovHole>();
+		int m_holeIdx;
+		DateTime m_covEndUtc = DateTime.MaxValue, m_nextCovUtc = DateTime.MaxValue;
+		string m_covEndWhy;
 
 		// bar state
 		DateTime m_barTime, m_open = DateTime.MinValue, m_now = DateTime.MinValue, m_day = DateTime.MinValue, m_lastSpliceDay = DateTime.MinValue;
@@ -509,7 +1179,7 @@ namespace PowerLanguage.Function
 			jr("created classes(" + config.classes + ") minTier(" + config.minTier + ") blackout(" + config.blackoutPreMin + "/" + config.blackoutPostMin + " " + config.blackoutTier +
 				(config.blackoutFlatten ? " flatten" : "") + ") csv(" + (string.IsNullOrEmpty(config.csvPath) ? "-" : config.csvPath + " rows " + m_csv.Count + " sha " + config.csvSha.Substring(0, 16)) +
 				") table(" + EventRules.TableSha() + " rows " + m_table.Count + " corrections " + m_corr.Length + ")");
-			if (missing.Count > 0) jr("table missing: " + string.Join(",", missing));
+			if (missing.Count > 0) jr("table kinds missing: " + string.Join(",", missing));
 			var cov = new StringBuilder();
 			foreach (var k in EventRules.TableKinds)
 			{
@@ -520,6 +1190,38 @@ namespace PowerLanguage.Function
 				// R2.1-h (EV-4.6): never fail Configure / throw; the shortfall disables the engine on the first Step
 				if (m_coverageFail == null && firstBarUtc != DateTime.MinValue && toUtc(a) > firstBarUtc && !config.allowPartialCoverage)
 					m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
+			}
+			// EV-4.6 interior holes (refused spans from build_table.py) and per-kind end of coverage
+			m_holes.Clear(); m_holeIdx = 0; m_covEndUtc = m_nextCovUtc = DateTime.MaxValue; m_covEndWhy = null;
+			long[] holes = coverageHoles ?? (table == null ? EventRules.CoverageHoles() : null);
+			if (holes != null)
+				for (int i = 0; i + 2 < holes.Length; i += 3)
+				{
+					var hk = (EEventKind)holes[i];
+					if (!m_tableKindsPresent.Contains(hk)) continue;
+					var h = new CovHole { kind = hk, fromUtc = toUtc(EventRules.FromYmdhm(holes[i + 1])), toUtc = toUtc(EventRules.FromYmdhm(holes[i + 2])),
+						why = EventRules.HoleWhyFor(holes[i], holes[i + 1], holes[i + 2]) ?? "test seam" };
+					m_holes.Add(h);
+					if (firstBarUtc == DateTime.MinValue || h.toUtc >= firstBarUtc) jr("coverage hole " + hk + " " + holes[i + 1] + ".." + holes[i + 2] + " " + h.why);
+				}
+			m_holes.Sort((x, y2) => x.fromUtc.CompareTo(y2.fromUtc));
+			DateTime tableEnd = DateTime.MinValue;
+			foreach (var r in m_table) if (r.etTime > tableEnd) tableEnd = r.etTime;
+			if (tableEnd != DateTime.MinValue)
+			{
+				DateTime globalEnd = endOfMonth(tableEnd);
+				foreach (var k in EventRules.TableKinds)
+				{
+					if (!m_tableKindsPresent.Contains(k)) continue;
+					DateTime b = DateTime.MinValue;
+					foreach (var r in m_table) if (r.kind == k && r.etTime > b) b = r.etTime;
+					// covered through the month before the next expected release (GDP kinds quarterly, others monthly), capped at the table end
+					DateTime e = endOfMonth(b.AddMonths(k == EEventKind.GdpAdvance || k == EEventKind.GdpSecond || k == EEventKind.GdpThird ? 2 : 0));
+					if (e > globalEnd) e = globalEnd;
+					DateTime eu = toUtc(e);
+					if (eu < m_covEndUtc) { m_covEndUtc = eu; m_covEndWhy = "coverage " + k + " ends " + ymd(e) + " (last row " + ymd(b) + ")"; }
+				}
+				jr("coverage end " + ymd(ToEt(m_covEndUtc)) + " (" + m_covEndWhy + ")");
 			}
 			jr("coverage rules(Claims,IsmMfg,IsmSvc,EiaPetroleum,calendar)" + cov + " ruleOnly(Claims, ISM except 2026, EIA outside 2025-01..2026-11, VixExpiry)");
 			if (firstBarUtc != DateTime.MinValue)
@@ -765,14 +1467,24 @@ namespace PowerLanguage.Function
 			if (m_now == DateTime.MinValue)
 			{
 				if (firstBarUtc == DateTime.MinValue) firstCoverageCheck(barCloseUtc);
-				if (m_coverageFail != null)
+				if (m_coverageFail != null) { coverageDisable(m_coverageFail); return; }
+				if (!config.allowPartialCoverage)
 				{
-					// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
-					string msg = label + " " + m_coverageFail + "; engine disabled";
-					if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
-					m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
-					return;
+					// holes that ended before the first bar are out of range
+					while (m_holeIdx < m_holes.Count && m_holes[m_holeIdx].toUtc < barCloseUtc && m_holes[m_holeIdx].toUtc < (firstBarUtc == DateTime.MinValue ? barCloseUtc : firstBarUtc)) ++m_holeIdx;
+					m_nextCovUtc = m_holeIdx < m_holes.Count && m_holes[m_holeIdx].fromUtc < m_covEndUtc ? m_holes[m_holeIdx].fromUtc : m_covEndUtc;
 				}
+			}
+			if (barCloseUtc >= m_nextCovUtc)
+			{
+				// EV-4.6: the bar range reaches an interior hole or runs past a kind's coverage end
+				if (m_holeIdx < m_holes.Count && barCloseUtc >= m_holes[m_holeIdx].fromUtc && m_holes[m_holeIdx].fromUtc <= m_covEndUtc)
+				{
+					var h = m_holes[m_holeIdx];
+					coverageDisable("coverage hole " + h.kind + " " + ymd(ToEt(h.fromUtc)) + ".." + ymd(ToEt(h.toUtc)) + " (" + h.why + ") (set allowPartialCoverage)");
+				}
+				else coverageDisable(m_covEndWhy + "; bar " + ymd(ToEt(barCloseUtc)) + " is past it (set allowPartialCoverage)");
+				return;
 			}
 			m_barTime = barTime;
 			m_open = barOpenUtc;
@@ -813,6 +1525,16 @@ namespace PowerLanguage.Function
 			if (m_blackout != was)
 				jr("blackout " + (m_blackout ? "on" : "off") + " at " + barTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " " + m_blackoutRec.KindName + " " + m_blackoutRec.etTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " ET pre(" + config.blackoutPreMin + ") post(" + config.blackoutPostMin + ")" + (m_flattenNow ? " flatten" : ""));
 		}
+
+		void coverageDisable(string why)
+		{
+			// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
+			string msg = label + " " + why + "; engine disabled";
+			if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
+			jr(msg);
+			m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
+		}
+		static DateTime endOfMonth(DateTime d) { return new DateTime(d.Year, d.Month, 1).AddMonths(1).AddMinutes(-1); }
 
 		/// <summary>EV-4.6/4.7 (R2.1-h) on the first bar when the host did not pass firstBarUtc: a table kind starting after the
 		/// first bar disables the engine (Error line in Step; never a throw) unless allowPartialCoverage.</summary>
