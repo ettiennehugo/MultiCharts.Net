@@ -18,7 +18,7 @@ static class Program
 
 	static _EventCalendar Eng(Action<EventConfig> f = null, List<EventRec> table = null, EventCorrection[] corr = null, List<string> j = null, List<string> w = null, int barMin = 1)
 	{
-		// synthetic tables start mid-history: partial coverage on by default (R2.1-h has its own tests in FirstBarCoverage)
+		// synthetic tables start mid-history: partial coverage on by default (EV-4.6b has its own tests in FirstBarCoverage)
 		var c = new EventConfig { enabled = true, allowPartialCoverage = true }; if (f != null) f(c);
 		var e = new _EventCalendar { config = c, table = table ?? new List<EventRec>(), corrections = corr ?? new EventCorrection[0], barDuration = TimeSpan.FromMinutes(barMin) };
 		if (j != null) e.journal = s => j.Add(s);
@@ -282,22 +282,46 @@ static class Program
 		Check((Gen(2026).First(x => x.kind == EEventKind.EiaPetroleum && x.etTime.Month == 3).flags & EEventFlags.RuleOnly) == 0, "EIA 2026 published");
 	}
 
-	// ---- EV-4.7 firstBarUtc from the host: Configure fails hard
+	// ---- EV-4.6b: a kind starting after the first bar is Unknown before its coverage (no engine disable)
 	static void FirstBarCoverage()
 	{
 		var c = new EventConfig { enabled = true };
 		var e = new _EventCalendar { config = c, table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0], barDuration = TimeSpan.FromMinutes(1), firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
 		var errs = new List<string>(); e.error = s => errs.Add(s);
-		Check(e.Configure() == null, "coverage shortfall: Configure never fails (R2.1-h)");
+		Check(e.Configure() == null, "coverage shortfall: Configure never fails");
+		Bar(e, ET(2026, 1, 5, 9, 0));
+		Check(!e.Disabled && errs.Count == 0, "EV-4.6b: coverage start after the first bar never disables");
+		Check(e.Coverage(EEventKind.Cpi, new DateTime(2026, 1, 5)) == EEventCoverage.Unknown && e.IsInWindow(EEventTier.T1, 5, 10), "before coverage start: Unknown, blocks (partial=false)");
 		Bar(e, ET(2026, 3, 11, 8, 31));
-		Check(e.Disabled && errs.Count == 1 && errs[0] == "EVENT coverage Cpi starts 2026-03-11 after the first bar (set allowPartialCoverage); engine disabled", "first Step: Error line + disabled");
-		Check(!e.IsInWindow(EEventTier.T1, 5, 10) && e.EventsOn(new DateTime(2026, 3, 11)).Count == 0 && !e.EventBlackout, "disabled: neutral answers");
+		Check(e.Coverage(EEventKind.Cpi, new DateTime(2026, 3, 11)) == EEventCoverage.Event && e.IsInWindow(EEventTier.T1, 5, 10) && e.EventsOn(new DateTime(2026, 3, 11)).Count == 1, "covered month: Event");
+		Check(e.Coverage(EEventKind.Cpi, new DateTime(2026, 3, 12)) == EEventCoverage.NoEvent, "covered day without a release: NoEvent");
 		var e3 = Eng(c3 => c3.allowPartialCoverage = false, new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }); var errs3 = new List<string>(); e3.error = s => errs3.Add(s);
 		Bar(e3, ET(2026, 1, 5, 9, 0));
-		Check(e3.Disabled && errs3.Count == 1, "no host firstBarUtc: first Step's bar, also disables");
+		Check(!e3.Disabled && errs3.Count == 0 && e3.IsInWindow(EEventTier.T1, 5, 10), "no host firstBarUtc: Unknown blocks, no disable");
 		var e2 = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = true }, table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0], firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
 		Check(e2.Configure() == null, "allowPartialCoverage -> ok");
-		Bar(e2, ET(2026, 1, 5, 9, 0)); Check(!e2.Disabled, "allowPartialCoverage -> stays enabled");
+		Bar(e2, ET(2026, 1, 5, 9, 0)); Check(!e2.Disabled && !e2.IsInWindow(EEventTier.T1, 5, 10), "allowPartialCoverage -> Unknown counts as NoEvent");
+		// engine-wide disable only for a missing table / hash mismatch
+		Check(EventRules.TableIntegrity(EventRules.TableRowCount, EventRules.TableSha(), EventRules.ExpectedTableSha) == null, "compiled table hash == build_table.py hash");
+		Check(EventRules.TableIntegrity(0, "x", "x") == "event table missing", "missing table detected");
+		var bad = new _EventCalendar { config = new EventConfig { enabled = true }, corrections = null, barDuration = TimeSpan.FromMinutes(1), tableShaExpected = "0000000000000000" };
+		var errsB = new List<string>(); bad.error = s => errsB.Add(s);
+		Check(bad.Configure() == null && bad.Disabled && errsB.Count == 1 && errsB[0].Contains("hash") && errsB[0].EndsWith("engine disabled"), "hash mismatch disables the engine: " + string.Join("|", errsB));
+		var good = new _EventCalendar { config = new EventConfig { enabled = true }, barDuration = TimeSpan.FromMinutes(1) };
+		Check(good.Configure() == null && !good.Disabled, "compiled table intact -> enabled");
+		// R2.1-d amendment: historical NYSE closures in the single source; CME equity-futures status from CME notices
+		foreach (var d in new[] { new DateTime(2001, 9, 11), new DateTime(2001, 9, 12), new DateTime(2001, 9, 13), new DateTime(2001, 9, 14), new DateTime(2004, 6, 11), new DateTime(2007, 1, 2), new DateTime(2012, 10, 29), new DateTime(2012, 10, 30) })
+			Check(EventRules.IsNyseHoliday(d) && !EventRules.IsNyseBusinessDay(d), "NYSE closed " + d.ToString("yyyy-MM-dd"));
+		Check(EventRules.IsNyseBusinessDay(new DateTime(2001, 9, 17)) && EventRules.IsNyseBusinessDay(new DateTime(2012, 10, 31)), "NYSE reopened 2001-09-17 / 2012-10-31");
+		Func<DateTime, _CmeHolidays.Rules.Day> cme = _CmeHolidays.Rules.Get;
+		var d911 = cme(new DateTime(2001, 9, 11));
+		Check(!d911.Closed && d911.NoRth && d911.HaltEt == new TimeSpan(9, 30, 0), "CME 2001-09-11 equity Globex halted 08:30 CT");
+		Check(new[] { 12, 13, 14 }.All(x => cme(new DateTime(2001, 9, x)).Closed), "CME 2001-09-12..14 equity index closed");
+		Check(!cme(new DateTime(2001, 9, 17)).NoRth, "CME 2001-09-17 normal");
+		var r04 = cme(new DateTime(2004, 6, 11)); Check(!r04.Closed && r04.NoRth && r04.HaltEt == new TimeSpan(9, 0, 0), "CME 2004-06-11 Reagan: Globex to 08:00 CT");
+		var f07 = cme(new DateTime(2007, 1, 2)); Check(!f07.Closed && f07.NoRth && f07.HaltEt == new TimeSpan(9, 15, 0), "CME 2007-01-02 Ford: halt 08:15 CT");
+		Check(new[] { 29, 30 }.All(x => { var q = cme(new DateTime(2012, 10, x)); return !q.Closed && q.NoRth && q.HaltEt == new TimeSpan(9, 15, 0); }), "CME 2012-10-29/30 Sandy: halt 08:15 CT");
+		Check(!cme(new DateTime(2012, 10, 31)).NoRth, "CME 2012-10-31 normal");
 	}
 
 	// ---- EV-8.7 roll
@@ -510,40 +534,65 @@ static class Program
 		Check(h.IsInWindow(EEventTier.T1, 30, 120), "half day: in window before the halt");
 		Bar(h, ET(2026, 11, 29, 18, 5));
 		Check(!h.IsInWindow(EEventTier.T1, 30, 120) && !h.EventsOn(new DateTime(2026, 11, 30)).Any(r => r.kind == EEventKind.Cpi), "half day: window does not leak into the 11-30 session");
-		// EV-4.6 interior holes / end of coverage (allowPartialCoverage = false): Error line + disabled, never a throw
-		Func<bool, List<string>, _EventCalendar> real = (partial, errs) =>
+		// EV-4.6b: per-kind, per-day coverage (tri-state); holes never disable the engine
+		Func<bool, List<string>, EEventClassMask, _EventCalendar> real = (partial, jl0, mask) =>
 		{
-			var x = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = partial }, table = EventRules.Table(), corrections = EventRules.Corrections,
+			var x = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = partial, classes = mask }, table = EventRules.Table(), corrections = EventRules.Corrections,
 				coverageHoles = EventRules.CoverageHoles(), barDuration = TimeSpan.FromMinutes(1) };
-			x.error = s => errs.Add(s);
+			if (jl0 != null) x.journal = s => jl0.Add(s);
+			x.error = s => { throw new Exception("error sink: " + s); };
 			if (x.Configure() != null) throw new Exception("configure");
 			return x;
 		};
-		Func<DateTime, DateTime, bool, string> run = (a, b, partial) =>
-		{
-			var errs = new List<string>(); var x = real(partial, errs);
-			Bar(x, a); bool ok1 = !x.Disabled;
-			Bar(x, b);
-			return (ok1 ? "" : "EARLY ") + (x.Disabled ? "DISABLED " + string.Join("|", errs) : "enabled");
-		};
-		string r1 = run(ET(2020, 8, 31, 10, 0), ET(2020, 9, 1, 10, 0), false);
-		Check(r1.StartsWith("DISABLED") && r1.Contains("coverage hole Gdp") && r1.Contains("2020-09-01") && r1.Contains("ALFRED"), "GDP hole 2020-09 disables: " + r1);
-		string r2 = run(ET(2022, 11, 30, 10, 0), ET(2022, 12, 1, 10, 0), false);
-		Check(r2.StartsWith("DISABLED") && r2.Contains("Pce") && r2.Contains("2022-12"), "PCE hole 2022-12 disables: " + r2);
-		string r3 = run(ET(2026, 12, 31, 10, 0), ET(2027, 1, 4, 10, 0), false);
-		Check(r3.StartsWith("DISABLED") && r3.Contains("Jolts") && r3.Contains("2026-12-31"), "JOLTS coverage ends 2026-12: " + r3);
-		string r4 = run(ET(2026, 10, 27, 10, 0), ET(2026, 10, 28, 10, 0), false);
-		Check(r4.StartsWith("DISABLED") && r4.Contains("FomcPress") && r4.Contains("2026-10-28"), "future FomcPress hole disables: " + r4);
-		Check(run(ET(2020, 8, 31, 10, 0), ET(2020, 9, 1, 10, 0), true) == "enabled", "allowPartialCoverage keeps it enabled across a hole");
-		Check(run(ET(2026, 1, 5, 10, 0), ET(2026, 1, 6, 10, 0), false) == "enabled", "no hole 2026-01-05..06 -> enabled");
-		string r5 = run(ET(2020, 9, 15, 10, 0), ET(2020, 9, 16, 10, 0), false);
-		Check(r5.StartsWith("EARLY DISABLED"), "first bar inside a hole disables on that bar: " + r5);
+		var all = EEventClassMask.Macro | EEventClassMask.Calendar;
+		// (1) a hole day returns Unknown (GDP 2020-09 hole), the kinds around it stay tri-state
+		var s1 = real(false, null, all); Bar(s1, ET(2020, 9, 15, 10, 0));
+		Check(s1.Coverage(EEventKind.GdpAdvance, new DateTime(2020, 9, 15)) == EEventCoverage.Unknown || s1.Coverage(EEventKind.GdpThird, new DateTime(2020, 9, 15)) == EEventCoverage.Unknown, "EV-4.6b(1) GDP hole day 2020-09-15 -> Unknown");
+		Check(s1.Coverage(EEventKind.Cpi, new DateTime(2020, 9, 11)) == EEventCoverage.Event && s1.Coverage(EEventKind.Cpi, new DateTime(2020, 9, 15)) == EEventCoverage.NoEvent, "Cpi 2020-09: Event / NoEvent");
+		Check(!s1.Disabled, "hole never disables the engine");
+		// (2) blocks under allowPartialCoverage = false
+		EEventKind bk;
+		Check(s1.CoverageBlocks(new DateTime(2020, 9, 15), EEventClassMask.Macro, EEventTier.None, out bk) && s1.IsInWindow(EEventTier.None, 0, 0, EEventClassMask.Macro), "EV-4.6b(2) hole day blocks under partial=false (" + bk + ")");
+		// (3) NoEvent under allowPartialCoverage = true
+		var s3 = real(true, null, all); Bar(s3, ET(2020, 9, 15, 10, 0));
+		Check(s3.Coverage(EEventKind.Pce, new DateTime(2022, 12, 15)) == EEventCoverage.Unknown && !s3.CoverageBlocks(new DateTime(2020, 9, 15), EEventClassMask.Macro) && !s3.IsInWindow(EEventTier.T1, 0, 0, EEventClassMask.Macro), "EV-4.6b(3) partial=true: Unknown counts as NoEvent");
+		// (4) end of coverage (JOLTS after 2026-12) behaves like a hole
+		var s4 = real(false, null, all); Bar(s4, ET(2027, 1, 4, 10, 0));
+		Check(s4.Coverage(EEventKind.Jolts, new DateTime(2027, 1, 4)) == EEventCoverage.Unknown && s4.Coverage(EEventKind.Jolts, new DateTime(2026, 12, 31)) != EEventCoverage.Unknown, "EV-4.6b(4) JOLTS after 2026-12 -> Unknown");
+		Check(s4.CoverageBlocks(new DateTime(2027, 1, 4), EEventClassMask.Macro, EEventTier.None, out bk) && !s4.Disabled, "EV-4.6b(4) end of coverage blocks like a hole, engine enabled");
+		// (5) a hole for a kind not in the mask never blocks: 2022-12 PCE hole, consumer mask without PCE's class
+		var pceCls = EventRules.ClassOf(EEventKind.Pce, EventRules.DefaultTier(EEventKind.Pce));
+		var s5 = real(false, null, all); Bar(s5, ET(2022, 12, 15, 10, 0));
+		var unk = new List<EEventKind>(); foreach (EEventKind k in Enum.GetValues(typeof(EEventKind))) if (s5.Coverage(k, new DateTime(2022, 12, 15)) == EEventCoverage.Unknown) unk.Add(k);
+		var other = EEventClassMask.Calendar | EEventClassMask.Energy;
+		Check(unk.Contains(EEventKind.Pce) && unk.All(k => (EventRules.ClassOf(k, EventRules.DefaultTier(k)) & other) == 0) && !s5.CoverageBlocks(new DateTime(2022, 12, 15), other) && !s5.IsInWindow(EEventTier.None, 0, 0, other),
+			"EV-4.6b(5) PCE hole (" + pceCls + ") never blocks a mask without it [" + string.Join(",", unk) + "]");
+		Check(s5.CoverageBlocks(new DateTime(2022, 12, 15), pceCls), "same day blocks a mask with PCE's class");
+		Check(real(false, null, all).Coverage(EEventKind.Cpi, new DateTime(2026, 1, 6)) != EEventCoverage.Unknown, "no hole 2026-01-06 for Cpi");
+		// COVGAP journal: once at start (spans reaching the first bar) and once per affected day
 		var jh = new List<string>();
 		var x2 = new _EventCalendar { config = new EventConfig { enabled = true }, table = EventRules.Table(), corrections = EventRules.Corrections, coverageHoles = EventRules.CoverageHoles(),
 			barDuration = TimeSpan.FromMinutes(1), firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
 		x2.journal = s => jh.Add(s); x2.Configure();
-		Check(jh.Any(s => s.Contains("coverage hole FomcPress 202610280000")) && !jh.Any(s => s.Contains("coverage hole Pce 202010")), "journal lists holes after the first bar only");
-		Check(jh.Any(s => s.Contains("coverage end 2026-12-31") && s.Contains("Jolts")), "journal coverage end (Jolts)");
+		Check(jh.Any(s => s.Contains("COVGAP FomcPress 2026-10-28")) && !jh.Any(s => s.Contains("COVGAP Pce 2020-10")), "COVGAP start lines: spans after the first bar only");
+		Check(jh.Any(s => s.StartsWith("EVENT COVGAP Jolts 2027-01-01..-") && s.Contains("after coverage end 2026-12-31")), "COVGAP start line: Jolts coverage end");
+		int n0 = jh.Count;
+		Bar(x2, ET(2026, 10, 28, 10, 0)); Bar(x2, ET(2026, 10, 28, 10, 1)); Bar(x2, ET(2026, 10, 29, 10, 0));
+		var dl = jh.Skip(n0).Where(s => s.Contains("COVGAP day")).ToList();
+		Check(dl.Count(s => s.Contains("COVGAP day 2026-10-28") && s.Contains("FomcPress(blocks)")) == 1, "COVGAP once per affected day: " + string.Join("|", dl));
+		// share report per kind and window; >5% flagged
+		var rep = real(false, null, all); bool flg;
+		foreach (var w in new[] { new[] { 2016, 2019 }, new[] { 2020, 2022 }, new[] { 2023, 2026 } })
+		{
+			var lines = rep.CoverageReport(new DateTime(w[0], 1, 1), new DateTime(w[1], 12, 31), all, out flg);
+			foreach (var l in lines) Console.WriteLine(l);
+			Check(lines.Count > 0, "COVSHARE report " + w[0] + "-" + w[1] + (flg ? " (has FLAG)" : ""));
+		}
+		var fr = rep.CoverageReport(new DateTime(2027, 1, 1), new DateTime(2027, 3, 31), all, out flg);
+		Check(flg && fr.Any(l => l.Contains("Jolts") && l.EndsWith("FLAG")), "window past coverage end is flagged >5%");
+		var rp = real(true, null, all); rp.CoverageReport(new DateTime(2027, 1, 1), new DateTime(2027, 3, 31), all, out flg);
+		Check(!flg, "partial=true: nothing blocked, no flag");
+		Check(x2.CoverageStats().Any(l => l.StartsWith("COVSHARE run FomcPress blocked 1/2")), "run-time COVSHARE counts: " + string.Join("|", x2.CoverageStats()));
 	}
 	static string TzId() { try { TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); return "Eastern Standard Time"; } catch { return "America/New_York"; } }
 

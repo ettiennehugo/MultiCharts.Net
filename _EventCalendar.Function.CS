@@ -42,6 +42,9 @@ namespace PowerLanguage.Function
 	public enum EEventTier : byte { None = 0, T3 = 1, T2 = 2, T1 = 3, C = 8 }
 
 	[Flags]
+	/// <summary>EV-4.6b per-kind, per-day coverage state: a day inside a coverage hole (or past a kind's coverage) is Unknown.</summary>
+	public enum EEventCoverage : byte { NoEvent = 0, Event = 1, Unknown = 2 }
+
 	public enum EEventFlags : ushort
 	{
 		None = 0, Sep = 1, Quad = 2, Unscheduled = 4, Scheduled = 8, Delayed = 16, Canceled = 32, Csv = 64, RuleOnly = 128,
@@ -116,7 +119,7 @@ namespace PowerLanguage.Function
 		public EEventTier minTier = EEventTier.T3;   // macro records below are dropped at build (tier C is kept)
 		public Dictionary<EEventKind, EEventTier> tierOverride = new Dictionary<EEventKind, EEventTier>();
 		public string csvPath = "";
-		public bool allowPartialCoverage = false;
+		public bool allowPartialCoverage = false;   // EV-4.6b: false = an Unknown (coverage hole) day of a kind in the mask blocks
 		public int blackoutPreMin = 0, blackoutPostMin = 0;   // 0/0 = no blackout
 		public EEventTier blackoutTier = EEventTier.T1;
 		public bool blackoutFlatten = false;
@@ -399,6 +402,16 @@ namespace PowerLanguage.Function
 			if (s_tableSha == null) s_tableSha = ComputeTableSha(s_yyyymmddhhmm, s_kind, s_flags, s_ref, s_corrections, s_coverageHoles);
 			return s_tableSha;
 		}
+		public static string ExpectedTableSha { get { return s_expectedTableSha; } }
+		public static int TableRowCount { get { return s_yyyymmddhhmm.Length; } }
+		/// <summary>EV-4.6b: the only engine-wide disable: the generated table is missing or its hash differs from the one
+		/// build_table.py emitted. Returns null when the table is intact.</summary>
+		public static string TableIntegrity(int rows, string actualSha, string expectedSha)
+		{
+			if (rows == 0) return "event table missing";
+			if (actualSha != expectedSha) return "event table hash " + actualSha + " != expected " + expectedSha;
+			return null;
+		}
 		/// <summary>Hash of table rows, corrections and coverage holes (any one changing changes the config hash).</summary>
 		public static string ComputeTableSha(long[] et, byte[] kind, ushort[] flags, string[] refs, EventCorrection[] corr, long[] holes)
 		{
@@ -459,7 +472,7 @@ namespace PowerLanguage.Function
 	// NOTE GdpSecond 2019-02-28 (2018Q4): (m-1)%3 tags it Second; it was the shutdown 'Initial' estimate. s_corrections moves GdpAdvance 2018Q4 to 02-28 and cancels GdpSecond 2018Q4.
 	// NOTE FomcMinutes 2020-04-08 (ref 2020-03-15) is flagged Unscheduled: minutes of an unscheduled meeting, known only at the instant.
 	// NOTE FomcDecision 2020-03-18 (canceled in s_corrections) carries no Sep flag: the Fed's 2020 page lists it only as 'March 17-18 (cancelled)' with no SEP; it was a scheduled SEP meeting (EV-8.2 counts 2020 published SEP = 3). Canceled, so the flag has no runtime effect.
-	// Coverage holes (EV-4.6, s_coverageHoles): 80 refused spans; with allowPartialCoverage=false a bar inside one disables the engine.
+	// Coverage holes (EV-4.6, s_coverageHoles): 80 refused spans; a day inside one is Unknown for that kind (EV-4.6b).
 	public static partial class EventRules
 	{
 		static readonly long[] s_yyyymmddhhmm = {
@@ -979,6 +992,7 @@ namespace PowerLanguage.Function
 			"FomcPress 2027-09-15: future meeting: the calendar page lists no press conference yet (no source)",
 			"FomcPress 2027-10-27: future meeting: the calendar page lists no press conference yet (no source)",
 		};
+		static readonly string s_expectedTableSha = "228cdee716a6eafa";
 		static readonly EventCorrection[] s_corrections = {
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2018-12", originalEt = 201901160830, actualEt = 201902140830, announcedEt = 201901302359, canceledSinceEt = 201901302359, flags = EEventFlags.None,
 				source = "https://www.census.gov/newsroom/press-releases/2019/revised-indicator-calendar.html (first issued 2019-01-30)" },
@@ -1080,7 +1094,7 @@ namespace PowerLanguage.Function
 		public EventConfig config;
 		public string label = "EVENT";
 		public Action<string> journal, warnOnce;
-		/// <summary>Error sink (R2.1-h coverage failure). Null = warnOnce.</summary>
+		/// <summary>Error sink (EV-4.6b table missing / hash mismatch). Null = warnOnce.</summary>
 		public Action<string> error;
 		/// <summary>Bar length (EV-3.3/3.7). Zero = non-time bars (open = previous bar close). &gt;= 1 day = daily bars.</summary>
 		public TimeSpan barDuration = TimeSpan.Zero;
@@ -1092,6 +1106,8 @@ namespace PowerLanguage.Function
 		/// <summary>Test seam: coverage-hole triples (kind, fromEt, toEt yyyyMMddHHmm). null = EventRules holes when table is null,
 		/// none when the table seam is set.</summary>
 		public long[] coverageHoles;
+		/// <summary>Test seam: expected table hash (null = EventRules.ExpectedTableSha); used only with the compiled table.</summary>
+		public string tableShaExpected;
 
 		sealed class Year
 		{
@@ -1115,14 +1131,13 @@ namespace PowerLanguage.Function
 		HashSet<EEventKind> m_tableKindsPresent = new HashSet<EEventKind>();
 		HashSet<int> m_warnedYears = new HashSet<int>();
 		bool m_configured, m_dailyWarned;
-		bool m_disabled;              // R2.1-h: coverage shortfall; every query is neutral
-		string m_coverageFail;        // set by Configure when firstBarUtc is known, reported on the first Step
-		// EV-4.6 interior gaps / end of coverage (allowPartialCoverage = false): checked on every bar against m_nextCovUtc
-		struct CovHole { public EEventKind kind; public DateTime fromUtc, toUtc; public string why; }
-		List<CovHole> m_holes = new List<CovHole>();
-		int m_holeIdx;
-		DateTime m_covEndUtc = DateTime.MaxValue, m_nextCovUtc = DateTime.MaxValue;
-		string m_covEndWhy;
+		bool m_disabled;              // EV-4.6b: table missing / hash mismatch only; every query is neutral
+		// EV-4.6b per-kind Unknown spans (ET trading days, inclusive): before coverage start, interior holes, after coverage end
+		struct CovSpan { public EEventKind kind; public DateTime from, to; public string why; }
+		List<CovSpan> m_unk = new List<CovSpan>();
+		DateTime m_unkDay = DateTime.MinValue;
+		List<EEventKind> m_unkKinds = new List<EEventKind>();
+		readonly Dictionary<EEventKind, int[]> m_covStats = new Dictionary<EEventKind, int[]>();   // kind -> {days, blocked days}
 
 		// bar state
 		DateTime m_barTime, m_open = DateTime.MinValue, m_now = DateTime.MinValue, m_day = DateTime.MinValue, m_lastSpliceDay = DateTime.MinValue;
@@ -1138,7 +1153,7 @@ namespace PowerLanguage.Function
 		public bool FlattenNow { get { return m_flattenNow; } }
 		public bool DailyBars { get { return barDuration >= TimeSpan.FromDays(1); } }
 		public int RowsLoadedCsv { get { return m_csv.Count; } }
-		/// <summary>R2.1-h: disabled after a coverage shortfall (allowPartialCoverage = false); all answers neutral.</summary>
+		/// <summary>EV-4.6b: disabled only when the event table is missing or its hash mismatches; all answers neutral.</summary>
 		public bool Disabled { get { return m_disabled; } }
 
 		void jr(string s) { if (journal != null) journal(label + " " + s); }
@@ -1187,46 +1202,51 @@ namespace PowerLanguage.Function
 				DateTime a = DateTime.MaxValue, b = DateTime.MinValue;
 				foreach (var r in m_table) if (r.kind == k) { if (r.etTime < a) a = r.etTime; if (r.etTime > b) b = r.etTime; }
 				cov.Append(' ').Append(k).Append('(').Append(ymd(a)).Append("..").Append(ymd(b)).Append(')');
-				// R2.1-h (EV-4.6): never fail Configure / throw; the shortfall disables the engine on the first Step
-				if (m_coverageFail == null && firstBarUtc != DateTime.MinValue && toUtc(a) > firstBarUtc && !config.allowPartialCoverage)
-					m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
 			}
-			// EV-4.6 interior holes (refused spans from build_table.py) and per-kind end of coverage
-			m_holes.Clear(); m_holeIdx = 0; m_covEndUtc = m_nextCovUtc = DateTime.MaxValue; m_covEndWhy = null;
+			// EV-4.6b: per-kind Unknown spans: before the kind's coverage start, refused holes (build_table.py), after its end
+			m_unk.Clear(); m_unkDay = DateTime.MinValue; m_unkKinds.Clear(); m_covStats.Clear();
+			DateTime tableEnd = DateTime.MinValue;
+			foreach (var r in m_table) if (r.etTime > tableEnd) tableEnd = r.etTime;
+			foreach (var k in EventRules.TableKinds)
+			{
+				if (!m_tableKindsPresent.Contains(k)) continue;
+				DateTime a = DateTime.MaxValue, b = DateTime.MinValue;
+				foreach (var r in m_table) if (r.kind == k) { if (r.etTime < a) a = r.etTime; if (r.etTime > b) b = r.etTime; }
+				bool gdp = k == EEventKind.GdpAdvance || k == EEventKind.GdpSecond || k == EEventKind.GdpThird;
+				// covered from the reference month of the first row through the month before the next expected release
+				// (GDP kinds quarterly, others monthly), capped at the table end
+				DateTime s0 = new DateTime(a.Year, a.Month, 1).AddMonths(gdp ? -2 : 0);
+				DateTime e = endOfMonth(b.AddMonths(gdp ? 2 : 0)).Date, ge = endOfMonth(tableEnd).Date;
+				if (e > ge) e = ge;
+				m_unk.Add(new CovSpan { kind = k, from = DateTime.MinValue, to = s0.AddDays(-1), why = "before coverage start (first row " + ymd(a) + ")" });
+				m_unk.Add(new CovSpan { kind = k, from = e.AddDays(1), to = DateTime.MaxValue.Date, why = "after coverage end " + ymd(e) + " (last row " + ymd(b) + ")" });
+				m_covStats[k] = new int[2];
+			}
 			long[] holes = coverageHoles ?? (table == null ? EventRules.CoverageHoles() : null);
 			if (holes != null)
 				for (int i = 0; i + 2 < holes.Length; i += 3)
 				{
 					var hk = (EEventKind)holes[i];
 					if (!m_tableKindsPresent.Contains(hk)) continue;
-					var h = new CovHole { kind = hk, fromUtc = toUtc(EventRules.FromYmdhm(holes[i + 1])), toUtc = toUtc(EventRules.FromYmdhm(holes[i + 2])),
-						why = EventRules.HoleWhyFor(holes[i], holes[i + 1], holes[i + 2]) ?? "test seam" };
-					m_holes.Add(h);
-					if (firstBarUtc == DateTime.MinValue || h.toUtc >= firstBarUtc) jr("coverage hole " + hk + " " + holes[i + 1] + ".." + holes[i + 2] + " " + h.why);
+					m_unk.Add(new CovSpan { kind = hk, from = EventRules.FromYmdhm(holes[i + 1]).Date, to = EventRules.FromYmdhm(holes[i + 2]).Date,
+						why = EventRules.HoleWhyFor(holes[i], holes[i + 1], holes[i + 2]) ?? "test seam" });
 				}
-			m_holes.Sort((x, y2) => x.fromUtc.CompareTo(y2.fromUtc));
-			DateTime tableEnd = DateTime.MinValue;
-			foreach (var r in m_table) if (r.etTime > tableEnd) tableEnd = r.etTime;
-			if (tableEnd != DateTime.MinValue)
-			{
-				DateTime globalEnd = endOfMonth(tableEnd);
-				foreach (var k in EventRules.TableKinds)
-				{
-					if (!m_tableKindsPresent.Contains(k)) continue;
-					DateTime b = DateTime.MinValue;
-					foreach (var r in m_table) if (r.kind == k && r.etTime > b) b = r.etTime;
-					// covered through the month before the next expected release (GDP kinds quarterly, others monthly), capped at the table end
-					DateTime e = endOfMonth(b.AddMonths(k == EEventKind.GdpAdvance || k == EEventKind.GdpSecond || k == EEventKind.GdpThird ? 2 : 0));
-					if (e > globalEnd) e = globalEnd;
-					DateTime eu = toUtc(e);
-					if (eu < m_covEndUtc) { m_covEndUtc = eu; m_covEndWhy = "coverage " + k + " ends " + ymd(e) + " (last row " + ymd(b) + ")"; }
-				}
-				jr("coverage end " + ymd(ToEt(m_covEndUtc)) + " (" + m_covEndWhy + ")");
-			}
+			// COVGAP journal, once at start (per affected day lines follow from Step)
+			DateTime firstDay = firstBarUtc == DateTime.MinValue ? DateTime.MinValue : ToEt(firstBarUtc).Date;
+			foreach (var u in m_unk)
+				if (u.to >= firstDay)
+					jr("COVGAP " + u.kind + " " + (u.from == DateTime.MinValue ? "-" : ymd(u.from)) + ".." + (u.to == DateTime.MaxValue.Date ? "-" : ymd(u.to)) + " Unknown " +
+						(config.allowPartialCoverage || (kindClass(u.kind) & config.classes) == 0 ? "(NoEvent: " + (config.allowPartialCoverage ? "allowPartialCoverage" : "not in classes") + ")" : "(blocks)") + " " + u.why);
 			jr("coverage rules(Claims,IsmMfg,IsmSvc,EiaPetroleum,calendar)" + cov + " ruleOnly(Claims, ISM except 2026, EIA outside 2025-01..2026-11, VixExpiry)");
 			if (firstBarUtc != DateTime.MinValue)
 				foreach (var c in m_corr) { long t = c.actualEt != 0 ? c.actualEt : c.originalEt; if (t != 0 && toUtc(EventRules.FromYmdhm(t)) >= firstBarUtc) jr("correction " + c.kind + " " + (c.refPeriod ?? "") + " orig(" + c.originalEt + ") actual(" + (c.actualEt == 0 ? "Canceled" : c.actualEt.ToString()) + ") announced(" + c.announcedEt + ") " + c.flags + " " + (c.source ?? "")); }
 			m_configured = true;
+			// EV-4.6b: engine-wide disable only for a missing generated table or a hash mismatch
+			if (table == null)
+			{
+				string bad = EventRules.TableIntegrity(EventRules.TableRowCount, EventRules.TableSha(), tableShaExpected ?? EventRules.ExpectedTableSha);
+				if (bad != null) coverageDisable(bad);
+			}
 			return null;
 		}
 
@@ -1464,28 +1484,6 @@ namespace PowerLanguage.Function
 		{
 			if (!m_configured) return;
 			if (m_disabled) return;
-			if (m_now == DateTime.MinValue)
-			{
-				if (firstBarUtc == DateTime.MinValue) firstCoverageCheck(barCloseUtc);
-				if (m_coverageFail != null) { coverageDisable(m_coverageFail); return; }
-				if (!config.allowPartialCoverage)
-				{
-					// holes that ended before the first bar are out of range
-					while (m_holeIdx < m_holes.Count && m_holes[m_holeIdx].toUtc < barCloseUtc && m_holes[m_holeIdx].toUtc < (firstBarUtc == DateTime.MinValue ? barCloseUtc : firstBarUtc)) ++m_holeIdx;
-					m_nextCovUtc = m_holeIdx < m_holes.Count && m_holes[m_holeIdx].fromUtc < m_covEndUtc ? m_holes[m_holeIdx].fromUtc : m_covEndUtc;
-				}
-			}
-			if (barCloseUtc >= m_nextCovUtc)
-			{
-				// EV-4.6: the bar range reaches an interior hole or runs past a kind's coverage end
-				if (m_holeIdx < m_holes.Count && barCloseUtc >= m_holes[m_holeIdx].fromUtc && m_holes[m_holeIdx].fromUtc <= m_covEndUtc)
-				{
-					var h = m_holes[m_holeIdx];
-					coverageDisable("coverage hole " + h.kind + " " + ymd(ToEt(h.fromUtc)) + ".." + ymd(ToEt(h.toUtc)) + " (" + h.why + ") (set allowPartialCoverage)");
-				}
-				else coverageDisable(m_covEndWhy + "; bar " + ymd(ToEt(barCloseUtc)) + " is past it (set allowPartialCoverage)");
-				return;
-			}
 			m_barTime = barTime;
 			m_open = barOpenUtc;
 			m_now = barCloseUtc;
@@ -1504,6 +1502,7 @@ namespace PowerLanguage.Function
 			{
 				m_day = day;
 				if (m_dayCache.Count > 64) m_dayCache.Clear();
+				coverageDay(day);
 				EventDay d = Classify(day);
 				// R2.1-e: RuleOnly EIA is known only at its instant, so the day line checks it ex post
 				bool eiaRo = journal != null && ClassifyExPost(day).eiaRuleOnly;
@@ -1528,25 +1527,103 @@ namespace PowerLanguage.Function
 
 		void coverageDisable(string why)
 		{
-			// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
+			// EV-4.6b: table missing / hash mismatch: Error line, engine disabled, neutral answers (no throw)
 			string msg = label + " " + why + "; engine disabled";
 			if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
 			jr(msg);
 			m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
 		}
 		static DateTime endOfMonth(DateTime d) { return new DateTime(d.Year, d.Month, 1).AddMonths(1).AddMinutes(-1); }
+		static EEventClassMask kindClass(EEventKind k) { return EventRules.ClassOf(k, EventRules.DefaultTier(k)); }
 
-		/// <summary>EV-4.6/4.7 (R2.1-h) on the first bar when the host did not pass firstBarUtc: a table kind starting after the
-		/// first bar disables the engine (Error line in Step; never a throw) unless allowPartialCoverage.</summary>
-		void firstCoverageCheck(DateTime first)
+		// ------------------------------------------------------------------ coverage (EV-4.6b)
+		List<EEventKind> unknownKinds(DateTime day)
 		{
-			if (config.allowPartialCoverage) return;
-			foreach (var k in m_tableKindsPresent)
+			day = day.Date;
+			if (day != m_unkDay)
 			{
-				DateTime a = DateTime.MaxValue;
-				foreach (var r in m_table) if (r.kind == k && r.etTime < a) a = r.etTime;
-				if (toUtc(a) > first && m_coverageFail == null) m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
+				m_unkDay = day; m_unkKinds.Clear();
+				foreach (var u in m_unk) if (day >= u.from && day <= u.to && !m_unkKinds.Contains(u.kind)) m_unkKinds.Add(u.kind);
 			}
+			return m_unkKinds;
+		}
+		bool kindBlocks(EEventKind k, DateTime day, EEventClassMask mask, EEventTier minTier)
+		{
+			var r = EventRec.Make(k, day, EventRules.DefaultTier(k), EEventFlags.None);
+			return tierOk(ref r, minTier, mask);
+		}
+
+		/// <summary>EV-4.6b tri-state for one kind and ET trading day: Unknown inside a coverage hole, before the kind's first
+		/// covered month or after its coverage end; else Event / NoEvent from the calendar (ex post). Rule-only and absent
+		/// kinds are never Unknown.</summary>
+		public EEventCoverage Coverage(EEventKind kind, DateTime day)
+		{
+			if (m_disabled || !m_configured) return EEventCoverage.NoEvent;
+			if (unknownKinds(day).Contains(kind)) return EEventCoverage.Unknown;
+			foreach (var r in EventsOnExPost(day.Date)) if (r.kind == kind) return EEventCoverage.Event;
+			return EEventCoverage.NoEvent;
+		}
+
+		/// <summary>EV-4.6b: true when an Unknown kind blocks this day for a consumer: only if allowPartialCoverage = false and the
+		/// kind is in the consumer's mask (and passes minTier); otherwise Unknown counts as NoEvent.</summary>
+		public bool CoverageBlocks(DateTime day, EEventClassMask mask, EEventTier minTier, out EEventKind kind)
+		{
+			kind = EEventKind.None;
+			if (m_disabled || !m_configured || config.allowPartialCoverage) return false;
+			foreach (var k in unknownKinds(day)) if (kindBlocks(k, day, mask, minTier)) { kind = k; return true; }
+			return false;
+		}
+		public bool CoverageBlocks(DateTime day, EEventClassMask mask) { EEventKind k; return CoverageBlocks(day, mask, EEventTier.None, out k); }
+
+		void coverageDay(DateTime day)
+		{
+			var uk = unknownKinds(day);
+			foreach (var kv in m_covStats)
+			{
+				kv.Value[0]++;
+				if (!config.allowPartialCoverage && uk.Contains(kv.Key) && kindBlocks(kv.Key, day, config.classes, EEventTier.None)) kv.Value[1]++;
+			}
+			if (uk.Count == 0 || journal == null) return;
+			var sb = new StringBuilder();
+			foreach (var k in uk)
+			{
+				if (sb.Length > 0) sb.Append(',');
+				sb.Append(k).Append(!config.allowPartialCoverage && kindBlocks(k, day, config.classes, EEventTier.None) ? "(blocks)" : "(NoEvent)");
+			}
+			jr("COVGAP day " + ymd(day) + " Unknown " + sb);
+		}
+
+		/// <summary>EV-4.6b report: share of Unknown-blocked trading days per kind in [from, to] for the consumer mask; a line
+		/// ending FLAG means the share exceeds 5%. Run-time counts (days stepped) are in CoverageStats().</summary>
+		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, out bool flagged)
+		{
+			flagged = false;
+			var res = new List<string>();
+			foreach (var k in EventRules.TableKinds)
+			{
+				if (!m_tableKindsPresent.Contains(k)) continue;
+				int n = 0, b = 0;
+				for (DateTime d = from.Date; d <= to.Date; d = d.AddDays(1))
+				{
+					if (!EventRules.IsNyseBusinessDay(d)) continue;
+					++n;
+					if (!config.allowPartialCoverage && unknownKinds(d).Contains(k) && kindBlocks(k, d, mask, EEventTier.None)) ++b;
+				}
+				double p = n == 0 ? 0 : 100.0 * b / n;
+				bool f = p > 5.0; flagged |= f;
+				res.Add("COVSHARE " + ymd(from) + ".." + ymd(to) + " " + k + " blocked " + b + "/" + n + " " + p.ToString("0.0", CultureInfo.InvariantCulture) + "%" + (f ? " FLAG" : ""));
+			}
+			return res;
+		}
+		public List<string> CoverageStats()
+		{
+			var res = new List<string>();
+			foreach (var kv in m_covStats)
+			{
+				double p = kv.Value[0] == 0 ? 0 : 100.0 * kv.Value[1] / kv.Value[0];
+				res.Add("COVSHARE run " + kv.Key + " blocked " + kv.Value[1] + "/" + kv.Value[0] + " " + p.ToString("0.0", CultureInfo.InvariantCulture) + "%" + (p > 5.0 ? " FLAG" : ""));
+			}
+			return res;
 		}
 
 		// ------------------------------------------------------------------ visibility (EV-5)
@@ -1617,7 +1694,7 @@ namespace PowerLanguage.Function
 		bool windowHit(EEventTier minTier, int preMin, int postMin, EEventClassMask mask, out EventRec e, bool warnDaily)
 		{
 			e = default(EventRec);
-			if (m_disabled || m_now == DateTime.MinValue) return false;   // R2.1-h neutral; no bar stepped yet
+			if (m_disabled || m_now == DateTime.MinValue) return false;   // disabled (EV-4.6b) or no bar stepped yet
 			if (DailyBars) { if (warnDaily) dailyQuery(); return false; }
 			return window(m_open, m_now, minTier, preMin, postMin, mask, out e);
 		}
@@ -1625,6 +1702,13 @@ namespace PowerLanguage.Function
 		bool window(DateTime open, DateTime close, EEventTier minTier, int preMin, int postMin, EEventClassMask mask, out EventRec e)
 		{
 			e = default(EventRec);
+			// EV-4.6b: an Unknown day of a kind in the mask blocks (fail closed) when allowPartialCoverage = false
+			EEventKind uk;
+			if (!config.allowPartialCoverage && m_unk.Count > 0)
+			{
+				DateTime td = TradingDayOf(close);
+				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, EventRules.DefaultTier(uk), EEventFlags.None); return true; }
+			}
 			TimeSpan pre = TimeSpan.FromMinutes(preMin), post = TimeSpan.FromMinutes(postMin);
 			DateTime lo = open - post, hi = close + pre;
 			int y0 = ToEt(lo).Year, y1 = ToEt(hi).Year;

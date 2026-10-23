@@ -365,6 +365,10 @@ def easter(y):
 HOLIDAYS_TXT = os.path.join(HERE, "nyse_holidays.txt")
 def load_nyse():
     return {dt.date.fromisoformat(l.strip()) for l in open(HOLIDAYS_TXT) if l.strip() and not l.startswith("#")}
+NYSE_SPECIAL = (dt.date(2001, 9, 11), dt.date(2001, 9, 12), dt.date(2001, 9, 13), dt.date(2001, 9, 14),   # 9/11
+                dt.date(2004, 6, 11), dt.date(2007, 1, 2),                                                # Reagan, Ford mourning
+                dt.date(2012, 10, 29), dt.date(2012, 10, 30),                                             # Hurricane Sandy
+                dt.date(2018, 12, 5), dt.date(2025, 1, 9))                                                # G.H.W. Bush, Carter mourning
 def nyse_rule(y):
     """Independent mirror of _NyseHolidays.Rules.Holidays (used only by --check to cross-check nyse_holidays.txt)."""
     def obs(x): return x - dt.timedelta(1) if x.weekday() == 5 else x + dt.timedelta(1) if x.weekday() == 6 else x
@@ -376,7 +380,7 @@ def nyse_rule(y):
     if ny.weekday() != 5: h.add(obs(ny))          # NYSE: a Saturday New Year is not observed on the Friday before
     if y >= 2022: h.add(obs(dt.date(y, 6, 19)))
     # special closures exactly as _NyseHolidays.s_special (pre-2017 one-offs are out of its documented range)
-    h |= {x for x in (dt.date(2018, 12, 5), dt.date(2025, 1, 9)) if x.year == y}
+    h |= {x for x in NYSE_SPECIAL if x.year == y}
     return h
 NYSE = None
 def nyse_closed(d): return d.weekday() >= 5 or d in NYSE
@@ -551,7 +555,7 @@ def emit(table, corr, man):
     for n, h, _ in shas: L.append("\t//   %-26s %s  %s" % (n, h, man[n]["url"]))
     for k, (u, ts, what) in WAYBACK.items(): L.append("\t//   wayback %s (%s): %s" % (ts, u, what))
     for n_ in NOTES: L.append("\t// NOTE " + n_)
-    L.append("\t// Coverage holes (EV-4.6, s_coverageHoles): %d refused spans; with allowPartialCoverage=false a bar inside one disables the engine." % len(HOLES))
+    L.append("\t// Coverage holes (EV-4.6, s_coverageHoles): %d refused spans; a day inside one is Unknown for that kind (EV-4.6b)." % len(HOLES))
     L += ["\tpublic static partial class EventRules", "\t{"]
     def arr(name, typ, vals, per):
         L.append("\t\tstatic readonly %s[] %s = {" % (typ, name))
@@ -566,6 +570,12 @@ def emit(table, corr, man):
     L.append("\t\tstatic readonly string[] s_coverageHoleWhy = {")
     for k, a, b, why in HOLES: L.append("\t\t\t%s," % cs_str(why))
     L.append("\t\t};")
+    # EV-4.6b: expected hash (mirror of EventRules.ComputeTableSha); a mismatch at runtime disables the engine
+    y_ = lambda d: ymdhm(d) if d else 0
+    hs = "".join("%d,%d,%d,%s;" % (ymdhm(e.et), KIND[e.kind], e.flags, e.ref or "") for e in table)
+    hs += "".join("%s,%d,%d,%d,%d,%d;" % (c["kind"], y_(c.get("original")), y_(c.get("actual")), y_(c.get("announced")), y_(c.get("canceled_since")), c["flags"]) for c in corr)
+    if HOLES: hs += "holes" + "".join(",%d,%d,%d" % (KIND[k], ymdhm(a), ymdhm(b)) for k, a, b, _ in HOLES)
+    L.append("\t\tstatic readonly string s_expectedTableSha = \"%s\";" % hashlib.sha256(hs.encode("utf-8")).hexdigest()[:16])
     L.append("\t\tstatic readonly EventCorrection[] s_corrections = {")
     for c in corr:
         L.append("\t\t\tnew EventCorrection { kind = EEventKind.%s, refPeriod = %s, originalEt = %d, actualEt = %d, announcedEt = %d, canceledSinceEt = %d, flags = %s,"
