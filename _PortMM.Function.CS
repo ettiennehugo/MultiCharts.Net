@@ -26,6 +26,13 @@ namespace PowerLanguage.Function
 		/// <summary>Optional (phase3 §3.3 / Q10): G-R filtered regime probabilities, double[] (empty = unknown), written at the session close
 		/// only when RegimeConfig.publish is set; a new array each time (copy-on-write, never mutated after publishing).</summary>
 		public const string RegimeP = "pm.regimeP";
+		/// <summary>M-EVENT optional keys (EV-7.1), written only when PortfolioPublish &amp;&amp; EventConfig.publish &amp;&amp; the engine exists.
+		/// EvtTier: max macro tier of the trading day (0 none, 1 T3, 2 T2, 3 T1), EvtMask: kinds bitmask (bits &lt; 53) — both once per
+		/// trading day; EvtWin: 1 in a blackout window, else 0; EvtNext: minutes to the next blackoutTier event (NaN none) — every close.</summary>
+		public const string EvtTier = "pm.evtTier";
+		public const string EvtMask = "pm.evtMask";
+		public const string EvtWin = "pm.evtWin";
+		public const string EvtNext = "pm.evtNext";
 		// book-level values written by the MM into CommonPortfolioData
 		public const string Mult = "pm.mult", Heat = "pm.heat", Dd = "pm.dd", Rho = "pm.rho";
 	}
