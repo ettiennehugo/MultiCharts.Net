@@ -23,6 +23,9 @@ namespace PowerLanguage.Function
 		public const string Eq = "pm.eq", Pnl = "pm.pnl", Ret = "pm.ret", URet = "pm.uRet", Vol = "pm.vol";
 		public const string RDollar = "pm.R$", QtyCode = "pm.qtyCode", RiskNew = "pm.riskNew", RiskOpen = "pm.riskOpen", OpenR = "pm.openR";
 		public const string State = "pm.state", Side = "pm.side", Regime = "pm.regime", Score = "pm.score", Stamp = "pm.stamp", Day = "pm.day", Pos = "pm.pos";
+		/// <summary>Optional (phase3 §3.3 / Q10): G-R filtered regime probabilities, double[] (empty = unknown), written at the session close
+		/// only when RegimeConfig.publish is set; a new array each time (copy-on-write, never mutated after publishing).</summary>
+		public const string RegimeP = "pm.regimeP";
 		// book-level values written by the MM into CommonPortfolioData
 		public const string Mult = "pm.mult", Heat = "pm.heat", Dd = "pm.dd", Rho = "pm.rho";
 	}
