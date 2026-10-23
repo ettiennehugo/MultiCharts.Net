@@ -1,0 +1,17 @@
+{
+  "_doc": "Hand-sourced EV-5.5 corrections that are not machine-derivable from one page. Every row cites its source; build_table.py checks each actual date against the parsed pages and refuses to write on a disagreement. Times ET (yyyy-mm-dd HH:MM). announced: conservative upper bound (date of the cited notice at 23:59 when its time is unknown).",
+  "rows": [
+    {"kind": "FomcDecision", "ref": "2020-03-18", "original": "2020-03-18 14:00", "actual": null, "announced": null, "canceled_since": "2020-03-15 17:00", "flags": [],
+     "check": "fed_canceled", "source": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm (March 17-18 (cancelled)); canceledSince = 03-15 17:00 statement (EV-5.5c design choice)"},
+    {"kind": "FomcPress", "ref": "2020-03-18", "original": "2020-03-18 14:30", "actual": null, "announced": null, "canceled_since": "2020-03-15 17:00", "flags": [],
+     "check": "fed_canceled", "source": "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm (March 17-18 (cancelled))"},
+    {"kind": "Cpi", "ref": "2025-09", "original": "2025-10-15 08:30", "actual": "2025-10-24 08:30", "announced": "2025-10-10 23:59", "canceled_since": "2025-10-01 00:01", "flags": [],
+     "check": "bls_actual", "source": "https://www.bls.gov/bls/092025-cpi-reschedule-notice.htm (last modified 2025-10-10); https://www.bls.gov/news.release/archives/cpi_10242025.htm"},
+    {"kind": "GdpAdvance", "ref": "2018Q4", "original": "2019-01-30 08:30", "actual": "2019-02-28 08:30", "announced": "2019-02-06 23:59", "canceled_since": "2019-02-06 23:59", "flags": [],
+     "check": "alfred_53", "source": "https://www.bea.gov/news/blog/2019-02-06/new-dates-set-gdp-personal-income-and-international-trade; https://www.bea.gov/news/2019/initial-gross-domestic-product-4th-quarter-and-annual-2018"},
+    {"kind": "GdpSecond", "ref": "2018Q4", "original": "2019-02-28 08:30", "actual": null, "announced": "2019-02-06 23:59", "canceled_since": "2019-02-06 23:59", "flags": [],
+     "check": "none", "source": "https://www.bea.gov/news/blog/2019-02-06/new-dates-set-gdp-personal-income-and-international-trade (second estimate replaced by the initial estimate)"},
+    {"kind": "RetailSales", "ref": "2018-12", "original": "2019-01-16 08:30", "actual": "2019-02-14 08:30", "announced": "2019-01-30 23:59", "canceled_since": "2019-01-30 23:59", "flags": [],
+     "check": "census", "source": "https://www.census.gov/newsroom/press-releases/2019/revised-indicator-calendar.html (first issued 2019-01-30)"}
+  ]
+}
