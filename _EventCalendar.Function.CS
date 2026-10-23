@@ -164,11 +164,13 @@ namespace PowerLanguage.Function
 		public static readonly TimeSpan T0830 = new TimeSpan(8, 30, 0), T0930 = new TimeSpan(9, 30, 0), T1000 = new TimeSpan(10, 0, 0),
 			T1030 = new TimeSpan(10, 30, 0), T1600 = new TimeSpan(16, 0, 0);
 
-		/// <summary>Monday-before-third-Friday roll rule applies from this date; earlier years use the "Thursday eight calendar
-		/// days before expiration" wording. Cutover from the Wayback capture
-		/// https://web.archive.org/web/20220614152318/https://www.cmegroup.com/trading/equity-index/rolldates.html : ESM22 roll
-		/// Mon 2022-06-13, ESH22 roll Thu 2022-03-10. Caveat: the capture (06-14) postdates the 06-13 roll.</summary>
-		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 6, 1);
+		/// <summary>Monday-before-third-Friday roll rule applies from this date; earlier contracts use the "Thursday eight calendar
+		/// days before expiration" wording. Wayback (CDX listing of https://www.cmegroup.com/trading/equity-index/rolldates.html):
+		/// capture 20220609055445 still shows the Thursday rule (ESM22 roll Thu 2022-06-09, ESU22 Thu 2022-09-08); capture
+		/// 20220610060819 (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html)
+		/// is the first with the Monday rule. ESM22 therefore rolled Thu 06-09 and the Monday rule starts with ESU22 (Mon 2022-09-12);
+		/// cutover 2022-07-01 sits between them.</summary>
+		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 7, 1);
 
 		// ISM Report On Business release calendar. Source: https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/
 		// (fetched 2026-10-22; 2026: Mfg Jan 5 ... Dec 1, Svc Jan 7 ... Dec 3, 10:00 ET). The 1st / 3rd NYSE business day rule reproduces
@@ -269,31 +271,13 @@ namespace PowerLanguage.Function
 		/// <summary>Standard (AM) SPX options expiry (MonthlyOpex, VixExpiry): third Friday, or the preceding NYSE business day when
 		/// it is an NYSE holiday (Cboe follows the NYSE calendar).</summary>
 		public static DateTime OpexDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
-		/// <summary>Equity-index futures expiry (QuarterlyExpiry, RollWeek, SessionsToExpiry), R2.1-d: third Friday, moved back only
-		/// over CME Globex closures (_CmeHolidays: New Year, Christmas, Good Friday), never for a federal/NYSE holiday CME trades
-		/// through (e.g. 2027-06-18, Juneteenth observed: CME lists expiry 06-18). Then s_expiryOverrides (CME's calendar wins).</summary>
-		public static DateTime ExpiryDate(int y, int m)
-		{
-			long key = y * 100L + m;
-			for (int i = 0; i < s_expiryOverrides.Length; i += 2) if (s_expiryOverrides[i] == key) return FromYmdhm(s_expiryOverrides[i + 1] * 10000L);
-			return RuleExpiryDate(y, m);
-		}
-		/// <summary>The R2.1-d rule alone (no overrides), for the rule-vs-CME mismatch check.</summary>
-		public static DateTime RuleExpiryDate(int y, int m)
-		{
-			DateTime d = ThirdFriday(y, m);
-			while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || _CmeHolidays.Rules.Get(d).Closed) d = d.AddDays(-1);
-			return d;
-		}
-		/// <summary>R2.1-d exchange-calendar overrides: yyyyMM, yyyyMMdd. One row per date where CME's published expiry differs from
-		/// RuleExpiryDate; each row cites its CME source. Every row is re-checked by EventTests (rule != override).</summary>
-		public static readonly long[] s_expiryOverrides = {
-			202606, 20260618,   // ESM26: Juneteenth Fri 06-19; CME lists ES expiry Thu 06-18 at https://www.cmegroup.com/trading/equity-index/rolldates.html
-			                    // (ESM26 contract page no longer published after expiry, so the rolldates page is the contract's own CME cite)
-			202706, 20270617,   // ESM27: CME contract calendar ESM27 last trade Thu 2027-06-17 (Juneteenth Fri 06-18):
-			                    // https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.calendar.html (data: CmeWS/mvc/ProductCalendar/Future/133).
-			                    // The rolldates page shows 06-18 for June 2027; the contract page wins.
-		};
+		/// <summary>Equity-index futures expiry (QuarterlyExpiry, RollWeek, SessionsToExpiry), R2.1-d as amended (PR27 review) and
+		/// EV-1.20: third Friday, moved back to the preceding NYSE business day when NYSE is closed (the SOQ needs an NYSE open).
+		/// Authority: CME's per-contract calendar (CmeWS/mvc/ProductCalendar/Future/133), e.g. ESM26 Thu 2026-06-18, ESM27 Thu
+		/// 2027-06-17 (Juneteenth), ESH08 Thu 2008-03-20 (Good Friday). Not rolldates.html (stale customary dates). No overrides.</summary>
+		public static DateTime ExpiryDate(int y, int m) { return RuleExpiryDate(y, m); }
+		/// <summary>The R2.1-d rule (same as OpexDate); kept as a name for the build_table.py rule-vs-CME check.</summary>
+		public static DateTime RuleExpiryDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
 		/// <summary>Customary roll date (EV §1.2): Monday before the third Friday (from RollRuleMondayFrom), else the Thursday eight
 		/// calendar days before it.</summary>
 		public static DateTime RollDate(int y, int m)
@@ -313,7 +297,11 @@ namespace PowerLanguage.Function
 		}
 
 		static bool contains(int[] a, int v) { return Array.IndexOf(a, v) >= 0; }
-		public static DateTime FromYmdhm(long v) { return new DateTime((int)(v / 100000000), (int)(v / 1000000 % 100), (int)(v / 10000 % 100), (int)(v / 100 % 100), (int)(v % 100), 0); }
+		public static DateTime FromYmdhm(long v)
+		{
+			if (v < 100000000000L || v > 999999999999L) throw new ArgumentException("FromYmdhm expects 12-digit yyyyMMddHHmm, got " + v);
+			return new DateTime((int)(v / 100000000), (int)(v / 1000000 % 100), (int)(v / 10000 % 100), (int)(v / 100 % 100), (int)(v % 100), 0);
+		}
 		public static long ToYmdhm(DateTime d) { return d.Year * 100000000L + d.Month * 1000000L + d.Day * 10000L + d.Hour * 100L + d.Minute; }
 
 		/// <summary>All rule-kind records whose ET start falls in the year (unsorted, utc not yet set).</summary>
@@ -383,6 +371,14 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Decoded generated table (EV-4.2). Empty in PR A.</summary>
+		/// <summary>EV-4.6 coverage holes of the generated table: triples kind, first ET minute, last ET minute.</summary>
+		public static long[] CoverageHoles() { return (long[])s_coverageHoles.Clone(); }
+		public static string HoleWhyFor(long kind, long fromEt, long toEt)
+		{
+			for (int i = 0; i + 2 < s_coverageHoles.Length; i += 3)
+				if (s_coverageHoles[i] == kind && s_coverageHoles[i + 1] == fromEt && s_coverageHoles[i + 2] == toEt) return s_coverageHoleWhy[i / 3];
+			return null;
+		}
 		public static List<EventRec> Table()
 		{
 			var r = new List<EventRec>(s_yyyymmddhhmm.Length);
@@ -400,19 +396,24 @@ namespace PowerLanguage.Function
 		static string s_tableSha;
 		public static string TableSha()
 		{
-			if (s_tableSha != null) return s_tableSha;
-			var sb = new StringBuilder();
-			for (int i = 0; i < s_yyyymmddhhmm.Length; ++i) sb.Append(s_yyyymmddhhmm[i]).Append(',').Append(s_kind[i]).Append(',').Append(s_flags[i]).Append(',').Append(s_ref[i]).Append(';');
-			foreach (var c in s_corrections) sb.Append(c.kind).Append(',').Append(c.originalEt).Append(',').Append(c.actualEt).Append(',').Append(c.announcedEt).Append(',').Append(c.canceledSinceEt).Append(',').Append((int)c.flags).Append(';');
-			s_tableSha = Sha256(Encoding.UTF8.GetBytes(sb.ToString())).Substring(0, 16);
+			if (s_tableSha == null) s_tableSha = ComputeTableSha(s_yyyymmddhhmm, s_kind, s_flags, s_ref, s_corrections, s_coverageHoles);
 			return s_tableSha;
+		}
+		/// <summary>Hash of table rows, corrections and coverage holes (any one changing changes the config hash).</summary>
+		public static string ComputeTableSha(long[] et, byte[] kind, ushort[] flags, string[] refs, EventCorrection[] corr, long[] holes)
+		{
+			var sb = new StringBuilder();
+			for (int i = 0; i < et.Length; ++i) sb.Append(et[i]).Append(',').Append(kind[i]).Append(',').Append(flags[i]).Append(',').Append(refs[i]).Append(';');
+			foreach (var c in corr) sb.Append(c.kind).Append(',').Append(c.originalEt).Append(',').Append(c.actualEt).Append(',').Append(c.announcedEt).Append(',').Append(c.canceledSinceEt).Append(',').Append((int)c.flags).Append(';');
+			if (holes != null && holes.Length > 0) { sb.Append("holes"); foreach (var h in holes) sb.Append(',').Append(h); }
+			return Sha256(Encoding.UTF8.GetBytes(sb.ToString())).Substring(0, 16);
 		}
 		public static string Sha256(byte[] b) { using (var h = SHA256.Create()) { var d = h.ComputeHash(b); var sb = new StringBuilder(64); foreach (var x in d) sb.Append(x.ToString("x2")); return sb.ToString(); } }
 	}
 	// </event-rules>
 
 	// <event-table>
-	// GENERATED by tools/m-event/build_table.py v1.0.0 (EV-4.5) -- do not edit by hand; re-run the script.
+	// GENERATED by tools/m-event/build_table.py v1.1.0 (EV-4.5) -- do not edit by hand; re-run the script.
 	// Pages fetched 2026-10-23 16:36 .. 2026-10-23 16:36 UTC (raw copies + manifest: tools/m-event/raw/). Source sha256[:16]:
 	//   alfred_10.txt              3f1aa6890bd07d49  https://alfred.stlouisfed.org/release/downloaddates?rid=10&ff=txt
 	//   alfred_180.txt             db4d35accccee081  https://alfred.stlouisfed.org/release/downloaddates?rid=180&ff=txt
@@ -452,7 +453,13 @@ namespace PowerLanguage.Function
 	//   fed_hist_2020.html         686ec7998d50e8c0  https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm
 	//   fed_pr_20200303.html       caa2e79d587296b8  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200303a.htm
 	//   fed_pr_20200315.html       f6914aa595895b72  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200315a.htm
-	//   wayback 2022-06-14 15:23:18 UTC (https://web.archive.org/web/20220614152318/https://www.cmegroup.com/trading/equity-index/rolldates.html): roll table: 2022-03 roll Thu 3/10; 2022-06 roll Mon 6/13; 2022-09 Mon 9/12; 2022-12 Mon 12/12
+	//   wayback 2022-06-10 06:08:19 UTC (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html): first capture with the Monday rule: 2022-09 roll Mon 9/12; 2022-12 Mon 12/12 (ESM22 had already rolled Thu 6/9)
+	//   wayback 2022-06-09 05:54:45 UTC (https://web.archive.org/web/20220609055445/https://www.cmegroup.com/trading/equity-index/rolldates.html): last capture with the Thursday rule: 2022-06 roll Thu 6/9; 2022-09 Thu 9/8
+	// NOTE time assumed 08:30 (not in the source): BEA GdpAdvance/GdpSecond/GdpThird/Pce rows 2016-2024 (ALFRED dates only) and every RetailSales row (Census sheet has dates only).
+	// NOTE GdpSecond 2019-02-28 (2018Q4): (m-1)%3 tags it Second; it was the shutdown 'Initial' estimate. s_corrections moves GdpAdvance 2018Q4 to 02-28 and cancels GdpSecond 2018Q4.
+	// NOTE FomcMinutes 2020-04-08 (ref 2020-03-15) is flagged Unscheduled: minutes of an unscheduled meeting, known only at the instant.
+	// NOTE FomcDecision 2020-03-18 (canceled in s_corrections) carries no Sep flag: the Fed's 2020 page lists it only as 'March 17-18 (cancelled)' with no SEP; it was a scheduled SEP meeting (EV-8.2 counts 2020 published SEP = 3). Canceled, so the flag has no runtime effect.
+	// Coverage holes (EV-4.6, s_coverageHoles): 80 refused spans; with allowPartialCoverage=false a bar inside one disables the engine.
 	public static partial class EventRules
 	{
 		static readonly long[] s_yyyymmddhhmm = {
@@ -867,6 +874,111 @@ namespace PowerLanguage.Function
 			"2027-10", "2027-10-27", "2027-10", "2027Q3", "2027-11", "2027-12-08", "2027-12-08", "2027-11",
 			"2027-11", "2027-11", "2027-11", "2027Q3", "2027-12-08",
 		};
+		/// <summary>EV-4.6 coverage holes from refused items: kind, first ET minute, last ET minute (yyyyMMddHHmm).</summary>
+		static readonly long[] s_coverageHoles = {
+			9, 201602010000, 201602292359, 9, 201608010000, 201608312359, 10, 201608010000, 201608312359, 11, 201608010000, 201608312359,
+			12, 201608010000, 201608312359, 10, 201609010000, 201609302359, 11, 201609010000, 201609302359, 12, 201609010000, 201609302359,
+			10, 201611010000, 201611302359, 11, 201611010000, 201611302359, 12, 201611010000, 201611302359, 9, 201612220000, 201612222359,
+			9, 201703010000, 201703312359, 9, 201705010000, 201705312359, 9, 201708010000, 201708312359, 10, 201708010000, 201708312359,
+			11, 201708010000, 201708312359, 12, 201708010000, 201708312359, 10, 201710010000, 201710312359, 11, 201710010000, 201710312359,
+			12, 201710010000, 201710312359, 10, 201711010000, 201711302359, 11, 201711010000, 201711302359, 12, 201711010000, 201711302359,
+			9, 201803010000, 201803312359, 10, 201807010000, 201807312359, 11, 201807010000, 201807312359, 12, 201807010000, 201807312359,
+			9, 201807310000, 201807312359, 9, 201812210000, 201812212359, 11, 201901010000, 201901312359, 12, 201901010000, 201901312359,
+			9, 201903010000, 201903312359, 1, 201910110000, 201910112359, 9, 201911270000, 201911272359, 9, 201912200000, 201912202359,
+			2, 202003030000, 202003032359, 2, 202003150000, 202003152359, 10, 202009010000, 202009302359, 11, 202009010000, 202009302359,
+			12, 202009010000, 202009302359, 9, 202010010000, 202010312359, 10, 202011010000, 202011302359, 11, 202011010000, 202011302359,
+			12, 202011010000, 202011302359, 9, 202011250000, 202011252359, 10, 202108010000, 202108312359, 11, 202108010000, 202108312359,
+			12, 202108010000, 202108312359, 10, 202109010000, 202109302359, 11, 202109010000, 202109302359, 12, 202109010000, 202109302359,
+			9, 202110010000, 202110312359, 10, 202110010000, 202110312359, 11, 202110010000, 202110312359, 12, 202110010000, 202110312359,
+			9, 202111240000, 202111242359, 10, 202210010000, 202210312359, 11, 202210010000, 202210312359, 12, 202210010000, 202210312359,
+			9, 202212010000, 202212312359, 10, 202311010000, 202311302359, 11, 202311010000, 202311302359, 12, 202311010000, 202311302359,
+			10, 202410010000, 202410312359, 11, 202410010000, 202410312359, 12, 202410010000, 202410312359, 9, 202411270000, 202411272359,
+			10, 202601220000, 202601222359, 11, 202601220000, 202601222359, 12, 202601220000, 202601222359, 2, 202610280000, 202610282359,
+			2, 202612090000, 202612092359, 2, 202701270000, 202701272359, 2, 202703170000, 202703172359, 2, 202704280000, 202704282359,
+			2, 202706090000, 202706092359, 2, 202707280000, 202707282359, 2, 202709150000, 202709152359, 2, 202710270000, 202710272359,
+		};
+		static readonly string[] s_coverageHoleWhy = {
+			"PCE 2016-02: ALFRED lists 2 dates (2016-02-01,2016-02-26)",
+			"PCE 2016-08: ALFRED lists 2 dates (2016-08-02,2016-08-29)",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-08: ALFRED lists 2 dates in the month (2016-08-03,2016-08-26): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-09: ALFRED lists 2 dates in the month (2016-09-08,2016-09-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"GDP 2016-11: ALFRED lists 2 dates in the month (2016-11-03,2016-11-29): estimate ambiguous",
+			"PCE 2016-12-22: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2017-03: ALFRED lists 2 dates (2017-03-01,2017-03-31)",
+			"PCE 2017-05: ALFRED lists 2 dates (2017-05-01,2017-05-30)",
+			"PCE 2017-08: ALFRED lists 2 dates (2017-08-01,2017-08-31)",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-08: ALFRED lists 3 dates in the month (2017-08-03,2017-08-30,2017-08-31): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-10: ALFRED lists 2 dates in the month (2017-10-03,2017-10-27): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"GDP 2017-11: ALFRED lists 2 dates in the month (2017-11-16,2017-11-29): estimate ambiguous",
+			"PCE 2018-03: ALFRED lists 2 dates (2018-03-01,2018-03-29)",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"GDP 2018-07: ALFRED lists 2 dates in the month (2018-07-27,2018-07-31): estimate ambiguous",
+			"PCE 2018-07-31: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2018-12-21: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2019-01: no ALFRED date in the month",
+			"GDP 2019-01: no ALFRED date in the month",
+			"PCE 2019-03: ALFRED lists 2 dates (2019-03-01,2019-03-29)",
+			"FomcDecision 2019-10-04 (unscheduled): statement released 2019-10-11, no time on the page; not a rate decision",
+			"PCE 2019-11-27: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"PCE 2019-12-20: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"FomcPress 2020-03-03 (unscheduled): fomcpresconf page carries no time",
+			"FomcPress 2020-03-15 (unscheduled): fomcpresconf page carries no time",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"GDP 2020-09: ALFRED lists 2 dates in the month (2020-09-16,2020-09-30): estimate ambiguous",
+			"PCE 2020-10: ALFRED lists 2 dates (2020-10-01,2020-10-30)",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"GDP 2020-11: ALFRED lists 2 dates in the month (2020-11-03,2020-11-25): estimate ambiguous",
+			"PCE 2020-11-25: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-08: ALFRED lists 3 dates in the month (2021-08-06,2021-08-20,2021-08-26): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"GDP 2021-09: ALFRED lists 2 dates in the month (2021-09-24,2021-09-30): estimate ambiguous",
+			"PCE 2021-10: ALFRED lists 2 dates (2021-10-01,2021-10-29)",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"GDP 2021-10: ALFRED lists 2 dates in the month (2021-10-28,2021-10-29): estimate ambiguous",
+			"PCE 2021-11-24: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"GDP 2022-10: ALFRED lists 2 dates in the month (2022-10-06,2022-10-27): estimate ambiguous",
+			"PCE 2022-12: ALFRED lists 2 dates (2022-12-01,2022-12-23)",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2023-11: ALFRED lists 2 dates in the month (2023-11-17,2023-11-29): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"GDP 2024-10: ALFRED lists 2 dates in the month (2024-10-02,2024-10-30): estimate ambiguous",
+			"PCE 2024-11-27: same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"GDP 2025Q3 Updated Estimate 2026-01-22 08:30:00: lapse-era 'Updated' estimate has no Advance/Second/Third kind",
+			"FomcPress 2026-10-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2026-12-09: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-01-27: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-03-17: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-04-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-06-09: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-07-28: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-09-15: future meeting: the calendar page lists no press conference yet (no source)",
+			"FomcPress 2027-10-27: future meeting: the calendar page lists no press conference yet (no source)",
+		};
 		static readonly EventCorrection[] s_corrections = {
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2018-12", originalEt = 201901160830, actualEt = 201902140830, announcedEt = 201901302359, canceledSinceEt = 201901302359, flags = EEventFlags.None,
 				source = "https://www.census.gov/newsroom/press-releases/2019/revised-indicator-calendar.html (first issued 2019-01-30)" },
@@ -875,11 +987,11 @@ namespace PowerLanguage.Function
 			new EventCorrection { kind = EEventKind.GdpSecond, refPeriod = "2018Q4", originalEt = 201902280830, actualEt = 0, announcedEt = 201902062359, canceledSinceEt = 201902062359, flags = EEventFlags.None,
 				source = "https://www.bea.gov/news/blog/2019-02-06/new-dates-set-gdp-personal-income-and-international-trade (second estimate replaced by the initial estimate)" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-01", originalEt = 0, actualEt = 201903110830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-02", originalEt = 0, actualEt = 201904010830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2019-03", originalEt = 0, actualEt = 201904180830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.FomcDecision, refPeriod = "2020-03-18", originalEt = 202003181400, actualEt = 0, announcedEt = 0, canceledSinceEt = 202003151700, flags = EEventFlags.None,
 				source = "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm (March 17-18 (cancelled)); canceledSince = 03-15 17:00 statement (EV-5.5c design choice)" },
 			new EventCorrection { kind = EEventKind.FomcPress, refPeriod = "2020-03-18", originalEt = 202003181430, actualEt = 0, announcedEt = 0, canceledSinceEt = 202003151700, flags = EEventFlags.None,
@@ -919,7 +1031,7 @@ namespace PowerLanguage.Function
 			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-10", originalEt = 202511140830, actualEt = 0, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.None,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-09", originalEt = 0, actualEt = 202511250830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Jolts, refPeriod = "2025-10", originalEt = 202512021000, actualEt = 202512091000, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2025-11", originalEt = 202512050830, actualEt = 202512160830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
@@ -931,29 +1043,29 @@ namespace PowerLanguage.Function
 			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-11", originalEt = 202512110830, actualEt = 202601140830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-10", originalEt = 0, actualEt = 202512160830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2025-12", originalEt = 202601140830, actualEt = 202601300830, announcedEt = 0, canceledSinceEt = 202510010001, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm; revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-11", originalEt = 0, actualEt = 202601140830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Pce, refPeriod = "2025-10/11", originalEt = 0, actualEt = 202601221000, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
 				source = "https://www.bea.gov/news/schedule/full (lapse-delayed; original date not on the page: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Nfp, refPeriod = "2026-01", originalEt = 202602060830, actualEt = 202602110830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2025-12", originalEt = 0, actualEt = 202602100830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Cpi, refPeriod = "2026-01", originalEt = 202602110830, actualEt = 202602130830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2026-01", originalEt = 202602120830, actualEt = 202602270830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-01", originalEt = 0, actualEt = 202603060830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.Ppi, refPeriod = "2026-02", originalEt = 202603120830, actualEt = 202603180830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
 				source = "https://www.bls.gov/bls/2025-lapse-revised-release-dates.htm (2026 lapse start unknown: canceled at the original instant); revised date first-publication capture unavailable: known at the instant" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-02", originalEt = 0, actualEt = 202604010830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 			new EventCorrection { kind = EEventKind.RetailSales, refPeriod = "2026-03", originalEt = 0, actualEt = 202604210830, announcedEt = 0, canceledSinceEt = 0, flags = EEventFlags.Unscheduled,
-				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
+				source = "https://www.census.gov/retail/marts/www/MARTSreleasedates.xlsx (time assumed 08:30: the Census release-date sheet gives no time) ('**' = lapse-delayed; original date unknown: unscheduled, known at the instant)" },
 		};
 	}
 	// </event-table>
@@ -977,6 +1089,9 @@ namespace PowerLanguage.Function
 		/// <summary>Test seams: replace the generated table / corrections (null = EventRules).</summary>
 		public List<EventRec> table;
 		public EventCorrection[] corrections;
+		/// <summary>Test seam: coverage-hole triples (kind, fromEt, toEt yyyyMMddHHmm). null = EventRules holes when table is null,
+		/// none when the table seam is set.</summary>
+		public long[] coverageHoles;
 
 		sealed class Year
 		{
@@ -1002,6 +1117,12 @@ namespace PowerLanguage.Function
 		bool m_configured, m_dailyWarned;
 		bool m_disabled;              // R2.1-h: coverage shortfall; every query is neutral
 		string m_coverageFail;        // set by Configure when firstBarUtc is known, reported on the first Step
+		// EV-4.6 interior gaps / end of coverage (allowPartialCoverage = false): checked on every bar against m_nextCovUtc
+		struct CovHole { public EEventKind kind; public DateTime fromUtc, toUtc; public string why; }
+		List<CovHole> m_holes = new List<CovHole>();
+		int m_holeIdx;
+		DateTime m_covEndUtc = DateTime.MaxValue, m_nextCovUtc = DateTime.MaxValue;
+		string m_covEndWhy;
 
 		// bar state
 		DateTime m_barTime, m_open = DateTime.MinValue, m_now = DateTime.MinValue, m_day = DateTime.MinValue, m_lastSpliceDay = DateTime.MinValue;
@@ -1069,6 +1190,38 @@ namespace PowerLanguage.Function
 				// R2.1-h (EV-4.6): never fail Configure / throw; the shortfall disables the engine on the first Step
 				if (m_coverageFail == null && firstBarUtc != DateTime.MinValue && toUtc(a) > firstBarUtc && !config.allowPartialCoverage)
 					m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
+			}
+			// EV-4.6 interior holes (refused spans from build_table.py) and per-kind end of coverage
+			m_holes.Clear(); m_holeIdx = 0; m_covEndUtc = m_nextCovUtc = DateTime.MaxValue; m_covEndWhy = null;
+			long[] holes = coverageHoles ?? (table == null ? EventRules.CoverageHoles() : null);
+			if (holes != null)
+				for (int i = 0; i + 2 < holes.Length; i += 3)
+				{
+					var hk = (EEventKind)holes[i];
+					if (!m_tableKindsPresent.Contains(hk)) continue;
+					var h = new CovHole { kind = hk, fromUtc = toUtc(EventRules.FromYmdhm(holes[i + 1])), toUtc = toUtc(EventRules.FromYmdhm(holes[i + 2])),
+						why = EventRules.HoleWhyFor(holes[i], holes[i + 1], holes[i + 2]) ?? "test seam" };
+					m_holes.Add(h);
+					if (firstBarUtc == DateTime.MinValue || h.toUtc >= firstBarUtc) jr("coverage hole " + hk + " " + holes[i + 1] + ".." + holes[i + 2] + " " + h.why);
+				}
+			m_holes.Sort((x, y2) => x.fromUtc.CompareTo(y2.fromUtc));
+			DateTime tableEnd = DateTime.MinValue;
+			foreach (var r in m_table) if (r.etTime > tableEnd) tableEnd = r.etTime;
+			if (tableEnd != DateTime.MinValue)
+			{
+				DateTime globalEnd = endOfMonth(tableEnd);
+				foreach (var k in EventRules.TableKinds)
+				{
+					if (!m_tableKindsPresent.Contains(k)) continue;
+					DateTime b = DateTime.MinValue;
+					foreach (var r in m_table) if (r.kind == k && r.etTime > b) b = r.etTime;
+					// covered through the month before the next expected release (GDP kinds quarterly, others monthly), capped at the table end
+					DateTime e = endOfMonth(b.AddMonths(k == EEventKind.GdpAdvance || k == EEventKind.GdpSecond || k == EEventKind.GdpThird ? 2 : 0));
+					if (e > globalEnd) e = globalEnd;
+					DateTime eu = toUtc(e);
+					if (eu < m_covEndUtc) { m_covEndUtc = eu; m_covEndWhy = "coverage " + k + " ends " + ymd(e) + " (last row " + ymd(b) + ")"; }
+				}
+				jr("coverage end " + ymd(ToEt(m_covEndUtc)) + " (" + m_covEndWhy + ")");
 			}
 			jr("coverage rules(Claims,IsmMfg,IsmSvc,EiaPetroleum,calendar)" + cov + " ruleOnly(Claims, ISM except 2026, EIA outside 2025-01..2026-11, VixExpiry)");
 			if (firstBarUtc != DateTime.MinValue)
@@ -1314,14 +1467,24 @@ namespace PowerLanguage.Function
 			if (m_now == DateTime.MinValue)
 			{
 				if (firstBarUtc == DateTime.MinValue) firstCoverageCheck(barCloseUtc);
-				if (m_coverageFail != null)
+				if (m_coverageFail != null) { coverageDisable(m_coverageFail); return; }
+				if (!config.allowPartialCoverage)
 				{
-					// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
-					string msg = label + " " + m_coverageFail + "; engine disabled";
-					if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
-					m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
-					return;
+					// holes that ended before the first bar are out of range
+					while (m_holeIdx < m_holes.Count && m_holes[m_holeIdx].toUtc < barCloseUtc && m_holes[m_holeIdx].toUtc < (firstBarUtc == DateTime.MinValue ? barCloseUtc : firstBarUtc)) ++m_holeIdx;
+					m_nextCovUtc = m_holeIdx < m_holes.Count && m_holes[m_holeIdx].fromUtc < m_covEndUtc ? m_holes[m_holeIdx].fromUtc : m_covEndUtc;
 				}
+			}
+			if (barCloseUtc >= m_nextCovUtc)
+			{
+				// EV-4.6: the bar range reaches an interior hole or runs past a kind's coverage end
+				if (m_holeIdx < m_holes.Count && barCloseUtc >= m_holes[m_holeIdx].fromUtc && m_holes[m_holeIdx].fromUtc <= m_covEndUtc)
+				{
+					var h = m_holes[m_holeIdx];
+					coverageDisable("coverage hole " + h.kind + " " + ymd(ToEt(h.fromUtc)) + ".." + ymd(ToEt(h.toUtc)) + " (" + h.why + ") (set allowPartialCoverage)");
+				}
+				else coverageDisable(m_covEndWhy + "; bar " + ymd(ToEt(barCloseUtc)) + " is past it (set allowPartialCoverage)");
+				return;
 			}
 			m_barTime = barTime;
 			m_open = barOpenUtc;
@@ -1362,6 +1525,16 @@ namespace PowerLanguage.Function
 			if (m_blackout != was)
 				jr("blackout " + (m_blackout ? "on" : "off") + " at " + barTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " " + m_blackoutRec.KindName + " " + m_blackoutRec.etTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " ET pre(" + config.blackoutPreMin + ") post(" + config.blackoutPostMin + ")" + (m_flattenNow ? " flatten" : ""));
 		}
+
+		void coverageDisable(string why)
+		{
+			// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
+			string msg = label + " " + why + "; engine disabled";
+			if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
+			jr(msg);
+			m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
+		}
+		static DateTime endOfMonth(DateTime d) { return new DateTime(d.Year, d.Month, 1).AddMonths(1).AddMinutes(-1); }
 
 		/// <summary>EV-4.6/4.7 (R2.1-h) on the first bar when the host did not pass firstBarUtc: a table kind starting after the
 		/// first bar disables the engine (Error line in Step; never a throw) unless allowPartialCoverage.</summary>

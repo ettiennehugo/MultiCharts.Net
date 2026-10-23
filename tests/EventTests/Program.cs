@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using PowerLanguage.Function;
@@ -28,13 +29,19 @@ static class Program
 	/// <summary>Step one bar whose CLOSE is `etClose` (ET).</summary>
 	static void Bar(_EventCalendar e, DateTime etClose, int barMin = 1, bool splice = false)
 	{ DateTime c = U(etClose); e.Step(etClose, c.AddMinutes(-barMin), c, splice); }
+	static string FindUp(string rel)
+	{
+		for (var d = new DirectoryInfo(Directory.GetCurrentDirectory()); d != null; d = d.Parent) { string p = Path.Combine(d.FullName, rel); if (File.Exists(p)) return p; }
+		for (var d = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory); d != null; d = d.Parent) { string p = Path.Combine(d.FullName, rel); if (File.Exists(p)) return p; }
+		throw new FileNotFoundException(rel);
+	}
 	static List<EventRec> Gen(int y) { return EventRules.Generate(y, false); }
 	static bool Has(List<EventRec> l, EEventKind k, DateTime et) { return l.Any(r => r.kind == k && r.etTime == et); }
 	static EventRec T1(EEventKind k, DateTime et, EEventFlags f = EEventFlags.None) { var r = EventRec.Make(k, et, EventRules.DefaultTier(k), f); return r; }
 
 	static void Main()
 	{
-		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Perf();
+		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); Perf();
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -70,25 +77,31 @@ static class Program
 		for (int i = 0; i < cme.GetLength(0); ++i)
 		{
 			int y = cme[i, 0], m = cme[i, 1];
-			// R2.1-d: 2026-06 and 2027-06 (Juneteenth) come from the override table (CME contract calendar: ESM27 last trade 06-17).
+			// R2.1-d as amended (PR27): every row (incl. 2026-06 / 2027-06 Juneteenth) comes from the NYSE-business-day rule.
 			Check(EventRules.ExpiryDate(y, m) == new DateTime(y, m, cme[i, 2]), "CME expiry " + y + "-" + m);
 			Check(EventRules.RollDate(y, m) == new DateTime(y, m, cme[i, 3]), "CME roll " + y + "-" + m);
 		}
-		// R2.1-d: futures expiry moves only for CME closures; options (Opex) still follow NYSE.
-		// PR B: CME's ESM27 contract calendar lists last trade Thu 06-17 (override row), the rule alone gives 06-18.
-		Check(EventRules.RuleExpiryDate(2027, 6) == new DateTime(2027, 6, 18) && EventRules.ExpiryDate(2027, 6) == new DateTime(2027, 6, 17) && EventRules.OpexDate(2027, 6) == new DateTime(2027, 6, 17), "2027-06 rule 06-18, CME override 06-17, SPX opex 06-17");
+		// R2.1-d amended (PR27 review) / EV-1.20: third Friday, back to the preceding NYSE business day. CME per-contract calendar
+		// (ProductCalendar/Future/133): ESM27 last trade Thu 2027-06-17 (Juneteenth); no override table any more.
+		Check(EventRules.RuleExpiryDate(2027, 6) == new DateTime(2027, 6, 17) && EventRules.ExpiryDate(2027, 6) == new DateTime(2027, 6, 17) && EventRules.OpexDate(2027, 6) == new DateTime(2027, 6, 17), "2027-06 ESM27 06-17 from the rule, SPX opex 06-17");
 		Check(Has(g27, EEventKind.QuarterlyExpiry, ET(2027, 6, 17, 9, 30)) && Has(g27, EEventKind.RollWeek, ET(2027, 6, 14)), "2027-06 QuarterlyExpiry 06-17 + roll span");
-		for (int i = 0; i < EventRules.s_expiryOverrides.Length; i += 2)
+		// regression: Good Friday 2008-03-21 -> ESH08 expired Thu 2008-03-20
+		Check(EventRules.ExpiryDate(2008, 3) == new DateTime(2008, 3, 20), "ESH08 expiry 2008-03-20 (Good Friday)");
+		for (int y = 2016; y <= 2035; ++y) for (int m = 3; m <= 12; m += 3) Check(EventRules.ExpiryDate(y, m) == EventRules.OpexDate(y, m), "expiry == opex rule " + y + "-" + m);
+		// single NYSE holiday source: tools/m-event/nyse_holidays.txt (read by build_table.py) == _NyseHolidays.Rules 2000-2035
 		{
-			long k = EventRules.s_expiryOverrides[i]; int oy = (int)(k / 100), om = (int)(k % 100);
-			Check(EventRules.RuleExpiryDate(oy, om) != EventRules.ExpiryDate(oy, om), "override " + k + " differs from the rule (else drop it)");
+			string hp = FindUp("tools/m-event/nyse_holidays.txt");
+			var fileDays = new HashSet<DateTime>(File.ReadAllLines(hp).Where(l => l.Trim().Length > 0 && !l.StartsWith("#")).Select(l => DateTime.ParseExact(l.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture)));
+			var csDays = new HashSet<DateTime>();
+			for (DateTime d = new DateTime(2000, 1, 1); d.Year <= 2035; d = d.AddDays(1)) if (EventRules.IsNyseHoliday(d)) csDays.Add(d);
+			Check(fileDays.SetEquals(csDays), "nyse_holidays.txt == _NyseHolidays 2000-2035 (" + fileDays.Count + " vs " + csDays.Count + ")");
 		}
-		// whole range: every quarterly expiry is a CME trading weekday and a Friday unless a CME closure / override moved it
+		// whole range: every quarterly expiry is an NYSE business day and a Friday unless an NYSE closure moved it
 		for (int y = 2016; y <= 2028; ++y)
 			for (int m = 3; m <= 12; m += 3)
 			{
 				DateTime x = EventRules.ExpiryDate(y, m), f = EventRules.ThirdFriday(y, m);
-				Check(x <= f && x > f.AddDays(-7) && x.DayOfWeek != DayOfWeek.Saturday && x.DayOfWeek != DayOfWeek.Sunday && !_CmeHolidays.Rules.Get(x).Closed, "expiry valid " + y + "-" + m);
+				Check(x <= f && x > f.AddDays(-7) && x.DayOfWeek != DayOfWeek.Saturday && x.DayOfWeek != DayOfWeek.Sunday && EventRules.IsNyseBusinessDay(x), "expiry valid " + y + "-" + m);
 				if (x != f) Console.WriteLine("expiry moved " + y + "-" + m + ": " + f.ToString("MM-dd") + " -> " + x.ToString("MM-dd"));
 			}
 		Check(EventRules.RollDate(2018, 3) == new DateTime(2018, 3, 8), "2018 roll: Thursday 8 days before");
@@ -393,7 +406,7 @@ static class Program
 			var dec = t.Where(r => r.kind == EEventKind.FomcDecision && r.etTime.Year == y && (r.flags & EEventFlags.Unscheduled) == 0).ToList();
 			Check(dec.Count == 8, "FOMC " + y + ": 8 scheduled meetings (" + dec.Count + ")");
 			// 2020: the March 17-18 SEP meeting was canceled (the table keeps the original row; s_corrections cancels it), but the
-			// Fed's 2020 page lists no SEP for it, so 2020 has 3 SEP rows.
+			// Fed's 2020 page lists no SEP for it, so 2020 has 3 SEP rows (PR27 review: kept as a comment, see the region NOTE).
 			Check(dec.Count(r => (r.flags & EEventFlags.Sep) != 0) == (y == 2020 ? 3 : 4), "FOMC " + y + ": SEP count");
 			foreach (var d in dec)
 			{
@@ -453,6 +466,86 @@ static class Program
 		// CPI Oct 2025: canceled (original 11-13)
 		Check(!e2.EventsOnExPost(new DateTime(2025, 11, 13)).Any(r => r.kind == EEventKind.Cpi) && e2.EventsOnExPost(new DateTime(2025, 11, 13), true).Any(r => r.kind == EEventKind.Cpi), "CPI Oct 2025 canceled");
 	}
+
+	// ---- PR27 review (analysts 1+2): roll cutover, coverage holes/end, DST, half day, widths, hash
+	static void Pr27()
+	{
+		// roll cutover 2022-07-01 (Wayback 20220609055445 Thursday rule / 20220610060819 Monday rule)
+		Check(EventRules.RollDate(2022, 6) == new DateTime(2022, 6, 9) && EventRules.RollDate(2022, 9) == new DateTime(2022, 9, 12), "ESM22 rolls Thu 06-09, ESU22 Mon 09-12");
+		Check(EventRules.RollDate(2022, 3) == new DateTime(2022, 3, 10), "ESH22 rolls Thu 03-10");
+		// FromYmdhm width assert
+		bool t8 = false, t13 = false;
+		try { EventRules.FromYmdhm(20260101L); } catch (ArgumentException) { t8 = true; }
+		try { EventRules.FromYmdhm(2026010108300L); } catch (ArgumentException) { t13 = true; }
+		Check(t8 && t13 && EventRules.FromYmdhm(202601010830L) == new DateTime(2026, 1, 1, 8, 30, 0), "FromYmdhm rejects non-12-digit values");
+		// corrections alone change the table hash (and so EventConfig.Canon)
+		long[] et = { 202601020830L }; byte[] kd = { 4 }; ushort[] fl = { 0 }; string[] rf = { "2025-12" };
+		var c1 = new[] { new EventCorrection { kind = EEventKind.Cpi, originalEt = 202601020830L, actualEt = 202601050830L, source = "x" } };
+		var c2 = new[] { new EventCorrection { kind = EEventKind.Cpi, originalEt = 202601020830L, actualEt = 202601060830L, source = "x" } };
+		Check(EventRules.ComputeTableSha(et, kd, fl, rf, c1, null) != EventRules.ComputeTableSha(et, kd, fl, rf, c2, null), "corrections-only change -> TableSha changes");
+		Check(EventRules.ComputeTableSha(et, kd, fl, rf, c1, null) != EventRules.ComputeTableSha(et, kd, fl, rf, c1, new long[] { 4, 202601010000L, 202601312359L }), "holes-only change -> TableSha changes");
+		Check(new EventConfig().Canon().Contains(EventRules.TableSha()), "Canon carries TableSha");
+		// whole table loads with zero rejections; no row on a DST-skipped or ambiguous ET minute 2016-2027
+		var jl = new List<string>();
+		var full = Eng(c => c.allowPartialCoverage = false, EventRules.Table(), EventRules.Corrections, jl);
+		Check(!jl.Any(x => x.Contains("reject") || x.Contains("invalid")), "real table: zero rejections");
+		var est = TimeZoneInfo.FindSystemTimeZoneById(TzId());
+		int dstDays = 0;
+		for (DateTime d = new DateTime(2016, 1, 1); d.Year <= 2027; d = d.AddDays(1))
+			if (est.IsDaylightSavingTime(d.AddHours(12)) != est.IsDaylightSavingTime(d.AddDays(-1).AddHours(12))) dstDays++;
+		Check(dstDays == 24, "24 DST changes 2016-2027 (" + dstDays + ")");
+		Check(EventRules.Table().All(r => !est.IsInvalidTime(r.etTime) && !est.IsAmbiguousTime(r.etTime)), "no table row on a DST gap/overlap minute");
+		Check(EventRules.Table().Concat(EventRules.Corrections.Where(c => c.actualEt != 0).Select(c => EventRec.Make(c.kind, EventRules.FromYmdhm(c.actualEt), EEventTier.T1, EEventFlags.None)))
+			.All(r => full.TradingDayOf(U(r.etTime)) >= r.etTime.Date.AddDays(-1)), "every row maps to a trading day");
+		// Sunday 2020-03-15 17:00 (unscheduled cut) lands on the 03-16 trading day: EventsOn and IsInWindow
+		var e = Eng(c => c.allowPartialCoverage = false, EventRules.Table(), EventRules.Corrections);
+		Bar(e, ET(2020, 3, 15, 17, 10));
+		Check(e.IsInWindow(EEventTier.T1, 30, 30), "2020-03-15 17:10: in the post-window of the 17:00 cut");
+		Check(e.EventsOn(new DateTime(2020, 3, 16)).Any(r => r.kind == EEventKind.FomcDecision && r.etTime == ET(2020, 3, 15, 17, 0)), "EventsOn(03-16) holds the 03-15 17:00 decision");
+		Check(!e.EventsOn(new DateTime(2020, 3, 13)).Any(r => r.etTime == ET(2020, 3, 15, 17, 0)), "not on Fri 03-13");
+		// half day 2026-11-27: a pre-halt event is labelled on its own day; its window does not leak into the next session
+		var h = Eng(null, new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 11, 27, 12, 30)) });
+		Bar(h, ET(2026, 11, 27, 12, 45));
+		Check(h.Classify(new DateTime(2026, 11, 27)).isHalfDay && h.EventsOn(new DateTime(2026, 11, 27)).Any(r => r.kind == EEventKind.Cpi), "half day 2026-11-27: Cpi 12:30 on its own day");
+		Check(h.IsInWindow(EEventTier.T1, 30, 120), "half day: in window before the halt");
+		Bar(h, ET(2026, 11, 29, 18, 5));
+		Check(!h.IsInWindow(EEventTier.T1, 30, 120) && !h.EventsOn(new DateTime(2026, 11, 30)).Any(r => r.kind == EEventKind.Cpi), "half day: window does not leak into the 11-30 session");
+		// EV-4.6 interior holes / end of coverage (allowPartialCoverage = false): Error line + disabled, never a throw
+		Func<bool, List<string>, _EventCalendar> real = (partial, errs) =>
+		{
+			var x = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = partial }, table = EventRules.Table(), corrections = EventRules.Corrections,
+				coverageHoles = EventRules.CoverageHoles(), barDuration = TimeSpan.FromMinutes(1) };
+			x.error = s => errs.Add(s);
+			if (x.Configure() != null) throw new Exception("configure");
+			return x;
+		};
+		Func<DateTime, DateTime, bool, string> run = (a, b, partial) =>
+		{
+			var errs = new List<string>(); var x = real(partial, errs);
+			Bar(x, a); bool ok1 = !x.Disabled;
+			Bar(x, b);
+			return (ok1 ? "" : "EARLY ") + (x.Disabled ? "DISABLED " + string.Join("|", errs) : "enabled");
+		};
+		string r1 = run(ET(2020, 8, 31, 10, 0), ET(2020, 9, 1, 10, 0), false);
+		Check(r1.StartsWith("DISABLED") && r1.Contains("coverage hole Gdp") && r1.Contains("2020-09-01") && r1.Contains("ALFRED"), "GDP hole 2020-09 disables: " + r1);
+		string r2 = run(ET(2022, 11, 30, 10, 0), ET(2022, 12, 1, 10, 0), false);
+		Check(r2.StartsWith("DISABLED") && r2.Contains("Pce") && r2.Contains("2022-12"), "PCE hole 2022-12 disables: " + r2);
+		string r3 = run(ET(2026, 12, 31, 10, 0), ET(2027, 1, 4, 10, 0), false);
+		Check(r3.StartsWith("DISABLED") && r3.Contains("Jolts") && r3.Contains("2026-12-31"), "JOLTS coverage ends 2026-12: " + r3);
+		string r4 = run(ET(2026, 10, 27, 10, 0), ET(2026, 10, 28, 10, 0), false);
+		Check(r4.StartsWith("DISABLED") && r4.Contains("FomcPress") && r4.Contains("2026-10-28"), "future FomcPress hole disables: " + r4);
+		Check(run(ET(2020, 8, 31, 10, 0), ET(2020, 9, 1, 10, 0), true) == "enabled", "allowPartialCoverage keeps it enabled across a hole");
+		Check(run(ET(2026, 1, 5, 10, 0), ET(2026, 1, 6, 10, 0), false) == "enabled", "no hole 2026-01-05..06 -> enabled");
+		string r5 = run(ET(2020, 9, 15, 10, 0), ET(2020, 9, 16, 10, 0), false);
+		Check(r5.StartsWith("EARLY DISABLED"), "first bar inside a hole disables on that bar: " + r5);
+		var jh = new List<string>();
+		var x2 = new _EventCalendar { config = new EventConfig { enabled = true }, table = EventRules.Table(), corrections = EventRules.Corrections, coverageHoles = EventRules.CoverageHoles(),
+			barDuration = TimeSpan.FromMinutes(1), firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
+		x2.journal = s => jh.Add(s); x2.Configure();
+		Check(jh.Any(s => s.Contains("coverage hole FomcPress 202610280000")) && !jh.Any(s => s.Contains("coverage hole Pce 202010")), "journal lists holes after the first bar only");
+		Check(jh.Any(s => s.Contains("coverage end 2026-12-31") && s.Contains("Jolts")), "journal coverage end (Jolts)");
+	}
+	static string TzId() { try { TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"); return "Eastern Standard Time"; } catch { return "America/New_York"; } }
 
 	// ---- EV-6.11 performance
 	static void Perf()

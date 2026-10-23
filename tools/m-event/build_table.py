@@ -13,7 +13,7 @@ Python 3 stdlib (+ openpyxl for the Census xlsx).
 """
 import argparse, csv, datetime as dt, hashlib, html, io, json, os, re, subprocess, sys
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 RAW = os.path.join(HERE, "raw")
@@ -51,8 +51,12 @@ ALFRED = dict(Cpi=10, Ppi=46, Nfp=50, Jolts=192, Pce=54, Gdp=53, RetailSales=9, 
 for _k, _r in ALFRED.items(): SOURCES["alfred_%d.txt" % _r] = "https://alfred.stlouisfed.org/release/downloaddates?rid=%d&ff=txt" % _r
 # Evidence read through a Wayback capture (box TLS to archive.org is blocked; captured URL + timestamp recorded, not cached)
 WAYBACK = {
-    "cme_rolldates_20220614": ("https://web.archive.org/web/20220614152318/https://www.cmegroup.com/trading/equity-index/rolldates.html",
-                               "2022-06-14 15:23:18 UTC", "roll table: 2022-03 roll Thu 3/10; 2022-06 roll Mon 6/13; 2022-09 Mon 9/12; 2022-12 Mon 12/12"),
+    # Earliest capture showing the Monday roll rule (PR27 review, analyst1 CDX reading). Captures 20220521, 20220608 and
+    # 20220609055445 still show ESM22 roll Thu 6/9/22 (Sep 9/8), so the published ESM22 roll was 6/9: cutover after ESM22.
+    "cme_rolldates_20220610": ("https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html",
+                               "2022-06-10 06:08:19 UTC", "first capture with the Monday rule: 2022-09 roll Mon 9/12; 2022-12 Mon 12/12 (ESM22 had already rolled Thu 6/9)"),
+    "cme_rolldates_20220609": ("https://web.archive.org/web/20220609055445/https://www.cmegroup.com/trading/equity-index/rolldates.html",
+                               "2022-06-09 05:54:45 UTC", "last capture with the Thursday rule: 2022-06 roll Thu 6/9; 2022-09 Thu 9/8"),
 }
 
 # ------------------------------------------------------------------ fetch / cache
@@ -94,7 +98,15 @@ def ymdhm(d): return d.year * 100000000 + d.month * 1000000 + d.day * 10000 + d.
 def pdt(s): return dt.datetime.strptime(s, "%Y-%m-%d %H:%M") if s else None
 
 REPORT = {"refused": [], "unresolved": [], "verify": [], "info": [], "disagree": [], "mismatch": []}
-def refuse(what, why): REPORT["refused"].append("%s: %s" % (what, why))
+HOLES = []   # EV-4.6 coverage holes: (kind, first ET minute, last ET minute, why); emitted as s_coverageHoles
+GDPK = ("GdpAdvance", "GdpSecond", "GdpThird")
+def month_span(y, m):
+    a = dt.datetime(y, m, 1); b = (a + dt.timedelta(days=32)).replace(day=1) - dt.timedelta(minutes=1); return a, b
+def day_span(d): a = dt.datetime(d.year, d.month, d.day); return a, a + dt.timedelta(hours=23, minutes=59)
+def refuse(what, why, kinds=(), span=None):
+    """A refused item. With kinds + span (ET datetimes) it is also a coverage hole the engine fails closed on (EV-4.6)."""
+    REPORT["refused"].append("%s: %s" % (what, why))
+    for k in kinds: HOLES.append((k, span[0], span[1], "%s: %s" % (what, why)))
 
 # ------------------------------------------------------------------ Fed
 def fed(pages, y0, y1):
@@ -125,7 +137,7 @@ def fed(pages, y0, y1):
             ref = dec.isoformat()
             ev.append(Ev("FomcDecision", T(dec, "14:00"), ref, src_cal, FLAG["Sep"] if sep else 0))
             if re.search(r"fomcpresconf\d{8}\.htm", b): ev.append(Ev("FomcPress", T(dec, "14:30"), ref, src_cal))
-            elif dec > today: refuse("FomcPress %s" % ref, "future meeting: the calendar page lists no press conference yet (no source)")
+            elif dec > today: refuse("FomcPress %s" % ref, "future meeting: the calendar page lists no press conference yet (no source)", ("FomcPress",), day_span(dec))
             mr = re.search(r"\(Released ([A-Z][a-z]+) (\d{1,2}), (\d{4})\)", b)
             if mr: md = dt.date(int(mr.group(3)), MONTHS[mr.group(1)], int(mr.group(2)))
             elif dec > today - dt.timedelta(days=21):
@@ -142,7 +154,7 @@ def fed(pages, y0, y1):
             if "notation vote" in head: continue
             if head.startswith("October 4 (unscheduled)") and y == 2019:
                 # unscheduled call; statement "Released October 11, 2019" with no time on the page and not a rate decision
-                refuse("FomcDecision 2019-10-04 (unscheduled)", "statement released 2019-10-11, no time on the page; not a rate decision"); continue
+                refuse("FomcDecision 2019-10-04 (unscheduled)", "statement released 2019-10-11, no time on the page; not a rate decision", ("FomcDecision",), day_span(dt.date(2019, 10, 11))); continue
             m = re.match(r"([A-Z][a-z]+)(?:/([A-Z][a-z]+))? (\d{1,2})(?:-(\d{1,2}))? ?(\((unscheduled|cancelled|conference call)\))? Meeting", head)
             if not m: REPORT["disagree"].append("Fed %d: unparsed heading %r" % (y, head)); continue
             mon = mnum_of(m.group(2) or m.group(1)); d2 = int(m.group(4) or m.group(3)); tag = m.group(6)
@@ -161,11 +173,13 @@ def fed(pages, y0, y1):
                 ft = re.search(r"For release at (\d{1,2}):(\d{2}) ([ap])\.m\.", pages[prk].decode("utf-8", "replace"))
                 hm = "%02d:%s" % (int(ft.group(1)) % 12 + (12 if ft.group(3) == "p" else 0), ft.group(2))
                 ev.append(Ev("FomcDecision", T(sd, hm), ref, SOURCES[prk], FLAG["Unscheduled"]))
-                if "fomcpresconf" in b: refuse("FomcPress %s (unscheduled)" % ref, "fomcpresconf page carries no time")
+                if "fomcpresconf" in b: refuse("FomcPress %s (unscheduled)" % ref, "fomcpresconf page carries no time", ("FomcPress",), day_span(sd))
             else:
                 sep = "SEP:" in re.sub(r"<[^>]+>", " ", b) or "Projection Materials" in b
                 ev.append(Ev("FomcDecision", T(sd, "14:00"), ref, src, FLAG["Sep"] if sep else 0))
                 if re.search(r"fomcpresconf\d{8}\.htm", b): ev.append(Ev("FomcPress", T(sd, "14:30"), ref, src))
+            # NOTE 2020-04-08: the minutes of the unscheduled 2020-03-15 meeting are flagged Unscheduled (no published date
+            # in advance), so they are known only at their instant even though the meeting was known from 03-15 17:00.
             mr = re.search(r"Minutes[^(]{0,40}\(Released ([A-Z][a-z]+) (\d{1,2}), (\d{4})\)", re.sub(r"<[^>]+>", " ", b))
             if mr: ev.append(Ev("FomcMinutes", T(dt.date(int(mr.group(3)), MONTHS[mr.group(1)], int(mr.group(2))), "14:00"), ref, src,
                                 FLAG["Unscheduled"] if tag else 0))
@@ -232,7 +246,7 @@ def bea(pages, y0, y1):
                 ref = "%sQ%s" % (q.group(2), q.group(1))
                 est = re.search(r"\((Advance|Second|Third|Initial|Updated) Estimate\)", t).group(1)
                 k = {"Advance": "GdpAdvance", "Second": "GdpSecond", "Third": "GdpThird", "Initial": "GdpAdvance"}.get(est)
-                if est == "Updated": refuse("GDP %s Updated Estimate %s" % (ref, et), "lapse-era 'Updated' estimate has no Advance/Second/Third kind"); continue
+                if est == "Updated": refuse("GDP %s Updated Estimate %s" % (ref, et), "lapse-era 'Updated' estimate has no Advance/Second/Third kind", GDPK, day_span(et.date())); continue
                 if est == "Initial": REPORT["info"].append("GDP %s 'Initial' estimate %s mapped to GdpAdvance (replaces the never-released advance)" % (ref, et))
             e = Ev(k, et, ref, src)
             if d < TODAY and not released: canceled.append(e)
@@ -245,6 +259,14 @@ def alfred_dates(pages, rid):
         if re.match(r"^\d{4}-\d{2}-\d{2}\s*$", l): out.append(dt.date.fromisoformat(l.strip()))
     return out
 
+NOTES = [
+    "time assumed 08:30 (not in the source): BEA GdpAdvance/GdpSecond/GdpThird/Pce rows 2016-2024 (ALFRED dates only) and every RetailSales row (Census sheet has dates only).",
+    "GdpSecond 2019-02-28 (2018Q4): (m-1)%3 tags it Second; it was the shutdown 'Initial' estimate. s_corrections moves GdpAdvance 2018Q4 to 02-28 and cancels GdpSecond 2018Q4.",
+    "FomcMinutes 2020-04-08 (ref 2020-03-15) is flagged Unscheduled: minutes of an unscheduled meeting, known only at the instant.",
+    "FomcDecision 2020-03-18 (canceled in s_corrections) carries no Sep flag: the Fed's 2020 page lists it only as 'March 17-18 (cancelled)' with no SEP; it was a scheduled SEP meeting (EV-8.2 counts 2020 published SEP = 3). Canceled, so the flag has no runtime effect.",
+]
+ASSUMED = " (time assumed 08:30: ALFRED gives no time)"
+ASSUMED_CENSUS = " (time assumed 08:30: the Census release-date sheet gives no time)"
 def bea_alfred(pages, y0, y1):
     """BEA 2016-2024: BEA's archive pages are JS-rendered / 404, so ALFRED (second source) gives the dates. Time 08:30
     (BEA's GDP/PIO release time, ALFRED gives dates only: reported as unresolved)."""
@@ -255,24 +277,26 @@ def bea_alfred(pages, y0, y1):
     bym = {}
     for d in gdp: bym.setdefault((d.year, d.month), []).append(d)
     for (y, m), ds in sorted(bym.items()):
-        if len(ds) != 1: refuse("GDP %d-%02d" % (y, m), "ALFRED lists %d dates in the month (%s): estimate ambiguous" % (len(ds), ",".join(map(str, ds)))); continue
+        if len(ds) != 1: refuse("GDP %d-%02d" % (y, m), "ALFRED lists %d dates in the month (%s): estimate ambiguous" % (len(ds), ",".join(map(str, ds))), GDPK, month_span(y, m)); continue
         d = ds[0]; phase = (m - 1) % 3   # Jan/Apr/Jul/Oct advance of the prior quarter
         qy, qq = (y - 1, 4) if m <= 3 else (y, (m - 1) // 3)
         k = ("GdpAdvance", "GdpSecond", "GdpThird")[phase]
-        ev.append(Ev(k, T(d, "08:30"), "%dQ%d" % (qy, qq), src_g))
+        # NOTE 2019-02-28: (m-1)%3 tags it GdpSecond 2018Q4, but it was the shutdown "Initial" estimate; corrections.json
+        # (GdpAdvance 2018Q4 -> 02-28, GdpSecond 2018Q4 canceled) carries the real history.
+        ev.append(Ev(k, T(d, "08:30"), "%dQ%d" % (qy, qq), src_g + ASSUMED))
     for y in range(2016, 2025):
         if not (y0 <= y <= y1): continue
         for m in range(1, 13):
-            if not any((x.year, x.month) == (y, m) for x in gdp): refuse("GDP %d-%02d" % (y, m), "no ALFRED date in the month")
+            if not any((x.year, x.month) == (y, m) for x in gdp): refuse("GDP %d-%02d" % (y, m), "no ALFRED date in the month", GDPK, month_span(y, m))
     pm = {}
     for d in pio: pm.setdefault((d.year, d.month), []).append(d)
     gset = set(gdp)
     for (y, m), ds in sorted(pm.items()):
-        if len(ds) != 1: refuse("PCE %d-%02d" % (y, m), "ALFRED lists %d dates (%s)" % (len(ds), ",".join(map(str, ds)))); continue
+        if len(ds) != 1: refuse("PCE %d-%02d" % (y, m), "ALFRED lists %d dates (%s)" % (len(ds), ",".join(map(str, ds))), ("Pce",), month_span(y, m)); continue
         d = ds[0]
-        if d in gset: refuse("PCE %s" % d, "same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED"); continue
+        if d in gset: refuse("PCE %s" % d, "same day as a GDP release: BEA time (08:30 or 10:00) not verifiable from ALFRED", ("Pce",), day_span(d)); continue
         r = dt.date(y, m, 1) - dt.timedelta(days=1)
-        ev.append(Ev("Pce", T(d, "08:30"), "%d-%02d" % (r.year, r.month), src_p))
+        ev.append(Ev("Pce", T(d, "08:30"), "%d-%02d" % (r.year, r.month), src_p + ASSUMED))
     return ev
 
 # ------------------------------------------------------------------ Census
@@ -295,7 +319,7 @@ def census(pages, y0, y1):
         if not star and (d.year * 12 + d.month) - (ref[0] * 12 + ref[1]) != 1:
             REPORT["disagree"].append("Census %s: sequential ref %d-%02d is not one month lag" % (d, ref[0], ref[1]))
         if not (y0 <= d.year <= y1) or d.year < 2016: continue
-        e = Ev("RetailSales", T(d, "08:30"), "%d-%02d" % ref, SOURCES["census_marts.xlsx"])
+        e = Ev("RetailSales", T(d, "08:30"), "%d-%02d" % ref, SOURCES["census_marts.xlsx"] + ASSUMED_CENSUS)
         (delayed if star else ev).append(e)
     return ev, delayed
 
@@ -336,12 +360,30 @@ def easter(y):
     a = y % 19; b = y // 100; c = y % 100; d = b // 4; e = b % 4; f = (b + 8) // 25; g = (b - f + 1) // 3; h = (19 * a + b - d - g + 15) % 30
     i = c // 4; k = c % 4; l = (32 + 2 * e + 2 * i - h - k) % 7; m = (a + 11 * h + 22 * l) // 451; mo = (h + l - 7 * m + 114) // 31; da = ((h + l - 7 * m + 114) % 31) + 1
     return dt.date(y, mo, da)
-def cme_closed(d):   # _CmeHolidays closures: New Year, Good Friday, Christmas (observed)
+# NYSE holidays: ONE source. nyse_holidays.txt is exported from _NyseHolidays.Rules (C#) and EventTests asserts the file equals
+# the C# rules for 2000-2035, so Python and C# cannot drift. --check also recomputes the rule set below and fails on any diff.
+HOLIDAYS_TXT = os.path.join(HERE, "nyse_holidays.txt")
+def load_nyse():
+    return {dt.date.fromisoformat(l.strip()) for l in open(HOLIDAYS_TXT) if l.strip() and not l.startswith("#")}
+def nyse_rule(y):
+    """Independent mirror of _NyseHolidays.Rules.Holidays (used only by --check to cross-check nyse_holidays.txt)."""
     def obs(x): return x - dt.timedelta(1) if x.weekday() == 5 else x + dt.timedelta(1) if x.weekday() == 6 else x
-    return d in (obs(dt.date(d.year, 1, 1)), obs(dt.date(d.year + 1, 1, 1)), easter(d.year) - dt.timedelta(2), obs(dt.date(d.year, 12, 25)))
+    def nth(m, wd, n): f = dt.date(y, m, 1); return f + dt.timedelta((wd - f.weekday()) % 7 + 7 * (n - 1))
+    def last(m, wd):
+        l = dt.date(y, m, 28) + dt.timedelta(4); l = l - dt.timedelta(l.day); return l - dt.timedelta((l.weekday() - wd) % 7)
+    h = {nth(1, 0, 3), nth(2, 0, 3), easter(y) - dt.timedelta(2), last(5, 0), obs(dt.date(y, 7, 4)), nth(9, 0, 1), nth(11, 3, 4), obs(dt.date(y, 12, 25))}
+    ny = dt.date(y, 1, 1)
+    if ny.weekday() != 5: h.add(obs(ny))          # NYSE: a Saturday New Year is not observed on the Friday before
+    if y >= 2022: h.add(obs(dt.date(y, 6, 19)))
+    # special closures exactly as _NyseHolidays.s_special (pre-2017 one-offs are out of its documented range)
+    h |= {x for x in (dt.date(2018, 12, 5), dt.date(2025, 1, 9)) if x.year == y}
+    return h
+NYSE = None
+def nyse_closed(d): return d.weekday() >= 5 or d in NYSE
 def rule_expiry(y, m):
+    """R2.1-d as amended (PR27): third Friday, moved back to the preceding NYSE business day (SOQ requirement, EV-1.20)."""
     d = third_friday(y, m)
-    while d.weekday() >= 5 or cme_closed(d): d -= dt.timedelta(1)
+    while nyse_closed(d): d -= dt.timedelta(1)
     return d
 def expiry_check(pages):
     MC = {"H": 3, "M": 6, "U": 9, "Z": 12}
@@ -362,11 +404,7 @@ def expiry_check(pages):
     for c, d in sorted(cme.items(), key=lambda kv: kv[1]):
         y = 2000 + int(c[3:]); m = MC[c[2]]; r = rule_expiry(y, m)
         rows.append((c, y, m, d, r))
-        if d != r: REPORT["mismatch"].append("%s: CME last trade %s vs rule %s -> override %d%02d, %s (https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.calendar.html contract %s; data %s)" % (c, d, r, y, m, d.strftime("%Y%m%d"), c, SOURCES["cme_es_calendar.json"]))
-    # rolldates page (live) expiry column
-    L = text_of(pages["cme_rolldates.html"])
-    for i, l in enumerate(L):
-        m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{2,4})$", l)
+        if d != r: REPORT["disagree"].append("%s: CME ProductCalendar last trade %s vs rule %s: fix the rule or the NYSE calendar (%s)" % (c, d, r, SOURCES["cme_es_calendar.json"]))
     return cme, rows
 
 # ------------------------------------------------------------------ assemble
@@ -376,6 +414,11 @@ def main():
     ap.add_argument("--check", action="store_true"); ap.add_argument("--from", dest="y0", type=int, default=2016); ap.add_argument("--to", dest="y1", type=int, default=2027)
     ARGS = ap.parse_args()
     os.makedirs(RAW, exist_ok=True); os.makedirs(OUT, exist_ok=True)
+    global NYSE
+    NYSE = load_nyse()
+    if ARGS.check:
+        exp = set().union(*(nyse_rule(y) for y in range(2000, 2036)))
+        if exp != NYSE: raise SystemExit("nyse_holidays.txt != NYSE rule mirror: only-file %s only-rule %s" % (sorted(NYSE - exp)[:5], sorted(exp - NYSE)[:5]))
     man = load_manifest(); pages = {}
     for n, u in SOURCES.items(): pages[n] = fetch(n, u, man, ARGS.refetch)
     if not ARGS.offline: json.dump(man, open(manifest_path(), "w"), indent=1, sort_keys=True); open(manifest_path(), "a").write("\n")
@@ -475,6 +518,13 @@ def main():
             REPORT["info"].append("odd time %s %s %s" % (e.kind, e.ref, e.et))
         if nyse_fed_holiday(e.et.date()): REPORT["info"].append("federal holiday release %s %s %s" % (e.kind, e.ref, e.et))
 
+    # a refused span that a table or correction row of the same kind fills is not a hole
+    have = [(e.kind, e.et) for e in table] + [(c["kind"], c["actual"]) for c in corr if c.get("actual")]
+    seen = set(); keep = []
+    for h in HOLES:
+        if (h[0], h[1], h[2]) in seen or any(k == h[0] and h[1] <= t <= h[2] for k, t in have): continue
+        seen.add((h[0], h[1], h[2])); keep.append(h)
+    HOLES[:] = sorted(keep, key=lambda h: (h[1], KIND[h[0]]))
     region = emit(table, corr, man)
     write_csv(table, corr, y0, y1)
     src = open(CS, encoding="utf-8").read()
@@ -500,6 +550,8 @@ def emit(table, corr, man):
          "\t// Pages fetched %s .. %s UTC (raw copies + manifest: tools/m-event/raw/). Source sha256[:16]:" % (min(s[2] for s in shas), max(s[2] for s in shas))]
     for n, h, _ in shas: L.append("\t//   %-26s %s  %s" % (n, h, man[n]["url"]))
     for k, (u, ts, what) in WAYBACK.items(): L.append("\t//   wayback %s (%s): %s" % (ts, u, what))
+    for n_ in NOTES: L.append("\t// NOTE " + n_)
+    L.append("\t// Coverage holes (EV-4.6, s_coverageHoles): %d refused spans; with allowPartialCoverage=false a bar inside one disables the engine." % len(HOLES))
     L += ["\tpublic static partial class EventRules", "\t{"]
     def arr(name, typ, vals, per):
         L.append("\t\tstatic readonly %s[] %s = {" % (typ, name))
@@ -509,6 +561,11 @@ def emit(table, corr, man):
     arr("s_kind", "byte", [str(KIND[e.kind]) for e in table], 24)
     arr("s_flags", "ushort", [str(e.flags) for e in table], 24)
     arr("s_ref", "string", [cs_str(e.ref) for e in table], 8)
+    L.append("\t\t/// <summary>EV-4.6 coverage holes from refused items: kind, first ET minute, last ET minute (yyyyMMddHHmm).</summary>")
+    arr("s_coverageHoles", "long", ["%d, %d, %d" % (KIND[k], ymdhm(a), ymdhm(b)) for k, a, b, _ in HOLES], 4)
+    L.append("\t\tstatic readonly string[] s_coverageHoleWhy = {")
+    for k, a, b, why in HOLES: L.append("\t\t\t%s," % cs_str(why))
+    L.append("\t\t};")
     L.append("\t\tstatic readonly EventCorrection[] s_corrections = {")
     for c in corr:
         L.append("\t\t\tnew EventCorrection { kind = EEventKind.%s, refPeriod = %s, originalEt = %d, actualEt = %d, announcedEt = %d, canceledSinceEt = %d, flags = %s,"
