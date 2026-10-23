@@ -106,6 +106,9 @@ namespace PowerLanguage.Function
 				return m_lbrDn == 0 ? (m_lbrUp == 0 ? 50 : 100) : 100 - 100 / (1 + m_lbrUp / m_lbrDn);
 			}
 		}
+		/// <summary>S2 / G-R: the previous completed day's basis close on the ratio-adjusted (roll-continuous) chain; never rebased at a roll,
+		/// so ratios of stored values are roll-adjusted returns. NaN before the first day.</summary>
+		public double RthCloseAdj { get { return m_count > 0 ? at(0).rrc : double.NaN; } }
 		/// <summary>S2: the previous completed day's basis close (difference-adjusted).</summary>
 		public double RthClosePrev { get { return s2Ready("RthClosePrev", config.lbrRsiLength > 0 || config.HvOn) && m_count > 0 ? at(0).rthc : double.NaN; } }
 

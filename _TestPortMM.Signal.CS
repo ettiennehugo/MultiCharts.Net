@@ -48,6 +48,11 @@ namespace PowerLanguage.Strategy
 	///  L7 (a). Portfolio @ES 1 min (index 0) + @CL 5 min (index 1). Journal each MM call:
 	///     "P5b L7 MM call(n) time(..) wall(..)" and "P5b L7 MM #i sym(..) stamp(..) lag(..)".
 	///     PASS: an MM call on every 1-min step; CL stamp only advances every 5 min (lag 0-4 min).
+	///  REG (G-R acceptance trace A-REG, phase3-specs §3.3). Strategies carry a _CustomSignal derivative with
+	///     RegimeConfig.enabled = publish = true (backtest). MM allows all entries and, for each strategy, on every change of its
+	///     pm.day prints "A-REG MM #i sym(..) day(..) pm.regime(..) pm.regimeP(p0,p1,p2|none|empty)" (one line per strategy per day).
+	///     PASS: pm.regime = REGIME journal label + 1 of the previous close (0 while unknown); pm.regimeP equals that day's
+	///     REGIME p(..) line; strategies on the same underlying agree; no line before the first REGIME daily line.
 	/// </summary>
 	public class _TestPortMM : PortfolioSignalObject
 	{
@@ -58,6 +63,7 @@ namespace PowerLanguage.Strategy
 		private int m_calls, m_longCalls, m_l3State;   // L3: 0 waiting, 1 force-closed, 2 done
 		private bool m_l8Done, m_l4Paused;
 		private object m_lastRef;
+		private System.Collections.Generic.Dictionary<int, string> m_regDay = new System.Collections.Generic.Dictionary<int, string>();
 		private DateTime m_lastStamp;
 
 		public _TestPortMM(object _ctx) : base(_ctx) { }
@@ -165,6 +171,23 @@ namespace PowerLanguage.Strategy
 						IStrategy s = sig(i);
 						string lag = o is DateTime ? (Bars.Time[0] - (DateTime)o).TotalMinutes.ToString("0.#") + "m" : "-";
 						Output.WriteLine($"P5b L7 MM #{i} sym({(s != null ? s.Bars.Info.Name : "?")}) stamp({(o is DateTime ? ((DateTime)o).ToString("yyyy-MM-dd HH:mm") : "none")}) lag({lag})");
+					}
+					break;
+				case "REG":
+					allowAll(n);
+					for (int i = 0; i < n; i++)
+					{
+						IPortfolioData pd = PortfolioStrategies[i].PortfolioData;
+						object day = get(pd, _PortKeys.Day);
+						string dk = day != null ? (day is DateTime ? ((DateTime)day).ToString("yyyy-MM-dd") : day.ToString()) : null;
+						string last;
+						if (dk == null || (m_regDay.TryGetValue(i, out last) && last == dk)) continue;
+						m_regDay[i] = dk;
+						IStrategy s = sig(i);
+						object rg = get(pd, _PortKeys.Regime), rp = get(pd, _PortKeys.RegimeP);
+						var pa = rp as double[];
+						string ps = rp == null ? "none" : pa == null ? "?" : pa.Length == 0 ? "empty" : string.Join(",", Array.ConvertAll(pa, v => v.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)));
+						Output.WriteLine($"A-REG MM #{i} sym({(s != null ? s.Bars.Info.Name : "?")}) day({dk}) pm.regime({rg ?? "none"}) pm.regimeP({ps})");
 					}
 					break;
 				default:

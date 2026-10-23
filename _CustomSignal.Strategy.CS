@@ -677,6 +677,60 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// ---- G-R (phase3-specs §3.3): market regime engine, _RegimeEngine.Function.CS. Off by default (RegimeConfig.enabled = false). ----
+		// USE RULE: Regime is a PRIOR / BUCKET for a consumer, never a direct entry trigger. No strategy may consume Regime (or pm.regime)
+		// until that consumer is pre-registered with a kill rule against the AtrTercile (RG-03) baseline (a causal regime variable ranks
+		// above a fitted HMM label, Keller). The value is computed at day t's close and is usable from the next session only.
+
+		/// <summary>G-R configuration (no [Input]); set fields in a derived Create()/ctor. enabled = false: nothing is created.</summary>
+		protected RegimeConfig RegimeConfig { get; } = new RegimeConfig();
+		private _RegimeEngine m_regime;
+		private bool m_regimeQueryWarned;
+		private DateTime m_regimeLastDay = DateTime.MinValue, m_regimeRollDay = DateTime.MinValue;
+
+		/// <summary>G-R state (a copy). Disabled: a neutral state (Valid = false, Label = -1) and a one-time warning.</summary>
+		protected RegimeState Regime
+		{
+			get
+			{
+				if (m_regime != null) return m_regime.State;
+				if (!m_regimeQueryWarned) { m_regimeQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "Regime queried but RegimeConfig.enabled is false (engine not created): neutral state"); }
+				return RegimeState.Neutral(RegimeConfig.K);
+			}
+		}
+
+		/// <summary>G-R lazily enables M-DAILY with S2's HV lengths {20, 63} (merged into DailyConfig.hvLengths). No-op when disabled.</summary>
+		private void prepareRegime()
+		{
+			if (!RegimeConfig.enabled) return;
+			NeedsDaily = true;
+			var hv = new List<int>(DailyConfig.hvLengths ?? new int[0]);
+			foreach (int n in new[] { 20, 63 }) if (!hv.Contains(n)) hv.Add(n);
+			DailyConfig.hvLengths = hv.ToArray();
+		}
+
+		private void startRegime()
+		{
+			m_regime = null; m_regimeQueryWarned = false;
+			m_regimeLastDay = m_regimeRollDay = DateTime.MinValue;
+			if (!RegimeConfig.enabled || m_daily == null) return;
+			var r = new _RegimeEngine { config = RegimeConfig, label = "REGIME", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+			string err = r.Configure();
+			if (err != null) throw new ArgumentException(err);
+			m_regime = r;
+		}
+
+		/// <summary>After stepDaily: feed each newly completed M-DAILY day once (roll-adjusted RTH close, HV20/HV63, H/L, ATR20d, roll flag).</summary>
+		private void stepRegime()
+		{
+			if (Bars.Status != EBarState.Close) return;
+			if (rollOn(1)) m_regimeRollDay = tradingDayKey(Bars.Time[0]);
+			DateTime d = m_daily.PrevDate;
+			if (d == DateTime.MinValue || d == m_regimeLastDay) return;
+			m_regimeLastDay = d;
+			m_regime.AddDay(d, m_daily.RthCloseAdj, m_daily.Hv(20), m_daily.Hv(63), m_daily.PrevHigh, m_daily.PrevLow, m_daily.Atr20d, d == m_regimeRollDay);
+		}
+
 		// ---- M-XMKT (§6): cross-market legs on extra chart streams (bar resolutions). Orders stay on Data1. ----
 
 		/// <summary>M-XMKT legs (role -> stream, staleness, windows, leader swing). Empty (default) = no legs created.
@@ -1037,8 +1091,17 @@ namespace PowerLanguage.Strategy
 		protected virtual bool PortfolioPublish { get { return Environment.ApplicationCode == EApplicationCode.Portfolio; } }
 		/// <summary>M-PORT: catalogue family (PS, VW, PF ...); empty = unknown.</summary>
 		protected virtual string PortfolioFamily { get { return ""; } }
-		/// <summary>M-PORT: regime tag published at session close (0 = unknown).</summary>
-		protected virtual int PortfolioRegime { get { return 0; } }
+		/// <summary>M-PORT: regime tag published at session close (0 = unknown). Default: G-R Label + 1 (1..K) only when
+		/// RegimeConfig.enabled &amp;&amp; publish and the state is valid, else 0 (unchanged behaviour for every strategy by default).</summary>
+		protected virtual int PortfolioRegime
+		{
+			get
+			{
+				if (m_regime == null || !RegimeConfig.publish) return 0;
+				RegimeState s = m_regime.State;
+				return s.Valid && s.Label >= 0 ? s.Label + 1 : 0;
+			}
+		}
 		/// <summary>M-PORT: rank/priority for the MM (NaN = PT table order).</summary>
 		protected virtual double PortfolioScore { get { return double.NaN; } }
 		/// <summary>M-PORT: the strategy's own kill rule fired (pm.state = Halted; the MM flattens and pauses it).</summary>
@@ -1128,6 +1191,7 @@ namespace PowerLanguage.Strategy
 					m_portPrevDayClose = m_portDayClose;
 					pd[_PortKeys.Vol] = m_daily != null ? m_daily.Atr20d * bpv : double.NaN;
 					pd[_PortKeys.Regime] = PortfolioRegime;
+					if (m_regime != null && RegimeConfig.publish) { RegimeState rs = m_regime.State; pd[_PortKeys.RegimeP] = rs.Valid ? rs.Probs : new double[0]; }   // optional key, a fresh array each close (copy-on-write)
 				}
 				m_portDay = day; m_portDayStartPnl = double.IsNaN(m_portLastPnl) ? pnl : m_portLastPnl; m_portRollToday = false;
 			}
@@ -1333,7 +1397,9 @@ namespace PowerLanguage.Strategy
 			}
 			startExtraPa();   // S5: before XMKT/AVWAP so they can share a hosted twin (empty by default)
 			startTod();
+			prepareRegime();   // G-R: lazy M-DAILY + HV {20, 63}, only when RegimeConfig.enabled
 			startDaily();
+			startRegime();
 			startXmkt();
 			startTick();
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
@@ -1412,6 +1478,7 @@ namespace PowerLanguage.Strategy
 			if (m_tickStream != null) stepTick();
 			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR
+			if (m_regime != null) stepRegime();   // G-R: after M-DAILY, before portfolioBar publishes pm.regime
 			if (m_tod != null) stepTod();       // before AVWAP: VolumeClimax reads this bar's clock-minute z
 			if (m_avwap != null) stepAvwap();   // after PRICEACTION so the shared instance has this bar's pivots
 		}
@@ -1423,6 +1490,7 @@ namespace PowerLanguage.Strategy
 			m_avwapPa = null;
 			m_tod = null;
 			m_daily = null;
+			m_regime = null;
 			m_xmkt = null;
 			m_xmktPa = null;
 			m_paExtra = null; m_paHosted = null; m_paCreatedLog = null;

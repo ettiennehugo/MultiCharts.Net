@@ -33,6 +33,7 @@ namespace PowerLanguage.Function
 		public int cholRetries;         // regCovar x10 retries that were needed
 		public bool reseedInFinalIter;
 		public GmmModel[] perK;         // best fit per K (index K - kMin); set on the selected model only
+		public GmmModel init;           // the k-means++ / Lloyd start of this EM run (G-R / G-V reference export); additive
 
 		public int Params { get { return _Gmm.ParamCount(K, D); } }
 
@@ -46,6 +47,7 @@ namespace PowerLanguage.Function
 			m.mu = new double[K][]; m.cov = new double[K][,];
 			for (int k = 0; k < K; k++) { m.mu[k] = (double[])mu[k].Clone(); m.cov[k] = (double[,])cov[k].Clone(); }
 			m.perK = null;
+			m.init = init == null ? null : init.Clone();
 			return m;
 		}
 	}
@@ -176,6 +178,7 @@ namespace PowerLanguage.Function
 			var m = new GmmModel { K = K, D = D, w = new double[K], mu = new double[K][], cov = new double[K][,], nEff = nEff, restart = restart };
 			double[,] gcov = weightedCov(x, om, null, 0, mean(x, om, null, 0, D), D, cfg.regCovar);
 			kmeansInit(x, om, K, D, cfg, rng, m, gcov);
+			m.init = m.Clone();
 
 			var L = new double[K][,]; var ok = new bool[K];
 			var lnr = new double[N, K]; var lnp = new double[N];
