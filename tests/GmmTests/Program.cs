@@ -113,6 +113,7 @@ static class Program
 		var e05 = lv.First(l => l.kind == ELevelKind.GmmEdge); var e10 = _ProfileStats.MixtureLevels(pm, 1.0, day, day, day, 1, "t").First(l => l.kind == ELevelKind.GmmEdge);
 		Check(Math.Abs(e05.price - (pm.mu[0] - 0.5 * pm.sd[0])) < 1e-9 && Math.Abs(e10.price - (pm.mu[0] - pm.sd[0])) < 1e-9, "edges at mu -/+ c sd, c in {0.5, 1.0}");
 
+		Check(new _GmmProfileTracker(0.25).neff == EGmmNeff.Bars, "N_eff default = Bars (4-arg Rows overload removed)");
 		// A2-32 tracker
 		var log = new List<string>();
 		var tr = new _GmmProfileTracker(0.25) { journal = log.Add };
@@ -132,6 +133,17 @@ static class Program
 		int fits = tr.Fits; tr.Levels(); tr.Levels();
 		Check(tr.Fits == fits, "lazy: one fit per session close");
 		Check(log.Any(s => s.StartsWith("GMMP 2024-01-21 K(") && s.Contains("space(z)")) && log.Any(s => s.StartsWith("GMMP 2024-01-21 K(") && !s.Contains("space(z)")), "price + sigma journal lines");
+		// no lookahead: levels are created at the source session's close (its last 1m bar) and only usable from the next session
+		{
+			var srcBars = Session(d0.AddDays(19), 4819, 4, 119, true); DateTime close = srcBars[srcBars.Count - 1].time;
+			var nextBars = Session(d0.AddDays(20), 4830, 4, 120, true);
+			bool okCreated = L.Count > 0;
+			foreach (var l in L) okCreated &= l.createdTime == close && l.sourceT1 == close && srcBars.All(rb => rb.time <= l.createdTime) && l.createdTime < nextBars[0].time;
+			Check(okCreated, "levels created at the source session close, usable from the next session only");
+			// a level is usable on a bar strictly after createdTime (LevelRef: "bar time from which it is usable", close of the source session)
+			Check(L.All(l => srcBars.All(rb => !(rb.time > l.createdTime))), "no level usable on any bar of the session it was built in");
+			Check(L.All(l => nextBars.All(rb => rb.time > l.createdTime)), "every level usable throughout the next session");
+		}
 		// roll inside the window -> NaN + journal + skipped count
 		tr.OnSessionClose(d0.AddDays(20), Session(d0.AddDays(20), 4830, 4, 120, true), true, "ESM4");
 		tr.Levels();
