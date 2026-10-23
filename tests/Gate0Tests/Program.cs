@@ -50,10 +50,11 @@ static class Program
 		Check(hv.Count == 2 && Math.Abs(hv[0][0] - 3995) <= 0.5 && Math.Abs(hv[1][0] - 4005) <= 0.5, "two HVNs at the modes");
 		Check(lvn.Count == 1 && Math.Abs(lvn[0][0] - 4000) <= 1.0 && lvn[0][1] > 0.1, "one LVN between them");
 		var gx = new List<double>(); var gw = new List<double>(); foreach (var kv in bi.rows) { gx.Add(kv.Key * 0.25); gw.Add(kv.Value); }
-		var gm = Gate0Gmm.Fit(gx, gw, 4, 390, 0.25);
-		Check(gm != null && gm.K >= 2 && Math.Abs(gm.mu[0] - 3995) < 1 && Math.Abs(gm.mu[gm.K - 1] - 4005) < 1, "GMM (BIC) finds the two components (K=" + (gm == null ? 0 : gm.K) + ")");
+		var gm = _ProfileStats.ProfileMixture(gx.ToArray(), gw.ToArray(), 4, _ProfileStats.MixtureSeed(new DateTime(2024, 3, 11)), EGmmNeff.Bars, 390, 0.25);
+		Check(gm.model != null && gm.K == 2 && Math.Abs(gm.mu[0] - 3995) < 1 && Math.Abs(gm.mu[gm.K - 1] - 4005) < 1, "GMM (_Gmm core, BIC delta > 10) finds the two components (K=" + gm.K + ")");
+		Check(gm.voidPrice.Length == 1 && Math.Abs(gm.voidPrice[0] - 4000) <= 1 && gm.voidDepth[0] > 0.5, "GMM void between the two modes");
 		var uni = new List<double>(); var uw = new List<double>(); var ur = new Random(3); for (int i = 0; i < 200; i++) { uni.Add(ur.NextDouble() * 0.1 + 50 + 3 * Math.Sqrt(-2 * Math.Log(ur.NextDouble() + 1e-12)) * Math.Cos(2 * Math.PI * ur.NextDouble())); uw.Add(1); }
-		Check(Gate0Gmm.Fit(uni, uw, 4, 200, 0.01).K == 1, "GMM BIC picks K=1 on one Gaussian");
+		Check(_ProfileStats.ProfileMixture(uni.ToArray(), uw.ToArray(), 4, 7UL, EGmmNeff.Bars, 200, 0.01).K == 1, "GMM BIC picks K=1 on one Gaussian (_Gmm core)");
 
 		// ---- buckets ----
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 31, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "5m bucket end");
