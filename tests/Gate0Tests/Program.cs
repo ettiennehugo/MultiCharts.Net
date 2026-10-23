@@ -54,6 +54,30 @@ static class Program
 		Check(gm.model != null && gm.K == 2 && Math.Abs(gm.mu[0] - 3995) < 1 && Math.Abs(gm.mu[gm.K - 1] - 4005) < 1, "GMM (_Gmm core, BIC delta > 10) finds the two components (K=" + gm.K + ")");
 		Check(gm.voidPrice.Length == 1 && Math.Abs(gm.voidPrice[0] - 4000) <= 1 && gm.voidDepth[0] > 0.5, "GMM void between the two modes");
 		var uni = new List<double>(); var uw = new List<double>(); var ur = new Random(3); for (int i = 0; i < 200; i++) { uni.Add(ur.NextDouble() * 0.1 + 50 + 3 * Math.Sqrt(-2 * Math.Log(ur.NextDouble() + 1e-12)) * Math.Cos(2 * Math.PI * ur.NextDouble())); uw.Add(1); }
+		// family 13 runs on the shared _ProfileStats.SigmaMixture path: same raw pooled volume, AwayFromZero z rounding, sigma-hat
+		{
+			var rg = new _Rng(55); var g0 = new List<Gate0Session>(); var gs = new List<GmmSession>(); DateTime dd = new DateTime(2024, 2, 1);
+			for (int si = 0; si < 22; si++)
+			{
+				var s0 = new Gate0Session(dd.AddDays(si), 0.25); s0.bars1m = 390;
+				for (int bj = 0; bj < 390; bj++)
+				{
+					double c = 4800 + si + ((bj / 65) % 2 == 0 ? -8 : 8) + Math.Round(4 * (rg.NextDouble() - 0.5)) / 4, vol = 100 + rg.NextInt(400);
+					s0.profile.Add(c + 0.25, c - 0.25, vol); s0.vwap.Add(c, vol);
+					if (bj % 5 == 0) { double lr = Math.Log((c + 1) / (c - 1)); s0.pkSum += lr * lr; s0.pkN++; }
+				}
+				g0.Add(s0);
+				var gm0 = new GmmSession { day = s0.day, contract = "X", bars = 390, sVwap = s0.vwap.Value, sigma = s0.SigmaPrice };
+				var pp = new List<double>(); var vv = new List<double>(); foreach (var kv in s0.profile.rows) { pp.Add(kv.Key * 0.25); vv.Add(kv.Value); }
+				gm0.prices = pp.ToArray(); gm0.vols = vv.ToArray(); gs.Add(gm0);
+			}
+			var a13 = Gate0Engine.SigmaCompositeFit(g0, 0.25);
+			var b13 = _ProfileStats.SigmaMixture(gs, _ProfileStats.MixtureSeed(gs[gs.Count - 1].day), 20, 10, 0.05, 4);
+			bool eq = a13.ok && b13.ok && a13.mix.K == b13.mix.K && a13.sigmaHat == b13.sigmaHat && a13.priorVwap == b13.priorVwap && a13.mix.model.bic == b13.mix.model.bic;
+			for (int k = 0; eq && k < a13.mix.K; k++) eq = a13.mix.mu[k] == b13.mix.mu[k] && a13.mix.pi[k] == b13.mix.pi[k] && a13.mix.sd[k] == b13.mix.sd[k] && a13.levels[k] == b13.levels[k];
+			Check(eq, "family 13 = _ProfileStats.SigmaMixture exactly (K=" + (a13.mix == null ? 0 : a13.mix.K) + ")");
+			Check(a13.sessions == 20 && a13.days[0] == dd.AddDays(2), "family 13 window = newest 20 sessions");
+		}
 		Check(_ProfileStats.ProfileMixture(uni.ToArray(), uw.ToArray(), 4, 7UL, EGmmNeff.Bars, 200, 0.01).K == 1, "GMM BIC picks K=1 on one Gaussian (_Gmm core)");
 
 		// ---- buckets ----

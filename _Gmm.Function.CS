@@ -103,6 +103,8 @@ namespace PowerLanguage.Function
 			int D = x[0].Length;
 			var perK = new List<GmmModel>();
 			GmmModel chosen = null;
+			// Every K in kMin..kMax is fitted and compared against the best K so far (chosen), i.e. the search does NOT stop at the
+			// first K that fails to beat it by bicDelta: K=3 can still win when K=2 did not improve on K=1 by more than bicDelta.
 			for (int K = cfg.kMin; K <= cfg.kMax; K++)
 			{
 				GmmModel best = FitK(x, om, nEff, K, cfg, orderFeature, tieFeature);
