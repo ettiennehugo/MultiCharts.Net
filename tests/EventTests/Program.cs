@@ -17,7 +17,8 @@ static class Program
 
 	static _EventCalendar Eng(Action<EventConfig> f = null, List<EventRec> table = null, EventCorrection[] corr = null, List<string> j = null, List<string> w = null, int barMin = 1)
 	{
-		var c = new EventConfig { enabled = true }; if (f != null) f(c);
+		// synthetic tables start mid-history: partial coverage on by default (R2.1-h has its own tests in FirstBarCoverage)
+		var c = new EventConfig { enabled = true, allowPartialCoverage = true }; if (f != null) f(c);
 		var e = new _EventCalendar { config = c, table = table ?? new List<EventRec>(), corrections = corr ?? new EventCorrection[0], barDuration = TimeSpan.FromMinutes(barMin) };
 		if (j != null) e.journal = s => j.Add(s);
 		if (w != null) e.warnOnce = s => w.Add(s);
@@ -33,7 +34,7 @@ static class Program
 
 	static void Main()
 	{
-		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); Perf();
+		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); Perf();
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -69,10 +70,26 @@ static class Program
 		for (int i = 0; i < cme.GetLength(0); ++i)
 		{
 			int y = cme[i, 0], m = cme[i, 1];
-			// 2027-06: third Friday 06-18 is the NYSE Juneteenth (observed) holiday, the rule gives 06-17; the CME page lists 06-18. VERIFY in PR B.
-			if (!(y == 2027 && m == 6)) Check(EventRules.ExpiryDate(y, m) == new DateTime(y, m, cme[i, 2]), "CME expiry " + y + "-" + m);
+			// R2.1-d: 2027-06 (Juneteenth observed Fri 06-18, CME open) is 06-18; 2026-06 comes from the override table.
+			Check(EventRules.ExpiryDate(y, m) == new DateTime(y, m, cme[i, 2]), "CME expiry " + y + "-" + m);
 			Check(EventRules.RollDate(y, m) == new DateTime(y, m, cme[i, 3]), "CME roll " + y + "-" + m);
 		}
+		// R2.1-d: futures expiry moves only for CME closures; options (Opex) still follow NYSE.
+		Check(EventRules.ExpiryDate(2027, 6) == new DateTime(2027, 6, 18) && EventRules.OpexDate(2027, 6) == new DateTime(2027, 6, 17), "2027-06 futures 06-18, SPX opex 06-17");
+		Check(Has(g27, EEventKind.QuarterlyExpiry, ET(2027, 6, 18, 9, 30)) && Has(g27, EEventKind.RollWeek, ET(2027, 6, 14)), "2027-06 QuarterlyExpiry 06-18 + roll span");
+		for (int i = 0; i < EventRules.s_expiryOverrides.Length; i += 2)
+		{
+			long k = EventRules.s_expiryOverrides[i]; int oy = (int)(k / 100), om = (int)(k % 100);
+			Check(EventRules.RuleExpiryDate(oy, om) != EventRules.ExpiryDate(oy, om), "override " + k + " differs from the rule (else drop it)");
+		}
+		// whole range: every quarterly expiry is a CME trading weekday and a Friday unless a CME closure / override moved it
+		for (int y = 2016; y <= 2028; ++y)
+			for (int m = 3; m <= 12; m += 3)
+			{
+				DateTime x = EventRules.ExpiryDate(y, m), f = EventRules.ThirdFriday(y, m);
+				Check(x <= f && x > f.AddDays(-7) && x.DayOfWeek != DayOfWeek.Saturday && x.DayOfWeek != DayOfWeek.Sunday && !_CmeHolidays.Rules.Get(x).Closed, "expiry valid " + y + "-" + m);
+				if (x != f) Console.WriteLine("expiry moved " + y + "-" + m + ": " + f.ToString("MM-dd") + " -> " + x.ToString("MM-dd"));
+			}
 		Check(EventRules.RollDate(2018, 3) == new DateTime(2018, 3, 8), "2018 roll: Thursday 8 days before");
 		Check(EventRules.ExpiryDate(2022, 4) == new DateTime(2022, 4, 14), "Opex Good Friday 2022 -> Thu");
 		Check(Has(g26, EEventKind.MonthlyOpex, ET(2026, 6, 18, 9, 30)) && Has(g26, EEventKind.MonthlyOpex, ET(2026, 6, 18, 16)), "Opex Juneteenth 2026 AM + PM");
@@ -106,6 +123,16 @@ static class Program
 		Check(e.TradingDayOf(U(ET(2026, 3, 8, 12, 0))) == new DateTime(2026, 3, 9), "Sunday -> Monday");
 		Check(e.TradingDayOf(U(ET(2026, 3, 7, 12, 0))) == new DateTime(2026, 3, 9), "Saturday -> Monday");
 		Check(e.TradingDayOf(U(ET(2024, 3, 29, 8, 30))) == new DateTime(2024, 4, 1), "closed Good Friday 2024 -> Monday");
+		// Good Friday NFP with an abbreviated CME equity session (closes 08:15 CT = 09:15 ET): the 08:30 release stays on the day.
+		// 2026: CME clearing advisory https://www.cmegroup.com/tools-information/holiday-calendar/files/2026/2026-good-friday-clearing-advisory.pdf
+		foreach (var gf in new[] { new DateTime(2021, 4, 2), new DateTime(2026, 4, 3) })
+		{
+			var h = _CmeHolidays.Rules.Get(gf);
+			var eg = Eng(null, new List<EventRec> { T1(EEventKind.Nfp, gf + new TimeSpan(8, 30, 0)) });
+			Check(!h.Closed && h.HaltEt == new TimeSpan(9, 15, 0), "Good Friday " + gf.Year + ": CME abbreviated, halt 09:15 ET");
+			Check(eg.TradingDayOf(U(gf + new TimeSpan(8, 30, 0))) == gf && eg.EventsOnExPost(gf).Any(r => r.kind == EEventKind.Nfp), "Good Friday NFP " + gf.Year + " maps to the same day");
+			Check(eg.TradingDayOf(U(gf + new TimeSpan(9, 30, 0))) == gf.AddDays(3), "Good Friday " + gf.Year + " after the halt -> Monday");
+		}
 		Check(e.TradingDayOf(U(ET(2026, 3, 6, 17, 30))) == new DateTime(2026, 3, 9), "Friday after close -> Monday");
 	}
 
@@ -187,10 +214,76 @@ static class Program
 		Bar(e, ET(2025, 11, 28, 9, 0));
 		var d = e.Classify(new DateTime(2025, 11, 28));
 		Check(d.isHalfDay && e.Classify(new DateTime(2025, 12, 24)).isHalfDay && !e.Classify(new DateTime(2025, 12, 23)).isHalfDay, "half days 11-28 / 12-24");
-		Check(e.EventsOn(new DateTime(2025, 11, 28)).Any(r => r.name == "Late" && r.etTime.Hour == 14), "after-close event still in EventsOn");
-		Check(d.firstReleaseEt == new TimeSpan(14, 0, 0), "firstReleaseEt unaffected by the half day");
+		// R2.1-b: 14:00 is after the 13:15 halt -> the event belongs to the next session (Mon 12-01)
+		Check(!e.EventsOn(new DateTime(2025, 11, 28)).Any(r => r.name == "Late") && e.EventsOnExPost(new DateTime(2025, 12, 1)).Any(r => r.name == "Late" && r.etTime.Hour == 14), "after-halt event moves to the next session");
+		Check(!d.firstReleaseEt.HasValue, "half day: no macro release before the halt");
 		Check(e.EventsOn(new DateTime(2025, 11, 28)).Any(r => r.kind == EEventKind.HalfDay && r.etTime.TimeOfDay == new TimeSpan(13, 15, 0)), "HalfDay 13:15");
+		// R2.1-b: after the early halt (13:15 ET) an instant is out of session -> next session open (Mon 12-01)
+		Check(e.TradingDayOf(U(ET(2025, 11, 28, 13, 0))) == new DateTime(2025, 11, 28), "half day before halt keeps the date");
+		Check(e.TradingDayOf(U(ET(2025, 11, 28, 13, 15))) == new DateTime(2025, 12, 1), "half day at halt -> next session");
+		Check(e.TradingDayOf(U(ET(2025, 11, 28, 14, 0))) == new DateTime(2025, 12, 1), "half day after halt -> next session (R2.1-b)");
+		Check(e.TradingDayOf(U(ET(2025, 12, 24, 14, 0))) == new DateTime(2025, 12, 26), "Christmas Eve after halt -> Fri 12-26");
 		File.Delete(p);
+	}
+
+	// ---- SessionOpenUtc vs weekday Globex closures (Fri Christmas 2026, Thu Christmas 2025, Good Friday, New Year)
+	static void SessionOpens()
+	{
+		var e = Eng(); var clk = new _CmeSessionClock(null);
+		Check(e.SessionOpenUtc(new DateTime(2026, 12, 28)) == U(ET(2026, 12, 27, 18, 0)), "Fri Christmas 2026: Mon 12-28 opens Sun 18:00");
+		Check(e.SessionOpenUtc(new DateTime(2025, 12, 26)) == U(ET(2025, 12, 25, 18, 0)), "Thu Christmas 2025: Fri 12-26 opens Thu 18:00");
+		int bad = 0;
+		for (DateTime d = new DateTime(2016, 1, 4); d.Year <= 2028; d = d.AddDays(1))
+		{
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || clk.IsGlobexClosedDay(d)) continue;
+			DateTime o = TimeZoneInfo.ConvertTimeFromUtc(e.SessionOpenUtc(d), Est);
+			bool ok = clk.StateEt(o) == _CmeSessionClock.GlobexState.Open && clk.GlobexDateEt(o) == d && clk.StateEt(o.AddMinutes(-1)) != _CmeSessionClock.GlobexState.Open
+				&& e.TradingDayOf(e.SessionOpenUtc(d)) == d;
+			if (!ok && bad++ < 5) Console.WriteLine("session open mismatch " + d.ToString("yyyy-MM-dd") + " " + o.ToString("MM-dd HH:mm") + " " + clk.StateEt(o));
+		}
+		Check(bad == 0, "SessionOpenUtc = real reopen for every trading day 2016-2028");
+	}
+
+	// ---- R2.1-c: EventBlackout is Macro-only; Energy only via an explicit mask
+	static void BlackoutMacroOnly()
+	{
+		var tbl = new List<EventRec>();
+		var e = Eng(c => { c.blackoutPreMin = 5; c.blackoutPostMin = 10; c.blackoutTier = EEventTier.T2; c.classes = EEventClassMask.Macro | EEventClassMask.Calendar | EEventClassMask.Energy; }, tbl);
+		Bar(e, ET(2026, 3, 4, 10, 32));   // EIA Wed 10:30 (T2 Energy); ISM Svc 10:00 is T3
+		Check(!e.EventBlackout && e.IsInWindow(EEventTier.T2, 5, 10, EEventClassMask.Energy) && !e.IsInWindow(EEventTier.T2, 5, 10), "EIA: no blackout, Energy window explicit");
+	}
+
+	// ---- R2.1-e/g: EIA outside the published range is RuleOnly, journals EiaRuleOnly, known-from = its instant (never
+	// MinValue); Classify count / maxTier / firstRelease are Macro only
+	static void EiaRuleOnly()
+	{
+		var j = new List<string>();
+		var e = Eng(c => c.classes = EEventClassMask.Macro | EEventClassMask.Calendar | EEventClassMask.Energy, null, null, j);
+		Bar(e, ET(2024, 3, 6, 9, 0));
+		var r = e.EventsOnExPost(new DateTime(2024, 3, 6)).First(x => x.kind == EEventKind.EiaPetroleum);
+		Check((r.flags & EEventFlags.RuleOnly) != 0 && r.knownSinceUtc == r.utc, "EIA 2024 RuleOnly, knownSince = instant");
+		Check(j.Any(x => x.StartsWith("EVENT day 2024-03-06") && x.EndsWith(" EiaRuleOnly")), "day journal EiaRuleOnly");
+		var d = e.ClassifyExPost(new DateTime(2024, 3, 6));
+		Check(d.eiaRuleOnly && d.count == 0 && d.maxTier == EEventTier.None && !d.firstReleaseEt.HasValue && d.Has(EEventKind.EiaPetroleum), "Energy-only day: Macro count 0");
+		Check((Gen(2026).First(x => x.kind == EEventKind.EiaPetroleum && x.etTime.Month == 3).flags & EEventFlags.RuleOnly) == 0, "EIA 2026 published");
+	}
+
+	// ---- EV-4.7 firstBarUtc from the host: Configure fails hard
+	static void FirstBarCoverage()
+	{
+		var c = new EventConfig { enabled = true };
+		var e = new _EventCalendar { config = c, table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0], barDuration = TimeSpan.FromMinutes(1), firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
+		var errs = new List<string>(); e.error = s => errs.Add(s);
+		Check(e.Configure() == null, "coverage shortfall: Configure never fails (R2.1-h)");
+		Bar(e, ET(2026, 3, 11, 8, 31));
+		Check(e.Disabled && errs.Count == 1 && errs[0] == "EVENT coverage Cpi starts 2026-03-11 after the first bar (set allowPartialCoverage); engine disabled", "first Step: Error line + disabled");
+		Check(!e.IsInWindow(EEventTier.T1, 5, 10) && e.EventsOn(new DateTime(2026, 3, 11)).Count == 0 && !e.EventBlackout, "disabled: neutral answers");
+		var e3 = Eng(c3 => c3.allowPartialCoverage = false, new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }); var errs3 = new List<string>(); e3.error = s => errs3.Add(s);
+		Bar(e3, ET(2026, 1, 5, 9, 0));
+		Check(e3.Disabled && errs3.Count == 1, "no host firstBarUtc: first Step's bar, also disables");
+		var e2 = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = true }, table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0], firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
+		Check(e2.Configure() == null, "allowPartialCoverage -> ok");
+		Bar(e2, ET(2026, 1, 5, 9, 0)); Check(!e2.Disabled, "allowPartialCoverage -> stays enabled");
 	}
 
 	// ---- EV-8.7 roll

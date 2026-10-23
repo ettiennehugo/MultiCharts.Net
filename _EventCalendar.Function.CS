@@ -89,7 +89,8 @@ namespace PowerLanguage.Function
 		public ulong kindsMask;          // bit (1 << kind)
 		public bool hasFomc, hasSep, isHalfDay, isRollWeek, isQuarterlyExpiry, isOpex, isRebalance;
 		public TimeSpan? firstReleaseEt; // earliest macro release (ET time of day)
-		public int count;
+		public int count;                // R2.1-g: Macro-class records only (like maxTier / firstReleaseEt)
+		public bool eiaRuleOnly;         // R2.1-e: an EIA release on the day is RuleOnly (outside the published exception table)
 
 		public bool Has(EEventKind k) { return (kindsMask & (1UL << (int)k)) != 0; }
 	}
@@ -259,8 +260,30 @@ namespace PowerLanguage.Function
 			return false;
 		}
 
-		/// <summary>Standard (AM) expiry date: third Friday, or the preceding NYSE business day when it is a holiday.</summary>
-		public static DateTime ExpiryDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
+		/// <summary>Standard (AM) SPX options expiry (MonthlyOpex, VixExpiry): third Friday, or the preceding NYSE business day when
+		/// it is an NYSE holiday (Cboe follows the NYSE calendar).</summary>
+		public static DateTime OpexDate(int y, int m) { return PrevBusinessDayOrSelf(ThirdFriday(y, m)); }
+		/// <summary>Equity-index futures expiry (QuarterlyExpiry, RollWeek, SessionsToExpiry), R2.1-d: third Friday, moved back only
+		/// over CME Globex closures (_CmeHolidays: New Year, Christmas, Good Friday), never for a federal/NYSE holiday CME trades
+		/// through (e.g. 2027-06-18, Juneteenth observed: CME lists expiry 06-18). Then s_expiryOverrides (CME's calendar wins).</summary>
+		public static DateTime ExpiryDate(int y, int m)
+		{
+			long key = y * 100L + m;
+			for (int i = 0; i < s_expiryOverrides.Length; i += 2) if (s_expiryOverrides[i] == key) return FromYmdhm(s_expiryOverrides[i + 1] * 10000L);
+			return RuleExpiryDate(y, m);
+		}
+		/// <summary>The R2.1-d rule alone (no overrides), for the rule-vs-CME mismatch check.</summary>
+		public static DateTime RuleExpiryDate(int y, int m)
+		{
+			DateTime d = ThirdFriday(y, m);
+			while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || _CmeHolidays.Rules.Get(d).Closed) d = d.AddDays(-1);
+			return d;
+		}
+		/// <summary>R2.1-d exchange-calendar overrides: yyyyMM, yyyyMMdd. One row per date where CME's published expiry differs from
+		/// RuleExpiryDate; each row cites its CME source. Every row is re-checked by EventTests (rule != override).</summary>
+		public static readonly long[] s_expiryOverrides = {
+			202606, 20260618,   // Juneteenth Fri 06-19 (CME halt, not closed); CME lists ES expiry Thu 06-18: https://www.cmegroup.com/trading/equity-index/rolldates.html
+		};
 		/// <summary>Customary roll date (EV §1.2): Monday before the third Friday (from RollRuleMondayFrom), else the Thursday eight
 		/// calendar days before it.</summary>
 		public static DateTime RollDate(int y, int m)
@@ -273,7 +296,7 @@ namespace PowerLanguage.Function
 		public static DateTime VixExpiry(int y, int m)
 		{
 			DateTime n = new DateTime(y, m, 1).AddMonths(1);
-			DateTime w = ExpiryDate(n.Year, n.Month).AddDays(-30);
+			DateTime w = OpexDate(n.Year, n.Month).AddDays(-30);
 			return PrevBusinessDayOrSelf(w);
 		}
 
@@ -311,13 +334,13 @@ namespace PowerLanguage.Function
 			for (int m = 1; m <= 12; ++m)
 			{
 				bool q = m % 3 == 0;
-				DateTime x = ExpiryDate(y, m);
-				r.Add(EventRec.Make(EEventKind.MonthlyOpex, x + T0930, EEventTier.C, q ? EEventFlags.Quad : EEventFlags.None));
-				r.Add(EventRec.Make(EEventKind.MonthlyOpex, x + T1600, EEventTier.C, EEventFlags.Pm | (q ? EEventFlags.Quad : EEventFlags.None)));
+				DateTime o = OpexDate(y, m), x = ExpiryDate(y, m);
+				r.Add(EventRec.Make(EEventKind.MonthlyOpex, o + T0930, EEventTier.C, q ? EEventFlags.Quad : EEventFlags.None));
+				r.Add(EventRec.Make(EEventKind.MonthlyOpex, o + T1600, EEventTier.C, EEventFlags.Pm | (q ? EEventFlags.Quad : EEventFlags.None)));
 				if (q)
 				{
 					r.Add(EventRec.Make(EEventKind.QuarterlyExpiry, x + T0930, EEventTier.C, EEventFlags.Quad));
-					r.Add(EventRec.Make(EEventKind.IndexRebalance, x + T1600, EEventTier.C));
+					r.Add(EventRec.Make(EEventKind.IndexRebalance, o + T1600, EEventTier.C));   // index rebalance at the NYSE close
 					EventRec s = EventRec.Make(EEventKind.RollWeek, RollDate(y, m), EEventTier.C);
 					s.etEnd = x + T0930;
 					r.Add(s);
@@ -396,6 +419,8 @@ namespace PowerLanguage.Function
 		public EventConfig config;
 		public string label = "EVENT";
 		public Action<string> journal, warnOnce;
+		/// <summary>Error sink (R2.1-h coverage failure). Null = warnOnce.</summary>
+		public Action<string> error;
 		/// <summary>Bar length (EV-3.3/3.7). Zero = non-time bars (open = previous bar close). &gt;= 1 day = daily bars.</summary>
 		public TimeSpan barDuration = TimeSpan.Zero;
 		/// <summary>First bar instant (coverage check, EV-4.7). MinValue = skip.</summary>
@@ -426,6 +451,8 @@ namespace PowerLanguage.Function
 		HashSet<EEventKind> m_tableKindsPresent = new HashSet<EEventKind>();
 		HashSet<int> m_warnedYears = new HashSet<int>();
 		bool m_configured, m_dailyWarned;
+		bool m_disabled;              // R2.1-h: coverage shortfall; every query is neutral
+		string m_coverageFail;        // set by Configure when firstBarUtc is known, reported on the first Step
 
 		// bar state
 		DateTime m_barTime, m_open = DateTime.MinValue, m_now = DateTime.MinValue, m_day = DateTime.MinValue, m_lastSpliceDay = DateTime.MinValue;
@@ -441,6 +468,8 @@ namespace PowerLanguage.Function
 		public bool FlattenNow { get { return m_flattenNow; } }
 		public bool DailyBars { get { return barDuration >= TimeSpan.FromDays(1); } }
 		public int RowsLoadedCsv { get { return m_csv.Count; } }
+		/// <summary>R2.1-h: disabled after a coverage shortfall (allowPartialCoverage = false); all answers neutral.</summary>
+		public bool Disabled { get { return m_disabled; } }
 
 		void jr(string s) { if (journal != null) journal(label + " " + s); }
 		void warn(string s) { if (warnOnce != null) warnOnce(label + " " + s); }
@@ -488,8 +517,9 @@ namespace PowerLanguage.Function
 				DateTime a = DateTime.MaxValue, b = DateTime.MinValue;
 				foreach (var r in m_table) if (r.kind == k) { if (r.etTime < a) a = r.etTime; if (r.etTime > b) b = r.etTime; }
 				cov.Append(' ').Append(k).Append('(').Append(ymd(a)).Append("..").Append(ymd(b)).Append(')');
-				if (firstBarUtc != DateTime.MinValue && toUtc(a) > firstBarUtc && !config.allowPartialCoverage)
-					return label + ": coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
+				// R2.1-h (EV-4.6): never fail Configure / throw; the shortfall disables the engine on the first Step
+				if (m_coverageFail == null && firstBarUtc != DateTime.MinValue && toUtc(a) > firstBarUtc && !config.allowPartialCoverage)
+					m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
 			}
 			jr("coverage rules(Claims,IsmMfg,IsmSvc,EiaPetroleum,calendar)" + cov + " ruleOnly(Claims, ISM except 2026, EIA outside 2025-01..2026-11, VixExpiry)");
 			if (firstBarUtc != DateTime.MinValue)
@@ -572,9 +602,11 @@ namespace PowerLanguage.Function
 		}
 
 		// ------------------------------------------------------------------ year build
+		static readonly Year s_emptyYear = new Year { recs = new EventRec[0], dayIdx = new Dictionary<DateTime, int[]>() };
 		Year year(int y)
 		{
 			Year yr;
+			if (m_disabled) return s_emptyYear;
 			if (m_years.TryGetValue(y, out yr)) return yr;
 			yr = build(y);
 			m_years[y] = yr;
@@ -602,6 +634,11 @@ namespace PowerLanguage.Function
 				r.utc = toUtc(r.etTime);
 				r.tradingDay = TradingDayOf(r.utc);
 				if ((r.flags & EEventFlags.Unscheduled) != 0 && r.knownSinceUtc == DateTime.MinValue) r.knownSinceUtc = r.utc;
+				// R2.1-e (EV-1.19): a RuleOnly EIA instant (no published exception table that year, so holiday retimes are unknown)
+				// is not known in advance: known-from = the instant itself, never MinValue.
+				if (r.kind == EEventKind.EiaPetroleum && (r.flags & EEventFlags.RuleOnly) != 0 && r.knownSinceUtc == DateTime.MinValue) r.knownSinceUtc = r.utc;
+				// The HalfDay marker sits at the early halt instant, which R2.1-b maps to the next session; it labels its own date.
+				if (r.kind == EEventKind.HalfDay) r.tradingDay = r.etTime.Date;
 				keep.Add(r);
 			}
 			keep.Sort((a, b) => { int c = a.utc.CompareTo(b.utc); return c != 0 ? c : ((byte)b.tier).CompareTo((byte)a.tier); });
@@ -700,8 +737,11 @@ namespace PowerLanguage.Function
 		{
 			DateTime et = ToEt(utc);
 			if (m_clock.StateEt(et) == _CmeSessionClock.GlobexState.Open) return m_clock.GlobexDateEt(et);
-			// spec-silent (EV-8.6): a holiday halt before the normal 17:00 close keeps the date (half-day events after the close)
-			if (et.TimeOfDay < m_clock.GlobexClose && et.DayOfWeek != DayOfWeek.Saturday && et.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(et.Date)) return et.Date;
+			// R2.1-b: on a half day an instant after the early halt (before 17:00) is out of session like any other and maps to the
+			// next session open (below). Before the halt (or with no halt) a weekday instant before 17:00 keeps its date.
+			TimeSpan? halt = m_clock.HolidayHaltEt(et.Date);
+			bool afterHalt = halt.HasValue && et.TimeOfDay >= halt.Value;
+			if (!afterHalt && et.TimeOfDay < m_clock.GlobexClose && et.DayOfWeek != DayOfWeek.Saturday && et.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(et.Date)) return et.Date;
 			DateTime d = et.TimeOfDay >= m_clock.GlobexOpen ? et.Date.AddDays(2) : et.Date.AddDays(1);
 			while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || m_clock.IsGlobexClosedDay(d)) d = d.AddDays(1);
 			return d;
@@ -709,14 +749,31 @@ namespace PowerLanguage.Function
 		/// <summary>The session open (18:00 ET of the previous calendar day) of a trading date, in UTC — the default as-of point.</summary>
 		public DateTime SessionOpenUtc(DateTime day)
 		{
-			return toUtc(day.Date.AddDays(-1) + m_clock.GlobexOpen);   // Monday: Sunday 18:00; after a closed day: its 18:00 reopen
+			// Always 18:00 ET of the previous calendar day. Weekday Globex closures (New Year, Christmas, Good Friday) are full
+			// calendar-day closures that end with an 18:00 reopen on the closed day itself, so for the next trading day this is
+			// the real reopen too: Fri Christmas 2026 -> Mon 12-28 opens Sun 12-27 18:00; Thu Christmas 2025 -> Fri 12-26 opens
+			// Thu 12-25 18:00. A closed date is never a trading day (TradingDayOf skips it), so it has no session open; callers
+			// passing one get the 18:00 before it (as-of point only). Checked for every trading day 2016-2028 in EventTests.
+			return toUtc(day.Date.AddDays(-1) + m_clock.GlobexOpen);
 		}
 
 		// ------------------------------------------------------------------ step
 		public void Step(DateTime barTime, DateTime barOpenUtc, DateTime barCloseUtc, bool rollSplice)
 		{
 			if (!m_configured) return;
-			if (m_now == DateTime.MinValue && firstBarUtc == DateTime.MinValue) firstCoverageCheck(barCloseUtc);
+			if (m_disabled) return;
+			if (m_now == DateTime.MinValue)
+			{
+				if (firstBarUtc == DateTime.MinValue) firstCoverageCheck(barCloseUtc);
+				if (m_coverageFail != null)
+				{
+					// R2.1-h (EV-4.6): Error line, engine disabled, neutral answers from here on (no mid-run throw)
+					string msg = label + " " + m_coverageFail + "; engine disabled";
+					if (error != null) error(msg); else if (warnOnce != null) warnOnce(msg);
+					m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
+					return;
+				}
+			}
 			m_barTime = barTime;
 			m_open = barOpenUtc;
 			m_now = barCloseUtc;
@@ -736,25 +793,29 @@ namespace PowerLanguage.Function
 				m_day = day;
 				if (m_dayCache.Count > 64) m_dayCache.Clear();
 				EventDay d = Classify(day);
-				if (d.count > 0 && journal != null)
+				// R2.1-e: RuleOnly EIA is known only at its instant, so the day line checks it ex post
+				bool eiaRo = journal != null && ClassifyExPost(day).eiaRuleOnly;
+				if ((d.kindsMask != 0 || eiaRo) && journal != null)
 				{
 					var ks = new StringBuilder();
 					foreach (var r in EventsOn(day, EEventClassMask.All)) { if (ks.Length > 0) ks.Append(','); ks.Append(r.KindName).Append('@').Append(hm(r.etTime)); }
 					jr("day " + ymd(day) + " at " + barTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " tier(" + d.maxTier + ") kinds(" + ks + ") firstRelease(" +
-						(d.firstReleaseEt.HasValue ? d.firstReleaseEt.Value.ToString(@"hh\:mm") + " ET" : "-") + ")" + (d.isRollWeek ? " rollWeek" : "") + (d.isHalfDay ? " halfDay" : ""));
+						(d.firstReleaseEt.HasValue ? d.firstReleaseEt.Value.ToString(@"hh\:mm") + " ET" : "-") + ")" + (d.isRollWeek ? " rollWeek" : "") + (d.isHalfDay ? " halfDay" : "") + (eiaRo ? " EiaRuleOnly" : ""));
 				}
 			}
 			// blackout (exposed only; the base never blocks orders)
 			bool was = m_blackout;
 			EventRec hit;
+			// R2.1-c (EV-6.7): Macro classes only; Energy is never OR'd in. Energy consumers (e.g. A2-20 on CL) call
+			// IsInWindow(..., EEventClassMask.Energy) explicitly.
 			m_blackout = (config.blackoutPreMin > 0 || config.blackoutPostMin > 0) && windowHit(config.blackoutTier, config.blackoutPreMin, config.blackoutPostMin, EEventClassMask.Macro, out hit, false) && (m_blackoutRec = hit).kind != EEventKind.None;
 			m_flattenNow = config.blackoutFlatten && m_blackout && !was;
 			if (m_blackout != was)
 				jr("blackout " + (m_blackout ? "on" : "off") + " at " + barTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " " + m_blackoutRec.KindName + " " + m_blackoutRec.etTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " ET pre(" + config.blackoutPreMin + ") post(" + config.blackoutPostMin + ")" + (m_flattenNow ? " flatten" : ""));
 		}
 
-		/// <summary>EV-4.7 on the first bar when the host did not pass firstBarUtc: a table kind starting after the first bar is a
-		/// warning (the run continues; the engine never throws mid-run) unless allowPartialCoverage.</summary>
+		/// <summary>EV-4.6/4.7 (R2.1-h) on the first bar when the host did not pass firstBarUtc: a table kind starting after the
+		/// first bar disables the engine (Error line in Step; never a throw) unless allowPartialCoverage.</summary>
 		void firstCoverageCheck(DateTime first)
 		{
 			if (config.allowPartialCoverage) return;
@@ -762,7 +823,7 @@ namespace PowerLanguage.Function
 			{
 				DateTime a = DateTime.MaxValue;
 				foreach (var r in m_table) if (r.kind == k && r.etTime < a) a = r.etTime;
-				if (toUtc(a) > first) warn("coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)");
+				if (toUtc(a) > first && m_coverageFail == null) m_coverageFail = "coverage " + k + " starts " + ymd(a) + " after the first bar (set allowPartialCoverage)";
 			}
 		}
 
@@ -834,6 +895,7 @@ namespace PowerLanguage.Function
 		bool windowHit(EEventTier minTier, int preMin, int postMin, EEventClassMask mask, out EventRec e, bool warnDaily)
 		{
 			e = default(EventRec);
+			if (m_disabled || m_now == DateTime.MinValue) return false;   // R2.1-h neutral; no bar stepped yet
 			if (DailyBars) { if (warnDaily) dailyQuery(); return false; }
 			return window(m_open, m_now, minTier, preMin, postMin, mask, out e);
 		}
@@ -861,6 +923,7 @@ namespace PowerLanguage.Function
 			return false;
 		}
 
+		/// <summary>Blackout over Macro-class events only (R2.1-c): EIA/Energy never contributes; query IsInWindow with Energy.</summary>
 		public bool EventBlackout { get { return m_blackout; } }
 		public bool EventFlattenNow { get { return m_flattenNow; } }
 
@@ -921,10 +984,11 @@ namespace PowerLanguage.Function
 					EventRec r = yr.recs[i];
 					if (r.IsSpan) continue;
 					if (exp ? !exPost(ref r) : !(r.knownSinceUtc <= asOf && r.canceledSinceUtc > asOf)) continue;
-					d.count++;
 					d.kindsMask |= 1UL << (int)r.kind;
+					if (r.kind == EEventKind.EiaPetroleum && (r.flags & EEventFlags.RuleOnly) != 0) d.eiaRuleOnly = true;
 					if (r.Class == EEventClassMask.Macro && EventConfig.IsMacroTier(r.tier))
-					{
+					{   // R2.1-g: count / maxTier / firstRelease are Macro only
+						d.count++;
 						if (r.tier > d.maxTier) d.maxTier = r.tier;
 						if (!d.firstReleaseEt.HasValue || r.etTime.TimeOfDay < d.firstReleaseEt.Value) d.firstReleaseEt = r.etTime.TimeOfDay;
 					}
