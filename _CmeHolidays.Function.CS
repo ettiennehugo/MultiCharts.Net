@@ -52,6 +52,17 @@ namespace PowerLanguage.Function
 			// Days of mourning: equity products closed after the overnight session (SER-9499R for 2025; 2018 same policy, verify).
 			private static readonly DateTime[] s_mourning = { new DateTime(2018, 12, 5), new DateTime(2025, 1, 9) };
 
+			// Historical unscheduled closures (R2.1-d amendment 2026-10-23), CME equity-index futures status from CME notices:
+			//  2001-09-11 equity Globex suspended 08:30 CT; 09-12..09-14 equity index closed, reopened Mon 09-17 (CME press
+			//             releases 2001-09-11/13, as reprinted by Mondo Visione; no cmegroup.com original located)
+			//  2004-06-11 Reagan: CME closed, Globex abbreviated session to 08:00 CT (CME release 2004-06-07, investor.cmegroup.com)
+			//  2007-01-02 Ford: equity index closed, Globex equity halted 08:15 CT (CME release 2006-12-29; CFTC filing CME 06-120)
+			//  2012-10-29/30 Sandy: equity futures halted 08:15 CT both days, Globex reopened 17:00 CT (CME 12-363, Chadv12-464)
+			private static readonly DateTime[] s_histClosed = { new DateTime(2001, 9, 12), new DateTime(2001, 9, 13), new DateTime(2001, 9, 14) };
+			private static readonly DateTime[] s_histHalt = { new DateTime(2001, 9, 11), new DateTime(2004, 6, 11), new DateTime(2007, 1, 2), new DateTime(2012, 10, 29), new DateTime(2012, 10, 30) };
+			private static readonly TimeSpan[] s_histHaltEt = { new TimeSpan(9, 30, 0), new TimeSpan(9, 0, 0), new TimeSpan(9, 15, 0), new TimeSpan(9, 15, 0), new TimeSpan(9, 15, 0) };
+			private static readonly string[] s_histName = { "September 11", "Day of mourning (Reagan)", "Day of mourning (Ford)", "Hurricane Sandy", "Hurricane Sandy" };
+
 			public static Day Get(DateTime date)
 			{
 				DateTime d = date.Date;
@@ -69,6 +80,9 @@ namespace PowerLanguage.Function
 				if (d == goodFriday)
 					return Array.IndexOf(s_goodFridayOpenYears, y) >= 0 ? halt("Good Friday (abbreviated)", GoodFridayCloseEt) : closed("Good Friday");
 				if (Array.IndexOf(s_mourning, d) >= 0) return halt("Day of mourning", MourningCloseEt);
+				if (Array.IndexOf(s_histClosed, d) >= 0) return closed("September 11");
+				int hi = Array.IndexOf(s_histHalt, d);
+				if (hi >= 0) return halt(s_histName[hi], s_histHaltEt[hi]);
 
 				// holiday halts (no RTH)
 				if (d == NthWeekday(y, 1, DayOfWeek.Monday, 3)) return halt("Martin Luther King Jr. Day", HolidayHaltEt);

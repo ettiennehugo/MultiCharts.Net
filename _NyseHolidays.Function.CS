@@ -25,9 +25,18 @@ namespace PowerLanguage.Function
 		/// </summary>
 		public static class Rules
 		{
-			// Unscheduled full-day NYSE closures inside the backtest range (2017-2026).
+			// Unscheduled full-day NYSE closures 2000-2035 (R2.1-d amendment 2026-10-23: the single holiday source includes the
+			// historical one-offs; tools/m-event/nyse_holidays.txt is exported from this list).
 			private static readonly DateTime[] s_special =
 			{
+				new DateTime(2001, 9, 11),   // September 11 attacks (NYSE closed 09-11..09-14, reopened 09-17)
+				new DateTime(2001, 9, 12),
+				new DateTime(2001, 9, 13),
+				new DateTime(2001, 9, 14),
+				new DateTime(2004, 6, 11),   // National Day of Mourning, President R. Reagan (NYSE closed)
+				new DateTime(2007, 1, 2),    // National Day of Mourning, President G. Ford (NYSE closed)
+				new DateTime(2012, 10, 29),  // Hurricane Sandy (NYSE closed 10-29 and 10-30)
+				new DateTime(2012, 10, 30),
 				new DateTime(2018, 12, 5),   // National Day of Mourning, President G.H.W. Bush (NYSE closed)
 				new DateTime(2025, 1, 9),    // National Day of Mourning, President J. Carter (NYSE closed)
 			};
