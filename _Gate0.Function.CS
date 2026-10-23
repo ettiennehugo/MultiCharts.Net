@@ -269,6 +269,8 @@ namespace PowerLanguage.Function
 		public double poc = double.NaN, vah = double.NaN, val = double.NaN;
 		public List<double> closes1m = new List<double>();   // RTH 1m closes (ControlRT draws)
 		public int bars1m;                                    // RTH 1m bars (GMM BIC N)
+		public List<RingBar> rth1m;                           // RTH 1m bars, kept only when the HVN/LVN h_cv arm is enabled
+		public double hCv = double.NaN;                       // this session's KDE h_cv (price units, _ProfileStats.KdeSweep, contiguous 5-fold CV)
 		public double pkSum; public int pkN;                  // Parkinson sum (ln H/L)^2 and count over RTH 5m bars (A2-32)
 		public bool pocNaked = true;                          // POC not traded since this session ended
 		public bool HasRth { get { return !double.IsNaN(rthO); } }
@@ -317,7 +319,20 @@ namespace PowerLanguage.Function
 		public const int CompositeSessions = 5;
 		public const int SigmaCompositeSessions = 20, SigmaEwmaSpan = 10, ParkinsonMinBars = 60, GmmMaxK = 4;   // A2-32
 		public const int HistoryCap = 26;                                            // sessions kept (A2-32 needs 20 valid ones)
-		public const double KdeBandwidthTicks = 6, KdeProminence = 0.10;            // §2.1 HVN/LVN (ES bandwidth)
+		public const double KdeBandwidthTicks = 6, KdeProminence = 0.10;            // §2.1 HVN/LVN (ES bandwidth) = PRIMARY arm
+		// HVN/LVN sensitivity arm (types HVN_HCV / LVN_HCV): bandwidth = the prior session's h_cv from _ProfileStats.KdeSweep (PR #18,
+		// uniform rows, contiguous 5-fold CV by 1m bar), computed when that session closes - no lookahead into the session traded.
+		public const int HcvDistribution = 2;
+
+		/// <summary>Pre-registered arms, journaled at Configure before any result.</summary>
+		public static string PreRegistration()
+		{
+			return string.Format(CultureInfo.InvariantCulture,
+				"G0 PRE-REGISTERED: DV rotation types DV_ROT_POC_R6 (6-bar box) and DV_ROT_POC_R12 (12-bar box), w={0} x ATR30, breakout {1} x ATR30, expiry {2} sessions; " +
+				"HVN/LVN bandwidth arms PRIMARY [HVN, LVN] = {3} ticks fixed, SENSITIVITY [HVN_HCV, LVN_HCV] = prior session h_cv (_ProfileStats.KdeSweep); prominence >= {4:0%}; " +
+				"composite {5} sessions; controls {6}; reaction {7} x 5m; ages 1..{8}; Holm m = {9}",
+				DvRotW, DvBreakAtr, DvRotExpirySessions, KdeBandwidthTicks, KdeProminence, CompositeSessions, Controls, ReactionBars5m, MaxAge, AllTypes.Length);
+		}
 		public const int SinglePrintMinRows = 4; public const double SinglePrintVolFrac = 0.05;
 		public const double DvRotW = 1.5, DvBreakAtr = 1.5, DvTrendLegAtr = 3.0, DvHvnMedianX = 2.0;
 		public const int DvRotExpirySessions = 5, DvTrendExpirySessions = 10, DvTrendArmBars = 2, DvTrendLookback = 20, DvPendingBars = 26;
@@ -326,7 +341,7 @@ namespace PowerLanguage.Function
 		/// across the per-family runs, which never see the other families' p-values).</summary>
 		public static readonly string[] AllTypes = { "POC", "VAH", "VAL", "NPOC", "IBH", "IBL", "ONH", "ONL", "AV_PH", "AV_PL", "AV_WK", "AV_MO", "AV_OPEN", "AV_PC",
 			"VWAP", "VWAP+1", "VWAP-1", "WPOC", "WVAH", "WVAL", "CVAH", "CVAL", "SP_HI", "SP_LO", "SPV_HI", "SPV_LO", "DV_ROT_POC_R6", "DV_ROT_POC_R12", "DV_TREND_HVN",
-			"HVN", "LVN", "GMM_MU", "GMM_EDGE", "SIG_MU", "SIG_EDGE" };
+			"HVN", "LVN", "HVN_HCV", "LVN_HCV", "GMM_MU", "GMM_EDGE", "SIG_MU", "SIG_EDGE" };
 
 		// ---- configuration (set before the first Bar) ----
 		public EGate0Mode mode = EGate0Mode.EventStudy;
@@ -391,7 +406,7 @@ namespace PowerLanguage.Function
 			gap = g[i / 8]; j = 1 + (i / 4) % 2; minutes = (i / 2) % 2 == 0 ? 30 : 15; filter = i % 2 == 0;
 			return true;
 		}
-		private EGate0Canary Cv { get { return variant >= 100 ? EGate0Canary.A2_53 : Cv; } }
+		private EGate0Canary Cv { get { return variant >= 100 ? EGate0Canary.A2_53 : (EGate0Canary)variant; } }
 		public string CanaryName { get { if (Cv != EGate0Canary.A2_53) return Cv.ToString(); return string.Format(CultureInfo.InvariantCulture, "A2_53[g={0:0.0}% j={1} {2}m filter={3}]", a253Gap * 100, a253Bar, a253Minutes, a253Filter ? "on" : "off"); } }
 
 		public string Configure()
@@ -406,7 +421,9 @@ namespace PowerLanguage.Function
 			study.config.controlsEitherSide = true; study.config.reactionAfterTouch = true;
 			if (mode != EGate0Mode.Canary && variant == 0) study.config.controls = 5;   // memory: overview only, NOT a verdict run
 			m_inited = true;
-			return study.Configure();
+			string err = study.Configure();
+			if (err == null && journal != null && StudyMode) journal(PreRegistration());
+			return err;
 		}
 
 		private bool StudyMode { get { return mode != EGate0Mode.Canary; } }
@@ -515,6 +532,7 @@ namespace PowerLanguage.Function
 			double poc, vah, val;
 			if (s.profile.ValueArea(vaPct, out poc, out vah, out val)) { s.poc = poc; s.vah = vah; s.val = val; }
 			closeBlock();
+			if (s.rth1m != null && s.rth1m.Count > 0) { s.hCv = _ProfileStats.KdeSweep(s.rth1m, tick, HcvDistribution).hCv; s.rth1m = null; }
 			m_atrD.Add(s.rthH, s.rthL, s.rthC);
 			if (!double.IsNaN(m_prevDailyClose) && !m_rollSplice) { m_dailyRets.Add(Math.Log(s.rthC / m_prevDailyClose)); if (m_dailyRets.Count > 300) m_dailyRets.RemoveAt(0); }
 			m_prevDailyClose = s.rthC; m_rollSplice = false;
@@ -543,6 +561,7 @@ namespace PowerLanguage.Function
 			if (m_cur != null)
 			{
 				var s = m_cur; s.closes1m.Add(c); s.bars1m++;
+				if (StudyMode && Fam(EGate0Family.HvnLvn)) { if (s.rth1m == null) s.rth1m = new List<RingBar>(); s.rth1m.Add(new RingBar { time = end, tradingDay = s.day, o = o, h = h, l = l, c = c, v = v, rth = true }); }
 				int period = (int)Math.Ceiling((end.TimeOfDay - new TimeSpan(9, 30, 0)).TotalMinutes / 30.0);
 				long lo = (long)Math.Round(l / tick), hi = (long)Math.Round(h / tick);
 				for (long r = lo; r <= hi; r++)
@@ -690,6 +709,12 @@ namespace PowerLanguage.Function
 				List<double[]> hv, lv; p1.profile.Nodes(KdeBandwidthTicks, KdeProminence, out hv, out lv);
 				foreach (var x in hv) addQ("HVN", Math.Round(x[0] / tick) * tick, 1, x[1]);
 				foreach (var x in lv) addQ("LVN", Math.Round(x[0] / tick) * tick, 1, x[1]);
+				if (p1.hCv > 0)
+				{
+					p1.profile.Nodes(p1.hCv / tick, KdeProminence, out hv, out lv);   // sensitivity arm: h = prior session h_cv
+					foreach (var x in hv) addQ("HVN_HCV", Math.Round(x[0] / tick) * tick, 1, x[1]);
+					foreach (var x in lv) addQ("LVN_HCV", Math.Round(x[0] / tick) * tick, 1, x[1]);
+				}
 			}
 			if (p1 != null && Fam(EGate0Family.Mixture) && p1.bars1m > 1)
 			{

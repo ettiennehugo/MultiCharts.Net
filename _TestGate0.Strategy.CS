@@ -20,6 +20,7 @@ namespace PowerLanguage.Strategy
 	//   Already in the repo (import if your MultiCharts install does not have them yet, in this order):
 	//     _Rng.Function.CS            (SplitMix64 seeded RNG: controls, negative controls, bootstrap)
 	//     _LevelStudy.Function.CS     (A2-33 level-study harness, PR #15)
+	//     _BarRing.Function.CS, _ProfileMath.Function.CS, _ProfileStats.Function.CS (KDE h_cv for the HVN/LVN sensitivity arm, PR #18)
 	//     _LevelRef.Function.CS, _RollDetector.Function.CS (roll window / roll detection; PR #19 branch)
 	//     the _CustomSignal / _VolumeProfileBase / _VolumeProfileFuturesBase chain and their helper functions
 	//   New with this strategy:
@@ -90,8 +91,9 @@ namespace PowerLanguage.Strategy
 	//                             [DV_TREND_HVN] trend leg (30m close beyond the prior 20-bar high/low, leg from the 21-bar
 	//                             extreme, range >= 3 x ATR30): KDE HVN of the leg profile with row volume >= 2 x the leg's
 	//                             median row; armed after 2 closed 30m bars fully beyond it, expires after 10 sessions.
-	//   11 HVN / LVN              [HVN, LVN] KDE (bandwidth 6 ticks, prominence >= 10%) of the prior RTH profile; quality =
-	//                             prominence (A2-33 terciles)
+	//   11 HVN / LVN              [HVN, LVN] PRIMARY: KDE (bandwidth 6 ticks fixed, prominence >= 10%) of the prior RTH
+	//                             profile; [HVN_HCV, LVN_HCV] SENSITIVITY arm: same with bandwidth = the prior session's h_cv
+	//                             (_ProfileStats.KdeSweep, PR #18); quality = prominence (A2-33 terciles)
 	//   12 Mixture (A2-27)        [GMM_MU, GMM_EDGE] volume-weighted GMM (K <= 4 by BIC) of the prior RTH profile: means and
 	//                             mu +- sigma edges; quality = weight pi
 	//   13 Sigma mixture (A2-32)  [SIG_MU, SIG_EDGE] GMM of the last 20 sessions in z = (p - sVWAP) / sigma_session
@@ -125,6 +127,7 @@ namespace PowerLanguage.Strategy
 	//   The canary verdict is the Strategy Performance Report NET profit factor over 2016–2024 (or your dev window).
 	//
 	// WHERE THE RESULTS SHOW UP AND HOW TO READ THEM
+	//   At StartCalc (level-study modes) a "G0 PRE-REGISTERED:" line records the DV rotation types and HVN/LVN bandwidth arms.
 	//   With the trace level at Journal, the PowerLanguage Output window / the _CustomSignal log file receive, once at
 	//   the first bar of 2025 (or the last bar on the chart, whichever comes first):
 	//     A2-33 <Summary>   the _LevelStudy result per type (touch edge, reaction edge, Holm, half-life, terciles, KM)

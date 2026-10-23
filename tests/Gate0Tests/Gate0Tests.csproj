@@ -13,5 +13,15 @@
     <Compile Include="..\..\_Gate0.Function.CS" Link="Linked\_Gate0.cs" />
     <Compile Include="..\..\_LevelStudy.Function.CS" Link="Linked\_LevelStudy.cs" />
     <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
+    <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
   </ItemGroup>
+  <!-- _ProfileMath is extracted from its study file (same as VpHelperTests/gen.sh). -->
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
 </Project>

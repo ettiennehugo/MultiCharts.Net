@@ -161,12 +161,43 @@ static class Program
 			Check(found, "DV_ROT_POC_R6 registered after rotation, breakout >= 1.5 ATR30 and follow-through, level = box POC");
 		}
 
+		// ---- pre-registration journal + h_cv arm ----
+		{
+			var lines = new List<string>();
+			var pe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 11, journal = lines.Add };
+			Check(pe.Configure() == null && lines.Count == 1 && lines[0].StartsWith("G0 PRE-REGISTERED") && lines[0].Contains("DV_ROT_POC_R6") && lines[0].Contains("DV_ROT_POC_R12")
+				&& lines[0].Contains("6 ticks") && lines[0].Contains("HVN_HCV") && lines[0].Contains("h_cv"), "pre-registered line journaled at Configure");
+			Check(Gate0Engine.AllTypes.Contains("HVN_HCV") && Gate0Engine.AllTypes.Contains("LVN_HCV"), "h_cv arm types are in the Holm family");
+			var ce2 = new List<string>(); new Gate0Engine { mode = EGate0Mode.Canary, variant = 0, journal = ce2.Add }.Configure();
+			Check(ce2.Count == 0, "no pre-registration line in Canary mode");
+		}
+
+		// ---- every canary (0..7 and a sweep cell) runs over bars without throwing ----
+		foreach (int cvn in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 100, 111, 123 })
+		{
+			bool ok = true;
+			try
+			{
+				var ke = new Gate0Engine { mode = EGate0Mode.Canary, variant = cvn }; ok = ke.Configure() == null;
+				var kr = new Random(5); double kp = 4800; var ks = new DateTime(2023, 1, 2);
+				for (int d = 0; d < 10; d++)
+				{
+					var day = ks.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					for (var t = day.AddHours(-1); t <= day.AddHours(16); t = t.AddMinutes(1))
+					{ double o = kp, c = Math.Round((kp + (kr.NextDouble() - 0.5) * 2) * 4) / 4; kp = c; ke.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 100)); }
+				}
+				ok &= !string.IsNullOrEmpty(ke.CanaryName);
+			}
+			catch (Exception) { ok = false; }
+			Check(ok, "canary " + cvn + " runs");
+		}
+
 		// ---- every family runs and emits its types ----
 		{
-			var want = new Dictionary<int, string> { { 1, "POC" }, { 7, "WPOC" }, { 8, "CVAH" }, { 11, "HVN" }, { 12, "GMM_MU" }, { 13, "SIG_MU" } };
+			var want = new Dictionary<int, string> { { 1, "POC" }, { 7, "WPOC" }, { 8, "CVAH" }, { 11, "HVN" }, { -11, "HVN_HCV" }, { 12, "GMM_MU" }, { 13, "SIG_MU" } };
 			foreach (var kv in want)
 			{
-				var fe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = kv.Key }; fe.Configure();
+				var fe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = Math.Abs(kv.Key) }; fe.Configure();
 				var fr = new Random(11); double fp = 4800; var fs = new DateTime(2023, 1, 2);
 				for (int d = 0; d < 45; d++)
 				{
@@ -176,6 +207,7 @@ static class Program
 				}
 				fe.Finish();
 				Check(fe.study.Events.Any(e => e.type == kv.Value) && fe.study.Events.Where(e => !e.control).All(e => e.age >= 1 && e.age <= 15), "family " + kv.Key + " emits " + kv.Value);
+				if (kv.Key == -11) Check(fe.History.Count > 0 && fe.History.All(h => h.hCv > 0 && h.rth1m == null) && fe.study.Events.Any(e => e.type == "HVN"), "h_cv computed per session (bars released), both arms emitted");
 				if (kv.Key == 1) Check(fe.study.Events.Any(e => e.type == "POC" && e.age == 15), "prior POC ages reach 15");
 			}
 		}
