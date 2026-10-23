@@ -535,6 +535,7 @@
     <Compile Include="_RangeProfile.Function.CS" />
     <Compile Include="_WeeklyProfiles.Function.CS" />
     <Compile Include="_ProfileStats.Function.CS" />
+    <Compile Include="_Gmm.Function.CS" />
     <Compile Include="_FvgDetector.Function.CS" />
     <Compile Include="_PortMM.Function.CS" />
     <Compile Include="_PortfolioRiskManager.Strategy.CS" />

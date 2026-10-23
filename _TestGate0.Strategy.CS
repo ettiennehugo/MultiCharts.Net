@@ -20,7 +20,8 @@ namespace PowerLanguage.Strategy
 	//   Already in the repo (import if your MultiCharts install does not have them yet, in this order):
 	//     _Rng.Function.CS            (SplitMix64 seeded RNG: controls, negative controls, bootstrap)
 	//     _LevelStudy.Function.CS     (A2-33 level-study harness, PR #15)
-	//     _BarRing.Function.CS, _ProfileMath.Function.CS, _ProfileStats.Function.CS (KDE h_cv for the HVN/LVN sensitivity arm, PR #18)
+	//     _BarRing.Function.CS, _ProfileMath.Function.CS, _ProfileStats.Function.CS (KDE h_cv for the HVN/LVN sensitivity arm, PR #18),
+	//     _Gmm.Function.CS (shared EM core used by the GMM / sigma mixture families 12 and 13)
 	//     _LevelRef.Function.CS, _RollDetector.Function.CS (roll window / roll detection; PR #19 branch)
 	//     the _CustomSignal / _VolumeProfileBase / _VolumeProfileFuturesBase chain and their helper functions
 	//   New with this strategy:

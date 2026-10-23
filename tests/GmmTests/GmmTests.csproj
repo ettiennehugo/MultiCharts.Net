@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Off-MultiCharts tests for _Gmm (Phase 3 §3.1) and the G-P profile mixtures in _ProfileStats (§3.2). Not part of PLStudies.csproj. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_Gmm.Function.CS" Link="Linked\_Gmm.cs" />
+    <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
+    <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
+  </ItemGroup>
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

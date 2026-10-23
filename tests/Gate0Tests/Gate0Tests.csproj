@@ -16,6 +16,7 @@
     <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
     <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
     <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
+    <Compile Include="..\..\_Gmm.Function.CS" Link="Linked\_Gmm.cs" />
   </ItemGroup>
   <!-- _ProfileMath is extracted from its study file (same as VpHelperTests/gen.sh). -->
   <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">

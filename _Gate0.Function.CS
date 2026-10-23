@@ -155,52 +155,6 @@ namespace PowerLanguage.Function
 		}
 	}
 
-	/// <summary>Volume-weighted 1-D Gaussian mixture (EM), K chosen by BIC over 1..maxK. N for the BIC is nEff (weights are
-	/// rescaled to sum to nEff). Components sorted by mean.</summary>
-	public sealed class Gate0Gmm
-	{
-		public int K; public double[] mu = new double[0], sd = new double[0], pi = new double[0]; public double bic = double.NaN;
-		public static Gate0Gmm Fit(IList<double> x, IList<double> w, int maxK, double nEff, double sdFloor, int iters = 200)
-		{
-			Gate0Gmm best = null; int n = x.Count; if (n < 2 || !(nEff > 1)) return null;
-			double tw = 0; for (int i = 0; i < n; i++) tw += w[i]; if (!(tw > 0)) return null;
-			var ww = new double[n]; for (int i = 0; i < n; i++) ww[i] = w[i] / tw * nEff;
-			var idx = new int[n]; for (int i = 0; i < n; i++) idx[i] = i; Array.Sort(idx, (a, b) => x[a].CompareTo(x[b]));
-			for (int K = 1; K <= maxK; K++)
-			{
-				var g = new Gate0Gmm { K = K, mu = new double[K], sd = new double[K], pi = new double[K] };
-				// init: weighted quantile means of K equal-mass slices
-				double acc = 0; int sl = 0; var sw = new double[K]; var sx = new double[K]; var sxx = new double[K];
-				foreach (int i in idx) { int k = Math.Min(K - 1, (int)(acc / nEff * K)); sw[k] += ww[i]; sx[k] += ww[i] * x[i]; sxx[k] += ww[i] * x[i] * x[i]; acc += ww[i]; sl++; }
-				for (int k = 0; k < K; k++) { g.pi[k] = Math.Max(sw[k], 1e-9) / nEff; g.mu[k] = sw[k] > 0 ? sx[k] / sw[k] : x[idx[0]]; double v = sw[k] > 0 ? sxx[k] / sw[k] - g.mu[k] * g.mu[k] : 0; g.sd[k] = Math.Max(Math.Sqrt(Math.Max(v, 0)), sdFloor); }
-				var resp = new double[K]; double ll = 0;
-				for (int it = 0; it < iters; it++)
-				{
-					for (int k = 0; k < K; k++) { sw[k] = sx[k] = sxx[k] = 0; }
-					ll = 0;
-					for (int i = 0; i < n; i++)
-					{
-						double tot = 0;
-						for (int k = 0; k < K; k++) { double z = (x[i] - g.mu[k]) / g.sd[k]; resp[k] = g.pi[k] * Math.Exp(-0.5 * z * z) / (g.sd[k] * 2.5066282746310002); tot += resp[k]; }
-						if (!(tot > 0)) tot = 1e-300; ll += ww[i] * Math.Log(tot);
-						for (int k = 0; k < K; k++) { double r = ww[i] * resp[k] / tot; sw[k] += r; sx[k] += r * x[i]; sxx[k] += r * x[i] * x[i]; }
-					}
-					for (int k = 0; k < K; k++)
-					{
-						if (!(sw[k] > 1e-9)) { g.pi[k] = 1e-9; continue; }
-						g.pi[k] = sw[k] / nEff; g.mu[k] = sx[k] / sw[k];
-						g.sd[k] = Math.Max(Math.Sqrt(Math.Max(sxx[k] / sw[k] - g.mu[k] * g.mu[k], 0)), sdFloor);
-					}
-				}
-				g.bic = -2 * ll + (3 * K - 1) * Math.Log(nEff);
-				var ord = new int[K]; for (int k = 0; k < K; k++) ord[k] = k; Array.Sort(ord, (a, b) => g.mu[a].CompareTo(g.mu[b]));
-				g.mu = Array.ConvertAll(ord, k => g.mu[k]); g.sd = Array.ConvertAll(ord, k => g.sd[k]); g.pi = Array.ConvertAll(ord, k => g.pi[k]);
-				if (best == null || g.bic < best.bic) best = g;
-			}
-			return best;
-		}
-	}
-
 	/// <summary>Running VWAP with volume-weighted sigma.</summary>
 	public sealed class Gate0Vwap
 	{
@@ -719,8 +673,9 @@ namespace PowerLanguage.Function
 			if (p1 != null && Fam(EGate0Family.Mixture) && p1.bars1m > 1)
 			{
 				var xs = new List<double>(); var ws = new List<double>(); foreach (var kv in p1.profile.rows) { xs.Add(kv.Key * tick); ws.Add(kv.Value); }
-				var g = Gate0Gmm.Fit(xs, ws, GmmMaxK, p1.bars1m, tick);
-				if (g != null) for (int k = 0; k < g.K; k++) { addQ("GMM_MU", g.mu[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] - g.sd[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] + g.sd[k], 1, g.pi[k]); }
+				// shared _Gmm core (Phase 3 §3.1): 10 restarts, k-means++ init, step K up only when BIC improves by > 10, seed _Rng.Seed(27, day)
+				var g = _ProfileStats.ProfileMixture(xs.ToArray(), ws.ToArray(), GmmMaxK, _ProfileStats.MixtureSeed(p1.day), EGmmNeff.Bars, p1.bars1m, tick);
+				if (g.model != null) for (int k = 0; k < g.K; k++) { addQ("GMM_MU", g.mu[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] - g.sd[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] + g.sd[k], 1, g.pi[k]); }
 			}
 			if (p1 != null && Fam(EGate0Family.SigmaMixture)) sigmaComposite(addQ);
 			return r;
@@ -740,7 +695,7 @@ namespace PowerLanguage.Function
 				foreach (var kv in s.profile.rows) { long z = (long)Math.Round((kv.Key * tick - vw) / sg / bin); double x; hist.TryGetValue(z, out x); hist[z] = x + kv.Value / s.profile.total; }
 			}
 			var xs = new List<double>(); var ws = new List<double>(); foreach (var kv in hist) { xs.Add(kv.Key * bin); ws.Add(kv.Value); }
-			var g = Gate0Gmm.Fit(xs, ws, GmmMaxK, nEff, bin / 2); if (g == null) return;
+			var g = _ProfileStats.ProfileMixture(xs.ToArray(), ws.ToArray(), GmmMaxK, _ProfileStats.MixtureSeed(ses[0].day), EGmmNeff.Bars, (int)nEff, bin); if (g.model == null) return;   // shared _Gmm core
 			var sig = new List<double>(); for (int i = ses.Count - 1; i >= 0; i--) sig.Add(ses[i].SigmaPrice);   // oldest first
 			double a = 2.0 / (SigmaEwmaSpan + 1), sh = double.NaN; int st = Math.Max(0, sig.Count - SigmaEwmaSpan);
 			for (int i = st; i < sig.Count; i++) sh = double.IsNaN(sh) ? sig[i] : a * sig[i] + (1 - a) * sh;
