@@ -402,6 +402,7 @@ namespace PowerLanguage.Strategy
 		private _DvpEngine m_dvp;
 		private bool m_dvpQueryWarned;
 		private List<LevelRef> m_dvpRails, m_dvpRailPool;   // DV-13.1: allocated in startDvp only when DvpConfig.enabled
+		private _PriceActionEngine[][] m_dvpPa;   // DV-5.1: [stream][range] pivot engines, only when useFib (DV-13.3)
 
 		/// <summary>M-DVP engine, or null (one Warning on the first query) when DvpConfig.enabled is false.</summary>
 		internal _DvpEngine Dvp
@@ -441,6 +442,11 @@ namespace PowerLanguage.Strategy
 			DvpSnapshot s = e.Snapshot(ds, r, ago);
 			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
 			if (rails != null) rails.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, IsRollWindow(r[ago].tradingDay));
+			if (rails != null && m_dvpPa != null)
+			{
+				DvpLattice lat = dvpLattice(e, ds, r, ago, s);
+				if (lat != null) lat.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, rails.Deg, IsRollWindow(r[ago].tradingDay));
+			}
 			return m_dvpRails;
 		}
 
@@ -464,9 +470,43 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>M-DVP start (DV-0.1): after startVpHelpers, which clears the ring requests. Disabled: returns before any
 		/// allocation (no ring, no engine). The engine (and every DVP buffer) is constructed here and nowhere else.</summary>
+		/// <summary>DV-5: fills each range's pivots from its PA engine (ring bar numbering) and builds the lattice of snapshot s.</summary>
+		private DvpLattice dvpLattice(_DvpEngine e, int ds, _BarRing r, int ago, DvpSnapshot s)
+		{
+			int si = Array.IndexOf(DvpConfig.streams, ds);
+			DvpStream st = e.Stream(ds);
+			if (si < 0 || st == null || st.Pivots == null || s == null || !s.valid) return null;
+			IInstrument b = BarsOfData(ds);
+			int off = b.FullSymbolData.Current - b.CurrentBar;   // PA numbers bars by CurrentBar, the ring by FullSymbolData.Current
+			for (int j = 0; j < st.Pivots.Length; j++) DvpPaBridge.Fill(m_dvpPa[si][j], off, s.endBar, st.Pivots[j]);
+			return e.LatticeOf(ds, r, ago);
+		}
+
+		/// <summary>DV-5.1: range j's pivot engine on stream ds, strength fibPivot*2^(j-1) (j 1-based), shared with an equal hosted
+		/// ExtraPriceAction instance (same pattern as the XMKT leader swing; startExtraPa runs first). Returns the CREATED pa() label.</summary>
+		private string startDvpPa(int si, int ds, int j)
+		{
+			int str = DvpLattice.Strength(DvpConfig, j);
+			var c = new PriceActionConfig { enabled = true, dataStream = ds, layers = 1, strength = str, pivotMode = EPivotMode.Fractal,
+				minBreakoutLayer = 0, role = "DVP-S" + str };   // layers = 1 needs minBreakoutLayer 0 (Validate: 0..layers-1); breakouts are not read
+			presetExtraPriceAction(c);   // futures bases: ApplyPresetDefaults(Futures), as for ExtraPriceAction entries
+			string verr = c.Validate();
+			if (verr != null) throw new ArgumentException("DvpConfig fib range R" + (j + 1) + ": " + verr);
+			var pa = findSharedPa(c, false);
+			bool shared = pa != null;
+			if (pa == null)
+			{
+				pa = new _PriceActionEngine { config = c, label = "PA" + ds + "-DVP-S" + str, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+				string perr = pa.Configure();
+				if (perr != null) throw new ArgumentException(perr);
+			}
+			m_dvpPa[si][j] = pa;
+			return pa.label + (shared ? "(shared)" : "");
+		}
+
 		private void startDvp()
 		{
-			m_dvp = null; m_dvpQueryWarned = false;
+			m_dvp = null; m_dvpQueryWarned = false; m_dvpPa = null;
 			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); }
 			if (!DvpConfig.enabled) return;
 			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); }
@@ -476,17 +516,38 @@ namespace PowerLanguage.Strategy
 				if (ds != 1) throw new ArgumentException("DvpConfig.streams: Data" + ds + " is not hosted yet (PR-D3 is Data1 only; HTF streams arrive in PR-D6)");
 			int need = DvpStream.RingNeed(DvpConfig);
 			foreach (int ds in DvpConfig.streams) requireRing(ds, need, "DVP");
+			string paLabels = null;
+			if (DvpConfig.useFib)   // DV-13.3: PA instances only with useFib
+			{
+				var labels = new List<string>();
+				m_dvpPa = new _PriceActionEngine[DvpConfig.streams.Length][];
+				for (int si = 0; si < DvpConfig.streams.Length; si++)
+				{
+					m_dvpPa[si] = new _PriceActionEngine[DvpConfig.fibRanges];
+					for (int j = 0; j < DvpConfig.fibRanges; j++) labels.Add(startDvpPa(si, DvpConfig.streams[si], j));
+				}
+				paLabels = string.Join(",", labels);
+			}
 			m_dvp = new _DvpEngine(DvpConfig, RunId, _MtfMath.SymbolRoot(Bars.Info.Name).ToUpperInvariant(), tickSize(),
-				RollDetection != ERollDetection.Off, rthKnown(), engineSink(ETraceLevel.Journal), engineSink(ETraceLevel.Warning));
+				RollDetection != ERollDetection.Off, rthKnown(), engineSink(ETraceLevel.Journal), engineSink(ETraceLevel.Warning), paLabels);
 		}
 
 		/// <summary>M-DVP closed-bar step, after stepVpHelpers filled the rings (O(1) per stream unless the journal is a consumer).</summary>
 		private void stepDvp()
 		{
-			foreach (int ds in DvpConfig.streams)
+			for (int si = 0; si < DvpConfig.streams.Length; si++)
 			{
+				int ds = DvpConfig.streams[si];
 				IInstrument b = BarsOfData(ds);
 				if (b.Status != EBarState.Close) continue;
+				if (m_dvpPa != null)   // DV-5.1: DVP-owned pivot engines on closed bars; shared (hosted) ones are stepped by stepExtraPa
+					for (int j = 0; j < m_dvpPa[si].Length; j++)
+					{
+						_PriceActionEngine pa = m_dvpPa[si][j];
+						if (pa == null || paHosted(pa) || b.CurrentBar == pa.LastBar) continue;
+						if (rollOn(ds)) pa.OnRoll(b.Time[0]);
+						pa.Step(b);
+					}
 				_BarRing r = Ring(ds);
 				if (r == null || r.Count == 0 || r[0].bar != b.FullSymbolData.Current) continue;
 				m_dvp.OnBar(ds, r, todHalfDay(r[0].tradingDay));
@@ -584,6 +645,7 @@ namespace PowerLanguage.Strategy
 			foreach (var kv in m_paExtra) if (kv.Value == pa) l.Add(kv.Key);
 			if (pa == m_avwapPa) l.Add("AVWAP");
 			if (m_xmkt != null) for (int i = 0; i < m_xmkt.Length; i++) if (m_xmktPa[i] == pa) l.Add("XMKT-" + m_xmkt[i].config.role);
+			if (m_dvpPa != null && Array.Exists(m_dvpPa, row => Array.IndexOf(row, pa) >= 0)) l.Add("DVP");
 			return string.Join(",", l);
 		}
 
@@ -1678,7 +1740,7 @@ namespace PowerLanguage.Strategy
 		private void stopEngines()
 		{
 			m_pa = null;
-			m_dvp = null;
+			m_dvp = null; m_dvpPa = null;
 			m_avwap = null;
 			m_avwapPa = null;
 			m_tod = null;

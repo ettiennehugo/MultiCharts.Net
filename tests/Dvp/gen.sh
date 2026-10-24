@@ -12,4 +12,5 @@ ext() { # $1 region, $2 source file, $3 output
     echo "}"; } > "$here/Generated/$3"
 }
 ext dvp-core _DvpEngine.Function.CS DvpCore.cs
+ext dvp-pa _DvpEngine.Function.CS DvpPa.cs
 ext profile-math _ProfileMath.Function.CS ProfileMath.cs

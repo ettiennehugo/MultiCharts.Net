@@ -255,8 +255,8 @@ static partial class Program
 		int sd = host.IndexOf("private void startDvp()", StringComparison.Ordinal);
 		string body = sd >= 0 ? host.Substring(sd, host.IndexOf("private void stepDvp()", sd, StringComparison.Ordinal) - sd) : "";
 		int ret = body.IndexOf("if (!DvpConfig.enabled) return;", StringComparison.Ordinal);
-		Check(ret > 0 && ret < body.IndexOf("requireRing(", StringComparison.Ordinal) && ret < body.IndexOf("new _DvpEngine(", StringComparison.Ordinal) && !body.Contains("PriceAction"),
-			"DV-T22 disabled: startDvp returns before requireRing and the engine; no PA instance");
+		Check(ret > 0 && ret < body.IndexOf("requireRing(", StringComparison.Ordinal) && ret < body.IndexOf("new _DvpEngine(", StringComparison.Ordinal) && ret < body.IndexOf("_PriceActionEngine", StringComparison.Ordinal),
+			"DV-T22 disabled: startDvp returns before requireRing, the engine and any PA instance");
 		int lst = body.IndexOf("new List<LevelRef>()", StringComparison.Ordinal);
 		string noBody = System.Text.RegularExpressions.Regex.Replace(host.Replace(body, ""), @"//[^\n]*", "");
 		Check(ret > 0 && lst > ret && !noBody.Contains("new List<LevelRef>") && noBody.Contains("private List<LevelRef> m_dvpRails, m_dvpRailPool;"),
@@ -267,10 +267,11 @@ static partial class Program
 		// eager allocation: the row arrays (DvpManifold) and every window buffer are built only under the _DvpEngine constructor
 		var all = Directory.GetFiles(Root(), "*.CS").Select(File.ReadAllText).ToArray();
 		int engNew = all.Sum(t => Count(t, "new _DvpEngine(")), manNew = all.Sum(t => Count(t, "new DvpManifold(")), strNew = all.Sum(t => Count(t, "new DvpStream("));
+		int latNew = all.Sum(t => Count(t, "new DvpLattice(")), pivNew = all.Sum(t => Count(t, "new DvpPivots("));
 		string core = CoreSource();
 		var statics = core.Split('\n').Where(l => l.Contains(" static ") && l.Contains(" new ") && !l.TrimStart().StartsWith("//") && !l.Contains("static string") && !l.Contains("static bool") && !l.Contains("static int") && !l.Contains("static void") && !l.Contains("static double") && !l.Contains("static ulong")).ToArray();
-		Check(engNew == 1 && manNew == 1 && strNew == 1 && statics.Length == 1 && statics[0].Contains("Entry[] Table = new Entry[0]"),
-			"eager-allocation check: one new _DvpEngine (startDvp), one new DvpManifold (DvpStream slot), one new DvpStream (engine ctor); no static buffers (" + engNew + "/" + manNew + "/" + strNew + "/" + statics.Length + ")");
+		Check(engNew == 1 && manNew == 1 && strNew == 1 && latNew == 1 && pivNew == 1 && statics.Length == 1 && statics[0].Contains("Entry[] Table = new Entry[0]"),
+			"eager-allocation check: one new _DvpEngine (startDvp), one new DvpManifold (DvpStream slot), one new DvpStream (engine ctor), one new DvpLattice + DvpPivots (DvpStream ctor, useFib); no static buffers (" + engNew + "/" + manNew + "/" + strNew + "/" + latNew + "/" + pivNew + "/" + statics.Length + ")");
 	}
 
 	// DV-13.1/13.2: no allocation per closed bar (journal off) and none per query after warm-up (snapshot + rails, no LevelRef publish).

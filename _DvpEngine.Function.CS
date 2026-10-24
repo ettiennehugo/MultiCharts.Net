@@ -884,6 +884,27 @@ namespace PowerLanguage.Function
 			m_prevFit = new DvpFit(m_n);
 			m_fwd = new DvpCoef[m_H / m_r + 2];
 			for (int i = 0; i < m_fwd.Length; i++) m_fwd[i] = new DvpCoef();
+			if (cfg.useFib)
+			{
+				Lattice = new DvpLattice(cfg.fibRanges); Pivots = new DvpPivots[cfg.fibRanges];
+				for (int j = 0; j < cfg.fibRanges; j++) Pivots[j] = new DvpPivots(PivotCapacity);
+			}
+		}
+
+		/// <summary>DV-5: lattice and its per-range pivot buffers (null when useFib is false).</summary>
+		public readonly DvpLattice Lattice; public readonly DvpPivots[] Pivots;
+		/// <summary>Pivots copied per range: both sides of a PriceActionConfig.history = 50 engine.</summary>
+		public const int PivotCapacity = 128;
+
+		/// <summary>DV-5 lattice of the snapshot ending endAgo, from Pivots (filled by the host for this query). Null when useFib is off
+		/// or there is no valid fit (lattice levels carry a z-equivalent and are published with the rails).</summary>
+		public DvpLattice LatticeFor(_BarRing ring, int endAgo)
+		{
+			if (Lattice == null) return null;
+			DvpSnapshot s = Snapshot(ring, endAgo);
+			if (s == null || !s.valid) { Lattice.Count = 0; return null; }
+			Lattice.Build(Config, Pivots, s.endBar, s.atr, ring[endAgo].c);
+			return Lattice;
 		}
 
 		/// <summary>Ring bars this stream needs (DV-0.2): winLen + refitEvery (anchor offset) + endpointDrift's previous window + slack.</summary>
@@ -1181,7 +1202,7 @@ namespace PowerLanguage.Function
 		public Action<string> journal, warnOnce;
 		bool m_finished;
 
-		public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce)
+		public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce, string paLabels = null)
 		{
 			Config = cfg; RunId = runId ?? ""; RollDetect = rollDetect; this.journal = journal; this.warnOnce = warnOnce;
 			ConfigHash = Fnv1a64(cfg.Canon()).ToString("x16", CultureInfo.InvariantCulture);
@@ -1189,7 +1210,7 @@ namespace PowerLanguage.Function
 			m_streams = new DvpStream[m_ds.Length];
 			for (int i = 0; i < m_ds.Length; i++) m_streams[i] = new DvpStream(m_ds[i], cfg, root, tick, rollDetect, rthKnown) { warnOnce = warnOnce };
 			if (!rollDetect && warnOnce != null) warnOnce("DVP: RollDetection Off — roll skip disabled");   // DV-7.0: every stream diagnostic-only
-			if (journal != null) journal(CreatedLine(root));
+			if (journal != null) journal(CreatedLine(root, paLabels));
 		}
 
 		public int StreamCount { get { return m_streams.Length; } }
@@ -1202,7 +1223,7 @@ namespace PowerLanguage.Function
 			return h;
 		}
 
-		string CreatedLine(string root)
+		string CreatedLine(string root, string paLabels)
 		{
 			var sb = new StringBuilder(256);
 			sb.Append("DVP CREATED runId(").Append(RunId).Append(") configHash(").Append(ConfigHash).Append(") streams(");
@@ -1218,7 +1239,7 @@ namespace PowerLanguage.Function
 				sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)).Append('=').Append(d.ToString(CultureInfo.InvariantCulture));
 				if (calib || unfrozen) sb.Append('(').Append(calib ? "calibrate" : "").Append(calib && unfrozen ? "," : "").Append(unfrozen ? "unfrozen" : "").Append(')');
 			}
-			sb.Append(") pa(none) rollDetect(").Append(RollDetect ? "On" : "Off").Append(") canon(").Append(Config.Canon()).Append(')');
+			sb.Append(") pa(").Append(string.IsNullOrEmpty(paLabels) ? "none" : paLabels).Append(") rollDetect(").Append(RollDetect ? "On" : "Off").Append(") canon(").Append(Config.Canon()).Append(')');
 			return sb.ToString();
 		}
 
@@ -1244,6 +1265,12 @@ namespace PowerLanguage.Function
 			return s != null ? s.Snapshot(ring, endAgo) : null;
 		}
 
+		public DvpLattice LatticeOf(int ds, _BarRing ring, int endAgo)
+		{
+			DvpStream s = Stream(ds);
+			return s == null ? null : s.LatticeFor(ring, endAgo);
+		}
+
 		public DvpRails RailsOf(int ds, _BarRing ring, int endAgo)
 		{
 			DvpStream s = Stream(ds);
@@ -1261,5 +1288,177 @@ namespace PowerLanguage.Function
 		}
 	}
 
+	// ---------------------------------------------------------------------------------------------------------------
+	// PR-D4 (DV-5): Fib lattice. MC-free: the host copies each range's confirmed pivots (from a hosted _PriceActionEngine,
+	// see DvpPaBridge) into a DvpPivots buffer, in ring bar numbering; DvpLattice picks the anchors, lays out the 24 levels,
+	// merges and filters them. Buffers are sized once (DvpStream constructor, i.e. under the _DvpEngine constructor).
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/// <summary>Confirmed pivots of one lattice range (either side, any order), bar numbers in the stream's ring numbering.</summary>
+	public sealed class DvpPivots
+	{
+		public readonly double[] Price; public readonly int[] ExtremeBar, ConfirmBar; public readonly bool[] IsHigh;
+		public int Count;
+		public DvpPivots(int capacity) { Price = new double[capacity]; ExtremeBar = new int[capacity]; ConfirmBar = new int[capacity]; IsHigh = new bool[capacity]; }
+		public int Capacity { get { return Price.Length; } }
+		public void Clear() { Count = 0; }
+		public bool Add(bool isHigh, double price, int extremeBar, int confirmBar)
+		{
+			if (Count >= Price.Length) return false;
+			IsHigh[Count] = isHigh; Price[Count] = price; ExtremeBar[Count] = extremeBar; ConfirmBar[Count] = confirmBar; Count++;
+			return true;
+		}
+	}
+
+	/// <summary>
+	/// DV-5.2..5.5 lattice for one snapshot. Range j (0-based here, R{j+1} in tags) uses strength s_j = fibPivot*2^j.
+	/// Anchor (MostRecentPivot): B = the confirmed pivot (confirmBar &lt;= endBar) with the latest confirmBar (ties: later
+	/// extremeBar, then the high); A = the confirmed opposite-side pivot with the latest extremeBar before B's. Both extremeBars
+	/// must be within fibLookMult*s_j bars of endBar (bar t-1), else the range is empty. Levels L(f) = B - f(B - A) over the 24
+	/// FIB_LEVELS; within a range, sorted by price, greedy merge: a level joins the current group while it is closer than
+	/// fibMerge*ATR to the group's first (lowest) member (strict); the group's price is its member with the smallest |f - round f|
+	/// (ties: lower f). Then levels further than fibNear*ATR from C(t-1) are dropped (|P - C| &lt;= fibNear*ATR kept). Ranges never merge.
+	/// </summary>
+	public sealed class DvpLattice
+	{
+		/// <summary>DV-5.3 verbatim (rev 3.1 §2.2): do not "correct" .22/.62/.71/-2.62.</summary>
+		public static double FibLevel(int i)
+		{
+			switch (i)
+			{
+				case 0: return 0; case 1: return .22; case 2: return .5; case 3: return .62; case 4: return .71; case 5: return .786;
+				case 6: return .886; case 7: return 1; case 8: return 1.414; case 9: return 1.618; case 10: return 2.618; case 11: return 3.618;
+				case 12: return 4.236; case 13: return -.146; case 14: return -.272; case 15: return -.414; case 16: return -.764; case 17: return -1;
+				case 18: return -2; case 19: return -2.5; case 20: return -2.62; case 21: return -3; case 22: return -3.5; case 23: return -4;
+				default: return double.NaN;
+			}
+		}
+		public const int NFib = 24;
+
+		public readonly int Ranges;
+		public readonly double[] Price, F; public readonly int[] Range;   // output, Count levels, grouped by range, price-ascending within a range
+		public int Count;
+		public readonly double[] AnchorA, AnchorB; public readonly int[] AnchorABar, AnchorBBar; public readonly bool[] RangeOk;
+		readonly double[] m_p = new double[NFib], m_f = new double[NFib];
+
+		public DvpLattice(int ranges)
+		{
+			Ranges = ranges;
+			Price = new double[ranges * NFib]; F = new double[ranges * NFib]; Range = new int[ranges * NFib];
+			AnchorA = new double[ranges]; AnchorB = new double[ranges]; AnchorABar = new int[ranges]; AnchorBBar = new int[ranges]; RangeOk = new bool[ranges];
+		}
+
+		public static int Strength(DvpConfig c, int j) { return c.fibPivot << j; }
+
+		/// <summary>DV-5.2. False (range empty) when no B, no A, or either extreme is older than look bars before endBar.</summary>
+		public static bool Anchor(DvpPivots p, int endBar, int look, out double a, out double b, out int aBar, out int bBar)
+		{
+			a = b = double.NaN; aBar = bBar = int.MinValue;
+			int bi = -1;
+			for (int i = 0; i < p.Count; i++)
+			{
+				if (p.ConfirmBar[i] > endBar) continue;   // unusable before confirmBar
+				if (bi < 0 || p.ConfirmBar[i] > p.ConfirmBar[bi] || (p.ConfirmBar[i] == p.ConfirmBar[bi]
+					&& (p.ExtremeBar[i] > p.ExtremeBar[bi] || (p.ExtremeBar[i] == p.ExtremeBar[bi] && p.IsHigh[i] && !p.IsHigh[bi])))) bi = i;
+			}
+			if (bi < 0) return false;
+			int ai = -1;
+			for (int i = 0; i < p.Count; i++)
+			{
+				if (p.ConfirmBar[i] > endBar || p.IsHigh[i] == p.IsHigh[bi] || p.ExtremeBar[i] >= p.ExtremeBar[bi]) continue;
+				if (ai < 0 || p.ExtremeBar[i] > p.ExtremeBar[ai]) ai = i;
+			}
+			if (ai < 0) return false;
+			if (endBar - p.ExtremeBar[bi] > look || endBar - p.ExtremeBar[ai] > look) return false;
+			a = p.Price[ai]; b = p.Price[bi]; aBar = p.ExtremeBar[ai]; bBar = p.ExtremeBar[bi];
+			return true;
+		}
+
+		/// <summary>Builds every range. pivots[j] holds range j's confirmed pivots. No allocation.</summary>
+		public void Build(DvpConfig c, DvpPivots[] pivots, int endBar, double atr, double close)
+		{
+			Count = 0;
+			for (int j = 0; j < Ranges; j++)
+			{
+				RangeOk[j] = false; AnchorA[j] = AnchorB[j] = double.NaN; AnchorABar[j] = AnchorBBar[j] = int.MinValue;
+				if (!(atr > 0) || double.IsNaN(close) || pivots == null || j >= pivots.Length || pivots[j] == null) continue;
+				double a, b; int ab, bb;
+				if (!Anchor(pivots[j], endBar, c.fibLookMult * Strength(c, j), out a, out b, out ab, out bb)) continue;
+				RangeOk[j] = true; AnchorA[j] = a; AnchorB[j] = b; AnchorABar[j] = ab; AnchorBBar[j] = bb;
+				for (int i = 0; i < NFib; i++) { double f = FibLevel(i); m_f[i] = f; m_p[i] = b - f * (b - a); }
+				for (int i = 1; i < NFib; i++)   // insertion sort by price, then f
+				{
+					double pp = m_p[i], ff = m_f[i]; int k = i - 1;
+					while (k >= 0 && (m_p[k] > pp || (m_p[k] == pp && m_f[k] > ff))) { m_p[k + 1] = m_p[k]; m_f[k + 1] = m_f[k]; k--; }
+					m_p[k + 1] = pp; m_f[k + 1] = ff;
+				}
+				double tol = c.fibMerge * atr, near = c.fibNear * atr;
+				int g = 0;
+				while (g < NFib)
+				{
+					int best = g, e = g + 1;
+					while (e < NFib && m_p[e] - m_p[g] < tol) { if (better(m_f[e], m_f[best])) best = e; e++; }
+					if (Math.Abs(m_p[best] - close) <= near) { Price[Count] = m_p[best]; F[Count] = m_f[best]; Range[Count] = j; Count++; }
+					g = e;
+				}
+			}
+		}
+
+		static bool better(double f, double cur)
+		{
+			double df = Math.Abs(f - Math.Round(f)), dc = Math.Abs(cur - Math.Round(cur));
+			return df < dc || (df == dc && f < cur);
+		}
+
+		/// <summary>DV-10.2 lattice tag: DVP{ds}:{t-1}:d{deg}:DvpFib{f:+0.000}R{j}.</summary>
+		public static string Tag(int ds, DateTime tPrev, int deg, double f, int range)
+		{
+			return "DVP" + ds.ToString(CultureInfo.InvariantCulture) + ":" + tPrev.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture) + ":d"
+				+ deg.ToString(CultureInfo.InvariantCulture) + ":" + ELevelKind.DvpFib.ToString() + f.ToString("+0.000;-0.000;+0.000", CultureInfo.InvariantCulture)
+				+ "R" + (range + 1).ToString(CultureInfo.InvariantCulture);
+		}
+
+		/// <summary>Appends the levels as DvpFib LevelRefs (flat prices, DV-5.5) to into, reusing pool entries from into.Count on.</summary>
+		public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, int deg, bool isRollWindow)
+		{
+			for (int i = 0; i < Count; i++)
+			{
+				int k = into.Count; LevelRef r;
+				if (k < pool.Count) r = pool[k]; else { r = new LevelRef(); pool.Add(r); }
+				r.kind = ELevelKind.DvpFib; r.price = r.lo = r.hi = Price[i]; r.createdTime = tPrev; r.sourceT0 = t0; r.sourceT1 = tPrev; r.dataStream = ds;
+				r.tag = Tag(ds, tPrev, deg, F[i], Range[i]); r.quality = double.NaN; r.crossesRoll = false; r.isRollWindow = isRollWindow;
+				into.Add(r);
+			}
+		}
+	}
 	// </dvp-core>
+
+	// <dvp-pa>
+	/// <summary>
+	/// PR-D4 (DV-5.1) bridge from a hosted _PriceActionEngine (layer 0) to a DvpPivots buffer. PA bar numbers are the stream's
+	/// CurrentBar; the ring (and DvpSnapshot.endBar) uses FullSymbolData.Current, so barOffset = ring bar - PA bar of the same bar.
+	/// Only pivots confirmed by endBar are copied (the anchor rule re-checks this). No allocation.
+	/// </summary>
+	internal static class DvpPaBridge
+	{
+		public static void Fill(_PriceActionEngine pa, int barOffset, int endBar, DvpPivots into)
+		{
+			into.Clear();
+			if (pa == null) return;
+			side(pa, true, barOffset, endBar, into);
+			side(pa, false, barOffset, endBar, into);
+		}
+		static void side(_PriceActionEngine pa, bool isHigh, int off, int endBar, DvpPivots into)
+		{
+			int n = pa.PivotCount(0, isHigh);
+			for (int ago = 0; ago < n; ago++)
+			{
+				_Pivot p = isHigh ? pa.High(0, ago) : pa.Low(0, ago);
+				if (p == null) break;
+				if (p.confirmBar + off > endBar) continue;
+				if (!into.Add(isHigh, p.price, p.extremeBar + off, p.confirmBar + off)) return;
+			}
+		}
+	}
+	// </dvp-pa>
 }
