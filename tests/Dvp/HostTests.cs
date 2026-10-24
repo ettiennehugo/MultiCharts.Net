@@ -363,11 +363,16 @@ static partial class Program
 		Check(x != null && x.n == 240 && hEnd + 50 - 239 < hStart && x.sigma == f.SigmaD, "DV-T29 half-day bars stay in the fit window (n = 240, sigma bit-identical)");
 	}
 
-	// DV-R1: golden journal. 15m, 5,000 bars, two splices; DVP FIT lines byte-identical to fixtures/golden_fit.txt (RAIL lines arrive in PR-D5).
+	// DV-R1: golden journal. 15m, 5,000 bars, two splices. The test regenerates the full series and every DVP FIT line
+	// deterministically and checks their SHA-256 against fixtures/golden.sha256; the committed fixtures/golden_fit_sample.txt
+	// (every 20th FIT line plus the lines on either side of each crossesRoll transition) must appear byte-identical, so a
+	// mismatch shows readable lines. RAIL lines arrive in PR-D5. DVP_WRITE_GOLDEN=1 rewrites the sample and the hashes;
+	// DVP_WRITE_FULL=<dir> also dumps the full series csv and FIT journal there for inspection (not committed).
 	static void R1()
 	{
 		bool[] hd; RingBar[] s = Series(5000, 2026, new[] { 1700, 3400 }, new[] { 12, 40 }, out hd);
-		string csv = Path.Combine(Root(), "tests", "Dvp", "fixtures", "golden_series.csv"), gold = Path.Combine(Root(), "tests", "Dvp", "fixtures", "golden_fit.txt");
+		string dir = Path.Combine(Root(), "tests", "Dvp", "fixtures");
+		string sampleP = Path.Combine(dir, "golden_fit_sample.txt"), hashP = Path.Combine(dir, "golden.sha256");
 		var sb = new StringBuilder("bar,time,tradingDay,o,h,l,c,v,up,down,rth,rollBar,halfDay\n");
 		for (int i = 0; i < s.Length; i++)
 		{
@@ -377,13 +382,39 @@ static partial class Program
 				.Append(b.v.ToString("R", CI)).Append(',').Append(b.up.ToString("R", CI)).Append(',').Append(b.down.ToString("R", CI)).Append(',')
 				.Append(b.rth ? 1 : 0).Append(',').Append(b.rollBar ? 1 : 0).Append(',').Append(hd[i] ? 1 : 0).Append('\n');
 		}
+		string series = sb.ToString();
 		var fit = JournalRun(s, hd, Cfg()).Where(l => l.StartsWith("DVP FIT", StringComparison.Ordinal)).ToList();
-		string got = string.Join("\n", fit) + "\n";
-		if (Environment.GetEnvironmentVariable("DVP_WRITE_GOLDEN") == "1") { File.WriteAllText(csv, sb.ToString()); File.WriteAllText(gold, got); Console.WriteLine("wrote golden fixtures"); }
-		bool csvSame = File.Exists(csv) && File.ReadAllText(csv) == sb.ToString();
-		bool same = File.Exists(gold) && File.ReadAllText(gold) == got;
-		Check(csvSame && same && fit.Count == 5000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * 239,
-			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines byte-identical to fixtures/golden_fit.txt (series csv same: " + csvSame + ")");
+		string full = string.Join("\n", fit) + "\n";
+		var sample = new StringBuilder();
+		for (int i = 0; i < fit.Count; i++)
+		{
+			bool cr = fit[i].Contains("crossesRoll(1)");
+			bool edge = (i > 0 && fit[i - 1].Contains("crossesRoll(1)") != cr) || (i + 1 < fit.Count && fit[i + 1].Contains("crossesRoll(1)") != cr);
+			if (i % 20 == 0 || edge || i == fit.Count - 1) sample.Append(i.ToString(CI)).Append('\t').Append(fit[i]).Append('\n');
+		}
+		string hashes = "series " + Sha256(series) + "\nfit " + Sha256(full) + "\nfitLines " + fit.Count.ToString(CI) + "\n";
+		if (Environment.GetEnvironmentVariable("DVP_WRITE_GOLDEN") == "1") { File.WriteAllText(sampleP, sample.ToString()); File.WriteAllText(hashP, hashes); Console.WriteLine("wrote golden sample + hashes"); }
+		string dump = Environment.GetEnvironmentVariable("DVP_WRITE_FULL");
+		if (!string.IsNullOrEmpty(dump)) { File.WriteAllText(Path.Combine(dump, "golden_series.csv"), series); File.WriteAllText(Path.Combine(dump, "golden_fit.txt"), full); }
+		bool hashSame = File.Exists(hashP) && File.ReadAllText(hashP) == hashes;
+		bool sampleSame = File.Exists(sampleP) && File.ReadAllText(sampleP) == sample.ToString();
+		if (!sampleSame && File.Exists(sampleP))
+		{
+			string[] want = File.ReadAllLines(sampleP), got = sample.ToString().TrimEnd('\n').Split('\n');
+			for (int i = 0; i < Math.Min(want.Length, got.Length); i++) if (want[i] != got[i]) { Console.WriteLine("  R1 first sample diff:\n   want " + want[i] + "\n   got  " + got[i]); break; }
+		}
+		Check(hashSame && sampleSame && fit.Count == 5000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * 239,
+			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines, full-run SHA-256 matches fixtures/golden.sha256 (" + hashSame + "), sample byte-identical (" + sampleSame + ")");
+	}
+
+	static string Sha256(string text)
+	{
+		using (var h = System.Security.Cryptography.SHA256.Create())
+		{
+			byte[] d = h.ComputeHash(Encoding.UTF8.GetBytes(text)); var sb = new StringBuilder();
+			foreach (byte x in d) sb.Append(x.ToString("x2", CI));
+			return sb.ToString();
+		}
 	}
 
 	// DV-3.8 endpointDrift (accepted reading, Analyst 2 review of #36), refitEvery = 4: on a refit bar whose window ends at E,
