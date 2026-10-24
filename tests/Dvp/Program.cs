@@ -5,7 +5,7 @@ using System.IO;
 using PowerLanguage.Function;
 
 // M-DVP PR-D1 (specs/m-dvp-spec.md §15): DV-T1..T8, T20, T23 on the extracted <dvp-core> fit.
-static class Program
+static partial class Program
 {
 	static int s_fail, s_pass;
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
@@ -236,6 +236,8 @@ static class Program
 			Check(d1 != argmin && before == f.Deg && d1 == d2, "T7 " + mode + ": chosen d " + d1 + " is independent of BIC");
 		}
 		string core = CoreSource();
+		int jf = core.IndexOf("public static string FitLine(", StringComparison.Ordinal), je = core.IndexOf("static void kv(", StringComparison.Ordinal);
+		if (jf > 0 && je > jf) core = core.Remove(jf, je - jf);   // PR-D3: the DVP FIT journal formatter prints bic[1..dCap] (DV-11.1); it selects nothing
 		Check(Count(core, "Bic[") == 2 && core.Contains("Bic[k] = "), "T7 source scan: Bic[] is only written (Finish), never read for selection");
 	}
 
@@ -583,6 +585,7 @@ static class Program
 	{
 		T1(); T2(); T3(); T4(); T5(); T6(); T7(); T8(); T20(); T23(); ZeroAlloc();
 		T9a(); T9(); T10(); T11(); T12(); T13(); ZeroAllocD2();
+		D3Tests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
