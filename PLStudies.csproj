@@ -538,6 +538,7 @@
     <Compile Include="_ProfileStats.Function.CS" />
     <Compile Include="_Gmm.Function.CS" />
     <Compile Include="_EventCalendar.Function.CS" />
+    <Compile Include="_DvpEngine.Function.CS" />
     <Compile Include="_RegimeEngine.Function.CS" />
     <Compile Include="_RegimeGate.Function.CS" />
     <Compile Include="_FvgDetector.Function.CS" />

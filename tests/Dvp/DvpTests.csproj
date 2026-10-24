@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Off-MultiCharts unit tests for M-DVP (specs/m-dvp-spec.md §15). gen.sh extracts the MC-free <dvp-core>, <profile-math> and
+       <level-ref> regions of the study files into Generated/ before building. Fixtures come from reference.py. Not part of PLStudies.csproj. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+  </ItemGroup>
+  <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
