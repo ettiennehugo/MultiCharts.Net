@@ -13,7 +13,9 @@ namespace PowerLanguage.Function
 
 	// <level-ref>
 	public enum ELevelKind { Poc, Vah, Val, Hvn, Lvn, RangePoc, RangeVah, RangeVal, WeekPoc, WeekVah, WeekVal, FvgUpper, FvgLower,
-	                         GmmMu, GmmEdge, GmmVoid, SigmaMu, VtPrice, BootstrapPocZoneLo, BootstrapPocZoneHi }
+	                         GmmMu, GmmEdge, GmmVoid, SigmaMu, VtPrice, BootstrapPocZoneLo, BootstrapPocZoneHi,
+	                         // M-DVP (DV-10.3): appended so existing ordinals never change. Rails of the detrended volume profile.
+	                         DvpPoc, DvpVah, DvpVal, DvpHvn, DvpLvn, DvpSigma, DvpFib, DvpConf }
 
 	public sealed class LevelRef
 	{
