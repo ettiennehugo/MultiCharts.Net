@@ -298,6 +298,13 @@ static class Program
 		var e3 = Eng(c3 => c3.allowPartialCoverage = false, new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }); var errs3 = new List<string>(); e3.error = s => errs3.Add(s);
 		Bar(e3, ET(2026, 1, 5, 9, 0));
 		Check(!e3.Disabled && errs3.Count == 0 && e3.IsInWindow(EEventTier.T1, 5, 10), "no host firstBarUtc: Unknown blocks, no disable");
+		// effective tier (config.tierOverride) decides the minTier filter for Unknown, not the default tier
+		Check(EventRules.DefaultTier(EEventKind.Cpi) == EEventTier.T1, "Cpi default tier T1");
+		var eo = Eng(co => { co.allowPartialCoverage = false; co.tierOverride[EEventKind.Cpi] = EEventTier.T3; }, new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) });
+		Bar(eo, ET(2026, 1, 5, 9, 0));
+		EEventKind ok_;
+		Check(!eo.IsInWindow(EEventTier.T1, 5, 10) && !eo.CoverageBlocks(new DateTime(2026, 1, 5), EEventClassMask.Macro, EEventTier.T1, out ok_), "tierOverride Cpi=T3: Unknown does not block a T1 query");
+		Check(eo.IsInWindow(EEventTier.T3, 5, 10) && eo.CoverageBlocks(new DateTime(2026, 1, 5), EEventClassMask.Macro, EEventTier.T3, out ok_) && ok_ == EEventKind.Cpi, "tierOverride Cpi=T3: blocks a T3 query");
 		var e2 = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = true }, table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0], firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
 		Check(e2.Configure() == null, "allowPartialCoverage -> ok");
 		Bar(e2, ET(2026, 1, 5, 9, 0)); Check(!e2.Disabled && !e2.IsInWindow(EEventTier.T1, 5, 10), "allowPartialCoverage -> Unknown counts as NoEvent");
@@ -547,7 +554,7 @@ static class Program
 		var all = EEventClassMask.Macro | EEventClassMask.Calendar;
 		// (1) a hole day returns Unknown (GDP 2020-09 hole), the kinds around it stay tri-state
 		var s1 = real(false, null, all); Bar(s1, ET(2020, 9, 15, 10, 0));
-		Check(s1.Coverage(EEventKind.GdpAdvance, new DateTime(2020, 9, 15)) == EEventCoverage.Unknown || s1.Coverage(EEventKind.GdpThird, new DateTime(2020, 9, 15)) == EEventCoverage.Unknown, "EV-4.6b(1) GDP hole day 2020-09-15 -> Unknown");
+		Check(s1.Coverage(EEventKind.GdpAdvance, new DateTime(2020, 9, 15)) == EEventCoverage.Unknown, "EV-4.6b(1) GdpAdvance hole day 2020-09-15 -> Unknown");
 		Check(s1.Coverage(EEventKind.Cpi, new DateTime(2020, 9, 11)) == EEventCoverage.Event && s1.Coverage(EEventKind.Cpi, new DateTime(2020, 9, 15)) == EEventCoverage.NoEvent, "Cpi 2020-09: Event / NoEvent");
 		Check(!s1.Disabled, "hole never disables the engine");
 		// (2) blocks under allowPartialCoverage = false
@@ -568,6 +575,25 @@ static class Program
 		Check(unk.Contains(EEventKind.Pce) && unk.All(k => (EventRules.ClassOf(k, EventRules.DefaultTier(k)) & other) == 0) && !s5.CoverageBlocks(new DateTime(2022, 12, 15), other) && !s5.IsInWindow(EEventTier.None, 0, 0, other),
 			"EV-4.6b(5) PCE hole (" + pceCls + ") never blocks a mask without it [" + string.Join(",", unk) + "]");
 		Check(s5.CoverageBlocks(new DateTime(2022, 12, 15), pceCls), "same day blocks a mask with PCE's class");
+		// (6) tier filter: an Unknown hole for a kind below the query's minimum tier never blocks; at/above it does
+		Func<EEventTier?, List<string>, _EventCalendar> t6 = (ovr, jl6) =>
+		{
+			var x = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = false, minTier = EEventTier.T3 },
+				table = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 1, 13, 8, 30)), T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) }, corrections = new EventCorrection[0],
+				coverageHoles = new long[] { (long)EEventKind.Cpi, 202602100000, 202602122359 }, barDuration = TimeSpan.FromMinutes(1) };
+			if (ovr.HasValue) x.config.tierOverride[EEventKind.Cpi] = ovr.Value;
+			if (jl6 != null) x.journal = q => jl6.Add(q);
+			x.Configure(); Bar(x, ET(2026, 2, 11, 10, 0)); return x;
+		};
+		var j6 = new List<string>(); var lo6 = t6(EEventTier.T3, j6); var hi6 = t6(null, null);
+		var day6 = new DateTime(2026, 2, 11); EEventKind k6; bool f6;
+		Check(lo6.Coverage(EEventKind.Cpi, day6) == EEventCoverage.Unknown && !lo6.CoverageBlocks(day6, EEventClassMask.Macro, EEventTier.T1, out k6) && !lo6.IsInWindow(EEventTier.T1, 0, 0), "EV-4.6b(6) Unknown below minTier (override T3 < T1) does not block");
+		Check(lo6.CoverageBlocks(day6, EEventClassMask.Macro, EEventTier.T3, out k6) && lo6.IsInWindow(EEventTier.T3, 0, 0), "EV-4.6b(6) same hole at the minimum (T3) blocks");
+		Check(hi6.CoverageBlocks(day6, EEventClassMask.Macro, EEventTier.T1, out k6) && hi6.IsInWindow(EEventTier.T1, 0, 0), "EV-4.6b(6) same hole above the minimum (default T1, T1 query) blocks");
+		Check(j6.Any(q => q.Contains("COVGAP day 2026-02-11") && q.Contains("Cpi(")), "below-minTier Unknown day still journals COVGAP");
+		var rl = lo6.CoverageReport(new DateTime(2026, 2, 1), new DateTime(2026, 2, 28), EEventClassMask.Macro, EEventTier.T1, out f6);
+		var rh = lo6.CoverageReport(new DateTime(2026, 2, 1), new DateTime(2026, 2, 28), EEventClassMask.Macro, EEventTier.T3, out f6);
+		Check(rl.Any(q => q.Contains("Cpi blocked 0/")) && rh.Any(q => q.Contains("Cpi blocked 3/")), "below-minTier days excluded from the blocked share: " + rl[0] + " | " + rh[0]);
 		Check(real(false, null, all).Coverage(EEventKind.Cpi, new DateTime(2026, 1, 6)) != EEventCoverage.Unknown, "no hole 2026-01-06 for Cpi");
 		// COVGAP journal: once at start (spans reaching the first bar) and once per affected day
 		var jh = new List<string>();

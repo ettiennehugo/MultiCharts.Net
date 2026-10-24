@@ -1534,7 +1534,14 @@ namespace PowerLanguage.Function
 			m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
 		}
 		static DateTime endOfMonth(DateTime d) { return new DateTime(d.Year, d.Month, 1).AddMonths(1).AddMinutes(-1); }
-		static EEventClassMask kindClass(EEventKind k) { return EventRules.ClassOf(k, EventRules.DefaultTier(k)); }
+		EEventClassMask kindClass(EEventKind k) { return EventRules.ClassOf(k, effTier(k)); }
+		/// <summary>Effective tier of a kind: config.tierOverride, else the default tier (as applied to table rows).</summary>
+		EEventTier effTier(EEventKind k)
+		{
+			EEventTier ot;
+			if (config != null && config.tierOverride != null && config.tierOverride.TryGetValue(k, out ot)) return ot;
+			return EventRules.DefaultTier(k);
+		}
 
 		// ------------------------------------------------------------------ coverage (EV-4.6b)
 		List<EEventKind> unknownKinds(DateTime day)
@@ -1549,7 +1556,7 @@ namespace PowerLanguage.Function
 		}
 		bool kindBlocks(EEventKind k, DateTime day, EEventClassMask mask, EEventTier minTier)
 		{
-			var r = EventRec.Make(k, day, EventRules.DefaultTier(k), EEventFlags.None);
+			var r = EventRec.Make(k, day, effTier(k), EEventFlags.None);
 			return tierOk(ref r, minTier, mask);
 		}
 
@@ -1581,21 +1588,23 @@ namespace PowerLanguage.Function
 			foreach (var kv in m_covStats)
 			{
 				kv.Value[0]++;
-				if (!config.allowPartialCoverage && uk.Contains(kv.Key) && kindBlocks(kv.Key, day, config.classes, EEventTier.None)) kv.Value[1]++;
+				if (!config.allowPartialCoverage && uk.Contains(kv.Key) && kindBlocks(kv.Key, day, config.classes, config.minTier)) kv.Value[1]++;
 			}
 			if (uk.Count == 0 || journal == null) return;
 			var sb = new StringBuilder();
 			foreach (var k in uk)
 			{
 				if (sb.Length > 0) sb.Append(',');
-				sb.Append(k).Append(!config.allowPartialCoverage && kindBlocks(k, day, config.classes, EEventTier.None) ? "(blocks)" : "(NoEvent)");
+				sb.Append(k).Append(config.allowPartialCoverage ? "(NoEvent)" : kindBlocks(k, day, config.classes, config.minTier) ? "(blocks)" : kindBlocks(k, day, config.classes, EEventTier.None) ? "(belowMinTier)" : "(NoEvent)");
 			}
 			jr("COVGAP day " + ymd(day) + " Unknown " + sb);
 		}
 
 		/// <summary>EV-4.6b report: share of Unknown-blocked trading days per kind in [from, to] for the consumer mask; a line
 		/// ending FLAG means the share exceeds 5%. Run-time counts (days stepped) are in CoverageStats().</summary>
-		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, out bool flagged)
+		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, out bool flagged) { return CoverageReport(from, to, mask, config.minTier, out flagged); }
+		/// <summary>Tier filter (§14): a kind whose effective tier is below minTier is not counted as blocked.</summary>
+		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, EEventTier minTier, out bool flagged)
 		{
 			flagged = false;
 			var res = new List<string>();
@@ -1607,7 +1616,7 @@ namespace PowerLanguage.Function
 				{
 					if (!EventRules.IsNyseBusinessDay(d)) continue;
 					++n;
-					if (!config.allowPartialCoverage && unknownKinds(d).Contains(k) && kindBlocks(k, d, mask, EEventTier.None)) ++b;
+					if (!config.allowPartialCoverage && unknownKinds(d).Contains(k) && kindBlocks(k, d, mask, minTier)) ++b;
 				}
 				double p = n == 0 ? 0 : 100.0 * b / n;
 				bool f = p > 5.0; flagged |= f;
@@ -1707,7 +1716,7 @@ namespace PowerLanguage.Function
 			if (!config.allowPartialCoverage && m_unk.Count > 0)
 			{
 				DateTime td = TradingDayOf(close);
-				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, EventRules.DefaultTier(uk), EEventFlags.None); return true; }
+				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, effTier(uk), EEventFlags.None); return true; }
 			}
 			TimeSpan pre = TimeSpan.FromMinutes(preMin), post = TimeSpan.FromMinutes(postMin);
 			DateTime lo = open - post, hi = close + pre;

@@ -54,7 +54,9 @@ namespace PowerLanguage.Function
 
 			// Historical unscheduled closures (R2.1-d amendment 2026-10-23), CME equity-index futures status from CME notices:
 			//  2001-09-11 equity Globex suspended 08:30 CT; 09-12..09-14 equity index closed, reopened Mon 09-17 (CME press
-			//             releases 2001-09-11/13, as reprinted by Mondo Visione; no cmegroup.com original located)
+			//             releases 2001-09-11/13, as reprinted by Mondo Visione; no cmegroup.com original located;
+			//             corroborated by the CFTC 9/11 report: exchanges closed 09-12, stock-index futures closed until 09-17,
+			//             https://www.cftc.gov/sites/default/files/files/opa/opa9-11reportprintversion.pdf)
 			//  2004-06-11 Reagan: CME closed, Globex abbreviated session to 08:00 CT (CME release 2004-06-07, investor.cmegroup.com)
 			//  2007-01-02 Ford: equity index closed, Globex equity halted 08:15 CT (CME release 2006-12-29; CFTC filing CME 06-120)
 			//  2012-10-29/30 Sandy: equity futures halted 08:15 CT both days, Globex reopened 17:00 CT (CME 12-363, Chadv12-464)
