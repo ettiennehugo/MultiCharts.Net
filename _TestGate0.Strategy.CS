@@ -124,7 +124,9 @@ namespace PowerLanguage.Strategy
 	//
 	// COMMISSION AND SLIPPAGE FOR THE CANARIES (Format Signals → Properties)
 	//   Commission: $2.25 per contract per side ($4.50 round trip, IBKR ES incl. fees).
-	//   Slippage  : 1 tick per contract per side ($12.50 on ES, $5.00 NQ). Trade size: fixed 1 contract.
+	//   Slippage  : 0.5 tick per contract per side ($6.25 on ES, $2.50 NQ). Trade size: fixed 1 contract.
+	//   Round trip: ES $4.50 + $12.50 = $17.00 (catalogue §2.1: IBKR round trip + 1 tick = $16.98). Before 2026-10-23 this
+	//               read 1 tick per side ($29.50 round trip): Gate 0 canary runs made with that setting were over-costed.
 	//   The canary verdict is the Strategy Performance Report NET profit factor over 2016–2024 (or your dev window).
 	//
 	// WHERE THE RESULTS SHOW UP AND HOW TO READ THEM
