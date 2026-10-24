@@ -1748,22 +1748,30 @@ namespace PowerLanguage.Function
 			return slot;
 		}
 
+		/// <summary>Index of the rail matching (kind, z) in items[0..n): POC/VAH/VAL by kind; sigma by |dz| &lt;= 1e-6; HVN/LVN the
+		/// same-kind rail nearest in z (so nodes that swap order between snapshots still match by z, not position). -1 if none.</summary>
+		public static int Match(DvpRail[] it, int n, ELevelKind kind, double z)
+		{
+			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
+			bool node = kind == ELevelKind.DvpHvn || kind == ELevelKind.DvpLvn;
+			int best = -1; double bd = double.MaxValue;
+			for (int i = 0; i < n; i++)
+			{
+				if (it[i].kind != kind) continue;
+				if (unique) return i;
+				double dz = Math.Abs(it[i].z - z);
+				if (node) { if (dz < bd) { bd = dz; best = i; } }
+				else if (dz <= 1e-6) return i;
+			}
+			return best;
+		}
+
 		/// <summary>Own rail price of kind/z in a slot, or NaN.</summary>
 		public double PriceIn(int slot, ELevelKind kind, double z)
 		{
 			if (slot < 0 || !m_valid[slot]) return double.NaN;
-			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
-			bool node = kind == ELevelKind.DvpHvn || kind == ELevelKind.DvpLvn;
-			DvpRail[] it = m_items[slot]; int best = -1; double bd = double.MaxValue;
-			for (int i = 0; i < m_count[slot]; i++)
-			{
-				if (it[i].kind != kind) continue;
-				double dz = Math.Abs(it[i].z - z);
-				if (unique) return it[i].price;
-				if (node) { if (dz < bd) { bd = dz; best = i; } }
-				else if (dz <= 1e-6) return it[i].price;
-			}
-			return best >= 0 ? it[best].price : double.NaN;
+			int i = Match(m_items[slot], m_count[slot], kind, z);
+			return i >= 0 ? m_items[slot][i].price : double.NaN;
 		}
 
 		/// <summary>Fills C/P/A (k = 0 newest closed bar ring[0]) for one rail; Len = bars available (&lt;= 8). No allocation.</summary>
@@ -1803,7 +1811,7 @@ namespace PowerLanguage.Function
 	/// DV-11.2 DVP RAIL journal (journal-side, only when journalRails and a journal sink exist): on every closed bar, each manifold
 	/// and sigma rail is tested both ways for a trigger and for acceptance under the PS-25 reading (countTrigger = true,
 	/// deltaAtr = 0, N = 2/3/5). Each interaction is tracked for HOLD_BARS = 40 bars (MFE40/MAE40 in ATR from the event close) and
-	/// written when the clock completes (or at Finish, complete(0)). verdict41 [GAP stand-in, pre-registered]: on the 41-bar clock
+	/// written when the clock completes (or at Finish, complete(0)). verdict41 v0 (journal field verdict41v0) [GAP stand-in, pre-registered]: on the 41-bar clock
 	/// (event bar + 40), "accepted" if Accepted(N = 2, countTrigger = true, deltaAtr = 0) completes before any BackInside, "failed" if
 	/// BackInside comes first, else "held". Events of the current bar are exposed for the host's logSignal.
 	/// </summary>
@@ -1831,7 +1839,7 @@ namespace PowerLanguage.Function
 				.Append(") railKind(").Append(e.kind.ToString()).Append(") z(").Append(F(e.z)).Append(") price(").Append(F(e.price)).Append(") families(").Append(I(e.families))
 				.Append(") nRanges(").Append(I(e.nRanges)).Append(") score(").Append(I(e.families)).Append(") score077(").Append(F(e.score077)).Append(") distAtr(").Append(F(e.distAtr))
 				.Append(") closedThrough(").Append(e.closedThrough ? '1' : '0').Append(") heldBars(").Append(I(e.heldBars)).Append(") accepted(N2=").Append(e.acc2 ? '1' : '0')
-				.Append(",N3=").Append(e.acc3 ? '1' : '0').Append(",N5=").Append(e.acc5 ? '1' : '0').Append(") verdict41(").Append(verdict).Append(") isRollWindow(").Append(e.isRollWindow ? '1' : '0')
+				.Append(",N3=").Append(e.acc3 ? '1' : '0').Append(",N5=").Append(e.acc5 ? '1' : '0').Append(") verdict41v0(").Append(verdict).Append(") isRollWindow(").Append(e.isRollWindow ? '1' : '0')
 				.Append(") halfDay(").Append(e.halfDay ? '1' : '0').Append(") mfe40(").Append(F(e.atr > 0 && e.elapsed > 0 ? e.mfe / e.atr : double.NaN))
 				.Append(") mae40(").Append(F(e.atr > 0 && e.elapsed > 0 ? e.mae / e.atr : double.NaN)).Append(") bars(").Append(I(e.elapsed)).Append(") complete(").Append(complete ? '1' : '0').Append(')');
 			return sb.ToString();
