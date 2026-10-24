@@ -101,6 +101,7 @@ namespace PowerLanguage.Function
 			if (fibLookMult < 1) e.Add("fibLookMult < 1");
 			if (!(fibMerge >= 0) || double.IsInfinity(fibMerge)) e.Add("fibMerge must be >= 0 ATR");
 			if (!(fibNear > 0) || double.IsInfinity(fibNear)) e.Add("fibNear must be > 0 ATR");
+			if (fibAnchor != EDvpFibAnchor.MostRecentPivot) e.Add("fibAnchor " + fibAnchor + " not supported (MostRecentPivot only, spec rev 5 §2)");
 			if (!(confTol > 0) || double.IsInfinity(confTol)) e.Add("confTol must be > 0 ATR");
 			if (refitEvery < 1) e.Add("refitEvery < 1");
 			return e.Count == 0 ? null : e;

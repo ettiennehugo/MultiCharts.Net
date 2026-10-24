@@ -468,9 +468,9 @@ namespace PowerLanguage.Strategy
 			return rails != null ? rails.Z(price) : double.NaN;
 		}
 
-		/// <summary>M-DVP start (DV-0.1): after startVpHelpers, which clears the ring requests. Disabled: returns before any
-		/// allocation (no ring, no engine). The engine (and every DVP buffer) is constructed here and nowhere else.</summary>
-		/// <summary>DV-5: fills each range's pivots from its PA engine (ring bar numbering) and builds the lattice of snapshot s.</summary>
+		/// <summary>DV-5: fills each range's pivots from its PA engine (ring bar numbering) and builds the lattice of snapshot s.
+		/// Query time ONLY (dvpRails): never build the lattice in stepDvp. stepDvp runs before the main PA step and stepExtraPa,
+		/// so a shared (hosted) PA engine has not yet stepped the closed bar there and its pivots would be one bar stale.</summary>
 		private DvpLattice dvpLattice(_DvpEngine e, int ds, _BarRing r, int ago, DvpSnapshot s)
 		{
 			int si = Array.IndexOf(DvpConfig.streams, ds);
@@ -504,6 +504,8 @@ namespace PowerLanguage.Strategy
 			return pa.label + (shared ? "(shared)" : "");
 		}
 
+		/// <summary>M-DVP start (DV-0.1): after startVpHelpers, which clears the ring requests. Disabled: returns before any
+		/// allocation (no ring, no engine). The engine (and every DVP buffer) is constructed here and nowhere else.</summary>
 		private void startDvp()
 		{
 			m_dvp = null; m_dvpQueryWarned = false; m_dvpPa = null;
