@@ -439,5 +439,11 @@ static class Program
 			"VP-6 V/T hand example");
 		Check(_ProfileStats.VtPrices(bars, 1.0, 2, double.NaN).prices.Count == 0, "VP-6 V/T needs ATR30");
 		Check(_ProfileStats.VtLevels(vt, D0, D0, D0, 1, "VT")[0].kind == ELevelKind.VtPrice, "VP-6 V/T LevelRefs");
+		// M-DVP PR-D0a (DV-10.3): DVP kinds appended after BootstrapPocZoneHi; existing ordinals unchanged.
+		Check((int)ELevelKind.Poc == 0 && (int)ELevelKind.FvgLower == 12 && (int)ELevelKind.BootstrapPocZoneHi == 19, "D0a existing ELevelKind ordinals unchanged");
+		Check((int)ELevelKind.DvpPoc == 20 && (int)ELevelKind.DvpVah == 21 && (int)ELevelKind.DvpVal == 22 && (int)ELevelKind.DvpHvn == 23
+			&& (int)ELevelKind.DvpLvn == 24 && (int)ELevelKind.DvpSigma == 25 && (int)ELevelKind.DvpFib == 26 && (int)ELevelKind.DvpConf == 27
+			&& Enum.GetValues(typeof(ELevelKind)).Length == 28, "D0a DVP kinds appended in order 20..27");
+		Check(LevelRef.Line(ELevelKind.DvpVah, 100, D0, D0, D0, 1, "DVP1:x").StudyType == "DvpVah" && LevelRef.Line(ELevelKind.DvpConf, 100, D0, D0, D0, 1, null).StudyType == "DvpConf", "D0a DVP StudyType strings for A2-33");
 	}
 }
