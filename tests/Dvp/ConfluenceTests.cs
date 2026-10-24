@@ -270,7 +270,7 @@ static partial class Program
 		string body = h.Substring(b, h.IndexOf("\n\t\t}\n", b, StringComparison.Ordinal) - b);
 		Check(body.Contains("if (!DvpConfig.journalRails || m_dvp.journal == null) return;") && body.Contains("logSignal(") && body.Contains(", false);"),
 			"DV-11.2 dvpRailStep only with journalRails + Journal; logSignal taken:false");
-		Check(Count(h, "dvpLattice(") == 2 && Count(h, "dvpConfOf(") == 5, "N2 the lattice is built only through dvpConfOf");
+		Check(Count(h, "dvpLattice(") == 2 && Count(h, "dvpConfOf(") == 6, "N2 the lattice is built only through dvpConfOf");
 	}
 
 	static void NodeSwap()

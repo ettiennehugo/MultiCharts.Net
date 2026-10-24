@@ -398,7 +398,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>M-DVP (spec DV-0.1): detrended volume-profile engine configuration. enabled = false (engine not created, no ring,
 		/// one null check per CalcBar). A derived strategy sets DvpConfig.enabled = true (plus any per-field override) in its Create()
-		/// or ctor. Never an [Input] (D7). PR-D3 hosts Data1 only; HTF streams arrive in PR-D6.</summary>
+		/// or ctor. Never an [Input] (D7). PR-D6 hosts Data2/3 HTF streams (same root as Data1, DV-9).</summary>
 		protected DvpConfig DvpConfig { get; } = new DvpConfig();
 		private _DvpEngine m_dvp;
 		private bool m_dvpQueryWarned;
@@ -422,8 +422,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>DVP window end for a query on stream ds: 1 when the ring's newest bar is the current closed bar (the as-of t-1 fit for bar t), else 0.</summary>
 		private int dvpEndAgo(int ds, _BarRing ring)
 		{
-			IInstrument b = BarsOfData(ds);
-			return ring != null && ring.Count > 0 && b.Status == EBarState.Close && ring[0].bar == b.FullSymbolData.Current ? 1 : 0;
+			IInstrument b = BarsOfData(ds);   // DV-9.2: ring[0] is the last CLOSED bar of ds; a forming HTF bar is never read
+			return ring == null ? 0 : DvpHtf.EndAgo(b.Status == EBarState.Close, ring.Count, ring.Count > 0 ? ring[0].bar : -1, b.FullSymbolData.Current);
 		}
 
 		/// <summary>DV-10 Snapshot(ds): the as-of t-1 fit for bar t, or null (engine off, warm-up, or a window that crosses a roll).</summary>
@@ -555,6 +555,34 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>DV-9.3 / DV-10 Tradeable(ds): false when the engine is off or ds is not a DVP stream; Data2/3 false (one Warning) until
+		/// DvpConst.P2_PASSED. MT-07 trades the 60m stream only; 240m is diagnostic (DV-7.5) by consumer rule.</summary>
+		protected bool dvpTradeable(int ds) { _DvpEngine e = Dvp; return e != null && e.Tradeable(ds); }
+
+		/// <summary>DV-9.4 HtfAccepted(ds, R, dir, N >= 2): DV-8.3 Accepted on stream ds's CLOSED bars as seen from the current Data1 bar
+		/// (the newest closed HTF bar first; DV-9.2). rl is a LevelRef from the current dvpRails(ds) call. countTrigger and deltaAtr are
+		/// passed by the consumer: DV-8.3 "the engine has no default convention".</summary>
+		protected bool dvpHtfAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)
+		{
+			if (ds < 2) throw new ArgumentOutOfRangeException("ds", "DV-9.4: HtfAccepted needs an HTF stream (ds >= 2)");
+			if (N < 2 || N > DvpAccept.MaxN) throw new ArgumentOutOfRangeException("N", "DV-9.4: N must be 2.." + DvpAccept.MaxN);
+			return dvpAccepted(ds, rl, dir, N, countTrigger, deltaAtr);
+		}
+
+		/// <summary>DV-9.4 HtfNextRailDistAtr(ds, dir): distance from Data1 C(t-1) to the nearest HTF rail (model rails + lattice, DV-4.9)
+		/// strictly beyond it in dir, in the HTF snapshot's ATR(t-1). NaN when off, no HTF fit, or no rail that way.</summary>
+		protected double dvpHtfNextRailDistAtr(int ds, int dir)
+		{
+			_DvpEngine e = Dvp; if (e == null || ds < 2 || Bars.FullSymbolData.Current < 2) return double.NaN;
+			_BarRing r = Ring(ds); if (r == null || r.Count == 0) return double.NaN;
+			int ago = dvpEndAgo(ds, r);
+			DvpSnapshot s = e.Snapshot(ds, r, ago);
+			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
+			if (rails == null) return double.NaN;
+			DvpLattice lat; dvpConfOf(e, ds, r, ago, s, rails, out lat);   // lattice only through the confluence builder (N2)
+			return DvpHtf.NextRailDistAtr(rails, lat, Bars.Close[1], dir, s.atr);   // C(t-1) on Data1: Close[1] closed or intrabar
+		}
+
 		/// <summary>DV-10 RailPrice(ds, kind, z): P_t(z); NaN if the rail is absent or there is no fit.</summary>
 		protected double dvpRailPrice(int ds, ELevelKind kind, double z)
 		{
@@ -619,8 +647,12 @@ namespace PowerLanguage.Strategy
 			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); m_dvpConf = new List<LevelRef>(); m_dvpConfPool = new List<LevelRef>(); }
 			List<string> errs = DvpConfig.Validate();
 			if (errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
-			foreach (int ds in DvpConfig.streams)
-				if (ds != 1) throw new ArgumentException("DvpConfig.streams: Data" + ds + " is not hosted yet (PR-D3 is Data1 only; HTF streams arrive in PR-D6)");
+			foreach (int ds in DvpConfig.streams)   // PR-D6 (DV-9.1, DV-7.0): Data2/3 HTF streams, same root as Data1 only
+			{
+				requireDataStream("DvpConfig.streams", ds);
+				string rerr = DvpHtf.RootError(ds, Bars.Info.Name, _MtfMath.SymbolRoot(Bars.Info.Name), BarsOfData(ds).Info.Name, _MtfMath.SymbolRoot(BarsOfData(ds).Info.Name));
+				if (rerr != null) throw new ArgumentException(rerr);
+			}
 			int need = DvpStream.RingNeed(DvpConfig);
 			foreach (int ds in DvpConfig.streams) requireRing(ds, need, "DVP");
 			string paLabels = null;

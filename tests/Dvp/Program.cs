@@ -588,6 +588,7 @@ static partial class Program
 		D3Tests();
 		D4Tests();
 		D5Tests();
+		D6Tests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
