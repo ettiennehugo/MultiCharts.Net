@@ -101,6 +101,7 @@ namespace PowerLanguage.Function
 			if (fibLookMult < 1) e.Add("fibLookMult < 1");
 			if (!(fibMerge >= 0) || double.IsInfinity(fibMerge)) e.Add("fibMerge must be >= 0 ATR");
 			if (!(fibNear > 0) || double.IsInfinity(fibNear)) e.Add("fibNear must be > 0 ATR");
+			if (fibAnchor != EDvpFibAnchor.MostRecentPivot) e.Add("fibAnchor " + fibAnchor + " not supported (MostRecentPivot only, spec rev 5 §2)");
 			if (!(confTol > 0) || double.IsInfinity(confTol)) e.Add("confTol must be > 0 ATR");
 			if (refitEvery < 1) e.Add("refitEvery < 1");
 			return e.Count == 0 ? null : e;
@@ -844,7 +845,7 @@ namespace PowerLanguage.Function
 		readonly int m_n, m_r, m_K, m_H;
 		readonly double[] m_y, m_h, m_l, m_v, m_up, m_dn, m_atrHist, m_fwdY;
 		readonly Gate0Atr m_atr = new Gate0Atr(DvpConst.AtrLen);
-		readonly Slot m_s0, m_s1;
+		readonly Slot m_s0, m_s1, m_sh;   // m_sh: rail-history fills (DV-8.1), so they never evict the query cache
 		readonly DvpFit m_prevFit;
 		readonly DvpCoef[] m_fwd;
 		int m_fwdCount;
@@ -875,12 +876,16 @@ namespace PowerLanguage.Function
 		{
 			Ds = ds; Config = cfg; Root = root ?? ""; m_tick = tick; RollDetect = rollDetect; RthKnown = rthKnown;
 			m_n = cfg.winLen; m_r = Math.Max(1, cfg.refitEvery); m_H = Math.Max(1, cfg.projBars);
-			m_K = m_r + 4;
+			m_K = Math.Max(m_r + 4, DvpRailHistory.Depth + 2);   // D5: ATR(t-1) for every rail-history snapshot (endAgo <= 8)
 			m_y = new double[m_n]; m_h = new double[m_n]; m_l = new double[m_n]; m_v = new double[m_n];
 			m_up = cfg.splitFlow ? new double[m_n] : null; m_dn = cfg.splitFlow ? new double[m_n] : null;
 			m_atrHist = new double[m_K];
 			m_fwdY = new double[1];
-			m_s0 = new Slot(cfg); m_s1 = new Slot(cfg);
+			m_s0 = new Slot(cfg); m_s1 = new Slot(cfg); m_sh = new Slot(cfg);
+			int maxRails = m_s0.rails.Items.Length, maxLat = cfg.useFib ? cfg.fibRanges * DvpLattice.NFib : 0;
+			History = new DvpRailHistory(this, maxRails);
+			Confluence = new DvpConfluence(maxRails + maxLat);
+			RailJournal = new DvpRailJournal(maxRails);
 			m_prevFit = new DvpFit(m_n);
 			m_fwd = new DvpCoef[m_H / m_r + 2];
 			for (int i = 0; i < m_fwd.Length; i++) m_fwd[i] = new DvpCoef();
@@ -974,6 +979,25 @@ namespace PowerLanguage.Function
 			if (m_s1.key == eb.bar) return m_s1.snap;
 			Slot s = m_s0.key <= m_s1.key ? m_s0 : m_s1;   // replace the older end bar
 			compute(s, ring, endAgo);
+			return s.snap;
+		}
+
+		/// <summary>PR-D5 (DV-8.1/6): rail history of the last 8 snapshots, the confluence scorer and the DVP RAIL tracker (all preallocated).</summary>
+		public readonly DvpRailHistory History; public readonly DvpConfluence Confluence; public readonly DvpRailJournal RailJournal;
+
+		/// <summary>
+		/// DV-8.1: the snapshot ending endAgo for the rail history. Served from the query cache when it holds that end bar, else
+		/// computed into a private slot, so a history fill never evicts (overwrites) a snapshot the host holds. Same pure function
+		/// of the window as Snapshot (DV-0.7), so the history is path-independent.
+		/// </summary>
+		public DvpSnapshot HistSnapshot(_BarRing ring, int endAgo, out DvpRails rails)
+		{
+			rails = null;
+			if (ring == null || endAgo < 0 || ring.Count <= endAgo || ring[0].bar != m_lastBar) return null;
+			int key = ring[endAgo].bar;
+			Slot s = m_s0.key == key ? m_s0 : m_s1.key == key ? m_s1 : m_sh;
+			if (s.key != key) compute(s, ring, endAgo);
+			if (s.snap.valid) rails = s.rails;
 			return s.snap;
 		}
 
@@ -1278,12 +1302,32 @@ namespace PowerLanguage.Function
 			return s.RailsFor(s.Snapshot(ring, endAgo));
 		}
 
+		/// <summary>DV-8.1: stream ds's rail history loaded for one rail (kind, z), newest closed bar first; null if no such stream.</summary>
+		public DvpRailHistory HistoryOf(int ds, _BarRing ring, ELevelKind kind, double z)
+		{
+			DvpStream s = Stream(ds);
+			if (s == null) return null;
+			s.History.Load(ring, kind, z);
+			return s.History;
+		}
+
+		/// <summary>DV-6: stream ds's confluence scorer loaded with rails + lattice and clustered at ATR(t-1), C(t-1), confTol.</summary>
+		public DvpConfluence ConfluenceOf(int ds, DvpSnapshot snap, DvpRails rails, DvpLattice lat, double cPrev)
+		{
+			DvpStream s = Stream(ds);
+			if (s == null) return null;
+			s.Confluence.Load(rails, lat);
+			s.Confluence.Cluster(snap != null ? snap.atr : double.NaN, cPrev, Config.confTol);
+			return s.Confluence;
+		}
+
 		/// <summary>DV-11.3: the DVP RUN lines, once at end of run.</summary>
 		public void Finish()
 		{
 			if (m_finished) return;
 			m_finished = true;
 			if (journal == null) return;
+			for (int i = 0; i < m_streams.Length; i++) m_streams[i].RailJournal.Finish(m_ds[i], journal, RunId);   // DV-11.2 unfinished trackers
 			for (int i = 0; i < m_streams.Length; i++) journal(m_streams[i].RunLine(RunId));
 		}
 	}
@@ -1428,6 +1472,449 @@ namespace PowerLanguage.Function
 				r.kind = ELevelKind.DvpFib; r.price = r.lo = r.hi = Price[i]; r.createdTime = tPrev; r.sourceT0 = t0; r.sourceT1 = tPrev; r.dataStream = ds;
 				r.tag = Tag(ds, tPrev, deg, F[i], Range[i]); r.quality = double.NaN; r.crossesRoll = false; r.isRollWindow = isRollWindow;
 				into.Add(r);
+			}
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// PR-D5 (DV-6, DV-8, DV-11.2): confluence scorer, acceptance primitives, rail history and the DVP RAIL tracker.
+	// MC-free and allocation-free on the query path: every buffer is sized in the DvpStream constructor.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/// <summary>
+	/// DV-6 weightless confluence. Candidates (DV-6.1) are the snapshot's manifold rails (POC/VAH/VAL/HVN/LVN, family 0), sigma
+	/// rails (family 1) and lattice levels (family 2, with their range id) at their bar-t prices; the cone is never a candidate.
+	/// DV-6.2 greedy clustering with the deterministic weightless seed order: max F (distinct families among unclaimed candidates
+	/// within confTol*ATR), then max K (their count), then min |P - C(t-1)|, then lowest price (then candidate order, which cannot
+	/// matter once prices tie). The cluster is every unclaimed candidate within confTol*ATR of the seed (inclusive, DV-T18e) and its
+	/// price is the seed's. DV-6.3 families = distinct families (0..3), nRanges = distinct lattice range ids; a cluster qualifies at
+	/// families &gt;= DvpConst.MinFamilies (3). KD-09's "&gt;= 2 ranges" is not applied here. DV-6.5 score = families; score077 is
+	/// report-only (journal) and never gates, ranks or selects anything.
+	/// </summary>
+	public sealed class DvpConfluence
+	{
+		public const int FamManifold = 0, FamSigma = 1, FamLattice = 2;
+		public readonly double[] CandPrice; public readonly int[] CandFam, CandRange, CandCluster; public readonly ELevelKind[] CandKind;
+		public int CandCount;
+		/// <summary>Candidates [0, RailCount) are rails.Items in order; lattice level i is candidate RailCount + i (the dvpRails publish order).</summary>
+		public int RailCount { get; private set; }
+		public readonly double[] ClusterPrice, ClusterScore077; public readonly int[] ClusterFamilies, ClusterRanges, ClusterSize, ClusterSeed;
+		public int ClusterCount;
+		public double Atr { get; private set; }
+		public double Tol { get; private set; }
+		readonly bool[] m_claimed;
+
+		public DvpConfluence(int capacity)
+		{
+			capacity = Math.Max(1, capacity);
+			CandPrice = new double[capacity]; CandFam = new int[capacity]; CandRange = new int[capacity]; CandCluster = new int[capacity]; CandKind = new ELevelKind[capacity];
+			ClusterPrice = new double[capacity]; ClusterScore077 = new double[capacity]; ClusterFamilies = new int[capacity]; ClusterRanges = new int[capacity];
+			ClusterSize = new int[capacity]; ClusterSeed = new int[capacity]; m_claimed = new bool[capacity];
+		}
+
+		/// <summary>DV-6.1 family of a level kind: 0 manifold, 1 sigma, 2 lattice, -1 not a candidate (DvpConf, cone, non-DVP kinds).</summary>
+		public static int Family(ELevelKind k)
+		{
+			if (k == ELevelKind.DvpPoc || k == ELevelKind.DvpVah || k == ELevelKind.DvpVal || k == ELevelKind.DvpHvn || k == ELevelKind.DvpLvn) return FamManifold;
+			if (k == ELevelKind.DvpSigma) return FamSigma;
+			if (k == ELevelKind.DvpFib) return FamLattice;
+			return -1;
+		}
+
+		public void Clear() { CandCount = 0; RailCount = 0; ClusterCount = 0; }
+
+		/// <summary>Appends one candidate (range = lattice range id, ignored for other families). False when full or not a candidate kind.</summary>
+		public bool Add(ELevelKind kind, double price, int range)
+		{
+			int fam = Family(kind);
+			if (fam < 0 || CandCount >= CandPrice.Length || double.IsNaN(price)) return false;
+			CandKind[CandCount] = kind; CandPrice[CandCount] = price; CandFam[CandCount] = fam; CandRange[CandCount] = fam == FamLattice ? range : -1;
+			CandCluster[CandCount] = -1; CandCount++;
+			return true;
+		}
+
+		/// <summary>DV-6.1: loads the snapshot's rails then its lattice levels (lat may be null: useFib off or no ranges).</summary>
+		public void Load(DvpRails rails, DvpLattice lat)
+		{
+			Clear();
+			if (rails != null) for (int i = 0; i < rails.Count; i++) Add(rails.Items[i].kind, rails.Items[i].price, -1);
+			RailCount = CandCount;
+			if (lat != null) for (int i = 0; i < lat.Count; i++) Add(ELevelKind.DvpFib, lat.Price[i], lat.Range[i]);
+		}
+
+		static bool Within(double a, double b, double tol) { return Math.Abs(a - b) <= tol * (1 + 1e-12); }   // inclusive (DV-T18e), rounding-safe
+		static int Bits(int m) { int c = 0; while (m != 0) { c += m & 1; m >>= 1; } return c; }
+		static int RangeBit(int r) { return r >= 0 && r < 31 ? 1 << r : 0; }
+
+		public void Cluster(double atr, double cPrev, double confTol) { Cluster(atr, cPrev, confTol, DvpConst.ReportWeightVa, DvpConst.ReportWeightPoc); }
+
+		/// <summary>DV-6.2/6.3/6.5. wVa/wPoc feed score077 only (DV-T18c: they never change families or the cluster set). No allocation.</summary>
+		public void Cluster(double atr, double cPrev, double confTol, double wVa, double wPoc)
+		{
+			ClusterCount = 0; Atr = atr; Tol = confTol * atr;
+			for (int i = 0; i < CandCount; i++) { m_claimed[i] = false; CandCluster[i] = -1; }
+			if (!(atr > 0) || !(confTol > 0) || double.IsInfinity(Tol)) return;
+			double tol = Tol;
+			while (true)
+			{
+				int seed = -1, bF = -1, bK = -1; double bD = 0, bP = 0;
+				for (int c = 0; c < CandCount; c++)
+				{
+					if (m_claimed[c]) continue;
+					int mask = 0, k = 0; double pc = CandPrice[c];
+					for (int j = 0; j < CandCount; j++)
+						if (!m_claimed[j] && Within(CandPrice[j], pc, tol)) { mask |= 1 << CandFam[j]; k++; }
+					int f = Bits(mask); double d = Math.Abs(pc - cPrev);
+					bool better = seed < 0 || f > bF || (f == bF && (k > bK || (k == bK && (d < bD || (d == bD && pc < bP)))));
+					if (better) { seed = c; bF = f; bK = k; bD = d; bP = pc; }
+				}
+				if (seed < 0) break;
+				int cl = ClusterCount++, fm = 0, rm = 0, n = 0; double ps = CandPrice[seed], wMan = double.NaN;
+				for (int j = 0; j < CandCount; j++)
+				{
+					if (m_claimed[j] || !Within(CandPrice[j], ps, tol)) continue;
+					m_claimed[j] = true; CandCluster[j] = cl; n++;
+					fm |= 1 << CandFam[j];
+					if (CandFam[j] == FamLattice) rm |= RangeBit(CandRange[j]);
+					else if (CandFam[j] == FamManifold)
+					{
+						ELevelKind k = CandKind[j];
+						double w = k == ELevelKind.DvpPoc ? wPoc : k == ELevelKind.DvpVah || k == ELevelKind.DvpVal ? wVa : 1.0;   // every other kind 1.00
+						if (double.IsNaN(wMan) || w > wMan) wMan = w;
+					}
+				}
+				ClusterPrice[cl] = ps; ClusterSeed[cl] = seed; ClusterSize[cl] = n; ClusterFamilies[cl] = Bits(fm); ClusterRanges[cl] = Bits(rm);
+				ClusterScore077[cl] = (double.IsNaN(wMan) ? 0 : wMan) + ((fm & (1 << FamSigma)) != 0 ? 1 : 0) + (Bits(rm) >= 1 ? 1 : 0);
+			}
+		}
+
+		public bool Qualifies(int cl) { return cl >= 0 && cl < ClusterCount && ClusterFamilies[cl] >= DvpConst.MinFamilies; }
+		public int QualifyingCount { get { int q = 0; for (int i = 0; i < ClusterCount; i++) if (Qualifies(i)) q++; return q; } }
+
+		/// <summary>DV-6.5: families of the cluster holding candidate i (the rail's score; LevelRef.quality), or 0 when unclustered.</summary>
+		public int CandFamilies(int i) { int cl = i >= 0 && i < CandCount ? CandCluster[i] : -1; return cl >= 0 ? ClusterFamilies[cl] : 0; }
+		public int CandRanges(int i) { int cl = i >= 0 && i < CandCount ? CandCluster[i] : -1; return cl >= 0 ? ClusterRanges[cl] : 0; }
+		public double CandScore077(int i) { int cl = i >= 0 && i < CandCount ? CandCluster[i] : -1; return cl >= 0 ? ClusterScore077[cl] : double.NaN; }
+
+		/// <summary>DV-6.4 point query: distinct families and lattice ranges among the loaded candidates within tolAtr*Atr of price
+		/// (inclusive), without clustering. 0/0 when ATR is not usable.</summary>
+		public void FamiliesAt(double price, double tolAtr, out int families, out int nRanges)
+		{
+			families = 0; nRanges = 0;
+			double tol = tolAtr * Atr;
+			if (!(Atr > 0) || !(tolAtr >= 0) || double.IsNaN(price)) return;
+			int fm = 0, rm = 0;
+			for (int j = 0; j < CandCount; j++)
+			{
+				if (!Within(CandPrice[j], price, tol)) continue;
+				fm |= 1 << CandFam[j];
+				if (CandFam[j] == FamLattice) rm |= RangeBit(CandRange[j]);
+			}
+			families = Bits(fm); nRanges = Bits(rm);
+		}
+
+		/// <summary>DV-10.2-style DvpConf tag: DVP{ds}:{t-1}:d{deg}:DvpConf{z:+0.00} (z of the cluster price).</summary>
+		public static string Tag(int ds, DateTime tPrev, int deg, double z) { return DvpRails.Tag(ds, tPrev, deg, ELevelKind.DvpConf, z); }
+
+		/// <summary>DV-6.3: qualifying clusters as DvpConf LevelRefs (quality = families) into a caller-owned list, pooled objects.
+		/// Query-side only (tag strings allocate).</summary>
+		public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, DvpRails rails, bool isRollWindow)
+		{
+			into.Clear();
+			for (int cl = 0; cl < ClusterCount; cl++)
+			{
+				if (!Qualifies(cl)) continue;
+				int k = into.Count; LevelRef r;
+				if (k < pool.Count) r = pool[k]; else { r = new LevelRef(); pool.Add(r); }
+				double p = ClusterPrice[cl];
+				r.kind = ELevelKind.DvpConf; r.price = r.lo = r.hi = p; r.createdTime = tPrev; r.sourceT0 = t0; r.sourceT1 = tPrev; r.dataStream = ds;
+				r.tag = Tag(ds, tPrev, rails != null ? rails.Deg : -1, rails != null ? rails.Z(p) : double.NaN); r.quality = ClusterFamilies[cl];
+				r.crossesRoll = false; r.isRollWindow = isRollWindow;
+				into.Add(r);
+			}
+		}
+	}
+
+	/// <summary>
+	/// DV-8.2/8.3 acceptance primitives over one rail's history, newest first: k = 0 is the newest closed bar L, c[k] its close,
+	/// p[k] its OWN rail price (the snapshot that was live during bar k), a[k] the ATR known at k-1. A NaN p (no fit, skipped
+	/// window, rail absent) breaks every run. Pure and allocation-free; the engine has no counting default (each consumer passes
+	/// countTrigger and deltaAtr).
+	/// </summary>
+	public static class DvpAccept
+	{
+		public const double Delta = 0.10;   // DV-1.4 / DV-8.2 trigger buffer, ATR
+		public const int MaxN = 6;          // DV-8.1: trigger + 6 further closes + the pre-trigger bar = 8 snapshots
+
+		static bool Ok(double[] c, double[] p, double[] a, int len, int k) { return k >= 0 && k < len && !double.IsNaN(c[k]) && !double.IsNaN(p[k]) && a[k] > 0; }
+
+		/// <summary>C_k beyond its own rail by more than deltaAtr*ATR (strict; deltaAtr = 0 is closedThrough).</summary>
+		public static bool Beyond(double[] c, double[] p, double[] a, int len, int k, int dir, double deltaAtr)
+		{
+			return Ok(c, p, a, len, k) && dir * (c[k] - p[k]) > deltaAtr * a[k];
+		}
+
+		/// <summary>DV-8.2: trigger at k: C_k beyond P_k + Delta*ATR and C_{k+1} not beyond P_{k+1} (no delta on the earlier bar).</summary>
+		public static bool Triggered(double[] c, double[] p, double[] a, int len, int k, int dir)
+		{
+			if (!Beyond(c, p, a, len, k, dir, Delta) || k + 1 >= len || double.IsNaN(c[k + 1]) || double.IsNaN(p[k + 1])) return false;
+			return dir * (c[k + 1] - p[k + 1]) <= 0;
+		}
+
+		/// <summary>DV-8.3: consecutive closed bars ending at L, each beyond its own rail + deltaAtr*ATR (saturates at len).</summary>
+		public static int RunBeyond(double[] c, double[] p, double[] a, int len, int dir, double deltaAtr)
+		{
+			int r = 0;
+			while (r < len && Beyond(c, p, a, len, r, dir, deltaAtr)) r++;
+			return r;
+		}
+
+		/// <summary>DV-8.3: since the most recent trigger in the history (k &gt;= 1), some later close came back inside its own rail by
+		/// more than Delta*ATR. False when there is no trigger in the history.</summary>
+		public static bool BackInside(double[] c, double[] p, double[] a, int len, int dir)
+		{
+			for (int k = 1; k < len - 1; k++)
+			{
+				if (!Triggered(c, p, a, len, k, dir)) continue;
+				for (int j = 0; j < k; j++) if (Ok(c, p, a, len, j) && dir * (c[j] - p[j]) < -Delta * a[j]) return true;
+				return false;
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// DV-8.3 Accepted, true on the bar the run completes. countTrigger = true: the trigger plus N further closes (N + 1 bars,
+		/// trigger first); false: N closes in total with the trigger first. Every bar of the run closes beyond its own rail +
+		/// deltaAtr*ATR. Throws for N outside 1..6 (DV-8.1 assert).
+		/// </summary>
+		public static bool Accepted(double[] c, double[] p, double[] a, int len, int dir, int N, bool countTrigger, double deltaAtr)
+		{
+			if (N < 1 || N > MaxN) throw new ArgumentOutOfRangeException("N", "DV-8.1: N must be 1.." + MaxN);
+			int m = countTrigger ? N + 1 : N;
+			if (!Triggered(c, p, a, len, m - 1, dir)) return false;
+			for (int k = 0; k < m; k++) if (!Beyond(c, p, a, len, k, dir, deltaAtr)) return false;
+			return true;
+		}
+	}
+
+	/// <summary>
+	/// DV-8.1 rail history: a ring of the last 8 snapshots' rails per stream, keyed by window end bar. Bar ring[k]'s own rail comes
+	/// from the snapshot ending ring[k+1] (k = 0..7, endAgo 1..8; RingNeed covers endAgo 8). Lazy: an entry is copied only when
+	/// queried, normally one new snapshot per bar. Load fills C/P/A (newest first) for one rail, matched per snapshot by kind:
+	/// POC/VAH/VAL unique; sigma by z (|dz| &lt;= 1e-6); HVN/LVN the same-kind rail nearest in z. Lattice (DvpFib) and DvpConf
+	/// levels have no history here (acceptance is on manifold and sigma rails, DV-10.4).
+	/// </summary>
+	public sealed class DvpRailHistory
+	{
+		public const int Depth = 8;
+		readonly DvpStream m_s;
+		readonly int[] m_key, m_count; readonly bool[] m_valid; readonly double[] m_atr, m_yhat, m_sigma; readonly DvpRail[][] m_items;
+		public readonly double[] C = new double[Depth], P = new double[Depth], A = new double[Depth];
+		public int Len;
+		public long Copied { get; private set; }   // entries copied (laziness counter)
+
+		public DvpRailHistory(DvpStream s, int maxRails)
+		{
+			m_s = s;
+			m_key = new int[Depth]; m_count = new int[Depth]; m_valid = new bool[Depth]; m_atr = new double[Depth]; m_yhat = new double[Depth]; m_sigma = new double[Depth];
+			m_items = new DvpRail[Depth][];
+			for (int i = 0; i < Depth; i++) { m_items[i] = new DvpRail[maxRails]; m_key[i] = int.MinValue; }
+		}
+
+		public void Reset() { for (int i = 0; i < Depth; i++) m_key[i] = int.MinValue; }
+
+		static int Mod(int a, int m) { int x = a % m; return x < 0 ? x + m : x; }
+
+		/// <summary>Slot of bar ring[k]'s own rails (snapshot ending ring[k+1]), or -1 when outside the ring.</summary>
+		public int Entry(_BarRing ring, int k)
+		{
+			int endAgo = k + 1;
+			if (ring == null || k < 0 || k >= Depth || ring.Count <= endAgo) return -1;
+			int key = ring[endAgo].bar, slot = Mod(key, Depth);
+			if (m_key[slot] == key) return slot;
+			DvpRails rails;
+			DvpSnapshot snap = m_s.HistSnapshot(ring, endAgo, out rails);
+			if (snap == null) return -1;
+			m_key[slot] = key; Copied++;
+			m_valid[slot] = snap.valid && rails != null; m_atr[slot] = snap.atr; m_count[slot] = 0;
+			m_yhat[slot] = m_sigma[slot] = double.NaN;
+			if (m_valid[slot])
+			{
+				m_yhat[slot] = rails.YhatT; m_sigma[slot] = rails.Sigma;
+				int n = Math.Min(rails.Count, m_items[slot].Length);
+				for (int i = 0; i < n; i++) m_items[slot][i] = rails.Items[i];
+				m_count[slot] = n;
+			}
+			return slot;
+		}
+
+		/// <summary>Index of the rail matching (kind, z) in items[0..n): POC/VAH/VAL by kind; sigma by |dz| &lt;= 1e-6; HVN/LVN the
+		/// same-kind rail nearest in z (so nodes that swap order between snapshots still match by z, not position). -1 if none.</summary>
+		public static int Match(DvpRail[] it, int n, ELevelKind kind, double z)
+		{
+			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
+			bool node = kind == ELevelKind.DvpHvn || kind == ELevelKind.DvpLvn;
+			int best = -1; double bd = double.MaxValue;
+			for (int i = 0; i < n; i++)
+			{
+				if (it[i].kind != kind) continue;
+				if (unique) return i;
+				double dz = Math.Abs(it[i].z - z);
+				if (node) { if (dz < bd) { bd = dz; best = i; } }
+				else if (dz <= 1e-6) return i;
+			}
+			return best;
+		}
+
+		/// <summary>Own rail price of kind/z in a slot, or NaN.</summary>
+		public double PriceIn(int slot, ELevelKind kind, double z)
+		{
+			if (slot < 0 || !m_valid[slot]) return double.NaN;
+			int i = Match(m_items[slot], m_count[slot], kind, z);
+			return i >= 0 ? m_items[slot][i].price : double.NaN;
+		}
+
+		/// <summary>Fills C/P/A (k = 0 newest closed bar ring[0]) for one rail; Len = bars available (&lt;= 8). No allocation.</summary>
+		public int Load(_BarRing ring, ELevelKind kind, double z)
+		{
+			Len = 0;
+			for (int k = 0; k < Depth; k++) { C[k] = P[k] = A[k] = double.NaN; }
+			if (ring == null || ring.Count == 0 || DvpConfluence.Family(kind) < 0 || kind == ELevelKind.DvpFib) return 0;
+			for (int k = Depth - 1; k >= 0; k--)   // oldest first, so the last copy is the newest (cache-friendly)
+			{
+				int slot = Entry(ring, k);
+				if (slot < 0) continue;
+				if (k + 1 > Len) Len = k + 1;
+				C[k] = ring[k].c; P[k] = PriceIn(slot, kind, z); A[k] = m_atr[slot];
+			}
+			return Len;
+		}
+
+		/// <summary>RG-10 primitive: z of bar ring[k]'s close against its own snapshot, (C_k - yhat_k(u)) / sigma_k; NaN without a fit.</summary>
+		public double ZClose(_BarRing ring, int k)
+		{
+			int slot = Entry(ring, k);
+			return slot >= 0 && m_valid[slot] && m_sigma[slot] > 0 ? (ring[k].c - m_yhat[slot]) / m_sigma[slot] : double.NaN;
+		}
+	}
+
+	/// <summary>One DVP RAIL interaction (DV-11.2), plus its 40-bar forward tracker state.</summary>
+	public struct DvpRailEvent
+	{
+		public ELevelKind kind; public double z, price, close, atr, distAtr, score077, sigmaAtr, mfe, mae;
+		public int dir, families, nRanges, heldBars, deg, elapsed;
+		public bool trigger, closedThrough, acc2, acc3, acc5, isRollWindow, halfDay, active, accepted41, back41;
+		public DateTime time, tPrev;
+	}
+
+	/// <summary>
+	/// DV-11.2 DVP RAIL journal (journal-side, only when journalRails and a journal sink exist): on every closed bar, each manifold
+	/// and sigma rail is tested both ways for a trigger and for acceptance under the PS-25 reading (countTrigger = true,
+	/// deltaAtr = 0, N = 2/3/5). Each interaction is tracked for HOLD_BARS = 40 bars (MFE40/MAE40 in ATR from the event close) and
+	/// written when the clock completes (or at Finish, complete(0)). verdict41 v0 (journal field verdict41v0) [GAP stand-in, pre-registered]: on the 41-bar clock
+	/// (event bar + 40), "accepted" if Accepted(N = 2, countTrigger = true, deltaAtr = 0) completes before any BackInside, "failed" if
+	/// BackInside comes first, else "held". Events of the current bar are exposed for the host's logSignal.
+	/// </summary>
+	public sealed class DvpRailJournal
+	{
+		public const int MaxTracked = 512;
+		readonly DvpRailEvent[] m_track = new DvpRailEvent[MaxTracked];
+		public readonly DvpRailEvent[] Events;
+		public int EventCount;
+		public long Written { get; private set; }
+		public long Dropped { get; private set; }   // tracker pool full: written at once with complete(0)
+		int m_lastBar = int.MinValue;
+
+		public DvpRailJournal(int maxRails) { Events = new DvpRailEvent[Math.Max(1, 2 * maxRails)]; }
+
+		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
+		static string I(long x) { return x.ToString(CultureInfo.InvariantCulture); }
+
+		public static string Line(DvpRailEvent e, int ds, string runId, bool complete)
+		{
+			var sb = new StringBuilder(384);
+			string verdict = !e.trigger ? "accepted" : e.accepted41 ? "accepted" : e.back41 ? "failed" : complete ? "held" : "NaN";
+			sb.Append("DVP RAIL runId(").Append(runId).Append(") stream(Data").Append(I(ds)).Append(") barTime(").Append(e.time.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
+				.Append(") tag(").Append(DvpRails.Tag(ds, e.tPrev, e.deg, e.kind, e.z)).Append(") event(").Append(e.trigger ? "trigger" : "accept").Append(") dir(").Append(e.dir > 0 ? "+1" : "-1")
+				.Append(") railKind(").Append(e.kind.ToString()).Append(") z(").Append(F(e.z)).Append(") price(").Append(F(e.price)).Append(") families(").Append(I(e.families))
+				.Append(") nRanges(").Append(I(e.nRanges)).Append(") score(").Append(I(e.families)).Append(") score077(").Append(F(e.score077)).Append(") distAtr(").Append(F(e.distAtr))
+				.Append(") closedThrough(").Append(e.closedThrough ? '1' : '0').Append(") heldBars(").Append(I(e.heldBars)).Append(") accepted(N2=").Append(e.acc2 ? '1' : '0')
+				.Append(",N3=").Append(e.acc3 ? '1' : '0').Append(",N5=").Append(e.acc5 ? '1' : '0').Append(") verdict41v0(").Append(verdict).Append(") isRollWindow(").Append(e.isRollWindow ? '1' : '0')
+				.Append(") halfDay(").Append(e.halfDay ? '1' : '0').Append(") mfe40(").Append(F(e.atr > 0 && e.elapsed > 0 ? e.mfe / e.atr : double.NaN))
+				.Append(") mae40(").Append(F(e.atr > 0 && e.elapsed > 0 ? e.mae / e.atr : double.NaN)).Append(") bars(").Append(I(e.elapsed)).Append(") complete(").Append(complete ? '1' : '0').Append(')');
+			return sb.ToString();
+		}
+
+		/// <summary>
+		/// One closed bar (ring[0] is new; rails = its own rails, conf loaded and clustered on the same snapshot). Advances the
+		/// trackers, then records this bar's interactions. Returns EventCount. journal may be null (events only).
+		/// </summary>
+		public int Step(DvpStream s, _BarRing ring, DvpSnapshot snap, DvpRails rails, DvpConfluence conf, bool isRollWindow, bool halfDay, Action<string> journal, string runId)
+		{
+			EventCount = 0;
+			if (ring == null || ring.Count == 0 || ring[0].bar == m_lastBar) return 0;
+			m_lastBar = ring[0].bar;
+			RingBar b = ring[0];
+			DvpRailHistory h = s.History;
+			for (int i = 0; i < MaxTracked; i++)
+			{
+				if (!m_track[i].active) continue;
+				m_track[i].elapsed++;
+				double fav = m_track[i].dir > 0 ? b.h - m_track[i].close : m_track[i].close - b.l;
+				double adv = m_track[i].dir > 0 ? b.l - m_track[i].close : m_track[i].close - b.h;
+				if (fav > m_track[i].mfe) m_track[i].mfe = fav;
+				if (adv < m_track[i].mae) m_track[i].mae = adv;
+				if (m_track[i].trigger && !m_track[i].accepted41 && !m_track[i].back41 && h.Load(ring, m_track[i].kind, m_track[i].z) > 0)
+				{
+					int dr = m_track[i].dir;   // back inside its own rail by more than Delta*ATR, at any bar of the clock
+					if (!double.IsNaN(h.P[0]) && h.A[0] > 0 && dr * (h.C[0] - h.P[0]) < -DvpAccept.Delta * h.A[0]) m_track[i].back41 = true;
+					else if (DvpAccept.Accepted(h.C, h.P, h.A, h.Len, m_track[i].dir, 2, true, 0)) m_track[i].accepted41 = true;
+				}
+				if (m_track[i].elapsed >= DvpConst.HoldBars)
+				{
+					if (journal != null) journal(Line(m_track[i], s.Ds, runId, true));
+					m_track[i].active = false; Written++;
+				}
+			}
+			if (snap == null || !snap.valid || rails == null) return 0;
+			for (int i = 0; i < rails.Count; i++)
+			{
+				DvpRail r = rails.Items[i];
+				if (h.Load(ring, r.kind, r.z) == 0) continue;
+				for (int dir = 1; dir >= -1; dir -= 2)
+				{
+					bool trig = DvpAccept.Triggered(h.C, h.P, h.A, h.Len, 0, dir);
+					bool a2 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 2, true, 0), a3 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 3, true, 0),
+						a5 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 5, true, 0);
+					if (!trig && !a2 && !a3 && !a5) continue;
+					DvpRailEvent e = new DvpRailEvent();
+					e.kind = r.kind; e.z = r.z; e.price = r.price; e.close = b.c; e.atr = snap.atr; e.dir = dir; e.trigger = trig;
+					e.distAtr = snap.atr > 0 ? (b.c - r.price) / snap.atr : double.NaN;
+					e.closedThrough = DvpAccept.Beyond(h.C, h.P, h.A, h.Len, 0, dir, 0);
+					e.heldBars = DvpAccept.RunBeyond(h.C, h.P, h.A, h.Len, dir, 0);
+					e.acc2 = a2; e.acc3 = a3; e.acc5 = a5; e.accepted41 = !trig;
+					e.families = conf != null ? conf.CandFamilies(i) : 0; e.nRanges = conf != null ? conf.CandRanges(i) : 0;
+					e.score077 = conf != null ? conf.CandScore077(i) : double.NaN;
+					e.sigmaAtr = snap.sigmaAtr; e.deg = rails.Deg; e.isRollWindow = isRollWindow; e.halfDay = halfDay;
+					e.time = b.time; e.tPrev = snap.tPrev; e.active = true;
+					if (EventCount < Events.Length) Events[EventCount++] = e;
+					int slot = -1;
+					for (int t = 0; t < MaxTracked; t++) if (!m_track[t].active) { slot = t; break; }
+					if (slot >= 0) m_track[slot] = e;
+					else { Dropped++; Written++; if (journal != null) journal(Line(e, s.Ds, runId, false)); }
+				}
+			}
+			return EventCount;
+		}
+
+		/// <summary>End of run: writes every unfinished tracker with complete(0).</summary>
+		public void Finish(int ds, Action<string> journal, string runId)
+		{
+			for (int i = 0; i < MaxTracked; i++)
+			{
+				if (!m_track[i].active) continue;
+				if (journal != null) journal(Line(m_track[i], ds, runId, false));
+				m_track[i].active = false; Written++;
 			}
 		}
 	}
