@@ -231,5 +231,32 @@ static partial class Program
 			"DV-5.1 owned instances stepped on closed bars with OnRoll on rollOn(ds); hosted twins left to stepExtraPa; DVP named in paConsumers; startExtraPa before startDvp");
 	}
 
-	static void D4Tests() { T17(); T17Pa(); T17Host(); }
+
+	// Analyst 2 (#37): an ExtraPriceAction entry with the DVP role/strength but a non-zero minBreakoutLayer (needs layers >= 2) is not
+	// shared: Canon() differs, so findSharedPa (dataStream + Canon) misses and DVP builds its own instance; startDvpPa never touches
+	// the ExtraPriceAction role set, so the equal role "DVP-S20" cannot raise the duplicate-role exception.
+	static void T17SeparateInstance()
+	{
+		var host = new PriceActionConfig { enabled = true, dataStream = 1, layers = 2, minBreakoutLayer = 1, strength = 20, pivotMode = EPivotMode.Fractal, role = "DVP-S20" };
+		var dvp = new PriceActionConfig { enabled = true, dataStream = 1, layers = 1, minBreakoutLayer = 0, strength = 20, pivotMode = EPivotMode.Fractal, role = "DVP-S20" };
+		var hosted = new List<_PriceActionEngine>();
+		var hpa = new _PriceActionEngine { config = host, label = "PA1-DVP-S20" };
+		Check(host.Validate() == null && hpa.Configure() == null, "host twin minBreakoutLayer=1 (layers 2) is a valid ExtraPriceAction entry");
+		hosted.Add(hpa);
+		Func<PriceActionConfig, _PriceActionEngine> find = c => hosted.FirstOrDefault(e => e.config.dataStream == c.dataStream && e.config.Canon() == c.Canon());   // findSharedPa(c, false)
+		Exception ex = null; _PriceActionEngine mine = null;
+		try { mine = find(dvp) ?? new _PriceActionEngine { config = dvp, label = "PA1-DVP-S20" }; if (mine.Configure() != null) throw new Exception("configure"); }
+		catch (Exception e) { ex = e; }
+		Check(ex == null && mine != null && !ReferenceEquals(mine, hpa) && host.Canon() != dvp.Canon(), "#37: non-zero minBreakoutLayer host -> separate DVP PA instance, no exception");
+		var host0 = new PriceActionConfig { enabled = true, dataStream = 1, layers = 1, minBreakoutLayer = 0, strength = 20, pivotMode = EPivotMode.Fractal, role = "Swing20" };
+		var h0 = new _PriceActionEngine { config = host0, label = "PA1-Swing20" }; h0.Configure(); hosted.Add(h0);
+		Check(ReferenceEquals(find(dvp), h0), "#37: a minBreakoutLayer=0 twin (role ignored by Canon) is shared");
+		string src = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
+		int sp = src.IndexOf("private string startDvpPa(", StringComparison.Ordinal), sd = src.IndexOf("private void startDvp()", sp, StringComparison.Ordinal);
+		string b = src.Substring(sp, sd - sp);
+		Check(!b.Contains("m_paExtra") && !b.Contains("roles") && !b.Contains("duplicate role") && !b.Contains("m_paHosted.Add"),
+			"#37: startDvpPa does not register in ExtraPriceAction roles (no duplicate-role exception path)");
+	}
+
+	static void D4Tests() { T17(); T17Pa(); T17Host(); T17SeparateInstance(); }
 }
