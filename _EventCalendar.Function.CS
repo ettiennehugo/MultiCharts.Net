@@ -1601,7 +1601,10 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>EV-4.6b report: share of Unknown-blocked trading days per kind in [from, to] for the consumer mask; a line
-		/// ending FLAG means the share exceeds 5%. Run-time counts (days stepped) are in CoverageStats().</summary>
+		/// ending FLAG means the share exceeds 5%. This overload applies config.minTier (§14 tier filter): kinds whose effective
+		/// tier is below it are not counted. Run-time counts (days stepped) are in CoverageStats().
+		/// COVGAP day lines label each Unknown kind (blocks), (belowMinTier) or (NoEvent); (belowMinTier) is new in this
+		/// revision, so anything parsing COVGAP lines must accept it.</summary>
 		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, out bool flagged) { return CoverageReport(from, to, mask, config.minTier, out flagged); }
 		/// <summary>Tier filter (§14): a kind whose effective tier is below minTier is not counted as blocked.</summary>
 		public List<string> CoverageReport(DateTime from, DateTime to, EEventClassMask mask, EEventTier minTier, out bool flagged)
