@@ -1534,7 +1534,14 @@ namespace PowerLanguage.Function
 			m_disabled = true; m_blackout = m_flattenNow = false; m_years.Clear(); m_dayCache.Clear();
 		}
 		static DateTime endOfMonth(DateTime d) { return new DateTime(d.Year, d.Month, 1).AddMonths(1).AddMinutes(-1); }
-		static EEventClassMask kindClass(EEventKind k) { return EventRules.ClassOf(k, EventRules.DefaultTier(k)); }
+		EEventClassMask kindClass(EEventKind k) { return EventRules.ClassOf(k, effTier(k)); }
+		/// <summary>Effective tier of a kind: config.tierOverride, else the default tier (as applied to table rows).</summary>
+		EEventTier effTier(EEventKind k)
+		{
+			EEventTier ot;
+			if (config != null && config.tierOverride != null && config.tierOverride.TryGetValue(k, out ot)) return ot;
+			return EventRules.DefaultTier(k);
+		}
 
 		// ------------------------------------------------------------------ coverage (EV-4.6b)
 		List<EEventKind> unknownKinds(DateTime day)
@@ -1549,7 +1556,7 @@ namespace PowerLanguage.Function
 		}
 		bool kindBlocks(EEventKind k, DateTime day, EEventClassMask mask, EEventTier minTier)
 		{
-			var r = EventRec.Make(k, day, EventRules.DefaultTier(k), EEventFlags.None);
+			var r = EventRec.Make(k, day, effTier(k), EEventFlags.None);
 			return tierOk(ref r, minTier, mask);
 		}
 
@@ -1707,7 +1714,7 @@ namespace PowerLanguage.Function
 			if (!config.allowPartialCoverage && m_unk.Count > 0)
 			{
 				DateTime td = TradingDayOf(close);
-				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, EventRules.DefaultTier(uk), EEventFlags.None); return true; }
+				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, effTier(uk), EEventFlags.None); return true; }
 			}
 			TimeSpan pre = TimeSpan.FromMinutes(preMin), post = TimeSpan.FromMinutes(postMin);
 			DateTime lo = open - post, hi = close + pre;
