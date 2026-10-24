@@ -135,23 +135,11 @@ namespace PowerLanguage.Function
 			foreach (var kv in rows)
 				for (int j = Math.Max(0, (int)(kv.Key - lo) - pad); j <= Math.Min(n - 1, (int)(kv.Key - lo) + pad); j++)
 				{ double z = (j + lo - kv.Key) / bwTicks; d[j] += kv.Value * Math.Exp(-0.5 * z * z); }
-			double max = 0; foreach (var x in d) if (x > max) max = x; if (!(max > 0)) return;
-			var peaks = new List<int>();
-			for (int i = 0; i < n; i++)
-			{
-				if (!((i == 0 || d[i] > d[i - 1]) && (i == n - 1 || d[i] >= d[i + 1]))) continue;
-				double lb = d[i], rb = d[i]; int k;
-				for (k = i - 1; k >= 0 && d[k] <= d[i]; k--) if (d[k] < lb) lb = d[k]; if (k < 0) lb = Math.Min(lb, 0);
-				for (k = i + 1; k < n && d[k] <= d[i]; k++) if (d[k] < rb) rb = d[k]; if (k >= n) rb = Math.Min(rb, 0);
-				double p = (d[i] - Math.Max(lb, rb)) / max;
-				if (p >= prom) { peaks.Add(i); hvn.Add(new[] { (i + lo) * tick, p }); }
-			}
-			for (int q = 1; q < peaks.Count; q++)
-			{
-				int a = peaks[q - 1], b = peaks[q], m = a; for (int i = a; i <= b; i++) if (d[i] < d[m]) m = i;
-				double p = (Math.Min(d[a], d[b]) - d[m]) / max;
-				if (p >= prom) lvn.Add(new[] { (m + lo) * tick, p });
-			}
+			// M-DVP PR-D0b (DV-4.6): the peak/trough prominence loop lives in _ProfileMath.Prominence (behaviour-preserving:
+			// same comparisons, same order). It returns {row index, prominence}; map the index back to a price here.
+			_ProfileMath.Prominence(d, prom, hvn, lvn);
+			for (int i = 0; i < hvn.Count; i++) hvn[i][0] = ((long)hvn[i][0] + lo) * tick;
+			for (int i = 0; i < lvn.Count; i++) lvn[i][0] = ((long)lvn[i][0] + lo) * tick;
 		}
 	}
 
