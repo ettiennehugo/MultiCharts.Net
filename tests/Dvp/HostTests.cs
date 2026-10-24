@@ -257,6 +257,10 @@ static partial class Program
 		int ret = body.IndexOf("if (!DvpConfig.enabled) return;", StringComparison.Ordinal);
 		Check(ret > 0 && ret < body.IndexOf("requireRing(", StringComparison.Ordinal) && ret < body.IndexOf("new _DvpEngine(", StringComparison.Ordinal) && !body.Contains("PriceAction"),
 			"DV-T22 disabled: startDvp returns before requireRing and the engine; no PA instance");
+		int lst = body.IndexOf("new List<LevelRef>()", StringComparison.Ordinal);
+		string noBody = System.Text.RegularExpressions.Regex.Replace(host.Replace(body, ""), @"//[^\n]*", "");
+		Check(ret > 0 && lst > ret && !noBody.Contains("new List<LevelRef>") && noBody.Contains("private List<LevelRef> m_dvpRails, m_dvpRailPool;"),
+			"DV-T22/DV-13.1 disabled: the DVP rail lists are allocated only in startDvp after the enabled check (no field initialiser)");
 		Check(host.Contains("if (m_dvp != null) stepDvp();") && host.Contains("Dvp queried but DvpConfig.enabled is false") && host.Contains("startVpHelpers();   // Phase 3")
 			&& host.IndexOf("startDvp();", StringComparison.Ordinal) > host.IndexOf("startVpHelpers();   // Phase 3", StringComparison.Ordinal),
 			"DV-T22 one null check per CalcBar, one Warning on query; startDvp runs after startVpHelpers (which clears ring requests)");
@@ -308,6 +312,9 @@ static partial class Program
 		string run = a[a.Count - 1];
 		Check(run.Contains("rollDetect(On)") && run.Contains("diagnosticOnly(0)") && !run.Contains("meanCovIn(NaN)") && !run.Contains("meanCovFwd(NaN)") && run.Contains("fits(") ,
 			"DV-11.3 DVP RUN fields: " + run);
+		var fd = System.Text.RegularExpressions.Regex.Match(run, @"fwdDropped\((\d+)\)");
+		Check(fd.Success && int.Parse(fd.Groups[1].Value, CI) > 0 && int.Parse(fd.Groups[1].Value, CI) <= 60,
+			"DV-11.3 DVP RUN fwdDropped: cov_fwd horizons pending at the one roll are counted (" + (fd.Success ? fd.Groups[1].Value : "missing") + ", <= projBars)");
 		string fit = a.First(l => l.StartsWith("DVP FIT", StringComparison.Ordinal) && l.Contains("crossesRoll(0)"));
 		string[] keys = { "runId(", "configHash(", "stream(Data1)", "barTime(", " n(240)", " deg(", " bic(", "manRowsEff(", "rthShare(NaN)", "crossesRoll(0)", "sigma(", "sigmaAtr(", " r2(", " dw(", "skew(",
 			"yhatEnd(", "slopeEnd(", "slope1(", "endpointDrift(", "pocZ(", "vaLoZ(", "vaHiZ(", "entropy(", "concentration(", "concentrationOcc(", "tailVol(", "inSampleCov2(", "lowR2(", "coef{" };

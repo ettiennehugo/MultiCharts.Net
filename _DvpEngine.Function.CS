@@ -1075,9 +1075,12 @@ namespace PowerLanguage.Function
 
 		// ---- journal side (Q14: the journal is a consumer only when its sink is on) ----
 
+		/// <summary>cov_fwd horizons dropped because they crossed a roll (journal-side; DVP RUN fwdDropped).</summary>
+		public long FwdDropped { get; private set; }
+
 		void trackForward(RingBar b)
 		{
-			if (b.rollBar && RollDetect) { m_fwdCount = 0; return; }   // a forward horizon across a splice is dropped
+			if (b.rollBar && RollDetect) { FwdDropped += m_fwdCount; m_fwdCount = 0; return; }   // a forward horizon across a splice is dropped (counted)
 			double y = Src(b);
 			int w = 0;
 			for (int i = 0; i < m_fwdCount; i++)
@@ -1160,7 +1163,7 @@ namespace PowerLanguage.Function
 			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + I(FitLines) + ") skips(" + I(SkipLines)
 				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
 				+ ") diagnosticOnly(" + (DiagnosticOnly ? "1" : "0") + ") meanCovIn(" + F(MeanCovIn) + ") meanCovFwd(" + F(MeanCovFwd)
-				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ")";
+				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")";
 		}
 	}
 

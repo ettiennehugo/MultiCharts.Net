@@ -401,7 +401,7 @@ namespace PowerLanguage.Strategy
 		protected DvpConfig DvpConfig { get; } = new DvpConfig();
 		private _DvpEngine m_dvp;
 		private bool m_dvpQueryWarned;
-		private readonly List<LevelRef> m_dvpRails = new List<LevelRef>(), m_dvpRailPool = new List<LevelRef>();
+		private List<LevelRef> m_dvpRails, m_dvpRailPool;   // DV-13.1: allocated in startDvp only when DvpConfig.enabled
 
 		/// <summary>M-DVP engine, or null (one Warning on the first query) when DvpConfig.enabled is false.</summary>
 		internal _DvpEngine Dvp
@@ -435,8 +435,8 @@ namespace PowerLanguage.Strategy
 		/// The list and its LevelRef objects are reused by the next call.</summary>
 		protected IReadOnlyList<LevelRef> dvpRails(int ds)
 		{
+			_DvpEngine e = Dvp; if (e == null) return Array.Empty<LevelRef>();
 			m_dvpRails.Clear();
-			_DvpEngine e = Dvp; if (e == null) return m_dvpRails;
 			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
 			DvpSnapshot s = e.Snapshot(ds, r, ago);
 			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
@@ -467,8 +467,9 @@ namespace PowerLanguage.Strategy
 		private void startDvp()
 		{
 			m_dvp = null; m_dvpQueryWarned = false;
-			m_dvpRails.Clear(); m_dvpRailPool.Clear();
+			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); }
 			if (!DvpConfig.enabled) return;
+			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); }
 			List<string> errs = DvpConfig.Validate();
 			if (errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
 			foreach (int ds in DvpConfig.streams)
