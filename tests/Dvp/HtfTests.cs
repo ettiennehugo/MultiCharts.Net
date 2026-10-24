@@ -111,6 +111,11 @@ static partial class Program
 			&& DvpHtf.NextRailDistAtr(rails, lat, 101, -1, 2) == 0.5 && DvpHtf.NextRailDistAtr(rails, lat, 100, -1, 2) == 2.0
 			&& double.IsNaN(DvpHtf.NextRailDistAtr(rails, lat, 110, 1, 2)) && double.IsNaN(DvpHtf.NextRailDistAtr(rails, lat, 101, 0, 2))
 			&& double.IsNaN(DvpHtf.NextRailDistAtr(rails, lat, 101, 1, double.NaN)), "DV-9.4 NextRailDistAtr: nearest strictly beyond C(t-1), model + lattice, NaN when none");
+		// strictly beyond (DV-9.4 / DV-4.9): a rail or lattice level exactly at C(t-1) is skipped, both directions
+		Check(DvpHtf.NextRailDistAtr(rails, null, 104, 1, 2) == 3.0 && DvpHtf.NextRailDistAtr(rails, null, 104, -1, 2) == 2.0
+			&& DvpHtf.NextRailDistAtr(rails, lat, 102, 1, 2) == 1.0 && DvpHtf.NextRailDistAtr(rails, lat, 102, -1, 2) == 1.0
+			&& double.IsNaN(DvpHtf.NextRailDistAtr(rails, null, 110, 1, 2)) && double.IsNaN(DvpHtf.NextRailDistAtr(rails, lat, 96, -1, 2)),
+			"DV-9.4 / DV-4.9 a rail exactly at the price is skipped (strictly beyond)");
 		Check(host.Contains("protected bool dvpHtfAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)")
 			&& host.Contains("protected double dvpHtfNextRailDistAtr(int ds, int dir)") && host.Contains("protected bool dvpTradeable(int ds)"), "DV-10 host API: dvpTradeable / dvpHtfAccepted / dvpHtfNextRailDistAtr");
 	}

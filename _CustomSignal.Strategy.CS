@@ -561,7 +561,8 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>DV-9.4 HtfAccepted(ds, R, dir, N >= 2): DV-8.3 Accepted on stream ds's CLOSED bars as seen from the current Data1 bar
 		/// (the newest closed HTF bar first; DV-9.2). rl is a LevelRef from the current dvpRails(ds) call. countTrigger and deltaAtr are
-		/// passed by the consumer: DV-8.3 "the engine has no default convention".</summary>
+		/// passed by the consumer: DV-8.3 "the engine has no default convention" (Analyst 2 ruling E4 on PR #41: no counting default,
+		/// both stay explicit).</summary>
 		protected bool dvpHtfAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)
 		{
 			if (ds < 2) throw new ArgumentOutOfRangeException("ds", "DV-9.4: HtfAccepted needs an HTF stream (ds >= 2)");
