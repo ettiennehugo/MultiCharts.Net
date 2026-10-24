@@ -55,6 +55,16 @@ static partial class Program
 		var rr = new DvpConfluence(8);
 		rr.Add(Poc, 100.0, -1); rr.Add(ELevelKind.DvpHvn, double.NaN, -1);
 		Check(rr.CandCount == 1, "DvpConfluence.Add skips priceless candidates (low-level)");
+		// R2 (spec rev 5.1 DV-6.3/6.5 S4): Load-level slot alignment with a priceless HVN between POC and sigma
+		var rl = new DvpRails(1);
+		rl.Items[0] = new DvpRail { kind = Poc, z = 0, price = 100.0 };
+		rl.Items[1] = new DvpRail { kind = Hvn, z = 0.5, price = double.NaN };
+		rl.Items[2] = new DvpRail { kind = Sig, z = 1.0, price = 110.0 };
+		typeof(DvpRails).GetProperty("Count").SetValue(rl, 3);
+		var lt = new DvpLattice(1); lt.Price[0] = 110.5; lt.F[0] = 0.5; lt.Range[0] = 0; lt.Count = 1;
+		var cl = new DvpConfluence(16); cl.Load(rl, lt); cl.Cluster(10, 100, 0.30);
+		Check(cl.RailCount == 3 && cl.CandFam[1] == -1 && cl.CandCluster[1] == -1 && cl.CandFamilies(2) == 2 && cl.CandCluster[2] >= 0 && cl.CandCluster[2] == cl.CandCluster[3] && cl.CandFamilies(0) == 1,
+			"S4 Load: [POC, HVN(NaN), sigma]+fib -> RailCount 3, slot 1 non-candidate unclustered, CandFamilies(2) = sigma+fib (" + cl.RailCount + "/" + cl.CandFam[1] + "/" + cl.CandCluster[1] + "/" + cl.CandFamilies(2) + ")");
 		// T18d: FamiliesAt counts families and ranges without clustering.
 		c = Conf(Poc, 100.0, -1, Sig, 102.0, -1, Fib, 101.0, 0, Fib, 101.2, 3, Fib, 120.0, 1);
 		c.Cluster(10, 100, 0.30); int f, r;
@@ -215,6 +225,16 @@ static partial class Program
 		Check(trig.Where(l => l.Contains("verdict41v0(accepted)")).All(l => l.Contains("accepted(N2=0"))
 			&& trig.Count(l => l.Contains("verdict41v0(accepted)")) > 0 && trig.Count(l => l.Contains("verdict41v0(accepted)")) <= rail.Count(l => l.Contains("event(accept)") && l.Contains("accepted(N2=1")),
 			"DV-11.2 verdict41 v0 accepted only via an N=2 completion (accepted triggers <= N2 accept events)");
+		// R1 (Analyst 1 re-review, spec rev 5.1 DV-8.4 S3): exact 1:1 for stable-identity rails; also guards e1 (own-trigger only)
+		var bi = new Dictionary<DateTime, int>(); for (int i = 0; i < s.Length; i++) bi[s[i].time] = i;
+		Func<string, string, string> fv = (l, k) => Regex.Match(l, Regex.Escape(k) + @"\(([^)]*)\)").Groups[1].Value;
+		Func<string, bool> uk = l => { string k = fv(l, "railKind"); return k == "DvpPoc" || k == "DvpVah" || k == "DvpVal" || k == "DvpSigma"; };
+		Func<string, int, string> key = (l, d) => fv(l, "railKind") + "|" + fv(l, "dir") + "|" + (fv(l, "railKind") == "DvpSigma" ? fv(l, "z") : "") + "|"
+			+ (bi[DateTime.ParseExact(fv(l, "barTime"), "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)] - d);
+		var kt = rail.Where(l => uk(l) && l.Contains("event(trigger)") && l.Contains("verdict41v0(accepted)")).Select(l => key(l, 0)).ToList();
+		var ka = rail.Where(l => uk(l) && l.Contains("event(accept)") && l.Contains("accepted(N2=1")).Select(l => key(l, 2)).ToList();
+		Check(kt.Count > 0 && kt.Count == ka.Count && kt.Distinct().Count() == kt.Count && new HashSet<string>(kt).SetEquals(ka),
+			"DV-11.2 verdict41 v0 accepted <-> N=2 accept event 2 bars later, 1:1 for unique/sigma rails (" + kt.Count + " / " + ka.Count + ")");
 		var off = new Rig(new DvpConfig { enabled = true, journalRails = false, splitFlow = false }, true, true);
 		Check(off.S.RailJournal == null && rig.S.RailJournal != null, "N1 DvpRailJournal allocated only when journalRails is on");
 	}
