@@ -116,6 +116,15 @@ static partial class Program
 			&& DvpHtf.NextRailDistAtr(rails, lat, 102, 1, 2) == 1.0 && DvpHtf.NextRailDistAtr(rails, lat, 102, -1, 2) == 1.0
 			&& double.IsNaN(DvpHtf.NextRailDistAtr(rails, null, 110, 1, 2)) && double.IsNaN(DvpHtf.NextRailDistAtr(rails, lat, 96, -1, 2)),
 			"DV-9.4 / DV-4.9 a rail exactly at the price is skipped (strictly beyond)");
+		// Analyst 1 hardening (PR #41 review M7/M9/M10 + N range): host-only guards, checked on the source
+		int sd = host.IndexOf("private void stepDvp()", StringComparison.Ordinal);
+		string stepBody = host.Substring(sd, host.IndexOf("\n\t\t}\n", sd, StringComparison.Ordinal) - sd);
+		int pa = stepBody.IndexOf("if (b.Status != EBarState.Close) continue;", StringComparison.Ordinal), pas = stepBody.IndexOf("pa.Step(b);", StringComparison.Ordinal);
+		Check(pa > 0 && pas > pa, "DV-5.1 / DV-9.1 stepDvp skips forming bars before stepping DVP-owned PA engines");
+		Check(host.Contains("if (ds < 2) throw new ArgumentOutOfRangeException(\"ds\""), "DV-9.4 dvpHtfAccepted ds < 2 guard");
+		Check(host.Contains("if (N < 2 || N > DvpAccept.MaxN) throw new ArgumentOutOfRangeException(\"N\""), "DV-9.4 dvpHtfAccepted N range 2..MaxN");
+		Check(host.Contains("DvpHtf.NextRailDistAtr(rails, lat, Bars.Close[1], dir, s.atr)"), "DV-9.4 dvpHtfNextRailDistAtr measures from Data1 C(t-1) = Close[1]");
+		Check(double.IsNaN(DvpHtf.NextRailDistAtr(null, lat, 102, 1, 2)) && DvpHtf.NextRailDistAtr(null, lat, 102, -1, 2) == 3.0, "DV-9.4 lattice level exactly at the close is skipped (lattice only)");
 		Check(host.Contains("protected bool dvpHtfAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)")
 			&& host.Contains("protected double dvpHtfNextRailDistAtr(int ds, int dir)") && host.Contains("protected bool dvpTradeable(int ds)"), "DV-10 host API: dvpTradeable / dvpHtfAccepted / dvpHtfNextRailDistAtr");
 	}

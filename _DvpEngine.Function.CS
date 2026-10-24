@@ -1251,7 +1251,8 @@ namespace PowerLanguage.Function
 			int i = Array.IndexOf(m_ds, ds);
 			if (i < 0) return false;
 			// Gates only P2 (Analyst 2 ruling on PR #41): no timeframe is hard-coded (240m diagnostic-only is a consumer rule, DV-7.5).
-			// TODO(DV-7.0 diagnosticOnly): the RollDetection-Off gate goes in the instrument-profile rollMode PR (M-INSTR), not here.
+			// TODO(DV-7.0 rollMode PR, M-INSTR): diagnosticOnly is a run-level verdict (DV-7.4) and must NEVER gate Tradeable(); the
+			// rollMode PR reports diagnosticOnly in the DVP RUN line only (under rollMode None the stream stays tradeable, DV-7.0).
 			if (ds <= 1 || DvpConst.P2_PASSED) return true;
 			if (!m_p2Warned[i]) { m_p2Warned[i] = true; if (warnOnce != null) warnOnce("DVP Data" + ds.ToString(CultureInfo.InvariantCulture) + " used before Probe P2"); }
 			return false;
