@@ -118,11 +118,13 @@ static class Program
 			Check(nyse.Count == new HashSet<DateTime>(nyse).Count, "NYSE duplicate dates in " + y);
 		}
 
-		// --- regression: the refactored NYSE rules equal the pre-VPF-6 _NyseHolidays.refreshHolidays (plus mourning days) ---
+		// --- regression: the refactored NYSE rules equal the pre-VPF-6 _NyseHolidays.refreshHolidays (plus the unscheduled
+		// one-off closures: mourning days and the historical 2001/2004/2007/2012 closures, R2.1-d amendment 2026-10-23) ---
 		for (int y = 2000; y <= 2035; y++)
 		{
 			var now = new HashSet<DateTime>(Nyse.Holidays(y));
-			now.Remove(D(2018, 12, 5)); now.Remove(D(2025, 1, 9));
+			foreach (var x in new[] { D(2001, 9, 11), D(2001, 9, 12), D(2001, 9, 13), D(2001, 9, 14), D(2004, 6, 11), D(2007, 1, 2), D(2012, 10, 29), D(2012, 10, 30), D(2018, 12, 5), D(2025, 1, 9) })
+				Check(now.Remove(x) || x.Year != y, "special closure " + x.ToString("yyyy-MM-dd") + " in NYSE rules");
 			Check(now.SetEquals(OldNyse(y)), "NYSE rules changed vs old implementation in " + y);
 		}
 
