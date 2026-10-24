@@ -4,6 +4,7 @@ using PowerLanguage.TradeManager;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -402,6 +403,7 @@ namespace PowerLanguage.Strategy
 		private _DvpEngine m_dvp;
 		private bool m_dvpQueryWarned;
 		private List<LevelRef> m_dvpRails, m_dvpRailPool;   // DV-13.1: allocated in startDvp only when DvpConfig.enabled
+		private List<LevelRef> m_dvpConf, m_dvpConfPool;    // DV-6.3 DvpConf levels (startDvp, enabled only)
 		private _PriceActionEngine[][] m_dvpPa;   // DV-5.1: [stream][range] pivot engines, only when useFib (DV-13.3)
 
 		/// <summary>M-DVP engine, or null (one Warning on the first query) when DvpConfig.enabled is false.</summary>
@@ -441,13 +443,116 @@ namespace PowerLanguage.Strategy
 			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
 			DvpSnapshot s = e.Snapshot(ds, r, ago);
 			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
-			if (rails != null) rails.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, IsRollWindow(r[ago].tradingDay));
-			if (rails != null && m_dvpPa != null)
-			{
-				DvpLattice lat = dvpLattice(e, ds, r, ago, s);
-				if (lat != null) lat.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, rails.Deg, IsRollWindow(r[ago].tradingDay));
-			}
+			if (rails == null) return m_dvpRails;
+			DvpLattice lat; DvpConfluence cf = dvpConfOf(e, ds, r, ago, s, rails, out lat);
+			bool rw = IsRollWindow(r[ago].tradingDay);
+			rails.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, rw);
+			if (lat != null) lat.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, rails.Deg, rw);
+			for (int i = 0; i < m_dvpRails.Count; i++) m_dvpRails[i].quality = cf != null ? cf.CandFamilies(i) : double.NaN;   // DV-6.5 quality = families
 			return m_dvpRails;
+		}
+
+		/// <summary>DV-6 clustering of snapshot s (rails, then the lattice, in the dvpRails publish order) at ATR(t-1) and C(t-1).</summary>
+		private DvpConfluence dvpConfOf(_DvpEngine e, int ds, _BarRing r, int ago, DvpSnapshot s, DvpRails rails, out DvpLattice lat)
+		{
+			lat = rails != null && m_dvpPa != null ? dvpLattice(e, ds, r, ago, s) : null;
+			return rails != null ? e.ConfluenceOf(ds, s, rails, lat, r[ago].c) : null;
+		}
+
+		/// <summary>DV-10 Confluence(ds): qualifying clusters (families == 3) as DvpConf LevelRefs, quality = families. Reused list.</summary>
+		protected IReadOnlyList<LevelRef> dvpConfluence(int ds)
+		{
+			_DvpEngine e = Dvp; if (e == null) return Array.Empty<LevelRef>();
+			m_dvpConf.Clear();
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpSnapshot s = e.Snapshot(ds, r, ago);
+			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
+			if (rails == null) return m_dvpConf;
+			DvpLattice lat; DvpConfluence cf = dvpConfOf(e, ds, r, ago, s, rails, out lat);
+			if (cf != null) cf.Publish(m_dvpConf, m_dvpConfPool, ds, s.tPrev, s.t0, rails, IsRollWindow(r[ago].tradingDay));
+			return m_dvpConf;
+		}
+
+		/// <summary>DV-6.4 FamiliesAt(ds, price, tolAtr): distinct families and lattice ranges within tolAtr*ATR(t-1) of price (no clustering).</summary>
+		protected void dvpFamiliesAt(int ds, double price, double tolAtr, out int families, out int nRanges)
+		{
+			families = 0; nRanges = 0;
+			_DvpEngine e = Dvp; if (e == null) return;
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpSnapshot s = e.Snapshot(ds, r, ago);
+			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
+			if (rails == null) return;
+			DvpLattice lat; DvpConfluence cf = dvpConfOf(e, ds, r, ago, s, rails, out lat);
+			if (cf != null) cf.FamiliesAt(price, tolAtr, out families, out nRanges);
+		}
+		protected void dvpFamiliesAt(int ds, double price, out int families, out int nRanges) { dvpFamiliesAt(ds, price, DvpConfig.confTol, out families, out nRanges); }
+
+		/// <summary>DV-8.1: rail history of r (a LevelRef from the current dvpRails call: kind + its z on the current snapshot),
+		/// newest closed bar first. Null for lattice/conf levels, no fit, or engine off.</summary>
+		private DvpRailHistory dvpHist(int ds, LevelRef rl)
+		{
+			_DvpEngine e = Dvp; if (e == null || rl == null) return null;
+			if (DvpConfluence.Family(rl.kind) < 0 || rl.kind == ELevelKind.DvpFib) return null;
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpRails rails = e.Snapshot(ds, r, ago) != null ? e.RailsOf(ds, r, ago) : null;
+			if (rails == null) return null;
+			DvpRailHistory h = e.HistoryOf(ds, r, rl.kind, rails.Z(rl.price));
+			return h != null && h.Len > 0 ? h : null;
+		}
+
+		/// <summary>DV-8.2 Triggered: the newest closed bar closed beyond its own rail + 0.10 ATR and the bar before it did not (no delta).</summary>
+		protected bool dvpTriggered(int ds, LevelRef rl, int dir) { DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.Triggered(h.C, h.P, h.A, h.Len, 0, dir); }
+		/// <summary>DV-8.3 RunBeyond: consecutive closed bars ending at the newest, each beyond its own rail + deltaAtr*ATR (max 8).</summary>
+		protected int dvpRunBeyond(int ds, LevelRef rl, int dir, double deltaAtr) { DvpRailHistory h = dvpHist(ds, rl); return h != null ? DvpAccept.RunBeyond(h.C, h.P, h.A, h.Len, dir, deltaAtr) : 0; }
+		/// <summary>DV-8.3 BackInside: a close back inside by more than 0.10 ATR since the most recent trigger in the 8-bar history.</summary>
+		protected bool dvpBackInside(int ds, LevelRef rl, int dir) { DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.BackInside(h.C, h.P, h.A, h.Len, dir); }
+		/// <summary>DV-8.3 Accepted(N, countTrigger, deltaAtr), true on the completing bar; no default convention (PS-25: N = 2, true, 0).
+		/// Throws for N outside 1..6.</summary>
+		protected bool dvpAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)
+		{
+			if (N < 1 || N > DvpAccept.MaxN) throw new ArgumentOutOfRangeException("N", "DV-8.1: N must be 1.." + DvpAccept.MaxN);
+			DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, N, countTrigger, deltaAtr);
+		}
+		/// <summary>RG-10 primitive: z of the close k closed bars back (k = 0 newest, &lt; 8) against that bar's own snapshot; NaN without a fit.</summary>
+		protected double dvpZClose(int ds, int k)
+		{
+			_DvpEngine e = Dvp; if (e == null) return double.NaN;
+			DvpStream st = e.Stream(ds);
+			return st != null ? st.History.ZClose(Ring(ds), k) : double.NaN;
+		}
+
+		/// <summary>
+		/// DV-11.2 DVP RAIL step, after the main PA step and stepExtraPa (so the lattice reads this bar's pivots), only when
+		/// journalRails and the Journal sink are on (the journal is then a consumer). Each interaction also goes to logSignal
+		/// (taken: false; stop = rail -/+ 0.10 ATR).
+		/// </summary>
+		private void dvpRailStep()
+		{
+			if (!DvpConfig.journalRails || m_dvp.journal == null) return;
+			for (int si = 0; si < DvpConfig.streams.Length; si++)
+			{
+				int ds = DvpConfig.streams[si];
+				IInstrument b = BarsOfData(ds);
+				_BarRing r = Ring(ds);
+				if (b.Status != EBarState.Close || r == null || r.Count == 0 || r[0].bar != b.FullSymbolData.Current) continue;
+				DvpStream st = m_dvp.Stream(ds); if (st == null) continue;
+				DvpSnapshot s = m_dvp.Snapshot(ds, r, 1);
+				DvpRails rails = s != null ? m_dvp.RailsOf(ds, r, 1) : null;
+				DvpLattice lat; DvpConfluence cf = rails != null ? dvpConfOf(m_dvp, ds, r, 1, s, rails, out lat) : null;
+				int n = st.RailJournal.Step(st, r, s, rails, cf, IsRollWindow(r[0].tradingDay), st.SessionHalfDay, m_dvp.journal, m_dvp.RunId);
+				for (int i = 0; i < n; i++)
+				{
+					DvpRailEvent ev = st.RailJournal.Events[i];
+					var ctx = new Dictionary<string, string>
+					{
+						{ "railKind", ev.kind.ToString() }, { "z", ev.z.ToString("R", CultureInfo.InvariantCulture) }, { "families", ev.families.ToString(CultureInfo.InvariantCulture) },
+						{ "nRanges", ev.nRanges.ToString(CultureInfo.InvariantCulture) }, { "score", ev.families.ToString(CultureInfo.InvariantCulture) },
+						{ "deg", ev.deg.ToString(CultureInfo.InvariantCulture) }, { "sigmaAtr", ev.sigmaAtr.ToString("R", CultureInfo.InvariantCulture) }
+					};
+					logSignal(DvpRails.Tag(ds, ev.tPrev, ev.deg, ev.kind, ev.z) + (ev.trigger ? ":trigger" : ":accept"), ev.dir, ev.close,
+						ev.price - ev.dir * DvpAccept.Delta * ev.atr, ctx, false);
+				}
+			}
 		}
 
 		/// <summary>DV-10 RailPrice(ds, kind, z): P_t(z); NaN if the rail is absent or there is no fit.</summary>
@@ -469,7 +574,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>DV-5: fills each range's pivots from its PA engine (ring bar numbering) and builds the lattice of snapshot s.
-		/// Query time ONLY (dvpRails): never build the lattice in stepDvp. stepDvp runs before the main PA step and stepExtraPa,
+		/// Query time ONLY (dvpConfOf, from the query APIs and the post-PA dvpRailStep): never build the lattice in stepDvp. stepDvp runs before the main PA step and stepExtraPa,
 		/// so a shared (hosted) PA engine has not yet stepped the closed bar there and its pivots would be one bar stale.</summary>
 		private DvpLattice dvpLattice(_DvpEngine e, int ds, _BarRing r, int ago, DvpSnapshot s)
 		{
@@ -509,9 +614,9 @@ namespace PowerLanguage.Strategy
 		private void startDvp()
 		{
 			m_dvp = null; m_dvpQueryWarned = false; m_dvpPa = null;
-			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); }
+			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); m_dvpConf.Clear(); m_dvpConfPool.Clear(); }
 			if (!DvpConfig.enabled) return;
-			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); }
+			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); m_dvpConf = new List<LevelRef>(); m_dvpConfPool = new List<LevelRef>(); }
 			List<string> errs = DvpConfig.Validate();
 			if (errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
 			foreach (int ds in DvpConfig.streams)
@@ -1730,6 +1835,7 @@ namespace PowerLanguage.Strategy
 				m_pa.Step(bars);
 			}
 			if (m_paHosted != null) stepExtraPa();   // S5: after the main PA, before XMKT/AVWAP readers
+			if (m_dvp != null) dvpRailStep();   // M-DVP DV-11.2: after every PA step (lattice pivots current); no-op unless journalRails + Journal
 			if (m_tickStream != null) stepTick();
 			if (m_xmkt != null) stepXmkt();
 			if (m_daily != null) stepDaily();   // before AVWAP: GapOpen reads the previous day's ATR

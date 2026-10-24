@@ -41,12 +41,12 @@ static partial class Program
 			var bad = new DvpConfig { enabled = true, fibAnchor = EDvpFibAnchor.ExtremeInLookback }.Validate();
 			Check(ok == null && bad != null && bad.Count == 1 && bad[0].Contains("fibAnchor") && bad[0].Contains("ExtremeInLookback"), "S4 Validate rejects fibAnchor = ExtremeInLookback, accepts MostRecentPivot");
 		}
-		{   // Analyst 1 N2: the lattice is built at query time only (dvpRails), never in stepDvp
+		{   // Analyst 1 N2: the lattice is built only via dvpConfOf (query APIs + the post-PA dvpRailStep), never in stepDvp
 			string h = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
 			int st = h.IndexOf("private void stepDvp()", StringComparison.Ordinal);
 			string stb = h.Substring(st, h.IndexOf("private ", st + 10, StringComparison.Ordinal) - st);
 			Check(!stb.Contains("dvpLattice(") && !stb.Contains("LatticeOf(") && !stb.Contains("DvpPaBridge") && Count(h, "dvpLattice(") == 2,
-				"N2 lattice built only at query time (dvpRails), not in stepDvp");
+				"N2 lattice built only via dvpConfOf (query APIs, post-PA dvpRailStep), not in stepDvp");
 		}
 		var fl = Fibs();
 		Check(fl.Length == 24 && fl.SequenceEqual(new[] { 0, .22, .5, .62, .71, .786, .886, 1, 1.414, 1.618, 2.618, 3.618, 4.236, -.146, -.272, -.414, -.764, -1, -2, -2.5, -2.62, -3, -3.5, -4 }),
