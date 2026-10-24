@@ -146,6 +146,26 @@ static class Program
 		}
 		Check(trunc, "VMS 5: truncation");
 
+		// M-DVP PR-D0b, DV-T12b: _ProfileMath.Prominence on raw rows. Peaks 100 (idx 2) and 50 (idx 6), trough 38 (idx 4):
+		// peak 2 prominence = (50 - 38) / 100 = 0.12, LVN prominence = (min(100, 50) - 38) / 100 = 0.12.
+		{
+			var rows = new double[] { 10, 40, 100, 60, 38, 45, 50, 20, 5 };
+			var hv = new List<double[]>(); var lv = new List<double[]>();
+			bool ok = PM.Prominence(rows, 0.11, hv, lv);
+			Check(ok && hv.Count == 2 && lv.Count == 1 && hv[0][0] == 2 && hv[0][1] == 1.0 && hv[1][0] == 6 && Near(hv[1][1], 0.12)
+				&& lv[0][0] == 4 && Near(lv[0][1], 0.12), "DV-T12b bimodal rows: 2 HVN {2, 6} + 1 LVN {4} at prom 0.11");
+			PM.Prominence(rows, 0.13, hv, lv);
+			Check(hv.Count == 1 && hv[0][0] == 2 && lv.Count == 0, "DV-T12b prom 0.13: the 0.12 peak and trough drop out (lists trimmed)");
+			var slot0 = hv[0]; PM.Prominence(rows, 0.11, hv, lv);
+			var rows2 = new double[] { 5, 100, 30, 70, 10 };   // a different profile with the same node counts (2 HVN, 1 LVN)
+			long before = GC.GetAllocatedBytesForCurrentThread();
+			for (int r = 0; r < 1000; r++) { PM.Prominence(rows2, 0.11, hv, lv); PM.Prominence(rows, 0.11, hv, lv); }
+			long alloc = GC.GetAllocatedBytesForCurrentThread() - before;
+			Check(object.ReferenceEquals(hv[0], slot0) && hv.Count == 2 && lv.Count == 1 && alloc == 0, "DV-T12b caller-owned double[2] slots overwritten in place: 0 bytes over 2000 calls once the lists have grown (got " + alloc + ")");
+			Check(!PM.Prominence(new double[] { 0, 0, 0 }, 0.12, hv, lv) && hv.Count == 0 && lv.Count == 0, "DV-T12b all-zero rows: no nodes, lists cleared");
+			Check(PM.Prominence(new double[] { 1, 3, 3, 1 }, 0.12, hv, lv) && hv.Count == 1 && hv[0][0] == 1, "DV-T12b plateau: left edge of a flat top is the peak (strict left, >= right)");
+		}
+
 		Console.WriteLine($"ProfileTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}

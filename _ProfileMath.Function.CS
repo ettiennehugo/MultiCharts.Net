@@ -267,6 +267,49 @@ namespace PowerLanguage.Function
 		/// mode 1 = VolumeAtPrice (whole bar volume at the close: exact on a 1-tick source), 2 = BarUniform (volume spread
 		/// evenly over the ticks low..high), 3 = BarTypical (all volume at (H+L+C)/3 rounded to the tick).
 		/// </summary>
+		/// <summary>M-DVP PR-D0b (DV-4.6): topographic prominence nodes on a dense row array d (extracted verbatim from
+		/// Gate0Profile.Nodes, which now calls it). HVN = local maximum (strictly above the left row, at least the right row)
+		/// with prominence (d[i] - higher of its two bounding minima) / max(d) >= prom; a run that reaches an array end counts
+		/// that side's floor as min(.., 0). LVN = the minimum between two adjacent HVNs (first minimum on ties), prominence =
+		/// (lower of the two peaks - trough) / max(d), kept if >= prom. Results are {index, prominence} pairs in ascending
+		/// index order. Returns false (both lists empty) when max(d) is not > 0.
+		/// Caller-owned lists: existing double[2] entries are overwritten in place and the list is trimmed to the node count, so a
+		/// caller that reuses its lists allocates nothing once they have grown (DV-13.2); new entries are allocated only to grow.
+		/// No other allocation: adjacent peaks are paired as they are found instead of being collected first.</summary>
+		public static bool Prominence(double[] d, double prom, List<double[]> hvn, List<double[]> lvn)
+		{
+			int nh = 0, nl = 0, n = d == null ? 0 : d.Length;
+			double max = 0; for (int i = 0; i < n; i++) if (d[i] > max) max = d[i];
+			if (!(max > 0)) { hvn.Clear(); lvn.Clear(); return false; }
+			int prev = -1;
+			for (int i = 0; i < n; i++)
+			{
+				if (!((i == 0 || d[i] > d[i - 1]) && (i == n - 1 || d[i] >= d[i + 1]))) continue;
+				double lb = d[i], rb = d[i]; int k;
+				for (k = i - 1; k >= 0 && d[k] <= d[i]; k--) if (d[k] < lb) lb = d[k]; if (k < 0) lb = Math.Min(lb, 0);
+				for (k = i + 1; k < n && d[k] <= d[i]; k++) if (d[k] < rb) rb = d[k]; if (k >= n) rb = Math.Min(rb, 0);
+				double p = (d[i] - Math.Max(lb, rb)) / max;
+				if (!(p >= prom)) continue;
+				putNode(hvn, nh++, i, p);
+				if (prev >= 0)
+				{
+					int m = prev; for (int j = prev; j <= i; j++) if (d[j] < d[m]) m = j;
+					double q = (Math.Min(d[prev], d[i]) - d[m]) / max;
+					if (q >= prom) putNode(lvn, nl++, m, q);
+				}
+				prev = i;
+			}
+			if (hvn.Count > nh) hvn.RemoveRange(nh, hvn.Count - nh);
+			if (lvn.Count > nl) lvn.RemoveRange(nl, lvn.Count - nl);
+			return true;
+		}
+
+		private static void putNode(List<double[]> list, int at, int index, double prominence)
+		{
+			if (at < list.Count) { double[] e = list[at]; if (e != null && e.Length >= 2) { e[0] = index; e[1] = prominence; return; } list[at] = new double[] { index, prominence }; return; }
+			list.Add(new double[] { index, prominence });
+		}
+
 		public sealed class Accumulator
 		{
 			public readonly SortedDictionary<long, double> rows = new SortedDictionary<long, double>();
