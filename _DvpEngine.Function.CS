@@ -7,8 +7,9 @@ namespace PowerLanguage.Function
 {
 	// ============================================================================================
 	// M-DVP (specs/m-dvp-spec.md rev 3): detrended volume-profile engine after Keller B5 App E (buildTrend / evalTrend /
-	// evalLeverage / trendSE). PR-D1 = the fit core only: DvpConfig (Validate/Canon), DvpFit (Forsythe recurrence, sigma,
-	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone) and the empty DvpFrozenDegree table. Not wired into
+	// evalLeverage / trendSE). PR-D1 = the fit core: DvpConfig (Validate/Canon), DvpFit (Forsythe recurrence, sigma,
+	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone) and the empty DvpFrozenDegree table. PR-D2 = DvpManifold
+	// (rows, tick floor, VA, entropy/concentration, nodes) and DvpRails (rails, residual order, LevelRef/tags). Not wired into
 	// _CustomSignal yet (PR-D3). Everything between <dvp-core> markers is MC-free; tests/Dvp extracts it with awk (DV-0.3).
 	// ============================================================================================
 
@@ -419,6 +420,343 @@ namespace PowerLanguage.Function
 			m2 /= n; m3 /= n;
 			dw = den > 0 ? num / den : double.NaN;
 			skew = m2 > 0 ? m3 / Math.Pow(m2, 1.5) : double.NaN;
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// PR-D2 (DV-4): residual manifold, POC/VA, shape stats, nodes and rails. No allocation on the refit path: every
+	// buffer (exact-length row arrays for each possible manRowsEff, node slots, candidate and rail arrays) is allocated
+	// once in the constructor (DV-0.4, DV-13.2). LevelRef materialisation (tag strings) is a separate, query-side step.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/// <summary>One manifold node (DV-4.7): row index, z of the row centre, topographic prominence, side of POC (+1 above, -1 below).</summary>
+	public struct DvpNode
+	{
+		public int row; public double z, prom; public int side;
+	}
+
+	/// <summary>One rail of a snapshot (DV-4.8): kind, residual level z, price P_t(z) = yhat_{t-1}(u_t) + z sigma_{t-1}.</summary>
+	public struct DvpRail
+	{
+		public ELevelKind kind; public double z, price;
+	}
+
+	public sealed class DvpManifold
+	{
+		readonly int m_manRows;
+		readonly double[][] m_rowsBy, m_upBy, m_downBy;   // exact-length row arrays, index = manRowsEff (1..manRows); all preallocated
+		readonly List<double[]> m_hvnList, m_lvnList;      // caller-owned lists for _ProfileMath.Prominence
+		readonly double[][] m_hvnSlots, m_lvnSlots;        // slot pool refilled into the lists before every call
+		readonly DvpNode[] m_cand;                         // node-selection scratch
+		readonly bool[] m_taken;
+		double m_selSpan, m_selWz;
+		public readonly DvpNode[] Hvn, Lvn;                // selected nodes, ascending z; counts HvnCount / LvnCount
+		public int HvnCount { get; private set; }
+		public int LvnCount { get; private set; }
+
+		public bool Valid { get; private set; }            // a profile exists (sigma > 0 and some in-span volume)
+		public int RowsEff { get; private set; }           // manRowsEff (DV-4.1), journaled
+		public double Span { get; private set; }
+		public double Wz { get; private set; }             // row height in sigma units
+		public double Sigma { get; private set; }
+		public double TailVol { get; private set; }
+		public double TotalVol { get; private set; }       // sum of v_i that entered the deposit (v > 0 and finite)
+		public double UpTail { get; private set; }
+		public double DownTail { get; private set; }
+		public int Poc { get; private set; }
+		public int VaLo { get; private set; }
+		public int VaHi { get; private set; }
+		public double PocZ { get; private set; }
+		public double VaLoZ { get; private set; }
+		public double VaHiZ { get; private set; }
+		public double Entropy { get; private set; }
+		public double Concentration { get; private set; }
+		public double ConcentrationOcc { get; private set; }
+		public double InSampleCov2 { get; private set; }
+
+		public DvpManifold(int manRows, bool splitFlow)
+		{
+			if (manRows < 1) throw new ArgumentOutOfRangeException("manRows");
+			m_manRows = manRows;
+			m_rowsBy = new double[manRows + 1][];
+			if (splitFlow) { m_upBy = new double[manRows + 1][]; m_downBy = new double[manRows + 1][]; }
+			for (int r = 1; r <= manRows; r++)
+			{
+				m_rowsBy[r] = new double[r];
+				if (splitFlow) { m_upBy[r] = new double[r]; m_downBy[r] = new double[r]; }
+			}
+			int slots = manRows + 2;   // Prominence finds at most ceil(R/2) HVNs and one fewer LVN
+			m_hvnList = new List<double[]>(slots); m_lvnList = new List<double[]>(slots);
+			m_hvnSlots = new double[slots][]; m_lvnSlots = new double[slots][];
+			for (int i = 0; i < slots; i++) { m_hvnSlots[i] = new double[2]; m_lvnSlots[i] = new double[2]; }
+			m_cand = new DvpNode[slots]; m_taken = new bool[slots];
+			Hvn = new DvpNode[2 * 10]; Lvn = new DvpNode[2 * 10];   // maxNodes <= 10 per side (DvpConfig.Validate)
+			Clear();
+		}
+
+		public int ManRows { get { return m_manRows; } }
+		/// <summary>The in-span rows of the last build (exact length RowsEff), or null.</summary>
+		public double[] Rows { get { return RowsEff > 0 ? m_rowsBy[RowsEff] : null; } }
+		public double[] UpRows { get { return m_upBy != null && RowsEff > 0 ? m_upBy[RowsEff] : null; } }
+		public double[] DownRows { get { return m_downBy != null && RowsEff > 0 ? m_downBy[RowsEff] : null; } }
+		/// <summary>Centre z of row r.</summary>
+		public double RowZ(int r) { return -Span + (r + 0.5) * Wz; }
+
+		void Clear()
+		{
+			Valid = false; RowsEff = 0; Sigma = Wz = Span = 0; TailVol = TotalVol = UpTail = DownTail = 0;
+			Poc = VaLo = VaHi = -1; PocZ = VaLoZ = VaHiZ = Entropy = Concentration = ConcentrationOcc = InSampleCov2 = double.NaN;
+			HvnCount = LvnCount = 0;
+		}
+
+		/// <summary>DV-4.1 tick floor: manRowsEff = max(1, floor(2 span sigma / tick)) when a nominal row is under one tick, else manRows.</summary>
+		public static int RowsEffFor(int manRows, double span, double sigma, double tick)
+		{
+			double wz = 2.0 * span / manRows;
+			if (tick > 0 && wz * sigma < tick)
+			{
+				double r = Math.Floor(2.0 * span * sigma / tick);
+				return r < 1 ? 1 : (r > manRows ? manRows : (int)r);
+			}
+			return manRows;
+		}
+
+		/// <summary>
+		/// DV-4.2 deposit of volume v over [loZ, hiZ] onto rows[0..R-1] (row r = [-span + r wz, -span + (r+1) wz)), in
+		/// proportion to each row's overlap; the remainder (outside +-span) is returned as tail. A zero-range bar puts all of v
+		/// into its row (or the tail when it is outside; +span itself is outside, rows are half-open).
+		/// </summary>
+		public static double Deposit(double[] rows, int R, double span, double wz, double loZ, double hiZ, double v)
+		{
+			if (!(v > 0) || double.IsInfinity(v)) return 0;
+			if (hiZ < loZ) { double t = loZ; loZ = hiZ; hiZ = t; }
+			double len = hiZ - loZ;
+			if (!(len > 0))
+			{
+				double fr = Math.Floor((loZ + span) / wz);
+				if (fr >= 0 && fr < R) { rows[(int)fr] += v; return 0; }
+				return v;
+			}
+			double a = Math.Max(loZ, -span), b = Math.Min(hiZ, span), inside = 0;
+			if (b > a)
+			{
+				int r0 = (int)Math.Floor((a + span) / wz), r1 = (int)Math.Floor((b + span) / wz);
+				if (r0 < 0) r0 = 0; if (r1 > R - 1) r1 = R - 1;
+				for (int r = r0; r <= r1; r++)
+				{
+					double rl = -span + r * wz, rh = rl + wz;
+					double ov = Math.Min(b, rh) - Math.Max(a, rl);
+					if (ov > 0) { double dep = v * (ov / len); rows[r] += dep; inside += dep; }
+				}
+			}
+			double tail = v - inside;
+			return tail > 0 ? tail : 0;
+		}
+
+		/// <summary>
+		/// Build the manifold of a fitted window (DV-4.1..4.7). fit must be Valid with Choose already called; high/low/vol (and
+		/// up/down when splitFlow) are the same n window bars as the fit, i = n-1 = bar t-1. vaFraction is vaPct/100 (a
+		/// fraction; DV-4.4). Returns false (no profile) when sigma is not > 0 or no volume falls inside the span.
+		/// </summary>
+		public bool Build(DvpFit fit, double[] high, double[] low, double[] vol, double[] up, double[] down,
+			double manSpan, double tick, double vaFraction, double nodeProm, int maxNodes)
+		{
+			if (!(vaFraction > 0 && vaFraction <= 1)) throw new ArgumentOutOfRangeException("vaFraction", "DV-4.4: pass vaPct / 100.0");
+			Clear();
+			if (fit == null || !fit.Valid) return false;
+			int n = fit.n, d = fit.Deg;
+			double sigma = fit.SigmaD;
+			InSampleCov2 = fit.CovIn(d, 2);
+			if (!(sigma > 0) || double.IsInfinity(sigma)) return false;
+			int R = RowsEffFor(m_manRows, manSpan, sigma, tick);
+			double wz = 2.0 * manSpan / R;
+			RowsEff = R; Span = manSpan; Wz = wz; Sigma = sigma;
+			double[] rows = m_rowsBy[R]; Array.Clear(rows, 0, R);
+			bool split = m_upBy != null && up != null && down != null;
+			double[] ur = split ? m_upBy[R] : null, dr = split ? m_downBy[R] : null;
+			if (split) { Array.Clear(ur, 0, R); Array.Clear(dr, 0, R); }
+			double tail = 0, total = 0, ut = 0, dt = 0;
+			for (int i = 0; i < n; i++)
+			{
+				double v = vol[i];
+				if (!(v > 0) || double.IsInfinity(v)) continue;
+				double c = fit.Yhat(fit.U(i), d), lo = (low[i] - c) / sigma, hi = (high[i] - c) / sigma;
+				total += v;
+				tail += Deposit(rows, R, manSpan, wz, lo, hi, v);
+				if (split) { ut += Deposit(ur, R, manSpan, wz, lo, hi, up[i]); dt += Deposit(dr, R, manSpan, wz, lo, hi, down[i]); }
+			}
+			TailVol = tail; TotalVol = total; UpTail = ut; DownTail = dt;
+			int vlo, vhi, poc;
+			if (!_ProfileMath.ValueAreaExpansion(rows, vaFraction, out vlo, out vhi, out poc)) return false;
+			Valid = true; Poc = poc; VaLo = vlo; VaHi = vhi;
+			PocZ = RowZ(poc); VaLoZ = -manSpan + vlo * wz; VaHiZ = -manSpan + (vhi + 1) * wz;   // outer edges (DV-4.4, Q9)
+			double conc, concOcc;
+			Shape(rows, poc, out conc, out concOcc);
+			Concentration = conc; ConcentrationOcc = concOcc;
+			Entropy = _ProfileStats.Entropy(rows, EEntropyRows.TradedRows, 0).Hnorm;
+			SelectNodes(rows, poc, nodeProm, maxNodes, manSpan);
+			return true;
+		}
+
+		/// <summary>DV-4.5: concentration = rows[poc] / (sum / R) over all R rows; concentrationOcc uses occupied rows only.</summary>
+		public static void Shape(double[] rows, int poc, out double concentration, out double concentrationOcc)
+		{
+			concentration = concentrationOcc = double.NaN;
+			if (rows == null || poc < 0 || poc >= rows.Length) return;
+			double s = 0; int occ = 0;
+			for (int i = 0; i < rows.Length; i++) if (rows[i] > 0) { s += rows[i]; occ++; }
+			if (!(s > 0)) return;
+			concentration = rows[poc] / (s / rows.Length);
+			concentrationOcc = rows[poc] / (s / occ);
+		}
+
+		/// <summary>
+		/// DV-4.6/4.7 on rows (raw, unsmoothed): _ProfileMath.Prominence at nodeProm, then drop the POC row and any HVN within one
+		/// row of it, and keep per side of POC the maxNodes HVNs and maxNodes LVNs of highest prominence (ties: nearer to POC,
+		/// then lower row). z = row centre for rows spanning [-span, +span]. Results land in Hvn/Lvn sorted by ascending z.
+		/// Public for tests; no allocation.
+		/// </summary>
+		public void SelectNodes(double[] rows, int poc, double nodeProm, int maxNodes, double span)
+		{
+			HvnCount = LvnCount = 0;
+			if (rows == null || rows.Length == 0 || rows.Length >= m_cand.Length) return;
+			if (maxNodes > 10) maxNodes = 10;
+			m_selSpan = span; m_selWz = 2.0 * span / rows.Length;
+			refill(m_hvnList, m_hvnSlots); refill(m_lvnList, m_lvnSlots);
+			_ProfileMath.Prominence(rows, nodeProm, m_hvnList, m_lvnList);
+			HvnCount = pick(m_hvnList, poc, maxNodes, true, Hvn);
+			LvnCount = pick(m_lvnList, poc, maxNodes, false, Lvn);
+		}
+
+		static void refill(List<double[]> list, double[][] slots)
+		{
+			list.Clear();
+			for (int i = 0; i < slots.Length; i++) list.Add(slots[i]);   // capacity preset: no allocation; Prominence overwrites and trims
+		}
+
+		int pick(List<double[]> found, int poc, int maxNodes, bool hvn, DvpNode[] outp)
+		{
+			int nc = 0;
+			for (int i = 0; i < found.Count && nc < m_cand.Length; i++)
+			{
+				int r = (int)found[i][0];
+				if (r == poc || (hvn && Math.Abs(r - poc) <= 1)) continue;
+				m_cand[nc].row = r; m_cand[nc].prom = found[i][1]; m_cand[nc].side = r > poc ? 1 : -1; m_cand[nc].z = -m_selSpan + (r + 0.5) * m_selWz;
+				m_taken[nc] = false; nc++;
+			}
+			int no = 0;
+			for (int side = -1; side <= 1; side += 2)
+				for (int k = 0; k < maxNodes; k++)
+				{
+					int best = -1;
+					for (int j = 0; j < nc; j++)
+					{
+						if (m_taken[j] || m_cand[j].side != side) continue;
+						if (best < 0 || m_cand[j].prom > m_cand[best].prom
+							|| (m_cand[j].prom == m_cand[best].prom && Math.Abs(m_cand[j].row - poc) < Math.Abs(m_cand[best].row - poc))) best = j;
+					}
+					if (best < 0) break;
+					m_taken[best] = true; outp[no++] = m_cand[best];
+				}
+			for (int i = 1; i < no; i++)   // insertion sort by z (rows are distinct)
+			{
+				DvpNode x = outp[i]; int j = i - 1;
+				while (j >= 0 && outp[j].row > x.row) { outp[j + 1] = outp[j]; j--; }
+				outp[j + 1] = x;
+			}
+			return no;
+		}
+	}
+
+	/// <summary>
+	/// DV-4.8/4.9 rails of one snapshot: P_t(z) = yhat_{t-1}(u_t) + z sigma_{t-1}, sorted by z (residual order). Manifold kinds
+	/// (Poc/Vah/Val/Hvn/Lvn) and sigma rails +-k; DvpFib (PR-D4) and DvpConf (PR-D5) are added later. No z = 0 trend rail,
+	/// and the cone is never a rail (DV-1.5). Fixed capacity, no allocation in Build.
+	/// </summary>
+	public sealed class DvpRails
+	{
+		public readonly DvpRail[] Items;
+		public int Count { get; private set; }
+		public double YhatT { get; private set; }   // yhat_{t-1}(u_t)
+		public double Sigma { get; private set; }
+		public int Deg { get; private set; }
+
+		public DvpRails(int maxSigmaRails) { Items = new DvpRail[3 + 2 * 20 + 2 * Math.Max(1, maxSigmaRails)]; Count = 0; Sigma = double.NaN; YhatT = double.NaN; }
+
+		public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList)
+		{
+			Count = 0; YhatT = Sigma = double.NaN; Deg = -1;
+			if (fit == null || !fit.Valid || !(fit.SigmaD > 0)) return false;
+			Deg = fit.Deg; YhatT = fit.Yhat(fit.UT, Deg); Sigma = fit.SigmaD;
+			if (man != null && man.Valid)
+			{
+				add(ELevelKind.DvpPoc, man.PocZ); add(ELevelKind.DvpVah, man.VaHiZ); add(ELevelKind.DvpVal, man.VaLoZ);
+				for (int i = 0; i < man.HvnCount; i++) add(ELevelKind.DvpHvn, man.Hvn[i].z);
+				for (int i = 0; i < man.LvnCount; i++) add(ELevelKind.DvpLvn, man.Lvn[i].z);
+			}
+			if (sigmaList != null)
+				for (int i = 0; i < sigmaList.Length && Count + 2 <= Items.Length; i++) { add(ELevelKind.DvpSigma, sigmaList[i]); add(ELevelKind.DvpSigma, -sigmaList[i]); }
+			for (int i = 1; i < Count; i++)   // insertion sort: z, then kind ordinal (deterministic)
+			{
+				DvpRail x = Items[i]; int j = i - 1;
+				while (j >= 0 && (Items[j].z > x.z || (Items[j].z == x.z && (int)Items[j].kind > (int)x.kind))) { Items[j + 1] = Items[j]; j--; }
+				Items[j + 1] = x;
+			}
+			return true;
+		}
+
+		void add(ELevelKind kind, double z)
+		{
+			if (Count >= Items.Length || double.IsNaN(z)) return;
+			Items[Count].kind = kind; Items[Count].z = z; Items[Count].price = Price(z); Count++;
+		}
+
+		/// <summary>P_t(z) (DV-4.8).</summary>
+		public double Price(double z) { return YhatT + z * Sigma; }
+		/// <summary>(price - yhat(u_t)) / sigma (DV-10 Z).</summary>
+		public double Z(double price) { return Sigma > 0 ? (price - YhatT) / Sigma : double.NaN; }
+
+		/// <summary>DV-10 RailPrice: Poc/Vah/Val ignore z; Sigma/Hvn/Lvn need the rail at z (|dz| &lt;= 1e-9); NaN if absent.</summary>
+		public double RailPrice(ELevelKind kind, double z)
+		{
+			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
+			for (int i = 0; i < Count; i++)
+				if (Items[i].kind == kind && (unique || Math.Abs(Items[i].z - z) <= 1e-9)) return Items[i].price;
+			return double.NaN;
+		}
+
+		/// <summary>DV-4.9 NextRail: index of the first rail strictly beyond fromZ in direction dir (+1 up, -1 down), or -1.</summary>
+		public int NextRail(double fromZ, int dir)
+		{
+			if (dir > 0) { for (int i = 0; i < Count; i++) if (Items[i].z > fromZ) return i; }
+			else if (dir < 0) { for (int i = Count - 1; i >= 0; i--) if (Items[i].z < fromZ) return i; }
+			return -1;
+		}
+
+		/// <summary>DV-10.2 tag "DVP{ds}:{t-1:yyyyMMddHHmm}:d{deg}:{kind}{z:+0.00}" (invariant culture; a z that rounds to 0 prints +0.00).</summary>
+		public static string Tag(int ds, DateTime tPrev, int deg, ELevelKind kind, double z)
+		{
+			return "DVP" + ds.ToString(CultureInfo.InvariantCulture) + ":" + tPrev.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture) + ":d"
+				+ deg.ToString(CultureInfo.InvariantCulture) + ":" + kind.ToString() + z.ToString("+0.00;-0.00;+0.00", CultureInfo.InvariantCulture);
+		}
+
+		/// <summary>
+		/// DV-10.1 LevelRefs of the rails into a caller-owned list, reusing caller-pooled LevelRef objects (pool grows only when
+		/// short). Query-side: tag strings allocate, so the host calls this lazily (PR-D3), never on the refit path. quality =
+		/// families is NaN until confluence lands (PR-D5).
+		/// </summary>
+		public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, bool isRollWindow)
+		{
+			into.Clear();
+			for (int i = 0; i < Count; i++)
+			{
+				LevelRef r;
+				if (i < pool.Count) r = pool[i]; else { r = new LevelRef(); pool.Add(r); }
+				DvpRail x = Items[i];
+				r.kind = x.kind; r.price = r.lo = r.hi = x.price; r.createdTime = tPrev; r.sourceT0 = t0; r.sourceT1 = tPrev; r.dataStream = ds;
+				r.tag = Tag(ds, tPrev, Deg, x.kind, x.z); r.quality = double.NaN; r.crossesRoll = false; r.isRollWindow = isRollWindow;
+				into.Add(r);
+			}
 		}
 	}
 	// </dvp-core>

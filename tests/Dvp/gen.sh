@@ -1,7 +1,8 @@
 #!/bin/bash
 # Usage: tests/Dvp/gen.sh   (needs the .NET 8 SDK; on Windows run the same steps in Git Bash or WSL)
-# M-DVP (spec DV-0.3): extracts the MC-free <dvp-core> region of _DvpEngine.Function.CS together with <profile-math> and
-# <level-ref> into Generated/, under their study-file class names (namespace PowerLanguage.Function).
+# M-DVP (spec DV-0.3): extracts the MC-free <dvp-core> region of _DvpEngine.Function.CS together with <profile-math> into
+# Generated/, under their study-file class names (namespace PowerLanguage.Function). _LevelRef, _ProfileStats (DV-4.5 entropy)
+# and its MC-free dependencies (_Gmm, _Rng, _BarRing) are linked whole by DvpTests.csproj, as in tests/GmmTests.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"; root="$here/../.."
 mkdir -p "$here/Generated"
@@ -12,4 +13,3 @@ ext() { # $1 region, $2 source file, $3 output
 }
 ext dvp-core _DvpEngine.Function.CS DvpCore.cs
 ext profile-math _ProfileMath.Function.CS ProfileMath.cs
-ext level-ref _LevelRef.Function.CS LevelRef.cs
