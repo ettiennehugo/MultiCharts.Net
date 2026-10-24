@@ -51,6 +51,20 @@ static partial class Program
 		string core = CoreSource();
 		var lit = Regex.Matches(Regex.Replace(core, @"//[^\n]*", ""), @"(?<![\d.])0?\.(7|8|80)(?![\d])");
 		Check(lit.Count == 0, "DV-T18c no 0.7/0.8/0.80 literal in dvp-core (" + lit.Count + ")");
+		// S4/N2: every rail occupies a candidate slot in publish order; a priceless rail is a non-candidate slot
+		var rr = new DvpConfluence(8);
+		rr.Add(Poc, 100.0, -1); rr.Add(ELevelKind.DvpHvn, double.NaN, -1);
+		Check(rr.CandCount == 1, "DvpConfluence.Add skips priceless candidates (low-level)");
+		// R2 (spec rev 5.1 DV-6.3/6.5 S4): Load-level slot alignment with a priceless HVN between POC and sigma
+		var rl = new DvpRails(1);
+		rl.Items[0] = new DvpRail { kind = Poc, z = 0, price = 100.0 };
+		rl.Items[1] = new DvpRail { kind = Hvn, z = 0.5, price = double.NaN };
+		rl.Items[2] = new DvpRail { kind = Sig, z = 1.0, price = 110.0 };
+		typeof(DvpRails).GetProperty("Count").SetValue(rl, 3);
+		var lt = new DvpLattice(1); lt.Price[0] = 110.5; lt.F[0] = 0.5; lt.Range[0] = 0; lt.Count = 1;
+		var cl = new DvpConfluence(16); cl.Load(rl, lt); cl.Cluster(10, 100, 0.30);
+		Check(cl.RailCount == 3 && cl.CandFam[1] == -1 && cl.CandCluster[1] == -1 && cl.CandFamilies(2) == 2 && cl.CandCluster[2] >= 0 && cl.CandCluster[2] == cl.CandCluster[3] && cl.CandFamilies(0) == 1,
+			"S4 Load: [POC, HVN(NaN), sigma]+fib -> RailCount 3, slot 1 non-candidate unclustered, CandFamilies(2) = sigma+fib (" + cl.RailCount + "/" + cl.CandFam[1] + "/" + cl.CandCluster[1] + "/" + cl.CandFamilies(2) + ")");
 		// T18d: FamiliesAt counts families and ranges without clustering.
 		c = Conf(Poc, 100.0, -1, Sig, 102.0, -1, Fib, 101.0, 0, Fib, 101.2, 3, Fib, 120.0, 1);
 		c.Cluster(10, 100, 0.30); int f, r;
@@ -98,6 +112,22 @@ static partial class Program
 		Check(DvpAccept.Accepted(c, own, a, 4, 1, 2, true, 0) && !DvpAccept.Accepted(c, fixedP, a, 4, 1, 2, true, 0), "DV-T19b each bar against its OWN rail, not today's");
 		double[] own2 = { 105.5, 104.5, 101, 100 };   // bar 1 closes at its own rail: not beyond (strict)
 		Check(!DvpAccept.Accepted(c, own2, a, 4, 1, 2, true, 0) && DvpAccept.RunBeyond(c, own2, a, 4, 1, 0) == 1, "DV-T19b strictly beyond its own rail");
+		double[] ten = { 10, 10, 10, 10, 10, 10, 10, 10 };
+		// (i)/(ii) trigger + 1 further close: countTrigger=true N=2 not accepted; countTrigger=false N=2 accepted (KD-06, deltaAtr = delta)
+		double[] t1 = { 102, 102, 99 }, f1 = { 100, 100, 100 };
+		Check(DvpAccept.Triggered(t1, f1, ten, 3, 1, 1) && !DvpAccept.Accepted(t1, f1, ten, 3, 1, 2, true, 0), "DV-T19b (i) countTrigger=true, N=2, trigger + 1 further close: not accepted");
+		Check(DvpAccept.Accepted(t1, f1, ten, 3, 1, 2, false, DvpAccept.Delta), "DV-T19b (ii) countTrigger=false, N=2, trigger + 1 further close: accepted (deltaAtr = 0.10)");
+		// (iii) N=5 true: trigger + 5 further closes = 6 snapshots plus the pre-trigger bar (Len 7); Len 6 is not enough
+		double[] t5 = { 105, 105, 105, 105, 105, 102, 99 }, f5 = { 100, 100, 100, 100, 100, 100, 100 };
+		Check(DvpAccept.Accepted(t5, f5, ten, 7, 1, 5, true, 0) && !DvpAccept.Accepted(t5, f5, ten, 6, 1, 5, true, 0) && !DvpAccept.Accepted(t5, f5, ten, 7, 1, 6, true, 0),
+			"DV-T19b (iii) countTrigger=true, N=5 needs 6 snapshots + the pre-trigger bar (Len 7 accepted, Len 6 not)");
+		// (iv) 2nd further close beyond the OLD (trigger-bar) rail but not its own: not accepted
+		double[] t4 = { 103, 104, 102, 99 }, own4 = { 104, 101, 100, 100 }, old4 = { 100, 100, 100, 100 };
+		Check(DvpAccept.Accepted(t4, old4, ten, 4, 1, 2, true, 0) && !DvpAccept.Accepted(t4, own4, ten, 4, 1, 2, true, 0),
+			"DV-T19b (iv) 2nd further close beyond the old rail but not its own: not accepted");
+		// (v) a close beyond the old rail but not its own rail: no trigger
+		double[] tv = { 102, 99 }, ownv = { 102.5, 100 }, oldv = { 100, 100 };
+		Check(DvpAccept.Triggered(tv, oldv, ten, 2, 0, 1) && !DvpAccept.Triggered(tv, ownv, ten, 2, 0, 1), "DV-T19b (v) close beyond the old rail but not its own: no trigger");
 	}
 
 	static RingBar[] Ramp(int n, double slope, int seed)
@@ -187,10 +217,26 @@ static partial class Program
 			"DV-11.2 written when the 40-bar clock completes; Finish flushes the rest with complete(0)");
 		string[] fields = { "railKind(", "z(", "price(", "families(", "nRanges(", "score(", "score077(", "distAtr(", "closedThrough(", "heldBars(", "accepted(N2=", "verdict41v0(", "isRollWindow(", "halfDay(", "mfe40(", "mae40(" };
 		Check(rail.All(l => fields.All(l.Contains)), "DV-11.2 DVP RAIL fields present");
-		var v = rail.Where(l => l.Contains("complete(1)")).Select(l => Regex.Match(l, @"verdict41v0\((\w+)\)").Groups[1].Value).Distinct().ToList();
+		var v = rail.Where(l => l.Contains("complete(1)") && l.Contains("event(trigger)")).Select(l => Regex.Match(l, @"verdict41v0\((\w+)\)").Groups[1].Value).Distinct().ToList();
 		Check(v.All(x => x == "accepted" || x == "held" || x == "failed") && v.Contains("failed"), "DV-11.2 verdict41 v0 in {accepted, held, failed} [GAP stand-in] (" + string.Join("/", v) + ")");
-		Check(rail.Where(l => l.Contains("event(accept)")).All(l => l.Contains("verdict41v0(accepted)")) && rail.Any(l => l.Contains("event(trigger)")),
-			"DV-11.2 accept events have verdict41 accepted; triggers are journalled");
+		Check(rail.Where(l => l.Contains("event(accept)")).All(l => l.Contains("verdict41v0(NaN)")) && rail.Any(l => l.Contains("event(accept)")) && rail.Any(l => l.Contains("event(trigger)")),
+			"DV-11.2 verdict41 v0 [GAP]: accept events journal NaN; triggers are journalled");
+		var trig = rail.Where(l => l.Contains("event(trigger)") && l.Contains("complete(1)")).ToList();
+		Check(trig.Where(l => l.Contains("verdict41v0(accepted)")).All(l => l.Contains("accepted(N2=0"))
+			&& trig.Count(l => l.Contains("verdict41v0(accepted)")) > 0 && trig.Count(l => l.Contains("verdict41v0(accepted)")) <= rail.Count(l => l.Contains("event(accept)") && l.Contains("accepted(N2=1")),
+			"DV-11.2 verdict41 v0 accepted only via an N=2 completion (accepted triggers <= N2 accept events)");
+		// R1 (Analyst 1 re-review, spec rev 5.1 DV-8.4 S3): exact 1:1 for stable-identity rails; also guards e1 (own-trigger only)
+		var bi = new Dictionary<DateTime, int>(); for (int i = 0; i < s.Length; i++) bi[s[i].time] = i;
+		Func<string, string, string> fv = (l, k) => Regex.Match(l, Regex.Escape(k) + @"\(([^)]*)\)").Groups[1].Value;
+		Func<string, bool> uk = l => { string k = fv(l, "railKind"); return k == "DvpPoc" || k == "DvpVah" || k == "DvpVal" || k == "DvpSigma"; };
+		Func<string, int, string> key = (l, d) => fv(l, "railKind") + "|" + fv(l, "dir") + "|" + (fv(l, "railKind") == "DvpSigma" ? fv(l, "z") : "") + "|"
+			+ (bi[DateTime.ParseExact(fv(l, "barTime"), "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)] - d);
+		var kt = rail.Where(l => uk(l) && l.Contains("event(trigger)") && l.Contains("verdict41v0(accepted)")).Select(l => key(l, 0)).ToList();
+		var ka = rail.Where(l => uk(l) && l.Contains("event(accept)") && l.Contains("accepted(N2=1")).Select(l => key(l, 2)).ToList();
+		Check(kt.Count > 0 && kt.Count == ka.Count && kt.Distinct().Count() == kt.Count && new HashSet<string>(kt).SetEquals(ka),
+			"DV-11.2 verdict41 v0 accepted <-> N=2 accept event 2 bars later, 1:1 for unique/sigma rails (" + kt.Count + " / " + ka.Count + ")");
+		var off = new Rig(new DvpConfig { enabled = true, journalRails = false, splitFlow = false }, true, true);
+		Check(off.S.RailJournal == null && rig.S.RailJournal != null, "N1 DvpRailJournal allocated only when journalRails is on");
 	}
 
 	static void ZeroAllocD5()
@@ -229,26 +275,31 @@ static partial class Program
 
 	static void NodeSwap()
 	{
-		// Analyst 2: two HVNs swap order between snapshots; matching is by nearest same-kind z, not by position.
-		var a = new DvpRail[4]; var b = new DvpRail[4];
-		a[0].kind = ELevelKind.DvpPoc; a[1].kind = ELevelKind.DvpHvn; a[1].z = 0.50; a[1].price = 100; a[2].kind = ELevelKind.DvpHvn; a[2].z = 1.20; a[2].price = 110; a[3].kind = ELevelKind.DvpLvn; a[3].z = 0.9; a[3].price = 105;
-		b[0].kind = ELevelKind.DvpPoc; b[1].kind = ELevelKind.DvpHvn; b[1].z = 1.18; b[1].price = 111; b[2].kind = ELevelKind.DvpHvn; b[2].z = 0.53; b[2].price = 101; b[3].kind = ELevelKind.DvpLvn; b[3].z = 0.85; b[3].price = 104;
-		Check(DvpRailHistory.Match(a, 4, ELevelKind.DvpHvn, 1.20) == 2 && DvpRailHistory.Match(b, 4, ELevelKind.DvpHvn, 1.20) == 1
-			&& DvpRailHistory.Match(a, 4, ELevelKind.DvpHvn, 0.50) == 1 && DvpRailHistory.Match(b, 4, ELevelKind.DvpHvn, 0.50) == 2,
-			"DV-8.1 HVN/LVN nodes that swap order between snapshots still match by nearest same-kind z");
-		Check(DvpRailHistory.Match(b, 4, ELevelKind.DvpLvn, 1.20) == 3 && DvpRailHistory.Match(b, 4, ELevelKind.DvpSigma, 1.0) == -1 && DvpRailHistory.Match(b, 4, ELevelKind.DvpPoc, 9) == 0,
-			"DV-8.1 matching never crosses kinds (LVN query ignores HVNs; absent sigma = -1; POC by kind)");
+		// Analyst 1 T2: HVN/LVN nearest-z match is bounded (|dz| <= 0.25); a tracked node absent from a snapshot is NaN, never a far node.
+		var a = new DvpRail[3]; var b = new DvpRail[3]; var c = new DvpRail[3];
+		a[0].kind = ELevelKind.DvpPoc; a[1].kind = ELevelKind.DvpHvn; a[1].z = 0.50; a[1].price = 100; a[2].kind = ELevelKind.DvpHvn; a[2].z = 1.20; a[2].price = 110;
+		b[0].kind = ELevelKind.DvpPoc; b[1].kind = ELevelKind.DvpHvn; b[1].z = 1.18; b[1].price = 111; b[2].kind = ELevelKind.DvpLvn; b[2].z = 0.55; b[2].price = 101;   // 0.50 HVN disappeared
+		c[0].kind = ELevelKind.DvpPoc; c[1].kind = ELevelKind.DvpHvn; c[1].z = 0.62; c[1].price = 101; c[2].kind = ELevelKind.DvpHvn; c[2].z = 1.21; c[2].price = 110;   // a node (re)appears near 0.50
+		Check(DvpRailHistory.Match(a, 3, ELevelKind.DvpHvn, 0.50) == 1 && DvpRailHistory.Match(b, 3, ELevelKind.DvpHvn, 0.50) == -1 && DvpRailHistory.Match(c, 3, ELevelKind.DvpHvn, 0.50) == 1,
+			"DV-8.1 node disappears (far same-kind node 0.68 z away is NOT matched) then reappears within 0.25 z");
+		Check(DvpRailHistory.Match(b, 3, ELevelKind.DvpHvn, 1.20) == 1 && DvpRailHistory.Match(c, 3, ELevelKind.DvpHvn, 1.20) == 2 && DvpRailHistory.Match(b, 3, ELevelKind.DvpLvn, 0.50) == 2,
+			"DV-8.1 nodes matched by z, not position; never across kinds");
+		Check(DvpRailHistory.Match(a, 3, ELevelKind.DvpHvn, 0.75) == 1 && DvpRailHistory.Match(a, 3, ELevelKind.DvpHvn, 0.751) == -1 && DvpRailHistory.Match(a, 3, ELevelKind.DvpSigma, 1.0) == -1,
+			"DV-8.1 bound inclusive at |dz| = 0.25");
+		// absent node in the pre-trigger snapshot -> NaN own rail -> no false trigger
+		double[] cl = { 102, 99 }, p = { 100, double.NaN }, at = { 10, 10 };
+		Check(!DvpAccept.Triggered(cl, p, at, 2, 0, 1), "DV-8.1 absent node (NaN) in the pre-trigger snapshot: no trigger");
 	}
 
 	static void QueryOrder()
 	{
 		// Analyst 2 (ATR history fix): identical results whichever order the queries run, asserted for both orders explicitly.
 		bool[] hd; var s = Series(900, 57, null, null, out hd);
-		var x = new Rig(Cfg(), true, false); var y = new Rig(Cfg(), true, false);
+		var x = new Rig(Cfg(), true, false); var y = new Rig(Cfg(), true, false); var z = new Rig(Cfg(), true, false); var w = new Rig(Cfg(), true, false);
 		bool eq = true, atrOk = true; int n = 0;
 		for (int i = 0; i < s.Length; i++)
 		{
-			x.Feed(s[i], hd[i]); y.Feed(s[i], hd[i]);
+			x.Feed(s[i], hd[i]); y.Feed(s[i], hd[i]); z.Feed(s[i], hd[i]); w.Feed(s[i], hd[i]);
 			if (i < 300 || i % 53 != 0) continue;
 			// order A: snapshots endAgo 1..8 first, then the history; order B: the history first, then snapshots 8..1
 			var qa = new string[9]; for (int k = 1; k <= 8; k++) qa[k] = x.Q(k);
@@ -256,10 +307,16 @@ static partial class Program
 			var hb = y.e.HistoryOf(1, y.ring, ELevelKind.DvpVal, 0); string sb = string.Join(",", hb.P.Concat(hb.A).Concat(hb.C).Select(v => v.ToString("R", CI)));
 			for (int k = 8; k >= 1; k--) if (y.Q(k) != qa[k]) eq = false;
 			if (sa != sb) eq = false;
+			// order C: snapshots endAgo 8 -> 1, then the history; order D: Snapshot(endAgo 6..8) before HistoryOf
+			for (int k = 8; k >= 1; k--) z.e.Snapshot(1, z.ring, k);
+			var hz = z.e.HistoryOf(1, z.ring, ELevelKind.DvpVal, 0); string sz = string.Join(",", hz.P.Concat(hz.A).Concat(hz.C).Select(v => v.ToString("R", CI)));
+			for (int k = 6; k <= 8; k++) w.e.Snapshot(1, w.ring, k);
+			var hw = w.e.HistoryOf(1, w.ring, ELevelKind.DvpVal, 0); string sw = string.Join(",", hw.P.Concat(hw.A).Concat(hw.C).Select(v => v.ToString("R", CI)));
+			if (sz != sa || sw != sa) eq = false;
 			for (int k = 0; k < 8; k++) if (double.IsNaN(ha.A[k])) atrOk = false;
 			n++;
 		}
-		Check(eq && n > 0, "DV-8.1 query order A (snapshots then history) == order B (history then snapshots, reversed) (" + n + " probes)");
+		Check(eq && n > 0, "DV-8.1 query orders A (snapshots 1..8, history) == B (history, snapshots 8..1) == C (snapshots 8..1, history) == D (Snapshot 6..8, HistoryOf) (" + n + " probes)");
 		Check(atrOk, "DV-8.1 every history snapshot (endAgo 1..8) has ATR(t-1) (ATR history depth fix)");
 	}
 

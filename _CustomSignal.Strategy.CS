@@ -535,7 +535,7 @@ namespace PowerLanguage.Strategy
 				IInstrument b = BarsOfData(ds);
 				_BarRing r = Ring(ds);
 				if (b.Status != EBarState.Close || r == null || r.Count == 0 || r[0].bar != b.FullSymbolData.Current) continue;
-				DvpStream st = m_dvp.Stream(ds); if (st == null) continue;
+				DvpStream st = m_dvp.Stream(ds); if (st == null || st.RailJournal == null) continue;
 				DvpSnapshot s = m_dvp.Snapshot(ds, r, 1);
 				DvpRails rails = s != null ? m_dvp.RailsOf(ds, r, 1) : null;
 				DvpLattice lat; DvpConfluence cf = rails != null ? dvpConfOf(m_dvp, ds, r, 1, s, rails, out lat) : null;
