@@ -876,7 +876,7 @@ namespace PowerLanguage.Function
 		{
 			Ds = ds; Config = cfg; Root = root ?? ""; m_tick = tick; RollDetect = rollDetect; RthKnown = rthKnown;
 			m_n = cfg.winLen; m_r = Math.Max(1, cfg.refitEvery); m_H = Math.Max(1, cfg.projBars);
-			m_K = Math.Max(m_r + 4, DvpRailHistory.Depth + 2);   // D5: ATR(t-1) for every rail-history snapshot (endAgo <= 8)
+			m_K = Math.Max(m_r + 4, DvpRailHistory.Depth + 2);   // spec rev 5.1 DV-8.1 (S2, depth): max(refitEvery + 4, 10); endAgo <= 8 carries its ATR(t-1)
 			m_y = new double[m_n]; m_h = new double[m_n]; m_l = new double[m_n]; m_v = new double[m_n];
 			m_up = cfg.splitFlow ? new double[m_n] : null; m_dn = cfg.splitFlow ? new double[m_n] : null;
 			m_atrHist = new double[m_K];
@@ -885,7 +885,7 @@ namespace PowerLanguage.Function
 			int maxRails = m_s0.rails.Items.Length, maxLat = cfg.useFib ? cfg.fibRanges * DvpLattice.NFib : 0;
 			History = new DvpRailHistory(this, maxRails);
 			Confluence = new DvpConfluence(maxRails + maxLat);
-			RailJournal = new DvpRailJournal(maxRails);
+			RailJournal = cfg.journalRails ? new DvpRailJournal(maxRails) : null;   // DV-13.3: only when the DVP RAIL journal is on
 			m_prevFit = new DvpFit(m_n);
 			m_fwd = new DvpCoef[m_H / m_r + 2];
 			for (int i = 0; i < m_fwd.Length; i++) m_fwd[i] = new DvpCoef();
@@ -1327,7 +1327,7 @@ namespace PowerLanguage.Function
 			if (m_finished) return;
 			m_finished = true;
 			if (journal == null) return;
-			for (int i = 0; i < m_streams.Length; i++) m_streams[i].RailJournal.Finish(m_ds[i], journal, RunId);   // DV-11.2 unfinished trackers
+			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].RailJournal != null) m_streams[i].RailJournal.Finish(m_ds[i], journal, RunId); }   // DV-11.2 unfinished trackers
 			for (int i = 0; i < m_streams.Length; i++) journal(m_streams[i].RunLine(RunId));
 		}
 	}
@@ -1537,7 +1537,9 @@ namespace PowerLanguage.Function
 		public void Load(DvpRails rails, DvpLattice lat)
 		{
 			Clear();
-			if (rails != null) for (int i = 0; i < rails.Count; i++) Add(rails.Items[i].kind, rails.Items[i].price, -1);
+			if (rails != null) for (int i = 0; i < rails.Count; i++)   // spec rev 5.1 DV-6.3/6.5 (S4): every rail occupies a slot in publish order; priceless = non-candidate slot; 1:1 with quality
+					if (!Add(rails.Items[i].kind, rails.Items[i].price, -1) && CandCount < CandPrice.Length)
+					{ CandKind[CandCount] = rails.Items[i].kind; CandPrice[CandCount] = rails.Items[i].price; CandFam[CandCount] = -1; CandRange[CandCount] = -1; CandCluster[CandCount] = -1; CandCount++; }
 			RailCount = CandCount;
 			if (lat != null) for (int i = 0; i < lat.Count; i++) Add(ELevelKind.DvpFib, lat.Price[i], lat.Range[i]);
 		}
@@ -1552,7 +1554,7 @@ namespace PowerLanguage.Function
 		public void Cluster(double atr, double cPrev, double confTol, double wVa, double wPoc)
 		{
 			ClusterCount = 0; Atr = atr; Tol = confTol * atr;
-			for (int i = 0; i < CandCount; i++) { m_claimed[i] = false; CandCluster[i] = -1; }
+			for (int i = 0; i < CandCount; i++) { m_claimed[i] = CandFam[i] < 0; CandCluster[i] = -1; }   // non-candidate slots never cluster
 			if (!(atr > 0) || !(confTol > 0) || double.IsInfinity(Tol)) return;
 			double tol = Tol;
 			while (true)
@@ -1606,7 +1608,7 @@ namespace PowerLanguage.Function
 			int fm = 0, rm = 0;
 			for (int j = 0; j < CandCount; j++)
 			{
-				if (!Within(CandPrice[j], price, tol)) continue;
+				if (CandFam[j] < 0 || !Within(CandPrice[j], price, tol)) continue;
 				fm |= 1 << CandFam[j];
 				if (CandFam[j] == FamLattice) rm |= RangeBit(CandRange[j]);
 			}
@@ -1749,7 +1751,9 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Index of the rail matching (kind, z) in items[0..n): POC/VAH/VAL by kind; sigma by |dz| &lt;= 1e-6; HVN/LVN the
-		/// same-kind rail nearest in z (so nodes that swap order between snapshots still match by z, not position). -1 if none.</summary>
+		/// same-kind rail nearest in z provided |dz| &lt;= NodeZTol (so nodes that swap order still match by z, not position); a
+		/// tracked node absent from a snapshot (not yet formed, merged) is -1 there, never a far node of the same kind. -1 if none.</summary>
+		public const double NodeZTol = 0.25;   // spec rev 5.1 DV-8.1 (S1, matching): HVN/LVN |dz| <= 0.25, else absent (NaN)
 		public static int Match(DvpRail[] it, int n, ELevelKind kind, double z)
 		{
 			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
@@ -1763,7 +1767,7 @@ namespace PowerLanguage.Function
 				if (node) { if (dz < bd) { bd = dz; best = i; } }
 				else if (dz <= 1e-6) return i;
 			}
-			return best;
+			return best >= 0 && bd <= NodeZTol ? best : -1;
 		}
 
 		/// <summary>Own rail price of kind/z in a slot, or NaN.</summary>
@@ -1812,8 +1816,9 @@ namespace PowerLanguage.Function
 	/// and sigma rail is tested both ways for a trigger and for acceptance under the PS-25 reading (countTrigger = true,
 	/// deltaAtr = 0, N = 2/3/5). Each interaction is tracked for HOLD_BARS = 40 bars (MFE40/MAE40 in ATR from the event close) and
 	/// written when the clock completes (or at Finish, complete(0)). verdict41 v0 (journal field verdict41v0) [GAP stand-in, pre-registered]: on the 41-bar clock
-	/// (event bar + 40), "accepted" if Accepted(N = 2, countTrigger = true, deltaAtr = 0) completes before any BackInside, "failed" if
-	/// BackInside comes first, else "held". Events of the current bar are exposed for the host's logSignal.
+	/// (event bar + 40), trigger events only: "accepted" if Accepted(N = 2, countTrigger = true, deltaAtr = 0) completes on the event's
+	/// OWN trigger (2 bars after the event) before any close back inside its own rail by &gt; 0.10 ATR, "failed" if such a close comes
+	/// first, else "held". Accept events journal verdict41v0(NaN). Provisional, journal-only, never gates (spec rev 5.1 DV-8.4/DV-11.2 S3). Events of the current bar are exposed for the host's logSignal.
 	/// </summary>
 	public sealed class DvpRailJournal
 	{
@@ -1833,7 +1838,7 @@ namespace PowerLanguage.Function
 		public static string Line(DvpRailEvent e, int ds, string runId, bool complete)
 		{
 			var sb = new StringBuilder(384);
-			string verdict = !e.trigger ? "accepted" : e.accepted41 ? "accepted" : e.back41 ? "failed" : complete ? "held" : "NaN";
+			string verdict = !e.trigger ? "NaN" : e.accepted41 ? "accepted" : e.back41 ? "failed" : complete ? "held" : "NaN";
 			sb.Append("DVP RAIL runId(").Append(runId).Append(") stream(Data").Append(I(ds)).Append(") barTime(").Append(e.time.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
 				.Append(") tag(").Append(DvpRails.Tag(ds, e.tPrev, e.deg, e.kind, e.z)).Append(") event(").Append(e.trigger ? "trigger" : "accept").Append(") dir(").Append(e.dir > 0 ? "+1" : "-1")
 				.Append(") railKind(").Append(e.kind.ToString()).Append(") z(").Append(F(e.z)).Append(") price(").Append(F(e.price)).Append(") families(").Append(I(e.families))
@@ -1868,7 +1873,7 @@ namespace PowerLanguage.Function
 				{
 					int dr = m_track[i].dir;   // back inside its own rail by more than Delta*ATR, at any bar of the clock
 					if (!double.IsNaN(h.P[0]) && h.A[0] > 0 && dr * (h.C[0] - h.P[0]) < -DvpAccept.Delta * h.A[0]) m_track[i].back41 = true;
-					else if (DvpAccept.Accepted(h.C, h.P, h.A, h.Len, m_track[i].dir, 2, true, 0)) m_track[i].accepted41 = true;
+					else if (m_track[i].elapsed == 2 && DvpAccept.Accepted(h.C, h.P, h.A, h.Len, m_track[i].dir, 2, true, 0)) m_track[i].accepted41 = true;   // on the event's own trigger only
 				}
 				if (m_track[i].elapsed >= DvpConst.HoldBars)
 				{
@@ -1892,7 +1897,7 @@ namespace PowerLanguage.Function
 					e.distAtr = snap.atr > 0 ? (b.c - r.price) / snap.atr : double.NaN;
 					e.closedThrough = DvpAccept.Beyond(h.C, h.P, h.A, h.Len, 0, dir, 0);
 					e.heldBars = DvpAccept.RunBeyond(h.C, h.P, h.A, h.Len, dir, 0);
-					e.acc2 = a2; e.acc3 = a3; e.acc5 = a5; e.accepted41 = !trig;
+					e.acc2 = a2; e.acc3 = a3; e.acc5 = a5;
 					e.families = conf != null ? conf.CandFamilies(i) : 0; e.nRanges = conf != null ? conf.CandRanges(i) : 0;
 					e.score077 = conf != null ? conf.CandScore077(i) : double.NaN;
 					e.sigmaAtr = snap.sigmaAtr; e.deg = rails.Deg; e.isRollWindow = isRollWindow; e.halfDay = halfDay;
