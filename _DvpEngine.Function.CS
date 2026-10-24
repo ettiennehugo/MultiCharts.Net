@@ -7,8 +7,9 @@ namespace PowerLanguage.Function
 {
 	// ============================================================================================
 	// M-DVP (specs/m-dvp-spec.md rev 3): detrended volume-profile engine after Keller B5 App E (buildTrend / evalTrend /
-	// evalLeverage / trendSE). PR-D1 = the fit core only: DvpConfig (Validate/Canon), DvpFit (Forsythe recurrence, sigma,
-	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone) and the empty DvpFrozenDegree table. Not wired into
+	// evalLeverage / trendSE). PR-D1 = the fit core: DvpConfig (Validate/Canon), DvpFit (Forsythe recurrence, sigma,
+	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone) and the empty DvpFrozenDegree table. PR-D2 = DvpManifold
+	// (rows, tick floor, VA, entropy/concentration, nodes) and DvpRails (rails, residual order, LevelRef/tags). Not wired into
 	// _CustomSignal yet (PR-D3). Everything between <dvp-core> markers is MC-free; tests/Dvp extracts it with awk (DV-0.3).
 	// ============================================================================================
 
@@ -421,5 +422,844 @@ namespace PowerLanguage.Function
 			skew = m2 > 0 ? m3 / Math.Pow(m2, 1.5) : double.NaN;
 		}
 	}
+
+	// ---------------------------------------------------------------------------------------------------------------
+	// PR-D2 (DV-4): residual manifold, POC/VA, shape stats, nodes and rails. No allocation on the refit path: every
+	// buffer (exact-length row arrays for each possible manRowsEff, node slots, candidate and rail arrays) is allocated
+	// once in the constructor (DV-0.4, DV-13.2). LevelRef materialisation (tag strings) is a separate, query-side step.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/// <summary>One manifold node (DV-4.7): row index, z of the row centre, topographic prominence, side of POC (+1 above, -1 below).</summary>
+	public struct DvpNode
+	{
+		public int row; public double z, prom; public int side;
+	}
+
+	/// <summary>One rail of a snapshot (DV-4.8): kind, residual level z, price P_t(z) = yhat_{t-1}(u_t) + z sigma_{t-1}.</summary>
+	public struct DvpRail
+	{
+		public ELevelKind kind; public double z, price;
+	}
+
+	public sealed class DvpManifold
+	{
+		readonly int m_manRows;
+		readonly double[][] m_rowsBy, m_upBy, m_downBy;   // exact-length row arrays, index = manRowsEff (1..manRows); all preallocated
+		readonly List<double[]> m_hvnList, m_lvnList;      // caller-owned lists for _ProfileMath.Prominence
+		readonly double[][] m_hvnSlots, m_lvnSlots;        // slot pool refilled into the lists before every call
+		readonly DvpNode[] m_cand;                         // node-selection scratch
+		readonly bool[] m_taken;
+		double m_selSpan, m_selWz;
+		public readonly DvpNode[] Hvn, Lvn;                // selected nodes, ascending z; counts HvnCount / LvnCount
+		public int HvnCount { get; private set; }
+		public int LvnCount { get; private set; }
+
+		public bool Valid { get; private set; }            // a profile exists (sigma > 0 and some in-span volume)
+		public int RowsEff { get; private set; }           // manRowsEff (DV-4.1), journaled
+		public double Span { get; private set; }
+		public double Wz { get; private set; }             // row height in sigma units
+		public double Sigma { get; private set; }
+		public double TailVol { get; private set; }
+		public double TotalVol { get; private set; }       // sum of v_i that entered the deposit (v > 0 and finite)
+		public double UpTail { get; private set; }
+		public double DownTail { get; private set; }
+		public int Poc { get; private set; }
+		public int VaLo { get; private set; }
+		public int VaHi { get; private set; }
+		public double PocZ { get; private set; }
+		public double VaLoZ { get; private set; }
+		public double VaHiZ { get; private set; }
+		public double Entropy { get; private set; }
+		public double Concentration { get; private set; }
+		public double ConcentrationOcc { get; private set; }
+		public double InSampleCov2 { get; private set; }
+
+		public DvpManifold(int manRows, bool splitFlow)
+		{
+			if (manRows < 1) throw new ArgumentOutOfRangeException("manRows");
+			m_manRows = manRows;
+			m_rowsBy = new double[manRows + 1][];
+			if (splitFlow) { m_upBy = new double[manRows + 1][]; m_downBy = new double[manRows + 1][]; }
+			for (int r = 1; r <= manRows; r++)
+			{
+				m_rowsBy[r] = new double[r];
+				if (splitFlow) { m_upBy[r] = new double[r]; m_downBy[r] = new double[r]; }
+			}
+			int slots = manRows + 2;   // Prominence finds at most ceil(R/2) HVNs and one fewer LVN
+			m_hvnList = new List<double[]>(slots); m_lvnList = new List<double[]>(slots);
+			m_hvnSlots = new double[slots][]; m_lvnSlots = new double[slots][];
+			for (int i = 0; i < slots; i++) { m_hvnSlots[i] = new double[2]; m_lvnSlots[i] = new double[2]; }
+			m_cand = new DvpNode[slots]; m_taken = new bool[slots];
+			Hvn = new DvpNode[2 * 10]; Lvn = new DvpNode[2 * 10];   // maxNodes <= 10 per side (DvpConfig.Validate)
+			Clear();
+		}
+
+		public int ManRows { get { return m_manRows; } }
+		/// <summary>The in-span rows of the last build (exact length RowsEff), or null.</summary>
+		public double[] Rows { get { return RowsEff > 0 ? m_rowsBy[RowsEff] : null; } }
+		public double[] UpRows { get { return m_upBy != null && RowsEff > 0 ? m_upBy[RowsEff] : null; } }
+		public double[] DownRows { get { return m_downBy != null && RowsEff > 0 ? m_downBy[RowsEff] : null; } }
+		/// <summary>Centre z of row r.</summary>
+		public double RowZ(int r) { return -Span + (r + 0.5) * Wz; }
+
+		void Clear()
+		{
+			Valid = false; RowsEff = 0; Sigma = Wz = Span = 0; TailVol = TotalVol = UpTail = DownTail = 0;
+			Poc = VaLo = VaHi = -1; PocZ = VaLoZ = VaHiZ = Entropy = Concentration = ConcentrationOcc = InSampleCov2 = double.NaN;
+			HvnCount = LvnCount = 0;
+		}
+
+		/// <summary>DV-4.1 tick floor: manRowsEff = max(1, floor(2 span sigma / tick)) when a nominal row is under one tick, else manRows.</summary>
+		public static int RowsEffFor(int manRows, double span, double sigma, double tick)
+		{
+			double wz = 2.0 * span / manRows;
+			if (tick > 0 && wz * sigma < tick)
+			{
+				double r = Math.Floor(2.0 * span * sigma / tick);
+				return r < 1 ? 1 : (r > manRows ? manRows : (int)r);
+			}
+			return manRows;
+		}
+
+		/// <summary>
+		/// DV-4.2 deposit of volume v over [loZ, hiZ] onto rows[0..R-1] (row r = [-span + r wz, -span + (r+1) wz)), in
+		/// proportion to each row's overlap; the remainder (outside +-span) is returned as tail. A zero-range bar puts all of v
+		/// into its row (or the tail when it is outside; +span itself is outside, rows are half-open).
+		/// </summary>
+		public static double Deposit(double[] rows, int R, double span, double wz, double loZ, double hiZ, double v)
+		{
+			if (!(v > 0) || double.IsInfinity(v)) return 0;
+			if (hiZ < loZ) { double t = loZ; loZ = hiZ; hiZ = t; }
+			double len = hiZ - loZ;
+			if (!(len > 0))
+			{
+				double fr = Math.Floor((loZ + span) / wz);
+				if (fr >= 0 && fr < R) { rows[(int)fr] += v; return 0; }
+				return v;
+			}
+			double a = Math.Max(loZ, -span), b = Math.Min(hiZ, span), inside = 0;
+			if (b > a)
+			{
+				int r0 = (int)Math.Floor((a + span) / wz), r1 = (int)Math.Floor((b + span) / wz);
+				if (r0 < 0) r0 = 0; if (r1 > R - 1) r1 = R - 1;
+				for (int r = r0; r <= r1; r++)
+				{
+					double rl = -span + r * wz, rh = rl + wz;
+					double ov = Math.Min(b, rh) - Math.Max(a, rl);
+					if (ov > 0) { double dep = v * (ov / len); rows[r] += dep; inside += dep; }
+				}
+			}
+			double tail = v - inside;
+			return tail > 0 ? tail : 0;
+		}
+
+		/// <summary>
+		/// Build the manifold of a fitted window (DV-4.1..4.7). fit must be Valid with Choose already called; high/low/vol (and
+		/// up/down when splitFlow) are the same n window bars as the fit, i = n-1 = bar t-1. vaFraction is vaPct/100 (a
+		/// fraction; DV-4.4). Returns false (no profile) when sigma is not > 0 or no volume falls inside the span.
+		/// </summary>
+		public bool Build(DvpFit fit, double[] high, double[] low, double[] vol, double[] up, double[] down,
+			double manSpan, double tick, double vaFraction, double nodeProm, int maxNodes)
+		{
+			if (!(vaFraction > 0 && vaFraction <= 1)) throw new ArgumentOutOfRangeException("vaFraction", "DV-4.4: pass vaPct / 100.0");
+			Clear();
+			if (fit == null || !fit.Valid) return false;
+			int n = fit.n, d = fit.Deg;
+			double sigma = fit.SigmaD;
+			InSampleCov2 = fit.CovIn(d, 2);
+			if (!(sigma > 0) || double.IsInfinity(sigma)) return false;
+			int R = RowsEffFor(m_manRows, manSpan, sigma, tick);
+			double wz = 2.0 * manSpan / R;
+			RowsEff = R; Span = manSpan; Wz = wz; Sigma = sigma;
+			double[] rows = m_rowsBy[R]; Array.Clear(rows, 0, R);
+			bool split = m_upBy != null && up != null && down != null;
+			double[] ur = split ? m_upBy[R] : null, dr = split ? m_downBy[R] : null;
+			if (split) { Array.Clear(ur, 0, R); Array.Clear(dr, 0, R); }
+			double tail = 0, total = 0, ut = 0, dt = 0;
+			for (int i = 0; i < n; i++)
+			{
+				double v = vol[i];
+				if (!(v > 0) || double.IsInfinity(v)) continue;
+				double c = fit.Yhat(fit.U(i), d), lo = (low[i] - c) / sigma, hi = (high[i] - c) / sigma;
+				total += v;
+				tail += Deposit(rows, R, manSpan, wz, lo, hi, v);
+				if (split) { ut += Deposit(ur, R, manSpan, wz, lo, hi, up[i]); dt += Deposit(dr, R, manSpan, wz, lo, hi, down[i]); }
+			}
+			TailVol = tail; TotalVol = total; UpTail = ut; DownTail = dt;
+			int vlo, vhi, poc;
+			if (!_ProfileMath.ValueAreaExpansion(rows, vaFraction, out vlo, out vhi, out poc)) return false;
+			Valid = true; Poc = poc; VaLo = vlo; VaHi = vhi;
+			PocZ = RowZ(poc); VaLoZ = -manSpan + vlo * wz; VaHiZ = -manSpan + (vhi + 1) * wz;   // outer edges (DV-4.4, Q9)
+			double conc, concOcc;
+			Shape(rows, poc, out conc, out concOcc);
+			Concentration = conc; ConcentrationOcc = concOcc;
+			Entropy = _ProfileStats.Entropy(rows, EEntropyRows.TradedRows, 0).Hnorm;
+			SelectNodes(rows, poc, nodeProm, maxNodes, manSpan);
+			return true;
+		}
+
+		/// <summary>DV-4.5: concentration = rows[poc] / (sum / R) over all R rows; concentrationOcc uses occupied rows only.</summary>
+		public static void Shape(double[] rows, int poc, out double concentration, out double concentrationOcc)
+		{
+			concentration = concentrationOcc = double.NaN;
+			if (rows == null || poc < 0 || poc >= rows.Length) return;
+			double s = 0; int occ = 0;
+			for (int i = 0; i < rows.Length; i++) if (rows[i] > 0) { s += rows[i]; occ++; }
+			if (!(s > 0)) return;
+			concentration = rows[poc] / (s / rows.Length);
+			concentrationOcc = rows[poc] / (s / occ);
+		}
+
+		/// <summary>
+		/// DV-4.6/4.7 on rows (raw, unsmoothed): _ProfileMath.Prominence at nodeProm, then drop the POC row and any HVN within one
+		/// row of it, and keep per side of POC the maxNodes HVNs and maxNodes LVNs of highest prominence (ties: nearer to POC,
+		/// then lower row). z = row centre for rows spanning [-span, +span]. Results land in Hvn/Lvn sorted by ascending z.
+		/// Public for tests; no allocation.
+		/// </summary>
+		public void SelectNodes(double[] rows, int poc, double nodeProm, int maxNodes, double span)
+		{
+			HvnCount = LvnCount = 0;
+			if (rows == null || rows.Length == 0 || rows.Length >= m_cand.Length) return;
+			if (maxNodes > 10) maxNodes = 10;
+			m_selSpan = span; m_selWz = 2.0 * span / rows.Length;
+			refill(m_hvnList, m_hvnSlots); refill(m_lvnList, m_lvnSlots);
+			_ProfileMath.Prominence(rows, nodeProm, m_hvnList, m_lvnList);
+			HvnCount = pick(m_hvnList, poc, maxNodes, true, Hvn);
+			LvnCount = pick(m_lvnList, poc, maxNodes, false, Lvn);
+		}
+
+		static void refill(List<double[]> list, double[][] slots)
+		{
+			list.Clear();
+			for (int i = 0; i < slots.Length; i++) list.Add(slots[i]);   // capacity preset: no allocation; Prominence overwrites and trims
+		}
+
+		int pick(List<double[]> found, int poc, int maxNodes, bool hvn, DvpNode[] outp)
+		{
+			int nc = 0;
+			for (int i = 0; i < found.Count && nc < m_cand.Length; i++)
+			{
+				int r = (int)found[i][0];
+				if (r == poc || (hvn && Math.Abs(r - poc) <= 1)) continue;
+				m_cand[nc].row = r; m_cand[nc].prom = found[i][1]; m_cand[nc].side = r > poc ? 1 : -1; m_cand[nc].z = -m_selSpan + (r + 0.5) * m_selWz;
+				m_taken[nc] = false; nc++;
+			}
+			int no = 0;
+			for (int side = -1; side <= 1; side += 2)
+				for (int k = 0; k < maxNodes; k++)
+				{
+					int best = -1;
+					for (int j = 0; j < nc; j++)
+					{
+						if (m_taken[j] || m_cand[j].side != side) continue;
+						if (best < 0 || m_cand[j].prom > m_cand[best].prom
+							|| (m_cand[j].prom == m_cand[best].prom && Math.Abs(m_cand[j].row - poc) < Math.Abs(m_cand[best].row - poc))) best = j;
+					}
+					if (best < 0) break;
+					m_taken[best] = true; outp[no++] = m_cand[best];
+				}
+			for (int i = 1; i < no; i++)   // insertion sort by z (rows are distinct)
+			{
+				DvpNode x = outp[i]; int j = i - 1;
+				while (j >= 0 && outp[j].row > x.row) { outp[j + 1] = outp[j]; j--; }
+				outp[j + 1] = x;
+			}
+			return no;
+		}
+	}
+
+	/// <summary>
+	/// DV-4.8/4.9 rails of one snapshot: P_t(z) = yhat_{t-1}(u_t) + z sigma_{t-1}, sorted by z (residual order). Manifold kinds
+	/// (Poc/Vah/Val/Hvn/Lvn) and sigma rails +-k; DvpFib (PR-D4) and DvpConf (PR-D5) are added later. No z = 0 trend rail,
+	/// and the cone is never a rail (DV-1.5). Fixed capacity, no allocation in Build.
+	/// </summary>
+	public sealed class DvpRails
+	{
+		public readonly DvpRail[] Items;
+		public int Count { get; private set; }
+		public double YhatT { get; private set; }   // yhat_{t-1}(u_t)
+		public double Sigma { get; private set; }
+		public int Deg { get; private set; }
+
+		public DvpRails(int maxSigmaRails) { Items = new DvpRail[3 + 2 * 20 + 2 * Math.Max(1, maxSigmaRails)]; Count = 0; Sigma = double.NaN; YhatT = double.NaN; }
+
+		public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList)
+		{
+			return fit == null ? Build(null, man, sigmaList, double.NaN) : Build(fit, man, sigmaList, fit.UT);
+		}
+
+		/// <summary>PR-D3: rails at an explicit u (between refits, DV-3.8: u_t of the frozen fit = UAhead(1 + bars since the anchor)).</summary>
+		public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList, double uT)
+		{
+			Count = 0; YhatT = Sigma = double.NaN; Deg = -1;
+			if (fit == null || !fit.Valid || !(fit.SigmaD > 0)) return false;
+			Deg = fit.Deg; YhatT = fit.Yhat(uT, Deg); Sigma = fit.SigmaD;
+			if (man != null && man.Valid)
+			{
+				add(ELevelKind.DvpPoc, man.PocZ); add(ELevelKind.DvpVah, man.VaHiZ); add(ELevelKind.DvpVal, man.VaLoZ);
+				for (int i = 0; i < man.HvnCount; i++) add(ELevelKind.DvpHvn, man.Hvn[i].z);
+				for (int i = 0; i < man.LvnCount; i++) add(ELevelKind.DvpLvn, man.Lvn[i].z);
+			}
+			if (sigmaList != null)
+				for (int i = 0; i < sigmaList.Length && Count + 2 <= Items.Length; i++) { add(ELevelKind.DvpSigma, sigmaList[i]); add(ELevelKind.DvpSigma, -sigmaList[i]); }
+			for (int i = 1; i < Count; i++)   // insertion sort: z, then kind ordinal (deterministic)
+			{
+				DvpRail x = Items[i]; int j = i - 1;
+				while (j >= 0 && (Items[j].z > x.z || (Items[j].z == x.z && (int)Items[j].kind > (int)x.kind))) { Items[j + 1] = Items[j]; j--; }
+				Items[j + 1] = x;
+			}
+			return true;
+		}
+
+		void add(ELevelKind kind, double z)
+		{
+			if (Count >= Items.Length || double.IsNaN(z)) return;
+			Items[Count].kind = kind; Items[Count].z = z; Items[Count].price = Price(z); Count++;
+		}
+
+		/// <summary>P_t(z) (DV-4.8).</summary>
+		public double Price(double z) { return YhatT + z * Sigma; }
+		/// <summary>(price - yhat(u_t)) / sigma (DV-10 Z).</summary>
+		public double Z(double price) { return Sigma > 0 ? (price - YhatT) / Sigma : double.NaN; }
+
+		/// <summary>DV-10 RailPrice: Poc/Vah/Val ignore z; Sigma/Hvn/Lvn need the rail at z (|dz| &lt;= 1e-9); NaN if absent.</summary>
+		public double RailPrice(ELevelKind kind, double z)
+		{
+			bool unique = kind == ELevelKind.DvpPoc || kind == ELevelKind.DvpVah || kind == ELevelKind.DvpVal;
+			for (int i = 0; i < Count; i++)
+				if (Items[i].kind == kind && (unique || Math.Abs(Items[i].z - z) <= 1e-9)) return Items[i].price;
+			return double.NaN;
+		}
+
+		/// <summary>DV-4.9 NextRail: index of the first rail strictly beyond fromZ in direction dir (+1 up, -1 down), or -1.</summary>
+		public int NextRail(double fromZ, int dir)
+		{
+			if (dir > 0) { for (int i = 0; i < Count; i++) if (Items[i].z > fromZ) return i; }
+			else if (dir < 0) { for (int i = Count - 1; i >= 0; i--) if (Items[i].z < fromZ) return i; }
+			return -1;
+		}
+
+		/// <summary>DV-10.2 tag "DVP{ds}:{t-1:yyyyMMddHHmm}:d{deg}:{kind}{z:+0.00}" (invariant culture; a z that rounds to 0 prints +0.00).</summary>
+		public static string Tag(int ds, DateTime tPrev, int deg, ELevelKind kind, double z)
+		{
+			return "DVP" + ds.ToString(CultureInfo.InvariantCulture) + ":" + tPrev.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture) + ":d"
+				+ deg.ToString(CultureInfo.InvariantCulture) + ":" + kind.ToString() + z.ToString("+0.00;-0.00;+0.00", CultureInfo.InvariantCulture);
+		}
+
+		/// <summary>
+		/// DV-10.1 LevelRefs of the rails into a caller-owned list, reusing caller-pooled LevelRef objects (pool grows only when
+		/// short). Query-side: tag strings allocate, so the host calls this lazily (PR-D3), never on the refit path. quality =
+		/// families is NaN until confluence lands (PR-D5).
+		/// </summary>
+		public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, bool isRollWindow)
+		{
+			into.Clear();
+			for (int i = 0; i < Count; i++)
+			{
+				LevelRef r;
+				if (i < pool.Count) r = pool[i]; else { r = new LevelRef(); pool.Add(r); }
+				DvpRail x = Items[i];
+				r.kind = x.kind; r.price = r.lo = r.hi = x.price; r.createdTime = tPrev; r.sourceT0 = t0; r.sourceT1 = tPrev; r.dataStream = ds;
+				r.tag = Tag(ds, tPrev, Deg, x.kind, x.z); r.quality = double.NaN; r.crossesRoll = false; r.isRollWindow = isRollWindow;
+				into.Add(r);
+			}
+		}
+	}
+	// ---------------------------------------------------------------------------------------------------------------
+	// PR-D3 (DV-0.1, DV-3.7/3.8, DV-7, DV-10, DV-11): per-stream state and the host-facing engine. MC-free: the host feeds
+	// each closed bar's RingBar (already added to the stream's _BarRing) and queries lazily. Every buffer is allocated in the
+	// DvpStream constructor, which runs only inside the _DvpEngine constructor (the host creates the engine in StartCalc
+	// when DvpConfig.enabled, never at load). Nothing here is static except the frozen-degree table.
+	// ---------------------------------------------------------------------------------------------------------------
+
+	/// <summary>DV-10 snapshot: the as-of t-1 fit for bar t (window ends at endBar). Reused per stream; valid until the next closed bar.</summary>
+	public sealed class DvpSnapshot
+	{
+		public int ds, endBar, anchorBar, sinceRefit, n, deg, dCap, manRowsEff;
+		public DateTime tPrev, t0;
+		public bool valid, crossesRoll, lowR2, refitBar, calibrating, manValid, diagnosticOnly;
+		public double atr, sigma, sigmaAtr, r2, dw, skew, yhatEnd, slopeEnd, slope1, slope1SigmaPerBar, endpointDrift, uT, yhatT,
+			pocZ, vaLoZ, vaHiZ, entropy, concentration, concentrationOcc, tailVol, inSampleCov2, rthShare;
+
+		internal void Clear(int ds, int endBar, DateTime tPrev)
+		{
+			this.ds = ds; this.endBar = endBar; this.tPrev = tPrev; t0 = default(DateTime);
+			anchorBar = int.MinValue; sinceRefit = 0; n = 0; deg = -1; dCap = 0; manRowsEff = 0;
+			valid = crossesRoll = lowR2 = refitBar = calibrating = manValid = diagnosticOnly = false;
+			atr = sigma = sigmaAtr = r2 = dw = skew = yhatEnd = slopeEnd = slope1 = slope1SigmaPerBar = endpointDrift = uT = yhatT = double.NaN;
+			pocZ = vaLoZ = vaHiZ = entropy = concentration = concentrationOcc = tailVol = inSampleCov2 = rthShare = double.NaN;
+		}
+	}
+
+	/// <summary>A copy of a fit's coefficients (no window arrays), for the journal-side forward-coverage tracker (DV-3.6 cov_fwd).</summary>
+	public sealed class DvpCoef
+	{
+		public readonly double[] A = new double[DvpFit.MaxDeg + 1], B = new double[DvpFit.MaxDeg + 1], N = new double[DvpFit.MaxDeg + 1], C = new double[DvpFit.MaxDeg + 1];
+		public double yBar, sigma; public int n, deg;
+		public long startPos; public int seen, hits, hitsFlat;
+
+		public void From(DvpFit f, long startPos)
+		{
+			yBar = f.YBar; sigma = f.SigmaD; n = f.n; deg = f.Deg;
+			for (int k = 0; k <= deg; k++) { A[k] = f.A[k]; B[k] = f.B[k]; N[k] = f.N[k]; C[k] = f.C[k]; }
+			this.startPos = startPos; seen = hits = hitsFlat = 0;
+		}
+
+		/// <summary>Same recurrence as DvpFit.Eval (yhat and leverage at u).</summary>
+		public double Eval(double u, out double lev)
+		{
+			double pPrev = 0, p = 1, s = C[0], h = 1 / N[0];
+			for (int k = 0; k < deg; k++)
+			{
+				double pn = (u - A[k]) * p - B[k] * pPrev;
+				pPrev = p; p = pn;
+				s += C[k + 1] * p; h += p * p / N[k + 1];
+			}
+			lev = h; return yBar + s;
+		}
+	}
+
+	/// <summary>
+	/// One DVP stream (DV-7): O(1) per-bar bookkeeping (ATR as of each bar, roll positions, skip share, sessions) plus a
+	/// two-slot lazy cache keyed by window-end bar. Results depend only on the ring contents, never on query or journal
+	/// history (E10, DV-T16b): refit bars are bar-index based (bar % refitEvery == 0), a between-refit query recomputes the
+	/// scheduled refit from the ring, and endpointDrift recomputes the previous refit from the ring when it is not cached.
+	/// </summary>
+	public sealed class DvpStream
+	{
+		sealed class Slot
+		{
+			public readonly DvpFit fit; public readonly DvpManifold man; public readonly DvpRails rails; public readonly DvpSnapshot snap = new DvpSnapshot();
+			public int key = int.MinValue, fitAnchor = int.MinValue;
+			public bool fitOk;
+			public double dw, skew, rthShare;
+			public Slot(DvpConfig c) { fit = new DvpFit(c.winLen); man = new DvpManifold(c.manRows, c.splitFlow); rails = new DvpRails(c.sigmaList.Length); }
+		}
+
+		public readonly int Ds;
+		public readonly DvpConfig Config;
+		public readonly string Root;
+		public readonly bool RollDetect, RthKnown;
+		readonly double m_tick;
+		readonly int m_n, m_r, m_K, m_H;
+		readonly double[] m_y, m_h, m_l, m_v, m_up, m_dn, m_atrHist, m_fwdY;
+		readonly Gate0Atr m_atr = new Gate0Atr(DvpConst.AtrLen);
+		readonly Slot m_s0, m_s1;
+		readonly DvpFit m_prevFit;
+		readonly DvpCoef[] m_fwd;
+		int m_fwdCount;
+		long m_pos = -1, m_roll1 = long.MinValue, m_roll0 = long.MinValue;
+		int m_lastBar = int.MinValue;
+		bool m_degWarned;
+
+		/// <summary>Warning sink (DVP DEGREE fallback); null = silent.</summary>
+		public Action<string> warnOnce;
+
+		// sessions (DV-7.7): tradingDayKey changes on this stream's bars
+		public DateTime SessionDay { get; private set; }
+		public bool SessionHalfDay { get; private set; }
+		public bool NewSession { get; private set; }
+		public int Sessions { get; private set; }
+		public bool LastHalfDay { get; private set; }
+
+		// counters
+		public long BarsSeen { get { return m_pos + 1; } }
+		public long Eligible { get; private set; }     // windows after warm-up (DV-7.4)
+		public long Skipped { get; private set; }      // of which crossing a roll
+		public long FitsComputed { get; private set; } // window fits actually run (laziness counter, DV-T22)
+		public long FitLines { get; private set; }
+		public long SkipLines { get; private set; }
+		double m_covInSum, m_covFwdSum, m_covFwdFlatSum; long m_covInN, m_covFwdN;
+
+		public DvpStream(int ds, DvpConfig cfg, string root, double tick, bool rollDetect, bool rthKnown)
+		{
+			Ds = ds; Config = cfg; Root = root ?? ""; m_tick = tick; RollDetect = rollDetect; RthKnown = rthKnown;
+			m_n = cfg.winLen; m_r = Math.Max(1, cfg.refitEvery); m_H = Math.Max(1, cfg.projBars);
+			m_K = m_r + 4;
+			m_y = new double[m_n]; m_h = new double[m_n]; m_l = new double[m_n]; m_v = new double[m_n];
+			m_up = cfg.splitFlow ? new double[m_n] : null; m_dn = cfg.splitFlow ? new double[m_n] : null;
+			m_atrHist = new double[m_K];
+			m_fwdY = new double[1];
+			m_s0 = new Slot(cfg); m_s1 = new Slot(cfg);
+			m_prevFit = new DvpFit(m_n);
+			m_fwd = new DvpCoef[m_H / m_r + 2];
+			for (int i = 0; i < m_fwd.Length; i++) m_fwd[i] = new DvpCoef();
+		}
+
+		/// <summary>Ring bars this stream needs (DV-0.2): winLen + refitEvery (anchor offset) + endpointDrift's previous window + slack.</summary>
+		public static int RingNeed(DvpConfig c) { return c.winLen + 2 * Math.Max(1, c.refitEvery) + 8; }
+
+		public bool DiagnosticOnly { get { return !RollDetect || SkipShare > 0.30; } }
+		public double SkipShare { get { return !RollDetect ? double.NaN : Eligible > 0 ? (double)Skipped / Eligible : 0.0; } }
+		public double MeanCovIn { get { return m_covInN > 0 ? m_covInSum / m_covInN : double.NaN; } }
+		public double MeanCovFwd { get { return m_covFwdN > 0 ? m_covFwdSum / m_covFwdN : double.NaN; } }
+		public double MeanCovFwdFlat { get { return m_covFwdN > 0 ? m_covFwdFlatSum / m_covFwdN : double.NaN; } }
+		public int FallbackCount { get { return m_s0.fit.FallbackCount + m_s1.fit.FallbackCount + m_prevFit.FallbackCount; } }
+
+		static int Mod(int a, int m) { int x = a % m; return x < 0 ? x + m : x; }
+
+		double Src(RingBar b) { return Config.src == EDvpSrc.Close ? b.c : (b.h + b.l) * 0.5; }
+
+		/// <summary>
+		/// Closed-bar step (O(1) without a journal): ring[0] is this stream's newest closed bar, already added by the host.
+		/// Returns true for a new bar. journal != null with journalFits makes the journal a consumer (Q14): every refit bar's
+		/// window is computed and one DVP FIT line written.
+		/// </summary>
+		public bool OnBar(_BarRing ring, bool halfDay, Action<string> journal, string runId, string configHash)
+		{
+			if (ring == null || ring.Count == 0) return false;
+			RingBar b = ring[0];
+			if (b.bar == m_lastBar) return false;
+			m_lastBar = b.bar; m_pos++;
+			if (b.rollBar) { m_roll0 = m_roll1; m_roll1 = m_pos; if (RollDetect) m_atr.ResetPrev(); }   // DV-7.3
+			m_atr.Add(b.h, b.l, b.c);
+			m_atrHist[(int)(m_pos % m_K)] = m_atr.Value;
+			NewSession = m_pos == 0 || b.tradingDay != SessionDay;   // DV-7.7: tradingDayKey changes, never calendar dates
+			if (NewSession) { Sessions++; SessionDay = b.tradingDay; SessionHalfDay = halfDay; }
+			LastHalfDay = SessionHalfDay;
+			// DV-7.1 / 7.4: skip accounting on every closed bar from roll positions (no fit)
+			long aPos = m_pos - Mod(b.bar, m_r);
+			if (aPos - m_n + 1 >= 0)
+			{
+				Eligible++;
+				if (RollDetect && crossesByPos(aPos)) Skipped++;
+			}
+			if (journal != null)
+			{
+				trackForward(b);
+				if (Config.journalFits && Mod(b.bar, m_r) == 0) journalFit(ring, journal, runId, configHash);
+			}
+			return true;
+		}
+
+		bool crossesByPos(long aPos)
+		{
+			long lo = aPos - m_n + 2;   // i in [1, n-1]
+			return (m_roll1 >= lo && m_roll1 <= aPos) || (m_roll0 >= lo && m_roll0 <= aPos);
+		}
+
+		static bool crossesInRing(_BarRing ring, int anchorAgo, int n)
+		{
+			for (int a = anchorAgo; a <= anchorAgo + n - 2; a++) if (ring[a].rollBar) return true;   // i = n-1-(a-anchorAgo) in [1, n-1]
+			return false;
+		}
+
+		/// <summary>The snapshot whose window ends endAgo bars back in the ring (endAgo = 1 when ring[0] is the current closed bar t).</summary>
+		public DvpSnapshot Snapshot(_BarRing ring, int endAgo)
+		{
+			if (ring == null || endAgo < 0 || ring.Count <= endAgo || ring[0].bar != m_lastBar) return null;
+			RingBar eb = ring[endAgo];
+			if (m_s0.key == eb.bar) return m_s0.snap;
+			if (m_s1.key == eb.bar) return m_s1.snap;
+			Slot s = m_s0.key <= m_s1.key ? m_s0 : m_s1;   // replace the older end bar
+			compute(s, ring, endAgo);
+			return s.snap;
+		}
+
+		/// <summary>Rails of the cached snapshot for this window end (after Snapshot), or null.</summary>
+		public DvpRails RailsFor(DvpSnapshot snap)
+		{
+			if (snap == null || !snap.valid) return null;
+			if (m_s0.snap == snap) return m_s0.rails;
+			if (m_s1.snap == snap) return m_s1.rails;
+			return null;
+		}
+
+		public DvpFit FitFor(DvpSnapshot snap)
+		{
+			if (snap == null || !snap.valid) return null;
+			if (m_s0.snap == snap) return m_s0.fit;
+			if (m_s1.snap == snap) return m_s1.fit;
+			return null;
+		}
+
+		void compute(Slot s, _BarRing ring, int endAgo)
+		{
+			DvpConfig c = Config;
+			RingBar eb = ring[endAgo];
+			DvpSnapshot snap = s.snap;
+			snap.Clear(Ds, eb.bar, eb.time);
+			s.key = eb.bar;
+			snap.diagnosticOnly = !RollDetect;   // the skipShare verdict is run-level (DV-7.4), never a per-bar flag
+			long ePos = m_pos - endAgo;
+			int off = Mod(eb.bar, m_r), aAgo = endAgo + off;
+			long aPos = ePos - off;
+			snap.sinceRefit = off; snap.refitBar = off == 0;
+			snap.atr = m_pos - ePos < m_K && ePos >= 0 ? m_atrHist[(int)(ePos % m_K)] : double.NaN;
+			if (aPos - m_n + 1 < 0 || ring.Count < aAgo + m_n) return;   // warm-up: no fit (DV-7.1 "fits resume after n bars")
+			snap.anchorBar = ring[aAgo].bar; snap.t0 = ring[aAgo + m_n - 1].time;
+			if (RollDetect && crossesInRing(ring, aAgo, m_n)) { snap.crossesRoll = true; return; }   // skipped: no rails
+			if (s.fitAnchor != snap.anchorBar)
+			{
+				s.fitAnchor = snap.anchorBar;
+				s.fitOk = fitWindow(s.fit, ring, aAgo, true);
+				s.rthShare = m_rthShare;
+				if (s.fitOk)
+				{
+					s.man.Build(s.fit, m_h, m_l, m_v, m_up, m_dn, c.manSpan, m_tick, c.VaFraction, c.nodeProm, c.maxNodes);
+					s.fit.ResidualStats(s.fit.Deg, out s.dw, out s.skew);
+				}
+			}
+			if (!s.fitOk) return;
+			DvpFit f = s.fit; DvpManifold man = s.man;
+			int d = f.Deg;
+			snap.valid = true; snap.n = f.n; snap.deg = d; snap.dCap = f.DTop; snap.calibrating = f.Calibrating;
+			snap.sigma = f.SigmaD; snap.sigmaAtr = snap.sigma / snap.atr; snap.r2 = f.R2[d]; snap.lowR2 = !(snap.r2 >= c.minR2);
+			snap.dw = s.dw; snap.skew = s.skew; snap.rthShare = s.rthShare;
+			snap.yhatEnd = f.Yhat(1, d); snap.slopeEnd = f.SlopeEnd(d); snap.slope1 = f.SlopeEnd(1);
+			snap.slope1SigmaPerBar = snap.slope1 / f.SigmaAt(1);
+			snap.uT = f.UAhead(1 + off);   // DV-3.7: frozen coefficients at the current bar's u
+			s.rails.Build(f, man, c.sigmaList, snap.uT);
+			snap.yhatT = s.rails.YhatT;
+			snap.manValid = man.Valid; snap.manRowsEff = man.RowsEff; snap.inSampleCov2 = man.InSampleCov2;
+			if (man.Valid)
+			{
+				snap.pocZ = man.PocZ; snap.vaLoZ = man.VaLoZ; snap.vaHiZ = man.VaHiZ; snap.entropy = man.Entropy;
+				snap.concentration = man.Concentration; snap.concentrationOcc = man.ConcentrationOcc; snap.tailVol = man.TailVol;
+			}
+			if (off == 0) snap.endpointDrift = drift(s, ring, aAgo);   // DV-3.7: refit bars only
+		}
+
+		double m_rthShare;
+
+		/// <summary>Loads the n-bar window ending at anchorAgo (oldest first) and fits it with the DV-3.6 degree rule. No allocation.</summary>
+		bool fitWindow(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll)
+		{
+			DvpConfig c = Config;
+			int n = m_n;
+			double vol = 0, rth = 0;
+			for (int i = 0; i < n; i++)
+			{
+				RingBar x = ring[anchorAgo + n - 1 - i];
+				m_y[i] = Src(x); m_v[i] = x.v;
+				if (loadAll)
+				{
+					m_h[i] = x.h; m_l[i] = x.l;
+					if (m_up != null) { m_up[i] = x.up; m_dn[i] = x.down; }
+					if (x.v > 0 && !double.IsInfinity(x.v)) { vol += x.v; if (x.rth) rth += x.v; }
+				}
+			}
+			if (loadAll) m_rthShare = RthKnown && vol > 0 ? rth / vol : double.NaN;   // DV-7.7: NaN on the generic base
+			FitsComputed++;
+			if (!fit.Fit(m_y, m_v, n, c.degMax, c.weightVol)) return false;
+			int dStar, d; bool calib, warn;
+			bool hasFrozen = DvpFrozenDegree.TryGet(Root, Ds, n, out dStar);
+			DvpDegree.Select(c.degMode, n, c.degMax, hasFrozen, dStar, ref m_degWarned, out d, out calib, out warn);
+			if (warn && warnOnce != null)
+				warnOnce("DVP DEGREE: no frozen d* for root(" + Root + ") stream(Data" + Ds.ToString(CultureInfo.InvariantCulture) + ") winLen("
+					+ n.ToString(CultureInfo.InvariantCulture) + "); DevCoverageFrozen falls back to d = 1");
+			fit.Choose(d, calib);
+			return true;
+		}
+
+		/// <summary>
+		/// DV-3.8 endpointDrift, in ATR as of t-1: the new fit at the previous refit's endpoint bar minus the previous fit's own
+		/// endpoint value (same bar; see the PR-D3 note). The previous refit window is the cached slot when present, else it is
+		/// recomputed from the ring, so the value never depends on query or journal history. NaN when the previous window is
+		/// not in the ring, crosses a roll or does not fit.
+		/// </summary>
+		double drift(Slot s, _BarRing ring, int aAgo)
+		{
+			int pAgo = aAgo + m_r;
+			if (ring.Count < pAgo + m_n || m_pos - (aAgo + m_r) - m_n + 1 < 0) return double.NaN;
+			if (RollDetect && crossesInRing(ring, pAgo, m_n)) return double.NaN;
+			int pBar = ring[pAgo].bar;
+			Slot o = s == m_s0 ? m_s1 : m_s0;
+			DvpFit prev;
+			if (o.fitAnchor == pBar) { if (!o.fitOk) return double.NaN; prev = o.fit; }
+			else { if (!fitWindow(m_prevFit, ring, pAgo, false)) return double.NaN; prev = m_prevFit; }
+			DvpFit f = s.fit;
+			double now = f.Yhat(f.U(m_n - 1 - m_r), f.Deg), was = prev.Yhat(1, prev.Deg);
+			return (now - was) / s.snap.atr;
+		}
+
+		// ---- journal side (Q14: the journal is a consumer only when its sink is on) ----
+
+		/// <summary>cov_fwd horizons dropped because they crossed a roll (journal-side; DVP RUN fwdDropped).</summary>
+		public long FwdDropped { get; private set; }
+
+		void trackForward(RingBar b)
+		{
+			if (b.rollBar && RollDetect) { FwdDropped += m_fwdCount; m_fwdCount = 0; return; }   // a forward horizon across a splice is dropped (counted)
+			double y = Src(b);
+			int w = 0;
+			for (int i = 0; i < m_fwdCount; i++)
+			{
+				DvpCoef q = m_fwd[i];
+				int h = (int)(m_pos - q.startPos);
+				double lev, yh = q.Eval(1 + 2.0 * h / (q.n - 1), out lev);
+				double e = Math.Abs(y - yh);
+				q.seen++;
+				if (e <= 2 * q.sigma * Math.Sqrt(1 + lev)) q.hits++;
+				if (e <= 2 * q.sigma) q.hitsFlat++;
+				if (q.seen >= m_H) { m_covFwdSum += (double)q.hits / m_H; m_covFwdFlatSum += (double)q.hitsFlat / m_H; m_covFwdN++; }
+				else { m_fwd[i] = m_fwd[w]; m_fwd[w] = q; w++; }
+			}
+			m_fwdCount = w;
+		}
+
+		void journalFit(_BarRing ring, Action<string> journal, string runId, string configHash)
+		{
+			DvpSnapshot s = Snapshot(ring, 0);
+			if (s == null || s.anchorBar == int.MinValue) return;   // warm-up: no window yet
+			DvpFit f = FitFor(s);
+			journal(FitLine(s, f, runId, configHash));
+			if (s.crossesRoll || !s.valid) { SkipLines++; return; }
+			FitLines++;
+			m_covInSum += f.CovIn(f.Deg, 2); m_covInN++;
+			if (m_fwdCount < m_fwd.Length) m_fwd[m_fwdCount++].From(f, m_pos);
+		}
+
+		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
+		static string I(long x) { return x.ToString(CultureInfo.InvariantCulture); }
+
+		/// <summary>DV-11.1 DVP FIT line (invariant culture, R round-trip). A skipped window writes crossesRoll(1) and NaNs.</summary>
+		public static string FitLine(DvpSnapshot s, DvpFit f, string runId, string configHash)
+		{
+			var sb = new StringBuilder(512);
+			sb.Append("DVP FIT runId(").Append(runId).Append(") configHash(").Append(configHash).Append(") stream(Data").Append(I(s.ds))
+				.Append(") barTime(").Append(s.tPrev.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)).Append(')');
+			bool ok = s.valid && f != null;
+			sb.Append(" n(").Append(ok ? I(s.n) : "NaN").Append(") deg(").Append(ok ? I(s.deg) : "NaN").Append(") bic(");
+			if (ok) for (int k = 1; k <= f.MaxValidDeg; k++) { if (k > 1) sb.Append(';'); sb.Append(F(f.Bic[k])); }
+			else sb.Append("NaN");
+			sb.Append(") manRowsEff(").Append(ok ? I(s.manRowsEff) : "NaN").Append(") rthShare(").Append(F(s.rthShare))
+				.Append(") crossesRoll(").Append(s.crossesRoll ? '1' : '0').Append(')');
+			kv(sb, "sigma", s.sigma); kv(sb, "sigmaAtr", s.sigmaAtr); kv(sb, "r2", s.r2); kv(sb, "dw", s.dw); kv(sb, "skew", s.skew);
+			kv(sb, "yhatEnd", s.yhatEnd); kv(sb, "slopeEnd", s.slopeEnd); kv(sb, "slope1", s.slope1); kv(sb, "endpointDrift", s.endpointDrift);
+			kv(sb, "pocZ", s.pocZ); kv(sb, "vaLoZ", s.vaLoZ); kv(sb, "vaHiZ", s.vaHiZ); kv(sb, "entropy", s.entropy);
+			kv(sb, "concentration", s.concentration); kv(sb, "concentrationOcc", s.concentrationOcc); kv(sb, "tailVol", s.tailVol);
+			kv(sb, "inSampleCov2", s.inSampleCov2);
+			sb.Append(" lowR2(").Append(ok ? (s.lowR2 ? "1" : "0") : "NaN").Append(") coef{");
+			if (ok)
+			{
+				int d = f.Deg;
+				sb.Append(F(f.YBar)).Append(';').Append(F(f.Ctr)).Append(';').Append(F(f.Scl));
+				for (int k = 0; k <= d; k++) sb.Append(';').Append(F(f.A[k]));
+				for (int k = 1; k <= d; k++) sb.Append(';').Append(F(f.B[k]));
+				for (int k = 0; k <= d; k++) sb.Append(';').Append(F(f.N[k]));
+				for (int k = 0; k <= d; k++) sb.Append(';').Append(F(f.C[k]));
+			}
+			else sb.Append("NaN");
+			sb.Append('}');
+			if (ok && s.calibrating)
+			{
+				sb.Append(" calibrate(sigma");
+				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.Sigma[k]));
+				sb.Append(" r2");
+				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.R2[k]));
+				sb.Append(" covIn2");
+				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.CovIn(k, 2)));
+				sb.Append(')');
+			}
+			return sb.ToString();
+		}
+
+		static void kv(StringBuilder sb, string k, double v) { sb.Append(' ').Append(k).Append('(').Append(F(v)).Append(')'); }
+
+		/// <summary>DV-11.3 DVP RUN line for this stream.</summary>
+		public string RunLine(string runId)
+		{
+			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + I(FitLines) + ") skips(" + I(SkipLines)
+				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
+				+ ") diagnosticOnly(" + (DiagnosticOnly ? "1" : "0") + ") meanCovIn(" + F(MeanCovIn) + ") meanCovFwd(" + F(MeanCovFwd)
+				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")";
+		}
+	}
+
+	/// <summary>
+	/// M-DVP engine (DV-0.1): internal sealed, created by the host in StartCalc only when DvpConfig.enabled (null otherwise).
+	/// MC-free: the host passes each stream's ring and flags; the engine never touches Bars.
+	/// </summary>
+	internal sealed class _DvpEngine
+	{
+		public readonly DvpConfig Config;
+		public readonly string RunId, ConfigHash;
+		public readonly bool RollDetect;
+		readonly DvpStream[] m_streams;
+		readonly int[] m_ds;
+		public Action<string> journal, warnOnce;
+		bool m_finished;
+
+		public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce)
+		{
+			Config = cfg; RunId = runId ?? ""; RollDetect = rollDetect; this.journal = journal; this.warnOnce = warnOnce;
+			ConfigHash = Fnv1a64(cfg.Canon()).ToString("x16", CultureInfo.InvariantCulture);
+			m_ds = (int[])cfg.streams.Clone();
+			m_streams = new DvpStream[m_ds.Length];
+			for (int i = 0; i < m_ds.Length; i++) m_streams[i] = new DvpStream(m_ds[i], cfg, root, tick, rollDetect, rthKnown) { warnOnce = warnOnce };
+			if (!rollDetect && warnOnce != null) warnOnce("DVP: RollDetection Off — roll skip disabled");   // DV-7.0: every stream diagnostic-only
+			if (journal != null) journal(CreatedLine(root));
+		}
+
+		public int StreamCount { get { return m_streams.Length; } }
+		public DvpStream Stream(int ds) { for (int i = 0; i < m_ds.Length; i++) if (m_ds[i] == ds) return m_streams[i]; return null; }
+
+		public static ulong Fnv1a64(string s)
+		{
+			ulong h = 14695981039346656037UL;
+			for (int i = 0; i < s.Length; i++) { h ^= s[i]; h *= 1099511628211UL; }
+			return h;
+		}
+
+		string CreatedLine(string root)
+		{
+			var sb = new StringBuilder(256);
+			sb.Append("DVP CREATED runId(").Append(RunId).Append(") configHash(").Append(ConfigHash).Append(") streams(");
+			for (int i = 0; i < m_ds.Length; i++) { if (i > 0) sb.Append(','); sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)); }
+			sb.Append(") d(");
+			for (int i = 0; i < m_ds.Length; i++)
+			{
+				if (i > 0) sb.Append(',');
+				int dStar, d; bool calib, warn, latch = true;
+				bool has = DvpFrozenDegree.TryGet(root ?? "", m_ds[i], Config.winLen, out dStar);
+				DvpDegree.Select(Config.degMode, Config.winLen, Config.degMax, has, dStar, ref latch, out d, out calib, out warn);
+				bool unfrozen = Config.degMode == EDvpDegMode.DevCoverageFrozen && !has;
+				sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)).Append('=').Append(d.ToString(CultureInfo.InvariantCulture));
+				if (calib || unfrozen) sb.Append('(').Append(calib ? "calibrate" : "").Append(calib && unfrozen ? "," : "").Append(unfrozen ? "unfrozen" : "").Append(')');
+			}
+			sb.Append(") pa(none) rollDetect(").Append(RollDetect ? "On" : "Off").Append(") canon(").Append(Config.Canon()).Append(')');
+			return sb.ToString();
+		}
+
+		/// <summary>Closed-bar step for stream ds (ring[0] = the bar just closed).</summary>
+		public bool OnBar(int ds, _BarRing ring, bool halfDay)
+		{
+			DvpStream s = Stream(ds);
+			return s != null && s.OnBar(ring, halfDay, journal, RunId, ConfigHash);
+		}
+
+		/// <summary>DV-10 Snapshot for bar t; endAgo = 1 when ring[0] is the current closed bar, 0 intrabar. Null if no fit or skipped.</summary>
+		public DvpSnapshot Snapshot(int ds, _BarRing ring, int endAgo)
+		{
+			DvpStream s = Stream(ds);
+			DvpSnapshot x = s != null ? s.Snapshot(ring, endAgo) : null;
+			return x != null && x.valid ? x : null;
+		}
+
+		/// <summary>Snapshot including warm-up / skipped records (valid = false), for tests and the journal.</summary>
+		public DvpSnapshot SnapshotRaw(int ds, _BarRing ring, int endAgo)
+		{
+			DvpStream s = Stream(ds);
+			return s != null ? s.Snapshot(ring, endAgo) : null;
+		}
+
+		public DvpRails RailsOf(int ds, _BarRing ring, int endAgo)
+		{
+			DvpStream s = Stream(ds);
+			if (s == null) return null;
+			return s.RailsFor(s.Snapshot(ring, endAgo));
+		}
+
+		/// <summary>DV-11.3: the DVP RUN lines, once at end of run.</summary>
+		public void Finish()
+		{
+			if (m_finished) return;
+			m_finished = true;
+			if (journal == null) return;
+			for (int i = 0; i < m_streams.Length; i++) journal(m_streams[i].RunLine(RunId));
+		}
+	}
+
 	// </dvp-core>
 }

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Off-MultiCharts unit tests for M-DVP (specs/m-dvp-spec.md §15). gen.sh extracts the MC-free <dvp-core>, <profile-math> and
-       <level-ref> regions of the study files into Generated/ before building. Fixtures come from reference.py. Not part of PLStudies.csproj. -->
+  <!-- Off-MultiCharts unit tests for M-DVP (specs/m-dvp-spec.md §15). gen.sh extracts the MC-free <dvp-core> and <profile-math>
+       regions into Generated/ before building; _LevelRef/_ProfileStats (+ _Gmm, _Rng, _BarRing), _Gate0 (Gate0Atr, + _LevelStudy) and _RollDetector are linked whole. Fixtures come from reference.py. Not part of PLStudies.csproj. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -10,6 +10,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
+    <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
+    <Compile Include="..\..\_Gmm.Function.CS" Link="Linked\_Gmm.cs" />
+    <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
+    <Compile Include="..\..\_Gate0.Function.CS" Link="Linked\_Gate0.cs" />
+    <Compile Include="..\..\_LevelStudy.Function.CS" Link="Linked\_LevelStudy.cs" />
+    <Compile Include="..\..\_RollDetector.Function.CS" Link="Linked\_RollDetector.cs" />
   </ItemGroup>
   <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
   <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">

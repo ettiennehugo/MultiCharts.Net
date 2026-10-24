@@ -395,6 +395,104 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>M-DVP (spec DV-0.1): detrended volume-profile engine configuration. enabled = false (engine not created, no ring,
+		/// one null check per CalcBar). A derived strategy sets DvpConfig.enabled = true (plus any per-field override) in its Create()
+		/// or ctor. Never an [Input] (D7). PR-D3 hosts Data1 only; HTF streams arrive in PR-D6.</summary>
+		protected DvpConfig DvpConfig { get; } = new DvpConfig();
+		private _DvpEngine m_dvp;
+		private bool m_dvpQueryWarned;
+		private List<LevelRef> m_dvpRails, m_dvpRailPool;   // DV-13.1: allocated in startDvp only when DvpConfig.enabled
+
+		/// <summary>M-DVP engine, or null (one Warning on the first query) when DvpConfig.enabled is false.</summary>
+		internal _DvpEngine Dvp
+		{
+			get
+			{
+				if (m_dvp == null && !m_dvpQueryWarned) { m_dvpQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "Dvp queried but DvpConfig.enabled is false (engine not created)"); }
+				return m_dvp;
+			}
+		}
+
+		/// <summary>DV-7.7: true when isRthBar is a real RTH test (futures base). On the generic base isRthBar is always true, so rthShare is NaN.</summary>
+		protected virtual bool rthKnown() { return false; }
+
+		/// <summary>DVP window end for a query on stream ds: 1 when the ring's newest bar is the current closed bar (the as-of t-1 fit for bar t), else 0.</summary>
+		private int dvpEndAgo(int ds, _BarRing ring)
+		{
+			IInstrument b = BarsOfData(ds);
+			return ring != null && ring.Count > 0 && b.Status == EBarState.Close && ring[0].bar == b.FullSymbolData.Current ? 1 : 0;
+		}
+
+		/// <summary>DV-10 Snapshot(ds): the as-of t-1 fit for bar t, or null (engine off, warm-up, or a window that crosses a roll).</summary>
+		protected DvpSnapshot dvpSnapshot(int ds)
+		{
+			_DvpEngine e = Dvp; if (e == null) return null;
+			_BarRing r = Ring(ds);
+			return e.Snapshot(ds, r, dvpEndAgo(ds, r));
+		}
+
+		/// <summary>DV-10 Rails(ds): LevelRefs of the current rails (tag DV-10.2, isRollWindow from the t-1 trading day). Empty when no fit.
+		/// The list and its LevelRef objects are reused by the next call.</summary>
+		protected IReadOnlyList<LevelRef> dvpRails(int ds)
+		{
+			_DvpEngine e = Dvp; if (e == null) return Array.Empty<LevelRef>();
+			m_dvpRails.Clear();
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpSnapshot s = e.Snapshot(ds, r, ago);
+			DvpRails rails = s != null ? e.RailsOf(ds, r, ago) : null;
+			if (rails != null) rails.Publish(m_dvpRails, m_dvpRailPool, ds, s.tPrev, s.t0, IsRollWindow(r[ago].tradingDay));
+			return m_dvpRails;
+		}
+
+		/// <summary>DV-10 RailPrice(ds, kind, z): P_t(z); NaN if the rail is absent or there is no fit.</summary>
+		protected double dvpRailPrice(int ds, ELevelKind kind, double z)
+		{
+			_DvpEngine e = Dvp; if (e == null) return double.NaN;
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpRails rails = e.Snapshot(ds, r, ago) != null ? e.RailsOf(ds, r, ago) : null;
+			return rails != null ? rails.RailPrice(kind, z) : double.NaN;
+		}
+
+		/// <summary>DV-10 Z(ds, price): (price - yhat(u_t)) / sigma; NaN when there is no fit.</summary>
+		protected double dvpZ(int ds, double price)
+		{
+			_DvpEngine e = Dvp; if (e == null) return double.NaN;
+			_BarRing r = Ring(ds); int ago = dvpEndAgo(ds, r);
+			DvpRails rails = e.Snapshot(ds, r, ago) != null ? e.RailsOf(ds, r, ago) : null;
+			return rails != null ? rails.Z(price) : double.NaN;
+		}
+
+		/// <summary>M-DVP start (DV-0.1): after startVpHelpers, which clears the ring requests. Disabled: returns before any
+		/// allocation (no ring, no engine). The engine (and every DVP buffer) is constructed here and nowhere else.</summary>
+		private void startDvp()
+		{
+			m_dvp = null; m_dvpQueryWarned = false;
+			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); }
+			if (!DvpConfig.enabled) return;
+			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); }
+			List<string> errs = DvpConfig.Validate();
+			if (errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
+			foreach (int ds in DvpConfig.streams)
+				if (ds != 1) throw new ArgumentException("DvpConfig.streams: Data" + ds + " is not hosted yet (PR-D3 is Data1 only; HTF streams arrive in PR-D6)");
+			int need = DvpStream.RingNeed(DvpConfig);
+			foreach (int ds in DvpConfig.streams) requireRing(ds, need, "DVP");
+			m_dvp = new _DvpEngine(DvpConfig, RunId, _MtfMath.SymbolRoot(Bars.Info.Name).ToUpperInvariant(), tickSize(),
+				RollDetection != ERollDetection.Off, rthKnown(), engineSink(ETraceLevel.Journal), engineSink(ETraceLevel.Warning));
+		}
+
+		/// <summary>M-DVP closed-bar step, after stepVpHelpers filled the rings (O(1) per stream unless the journal is a consumer).</summary>
+		private void stepDvp()
+		{
+			foreach (int ds in DvpConfig.streams)
+			{
+				IInstrument b = BarsOfData(ds);
+				if (b.Status != EBarState.Close) continue;
+				_BarRing r = Ring(ds);
+				if (r == null || r.Count == 0 || r[0].bar != b.FullSymbolData.Current) continue;
+				m_dvp.OnBar(ds, r, todHalfDay(r[0].tradingDay));
+			}
+		}
+
 		/// <summary>Phase 3 S5: extra PRICEACTION instances (e.g. a Data2 swing structure), empty by default. Each entry needs enabled = true,
 		/// a dataStream and a non-empty unique role; label PA{ds}-{role}. Futures bases apply the Futures preset PER FIELD (ruling 1): each
 		/// preset-owned field (tieRule, volumeIncludesCurrent) the entry left at its Library default takes the Futures value, a field the entry
@@ -1496,6 +1594,7 @@ namespace PowerLanguage.Strategy
 			if (AvwapEvents != EAvwapAnchor.None) startAvwap(avwapPa);
 			startMtf();
 			startVpHelpers();   // Phase 3 rings / roll window / FVG (off by default)
+			startDvp();         // M-DVP (DV-0.1): after startVpHelpers, which clears ring requests; off by default
 		}
 
 		private void startAvwap(bool needsPa)
@@ -1559,6 +1658,7 @@ namespace PowerLanguage.Strategy
 		{
 			stepRollDetector();   // S4: Data1 roll first (no-op when RollDetection is Off), so every rollOn(ds) below sees it
 			stepVpHelpers();   // Phase 3: rings first, so every engine below reads this bar (no-op unless a helper is enabled)
+			if (m_dvp != null) stepDvp();   // M-DVP: after the rings (one null check when disabled)
 			if (m_pa != null)
 			{
 				IInstrument bars = BarsOfData(PriceActionConfig.dataStream);
@@ -1578,6 +1678,7 @@ namespace PowerLanguage.Strategy
 		private void stopEngines()
 		{
 			m_pa = null;
+			m_dvp = null;
 			m_avwap = null;
 			m_avwapPa = null;
 			m_tod = null;
@@ -1766,6 +1867,7 @@ namespace PowerLanguage.Strategy
 			{
 				m_runEndLogged = true;
 				finishLevelStudy();
+				if (m_dvp != null) m_dvp.Finish();   // DV-11.3 DVP RUN lines
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"RUN-END id({RunId}) lastBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) realTime({Environment.IsRealTimeCalc})");
 			}
 		}

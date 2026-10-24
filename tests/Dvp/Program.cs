@@ -5,7 +5,7 @@ using System.IO;
 using PowerLanguage.Function;
 
 // M-DVP PR-D1 (specs/m-dvp-spec.md §15): DV-T1..T8, T20, T23 on the extracted <dvp-core> fit.
-static class Program
+static partial class Program
 {
 	static int s_fail, s_pass;
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
@@ -236,6 +236,8 @@ static class Program
 			Check(d1 != argmin && before == f.Deg && d1 == d2, "T7 " + mode + ": chosen d " + d1 + " is independent of BIC");
 		}
 		string core = CoreSource();
+		int jf = core.IndexOf("public static string FitLine(", StringComparison.Ordinal), je = core.IndexOf("static void kv(", StringComparison.Ordinal);
+		if (jf > 0 && je > jf) core = core.Remove(jf, je - jf);   // PR-D3: the DVP FIT journal formatter prints bic[1..dCap] (DV-11.1); it selects nothing
 		Check(Count(core, "Bic[") == 2 && core.Contains("Bic[k] = "), "T7 source scan: Bic[] is only written (Finish), never read for selection");
 	}
 
@@ -290,7 +292,19 @@ static class Program
 		Check(flare, "T20 cone flares with the horizon");
 		// Rails/Confluence/FamiliesAt arrive in PR-D2/D5; until then the core must not turn the cone into a level.
 		string core = CoreSource();
-		Check(Count(core, "Cone(") == 1 && !core.Contains("LevelRef"), "T20 source scan: Cone has no caller in <dvp-core> and the core builds no LevelRef (re-checked against Rails/Confluence in PR-D5)");
+		Check(Count(core, "Cone(") == 1, "T20 source scan: Cone has no caller in <dvp-core> (rails never read it; Confluence/FamiliesAt re-checked in PR-D5)");
+		// PR-D2: the cone bounds never appear among the rails
+		var man = new DvpManifold(64, false); var rails = new DvpRails(3);
+		var bh = new double[240]; var low = new double[240]; var vol = Volumes(240);
+		for (int i = 0; i < 240; i++) { bh[i] = y[i] + 1; low[i] = y[i] - 1; }
+		man.Build(f, bh, low, vol, null, null, 3, 0.25, 0.7, 0.12, 3); rails.Build(f, man, new[] { 1.0, 2, 3 });
+		bool none = rails.Count > 0;
+		for (int h = 1; h <= 60; h++)
+		{
+			double cl, ch; f.Cone(h, 2, EDvpConeMode.Prediction, out cl, out ch);
+			for (int i = 0; i < rails.Count; i++) none &= rails.Items[i].price != cl && rails.Items[i].price != ch;
+		}
+		Check(none, "T20 no cone bound is a rail");
 	}
 
 	// DV-T23: config.
@@ -364,9 +378,214 @@ static class Program
 		if (double.IsNaN(sink)) Console.WriteLine("sink NaN");
 	}
 
+	// ---------------- PR-D2: manifold and rails ----------------
+
+	// A synthetic window: HL2 series y, bars of random half-range around it, volumes with ~5% zeros, up/down split.
+	static void Window(int n, double noise, double[] coef, out double[] y, out double[] hi, out double[] lo, out double[] v, out double[] up, out double[] dn)
+	{
+		y = Series(n, 4000, noise, coef); hi = new double[n]; lo = new double[n]; v = Volumes(n); up = new double[n]; dn = new double[n];
+		for (int i = 0; i < n; i++)
+		{
+			double r = Math.Abs(Gauss()) * noise * 0.8 + (i % 17 == 0 ? 0 : 0.01 * noise);
+			hi[i] = y[i] + r; lo[i] = y[i] - r;
+			if (s_rng.NextDouble() < 0.05) v[i] = 0;
+			double sh = s_rng.NextDouble(); up[i] = v[i] * sh; dn[i] = v[i] - up[i];
+		}
+	}
+
+	static DvpFit FitWindow(double[] y, int n, int deg)
+	{
+		var f = new DvpFit(n); f.Fit(y, null, n, 3, false); f.Choose(deg, false); return f;
+	}
+
+	// DV-T9a: shape stats.
+	static void T9a()
+	{
+		var e = _ProfileStats.Entropy(new double[] { 1, 1, 0, 1, 1 }, EEntropyRows.TradedRows, 0);
+		Check(Rel(e.Hnorm, 1.0, 1e-15) && Rel(e.H, Math.Log(4), 1e-15) && double.IsNaN(e.HnormMm) && double.IsNaN(e.Hmm), "T9a entropy {1,1,0,1,1}: Hnorm = 1, H = ln 4, mmN = 0 -> HnormMm NaN");
+		var rows = new double[] { 0, 2, 8, 4, 0, 2, 0, 0 };   // sum 16, R = 8, occupied 4, poc = 2
+		double c, co; DvpManifold.Shape(rows, _ProfileMath.PocIndex(rows), out c, out co);
+		Check(Rel(c, 8.0 / (16.0 / 8), 1e-15) && Rel(co, 8.0 / (16.0 / 4), 1e-15), "T9a concentration = rows[poc] / (sum / manRowsEff) = 4; concentrationOcc = 2");
+		Check(double.IsNaN(_ProfileStats.Entropy(new double[] { 0, 3, 0 }, EEntropyRows.TradedRows, 0).Hnorm), "T9a one occupied row -> Hnorm NaN");
+	}
+
+	// DV-T9: deposit and conservation.
+	static void T9()
+	{
+		// rows of height 1 over [-3, 3): R = 6. A bar over [-2.5, 0) covers half of row 0... use [-2.5, 0): rows 0 (0.5), 1, 2 -> 0.2/0.4/0.4
+		var rows = new double[6];
+		double tail = DvpManifold.Deposit(rows, 6, 3, 1, -2.5, 0, 10);
+		Check(tail == 0 && Rel(rows[0], 2, 1e-15) && Rel(rows[1], 4, 1e-15) && Rel(rows[2], 4, 1e-15) && rows[3] == 0, "T9 bar spanning 2.5 rows splits 0.2/0.4/0.4");
+		Array.Clear(rows, 0, 6);
+		tail = DvpManifold.Deposit(rows, 6, 3, 1, 0.3, 0.3, 7);
+		Check(tail == 0 && rows[3] == 7, "T9 zero-range bar deposits into one row");
+		Array.Clear(rows, 0, 6);
+		Check(DvpManifold.Deposit(rows, 6, 3, 1, 3.2, 4, 5) == 5 && DvpManifold.Deposit(rows, 6, 3, 1, 3, 3, 5) == 5 && DvpManifold.Deposit(rows, 6, 3, 1, -9, -3.5, 5) == 5 && rows[5] == 0, "T9 outside bars (and +span exactly) go to tailVol");
+		tail = DvpManifold.Deposit(rows, 6, 3, 1, 2, 4, 10);
+		Check(Rel(tail, 5, 1e-15) && Rel(rows[5], 5, 1e-15), "T9 straddling bar: in-span share to rows, rest to tailVol");
+		Check(DvpManifold.Deposit(rows, 6, 3, 1, 0, 1, double.NaN) == 0 && DvpManifold.Deposit(rows, 6, 3, 1, 0, 1, -3) == 0, "T9 NaN/negative volume deposits nothing");
+		bool cons = true, consSplit = true;
+		var man = new DvpManifold(64, true);
+		for (int rep = 0; rep < 50; rep++)
+		{
+			int n = rep % 2 == 0 ? 240 : 30;
+			double[] y, hi, lo, v, up, dn; Window(n, 1 + 3 * s_rng.NextDouble(), new[] { 0.0, 10 * Gauss(), 4 * Gauss(), 2 * Gauss() }, out y, out hi, out lo, out v, out up, out dn);
+			var f = FitWindow(y, n, rep % 4);
+			man.Build(f, hi, lo, v, up, dn, 1 + rep % 3, 0.25, 0.7, 0.12, 3);
+			double sv = 0; foreach (double x in v) if (x > 0) sv += x;
+			double sr = 0; foreach (double x in man.Rows) sr += x;
+			cons &= Rel(sr + man.TailVol, sv, 1e-9) && Rel(man.TotalVol, sv, 1e-12);
+			double su = 0, sd = 0, vu = 0, vd = 0;
+			foreach (double x in man.UpRows) su += x; foreach (double x in man.DownRows) sd += x;
+			for (int i = 0; i < n; i++) if (v[i] > 0) { vu += up[i]; vd += dn[i]; }
+			consSplit &= Rel(su + man.UpTail, vu, 1e-9) && Rel(sd + man.DownTail, vd, 1e-9);
+		}
+		Check(cons, "T9 conservation: sum rows + tailVol = sum v within 1e-9 (50 windows, manSpan 1..3)");
+		Check(consSplit, "T9 splitFlow up/down manifolds conserve their volume");
+	}
+
+	// DV-T10: tick floor.
+	static void T10()
+	{
+		Check(DvpManifold.RowsEffFor(64, 3, 0.5, 1) == 3, "T10 sigma = 0.5 tick -> manRowsEff = max(1, floor(6 x 0.5)) = 3");
+		Check(DvpManifold.RowsEffFor(64, 3, 0.1, 1) == 1 && DvpManifold.RowsEffFor(64, 3, 100, 1) == 64 && DvpManifold.RowsEffFor(64, 3, 0.5, 0) == 64, "T10 floor at 1 row; no floor for wide rows or tick <= 0");
+		Check(DvpManifold.RowsEffFor(64, 3, 64.0 / 6, 1) == 64 && DvpManifold.RowsEffFor(64, 3, 64.0 / 6 - 1e-9, 1) == 63, "T10 boundary: row = 1 tick keeps manRows");
+		double[] y, hi, lo, v, up, dn; Window(240, 0.1, new[] { 0.0, 0.5, 0, 0 }, out y, out hi, out lo, out v, out up, out dn);
+		var f = FitWindow(y, 240, 1); var man = new DvpManifold(64, false);
+		man.Build(f, hi, lo, v, null, null, 3, 0.25, 0.7, 0.12, 3);
+		double sr = 0; foreach (double x in man.Rows) sr += x;
+		Check(man.RowsEff == DvpManifold.RowsEffFor(64, 3, f.SigmaD, 0.25) && man.RowsEff < 64 && man.Rows.Length == man.RowsEff && Rel(man.Wz, 6.0 / man.RowsEff, 1e-15)
+			&& Rel(sr + man.TailVol, man.TotalVol, 1e-9), "T10 build on a sub-tick sigma uses manRowsEff = " + man.RowsEff + " (exact-length rows, conserved)");
+	}
+
+	// DV-T11: value area.
+	static void T11()
+	{
+		var man = new DvpManifold(64, false); bool ok = true;
+		for (int rep = 0; rep < 20; rep++)
+		{
+			double[] y, hi, lo, v, up, dn; Window(240, 2, new[] { 0.0, 8, -3, 2 }, out y, out hi, out lo, out v, out up, out dn);
+			var f = FitWindow(y, 240, 3);
+			man.Build(f, hi, lo, v, null, null, 3, 0.25, new DvpConfig().VaFraction, 0.12, 3);
+			int l, h, p; _ProfileMath.ValueAreaExpansion(man.Rows, 0.70, out l, out h, out p);
+			ok &= man.Valid && man.VaLo == l && man.VaHi == h && man.Poc == p && Rel(man.PocZ, -3 + (p + 0.5) * man.Wz, 1e-12)
+				&& Rel(man.VaLoZ, -3 + l * man.Wz, 1e-12) && Rel(man.VaHiZ, -3 + (h + 1) * man.Wz, 1e-12);
+		}
+		Check(ok, "T11 VA = ValueAreaExpansion(rows, 0.70); vaLoZ/vaHiZ are the outer row edges, pocZ the POC row centre");
+		bool threw = false;
+		try { double[] y, hi, lo, v, up, dn; Window(60, 2, new[] { 0.0, 1, 0, 0 }, out y, out hi, out lo, out v, out up, out dn); man.Build(FitWindow(y, 60, 1), hi, lo, v, null, null, 3, 0.25, 70, 0.12, 3); }
+		catch (ArgumentOutOfRangeException) { threw = true; }
+		var bad = new DvpConfig { vaPct = 0.7 };
+		Check(threw && bad.Validate() != null, "T11 passing 70 as the fraction is asserted; vaPct 0.7 is rejected by Validate");
+		Check(_ProfileMath.PocIndex(new double[] { 0, 5, 1, 5, 2, 0 }) == 3 && _ProfileMath.PocIndex(new double[] { 5, 0, 5 }) == 0, "T11 POC tie rule: nearest the volume-weighted mean row, then the lower row");
+	}
+
+	// DV-T12: prominence and node selection.
+	static void T12()
+	{
+		// (a) bit-identity of Gate0/Profile outputs is DV-T12a in PR-D0b (#33); their suites run unchanged in this PR.
+		var rows = new double[] { 1, 3, 10, 7, 4.8, 5.5, 6, 2, 0.5 };
+		var hv = new List<double[]>(); var lv = new List<double[]>();
+		_ProfileMath.Prominence(rows, 0.11, hv, lv);
+		Check(hv.Count == 2 && lv.Count == 1 && (int)hv[0][0] == 2 && (int)hv[1][0] == 6 && (int)lv[0][0] == 4, "T12b bimodal rows: 2 HVN + 1 LVN at prominence 0.11");
+		_ProfileMath.Prominence(rows, 0.13, hv, lv);
+		Check(hv.Count == 1 && lv.Count == 0, "T12b prominence 0.13 drops the 0.12 peak and its LVN");
+		var r = new double[21]; for (int i = 0; i < 21; i++) r[i] = 1;
+		r[2] = 6; r[5] = 4; r[7] = 5; r[10] = 10; r[11] = 10; r[14] = 7; r[17] = 3; r[19] = 8;
+		int poc = _ProfileMath.PocIndex(r);
+		var man = new DvpManifold(64, false);
+		man.SelectNodes(r, poc, 0.12, 2, 3);
+		bool near = true; for (int i = 0; i < man.HvnCount; i++) near &= Math.Abs(man.Hvn[i].row - poc) > 1;
+		Check(poc == 11 && near && man.HvnCount == 4 && man.Hvn[0].row == 2 && man.Hvn[1].row == 7 && man.Hvn[2].row == 14 && man.Hvn[3].row == 19,
+			"T12c maxNodes = 2 per side by prominence; the HVN next to POC (row 10) is excluded");
+		Check(man.Hvn[0].side == -1 && man.Hvn[3].side == 1 && Rel(man.Hvn[2].z, -3 + 14.5 * 6.0 / 21, 1e-12) && Rel(man.Hvn[2].prom, 0.6, 1e-12), "T12c node side, z and prominence");
+		int lvBelow = 0, lvAbove = 0; for (int i = 0; i < man.LvnCount; i++) { if (man.Lvn[i].side < 0) lvBelow++; else lvAbove++; }
+		Check(lvBelow <= 2 && lvAbove <= 2 && man.LvnCount >= 2, "T12c LVNs capped at maxNodes per side (" + lvBelow + "/" + lvAbove + ")");
+		man.SelectNodes(r, poc, 0.12, 1, 3);
+		Check(man.HvnCount == 2 && man.Hvn[0].row == 2 && man.Hvn[1].row == 19, "T12c maxNodes = 1 keeps the most prominent per side");
+		man.SelectNodes(r, poc, 0.12, 0, 3);
+		Check(man.HvnCount == 0 && man.LvnCount == 0, "T12c maxNodes = 0 -> no nodes");
+		var t = new double[] { 1, 4, 1, 4, 1, 10, 1, 4, 1 };
+		man.SelectNodes(t, 5, 0.12, 1, 3);
+		Check(man.HvnCount == 2 && man.Hvn[0].row == 3 && man.Hvn[1].row == 7, "T12c prominence tie goes to the row nearer POC");
+	}
+
+	// DV-T13: rails.
+	static void T13()
+	{
+		const int n = 240;
+		double[] y, hi, lo, v, up, dn; Window(n, 2, new[] { 0.0, 12, -5, 3 }, out y, out hi, out lo, out v, out up, out dn);
+		var f = FitWindow(y, n, 3); var man = new DvpManifold(64, false); var rails = new DvpRails(3);
+		man.Build(f, hi, lo, v, null, null, 3, 0.25, 0.7, 0.12, 3);
+		Check(rails.Build(f, man, new[] { 1.0, 2, 3 }), "T13 rails build");
+		double lev, g, yt = f.Eval(1 + 2.0 / (n - 1), 3, out lev, out g);
+		Check(Rel(rails.YhatT, yt, 1e-15) && rails.Sigma == f.SigmaD && rails.Deg == 3, "T13 rails use the t-1 fit at u_t = 1 + 2/(n-1)");
+		bool price = true, sorted = true; int np = 0, nva = 0, nvl = 0, nh = 0, nl = 0, ns = 0;
+		for (int i = 0; i < rails.Count; i++)
+		{
+			var x = rails.Items[i];
+			price &= Rel(x.price, yt + x.z * f.SigmaD, 1e-15);
+			if (i > 0) sorted &= rails.Items[i - 1].z <= x.z;
+			switch (x.kind) { case ELevelKind.DvpPoc: np++; break; case ELevelKind.DvpVah: nva++; break; case ELevelKind.DvpVal: nvl++; break; case ELevelKind.DvpHvn: nh++; break; case ELevelKind.DvpLvn: nl++; break; case ELevelKind.DvpSigma: ns++; break; default: price = false; break; }
+		}
+		Check(price, "T13 every rail price = yhat_{t-1}(u_t) + z sigma_{t-1}");
+		Check(sorted, "T13 rails sorted by z (residual order, DV-4.9)");
+		Check(np == 1 && nva == 1 && nvl == 1 && nh == man.HvnCount && nl == man.LvnCount && ns == 6, $"T13 rail kinds: Poc/Vah/Val once, {nh} Hvn, {nl} Lvn, 6 sigma");
+		Check(Rel(rails.RailPrice(ELevelKind.DvpPoc, 99), yt + man.PocZ * f.SigmaD, 1e-15) && Rel(rails.RailPrice(ELevelKind.DvpSigma, -2), yt - 2 * f.SigmaD, 1e-15)
+			&& double.IsNaN(rails.RailPrice(ELevelKind.DvpSigma, 2.5)) && double.IsNaN(rails.RailPrice(ELevelKind.DvpFib, 0)), "T13 RailPrice: unique kinds ignore z, sigma by z, NaN if absent");
+		Check(Rel(rails.Z(rails.Price(1.7)), 1.7, 1e-12), "T13 Z inverts P_t(z)");
+		int up1 = rails.NextRail(man.PocZ, 1), dn1 = rails.NextRail(man.PocZ, -1);
+		Check(up1 >= 0 && rails.Items[up1].z > man.PocZ && (up1 == 0 || rails.Items[up1 - 1].z <= man.PocZ) && dn1 >= 0 && rails.Items[dn1].z < man.PocZ && rails.NextRail(1e9, 1) == -1, "T13 NextRail in residual order");
+		Check(DvpRails.Tag(1, new DateTime(2026, 10, 23, 14, 45, 0), 3, ELevelKind.DvpSigma, 2) == "DVP1:202610231445:d3:DvpSigma+2.00"
+			&& DvpRails.Tag(2, new DateTime(2026, 1, 2, 9, 5, 0), 1, ELevelKind.DvpVal, -0.8333) == "DVP2:202601020905:d1:DvpVal-0.83"
+			&& DvpRails.Tag(1, new DateTime(2026, 1, 2, 9, 5, 0), 1, ELevelKind.DvpPoc, -0.001) == "DVP1:202601020905:d1:DvpPoc+0.00", "T13 tag format DV-10.2");
+		var into = new List<LevelRef>(); var pool = new List<LevelRef>();
+		DateTime tp = new DateTime(2026, 10, 23, 15, 0, 0), t0 = new DateTime(2026, 10, 13, 9, 30, 0);
+		rails.Publish(into, pool, 1, tp, t0, true);
+		bool lr = into.Count == rails.Count;
+		for (int i = 0; i < into.Count && lr; i++)
+		{
+			var L = into[i]; var x = rails.Items[i];
+			lr &= L.kind == x.kind && L.price == x.price && L.lo == x.price && L.hi == x.price && L.createdTime == tp && L.sourceT0 == t0 && L.sourceT1 == tp
+				&& L.dataStream == 1 && L.isRollWindow && !L.crossesRoll && L.tag == DvpRails.Tag(1, tp, 3, x.kind, x.z) && L.StudyType == x.kind.ToString();
+		}
+		Check(lr, "T13 LevelRefs: kind/price/times/stream/tag per DV-10.1/10.2");
+		var first = into[0]; rails.Publish(into, pool, 1, tp, t0, false);
+		Check(ReferenceEquals(first, into[0]) && pool.Count == rails.Count, "T13 Publish reuses pooled LevelRef objects");
+		var empty = new DvpRails(3);
+		Check(!empty.Build(new DvpFit(30), man, new[] { 1.0 }) && empty.Count == 0 && double.IsNaN(empty.RailPrice(ELevelKind.DvpPoc, 0)), "T13 no fit -> no rails");
+	}
+
+	// DV-0.4 / DV-13.2: manifold + nodes + rails allocate nothing per refit, across changing manRowsEff.
+	static void ZeroAllocD2()
+	{
+		const int n = 240;
+		double[] y, hi, lo, v, up, dn; Window(n, 2, new[] { 0.0, 10, 4, -3 }, out y, out hi, out lo, out v, out up, out dn);
+		var ys = new double[n]; var his = new double[n]; var los = new double[n];
+		var f = new DvpFit(n); var man = new DvpManifold(64, true); var rails = new DvpRails(3); var sl = new[] { 1.0, 2, 3 };
+		double sink = 0;
+		for (int i = 0; i < 64; i++) { f.Fit(y, v, n, 3, false); f.Choose(3, false); man.Build(f, hi, lo, v, up, dn, 3, 0.25, 0.7, 0.12, 3); rails.Build(f, man, sl); }
+		var seen = new bool[65]; int distinct = 0;
+		long b0 = GC.GetAllocatedBytesForCurrentThread();
+		for (int k = 0; k < 1000; k++)
+		{
+			double sc = 0.01 + (k % 50) * 0.02;   // shrink the series so the tick floor changes manRowsEff
+			for (int i = 0; i < n; i++) { ys[i] = 4000 + (y[i] - 4000) * sc; his[i] = 4000 + (hi[i] - 4000) * sc; los[i] = 4000 + (lo[i] - 4000) * sc; }
+			f.Fit(ys, v, n, 3, k % 2 == 0); f.Choose(3, false);
+			man.Build(f, his, los, v, up, dn, 3, 0.25, 0.7, 0.12, 3); rails.Build(f, man, sl);
+			sink += man.PocZ + rails.Count + rails.RailPrice(ELevelKind.DvpSigma, 2) + rails.NextRail(0, 1);
+			if (!seen[man.RowsEff]) { seen[man.RowsEff] = true; distinct++; }
+		}
+		long b1 = GC.GetAllocatedBytesForCurrentThread();
+		Check(b1 - b0 == 0 && distinct >= 5, "DV-13.2 zero allocations over 1000 refits (fit + manifold + nodes + rails), " + distinct + " distinct manRowsEff (" + (b1 - b0) + " bytes)");
+		if (double.IsNaN(sink)) Console.WriteLine("sink NaN");
+	}
+
 	static int Main()
 	{
 		T1(); T2(); T3(); T4(); T5(); T6(); T7(); T8(); T20(); T23(); ZeroAlloc();
+		T9a(); T9(); T10(); T11(); T12(); T13(); ZeroAllocD2();
+		D3Tests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
