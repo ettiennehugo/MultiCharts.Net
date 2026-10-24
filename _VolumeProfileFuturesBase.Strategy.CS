@@ -511,6 +511,9 @@ namespace PowerLanguage.Strategy
 		/// <summary>M-AVWAP GapOpen: CME RTH value bars (close-stamped RTH rule, VPF-8).</summary>
 		protected override bool isRthBar(DateTime barTime) { return IsRthValueBarEt(ToEastern(barTime)); }
 
+		/// <summary>M-DVP (DV-7.7): isRthBar is a real RTH test on the futures base, so rthShare is journaled (NaN on the generic base).</summary>
+		protected override bool rthKnown() { return true; }
+
 		protected override bool includeBarInProfile(DateTime barTime)
 		{
 			if (OwnProfileWindow != EOwnProfileWindow.Rth) return base.includeBarInProfile(barTime);
