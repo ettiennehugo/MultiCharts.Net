@@ -255,7 +255,60 @@ static class Program
 		Check(res.All(x => !string.IsNullOrEmpty(x.verdict)), "every scored level type gets a verdict");
 		Check(res.All(x => x.verdict.StartsWith("NOT A VERDICT RUN")), "Variant 0 results are marked not-a-verdict-run");
 
+		// M-DVP PR-D0b, DV-T12a: Gate0Profile.Nodes now delegates to _ProfileMath.Prominence. Compare it bit for bit with the
+		// pre-extraction code (OldNodes below, copied verbatim from origin/main @629da0d) on 2,000 random profiles.
+		{
+			var prng = new Random(20261023); bool same = true; int nodes = 0;
+			double[] proms = { 0.0, 0.05, Gate0Engine.KdeProminence, 0.12, 0.3 };
+			for (int c = 0; c < 2000 && same; c++)
+			{
+				var pr = new Gate0Profile(0.25); int bars = 1 + prng.Next(40); double ppx = 4000 + prng.Next(200) * 0.25;
+				for (int b = 0; b < bars; b++) { ppx += (prng.Next(9) - 4) * 0.25; double lo = ppx - prng.Next(12) * 0.25, hi = ppx + prng.Next(12) * 0.25; pr.Add(hi, lo, prng.Next(4) == 0 ? 0 : 1 + prng.Next(5000)); }
+				double bw = c % 7 == 0 ? 0 : 0.5 + prng.NextDouble() * 8, prom = proms[c % proms.Length];
+				List<double[]> h1, l1, h2, l2; pr.Nodes(bw, prom, out h1, out l1); OldNodes(pr, bw, prom, out h2, out l2);
+				same = SameNodes(h1, h2) && SameNodes(l1, l2); nodes += h1.Count + l1.Count;
+			}
+			Check(same && nodes > 1000, "DV-T12a Gate0Profile.Nodes bit-identical to the pre-extraction code on 2000 random profiles (" + nodes + " nodes)");
+		}
+
 		Console.WriteLine($"Gate0Tests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
+	}
+
+	static bool SameNodes(List<double[]> a, List<double[]> b)
+	{
+		if (a.Count != b.Count) return false;
+		for (int i = 0; i < a.Count; i++)
+			if (a[i].Length != 2 || BitConverter.DoubleToInt64Bits(a[i][0]) != BitConverter.DoubleToInt64Bits(b[i][0]) || BitConverter.DoubleToInt64Bits(a[i][1]) != BitConverter.DoubleToInt64Bits(b[i][1])) return false;
+		return true;
+	}
+
+	/// <summary>Gate0Profile.Nodes as it was on origin/main @629da0d, before PR-D0b (verbatim; reference for DV-T12a).</summary>
+	static void OldNodes(Gate0Profile pr, double bwTicks, double prom, out List<double[]> hvn, out List<double[]> lvn)
+	{
+		var rows = pr.rows; double tick = pr.tick;
+		hvn = new List<double[]>(); lvn = new List<double[]>(); if (pr.Empty || !(bwTicks > 0)) return;
+		long first = rows.Keys.First(), last = rows.Keys.Last(); int pad = (int)Math.Ceiling(3 * bwTicks); long lo = first - pad; int n = (int)(last + pad - lo + 1);
+		var d = new double[n];
+		foreach (var kv in rows)
+			for (int j = Math.Max(0, (int)(kv.Key - lo) - pad); j <= Math.Min(n - 1, (int)(kv.Key - lo) + pad); j++)
+			{ double z = (j + lo - kv.Key) / bwTicks; d[j] += kv.Value * Math.Exp(-0.5 * z * z); }
+		double max = 0; foreach (var x in d) if (x > max) max = x; if (!(max > 0)) return;
+		var peaks = new List<int>();
+		for (int i = 0; i < n; i++)
+		{
+			if (!((i == 0 || d[i] > d[i - 1]) && (i == n - 1 || d[i] >= d[i + 1]))) continue;
+			double lb = d[i], rb = d[i]; int k;
+			for (k = i - 1; k >= 0 && d[k] <= d[i]; k--) if (d[k] < lb) lb = d[k]; if (k < 0) lb = Math.Min(lb, 0);
+			for (k = i + 1; k < n && d[k] <= d[i]; k++) if (d[k] < rb) rb = d[k]; if (k >= n) rb = Math.Min(rb, 0);
+			double p = (d[i] - Math.Max(lb, rb)) / max;
+			if (p >= prom) { peaks.Add(i); hvn.Add(new[] { (i + lo) * tick, p }); }
+		}
+		for (int q = 1; q < peaks.Count; q++)
+		{
+			int a = peaks[q - 1], b = peaks[q], m = a; for (int i = a; i <= b; i++) if (d[i] < d[m]) m = i;
+			double p = (Math.Min(d[a], d[b]) - d[m]) / max;
+			if (p >= prom) lvn.Add(new[] { (m + lo) * tick, p });
+		}
 	}
 }
