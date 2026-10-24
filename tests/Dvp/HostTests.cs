@@ -386,8 +386,49 @@ static partial class Program
 			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines byte-identical to fixtures/golden_fit.txt (series csv same: " + csvSame + ")");
 	}
 
+	// DV-3.8 endpointDrift (accepted reading, Analyst 2 review of #36), refitEvery = 4: on a refit bar whose window ends at E,
+	// drift = (newFit.Yhat(bar E-r) - prevFit.Yhat(bar E-r)) / ATR(t-1), where prevFit is the refit window ending at E-r.
+	// NaN on non-refit bars, when the previous window crosses a roll, or when it is no longer in the ring. Checked against an
+	// independent DvpFit on the raw series.
+	static void TDriftR4()
+	{
+		const int n = 120, r = 4;
+		bool[] hd; RingBar[] s = Series(1500, 77, new[] { 900 }, null, out hd);
+		var rig = new Rig(Cfg(n, r, false), true, false);
+		var nf = new DvpFit(n); var pf = new DvpFit(n);
+		double[] y = new double[n], v = new double[n];
+		int finite = 0, nanRoll = 0, nanWarm = 0, bad = 0, nonRefitNonNaN = 0; double maxErr = 0;
+		Func<DvpFit, int, bool> fitEnd = (f, endIdx) =>
+		{
+			if (endIdx - n + 1 < 0) return false;
+			for (int k = 0; k < n; k++) { RingBar b = s[endIdx - n + 1 + k]; y[k] = (b.h + b.l) / 2; v[k] = b.v; }
+			return f.Fit(y, v, n, 3, false);
+		};
+		for (int i = 0; i < s.Length; i++)
+		{
+			rig.Feed(s[i], hd[i]);
+			DvpSnapshot x = rig.e.SnapshotRaw(1, rig.ring, 0);
+			if (x == null || !x.valid) continue;
+			if (!x.refitBar) { if (!double.IsNaN(x.endpointDrift)) nonRefitNonNaN++; continue; }
+			int e = x.anchorBar - 1, pe = e - r;           // series indices of the new and previous window ends
+			bool prevCrosses = false;
+			for (int k = Math.Max(1, pe - n + 2); k <= pe && k < s.Length; k++) if (s[k].rollBar) prevCrosses = true;
+			if (pe - n + 1 < 0) { if (double.IsNaN(x.endpointDrift)) nanWarm++; else bad++; continue; }
+			if (prevCrosses) { if (double.IsNaN(x.endpointDrift)) nanRoll++; else bad++; continue; }
+			if (!fitEnd(nf, e) || !fitEnd(pf, pe)) { bad++; continue; }
+			double want = (nf.Yhat(nf.U(n - 1 - r), 1) - pf.Yhat(1, 1)) / x.atr;
+			double err = Math.Abs(want - x.endpointDrift);
+			if (!(err <= 1e-9 * Math.Max(1, Math.Abs(want)))) bad++; else finite++;
+			maxErr = Math.Max(maxErr, double.IsNaN(err) ? double.PositiveInfinity : err);
+		}
+		Console.WriteLine("  endpointDrift r=4: finite " + finite + ", NaN roll " + nanRoll + ", NaN out-of-ring " + nanWarm + ", max err " + maxErr.ToString("G3", CI));
+		Check(bad == 0 && nonRefitNonNaN == 0 && finite > 200 && nanRoll > 0,
+			"DV-3.8 endpointDrift r=4: " + finite + " refits match independent fit (max err " + maxErr.ToString("G3", CI) + "), " + nanRoll
+			+ " NaN across roll, " + nanWarm + " NaN prev window out of range, 0 non-refit values (bad " + bad + ", nonRefit " + nonRefitNonNaN + ")");
+	}
+
 	static void D3Tests()
 	{
-		T14(); T15(); T16(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); T27(); T28T29(); R1();
+		T14(); T15(); T16(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); T27(); T28T29(); TDriftR4(); R1();
 	}
 }
