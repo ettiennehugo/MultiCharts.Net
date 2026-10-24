@@ -168,6 +168,8 @@ namespace PowerLanguage.Function
 			return r;
 		}
 
+		// expiration = default(DateTime) (0001-01-01 00:00:00) when the member is missing or default; see TYPED expiration(<null>|date)
+		// to tell them apart. '/' in a value may be an escaped '|'.
 		/// <summary>IP-11.2 fixture line: name|category|exchange|minMove|priceScale|bigPointValue|expiration|timeZone|description ('|' in values escaped as '/').</summary>
 		public static string FixtureLine(string name, string category, string exchange, double minMove, double priceScale, double bigPointValue, DateTime expiration, string timeZone, string description)
 		{

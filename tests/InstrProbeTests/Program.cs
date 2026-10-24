@@ -8,6 +8,8 @@ using PowerLanguage.Function;
 // Off-MC tests for InstrProbeCore (M-INSTR PR-I0, specs/instrument-profile-spec.md rev 3 §12, IP-11.2).
 public enum FakeCategory { Stock = 0, Future = 2, Forex = 5 }
 public class FakeResolution { public string Type { get { return "Minute"; } } public int Size { get { return 1; } } public override string ToString() { return "1 Minute"; } }
+public struct FakeSymInfo2 { public int Open { get { return 930; } } public double Ratio { get { return 0.5; } } }
+public class BadToString { public int X { get { return 7; } } public override string ToString() { throw new FormatException("boom"); } }
 public interface IFakeExtra { string FromInterface { get; } }
 public class FakeInfo : IFakeExtra
 {
@@ -23,6 +25,9 @@ public class FakeInfo : IFakeExtra
 	public string Throws { get { throw new InvalidOperationException("not available"); } }
 	public int this[int i] { get { return i; } }
 	public List<int> Sessions { get { return Enumerable.Range(0, 30).ToList(); } }
+	public FakeSymInfo2 SymbolInfo2 { get { return new FakeSymInfo2(); } }
+	public BadToString Bad { get { return new BadToString(); } }
+	public List<object> WithNull { get { return new List<object> { "a", null, 3 }; } }
 	public FakeInfo Self { get { return this; } }
 	string IFakeExtra.FromInterface { get { return "x"; } }
 }
@@ -67,6 +72,9 @@ static class Program
 		Check(has("Info.Resolution.Type : String = \"Minute\"") && has("Info.Resolution.Size : Int32 = 1"), "nested object recursed");
 		Check(has("Info.Self = <cycle>"), "self reference stops");
 		Check(has("Info.Sessions[...] = <truncated at 20>") && has("Info.Sessions[19] = 19") && !has("Info.Sessions[20] = 20"), "enumerable capped at MAX_ITEMS");
+		Check(has("Info.SymbolInfo2 : runtimeType = FakeSymInfo2") && has("Info.SymbolInfo2.Open : Int32 = 930") && has("Info.SymbolInfo2.Ratio : Double = 0.5"), "struct property recursed (MTPA_MCSymbolInfo2 shape)");
+		Check(has("Info.Bad : BadToString = {\"<FormatException: boom>\"}") && has("Info.Bad.X : Int32 = 7"), "throwing ToString reported, members still dumped");
+		Check(has("Info.WithNull[0] = \"a\"") && has("Info.WithNull[1] = <null>") && has("Info.WithNull[2] = 3") && has("Info.WithNull.<count listed> = 3"), "null list item printed, enumeration continues");
 		Check(lines.All(l => l.IndexOf('\n') < 0), "every dump line single-line");
 
 		var l0 = new List<string>(); InstrProbeCore.Dump(new FakeInfo(), "Info", 0, l0);

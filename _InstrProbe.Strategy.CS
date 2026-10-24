@@ -14,11 +14,14 @@ namespace PowerLanguage.Strategy
 	//   1. FIXTURE   one IP-11.2 fixture line: name|category|exchange|minMove|priceScale|bigPointValue|expiration|timeZone|description
 	//   2. TYPED     the verified IInstrumentSettings members read directly (Name, Category raw + int, Exchange, MinMove, ...)
 	//   3. ENUM      Enum.GetNames(typeof(ESymbolCategory)) with values (IP-1.1)
+	//   3b. FIRSTBAR Time[0] and CurrentBar of the stream (own section, after ENUM, so a stream without a bar yet loses nothing above)
 	//   4. INFO      every public property of Bars.Info by reflection (Expiration, Description, SessionName, QuoteField, ...)
 	//   5. BARS      every public property of the Bars object (looks for Sessions, IP-1.3)
-	//   6. SESSION   any Info/Bars property whose name contains "Session" or "SymbolInfo", dumped 2 levels deep (IP-1.2/1.3)
+	//   6. SESSION   any Info/Bars property whose name contains "Session" or "SymbolInfo", dumped 3 levels deep (IP-1.2/1.3)
 	//   7. TYPES     public MC types named *SymbolInfo* / *Session* / *SymbolCategory* / *Currency* / *InstrumentSettings*, with members
-	// Output: the PowerLanguage .NET Editor Output window AND the file OUT_DIR\InstrProbe_<symbol>.txt (overwritten each run).
+	// Output: the PowerLanguage .NET Editor Output window AND the file OUT_DIR\InstrProbe_<symbol>_ds<n>.txt (one per data stream;
+	// <symbol> made file-safe, @ES -> _ES; overwritten each run). If OUT_DIR cannot be written, retried once in %TEMP%\InstrProbe.
+	// Each section has its own try: a failing section writes "ERROR <section> ..." and the rest still run (FIXTURE/TYPED/ENUM first).
 	// Import: _InstrProbeCore.Function.CS first, then this file. Run instructions: PR-I0 description.
 	// ================================================================================================================
 	public class _InstrProbe : SignalObject
@@ -44,39 +47,51 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		private static void section(List<string> lines, string p, string tag, Action body)
+		{
+			try { body(); }
+			catch (Exception e) { lines.Add(p + " ERROR " + tag + " " + InstrProbeCore.Err(e) + " at " + InstrProbeCore.OneLine(e.StackTrace)); }
+		}
+
 		private void probe(int ds, IInstrument bars)
 		{
 			var lines = new List<string>();
 			string p = InstrProbeCore.PREFIX + " ds(" + ds + ")";
 			string sym = "unknown";
-			try
+			IInstrumentSettings info = null;
+			lines.Add(p + " BEGIN probeVersion(2) runLocal(" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + ") study(" + Name + ")");
+			section(lines, p, "INFO-READ", () => { info = bars.Info; sym = info.Name; });
+			if (info != null)
 			{
-				IInstrumentSettings info = bars.Info;
-				sym = info.Name;
-				lines.Add(p + " BEGIN probeVersion(1) runLocal(" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + ") study(" + Name + ") firstBar(" + bars.Time[0].ToString("yyyy-MM-dd HH:mm:ss") + ")");
-
 				object exp = get(info, "Expiration"), desc = get(info, "Description");
-				lines.Add(p + " FIXTURE " + InstrProbeCore.FixtureLine(info.Name, info.Category.ToString(), info.Exchange, info.MinMove, info.PriceScale, info.BigPointValue,
-					exp is DateTime ? (DateTime)exp : default(DateTime), info.TimeZone.ToString(), desc as string));
+				section(lines, p, "FIXTURE", () => lines.Add(p + " FIXTURE " + InstrProbeCore.FixtureLine(info.Name, info.Category.ToString(), info.Exchange, info.MinMove, info.PriceScale,
+					info.BigPointValue, exp is DateTime ? (DateTime)exp : default(DateTime), info.TimeZone.ToString(), desc as string)));
 
-				lines.Add(p + " TYPED name(" + info.Name + ") feed(" + info.DataFeed + ") category(" + info.Category.ToString() + ") categoryInt(" + Convert.ToInt64(info.Category) +
-					") categoryUpper(" + info.Category.ToString().ToUpperInvariant() + ") exchange(" + info.Exchange + ") minMove(" + InstrProbeCore.FormatValue(info.MinMove) +
-					") priceScale(" + InstrProbeCore.FormatValue(info.PriceScale) + ") tick(" + InstrProbeCore.FormatValue(info.MinMove / info.PriceScale) +
-					") bigPointValue(" + InstrProbeCore.FormatValue(info.BigPointValue) + ") timeZone(" + info.TimeZone.ToString() +
-					") resolution(" + info.Resolution.Type + " " + info.Resolution.Size + ") expiration(" + InstrProbeCore.FormatValue(exp) + ") contSeries(" +
-					(info.Name != null && info.Name.StartsWith("@") ? 1 : 0) + ")");
+				section(lines, p, "TYPED", () =>
+				{
+					var res = info.Resolution;
+					string resText = res == null ? "<null>" : res.Type + " " + res.Size;
+					lines.Add(p + " TYPED name(" + info.Name + ") feed(" + info.DataFeed + ") category(" + info.Category.ToString() + ") categoryInt(" + Convert.ToInt64(info.Category) +
+						") categoryUpper(" + info.Category.ToString().ToUpperInvariant() + ") exchange(" + info.Exchange + ") minMove(" + InstrProbeCore.FormatValue(info.MinMove) +
+						") priceScale(" + InstrProbeCore.FormatValue(info.PriceScale) + ") tick(" + InstrProbeCore.FormatValue(info.MinMove / info.PriceScale) +
+						") bigPointValue(" + InstrProbeCore.FormatValue(info.BigPointValue) + ") timeZone(" + info.TimeZone.ToString() +
+						") resolution(" + resText + ") expiration(" + InstrProbeCore.FormatValue(exp) + ") contSeries(" +
+						(info.Name != null && info.Name.StartsWith("@") ? 1 : 0) + ")");
+				});
+			}
+			section(lines, p, "ENUM", () => lines.Add(p + " ENUM ESymbolCategory " + string.Join(",", InstrProbeCore.EnumMembers(typeof(ESymbolCategory)).ToArray())));
+			section(lines, p, "FIRSTBAR", () => lines.Add(p + " FIRSTBAR time(" + bars.Time[0].ToString("yyyy-MM-dd HH:mm:ss") + ") currentBar(" + bars.CurrentBar + ")"));
 
-				lines.Add(p + " ENUM ESymbolCategory " + string.Join(",", InstrProbeCore.EnumMembers(typeof(ESymbolCategory)).ToArray()));
+			if (info != null)
+				section(lines, p, "INFO", () => { var d = new List<string>(); InstrProbeCore.Dump(info, "Info", 2, d); foreach (string s in d) lines.Add(p + " INFO " + s); });
+			section(lines, p, "BARS", () => { var d = new List<string>(); InstrProbeCore.Dump(bars, "Bars", 1, d); foreach (string s in d) lines.Add(p + " BARS " + s); });
 
+			section(lines, p, "SESSION", () =>
+			{
 				var d = new List<string>();
-				InstrProbeCore.Dump(info, "Info", 2, d);
-				foreach (string s in d) lines.Add(p + " INFO " + s);
-
-				d.Clear();
-				InstrProbeCore.Dump(bars, "Bars", 1, d);
-				foreach (string s in d) lines.Add(p + " BARS " + s);
-
 				foreach (object[] o in new[] { new object[] { "Info", info }, new object[] { "Bars", bars } })
+				{
+					if (o[1] == null) continue;
 					foreach (PropertyInfo pi in InstrProbeCore.Properties(o[1].GetType()))
 						if (pi.Name.IndexOf("Session", StringComparison.OrdinalIgnoreCase) >= 0 || pi.Name.IndexOf("SymbolInfo", StringComparison.OrdinalIgnoreCase) >= 0)
 						{
@@ -85,8 +100,11 @@ namespace PowerLanguage.Strategy
 							InstrProbeCore.Dump(v, o[0] + "." + pi.Name, 3, d);
 							foreach (string s in d) lines.Add(p + " SESSION " + s);
 						}
+				}
+			});
 
-				if (ds == 1)
+			if (ds == 1)
+				section(lines, p, "TYPES", () =>
 				{
 					var asms = new List<Assembly>();
 					foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
@@ -100,23 +118,25 @@ namespace PowerLanguage.Strategy
 						lines.Add(p + " TYPES " + t.FullName + " [" + t.Assembly.GetName().Name + "]");
 						foreach (string m in InstrProbeCore.Members(t)) lines.Add(p + " TYPES   " + t.Name + " " + m);
 					}
-				}
-				lines.Add(p + " END lines(" + (lines.Count + 1) + ")");
-			}
-			catch (Exception e)
-			{
-				lines.Add(p + " ERROR " + InstrProbeCore.Err(e) + " at " + InstrProbeCore.OneLine(e.StackTrace));
-			}
+				});
+			lines.Add(p + " END lines(" + (lines.Count + 1) + ")");
 
 			foreach (string s in lines) Output.WriteLine("{0}", s);
-			try
-			{
-				Directory.CreateDirectory(OUT_DIR);
-				string path = Path.Combine(OUT_DIR, "InstrProbe_" + InstrProbeCore.SafeFileName(sym) + "_ds" + ds + ".txt");
-				File.WriteAllLines(path, lines.ToArray());
-				Output.WriteLine("{0} ds({1}) written to {2}", InstrProbeCore.PREFIX, ds, path);
-			}
-			catch (Exception e) { Output.WriteLine("{0} ds({1}) file write failed: {2}", InstrProbeCore.PREFIX, ds, InstrProbeCore.Err(e)); }
+			string file = "InstrProbe_" + InstrProbeCore.SafeFileName(sym) + "_ds" + ds + ".txt";
+			string primary = Path.Combine(OUT_DIR, file), fallback = null;
+			string err = write(primary, lines);
+			if (err == null) { Output.WriteLine("{0} ds({1}) written to {2}", InstrProbeCore.PREFIX, ds, primary); return; }
+			Output.WriteLine("{0} ds({1}) file write failed: {2} {3}", InstrProbeCore.PREFIX, ds, primary, err);
+			try { fallback = Path.Combine(Path.Combine(Path.GetTempPath(), "InstrProbe"), file); } catch (Exception e) { Output.WriteLine("{0} ds({1}) no temp path: {2}", InstrProbeCore.PREFIX, ds, InstrProbeCore.Err(e)); return; }
+			string err2 = write(fallback, lines);
+			if (err2 == null) Output.WriteLine("{0} ds({1}) written to fallback {2} (primary {3} failed)", InstrProbeCore.PREFIX, ds, fallback, primary);
+			else Output.WriteLine("{0} ds({1}) fallback write failed too: {2} {3}; primary {4}. Copy the INSTRPROBE lines from this Output window.", InstrProbeCore.PREFIX, ds, fallback, err2, primary);
+		}
+
+		private static string write(string path, List<string> lines)
+		{
+			try { Directory.CreateDirectory(Path.GetDirectoryName(path)); File.WriteAllLines(path, lines.ToArray()); return null; }
+			catch (Exception e) { return InstrProbeCore.Err(e); }
 		}
 
 		private static object get(object o, string prop)
