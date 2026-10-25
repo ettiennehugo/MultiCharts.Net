@@ -84,7 +84,38 @@ static class Program
 		Check(real.edgeByTercile.All(x => !double.IsNaN(x)), "terciles computed when quality given");
 		Check(_LevelStudy.Summary(real).StartsWith("A2-33 REAL: levels(60)"), "summary line");
 
+		DvpTypes();
 		Console.WriteLine($"LevelStudyTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
+	}
+
+	// M-DVP PR-D7 (DV-12): the A2-33 harness takes the DVP G0-d type strings (LevelRef.StudyType of the appended ELevelKinds) as-is,
+	// one result per type, keys = DVP tags, quality = families (terciles).
+	static void DvpTypes()
+	{
+		var kinds = new[] { ELevelKind.DvpPoc, ELevelKind.DvpVah, ELevelKind.DvpVal, ELevelKind.DvpHvn, ELevelKind.DvpLvn, ELevelKind.DvpSigma, ELevelKind.DvpConf };
+		string[] want = { "DvpPoc", "DvpVah", "DvpVal", "DvpHvn", "DvpLvn", "DvpSigma", "DvpConf" };
+		Check(kinds.Select(k => new LevelRef { kind = k }.StudyType).SequenceEqual(want), "DVP StudyType strings DvpPoc/Vah/Val/Hvn/Lvn/Sigma/Conf");
+		var ls = new _LevelStudy { config = new LevelStudyConfig { enabled = true, reactionBars = 3, sigmaBars = 10 }, tickSize = 0.25 };
+		Check(ls.Configure() == null, "DVP: configure");
+		double px = 4000; int added = 0;
+		for (int d = 0; d < 6; d++)
+		{
+			ls.BeginSession(D0.AddDays(d));
+			for (int i = 0; i < 12; i++)
+			{
+				double c = px + (i % 3 == 0 ? 1.0 : -0.5);
+				ls.Bar(px, Math.Max(px, c) + 0.25, Math.Min(px, c) - 0.25, c, 100);
+				px = c;
+				if (i == 0 && d > 0)
+					for (int k = 0; k < want.Length; k++)
+						if (ls.AddLevel(want[k], px + (k - 3) * 1.25 + 0.5, 1, 1 + k % 3, "DVP:D1:" + D0.AddDays(d).ToString("yyyyMMdd") + ":" + want[k])) added++;
+			}
+		}
+		List<LevelTypeResult> res = ls.Finish();
+		var sw = new StringWriter(); ls.WriteCsv(sw); string csv = sw.ToString();
+		Check(added == 5 * want.Length, "DVP: every type added once per session (" + added + ")");
+		Check(want.All(t => res.Any(r => r.type == t && r.levels == 5)) && !res.Any(r => r.type == "DvpFib"), "DVP: one A2-33 result per G0-d type, 5 levels each, no DvpFib");
+		Check(csv.Contains(",DvpConf,DVP:D1:") && csv.Contains(",DvpSigma,"), "DVP: CSV carries the DVP type and tag key");
 	}
 }

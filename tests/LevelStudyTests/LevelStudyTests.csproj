@@ -11,5 +11,6 @@
   <ItemGroup>
     <Compile Remove="Generated\**" />
     <Compile Include="..\..\_LevelStudy.Function.CS" Link="Linked\_LevelStudy.cs" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
   </ItemGroup>
 </Project>

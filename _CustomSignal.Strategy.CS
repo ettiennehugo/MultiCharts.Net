@@ -459,6 +459,33 @@ namespace PowerLanguage.Strategy
 			return rails != null ? e.ConfluenceOf(ds, s, rails, lat, r[ago].c) : null;
 		}
 
+		private DateTime m_dvpLsDay = DateTime.MinValue;
+		private int m_dvpLsBar = -1;
+		private Func<string, double, int, double, string, bool> m_dvpLsAdd;   // lazily bound to levelStudyAdd (no per-call delegate)
+
+		/// <summary>DV-12 A2-33 hook (LevelStudyConfig.enabled and DVP enabled): on the first closed Data1 bar of each new tradingDayKey
+		/// (half-days included), every Rails(1) and Confluence(1) G0-d level of that bar's t-1 snapshot goes to levelStudyAdd(StudyType,
+		/// price, 1, quality, tag); crossesRoll / isRollWindow levels are not added (DV-12.2). Data1 only. One "DVP A2-33" Journal line
+		/// per session carries the halfDay flag (DV-7.7) and the counts, keyed by tradingDayKey(yyyy-MM-dd) = the LevelStudy CSV day column
+		/// (join on day, not key: the tag carries the t-1 bar time). Written only when m_dvp.journal != null (Journal trace level):
+		/// the A2-33 halfDay split needs Journal on. Runs after stepLevelStudy, so levels are first evaluated on the next bar.</summary>
+		private void dvpLevelStudyStep()
+		{
+			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_dvpLsBar) return;
+			m_dvpLsBar = Bars.CurrentBar;
+			if (m_levelStudyLastBar != Bars.CurrentBar) return;   // creation bar already fed to _LevelStudy.Bar: never evaluated on it
+			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (day == m_dvpLsDay) return;
+			m_dvpLsDay = day;
+			if (Array.IndexOf(DvpConfig.streams, 1) < 0) return;
+			if (m_dvpLsAdd == null) m_dvpLsAdd = levelStudyAdd;
+			int roll = 0, fib = 0;
+			int nr = DvpA233.Sample(dvpRails(1), m_dvpLsAdd, ref roll, ref fib);
+			int nc = DvpA233.Sample(dvpConfluence(1), m_dvpLsAdd, ref roll, ref fib);
+			if (m_dvp.journal != null)
+				m_dvp.journal(DvpA233.Line(m_dvp.RunId, day, todHalfDay(day), nr, nc, roll, fib));
+		}
+
 		/// <summary>DV-10 Confluence(ds): qualifying clusters (families == 3) as DvpConf LevelRefs, quality = families. Reused list.</summary>
 		protected IReadOnlyList<LevelRef> dvpConfluence(int ds)
 		{
@@ -642,7 +669,7 @@ namespace PowerLanguage.Strategy
 		/// allocation (no ring, no engine). The engine (and every DVP buffer) is constructed here and nowhere else.</summary>
 		private void startDvp()
 		{
-			m_dvp = null; m_dvpQueryWarned = false; m_dvpPa = null;
+			m_dvp = null; m_dvpQueryWarned = false; m_dvpPa = null; m_dvpLsDay = DateTime.MinValue; m_dvpLsBar = -1;
 			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); m_dvpConf.Clear(); m_dvpConfPool.Clear(); }
 			if (!DvpConfig.enabled) return;
 			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); m_dvpConf = new List<LevelRef>(); m_dvpConfPool = new List<LevelRef>(); }
@@ -2058,6 +2085,7 @@ namespace PowerLanguage.Strategy
 
 			stepEngines();   // lazy engines (§0.1): no-op unless enabled
 			if (m_levelStudy != null) stepLevelStudy();
+			if (m_levelStudy != null && m_dvp != null) dvpLevelStudyStep();   // M-DVP DV-12 A2-33 hook: after BeginSession of the new session
 			if (m_portOn) portfolioBar();   // M-PORT: position/equity keys; the derived strategy arms after base.CalcBar()
 
 			// CS-1: journal closed trades once per closed bar (only at ETraceLevel.Journal and above)

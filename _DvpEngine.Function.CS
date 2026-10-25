@@ -1942,6 +1942,43 @@ namespace PowerLanguage.Function
 			}
 		}
 	}
+	/// <summary>PR-D7 (DV-12) A2-33 hook core, MC-free. The host calls Sample for Rails(1) then Confluence(1) on the first closed bar
+	/// of each new tradingDayKey (t-1 snapshot; price frozen at creation, KD-11).</summary>
+	public static class DvpA233
+	{
+		/// <summary>DV-12 per-session Journal line; tradingDayKey uses the LevelStudy CSV day format (join key).</summary>
+		public static string Line(string runId, DateTime day, bool halfDay, int rails, int conf, int rollSkipped, int fibSkipped)
+		{
+			return "DVP A2-33 runId(" + runId + ") tradingDayKey(" + day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ") halfDay(" + (halfDay ? 1 : 0)
+				+ ") rails(" + rails + ") conf(" + conf + ") rollSkipped(" + rollSkipped + ") fibSkipped(" + fibSkipped + ")";
+		}
+
+		/// <summary>DV-12.1 G0-d types: DvpPoc, DvpVah, DvpVal, DvpHvn, DvpLvn, DvpSigma, DvpConf. DvpFib is reported but not a G0-d type.</summary>
+		public static bool IsG0dType(ELevelKind k)
+		{
+			return k == ELevelKind.DvpPoc || k == ELevelKind.DvpVah || k == ELevelKind.DvpVal || k == ELevelKind.DvpHvn
+				|| k == ELevelKind.DvpLvn || k == ELevelKind.DvpSigma || k == ELevelKind.DvpConf;
+		}
+
+		/// <summary>DV-12.1 / DV-12.2: add(r.StudyType, r.price, ageSessions 1, r.quality, key r.tag) for every G0-d level of src with a
+		/// finite price; crossesRoll / isRollWindow levels are not added (A2-39c). Returns the number add accepted; counts the
+		/// roll-filtered and DvpFib (non-G0-d) levels. No allocation beyond what add does.</summary>
+		public static int Sample(IReadOnlyList<LevelRef> src, Func<string, double, int, double, string, bool> add, ref int rollSkipped, ref int fibSkipped)
+		{
+			int n = 0;
+			if (src == null || add == null) return 0;
+			for (int i = 0; i < src.Count; i++)
+			{
+				LevelRef r = src[i];
+				if (r == null || double.IsNaN(r.price) || double.IsInfinity(r.price)) continue;   // priceless slot
+				if (!IsG0dType(r.kind)) { fibSkipped++; continue; }
+				if (r.crossesRoll || r.isRollWindow) { rollSkipped++; continue; }
+				if (add(r.StudyType, r.price, 1, r.quality, r.tag)) n++;
+			}
+			return n;
+		}
+	}
+
 	/// <summary>PR-D6 (DV-9) MC-free HTF helpers used by the _CustomSignal host (testable without MultiCharts).</summary>
 	public static class DvpHtf
 	{
