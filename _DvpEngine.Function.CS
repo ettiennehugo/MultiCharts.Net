@@ -33,6 +33,9 @@ namespace PowerLanguage.Function
 		public const int MaxDegree = 3;    // DV-1.2
 		public const double SseEps = 1e-12;   // DV-3.4 relative assert
 		public const double BreakdownRel = 1e-13;   // N_k <= BreakdownRel * N_0 counts as N_k <= 0 (floating-point zero)
+		/// <summary>DV-9.3 Probe P2 gate (in Canon()). While false, HTF (ds &gt; 1) snapshots are computed and journaled but Tradeable(ds) is
+		/// false with one Warning per stream. Flipped in a one-line PR (PR-D10) once _MtfProbe P2 passes; P2 is not recorded as run.</summary>
+		public const bool P2_PASSED = false;
 	}
 
 	/// <summary>DV-0.2 / §2. Set in a derived strategy's ctor or Create(); no [Input]s.</summary>
@@ -129,7 +132,7 @@ namespace PowerLanguage.Function
 			sb.Append(";const{confMode=").Append(DvpConst.ConfMode).Append(";minFamilies=").Append(DvpConst.MinFamilies);
 			sb.Append(";reportWeights=VA:").Append(R(DvpConst.ReportWeightVa)).Append(",POC:").Append(R(DvpConst.ReportWeightPoc));
 			sb.Append(";rowFloor=").Append(DvpConst.RowFloorTicks).Append("tick;rollAdjust=").Append(DvpConst.RollAdjust);
-			sb.Append(";minBars=").Append(DvpConst.MinBars).Append(";ATR_LEN=").Append(DvpConst.AtrLen).Append(";HOLD_BARS=").Append(DvpConst.HoldBars).Append('}');
+			sb.Append(";minBars=").Append(DvpConst.MinBars).Append(";ATR_LEN=").Append(DvpConst.AtrLen).Append(";HOLD_BARS=").Append(DvpConst.HoldBars).Append(";P2_PASSED=").Append(DvpConst.P2_PASSED ? 1 : 0).Append('}');   // DV-9.3
 			sb.Append(";frozen=").Append(DvpFrozenDegree.Canon(DvpFrozenDegree.Table)).Append('}');
 			return sb.ToString();
 		}
@@ -1223,6 +1226,7 @@ namespace PowerLanguage.Function
 		public readonly bool RollDetect;
 		readonly DvpStream[] m_streams;
 		readonly int[] m_ds;
+		readonly bool[] m_p2Warned;   // DV-9.3: one Warning per HTF stream
 		public Action<string> journal, warnOnce;
 		bool m_finished;
 
@@ -1231,13 +1235,28 @@ namespace PowerLanguage.Function
 			Config = cfg; RunId = runId ?? ""; RollDetect = rollDetect; this.journal = journal; this.warnOnce = warnOnce;
 			ConfigHash = Fnv1a64(cfg.Canon()).ToString("x16", CultureInfo.InvariantCulture);
 			m_ds = (int[])cfg.streams.Clone();
-			m_streams = new DvpStream[m_ds.Length];
+			m_streams = new DvpStream[m_ds.Length]; m_p2Warned = new bool[m_ds.Length];
 			for (int i = 0; i < m_ds.Length; i++) m_streams[i] = new DvpStream(m_ds[i], cfg, root, tick, rollDetect, rthKnown) { warnOnce = warnOnce };
 			if (!rollDetect && warnOnce != null) warnOnce("DVP: RollDetection Off — roll skip disabled");   // DV-7.0: every stream diagnostic-only
 			if (journal != null) journal(CreatedLine(root, paLabels));
 		}
 
 		public int StreamCount { get { return m_streams.Length; } }
+
+		/// <summary>DV-9.3 / DV-10 Tradeable(ds): false for a stream not in `streams`; Data1 true; ds &gt; 1 only when P2_PASSED. While P2 has
+		/// not passed, the first call per HTF stream logs the Warning "DVP Data{ds} used before Probe P2". (DV-7.4: diagnosticOnly is a
+		/// run-level verdict and never gates live bars, so it is not consulted here.)</summary>
+		public bool Tradeable(int ds)
+		{
+			int i = Array.IndexOf(m_ds, ds);
+			if (i < 0) return false;
+			// Gates only P2 (Analyst 2 ruling on PR #41): no timeframe is hard-coded (240m diagnostic-only is a consumer rule, DV-7.5).
+			// TODO(DV-7.0 rollMode PR, M-INSTR): diagnosticOnly is a run-level verdict (DV-7.4) and must NEVER gate Tradeable(); the
+			// rollMode PR reports diagnosticOnly in the DVP RUN line only (under rollMode None the stream stays tradeable, DV-7.0).
+			if (ds <= 1 || DvpConst.P2_PASSED) return true;
+			if (!m_p2Warned[i]) { m_p2Warned[i] = true; if (warnOnce != null) warnOnce("DVP Data" + ds.ToString(CultureInfo.InvariantCulture) + " used before Probe P2"); }
+			return false;
+		}
 		public DvpStream Stream(int ds) { for (int i = 0; i < m_ds.Length; i++) if (m_ds[i] == ds) return m_streams[i]; return null; }
 
 		public static ulong Fnv1a64(string s)
@@ -1263,7 +1282,7 @@ namespace PowerLanguage.Function
 				sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)).Append('=').Append(d.ToString(CultureInfo.InvariantCulture));
 				if (calib || unfrozen) sb.Append('(').Append(calib ? "calibrate" : "").Append(calib && unfrozen ? "," : "").Append(unfrozen ? "unfrozen" : "").Append(')');
 			}
-			sb.Append(") pa(").Append(string.IsNullOrEmpty(paLabels) ? "none" : paLabels).Append(") rollDetect(").Append(RollDetect ? "On" : "Off").Append(") canon(").Append(Config.Canon()).Append(')');
+			sb.Append(") pa(").Append(string.IsNullOrEmpty(paLabels) ? "none" : paLabels).Append(") rollDetect(").Append(RollDetect ? "On" : "Off").Append(") p2(").Append(DvpConst.P2_PASSED ? "passed" : "notRun").Append(") canon(").Append(Config.Canon()).Append(')');
 			return sb.ToString();
 		}
 
@@ -1921,6 +1940,49 @@ namespace PowerLanguage.Function
 				if (journal != null) journal(Line(m_track[i], ds, runId, false));
 				m_track[i].active = false; Written++;
 			}
+		}
+	}
+	/// <summary>PR-D6 (DV-9) MC-free HTF helpers used by the _CustomSignal host (testable without MultiCharts).</summary>
+	public static class DvpHtf
+	{
+		/// <summary>DV-9.2 / DV-0.5: window end (ring ago) of a query on a stream whose ring holds closed bars only. 1 when the ring's
+		/// newest bar is the stream's current bar and that bar has closed (as-of t-1 fit for bar t); else 0 (the stream's bar 0 is
+		/// forming, or the ring's newest bar is older: ring[0] is the last CLOSED bar, same as _MtfMath.ClosedIndex). A forming HTF bar
+		/// is never in the ring, so it never reaches a snapshot.</summary>
+		public static int EndAgo(bool barZeroClosed, int ringCount, int ringNewestBar, int currentBar)
+		{
+			return ringCount > 0 && barZeroClosed && ringNewestBar == currentBar ? 1 : 0;
+		}
+
+		/// <summary>DV-9.1 / DV-0.5: the host steps stream ds (ring add + OnBar) only on a closed bar not stepped before.</summary>
+		public static bool ShouldStep(bool barZeroClosed, int lastSteppedBar, int currentBar) { return barZeroClosed && currentBar != lastSteppedBar; }
+
+		/// <summary>DV-7.0 / DV-T21: a Data2/3 stream must carry the Data1 root (roll inheritance via _RollPending is same-root only).
+		/// Returns the rejection text, or null when the roots match (case-insensitive).</summary>
+		public static string RootError(int ds, string data1Name, string data1Root, string dsName, string dsRoot)
+		{
+			if (ds <= 1 || string.Equals(data1Root ?? "", dsRoot ?? "", StringComparison.OrdinalIgnoreCase)) return null;
+			return "DvpConfig.streams: Data" + ds.ToString(CultureInfo.InvariantCulture) + " is " + dsName + ", Data1 is " + data1Name
+				+ "; a DVP HTF stream must carry the Data1 root (DV-7.0: a different root is rejected)";
+		}
+
+		/// <summary>DV-9.4 HtfNextRailDistAtr: |P - c| / atr for the nearest rail of one snapshot strictly beyond c in dir (+1 up, -1 down),
+		/// over the model rails and the lattice levels (DV-4.9 residual order includes lattice rails; within one snapshot z is monotone in
+		/// price, so residual order = price order). c = Data1 C(t-1); atr = the HTF snapshot's ATR(t-1). NaN when there is no such rail,
+		/// dir is 0, or atr is not &gt; 0. No allocation.</summary>
+		public static double NextRailDistAtr(DvpRails rails, DvpLattice lat, double c, int dir, double atr)
+		{
+			if (dir == 0 || !(atr > 0) || double.IsNaN(c)) return double.NaN;
+			double best = double.PositiveInfinity;
+			if (rails != null) for (int i = 0; i < rails.Count; i++) best = Closer(rails.Items[i].price, c, dir, best);
+			if (lat != null) for (int i = 0; i < lat.Count; i++) best = Closer(lat.Price[i], c, dir, best);
+			return double.IsPositiveInfinity(best) ? double.NaN : best / atr;
+		}
+
+		static double Closer(double p, double c, int dir, double best)
+		{
+			double d = dir > 0 ? p - c : c - p;
+			return d > 0 && d < best ? d : best;   // strictly beyond; NaN prices fail d > 0
 		}
 	}
 	// </dvp-core>
