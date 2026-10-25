@@ -1947,6 +1947,13 @@ namespace PowerLanguage.Function
 	/// of each new tradingDayKey (t-1 snapshot; price frozen at creation, KD-11).</summary>
 	public static class DvpA233
 	{
+		/// <summary>DV-12 per-session Journal line; tradingDayKey uses the LevelStudy CSV day format (join key).</summary>
+		public static string Line(string runId, DateTime day, bool halfDay, int rails, int conf, int rollSkipped, int fibSkipped)
+		{
+			return "DVP A2-33 runId(" + runId + ") tradingDayKey(" + day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ") halfDay(" + (halfDay ? 1 : 0)
+				+ ") rails(" + rails + ") conf(" + conf + ") rollSkipped(" + rollSkipped + ") fibSkipped(" + fibSkipped + ")";
+		}
+
 		/// <summary>DV-12.1 G0-d types: DvpPoc, DvpVah, DvpVal, DvpHvn, DvpLvn, DvpSigma, DvpConf. DvpFib is reported but not a G0-d type.</summary>
 		public static bool IsG0dType(ELevelKind k)
 		{

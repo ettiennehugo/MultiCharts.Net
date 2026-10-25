@@ -466,11 +466,13 @@ namespace PowerLanguage.Strategy
 		/// <summary>DV-12 A2-33 hook (LevelStudyConfig.enabled and DVP enabled): on the first closed Data1 bar of each new tradingDayKey
 		/// (half-days included), every Rails(1) and Confluence(1) G0-d level of that bar's t-1 snapshot goes to levelStudyAdd(StudyType,
 		/// price, 1, quality, tag); crossesRoll / isRollWindow levels are not added (DV-12.2). Data1 only. One "DVP A2-33" Journal line
-		/// per session carries the halfDay flag (DV-7.7) and the counts, since _LevelStudy has no flag column.</summary>
+		/// per session carries the halfDay flag (DV-7.7) and the counts, keyed by tradingDayKey(yyyy-MM-dd) = the LevelStudy CSV day column
+		/// (join on day; per-level key = LevelRef tag = CSV key). Runs after stepLevelStudy, so levels are first evaluated on the next bar.</summary>
 		private void dvpLevelStudyStep()
 		{
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_dvpLsBar) return;
 			m_dvpLsBar = Bars.CurrentBar;
+			if (m_levelStudyLastBar != Bars.CurrentBar) return;   // creation bar already fed to _LevelStudy.Bar: never evaluated on it
 			DateTime day = tradingDayKey(Bars.Time[0]);
 			if (day == m_dvpLsDay) return;
 			m_dvpLsDay = day;
@@ -480,13 +482,7 @@ namespace PowerLanguage.Strategy
 			int nr = DvpA233.Sample(dvpRails(1), m_dvpLsAdd, ref roll, ref fib);
 			int nc = DvpA233.Sample(dvpConfluence(1), m_dvpLsAdd, ref roll, ref fib);
 			if (m_dvp.journal != null)
-				m_dvp.journal(DvpA233Line(m_dvp.RunId, day, todHalfDay(day), nr, nc, roll, fib));
-		}
-
-		internal static string DvpA233Line(string runId, DateTime day, bool halfDay, int rails, int conf, int rollSkipped, int fibSkipped)
-		{
-			return "DVP A2-33 runId(" + runId + ") day(" + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ") halfDay(" + (halfDay ? 1 : 0)
-				+ ") rails(" + rails + ") conf(" + conf + ") rollSkipped(" + rollSkipped + ") fibSkipped(" + fibSkipped + ")";
+				m_dvp.journal(DvpA233.Line(m_dvp.RunId, day, todHalfDay(day), nr, nc, roll, fib));
 		}
 
 		/// <summary>DV-10 Confluence(ds): qualifying clusters (families == 3) as DvpConf LevelRefs, quality = families. Reused list.</summary>

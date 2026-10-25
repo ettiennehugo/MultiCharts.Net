@@ -39,7 +39,7 @@ static partial class Program
 		var rw = new _RollWindow();
 		var rails = new List<LevelRef>(); var pool = new List<LevelRef>();
 		DateTime lsDay = DateTime.MinValue, hookDay = DateTime.MinValue;
-		int sessions = 0, sampled = 0, hookCalls = 0, halfSampled = 0, added = 0, rollSkip = 0, fibSkip = 0, priceBad = 0;
+		int sessions = 0, sampled = 0, hookCalls = 0, halfSampled = 0, added = 0, rollSkip = 0, fibSkip = 0, priceBad = 0, createdEval = 0, keyBad = 0;
 		var types = new HashSet<string>();
 		Func<string, double, int, double, string, bool> add = (t, p, ag, q, k) => { bool ok = ls.AddLevel(t, p, ag, q, k); if (ok) types.Add(t); return ok; };
 		for (int i = 0; i < s.Length; i++)
@@ -55,12 +55,16 @@ static partial class Program
 			if (r == null) continue;
 			rails.Clear(); r.Publish(rails, pool, 1, sn.tPrev, sn.t0, rw.IsRollWindow(rig.ring[1].tradingDay));
 			foreach (var x in rails) { bool hit = false; for (int j = 0; j < r.Count; j++) if (r.Items[j].price == x.price) hit = true; if (!double.IsNaN(x.price) && !hit) priceBad++; }
+			int ev0 = ls.Events.Count;
 			int before = added; added += DvpA233.Sample(rails, add, ref rollSkip, ref fibSkip);
+			for (int j = ev0; j < ls.Events.Count; j++) { var ev = ls.Events[j]; if (ev.touched || ev.barsSeen != 0) createdEval++; if (ev.day.ToString("yyyy-MM-dd") != DvpCustomSignalLineDay(day)) keyBad++; }
 			if (added > before) { sampled++; if (hd[i]) halfSampled++; }
 		}
 		Check(hookCalls == sessions && sampled > sessions / 2 && halfSampled == 1, "DV-12.1 / DV-T29 one A2-33 sampling per tradingDayKey (" + hookCalls + "/" + sessions + "), half-day sampled once (" + halfSampled + ")");
 		Check(rollSkip > 0 && types.All(t => t != "DvpFib") && types.Contains("DvpPoc") && types.Contains("DvpSigma"), "DV-12.2 roll-window levels not added (" + rollSkip + "), types " + string.Join(",", types.OrderBy(t => t)));
 		Check(priceBad == 0, "DV-12.1 price = the t-1 snapshot rail price (frozen at creation)");
+		Check(createdEval == 0 && ls.Events.All(ev => ev.touchBar != 1), "DV-12.1 (e) a DVP-fed level is never evaluated (touch / outcome) on its creation bar");
+		Check(keyBad == 0, "DV-12 (a) journal tradingDayKey == LevelStudy CSV day for every DVP-fed level");
 		List<LevelTypeResult> res = ls.Finish();
 		Check(res.Count > 0 && res.All(x => x.type.StartsWith("Dvp")), "A2-33 Finish: per-type results for DVP types (" + res.Count + ")");
 
@@ -75,5 +79,26 @@ static partial class Program
 		Check(host.Contains("m_dvpLsDay = DateTime.MinValue; m_dvpLsBar = -1;"), "DV-12 host state reset in startDvp");
 	}
 
-	static void D7Tests() { A233Core(); A233Replay(); }
+	static string DvpCustomSignalLineDay(DateTime d) { string l = DvpA233.Line("r", d, false, 0, 0, 0, 0); int i = l.IndexOf("tradingDayKey(") + 14; return l.Substring(i, 10); }
+
+	// (e) forced: the creation bar straddles the level price; the level must stay untouched until the next bar.
+	static void A233CreationBar()
+	{
+		var ls = new _LevelStudy { config = new LevelStudyConfig { enabled = true, reactionBars = 3, sigmaBars = 2, controls = 2 }, tickSize = 0.25 };
+		var d0 = new DateTime(2024, 1, 2); ls.BeginSession(d0);
+		for (int k = 0; k < 5; k++) ls.Bar(100, 101 + k % 2, 99, 100 + k % 2, 10);
+		var d1 = d0.AddDays(1); ls.BeginSession(d1);
+		ls.Bar(100, 102, 98, 100, 10);   // creation bar: fed first (stepLevelStudy), range covers 100.5
+		bool ok = ls.AddLevel("DvpPoc", 100.5, 1, double.NaN, "DvpPoc@t");
+		var lv = ls.Events.First(e => !e.control && e.key == "DvpPoc@t");
+		Check(ok && !lv.touched && lv.barsSeen == 0, "DV-12.1 (e) creation-bar range covers the level: not touched on it");
+		ls.Bar(100, 101, 100, 100.75, 10);
+		Check(lv.touched && lv.touchBar == 2 && lv.refPrice == 100, "DV-12.1 (e) first evaluation on the next bar; reference = creation-bar close (" + lv.touchBar + ", " + lv.refPrice + ")");
+		string line = DvpA233.Line("rid", d1, true, 1, 0, 0, 0);
+		Check(line.Contains("tradingDayKey(2024-01-03)") && line.Contains("halfDay(1)"), "DV-12 (a) journal line carries tradingDayKey in the CSV day format");
+		string host = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
+		Check(host.Contains("if (m_levelStudyLastBar != Bars.CurrentBar) return;"), "DV-12.1 (e) host guard: hook only after the bar was fed to the study");
+	}
+
+	static void D7Tests() { A233Core(); A233Replay(); A233CreationBar(); }
 }
