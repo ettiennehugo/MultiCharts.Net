@@ -39,7 +39,8 @@ static partial class Program
 		var rw = new _RollWindow();
 		var rails = new List<LevelRef>(); var pool = new List<LevelRef>();
 		DateTime lsDay = DateTime.MinValue, hookDay = DateTime.MinValue;
-		int sessions = 0, sampled = 0, hookCalls = 0, halfSampled = 0, added = 0, rollSkip = 0, fibSkip = 0, priceBad = 0, createdEval = 0, keyBad = 0;
+		int sessions = 0, sampled = 0, hookCalls = 0, halfSampled = 0, added = 0, rollSkip = 0, fibSkip = 0, priceBad = 0, createdEval = 0, keyBad = 0, halfLine = 0, confAdded = 0; DateTime day0 = DateTime.MinValue;
+		var confL = new List<LevelRef>(); var confPool = new List<LevelRef>();
 		var types = new HashSet<string>();
 		Func<string, double, int, double, string, bool> add = (t, p, ag, q, k) => { bool ok = ls.AddLevel(t, p, ag, q, k); if (ok) types.Add(t); return ok; };
 		for (int i = 0; i < s.Length; i++)
@@ -57,15 +58,25 @@ static partial class Program
 			foreach (var x in rails) { bool hit = false; for (int j = 0; j < r.Count; j++) if (r.Items[j].price == x.price) hit = true; if (!double.IsNaN(x.price) && !hit) priceBad++; }
 			int ev0 = ls.Events.Count;
 			int before = added; added += DvpA233.Sample(rails, add, ref rollSkip, ref fibSkip);
+			DvpConfluence cf = rig.e.ConfluenceOf(1, sn, r, rig.e.LatticeOf(1, rig.ring, 1), rig.ring[1].c);
+			confL.Clear(); if (cf != null) cf.Publish(confL, confPool, 1, sn.tPrev, sn.t0, r, rw.IsRollWindow(rig.ring[1].tradingDay));
+			int c0 = added; added += DvpA233.Sample(confL, add, ref rollSkip, ref fibSkip); confAdded += added - c0;
 			for (int j = ev0; j < ls.Events.Count; j++) { var ev = ls.Events[j]; if (ev.touched || ev.barsSeen != 0) createdEval++; if (ev.day.ToString("yyyy-MM-dd") != DvpCustomSignalLineDay(day)) keyBad++; }
-			if (added > before) { sampled++; if (hd[i]) halfSampled++; }
+			if (added > before) { sampled++; if (hd[i]) halfSampled++; if (day0 == DateTime.MinValue) day0 = day; }
+			if (hd[i] && DvpA233.Line("r", day, todHalf(hd, i), 0, 0, 0, 0).Contains(" halfDay(1) ")) halfLine++;
 		}
 		Check(hookCalls == sessions && sampled > sessions / 2 && halfSampled == 1, "DV-12.1 / DV-T29 one A2-33 sampling per tradingDayKey (" + hookCalls + "/" + sessions + "), half-day sampled once (" + halfSampled + ")");
 		Check(rollSkip > 0 && types.All(t => t != "DvpFib") && types.Contains("DvpPoc") && types.Contains("DvpSigma"), "DV-12.2 roll-window levels not added (" + rollSkip + "), types " + string.Join(",", types.OrderBy(t => t)));
 		Check(priceBad == 0, "DV-12.1 price = the t-1 snapshot rail price (frozen at creation)");
 		Check(createdEval == 0 && ls.Events.All(ev => ev.touchBar != 1), "DV-12.1 (e) a DVP-fed level is never evaluated (touch / outcome) on its creation bar");
 		Check(keyBad == 0, "DV-12 (a) journal tradingDayKey == LevelStudy CSV day for every DVP-fed level");
+		Check(halfLine == 1 && DvpA233.Line("r", day0, false, 1, 2, 3, 4) == "DVP A2-33 runId(r) tradingDayKey(" + day0.ToString("yyyy-MM-dd") + ") halfDay(0) rails(1) conf(2) rollSkipped(3) fibSkipped(4)", "DV-T29 Journal line halfDay(1) on the half-day (" + halfLine + "), exact format");
+		// O3: Confluence(1) is sampled in the replay too; the synthetic series has no families==3 cluster, so DvpConf adds are pinned in A233Core.
+		Check(confAdded == 0 || types.Contains("DvpConf"), "DV-12.1 Confluence(1) path sampled in the replay (" + confAdded + " DvpConf)");
 		List<LevelTypeResult> res = ls.Finish();
+		var sw = new StringWriter(); ls.WriteCsv(sw);
+		int creationTouch = sw.ToString().Split('\n').Skip(1).Where(x => x.Trim().Length > 0).Select(x => x.Split(',')).Count(f => f[10] == "1" && int.Parse(f[11]) <= 1);
+		Check(creationTouch == 0, "DV-12.1 a level is never evaluated on its creation bar (CSV touchBar >= 2): " + creationTouch);
 		Check(res.Count > 0 && res.All(x => x.type.StartsWith("Dvp")), "A2-33 Finish: per-type results for DVP types (" + res.Count + ")");
 
 		string host = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
@@ -75,9 +86,12 @@ static partial class Program
 		string body = host.Substring(h, host.IndexOf("\n\t\t}\n", h, StringComparison.Ordinal) - h);
 		Check(body.Contains("if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_dvpLsBar) return;") && body.Contains("DateTime day = tradingDayKey(Bars.Time[0]);")
 			&& body.Contains("if (day == m_dvpLsDay) return;") && body.Contains("DvpA233.Sample(dvpRails(1), m_dvpLsAdd") && body.Contains("DvpA233.Sample(dvpConfluence(1), m_dvpLsAdd")
-			&& body.Contains("todHalfDay(day)") && body.Contains("if (m_dvpLsAdd == null) m_dvpLsAdd = levelStudyAdd;"), "DV-12.1 host: first closed bar of a new tradingDayKey, Rails(1) + Confluence(1), halfDay flag, lazy delegate");
+			&& body.Contains("DvpA233.Line(m_dvp.RunId, day, todHalfDay(day)") && body.Contains("if (Array.IndexOf(DvpConfig.streams, 1) < 0) return;") && body.Contains("if (m_dvpLsAdd == null) m_dvpLsAdd = levelStudyAdd;"), "DV-12.1 host: first closed bar of a new tradingDayKey, Rails(1) + Confluence(1), halfDay flag, lazy delegate");
 		Check(host.Contains("m_dvpLsDay = DateTime.MinValue; m_dvpLsBar = -1;"), "DV-12 host state reset in startDvp");
 	}
+
+	// mirrors the host: the halfDay argument is the session's half-day flag (todHalfDay(day) in the host)
+	static bool todHalf(bool[] hd, int i) { return hd[i]; }
 
 	static string DvpCustomSignalLineDay(DateTime d) { string l = DvpA233.Line("r", d, false, 0, 0, 0, 0); int i = l.IndexOf("tradingDayKey(") + 14; return l.Substring(i, 10); }
 

@@ -467,7 +467,8 @@ namespace PowerLanguage.Strategy
 		/// (half-days included), every Rails(1) and Confluence(1) G0-d level of that bar's t-1 snapshot goes to levelStudyAdd(StudyType,
 		/// price, 1, quality, tag); crossesRoll / isRollWindow levels are not added (DV-12.2). Data1 only. One "DVP A2-33" Journal line
 		/// per session carries the halfDay flag (DV-7.7) and the counts, keyed by tradingDayKey(yyyy-MM-dd) = the LevelStudy CSV day column
-		/// (join on day; per-level key = LevelRef tag = CSV key). Runs after stepLevelStudy, so levels are first evaluated on the next bar.</summary>
+		/// (join on day, not key: the tag carries the t-1 bar time). Written only when m_dvp.journal != null (Journal trace level):
+		/// the A2-33 halfDay split needs Journal on. Runs after stepLevelStudy, so levels are first evaluated on the next bar.</summary>
 		private void dvpLevelStudyStep()
 		{
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_dvpLsBar) return;

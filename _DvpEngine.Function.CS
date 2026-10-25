@@ -1942,7 +1942,6 @@ namespace PowerLanguage.Function
 			}
 		}
 	}
-	/// <summary>PR-D6 (DV-9) MC-free HTF helpers used by the _CustomSignal host (testable without MultiCharts).</summary>
 	/// <summary>PR-D7 (DV-12) A2-33 hook core, MC-free. The host calls Sample for Rails(1) then Confluence(1) on the first closed bar
 	/// of each new tradingDayKey (t-1 snapshot; price frozen at creation, KD-11).</summary>
 	public static class DvpA233
@@ -1980,6 +1979,7 @@ namespace PowerLanguage.Function
 		}
 	}
 
+	/// <summary>PR-D6 (DV-9) MC-free HTF helpers used by the _CustomSignal host (testable without MultiCharts).</summary>
 	public static class DvpHtf
 	{
 		/// <summary>DV-9.2 / DV-0.5: window end (ring ago) of a query on a stream whose ring holds closed bars only. 1 when the ring's
