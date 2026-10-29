@@ -31,6 +31,21 @@ namespace PowerLanguage.Function
 
 		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; }
 
+		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
+		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
+		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
+		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
+		public static string SeriesKeyWarning(bool series, string resolutionType, bool calendarKeyed)
+		{
+			if (!series || !calendarKeyed) return null;
+			switch (resolutionType ?? "")
+			{
+				case "Day": case "Week": case "Month": case "Quarter": case "Year": return null;
+			}
+			return "RollDetection Series on an intraday chart (" + resolutionType + ") keyed by calendar date: Series only tests the first bar after midnight "
+				+ "and misses the Globex-open roll gap; use RollDetection = Table (RollDates) or a Globex tradingDayKey";
+		}
+
 		/// <summary>Feed one CLOSED bar. Returns true when this call recorded a roll on `bar` (false on a repeat call for the same bar).
 		/// prevClose is the prior bar's close (ignored on bar 1).</summary>
 		public bool Step(int bar, DateTime tradingDay, double open, double prevClose, string name, double tick)

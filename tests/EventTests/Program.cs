@@ -42,6 +42,17 @@ static class Program
 	static void Main()
 	{
 		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); Perf();
+		{   // PR D: _Test6 RollDates = EventRules.RollDate; must equal the repo roll table rule_roll column (2016-2024)
+			string rp = FindUp("tools/m-event/out/roll_splices_2016_2024.csv");
+			var rows = File.ReadAllLines(rp).Skip(1).Where(l => l.Trim().Length > 0).Select(l => l.Split(',')).ToList();
+			bool all = rows.Count == 36;
+			foreach (var r in rows)
+			{
+				DateTime exp = DateTime.ParseExact(r[1], "yyyy-MM-dd", CultureInfo.InvariantCulture), rr = DateTime.ParseExact(r[2], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+				if (EventRules.RollDate(exp.Year, exp.Month) != rr) { all = false; Console.WriteLine("roll table mismatch " + r[0]); }
+			}
+			Check(all, "PR D: EventRules.RollDate == roll_splices_2016_2024.csv rule_roll (36 rows)");
+		}
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

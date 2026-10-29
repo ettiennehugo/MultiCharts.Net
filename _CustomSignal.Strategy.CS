@@ -1761,6 +1761,16 @@ namespace PowerLanguage.Strategy
 			}
 			if (Bars.Status != EBarState.Close) return;
 			configureRollDetector();
+			if (!m_rollWarned)
+			{
+				// educator review R1: Series is blind on intraday calendar-keyed charts. calendarKeyed probe: 01:00 and 20:00 of the
+				// same date share a key only when tradingDayKey is the calendar date (a Globex / Forex key rolls in the evening).
+				m_rollWarned = true;
+				DateTime d0 = Bars.Time[0].Date;
+				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, Bars.Info.Resolution.Type.ToString(),
+					tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20)));
+				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
+			}
 			int bar = Bars.FullSymbolData.Current;
 			string name = Bars.Info.Name;
 			DateTime day = tradingDayKey(Bars.Time[0]);

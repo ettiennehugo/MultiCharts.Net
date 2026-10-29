@@ -103,6 +103,15 @@ static class Program
 		p.Arm(new DateTime(2025, 6, 13, 9, 30, 0));
 		Check(p.Fire(9, new DateTime(2025, 6, 13, 9, 30, 0)), "S4 pending: same-timestamp close fires");
 
+		// educator review R1: Series on an intraday calendar-keyed chart warns; daily bars, Globex keys and Table do not
+		Check(_RollDetector.SeriesKeyWarning(true, "Minute", true) != null, "R1 warn: Series + Minute + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, "Tick", true) != null, "R1 warn: Series + Tick + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, "Second", true) != null, "R1 warn: Series + Second + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, "Day", true) == null, "R1 no warn: daily bars");
+		Check(_RollDetector.SeriesKeyWarning(true, "Week", true) == null, "R1 no warn: weekly bars");
+		Check(_RollDetector.SeriesKeyWarning(true, "Minute", false) == null, "R1 no warn: Globex key");
+		Check(_RollDetector.SeriesKeyWarning(false, "Minute", true) == null, "R1 no warn: Table only");
+		Check((_RollDetector.SeriesKeyWarning(true, "Minute", true) ?? "").Contains("Table"), "R1 warning points to Table");
 		Console.WriteLine($"RollTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
