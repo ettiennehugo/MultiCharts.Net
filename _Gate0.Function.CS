@@ -24,8 +24,9 @@ namespace PowerLanguage.Function
 	/// <summary>Variant in the level-study modes. 0 = all families.</summary>
 	public enum EGate0Family { All = 0, PriorProfile = 1, NakedPoc = 2, IbEdge = 3, Overnight = 4, Avwap = 5, Vwap = 6, Weekly = 7, CompositeVa = 8, SinglePrint = 9, DvSource = 10, HvnLvn = 11, Mixture = 12, SigmaMixture = 13 }
 
-	/// <summary>Variant in Canary mode (A2-53 sweep cells are Variant 100..123, see Gate0Engine.DecodeA253).</summary>
-	public enum EGate0Canary { VW08 = 0, A2_24_i = 1, A2_24_ii = 2, A2_24_iii = 3, DV10 = 4, A2_53 = 5, DV01 = 6, PS03 = 7 }
+	/// <summary>Variant in Canary mode (A2-53 sweep cells are Variant 100..123, see Gate0Engine.DecodeA253; KD-02 sweep cells are
+	/// Variant 130..133, see Gate0Engine.DecodeKd02). KD02 is APPENDED (M-DVP PR-D8, DV-R4): Gate0 calls the MC-free // <dvp-core>.</summary>
+	public enum EGate0Canary { VW08 = 0, A2_24_i = 1, A2_24_ii = 2, A2_24_iii = 3, DV10 = 4, A2_53 = 5, DV01 = 6, PS03 = 7, KD02 = 8 }
 
 	public enum EGate0Entry { None = 0, Market = 1, Limit = 2 }
 
@@ -296,6 +297,9 @@ namespace PowerLanguage.Function
 		public double a253Gap = 0.005; public int a253Bar = 1, a253Minutes = 30; public bool a253Filter = true;
 		public double dv01F = 0.15, dv01K = 1.0;
 		public double dv10S = 0.5, dv10F = 0.20;
+		// KD-02 (catalogue keller-b5 KD-02, DV-R4): DVP stream bar size in minutes (a canary parameter, not an engine constant; the
+		// catalogue's 15m), time stop in DVP bars, stop rail k (sigma), stop pad in ATR (the DVP snapshot's ATR as of t-1)
+		public int kd02Minutes = 15, kd02TimeStop = 19; public double kd02StopK = 3.0, kd02StopPadAtr = 0.1;
 
 		internal readonly _LevelStudy study = new _LevelStudy();
 		public readonly Gate0Intent intent = new Gate0Intent();
@@ -348,15 +352,32 @@ namespace PowerLanguage.Function
 			gap = g[i / 8]; j = 1 + (i / 4) % 2; minutes = (i / 2) % 2 == 0 ? 30 : 15; filter = i % 2 == 0;
 			return true;
 		}
-		private EGate0Canary Cv { get { return variant >= 100 ? EGate0Canary.A2_53 : (EGate0Canary)variant; } }
-		public string CanaryName { get { if (Cv != EGate0Canary.A2_53) return Cv.ToString(); return string.Format(CultureInfo.InvariantCulture, "A2_53[g={0:0.0}% j={1} {2}m filter={3}]", a253Gap * 100, a253Bar, a253Minutes, a253Filter ? "on" : "off"); } }
+		/// <summary>KD-02 sweep cell (catalogue: <= 4 cells): Variant 130..133 -> idx = Variant-130; time stop = {19, 40}[idx % 2] DVP bars,
+		/// stop rail k = {3.0, 2.5}[idx / 2] sigma. Variant 8 = the default cell 130 (19 bars, 3 sigma).</summary>
+		public static bool DecodeKd02(int v, out int timeStop, out double stopK)
+		{
+			timeStop = 19; stopK = 3.0;
+			if (v == (int)EGate0Canary.KD02) return true;
+			if (v < 130 || v > 133) return false;
+			int i = v - 130; timeStop = i % 2 == 0 ? 19 : 40; stopK = i / 2 == 0 ? 3.0 : 2.5;
+			return true;
+		}
+		private EGate0Canary Cv { get { return variant >= 130 ? EGate0Canary.KD02 : variant >= 100 ? EGate0Canary.A2_53 : (EGate0Canary)variant; } }
+		public string CanaryName { get {
+			if (Cv == EGate0Canary.KD02) return string.Format(CultureInfo.InvariantCulture, "KD02[{0}m stop={1:0.0}s time={2}]", kd02Minutes, kd02StopK, kd02TimeStop);
+			if (Cv != EGate0Canary.A2_53) return Cv.ToString(); return string.Format(CultureInfo.InvariantCulture, "A2_53[g={0:0.0}% j={1} {2}m filter={3}]", a253Gap * 100, a253Bar, a253Minutes, a253Filter ? "on" : "off"); } }
 
 		public string Configure()
 		{
 			if (tick <= 0) return "tick must be > 0";
-			if (mode == EGate0Mode.Canary && !((variant >= 0 && variant <= 7) || (variant >= 100 && variant <= 123))) return "Canary Variant must be 0..7 or 100..123 (A2-53 sweep)";
+			if (mode == EGate0Mode.Canary && !((variant >= 0 && variant <= 8) || (variant >= 100 && variant <= 123) || (variant >= 130 && variant <= 133))) return "Canary Variant must be 0..8, 100..123 (A2-53 sweep) or 130..133 (KD-02 sweep)";
 			if (mode != EGate0Mode.Canary && (variant < 0 || variant > 13)) return "level-study Variant must be 0..13";
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.A2_53) DecodeA253(variant, out a253Gap, out a253Bar, out a253Minutes, out a253Filter);
+			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.KD02)
+			{
+				DecodeKd02(variant, out kd02TimeStop, out kd02StopK);
+				string ke = kd02Init(); if (ke != null) return ke;
+			}
 			study.tickSize = tick;
 			study.config.enabled = true; study.config.to = DevEnd.AddDays(-1); study.config.maxAge = MaxAge;
 			study.config.controls = Controls; study.config.reactionBars = ReactionBars5m;
@@ -379,6 +400,7 @@ namespace PowerLanguage.Function
 			m_mp = mp;
 			if (b.day != m_day) newDay(b);
 			if (b.roll) onRoll(b.day);
+			if (m_kd != null) kd02Feed(b);
 			TimeSpan t = b.et.TimeOfDay;
 			bool rth = IsRthTime(t);
 			DateTime e; double o, h, l, c, v;
@@ -1033,6 +1055,111 @@ namespace PowerLanguage.Function
 					}
 					break;
 			}
+		}
+
+		// ---------------- KD-02 (M-DVP PR-D8): fade the +-2 sigma DVP rail to the POC rail ----------------
+		// Allocated only when the KD02 canary is configured. The DVP stream is fed EVERY Data1 bar (Globex included: DVP windows span
+		// sessions, DV-7.7) aggregated to kd02Minutes buckets; entries obey the common G0-b rules (RTH only, flat by 15:55, roll
+		// session and the session after skipped, nothing on/after DevEnd).
+		private _DvpEngine m_kd; private _BarRing m_kdRing; private Gate0Bucket m_kdB;
+		private int m_kdBar; private bool m_kdRollCur; private DateTime m_kdDay;
+		private int m_kdHeld, m_kdPrevMp; private bool m_kdReachedThis;
+		/// <summary>KD-02: entries filled, and of those how many touched the POC rail target in effect (POC-reach rate, report-only).</summary>
+		public int Kd02Fills { get; private set; }
+		public int Kd02PocReached { get; private set; }
+		public int Kd02TimeStops { get; private set; }
+		public double Kd02PocReachRate { get { return Kd02Fills > 0 ? (double)Kd02PocReached / Kd02Fills : double.NaN; } }
+		internal _DvpEngine Kd02Engine { get { return m_kd; } }
+		internal _BarRing Kd02Ring { get { return m_kdRing; } }
+
+		/// <summary>The DVP config the KD-02 canary runs on: the DV-1 defaults (d per degMode; until PR-D9 freezes d* this is the
+		/// DevCoverageFrozen fallback, d = 1) with the stop rail k added to sigmaList when it is not already there.</summary>
+		public DvpConfig Kd02Config()
+		{
+			var c = new DvpConfig(); c.enabled = true; c.journalFits = false;
+			if (Array.IndexOf(c.sigmaList, kd02StopK) < 0)
+			{
+				var l = new List<double>(c.sigmaList); l.Add(kd02StopK); l.Sort(); c.sigmaList = l.ToArray();
+			}
+			return c;
+		}
+
+		private string kd02Init()
+		{
+			if (kd02Minutes < 1 || kd02TimeStop < 1 || !(kd02StopK > 2) || kd02StopPadAtr < 0) return "KD-02 parameters out of range";
+			DvpConfig c = Kd02Config();
+			List<string> errs = c.Validate(); if (errs != null && errs.Count > 0) return "KD-02 DVP config: " + string.Join("; ", errs);
+			Action<string> j = journal;
+			m_kd = new _DvpEngine(c, "G0KD02", "ES", tick, true, true, null, j == null ? (Action<string>)null : (x => j("G0-b KD02 warning: " + x)));
+			m_kdRing = new _BarRing(DvpStream.RingNeed(c));
+			m_kdB = new Gate0Bucket(kd02Minutes);
+			return null;
+		}
+
+		private void kd02Feed(Gate0Bar b)
+		{
+			if (b.day >= DevEnd) return;   // the holdout is never fed
+			DateTime e; double o, h, l, c, v;
+			if (m_kdB.PreBar(b.et, out e, out o, out h, out l, out c, out v)) kd02Close(e, o, h, l, c, v);
+			if (b.roll) m_kdRollCur = true;
+			m_kdB.Add(b.et, b.o, b.h, b.l, b.c, b.v); m_kdDay = b.day;
+			if (m_kdB.PostBar(b.et)) kd02Close(m_kdB.end, m_kdB.o, m_kdB.h, m_kdB.l, m_kdB.c, m_kdB.v);
+			kd02Track(b);
+		}
+
+		/// <summary>Per Data1 bar: fill bookkeeping and the POC-reach count (a touch of the target in effect on this bar).</summary>
+		private void kd02Track(Gate0Bar b)
+		{
+			if (m_mp != 0 && m_kdPrevMp == 0) { Kd02Fills++; m_kdHeld = 0; m_kdReachedThis = false; }
+			if (m_mp == 0 && m_kdPrevMp != 0) intent.flatten = false;
+			m_kdPrevMp = m_mp;
+			if (m_mp == 0 || m_kdReachedThis || double.IsNaN(intent.target)) return;
+			if (m_mp < 0 ? b.l <= intent.target : b.h >= intent.target) { m_kdReachedThis = true; Kd02PocReached++; }
+		}
+
+		private void kd02Close(DateTime end, double o, double h, double l, double c, double v)
+		{
+			var rb = new RingBar { bar = m_kdBar++, time = end, tradingDay = m_kdDay, o = o, h = h, l = l, c = c, v = v, rth = IsRthTime(end.TimeOfDay), rollBar = m_kdRollCur };
+			m_kdRollCur = false;
+			m_kdRing.Add(rb);
+			m_kd.OnBar(1, m_kdRing, false);   // halfDay unknown in Gate0 (no calendar): false
+			if (!m_rthLive || !IsRthTime(end.TimeOfDay) || end.TimeOfDay >= new TimeSpan(15, 55, 0) || !m_kd.Tradeable(1)) return;
+			if (m_mp != 0)
+			{
+				m_kdHeld++;
+				if (m_kdHeld >= kd02TimeStop) { Kd02TimeStops++; intent.flatten = true; intent.entry = EGate0Entry.None; return; }
+				DvpRails nr = m_kd.RailsOf(1, m_kdRing, 0);   // target re-read each bar: for bar t+1 the "t-1 fit" ends at t
+				double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
+				if (!double.IsNaN(poc)) intent.target = Math.Round(poc / tick) * tick;
+				return;
+			}
+			if (intent.entry != EGate0Entry.None) intent.entry = EGate0Entry.None;   // an unfilled signal lives one bar only
+			int side; double stop, target;
+			if (!Kd02Signal(m_kd, m_kdRing, c, kd02StopK, kd02StopPadAtr, out side, out stop, out target)) return;
+			enter(side, EGate0Entry.Market, double.NaN, Math.Round(stop / tick) * tick, Math.Round(target / tick) * tick, side < 0 ? "KD02S" : "KD02L");
+		}
+
+		/// <summary>
+		/// KD-02 rule on the close c of DVP bar t (ring[0]): short when c &gt; RailPrice(Sigma, +2) of the fit ending at t-1 (endAgo 1),
+		/// long when c &lt; RailPrice(Sigma, -2) (mirror). Stop = RailPrice(Sigma, +-stopK) of that same fit +- stopPad x ATR(t-1), frozen
+		/// at the signal. Target = RailPrice(Poc) of the fit ending at t (endAgo 0, i.e. the t-1 fit of the entry bar t+1), re-read each
+		/// DVP bar while in the trade. False (no signal) when either snapshot is missing/skipped or a rail is absent.
+		/// </summary>
+		internal static bool Kd02Signal(_DvpEngine e, _BarRing ring, double c, double stopK, double stopPadAtr, out int side, out double stop, out double target)
+		{
+			side = 0; stop = target = double.NaN;
+			DvpSnapshot s = e.Snapshot(1, ring, 1);
+			DvpRails r = s != null ? e.RailsOf(1, ring, 1) : null;
+			if (r == null || !(s.atr > 0)) return false;
+			double up = r.RailPrice(ELevelKind.DvpSigma, 2), dn = r.RailPrice(ELevelKind.DvpSigma, -2);
+			if (c > up) side = -1; else if (c < dn) side = 1; else return false;
+			double rail = r.RailPrice(ELevelKind.DvpSigma, -side * stopK);
+			DvpRails nr = e.RailsOf(1, ring, 0);
+			double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
+			if (double.IsNaN(rail) || double.IsNaN(poc)) { side = 0; return false; }
+			stop = rail - side * stopPadAtr * s.atr; target = poc;
+			if (side < 0 ? !(target < c && stop > c) : !(target > c && stop < c)) { side = 0; stop = target = double.NaN; return false; }   // geometry sanity
+			return true;
 		}
 
 		private void wkBand()

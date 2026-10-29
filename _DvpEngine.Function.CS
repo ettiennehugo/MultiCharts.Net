@@ -36,6 +36,9 @@ namespace PowerLanguage.Function
 		/// <summary>DV-9.3 Probe P2 gate (in Canon()). While false, HTF (ds &gt; 1) snapshots are computed and journaled but Tradeable(ds) is
 		/// false with one Warning per stream. Flipped in a one-line PR (PR-D10) once _MtfProbe P2 passes; P2 is not recorded as run.</summary>
 		public const bool P2_PASSED = false;
+		/// <summary>DV-3.6: first holdout day (Jan 2025 - Oct 2026). The Calibrate coverage journal never samples a window ending on or
+		/// after it and drops any forward horizon reaching it (counted), so the holdout is never read by the d* score.</summary>
+		public static readonly DateTime HoldoutFrom = new DateTime(2025, 1, 1);
 	}
 
 	/// <summary>DV-0.2 / §2. Set in a derived strategy's ctor or Create(); no [Input]s.</summary>
@@ -801,6 +804,15 @@ namespace PowerLanguage.Function
 		public readonly double[] A = new double[DvpFit.MaxDeg + 1], B = new double[DvpFit.MaxDeg + 1], N = new double[DvpFit.MaxDeg + 1], C = new double[DvpFit.MaxDeg + 1];
 		public double yBar, sigma; public int n, deg;
 		public long startPos; public int seen, hits, hitsFlat;
+		// PR-D8 Calibrate (DV-3.6): per-degree copies for d = 1..top, allocated only by the DvpCalib constructor
+		public readonly double[] SigK, CovInK; public readonly int[] HitsK, HitsFlatK;
+		public int top, year;
+		public DvpCoef() { }
+		internal DvpCoef(bool perDegree)
+		{
+			if (!perDegree) return;
+			SigK = new double[DvpFit.MaxDeg + 1]; CovInK = new double[DvpFit.MaxDeg + 1]; HitsK = new int[DvpFit.MaxDeg + 1]; HitsFlatK = new int[DvpFit.MaxDeg + 1];
+		}
 
 		public void From(DvpFit f, long startPos)
 		{
@@ -809,17 +821,144 @@ namespace PowerLanguage.Function
 			this.startPos = startPos; seen = hits = hitsFlat = 0;
 		}
 
+		/// <summary>Calibrate copy: every valid degree (the recurrence is nested, so one coefficient set evaluates any d &lt;= top).</summary>
+		internal void FromAll(DvpFit f, long startPos, int year)
+		{
+			yBar = f.YBar; n = f.n; top = f.MaxValidDeg; deg = top; sigma = f.SigmaD; this.year = year;
+			for (int k = 0; k <= top; k++) { A[k] = f.A[k]; B[k] = f.B[k]; N[k] = f.N[k]; C[k] = f.C[k]; }
+			for (int k = 1; k <= top; k++) { SigK[k] = f.Sigma[k]; CovInK[k] = f.CovIn(k, 2); HitsK[k] = HitsFlatK[k] = 0; }
+			this.startPos = startPos; seen = hits = hitsFlat = 0;
+		}
+
 		/// <summary>Same recurrence as DvpFit.Eval (yhat and leverage at u).</summary>
-		public double Eval(double u, out double lev)
+		public double Eval(double u, out double lev) { return Eval(u, deg, out lev); }
+
+		/// <summary>yhat and leverage at u for degree d (d &lt;= the copied degree).</summary>
+		public double Eval(double u, int d, out double lev)
 		{
 			double pPrev = 0, p = 1, s = C[0], h = 1 / N[0];
-			for (int k = 0; k < deg; k++)
+			for (int k = 0; k < d; k++)
 			{
 				double pn = (u - A[k]) * p - B[k] * pPrev;
 				pPrev = p; p = pn;
 				s += C[k + 1] * p; h += p * p / N[k + 1];
 			}
 			lev = h; return yBar + s;
+		}
+	}
+
+	/// <summary>
+	/// PR-D8 DV-3.6 Calibrate coverage journal (journal side, KD-08's diagnostic run): created lazily by a stream the first time a
+	/// journaled refit is calibrating (degMode = Calibrate, or the DevCoverageFrozen fallback while d* is unset). It samples one window
+	/// every projBars stream bars, copies every degree d = 1..MaxValidDeg, and after H = projBars closed bars adds per-degree cov_in
+	/// (k = 2), cov_fwd (k = 2, sqrt(1 + h(u)) band) and the flat band (report-only) to a per-calendar-year bucket, so the dev
+	/// folds (catalogue 2.0.1, VERIFY) can be pooled offline from the DVP CAL lines. A horizon crossing a roll splice is dropped
+	/// (rollDropped); windows ending on/after DvpConst.HoldoutFrom are not sampled and horizons reaching it are dropped (holdout).
+	/// </summary>
+	public sealed class DvpCalib
+	{
+		public sealed class Bucket
+		{
+			public readonly double[] covIn = new double[DvpFit.MaxDeg + 1], covFwd = new double[DvpFit.MaxDeg + 1], covFwdFlat = new double[DvpFit.MaxDeg + 1];
+			public readonly long[] n = new long[DvpFit.MaxDeg + 1];
+			public void Add(Bucket o) { for (int k = 0; k <= DvpFit.MaxDeg; k++) { covIn[k] += o.covIn[k]; covFwd[k] += o.covFwd[k]; covFwdFlat[k] += o.covFwdFlat[k]; n[k] += o.n[k]; } }
+			public double Score(int d) { return n[d] > 0 ? Math.Abs(covFwd[d] / n[d] - covIn[d] / n[d]) : double.NaN; }
+		}
+
+		public readonly int H;
+		readonly DvpCoef[] m_q;
+		int m_count;
+		long m_next = long.MinValue;
+		public readonly SortedDictionary<int, Bucket> Years = new SortedDictionary<int, Bucket>();
+		public long Sampled { get; private set; }
+		public long RollDropped { get; private set; }
+		public long HoldoutSkipped { get; private set; }
+
+		public DvpCalib(int projBars)
+		{
+			H = Math.Max(1, projBars);
+			m_q = new DvpCoef[2];   // one sample every H bars, each tracked for H bars: at most 2 overlap at a boundary
+			for (int i = 0; i < m_q.Length; i++) m_q[i] = new DvpCoef(true);
+		}
+
+		/// <summary>Offer the refit at stream position pos (window ending tPrev). Samples when pos has reached the next sample position.</summary>
+		public void Offer(DvpFit f, long pos, DateTime tPrev)
+		{
+			if (pos < m_next) return;
+			if (tPrev >= DvpConst.HoldoutFrom) { HoldoutSkipped++; m_next = pos + H; return; }
+			if (m_count >= m_q.Length) return;
+			m_q[m_count++].FromAll(f, pos, tPrev.Year);
+			Sampled++; m_next = pos + H;
+		}
+
+		/// <summary>One closed stream bar (y = the fit source) at position pos. rollSplice drops every open horizon.</summary>
+		public void Track(double y, long pos, DateTime time, bool rollSplice)
+		{
+			if (rollSplice) { RollDropped += m_count; m_count = 0; return; }
+			if (time >= DvpConst.HoldoutFrom) { HoldoutSkipped += m_count; m_count = 0; return; }
+			int w = 0;
+			for (int i = 0; i < m_count; i++)
+			{
+				DvpCoef q = m_q[i];
+				int h = (int)(pos - q.startPos);
+				double u = 1 + 2.0 * h / (q.n - 1);
+				for (int k = 1; k <= q.top; k++)
+				{
+					double lev, e = Math.Abs(y - q.Eval(u, k, out lev));
+					if (e <= 2 * q.SigK[k] * Math.Sqrt(1 + lev)) q.HitsK[k]++;
+					if (e <= 2 * q.SigK[k]) q.HitsFlatK[k]++;
+				}
+				q.seen++;
+				if (q.seen >= H)
+				{
+					Bucket b;
+					if (!Years.TryGetValue(q.year, out b)) { b = new Bucket(); Years.Add(q.year, b); }
+					for (int k = 1; k <= q.top; k++) { b.covIn[k] += q.CovInK[k]; b.covFwd[k] += (double)q.HitsK[k] / H; b.covFwdFlat[k] += (double)q.HitsFlatK[k] / H; b.n[k]++; }
+				}
+				else { m_q[i] = m_q[w]; m_q[w] = q; w++; }
+			}
+			m_count = w;
+		}
+
+		/// <summary>Pooled over every journaled year (the caller restricts the run to the dev folds).</summary>
+		public Bucket Pooled()
+		{
+			var p = new Bucket();
+			foreach (var kv in Years) p.Add(kv.Value);
+			return p;
+		}
+
+		/// <summary>d* = argmin score over degrees with samples, ties to the lower d; 0 when nothing completed.</summary>
+		public static int DStar(Bucket b)
+		{
+			int best = 0; double bs = double.PositiveInfinity;
+			for (int k = 1; k <= DvpFit.MaxDeg; k++) { double sc = b.Score(k); if (b.n[k] > 0 && sc < bs) { bs = sc; best = k; } }
+			return best;
+		}
+
+		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
+
+		/// <summary>DVP CAL lines: one per (year, d) and per pooled d, then a summary line with dStar.</summary>
+		public void Lines(Action<string> journal, string runId, int ds)
+		{
+			string head = "DVP CAL runId(" + runId + ") stream(Data" + ds.ToString(CultureInfo.InvariantCulture) + ")";
+			foreach (var kv in Years) bucketLines(journal, head + " year(" + kv.Key.ToString(CultureInfo.InvariantCulture) + ")", kv.Value);
+			Bucket p = Pooled();
+			bucketLines(journal, head + " year(all)", p);
+			journal(head + " summary H(" + H.ToString(CultureInfo.InvariantCulture) + ") sampled(" + Sampled.ToString(CultureInfo.InvariantCulture)
+				+ ") rollDropped(" + RollDropped.ToString(CultureInfo.InvariantCulture) + ") holdoutSkipped(" + HoldoutSkipped.ToString(CultureInfo.InvariantCulture)
+				+ ") dStar(" + DStar(p).ToString(CultureInfo.InvariantCulture) + ")");
+		}
+
+		static void bucketLines(Action<string> journal, string head, Bucket b)
+		{
+			for (int k = 1; k <= DvpFit.MaxDeg; k++)
+			{
+				if (b.n[k] == 0) continue;
+				double n = b.n[k];
+				journal(head + " d(" + k.ToString(CultureInfo.InvariantCulture) + ") windows(" + b.n[k].ToString(CultureInfo.InvariantCulture) + ") covIn(" + F(b.covIn[k] / n)
+					+ ") covFwd(" + F(b.covFwd[k] / n) + ") covFwdFlat(" + F(b.covFwdFlat[k] / n) + ") score(" + F(b.Score(k)) + ")");
+			}
 		}
 	}
 
@@ -1125,9 +1264,12 @@ namespace PowerLanguage.Function
 
 		/// <summary>cov_fwd horizons dropped because they crossed a roll (journal-side; DVP RUN fwdDropped).</summary>
 		public long FwdDropped { get; private set; }
+		/// <summary>PR-D8: the Calibrate coverage journal (null until a journaled refit is calibrating).</summary>
+		public DvpCalib Calib { get; private set; }
 
 		void trackForward(RingBar b)
 		{
+			if (Calib != null) Calib.Track(Src(b), m_pos, b.time, b.rollBar && RollDetect);
 			if (b.rollBar && RollDetect) { FwdDropped += m_fwdCount; m_fwdCount = 0; return; }   // a forward horizon across a splice is dropped (counted)
 			double y = Src(b);
 			int w = 0;
@@ -1156,6 +1298,11 @@ namespace PowerLanguage.Function
 			FitLines++;
 			m_covInSum += f.CovIn(f.Deg, 2); m_covInN++;
 			if (m_fwdCount < m_fwd.Length) m_fwd[m_fwdCount++].From(f, m_pos);
+			if (s.calibrating)
+			{
+				if (Calib == null) Calib = new DvpCalib(m_H);   // lazy (DV-13.3 journal side)
+				Calib.Offer(f, m_pos, s.tPrev);
+			}
 		}
 
 		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
@@ -1348,6 +1495,7 @@ namespace PowerLanguage.Function
 			if (journal == null) return;
 			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].RailJournal != null) m_streams[i].RailJournal.Finish(m_ds[i], journal, RunId); }   // DV-11.2 unfinished trackers
 			for (int i = 0; i < m_streams.Length; i++) journal(m_streams[i].RunLine(RunId));
+			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].Calib != null) m_streams[i].Calib.Lines(journal, RunId, m_ds[i]); }   // PR-D8 DV-3.6
 		}
 	}
 
