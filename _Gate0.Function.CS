@@ -29,6 +29,24 @@ namespace PowerLanguage.Function
 
 	public enum EGate0Entry { None = 0, Market = 1, Limit = 2 }
 
+	/// <summary>Educator review G2: Data1 resolution guard for _TestGate0. The engine re-aggregates Data1 into 1m/5m/15m/30m
+	/// buckets by bar close time, so a Data1 bar must never span more than one minute or straddle a minute boundary.
+	/// Accepted: Tick size 1 (each bar is one trade); Second with a size that divides 60 (1,2,3,4,5,6,10,12,15,20,30,60);
+	/// Minute size 1; all only with ChartType Regular. Rejected: Minute > 1, Hour/Day/Week/Month/Quarter/Year, multi-tick
+	/// bars (Tick > 1), Contract (= volume bars), Point / PointOriginal (= range bars), Change, and any non-Regular chart
+	/// type (Renko, Kagi, point-and-figure, ...): their duration is data-dependent and one bar can span several minutes in
+	/// quiet markets, so the guard cannot prove they stay within one minute. Arguments are Resolution.ChartType.ToString(),
+	/// Resolution.Type.ToString() (EResolution name) and Resolution.Size. Returns null if accepted, else the reason.</summary>
+	public static class Gate0Data1
+	{
+		public static string Check(string chartType, string type, long size)
+		{
+			bool ok = chartType == "Regular" && ((type == "Tick" && size == 1) || (type == "Minute" && size == 1) || (type == "Second" && size >= 1 && size <= 60 && 60 % size == 0));
+			return ok ? null : "Data1 is " + size + " " + type + " " + chartType + " bars; Gate 0 needs 1-tick, 1-minute or N-second bars (N divides 60). " +
+				"Bars longer than 1 minute (or of variable duration: multi-tick, volume/Contract, range/Point, Renko, ...) silently corrupt the 1m buckets and canaries";
+		}
+	}
+
 	public struct Gate0Bar
 	{
 		public DateTime et;    // bar close time, Eastern
