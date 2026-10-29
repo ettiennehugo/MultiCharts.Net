@@ -335,6 +335,7 @@ namespace PowerLanguage.Function
 		public IList<Gate0DvLevel> DvLevels { get { return m_dv; } }
 		public double SessionVwap { get { return m_cur != null ? m_cur.vwap.Value : double.NaN; } }
 		public double Atr20d { get { return m_atrD.Value; } }
+		public double Atr5 { get { return m_atr5.Value; } }
 		public double Atr30 { get { return m_atr30.Value; } }
 
 		/// <summary>A2-53 sweep cell: Variant 100..123 -> idx = Variant-100; gap g = {0.3,0.5,0.8}%[idx/8]; j = 1 + (idx/4)%2;
@@ -450,7 +451,9 @@ namespace PowerLanguage.Function
 			// A2-39 Reset: forget every multi-session source built on the old contract
 			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
 			m_bars30.Clear(); m_dvPending.Clear(); m_dv.Clear(); m_rotCool.Clear(); m_trendCool = 0;
-			m_atrD.ResetPrev(); m_rollSplice = true;
+			// Educator review G1 (both analysts): the intraday ATRs restart at the splice too, so the first 5m/30m TR after the roll
+			// is the bucket's own range, not the cross-contract gap. NEW PRE-REGISTRATION (changes ATR5/ATR30 after a roll).
+			m_atrD.ResetPrev(); m_atr5.ResetPrev(); m_atr30.ResetPrev(); m_rollSplice = true;
 		}
 
 		private void rthOpen(Gate0Bar b)

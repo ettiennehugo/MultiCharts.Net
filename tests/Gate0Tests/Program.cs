@@ -237,6 +237,28 @@ static class Program
 			}
 		}
 
+		// ---- educator review G1: ATR5 and ATR30 restart at a roll (only the splice TR is dropped) ----
+		{
+			Func<double, bool, Gate0Engine> runRoll = (gap, flag) =>
+			{
+				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
+				for (int d = 0; d < 6; d++)
+				{
+					var day = rs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					bool first = true; if (sd++ == 3) rp += gap;
+					for (var t = day.AddHours(-5).AddMinutes(1); t <= day.AddHours(16); t = t.AddMinutes(1))
+					{ re.Bar(new Gate0Bar(t, day, rp, rp + 0.25, rp - 0.25, rp, 100, flag && sd == 4 && first)); first = false; }
+				}
+				return re;
+			};
+			Gate0Engine flat = runRoll(0, false), rolled = runRoll(100, true), unflagged = runRoll(100, false);
+			Check(Near(flat.Atr5, 0.5) && Near(flat.Atr30, 0.5), "roll control: ATR5/ATR30 = bucket range 0.5 (" + flat.Atr5 + "/" + flat.Atr30 + ")");
+			Check(BitConverter.DoubleToInt64Bits(rolled.Atr5) == BitConverter.DoubleToInt64Bits(flat.Atr5), "ATR5 restarts at a roll: the 100-pt splice gap never enters TR (" + rolled.Atr5 + ")");
+			Check(BitConverter.DoubleToInt64Bits(rolled.Atr30) == BitConverter.DoubleToInt64Bits(flat.Atr30), "ATR30 restarts at a roll: the 100-pt splice gap never enters TR (" + rolled.Atr30 + ")");
+			Check(unflagged.Atr30 > flat.Atr30 + 1, "without the roll flag the same gap inflates ATR30 (test has teeth: " + unflagged.Atr30 + ")");
+		}
+
 		// ---- smoke: random walk across the holdout boundary never records holdout events ----
 		var eng = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 };
 		Check(eng.Configure() == null, "configure smoke engine");
