@@ -259,6 +259,31 @@ static class Program
 			Check(unflagged.Atr30 > flat.Atr30 + 1, "without the roll flag the same gap inflates ATR30 (test has teeth: " + unflagged.Atr30 + ")");
 		}
 
+		// ---- PR #43 nit: on tick data the old-contract bucket still open at the roll closes BEFORE the ATR restart ----
+		{
+			Func<double, bool, Gate0Engine> runTick = (gap, flag) =>
+			{
+				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
+				for (int d = 0; d < 6; d++)
+				{
+					var day = rs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					bool first = true; if (sd++ == 3) rp += gap;
+					var last = day.AddHours(16).AddSeconds(-30);
+					for (var t = day.AddHours(-5).AddSeconds(30); t <= last; t = t.AddMinutes(1))
+					{
+						if (sd == 3 && t == last) rp += 1.0;   // old contract: the last bar (bucket still pending at the roll) jumps 1 pt and stays
+						double tpx = rp;
+						re.Bar(new Gate0Bar(t, day, tpx, tpx + 0.25, tpx - 0.25, tpx, 100, flag && sd == 4 && first)); first = false;
+					}
+				}
+				return re;
+			};
+			Gate0Engine ctl = runTick(0, false), rol = runTick(100, true);
+			Check(ctl.Atr30 > 0.5 && BitConverter.DoubleToInt64Bits(rol.Atr5) == BitConverter.DoubleToInt64Bits(ctl.Atr5) && BitConverter.DoubleToInt64Bits(rol.Atr30) == BitConverter.DoubleToInt64Bits(ctl.Atr30),
+				"tick data: the pending old-contract bucket keeps its true range; only the splice TR is dropped (" + rol.Atr30 + " vs " + ctl.Atr30 + ")");
+		}
+
 		// ---- smoke: random walk across the holdout boundary never records holdout events ----
 		var eng = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 };
 		Check(eng.Configure() == null, "configure smoke engine");
