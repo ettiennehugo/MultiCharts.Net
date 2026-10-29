@@ -78,8 +78,9 @@ namespace PowerLanguage.Strategy
 	//    2 Naked POCs             [NPOC] prior RTH POCs not traded since they formed, age 2..15
 	//    3 Initial balance        [IBH, IBL] prior session 09:30-10:30 high / low
 	//    4 Overnight              [ONH, ONL] this morning's Globex overnight high / low (18:00 -> 09:30)
-	//    5 AVWAP anchors          [AV_PH, AV_PL] from the prior RTH high / low bar, [AV_WK, AV_MO] week / month, [AV_OPEN]
-	//                             prior RTH open, [AV_PC] prior RTH close; all valued at the RTH open
+	//    5 AVWAP anchors          [AV_PH, AV_PL] from the prior RTH high / low bar, [AV_WK, AV_MO] week / month,
+	//                             [AV_PC] prior RTH close; all valued at the RTH open. AV_OPEN (prior RTH open) is
+	//                             RETIRED (= the prior session VWAP, type VWAP in Variant 6); Holm m = 36
 	//    6 VWAP                   [VWAP, VWAP+1, VWAP-1] prior RTH session VWAP and +-1 sigma at its close
 	//    7 Weekly profile         [WPOC, WVAH, WVAL] prior week (the 09:30-11:30 range profile was dropped)
 	//    8 Composite value area   [CVAH, CVAL] composite of the last CompositeSessions = 5 RTH sessions (pre-registered)

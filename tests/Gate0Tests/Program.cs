@@ -114,6 +114,8 @@ static class Program
 		Check(double.IsNaN(Gate0Engine.PairedReaction(new LevelEvent { touched = false }, null)), "untouched level has no pair");
 		var hl = new List<LevelTypeResult> { new LevelTypeResult { p = 0.001 }, new LevelTypeResult { p = 0.02 } };
 		Gate0Engine.HolmFixed(hl, Gate0Engine.AllTypes.Length);
+		Check(Gate0Engine.AllTypes.Length == 36 && !Gate0Engine.AllTypes.Contains("AV_OPEN") && Gate0Engine.AllTypes.Distinct().Count() == 36, "Holm m = 36: AV_OPEN retired (educator review G4)");
+		Check(Gate0Engine.PreRegistration().EndsWith("Holm m = 36"), "pre-registration line states Holm m = 36");
 		Check(Near(hl[0].pHolm, Gate0Engine.AllTypes.Length * 0.001) && hl[1].pHolm >= hl[0].pHolm, "Holm across all Gate-0 types (fixed m)");
 
 		// ---- A2-33 study wiring: 20 controls, either side, frozen sigma, reaction after touch ----
@@ -139,6 +141,25 @@ static class Program
 			s2.Finish();
 			var y = s2.Events.First(e => !e.control);
 			Check(y.touched && Near(y.reaction, 2.0), "R = max over k=1..12 bars AFTER the touch (" + y.reaction + ")");
+		}
+
+		// ---- educator review G4: the AVWAP family (Variant 5) no longer emits AV_OPEN; VWAP (Variant 6) is unchanged ----
+		{
+			Func<int, Gate0Engine> runFam = v =>
+			{
+				var fe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = v }; fe.Configure();
+				var fr = new Random(11); double fp = 4800; var fs = new DateTime(2024, 3, 4);
+				for (int d = 0; d < 21; d++)
+				{
+					var day = fs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					for (var t = day.AddHours(-5).AddMinutes(1); t <= day.AddHours(16); t = t.AddMinutes(1))
+					{ double o = fp, c = Math.Round((fp + (fr.NextDouble() - 0.5) * 2) * 4) / 4; fp = c; fe.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 100)); }
+				}
+				return fe;
+			};
+			var av = runFam(5); var vw = runFam(6);
+			Check(av.study.Events.Any(e => e.type == "AV_PC") && !av.study.Events.Any(e => e.type == "AV_OPEN"), "Variant 5 registers AVWAP levels but never AV_OPEN");
+			Check(vw.study.Events.Any(e => e.type == "VWAP"), "Variant 6 still registers VWAP");
 		}
 
 		// ---- roll window (+-1 session) ----
