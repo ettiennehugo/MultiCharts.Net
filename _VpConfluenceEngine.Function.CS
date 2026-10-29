@@ -232,7 +232,7 @@ namespace PowerLanguage.Function
 			order.Sort((a, b) => lvn
 				? nodes[a].strength.CompareTo(nodes[b].strength)
 				: nodes[b].strength.CompareTo(nodes[a].strength));
-			int cap = order.Count < ZONE_TOP_SURVIVORS ? order.Count : ZONE_TOP_SURVIVORS;
+			int cap = order.Count < CONFLUENCE_NODES_PER_PROFILE ? order.Count : CONFLUENCE_NODES_PER_PROFILE;
 			for (int i = 0; i < cap; i++)
 			{
 				Node n = nodes[order[i]];
@@ -620,9 +620,9 @@ namespace PowerLanguage.Function
 					child.credit = 0;
 					continue;
 				}
-				double bonus = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
-				bonus = Math.Min(bonus, Math.Max(0.0, (MAX_PARENT_CREDIT_MULTIPLIER - 1.0) * parent.credit));   // VPB-14: named cap (no-op at 0.25)
-				child.credit = bonus;
+				// VPB-14: a refined child adds DEFAULT_CONFLUENCE_REFINEMENT x parent credit, at most once per parent (claimed). The old
+				// 1.25 x parent cap equalled that bonus exactly (credits are >= 0), so it was removed (educator review V9 / 6d).
+				child.credit = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
 			}
 		}
 
@@ -640,27 +640,13 @@ namespace PowerLanguage.Function
 		private static EConfluenceRole pickRole(List<Survivor> survivors, double acc, double rej)
 		{
 			bool naked = false;
-			int accRank = -1;
-			int rejRank = -1;
 			for (int i = 0; i < survivors.Count; i++)
 			{
 				Survivor s = survivors[i];
-				if (s.credit <= 0 || s.anchor.overlay) continue;
-				if (isRejection(s.anchor.kind))
-				{
-					if (s.anchor.timeframeRank > rejRank) rejRank = s.anchor.timeframeRank;
-				}
-				else
-				{
-					if (s.anchor.timeframeRank > accRank) accRank = s.anchor.timeframeRank;
-					if (s.anchor.kind == EConfluenceKind.NakedPoc) naked = true;
-				}
+				if (s.credit <= 0 || s.anchor.overlay || isRejection(s.anchor.kind)) continue;
+				if (s.anchor.kind == EConfluenceKind.NakedPoc) naked = true;
 			}
-			if (acc > 0 && rej > 0)
-			{
-				if (rejRank > accRank) return EConfluenceRole.Rejection;
-				return naked ? EConfluenceRole.Magnet : EConfluenceRole.Acceptance;
-			}
+			// acc > 0 && rej > 0 (Mixed) is decided by the only caller before pickRole runs.
 			if (rej > 0) return EConfluenceRole.Rejection;
 			if (naked) return EConfluenceRole.Magnet;
 			return EConfluenceRole.Acceptance;
