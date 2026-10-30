@@ -28,6 +28,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_lastDay = DateTime.MinValue, m_lastSplice = DateTime.MinValue;
 		private int m_probeCount, m_probeDst, m_probeMismatch, m_rollCount;
 		private EventRec m_pending; private bool m_hasPending;
+		private bool m_startLogged;   // startup line written for this run
 
 		public _EventCalendarTest(object _ctx) : base(_ctx) { Mode = 0; ProbeTier = 1; }
 
@@ -41,13 +42,36 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			try { Output.WriteLine($"{GetType().Name}: EVTEST StartCalc traceLevel({TraceLevel}) mode({Mode})"); } catch { }   // before base: visible even if base.StartCalc throws
 			base.StartCalc();
 			m_lastDay = m_lastSplice = DateTime.MinValue;
 			m_probeCount = m_probeDst = m_probeMismatch = m_rollCount = 0; m_hasPending = false;
+			m_startLogged = false;
+		}
+
+		/// <summary>One EVTEST summary per run so an empty run is visible (also echoed to Output, independent of TraceLevel).</summary>
+		protected override void StopCalc()
+		{
+			if (m_startLogged)
+			{
+				string msg = $"EVTEST end mode({Mode}) rolls({m_rollCount}) probes({m_probeCount}) dst({m_probeDst}) mismatch({m_probeMismatch}) lastDay({m_lastDay:yyyy-MM-dd}) lastSplice({m_lastSplice:yyyy-MM-dd})";
+				try { Output.WriteLine($"{GetType().Name}: {msg}"); } catch { }
+				try { if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg); } catch { }
+			}
+			base.StopCalc();
 		}
 
 		protected override void CalcBar()
 		{
+			if (!m_startLogged)
+			{
+				// First bar of the run, BEFORE base.CalcBar() so a throw in the base still leaves this line in Output. Echoed to
+				// Output so a run with TraceLevel None / no EventCalendar is visible.
+				m_startLogged = true;
+				string msg = $"EVTEST start mode({Mode}) probeTier({ProbeTier}) traceLevel({TraceLevel}) rollDetection({RollDetection}) eventCalendar({(EventCalendar == null ? "null" : "ok")})";
+				try { Output.WriteLine($"{GetType().Name}: {msg}"); } catch { }
+				try { if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg); } catch { }
+			}
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			_EventCalendar ev = EventCalendar;
