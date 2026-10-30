@@ -13,6 +13,164 @@ namespace PowerLanguage.Function
 	// Spec VPB-9 (analyst-base-class-spec.md): _VpConfluenceEngine moved verbatim out of _VolumeProfileBase.Strategy.CS into its own
 	// helper file, per the CS-0 probe convention (_SignalJournal.Function.CS: plain class in PowerLanguage.Function, class name = file name).
 
+	// <vpconf-rules>
+	/// <summary>
+	/// PR #47 (PR F scope): MC-free confluence rules, extracted by tests/VpHelperTests/gen.sh.
+	/// Zone split as a width rule: a cluster of at least MinSplitCount anchors splits at its largest gap when its width
+	/// exceeds max(SplitTolMultiple x tol, atrFraction x Atr20d). When Atr20d is not ready (NaN / not positive) the width
+	/// limit falls back to SplitTolMultiple x tol. There is no gap > tol veto: the largest gap always splits a too-wide cluster.
+	/// </summary>
+	/// <summary>The engine's anchor as the rules see it.</summary>
+	public interface IVpConfAnchor { string SourceVolumeId { get; } string ProfileId { get; } bool Developing { get; } bool Overlay { get; } }
+	/// <summary>The engine's same-source survivor as the rules see it.</summary>
+	public interface IVpConfSurvivor { IVpConfAnchor Anchor { get; } bool Independent { get; } double Credit { get; } }
+
+	public static class VpConfluenceRules
+	{
+		public const double SplitTolMultiple = 4.0;          // a cluster wider than 4 x tol may split (was CLUSTER_SPLIT_TOL_MULTIPLE)
+		public const int MinSplitCount = 3;                  // ... and only when it holds at least this many anchors (was CLUSTER_MIN_SPLIT_COUNT)
+		public const double DefaultSplitAtrFraction = 0.03;  // 3% of Atr20d (protected _VolumeProfileBase.ConfluenceSplitAtrFraction)
+		private const double Eps = 1e-12;
+
+		public static bool AtrReady(double atr20d) { return !double.IsNaN(atr20d) && !double.IsInfinity(atr20d) && atr20d > 0; }
+
+		/// <summary>Width a cluster may span before it splits.</summary>
+		public static double SplitWidth(double tol, double atr20d, double atrFraction)
+		{
+			double w = SplitTolMultiple * tol;
+			if (AtrReady(atr20d) && atrFraction > 0 && atrFraction * atr20d > w) w = atrFraction * atr20d;
+			return w;
+		}
+
+		/// <summary>prices[lo..hi) ascending. Returns the first index of the upper part (split at the largest gap; the
+		/// lowest such gap on a tie), or -1 when the cluster stays one zone.</summary>
+		public static int SplitAt(IList<double> prices, int lo, int hi, double tol, double atr20d, double atrFraction)
+		{
+			if (prices == null || hi - lo < MinSplitCount) return -1;
+			if (prices[hi - 1] - prices[lo] <= SplitWidth(tol, atr20d, atrFraction) + Eps) return -1;
+			int split = -1;
+			double gap = 0;
+			for (int i = lo + 1; i < hi; i++)
+			{
+				double g = prices[i] - prices[i - 1];
+				if (g > gap) { gap = g; split = i; }
+			}
+			return split > lo ? split : -1;
+		}
+
+		/// <summary>Distinct non-empty ids (independent sources = distinct volume masses, i.e. (stream, profile window)).</summary>
+		public static int DistinctCount(IEnumerable<string> ids)
+		{
+			var set = new HashSet<string>();
+			if (ids != null) foreach (var s in ids) if (!string.IsNullOrEmpty(s)) set.Add(s);
+			return set.Count;
+		}
+
+		/// <summary>PR #47 review: the cluster's zones. Applies SplitAt recursively to prices[lo..hi) and appends each final zone as
+		/// {start, end} to `zones` (ascending); every split taken is appended to `splits` as {lo, hi, at} when splits is not null.</summary>
+		public static void Partition(IList<double> prices, int lo, int hi, double tol, double atr20d, double atrFraction, List<int[]> zones, List<int[]> splits)
+		{
+			if (prices == null || zones == null || hi <= lo) return;
+			int at = SplitAt(prices, lo, hi, tol, atr20d, atrFraction);
+			if (at < 0) { zones.Add(new[] { lo, hi }); return; }
+			if (splits != null) splits.Add(new[] { lo, hi, at });
+			Partition(prices, lo, at, tol, atr20d, atrFraction, zones, splits);
+			Partition(prices, at, hi, tol, atr20d, atrFraction, zones, splits);
+		}
+
+		/// <summary>The volume mass an anchor belongs to: its (remapped) source id, else its own profile id.</summary>
+		public static string SourceId(string sourceVolumeId, string profileId)
+		{
+			return string.IsNullOrEmpty(sourceVolumeId) ? profileId : sourceVolumeId;
+		}
+
+		/// <summary>V5 zone counts over the zone's survivors: independentSources = distinct SourceId of the credited
+		/// independent survivors (labels of one volume mass count once); profileCount = their distinct profiles.</summary>
+		public static void ZoneSourceCounts(IReadOnlyList<IVpConfSurvivor> survivors, out int independentSources, out int profileCount)
+		{
+			var src = new List<string>(); var prof = new List<string>();
+			if (survivors != null)
+				for (int i = 0; i < survivors.Count; i++)
+				{
+					IVpConfSurvivor s = survivors[i];
+					if (!(s.Credit > 0) || !s.Independent) continue;
+					src.Add(SourceId(s.Anchor.SourceVolumeId, s.Anchor.ProfileId));
+					prof.Add(s.Anchor.ProfileId);
+				}
+			independentSources = DistinctCount(src);
+			profileCount = DistinctCount(prof);
+		}
+
+		/// <summary>The cluster's zones: Partition, then emitZone(start, end) once per final range in ascending order, after
+		/// onSplit(lo, hi, at) for every split taken (journal). Returns the number of zones emitted.</summary>
+		public static int EmitZones(IList<double> prices, int lo, int hi, double tol, Func<double> hostAtr20d, double atrFraction,
+			Action<int, int> emitZone, Action<int, int, int, double> onSplit)
+		{
+			double atr20d = hostAtr20d != null ? hostAtr20d() : double.NaN;   // the host's Atr20d, read once per cluster
+			var zones = new List<int[]>(); var splits = new List<int[]>();
+			Partition(prices, lo, hi, tol, atr20d, atrFraction, zones, splits);
+			if (onSplit != null) foreach (var sp in splits) onSplit(sp[0], sp[1], sp[2], atr20d);
+			foreach (var z in zones) emitZone(z[0], z[1]);
+			return zones.Count;
+		}
+
+		/// <summary>Developing confluence for cluster[lo..hi): every developing, non-overlay anchor, in order, becomes
+		/// makeHit(anchor, its survivor or null, credit), where credit is the survivor's credit when > 0, else 0 (absorbed into
+		/// its parent's source or refused). Hits go to `hits` (allocated on the first one; stays null when none).
+		/// Returns developingScore (sum of credits).</summary>
+		public static double DevelopingHits<THit>(IReadOnlyList<IVpConfAnchor> cluster, int lo, int hi, IReadOnlyList<IVpConfSurvivor> survivors,
+			Func<IVpConfAnchor, IVpConfSurvivor, double, THit> makeHit, ref List<THit> hits)
+		{
+			double score = 0;
+			for (int i = lo; i < hi; i++)
+			{
+				IVpConfAnchor a = cluster[i];
+				if (!a.Developing || a.Overlay) continue;
+				IVpConfSurvivor own = null;
+				if (survivors != null)
+					for (int k = 0; k < survivors.Count; k++)
+						if (object.ReferenceEquals(survivors[k].Anchor, a)) { own = survivors[k]; break; }
+				double c = own != null && own.Credit > 0 ? own.Credit : 0;
+				if (hits == null) hits = new List<THit>();
+				hits.Add(makeHit(a, c > 0 ? own : null, c));
+				score += c;
+			}
+			return score;
+		}
+
+		/// <summary>VP hosts build M-DAILY (Atr20d) only when the strategy declares it uses confluence zones
+		/// (UsesConfluenceZones), the split uses ATR, and at least one confluence slot is enabled.</summary>
+		public static bool NeedsAtr20d(bool usesConfluenceZones, double atrFraction, int ds1, int ds2, int ds3)
+		{
+			return usesConfluenceZones && atrFraction > 0 && (ds1 >= 1 || ds2 >= 1 || ds3 >= 1);
+		}
+
+		/// <summary>The host's Atr20d for the split: dailyAtr() when M-DAILY is on (needsDaily), else NaN (4 x tol fallback).</summary>
+		public static double HostAtr20d(bool needsDaily, Func<double> dailyAtr)
+		{
+			return needsDaily && dailyAtr != null ? dailyAtr() : double.NaN;
+		}
+
+		/// <summary>StartCalc: throws ArgumentException(DuplicateStreamError) for duplicate enabled confluence streams.</summary>
+		public static void ValidateStreams(int ds1, int ds2, int ds3)
+		{
+			string e = DuplicateStreamError(ds1, ds2, ds3);
+			if (e != null) throw new ArgumentException(e);
+		}
+
+		/// <summary>StartCalc check: every enabled confluence slot (stream >= 1) needs its own stream. Returns the error or null.</summary>
+		public static string DuplicateStreamError(int ds1, int ds2, int ds3)
+		{
+			int[] ds = { ds1, ds2, ds3 };
+			for (int j = 1; j < 3; j++)
+				for (int i = 0; i < j; i++)
+					if (ds[j] >= 1 && ds[j] == ds[i])
+						return "ConfluenceDataStream" + (j + 1) + " = ConfluenceDataStream" + (i + 1) + " (" + ds[j] + "): each confluence slot needs its own stream";
+			return null;
+		}
+	}
+	// </vpconf-rules>
+
 	/// <summary>
 	/// Rebuilds <see cref="m_confluenceZones"/> on the owning study.
 	/// The zone list itself stays on <see cref="_VolumeProfileBase"/>.
@@ -30,8 +188,12 @@ namespace PowerLanguage.Function
 	/// </summary>
 	internal sealed class _VpConfluenceEngine
 	{
-		private sealed class Anchor
+		private sealed class Anchor : IVpConfAnchor
 		{
+			string IVpConfAnchor.SourceVolumeId { get { return sourceVolumeId; } }
+			string IVpConfAnchor.ProfileId { get { return profileId; } }
+			bool IVpConfAnchor.Developing { get { return developing; } }
+			bool IVpConfAnchor.Overlay { get { return overlay; } }
 			public int dataStream;
 			public int profileStartBar;
 			public int profileEndBar;
@@ -49,8 +211,11 @@ namespace PowerLanguage.Function
 			public DateTime windowEnd;
 		}
 
-		private sealed class Survivor
+		private sealed class Survivor : IVpConfSurvivor
 		{
+			IVpConfAnchor IVpConfSurvivor.Anchor { get { return anchor; } }
+			bool IVpConfSurvivor.Independent { get { return independent; } }
+			double IVpConfSurvivor.Credit { get { return credit; } }
 			public Anchor anchor;
 			public double baseCredit;
 			public double credit;
@@ -79,6 +244,7 @@ namespace PowerLanguage.Function
 		private double m_htfVal;
 		private int m_htfRank = -1;
 		private int m_htfAge = int.MaxValue;
+		private readonly List<double> m_prices = new List<double>();   // cluster prices for VpConfluenceRules.EmitZones
 
 		public _VpConfluenceEngine(_VolumeProfileBase owner)
 		{
@@ -128,40 +294,26 @@ namespace PowerLanguage.Function
 
 		// Index range instead of GetRange. A split used to copy both sides; the anchors
 		// stay in price order, so [lo, hi) is the same cluster the copy would have been.
+		// PR #47: width rule (VpConfluenceRules.SplitAt). The anchors are sorted ascending, so m_prices mirrors the cluster.
 		private void emitClusters(List<Anchor> cluster, int lo, int hi, double tol)
 		{
 			if (cluster == null || hi <= lo) return;
-			double priceLo = cluster[lo].price;
-			double priceHi = cluster[lo].price;
-			for (int i = lo + 1; i < hi; i++)
+			if (lo == 0 && hi == cluster.Count)
 			{
-				if (cluster[i].price < priceLo) priceLo = cluster[i].price;
-				if (cluster[i].price > priceHi) priceHi = cluster[i].price;
+				m_prices.Clear();
+				for (int i = 0; i < cluster.Count; i++) m_prices.Add(cluster[i].price);
 			}
-			int count = hi - lo;
-			if (priceHi - priceLo <= CLUSTER_SPLIT_TOL_MULTIPLE * tol + PRICE_EPSILON || count < CLUSTER_MIN_SPLIT_COUNT)
-			{
-				addZone(cluster, lo, hi, tol);
-				return;
-			}
-			int split = -1;
-			double gap = 0;
-			for (int i = lo + 1; i < hi; i++)
-			{
-				double g = cluster[i].price - cluster[i - 1].price;
-				if (g > gap)
-				{
-					gap = g;
-					split = i;
-				}
-			}
-			if (split <= lo || gap <= tol)
-			{
-				addZone(cluster, lo, hi, tol);
-				return;
-			}
-			emitClusters(cluster, lo, split, tol);
-			emitClusters(cluster, split, hi, tol);
+			double atrFraction = m_owner.ConfluenceSplitAtrFraction;
+			VpConfluenceRules.EmitZones(m_prices, lo, hi, tol, m_owner.confluenceAtr20d, atrFraction, (zlo, zhi) => addZone(cluster, zlo, zhi, tol), (a, b, split, atr) => journalSplit(a, b, split, tol, atrFraction, atr));
+		}
+
+		private void journalSplit(int a, int b, int split, double tol, double atrFraction, double atr20d)
+		{
+			m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
+				"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
+				b - a, m_prices[a], m_prices[b - 1], m_prices[b - 1] - m_prices[a], VpConfluenceRules.SplitWidth(tol, atr20d, atrFraction),
+				m_prices[split], m_prices[split] - m_prices[split - 1], atr20d,
+				VpConfluenceRules.AtrReady(atr20d) ? "atr" : "tol-fallback"));
 		}
 
 		private void collectAnchors(List<Anchor> anchors)
@@ -232,7 +384,7 @@ namespace PowerLanguage.Function
 			order.Sort((a, b) => lvn
 				? nodes[a].strength.CompareTo(nodes[b].strength)
 				: nodes[b].strength.CompareTo(nodes[a].strength));
-			int cap = order.Count < ZONE_TOP_SURVIVORS ? order.Count : ZONE_TOP_SURVIVORS;
+			int cap = order.Count < CONFLUENCE_NODES_PER_PROFILE ? order.Count : CONFLUENCE_NODES_PER_PROFILE;
 			for (int i = 0; i < cap; i++)
 			{
 				Node n = nodes[order[i]];
@@ -423,8 +575,6 @@ namespace PowerLanguage.Function
 			double acc = 0;
 			double rej = 0;
 			double ctx = 0;
-			int independent = 0;
-			var sources = new HashSet<string>();
 			var streams = new HashSet<int>();
 			Survivor anchorPick = null;
 
@@ -439,12 +589,7 @@ namespace PowerLanguage.Function
 				else
 					acc += s.credit;
 
-				if (s.independent)
-				{
-					independent++;
-					sources.Add(s.anchor.sourceVolumeId);
-					streams.Add(s.anchor.dataStream);
-				}
+				if (s.independent) streams.Add(s.anchor.dataStream);
 				zone.hits.Add(toHit(s));
 				if (anchorPick == null || betterAnchor(s, anchorPick))
 					anchorPick = s;
@@ -477,8 +622,11 @@ namespace PowerLanguage.Function
 			zone.rejectionScore = rej;
 			zone.contextScore = ctx;
 			zone.rawScore = acc + rej;
-			zone.independentSources = independent;
-			zone.profileCount = independent;
+			int nSources, nProfiles;
+			VpConfluenceRules.ZoneSourceCounts(survivors, out nSources, out nProfiles);
+			zone.independentSources = nSources;   // V5: distinct sources, not survivors
+			zone.profileCount = nProfiles;
+			zone.developingScore = VpConfluenceRules.DevelopingHits(cluster, loIdx, hiIdx, survivors, developingHit, ref zone.developingHits);
 			zone.streamCount = streams.Count;
 			zone.hitCount = zone.hits.Count;
 			zone.role = acc > 0 && rej > 0 ? EConfluenceRole.Mixed : pickRole(survivors, acc, rej);
@@ -492,13 +640,24 @@ namespace PowerLanguage.Function
 			m_owner.m_confluenceZones.Add(zone);
 		}
 
+		// PR #47: VpConfluenceRules.DevelopingHits builder. The developing profile's confluence so far, kept apart from the scored hits. Every developing-profile anchor
+		// in the zone is listed (tagged developing). One that survived carries its credit; one absorbed into its completed
+		// parent's source (assignDevelopingSources) or refused carries credit 0. developingScore sums the credited ones.
+		private static ConfluenceHit developingHit(IVpConfAnchor a, IVpConfSurvivor own, double credit)
+		{
+			if (own != null) return toHit((Survivor)own);
+			ConfluenceHit h = toHit(new Survivor { anchor = (Anchor)a, absorbed = "" });
+			h.weight = 0; h.credit = 0; h.independent = false;
+			return h;
+		}
+
 		private List<Survivor> collapseSameSource(List<Anchor> cluster, int lo, int hi)
 		{
 			var groups = new Dictionary<string, List<Anchor>>();
 			for (int i = lo; i < hi; i++)
 			{
 				Anchor a = cluster[i];
-				string id = string.IsNullOrEmpty(a.sourceVolumeId) ? a.profileId : a.sourceVolumeId;
+				string id = VpConfluenceRules.SourceId(a.sourceVolumeId, a.profileId);
 				if (!groups.TryGetValue(id, out List<Anchor> list))
 				{
 					list = new List<Anchor>();
@@ -543,8 +702,9 @@ namespace PowerLanguage.Function
 
 		private Survivor makeSurvivor(Anchor a, string absorbedLabels, bool volume)
 		{
+			// PR #47: StartCalc rejects duplicate enabled streams, so every anchor's stream maps to exactly one slot weight
+			// (collectStream / addVwap skip weight <= 0); the old 1 + 0.25 x rank fallback is gone.
 			double weight = rankWeightFor(a.dataStream);
-			if (weight <= 0) weight = 1.0 + FALLBACK_TIMEFRAME_WEIGHT_STEP * a.timeframeRank;
 			double credit;
 			if (a.overlay)
 				credit = DEFAULT_CONFLUENCE_OVERLAY_FACTOR * weight;
@@ -620,9 +780,9 @@ namespace PowerLanguage.Function
 					child.credit = 0;
 					continue;
 				}
-				double bonus = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
-				bonus = Math.Min(bonus, Math.Max(0.0, (MAX_PARENT_CREDIT_MULTIPLIER - 1.0) * parent.credit));   // VPB-14: named cap (no-op at 0.25)
-				child.credit = bonus;
+				// VPB-14: a refined child adds DEFAULT_CONFLUENCE_REFINEMENT x parent credit, at most once per parent (claimed). The old
+				// 1.25 x parent cap equalled that bonus exactly (credits are >= 0), so it was removed (educator review V9 / 6d).
+				child.credit = DEFAULT_CONFLUENCE_REFINEMENT * parent.credit;
 			}
 		}
 
@@ -640,27 +800,13 @@ namespace PowerLanguage.Function
 		private static EConfluenceRole pickRole(List<Survivor> survivors, double acc, double rej)
 		{
 			bool naked = false;
-			int accRank = -1;
-			int rejRank = -1;
 			for (int i = 0; i < survivors.Count; i++)
 			{
 				Survivor s = survivors[i];
-				if (s.credit <= 0 || s.anchor.overlay) continue;
-				if (isRejection(s.anchor.kind))
-				{
-					if (s.anchor.timeframeRank > rejRank) rejRank = s.anchor.timeframeRank;
-				}
-				else
-				{
-					if (s.anchor.timeframeRank > accRank) accRank = s.anchor.timeframeRank;
-					if (s.anchor.kind == EConfluenceKind.NakedPoc) naked = true;
-				}
+				if (s.credit <= 0 || s.anchor.overlay || isRejection(s.anchor.kind)) continue;
+				if (s.anchor.kind == EConfluenceKind.NakedPoc) naked = true;
 			}
-			if (acc > 0 && rej > 0)
-			{
-				if (rejRank > accRank) return EConfluenceRole.Rejection;
-				return naked ? EConfluenceRole.Magnet : EConfluenceRole.Acceptance;
-			}
+			// acc > 0 && rej > 0 (Mixed) is decided by the only caller before pickRole runs.
 			if (rej > 0) return EConfluenceRole.Rejection;
 			if (naked) return EConfluenceRole.Magnet;
 			return EConfluenceRole.Acceptance;
@@ -689,7 +835,8 @@ namespace PowerLanguage.Function
 				credit = s.credit,
 				volumeShare = s.anchor.volumeShare,
 				naked = s.anchor.naked,
-				independent = s.independent
+				independent = s.independent,
+				developing = s.anchor.developing
 			};
 		}
 
