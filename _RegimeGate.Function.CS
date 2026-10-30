@@ -60,6 +60,7 @@ namespace PowerLanguage.Function
 		public const string RollDatesDigest2000To2035 = "fdd63bd8f179a8d4";
 		/// <summary>Trading-day key: "Globex18ET" = _CmeSessionClock.GlobexTradingDayEt (ET >= 18:00 -> next date).</summary>
 		public string tradingDay = "Globex18ET";
+		public bool atrRestartOnRoll = false;                     // PR #46: DailyConfig.atrRestartOnRoll (DECIDED: ATR carries on across rolls)
 	}
 
 	/// <summary>One session's gate decision, read once at the 09:30 latch and held for the session.</summary>
@@ -178,7 +179,7 @@ namespace PowerLanguage.Function
 			"rg.fallback", "rg.publish", "rg.atrPctLookback", "rg.parkinsonBars", "rg.bicDiagnostic", "rg.rollSuspectZ", "rg.gapBusinessDays",
 			"gate.arm", "gate.blocked", "gate.seed",
 			"host.k", "host.atrLength", "host.rthOpen", "host.activeEnd", "host.exitTime", "host.rthClose", "host.contracts", "host.halfDayExitBefore",
-			"host.rollDetection", "host.rollYears", "host.rollDates", "host.tradingDay",
+			"host.rollDetection", "host.rollYears", "host.rollDates", "host.tradingDay", "host.atrRestartOnRoll",
 		};
 
 		/// <summary>All config fields by name (a superset of HashFields is allowed; extras are journaled, not hashed).</summary>
@@ -201,7 +202,7 @@ namespace PowerLanguage.Function
 			f["host.exitTime"] = h.exitTime.ToString("c", IC); f["host.rthClose"] = h.rthClose.ToString("c", IC); f["host.contracts"] = h.contracts.ToString(IC);
 			f["host.halfDayExitBefore"] = h.halfDayExitBefore.ToString("c", IC);
 			f["host.rollDetection"] = h.rollDetection ?? ""; f["host.rollYears"] = h.rollFromYear.ToString(IC) + "-" + h.rollToYear.ToString(IC);
-			f["host.rollDates"] = h.rollDatesDigest ?? ""; f["host.tradingDay"] = h.tradingDay ?? "";
+			f["host.rollDates"] = h.rollDatesDigest ?? ""; f["host.tradingDay"] = h.tradingDay ?? ""; f["host.atrRestartOnRoll"] = h.atrRestartOnRoll ? "1" : "0";
 			return f;
 		}
 

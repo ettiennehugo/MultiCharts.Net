@@ -105,6 +105,9 @@ namespace PowerLanguage.Strategy
 			HostConfig.rollDatesDigest = _RollDetector.DatesDigest(RollDates);
 			HostConfig.tradingDay = "Globex18ET";
 			DailyConfig.atrLength = HostConfig.atrLength;
+			// PR #46 (DECIDED by Ettienne): carry ATR20d on from the roll-adjusted history; only the splice day's TR is skipped
+			HostConfig.atrRestartOnRoll = false;
+			DailyConfig.atrRestartOnRoll = HostConfig.atrRestartOnRoll;
 			base.StartCalc();
 			m_core = new A263Core(HostConfig);
 			m_terc = new AtrTercileTracker(RegimeConfig.atrPctLookback, RegimeConfig.K);

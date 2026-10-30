@@ -27,7 +27,7 @@ static class Program
 
 	static void Main()
 	{
-		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay(); EveningSplice();
+		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay(); EveningSplice(); RollCarryAtr();
 		Console.WriteLine($"DailyTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -238,7 +238,7 @@ static class Program
 		Check(Math.Abs(gx[0] - spread) < 25, "evening splice, Globex key: roll offset ~ the spread (" + gx[0].ToString("0.##") + ")");
 		Check(Math.Abs(cal[0]) < 25 && Math.Abs(cal[0]) < Math.Abs(gx[0]) - 20, "evening splice, calendar key: offset ~0, the known failure (" + cal[0].ToString("0.##") + ")");
 		// PR #46 re-review: ATR20d. The roll reseeds Wilder (applyRoll), so ATR20d is NaN for the next 20 completed days (the
-		// post-roll blackout, rulings (h), unchanged here), then finite and free of the 40-point spread (bar TRs are ~26 here).
+		// default atrRestartOnRoll = true reseed; _Test6 carries instead, rulings (h) and RollCarryAtr), then finite and free of the 40-point spread (bar TRs are ~26 here).
 		Console.WriteLine("EveningSplice: Globex offset " + gx[0].ToString("0.##") + " atr " + gx[1].ToString("0.##") + " nanDays " + gx[2] + "; calendar offset " + cal[0].ToString("0.##") + " atr " + cal[1].ToString("0.##") + " nanDays " + cal[2]);
 		// Holidays (rulings (i), accepted, documented): the key is a pure 18:00 ET rule. MLK 2024-01-15: Sun 18:00 -> Mon 01-15
 		// (a short holiday day of its own), Mon 18:00 -> Tue 01-16. CME books the holiday session to the next trade date.
@@ -247,5 +247,24 @@ static class Program
 			&& _CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 1, 15, 18, 0, 0)) == new DateTime(2024, 1, 16), "Globex key on a Monday holiday: own short day (documented, rulings (i))");
 		Check(gx[2] == 20, "post-roll ATR20d blackout: NaN for 20 completed days after the roll (" + gx[2] + ")");
 		Check(!double.IsNaN(gx[1]) && gx[1] < spread, "ATR20d after the blackout is finite and below the spread (" + gx[1].ToString("0.##") + ")");
+	}
+
+	// PR #46 (DECIDED by Ettienne): atrRestartOnRoll = false carries ATR20d on from the roll-adjusted history.
+	static void RollCarryAtr()
+	{
+		var d = Ctx(c => c.atrRestartOnRoll = false); var days = Days(260, 2);
+		for (int i = 0; i < 250; i++) d.AddDay(D0.AddDays(i), days[i][0], days[i][1], days[i][2], days[i][3]);
+		double atr0 = d.Atr20d, pc = d.PrevClose; const double off = 25;
+		// the splice day: a 500-point range vs the old close would dominate a TR; it must be skipped, not reseeded
+		d.AddDay(D0.AddDays(250), pc + off, pc + off + 250, pc + off - 250, pc + off, true, off);
+		Check(!double.IsNaN(atr0) && Near(d.Atr20d, atr0, 1e-12), "carry: splice-day TR excluded, ATR20d unchanged on the roll day (" + atr0.ToString("0.###") + ")");
+		bool anyNaN = false; double expect = atr0, prev = d.PrevClose;
+		for (int i = 251; i < 271; i++)
+		{
+			d.AddDay(D0.AddDays(i), prev, prev + 10, prev - 10, prev);
+			expect = (expect * 19 + 20) / 20; anyNaN |= double.IsNaN(d.Atr20d);
+		}
+		Check(!anyNaN && Near(d.Atr20d, expect, 1e-9), "carry: no NaN blackout after the roll; Wilder continues from the pre-roll ATR");
+		var r = Ctx(); Check(r.config.atrRestartOnRoll, "atrRestartOnRoll defaults to true (old reseed behaviour)");
 	}
 }

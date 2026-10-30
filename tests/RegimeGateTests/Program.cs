@@ -236,6 +236,7 @@ static class Program
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { rollToYear = 2030 }) != u, "hash sensitive to the roll table years");
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { rollDatesDigest = "0000000000000000" }) != u, "hash sensitive to the roll-date digest");
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { tradingDay = "Calendar" }) != u, "hash sensitive to the trading-day key");
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { atrRestartOnRoll = true }) != u && !new A263Config().atrRestartOnRoll, "hash sensitive to host.atrRestartOnRoll (default false = ATR carried across rolls)");
 		Check(new A263Config().rollDatesDigest == "fdd63bd8f179a8d4" && new A263Config().rollDetection == "Table" && new A263Config().tradingDay == "Globex18ET",
 			"A263Config roll defaults = the Table / Globex build (digest also pinned in EventTests)");
 		// ruling 5: the hash is over the NAMED prereg field list, not field order or record length
@@ -378,7 +379,7 @@ static class Program
 		}
 	}
 
-	// re-pin only with a new trial (ruling 5: named-field hash). PR #46 review Q1: re-pinned for host.rollDetection/rollYears/rollDates/tradingDay
+	// re-pin only with a new trial (ruling 5: named-field hash). PR #46 review Q1: re-pinned for host.rollDetection/rollYears/rollDates/tradingDay; re-pinned again for host.atrRestartOnRoll (Ettienne's ATR carry decision)
 	// (was U=26b38655261cc0bf G=9c1da7b123ca9441 A=3d9814a5f264c353, the pre-roll Off builds; those builds are void, see specs/a2-63-rulings.md).
-	const string PinnedU = "b442eb413f280db4", PinnedG = "bb2a59a5e74b3b4a", PinnedA = "8129399a3c7fffc2";
+	const string PinnedU = "0af309b4220ef9c8", PinnedG = "b82e06fe0e07d09e", PinnedA = "5d0a364e767bd8ae";
 }
