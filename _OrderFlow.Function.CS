@@ -57,12 +57,15 @@ namespace PowerLanguage.Function
 			public FlowSource Source;
 			public FlowQuality Quality;
 			public bool Developing;     // not final yet (e.g. absorption before the next bar closes)
+			/// <summary>CumDelta only: the reset period started before the oldest kept bar (FlowConfig.MaxBars cap), so Value sums
+			/// only the kept bars of the period and is not the full cumulative delta.</summary>
+			public bool Truncated;
 			public static FlowValue Unavailable(bool developing = false)
 			{
 				return new FlowValue { Value = double.NaN, Source = FlowSource.Unavailable, Quality = FlowQuality.Unknown, Developing = developing };
 			}
 			public bool IsAvailable { get { return Source != FlowSource.Unavailable && !double.IsNaN(Value); } }
-			public override string ToString() { return Value + " " + Source + "/" + Quality + (Developing ? " dev" : ""); }
+			public override string ToString() { return Value + " " + Source + "/" + Quality + (Developing ? " dev" : "") + (Truncated ? " trunc" : ""); }
 		}
 
 		public sealed class FlowConfig
@@ -74,7 +77,7 @@ namespace PowerLanguage.Function
 			public bool QuotesExpected = true;        // Bid/Ask tick streams are being fed
 			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume
 			public bool ExcludeExtremesTickRule = true;   // TickRule footprints are wrong at the bar high/low
-			public int MaxBars = 5000;                     // closed bars kept
+			public int MaxBars = 5000;                     // closed bars kept (at least 10); older bars are dropped and CumDelta reports Truncated
 			/// <summary>Spec S1: MC Volume Delta levels. Off (default): never requested. Prefer: a matching level set becomes the
 			/// ladder. CrossCheckOnly: levels are matched and their delta recorded (T9) but Quote/TickRule stays the source.</summary>
 			public EMcBidAsk McBidAsk = EMcBidAsk.Off;
@@ -199,6 +202,21 @@ namespace PowerLanguage.Function
 			private readonly Dictionary<int, BarInput> m_inputs = new Dictionary<int, BarInput>();
 			private DateTime m_mixSession = DateTime.MinValue;
 			private FlowQuality m_mixWorst = FlowQuality.Exact;
+			// MaxBars cap: bars dropped so far and the reset key of the last dropped bar (CumDelta Truncated)
+			private int m_dropped;
+			private DateTime m_droppedResetKey;
+			// first quality downgrade per session (journal)
+			private DateTime m_qSession = DateTime.MinValue;
+			private FlowQuality m_qWorst = FlowQuality.Exact;
+			private bool m_qStarted, m_qLogged;
+			/// <summary>Journal sink (null = off): one line on the first quality downgrade of each session.</summary>
+			public Action<string> journal;
+			/// <summary>Warning sink (null = off): one line the first time the MaxBars cap drops a bar.</summary>
+			public Action<string> warnOnce;
+			/// <summary>Closed bars dropped by the MaxBars cap so far.</summary>
+			public int DroppedBars { get { return m_dropped; } }
+			/// <summary>The bar cap actually applied: max(10, Cfg.MaxBars).</summary>
+			public int BarCap { get { return Math.Max(10, Cfg.MaxBars); } }
 
 			private readonly SortedDictionary<DateTime, double[][]> m_mc = new SortedDictionary<DateTime, double[][]>();
 			/// <summary>S1 counters: bars that used an MC set, bars with no set, bars whose set missed the volume tolerance.</summary>
@@ -329,10 +347,31 @@ namespace PowerLanguage.Function
 					if (fp.Quality > m_mixWorst) m_mixWorst = fp.Quality;
 					fp.Quality = m_mixWorst;
 				}
+				noteQuality(fp);
 				m_bars.Add(fp);
 				m_inputs[b.BarNumber] = b;
-				if (m_bars.Count > Math.Max(10, Cfg.MaxBars)) { m_inputs.Remove(m_bars[0].BarNumber); m_bars.RemoveAt(0); }
+				if (m_bars.Count > BarCap)
+				{
+					m_droppedResetKey = m_bars[0].ResetKey;
+					m_inputs.Remove(m_bars[0].BarNumber); m_bars.RemoveAt(0);
+					if (m_dropped++ == 0 && warnOnce != null)
+						warnOnce("OF MaxBars cap " + BarCap + " hit at bar " + fp.BarNumber + ": oldest footprints dropped; CumDelta of a reset period longer than the cap is Truncated");
+				}
 				return fp;
+			}
+
+			// journal the first bar of a session whose (final) quality is worse than every earlier bar of that session
+			private void noteQuality(FootprintBar fp)
+			{
+				if (fp.SessionKey != m_qSession || !m_qStarted) { m_qSession = fp.SessionKey; m_qWorst = fp.Quality; m_qStarted = true; m_qLogged = false; return; }
+				if (fp.Quality <= m_qWorst) return;
+				FlowQuality from = m_qWorst;
+				m_qWorst = fp.Quality;
+				if (m_qLogged) return;
+				m_qLogged = true;
+				if (journal != null)
+					journal("OF quality downgrade session(" + fp.SessionKey.ToString("yyyy-MM-dd") + ") bar(" + fp.BarNumber + ") " + from + "->" + fp.Quality
+						+ " source(" + fp.Source + ")" + (fp.StaleQuoteTrades > 0 ? " staleQuoteTrades(" + fp.StaleQuoteTrades + ")" : "") + (fp.McMiss != null ? " mcMiss(" + fp.McMiss + ")" : ""));
 			}
 
 			private static void clearToUnavailable(FootprintBar fp)
@@ -361,7 +400,8 @@ namespace PowerLanguage.Function
 				FootprintBar last = Closed(ago);
 				if (last == null) return FlowValue.Unavailable();
 				double sum = 0; FlowSource src = FlowSource.Aggressor; FlowQuality q = FlowQuality.Exact;
-				for (int i = m_bars.Count - 1 - ago; i >= 0 && m_bars[i].ResetKey == last.ResetKey; i--)
+				int i = m_bars.Count - 1 - ago;
+				for (; i >= 0 && m_bars[i].ResetKey == last.ResetKey; i--)
 				{
 					FootprintBar fp = m_bars[i];
 					if (fp.Source == FlowSource.Unavailable) return FlowValue.Unavailable();
@@ -369,7 +409,9 @@ namespace PowerLanguage.Function
 					if (fp.Source > src) src = fp.Source;
 					if (fp.Quality > q) q = fp.Quality;
 				}
-				return new FlowValue { Value = sum, Source = src, Quality = q };
+				// reached the oldest kept bar while the period continues into the dropped bars: partial sum
+				bool truncated = i < 0 && m_dropped > 0 && m_droppedResetKey == last.ResetKey;
+				return new FlowValue { Value = sum, Source = src, Quality = q, Truncated = truncated };
 			}
 
 			public List<Imbalance> DiagonalImbalances(int ago, double ratio = 3.0, double minVol = 10)
