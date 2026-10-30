@@ -66,7 +66,6 @@ namespace PowerLanguage.Strategy
 
 			private string m_logFilePath;
 			private IOutput m_output; //MC main output window
-			private StreamWriter m_writer;   // guarded by s_lock, opened lazily and kept open (CS-16)
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -97,46 +96,37 @@ namespace PowerLanguage.Strategy
 					if (s_instance == null)
 					{
 						s_instance = new LogFileSingleton(output);
-						LogFileSingleton instance = s_instance;
-						AppDomain.CurrentDomain.ProcessExit += (s, e) => instance.Close();
-						AppDomain.CurrentDomain.DomainUnload += (s, e) => instance.Close();   // study DLL reload
 					}
 
 					return s_instance;
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
+			/// <summary>Full path of the process-wide trace CSV.</summary>
+			public string FilePath { get { return m_logFilePath; } }
+
+			/// <summary>
+			/// One File.AppendAllText per line under s_lock (CS-16 reverted): no handle is held between lines, so a log file that was
+			/// deleted, moved or locked while MultiCharts runs is simply recreated on the next line instead of every later line going
+			/// into an unlinked handle. output = the calling signal's Output (the singleton's own m_output belongs to whichever signal
+			/// created it first and may since have been removed from the chart).
+			/// </summary>
+			public void WriteTrace(IOutput output, ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
 			{
 				lock (s_lock)
 				{
 					try
 					{
-						if (m_writer == null)
-						{
-							var fs = new FileStream(m_logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
-						}
 						string csvMessage = escapeCsv(message);
 						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
 						// CS-9: the bar time's zone (Bars.Info.TimeZone: Local / GMT / Exchange), not the PC offset that "zzz" printed
-						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}");
+						string line = $"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}";
+						File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, Encoding.UTF8);
 					}
 					catch (Exception ex)
 					{
-						try { if (m_writer != null) m_writer.Dispose(); } catch { }
-						m_writer = null;   // reopen on next write
-						m_output.WriteLine($"Error writing to log file: {ex.Message}");
+						try { (output ?? m_output).WriteLine($"Error writing to log file {m_logFilePath}: {ex.Message}"); } catch { }
 					}
-				}
-			}
-
-			public void Close()
-			{
-				lock (s_lock)
-				{
-					try { if (m_writer != null) m_writer.Dispose(); } catch { }
-					m_writer = null;
 				}
 			}
 
@@ -170,8 +160,6 @@ namespace PowerLanguage.Strategy
 			private readonly object m_lock = new object();
 			private readonly string m_path;
 			private readonly string m_header;
-			private StreamWriter m_writer;
-
 			public TradeJournal(string runId) : this(runId, "MCJournal_", HEADER) { }
 
 			/// <summary>CS-8 reuses the writer for MCEvents_&lt;runId&gt;.csv with its own header.</summary>
@@ -195,25 +183,13 @@ namespace PowerLanguage.Strategy
 
 			public void Write(string csvLine)
 			{
+				// One File.AppendAllText per line under the lock, no held-open handle (same reason as LogFileSingleton.WriteTrace).
+				// The header goes in front of the first line whenever the file does not exist (new run, or deleted mid-run).
 				lock (m_lock)
 				{
-					if (m_writer == null)
-					{
-						bool fresh = !File.Exists(m_path);
-						var fs = new FileStream(m_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-						m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };
-						if (fresh) m_writer.WriteLine(m_header);
-					}
-					m_writer.WriteLine(csvLine);
-				}
-			}
-
-			public void Close()
-			{
-				lock (m_lock)
-				{
-					try { if (m_writer != null) m_writer.Dispose(); } catch { }
-					m_writer = null;
+					string text = csvLine + System.Environment.NewLine;
+					if (!File.Exists(m_path)) text = m_header + System.Environment.NewLine + text;
+					File.AppendAllText(m_path, text, Encoding.UTF8);
 				}
 			}
 		}
@@ -371,8 +347,14 @@ namespace PowerLanguage.Strategy
 		{
 			if (TraceLevel >= traceLevel)
 			{
-				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
+				if (m_logger == null)
+				{
+					m_logger = LogFileSingleton.GetInstance(Output);
+					// The singleton is process-wide, so its "Log file created" line is printed once per MultiCharts process, into the
+					// Output of whichever signal traced first. Tell THIS signal's Output where its lines go, once per instance.
+					try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
+				}
+				m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
 			}
 		}
 
@@ -1959,14 +1941,12 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Static state (log file, TradeManager snapshot) is process-wide and shared by every signal instance.
-		/// The log file handle is closed on process exit/domain unload.
+		/// No log file handle is held (each line is one File.AppendAllText), so there is nothing to close.
 		/// </summary>
 		protected override void Destroy()
 		{
-			if (m_journal != null) m_journal.Close();
 			m_journal = null;
-			if (m_eventFile != null) m_eventFile.Close();   // CS-8
-			m_eventFile = null;
+			m_eventFile = null;   // CS-8
 			m_logger = null;
 			base.Destroy();
 		}
@@ -1998,11 +1978,10 @@ namespace PowerLanguage.Strategy
 			m_runLogged = false;
 			m_runEndLogged = false;
 			m_tick = 0;   // tickSize() re-resolved on first use
-			if (m_journal != null) m_journal.Close();
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
 			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
-			if (m_eventFile != null) m_eventFile.Close();      // CS-8: one events file per run
+			// CS-8: one events file per run
 			m_eventFile = null;
 			m_events.Clear();
 			m_eventsSteppedBar = -1;
