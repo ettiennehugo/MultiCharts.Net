@@ -80,10 +80,6 @@ namespace PowerLanguage.Function
 			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
 		}
 
-		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
-		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
-		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
-		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
 		/// <summary>PR #51 N3: true for an intraday resolution (EResolution.ToString(); Day/Week/Month/Quarter/Year are not).</summary>
 		public static bool IsIntraday(string resolutionType)
 		{
@@ -91,6 +87,10 @@ namespace PowerLanguage.Function
 			return true;
 		}
 
+		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
+		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
+		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
+		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
 		public static string SeriesKeyWarning(bool series, string resolutionType, bool calendarKeyed)
 		{
 			// fix-i: _CustomSignal keys Series by the Globex trading day on futures charts itself and passes calendarKeyed = false
