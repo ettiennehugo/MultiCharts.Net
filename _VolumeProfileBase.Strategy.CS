@@ -2990,7 +2990,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>VP-3 per-bar ladder (enabled=false: not created; on the futures base it forces OrderFlowEnabled).</summary>
 		protected BarLadderConfig BarLadders { get; } = new BarLadderConfig();
 		/// <summary>VWAP slot options; resetPeriodSlotsOnRoll (default false) resets Week / Month slots at a roll too. Needs RollDetection != Off;
-		/// until PR #51 merges RollDetection.Series over-detects rolls on intraday charts, so use RollDetection.Table with it.</summary>
+		/// until PR #51 merges RollDetection.Series over-detects rolls on intraday charts, so use RollDetection.Table with it.
+		/// Set resetPeriodSlotsOnRoll before base.StartCalc() (constructor / Create): configureVwap copies it there, later changes are ignored.</summary>
 		protected VwapConfig VwapConfig { get; } = new VwapConfig();
 
 		private bool m_rangeOn;

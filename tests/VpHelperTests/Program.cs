@@ -578,6 +578,7 @@ static class Program
 		Check(count(veng, "if (rollSlot && bars.Status == EBarState.Close &&") == 1, "PR I: roll reset only on closed bars");
 		Check(count(veng, "bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));") == 1, "PR I: roll slots = RollDate, or Week/Month with the flag");
 		Check(count(vbas, "if (VwapConfig.resetPeriodSlotsOnRoll && RollDetection == ERollDetection.Off)") == 1, "PR I: warns when the flag is on but RollDetection is Off");
+		Check(count(veng, "if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $\"VWAP roll reset ") == 1, "PR I: each roll reset journaled at ETraceLevel.Journal");
 		// default off: only RollDate resets at a roll (unchanged behaviour)
 		Check(VwapRollRules.ResetsAtRoll(true, false, false, true), "PR I: RollDate resets at a roll (flag off)");
 		Check(!VwapRollRules.ResetsAtRoll(false, true, false, true), "PR I: Week/Month do not reset at a roll when off");
