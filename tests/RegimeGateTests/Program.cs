@@ -351,7 +351,9 @@ static class Program
 			Check(cnt.noRth == 3 && cnt.sessions == 6, arm + ": noRth counted on halt days only (Jul 4, Thanksgiving, MLK), not half days: " + cnt.Suffix());
 		}
 		var cc = new RegimeGateCounts(); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1)); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, t.AddDays(-1), false), t, 2));
-		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0)", "counts suffix: " + cc.Suffix());
+		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0) nAtrNaN(0) nRollAtrNaN(0)", "counts suffix: " + cc.Suffix());
+		var ca = new RegimeGateCounts(); ca.AddAtr(true, false); ca.AddAtr(true, true); ca.AddAtr(true, true); ca.AddAtr(false, true); ca.AddAtr(true, true, true);
+		Check(ca.atrNaN == 3 && ca.rollAtrNaN == 2 && ca.Suffix().EndsWith(" nAtrNaN(3) nRollAtrNaN(2)"), "rulings (h): ATR NaN days counted, post-roll subset separate, no-RTH days excluded: " + ca.Suffix());
 	}
 
 	// ---------------- ruling 4: the label used on day D does not change when day D's bars are removed ----------------

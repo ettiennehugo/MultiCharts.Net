@@ -209,7 +209,7 @@ static class Program
 		const double spread = 40;
 		Func<Func<DateTime, DateTime>, double[]> run = key =>
 		{
-			var d = Ctx(); double offset = double.NaN; DateTime aggDay = DateTime.MinValue; double o = 0, h = 0, l = 0, c = 0; bool first = true;
+			var d = Ctx(); double offset = double.NaN; int nanAfterRoll = 0; bool rolled = false; DateTime aggDay = DateTime.MinValue; double o = 0, h = 0, l = 0, c = 0; bool first = true;
 			int k = 0;
 			for (DateTime t = new DateTime(2024, 1, 1, 18, 0, 0); t < new DateTime(2024, 4, 20); t = t.AddHours(1))
 			{
@@ -222,14 +222,14 @@ static class Program
 				bool r = !first && kk != aggDay && kk == roll;
 				if (kk != aggDay)
 				{
-					if (aggDay != DateTime.MinValue) d.AddDay(aggDay, o, h, l, c);
+					if (aggDay != DateTime.MinValue) { d.AddDay(aggDay, o, h, l, c); if (rolled && double.IsNaN(d.Atr20d)) nanAfterRoll++; }
 					aggDay = kk; o = bo; h = bh; l = bl;
 				}
 				else { h = Math.Max(h, bh); l = Math.Min(l, bl); }
 				c = bc; first = false;
-				if (r && d.Days > 0) { offset = bo - d.PrevClose; d.OnRoll(kk, offset); }
+				if (r && d.Days > 0) { offset = bo - d.PrevClose; d.OnRoll(kk, offset); rolled = true; }
 			}
-			return new[] { offset, d.Atr20d };
+			return new[] { offset, d.Atr20d, nanAfterRoll };
 		};
 		var gx = run(t => _CmeSessionClock.GlobexTradingDayEt(t));
 		var cal = run(t => t.Date);
@@ -237,5 +237,15 @@ static class Program
 			&& _CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 3, 11, 16, 59, 0)) == roll, "Globex key: ET >= 18:00 -> next date");
 		Check(Math.Abs(gx[0] - spread) < 25, "evening splice, Globex key: roll offset ~ the spread (" + gx[0].ToString("0.##") + ")");
 		Check(Math.Abs(cal[0]) < 25 && Math.Abs(cal[0]) < Math.Abs(gx[0]) - 20, "evening splice, calendar key: offset ~0, the known failure (" + cal[0].ToString("0.##") + ")");
+		// PR #46 re-review: ATR20d. The roll reseeds Wilder (applyRoll), so ATR20d is NaN for the next 20 completed days (the
+		// post-roll blackout, rulings (h), unchanged here), then finite and free of the 40-point spread (bar TRs are ~26 here).
+		Console.WriteLine("EveningSplice: Globex offset " + gx[0].ToString("0.##") + " atr " + gx[1].ToString("0.##") + " nanDays " + gx[2] + "; calendar offset " + cal[0].ToString("0.##") + " atr " + cal[1].ToString("0.##") + " nanDays " + cal[2]);
+		// Holidays (rulings (i), accepted, documented): the key is a pure 18:00 ET rule. MLK 2024-01-15: Sun 18:00 -> Mon 01-15
+		// (a short holiday day of its own), Mon 18:00 -> Tue 01-16. CME books the holiday session to the next trade date.
+		Check(_CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 1, 14, 18, 0, 0)) == new DateTime(2024, 1, 15)
+			&& _CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 1, 15, 12, 0, 0)) == new DateTime(2024, 1, 15)
+			&& _CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 1, 15, 18, 0, 0)) == new DateTime(2024, 1, 16), "Globex key on a Monday holiday: own short day (documented, rulings (i))");
+		Check(gx[2] == 20, "post-roll ATR20d blackout: NaN for 20 completed days after the roll (" + gx[2] + ")");
+		Check(!double.IsNaN(gx[1]) && gx[1] < spread, "ATR20d after the blackout is finite and below the spread (" + gx[1].ToString("0.##") + ")");
 	}
 }

@@ -131,6 +131,7 @@ namespace PowerLanguage.Strategy
 				_CmeHolidays.Rules.Day cme = _CmeHolidays.Rules.Get(et.Date);
 				RegimeGateDecision d = RegimeGate.Decide(RegimeGateConfig.arm, Regime, et.Date, m_terc.LastDate == atrAsOf ? m_terc.Tercile : -1);
 				m_counts.Add(d, cme.NoRth);
+				m_counts.AddAtr(double.IsNaN(atr), RollBars.Count > 0, cme.NoRth);   // rulings (h): post-roll ATR20d blackout days
 				m_core.Latch(et, Bars.Open[0], atr, atrAsOf, d.allow, cme.RthCloseEt, cme.NoRth);
 				if (journalOn())
 				{

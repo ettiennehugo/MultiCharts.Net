@@ -31,10 +31,6 @@ namespace PowerLanguage.Function
 
 		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; }
 
-		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
-		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
-		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
-		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
 		/// <summary>PR #46 review: digest of a roll-date set for the config hash (RegimeGate host.rollDates). FNV-1a 64 over the UTF-8
 		/// of the distinct dates sorted ascending, each as "yyyy-MM-dd;"; 16 lower-case hex digits. Order- and duplicate-insensitive.</summary>
 		public static string DatesDigest(IEnumerable<DateTime> dates)
@@ -48,6 +44,10 @@ namespace PowerLanguage.Function
 			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
 		}
 
+		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
+		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
+		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
+		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
 		public static string SeriesKeyWarning(bool series, string resolutionType, bool calendarKeyed)
 		{
 			if (!series || !calendarKeyed) return null;

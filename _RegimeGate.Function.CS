@@ -83,6 +83,15 @@ namespace PowerLanguage.Function
 	public sealed class RegimeGateCounts
 	{
 		public int sessions, usable, warmup, invalid, fallback, blocked, noRth;
+		/// <summary>PR #46 rulings (h): RTH sessions whose latch saw Atr20d = NaN (no entry, ruling 1), and the subset after a
+		/// detected roll (the post-roll ATR20d blackout: applyRoll reseeds Wilder, ~20 sessions per roll). Counting only.</summary>
+		public int atrNaN, rollAtrNaN;
+		public void AddAtr(bool atrIsNaN, bool afterRoll, bool noRthDay = false)
+		{
+			if (noRthDay || !atrIsNaN) return;
+			atrNaN++;
+			if (afterRoll) rollAtrNaN++;
+		}
 		public void Add(RegimeGateDecision d, bool noRthDay = false)
 		{
 			sessions++;
@@ -93,7 +102,7 @@ namespace PowerLanguage.Function
 			if (d.wouldBlock) blocked++;
 			if (noRthDay) noRth++;
 		}
-		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nFb(" + fallback + ") nBlock(" + blocked + ") nNoRth(" + noRth + ")"; }
+		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nFb(" + fallback + ") nBlock(" + blocked + ") nNoRth(" + noRth + ") nAtrNaN(" + atrNaN + ") nRollAtrNaN(" + rollAtrNaN + ")"; }
 	}
 
 	public static class RegimeGate
