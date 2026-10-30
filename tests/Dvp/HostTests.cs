@@ -265,11 +265,17 @@ static partial class Program
 			&& host.IndexOf("startDvp();", StringComparison.Ordinal) > host.IndexOf("startVpHelpers();   // Phase 3", StringComparison.Ordinal),
 			"DV-T22 one null check per CalcBar, one Warning on query; startDvp runs after startVpHelpers (which clears ring requests)");
 		// eager allocation: the row arrays (DvpManifold) and every window buffer are built only under the _DvpEngine constructor
-		var all = Directory.GetFiles(Root(), "*.CS").Select(File.ReadAllText).ToArray();
+		var all = Directory.GetFiles(Root(), "*.CS").Where(f => Path.GetFileName(f) != "_Gate0.Function.CS").Select(File.ReadAllText).ToArray();
+		// PR-D8: the Gate0 KD-02 canary is the only other host; its one engine is built in kd02Init (Configure, KD02 only)
+		string g0 = File.ReadAllText(Path.Combine(Root(), "_Gate0.Function.CS"));
+		int g0New = g0.IndexOf("new _DvpEngine(", StringComparison.Ordinal), g0Init = g0.IndexOf("private string kd02Init()", StringComparison.Ordinal);
+		Check(Count(g0, "new _DvpEngine(") == 1 && Count(g0, "new DvpStream(") == 0 && g0Init > 0 && g0New > g0Init && g0New < g0.IndexOf("private void kd02Feed(", StringComparison.Ordinal)
+			&& g0.Contains("Cv == EGate0Canary.KD02)") && g0.Contains("if (m_kd != null) kd02Feed(b);"),
+			"PR-D8 eager allocation: Gate0 allocates its KD-02 _DvpEngine only in kd02Init (KD02 canary), fed only when non-null");
 		int engNew = all.Sum(t => Count(t, "new _DvpEngine(")), manNew = all.Sum(t => Count(t, "new DvpManifold(")), strNew = all.Sum(t => Count(t, "new DvpStream("));
 		int latNew = all.Sum(t => Count(t, "new DvpLattice(")), pivNew = all.Sum(t => Count(t, "new DvpPivots("));
 		string core = CoreSource();
-		var statics = core.Split('\n').Where(l => l.Contains(" static ") && l.Contains(" new ") && !l.TrimStart().StartsWith("//") && !l.Contains("static string") && !l.Contains("static bool") && !l.Contains("static int") && !l.Contains("static void") && !l.Contains("static double") && !l.Contains("static ulong")).ToArray();
+		var statics = core.Split('\n').Where(l => l.Contains(" static ") && l.Contains(" new ") && !l.TrimStart().StartsWith("//") && !l.Contains("static string") && !l.Contains("static readonly DateTime") && !l.Contains("static bool") && !l.Contains("static int") && !l.Contains("static void") && !l.Contains("static double") && !l.Contains("static ulong")).ToArray();
 		Check(engNew == 1 && manNew == 1 && strNew == 1 && latNew == 1 && pivNew == 1 && statics.Length == 1 && statics[0].Contains("Entry[] Table = new Entry[0]"),
 			"eager-allocation check: one new _DvpEngine (startDvp), one new DvpManifold (DvpStream slot), one new DvpStream (engine ctor), one new DvpLattice + DvpPivots (DvpStream ctor, useFib); no static buffers (" + engNew + "/" + manNew + "/" + strNew + "/" + latNew + "/" + pivNew + "/" + statics.Length + ")");
 	}
@@ -308,9 +314,9 @@ static partial class Program
 		var a = JournalRun(s, hd, Cfg()); var b = JournalRun(s, hd, Cfg());
 		Check(a.Count > 2000 && a.SequenceEqual(b), "DV-T25 recalc: identical journals (" + a.Count + " lines)");
 		Check(a[0].StartsWith("DVP CREATED", StringComparison.Ordinal) && a.Count(l => l.StartsWith("DVP CREATED", StringComparison.Ordinal)) == 1
-			&& a.Count(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) == 1 && a[a.Count - 1].StartsWith("DVP RUN", StringComparison.Ordinal),
-			"DV-11.3 one DVP CREATED, one DVP RUN per stream (Finish idempotent)");
-		string run = a[a.Count - 1];
+			&& a.Count(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) == 1 && a.Skip(a.FindIndex(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) + 1).All(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)),
+			"DV-11.3 one DVP CREATED, one DVP RUN per stream (Finish idempotent); only PR-D8 DVP CAL lines follow it");
+		string run = a.Last(l => l.StartsWith("DVP RUN", StringComparison.Ordinal));
 		Check(run.Contains("rollDetect(On)") && run.Contains("diagnosticOnly(0)") && !run.Contains("meanCovIn(NaN)") && !run.Contains("meanCovFwd(NaN)") && run.Contains("fits(") ,
 			"DV-11.3 DVP RUN fields: " + run);
 		var fd = System.Text.RegularExpressions.Regex.Match(run, @"fwdDropped\((\d+)\)");
@@ -329,6 +335,56 @@ static partial class Program
 		Check(JournalRun(s.Take(600).ToArray(), hd, cal).Any(l => l.Contains(" deg(1)") && l.Contains("calibrate(sigma=")), "DV-3.6 Calibrate journals every d <= dCap, reported d = 1");
 	}
 
+	// PR-D8 DV-3.6: the Calibrate coverage journal (DvpCalib)
+	static void CalibTests()
+	{
+		bool[] hd; RingBar[] s = Series(2500, 25, new[] { 1200 }, null, out hd);
+		// lazy: Fixed1 never calibrates -> no DvpCalib, no CAL line
+		var f1 = new Rig(new DvpConfig { enabled = true, winLen = 240, journalFits = true, splitFlow = false, degMode = EDvpDegMode.Fixed1 }, true, true);
+		for (int i = 0; i < s.Length; i++) f1.Feed(s[i], hd[i]);
+		f1.e.Finish();
+		Check(f1.S.Calib == null && !f1.journal.Any(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)), "DvpCalib lazy: Fixed1 allocates none and journals no DVP CAL");
+		// journal off: nothing journaled, so nothing calibrates either
+		var off = new Rig(Cfg(), true, false);
+		for (int i = 0; i < s.Length; i++) off.Feed(s[i], hd[i]);
+		Check(off.S.Calib == null, "DvpCalib lazy: journal off allocates none");
+		// DevCoverageFrozen fallback (d* unset) calibrates: samples every H = projBars, drops the horizon across the roll
+		var rg = new Rig(Cfg(), true, true);
+		for (int i = 0; i < s.Length; i++) rg.Feed(s[i], hd[i]);
+		rg.e.Finish();
+		DvpCalib c = rg.S.Calib;
+		var cal = rg.journal.Where(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)).ToList();
+		Check(c != null && c.H == 60 && c.Sampled > 0 && c.RollDropped >= 1 && c.HoldoutSkipped == 0 && c.Years.Keys.All(y => y == 2024),
+			"DvpCalib: sampled " + (c == null ? "-" : c.Sampled + " rollDropped " + c.RollDropped + " H " + c.H));
+		string sum = cal.LastOrDefault() ?? "";
+		Check(cal.Count >= 3 && sum.StartsWith("DVP CAL runId(golden) stream(Data1) summary H(60) sampled(" + c.Sampled.ToString(CI) + ") rollDropped(" + c.RollDropped.ToString(CI) + ") holdoutSkipped(0) dStar(", StringComparison.Ordinal)
+			&& cal.Any(l => l.Contains(" year(2024) d(1) windows(")) && cal.Any(l => l.Contains(" year(all) d(1) windows(") && l.Contains(" covIn(") && l.Contains(" covFwd(") && l.Contains(" covFwdFlat(") && l.Contains(" score(")),
+			"DvpCalib DVP CAL lines (per year, pooled, summary): " + sum);
+		var p = c.Pooled(); int ds = DvpCalib.DStar(p);
+		Check(ds >= 1 && ds <= DvpFit.MaxDeg && p.n[ds] > 0 && Enumerable.Range(1, DvpFit.MaxDeg).Where(k => p.n[k] > 0).All(k => p.Score(k) >= p.Score(ds)) && sum.EndsWith("dStar(" + ds.ToString(CI) + ")", StringComparison.Ordinal),
+			"DvpCalib dStar = argmin pooled score (" + ds + ")");
+		bool cov = Enumerable.Range(1, DvpFit.MaxDeg).Where(k => p.n[k] > 0).All(k => p.covIn[k] / p.n[k] >= 0 && p.covIn[k] / p.n[k] <= 1 && p.covFwd[k] / p.n[k] >= 0 && p.covFwd[k] / p.n[k] <= 1 && p.covFwdFlat[k] / p.n[k] >= 0 && p.covFwdFlat[k] / p.n[k] <= 1);
+		Check(cov, "DvpCalib coverages are shares in [0, 1]");
+		// DStar ties go to the lower degree; nothing completed -> 0
+		var b = new DvpCalib.Bucket(); Check(DvpCalib.DStar(b) == 0, "DvpCalib DStar of an empty bucket = 0");
+		b.n[1] = b.n[2] = b.n[3] = 2; b.covIn[1] = b.covIn[2] = b.covIn[3] = 1.9; b.covFwd[1] = 1.5; b.covFwd[2] = 1.7; b.covFwd[3] = 1.7;
+		Check(DvpCalib.DStar(b) == 2, "DvpCalib DStar: lowest score, ties to the lower d (2 over 3)");
+		// holdout: a series entirely in 2025+ samples nothing; one straddling 2025-01-01 keeps only 2024 windows
+		Func<int, RingBar[]> shift = days => s.Select(x => { var y = x; y.time = x.time.AddDays(days); y.tradingDay = x.tradingDay.AddDays(days); return y; }).ToArray();
+		var h1 = new Rig(Cfg(), true, true); var s1 = shift(366);
+		for (int i = 0; i < s1.Length; i++) h1.Feed(s1[i], hd[i]);
+		Check(h1.S.Calib != null && h1.S.Calib.Sampled == 0 && h1.S.Calib.HoldoutSkipped > 0 && h1.S.Calib.Years.Count == 0, "DvpCalib holdout: nothing sampled on/after DvpConst.HoldoutFrom");
+		var h2 = new Rig(Cfg(), true, true); var s2 = shift(350);
+		for (int i = 0; i < s2.Length; i++) h2.Feed(s2[i], hd[i]);
+		DvpCalib c2 = h2.S.Calib;
+		Check(c2 != null && c2.Sampled > 0 && c2.HoldoutSkipped > 0 && c2.Years.Keys.All(y => y < 2025), "DvpCalib holdout straddle: only pre-2025 windows, horizons reaching 2025 dropped (" + (c2 == null ? "-" : c2.Sampled + "/" + c2.HoldoutSkipped) + ")");
+		// determinism: identical CAL lines on a second run
+		var rg2 = new Rig(Cfg(), true, true);
+		for (int i = 0; i < s.Length; i++) rg2.Feed(s[i], hd[i]);
+		rg2.e.Finish();
+		Check(rg2.journal.Where(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)).SequenceEqual(cal), "DvpCalib deterministic CAL lines");
+	}
+
 	// DV-T27: RollDetection Off -> one Warning, every stream diagnostic-only, skipShare NaN, nothing skipped.
 	static void T27()
 	{
@@ -336,7 +392,7 @@ static partial class Program
 		var rig = new Rig(Cfg(), false, true);
 		for (int i = 0; i < s.Length; i++) rig.Feed(s[i], hd[i]);
 		rig.e.Finish();
-		string run = rig.journal.Last();
+		string run = rig.journal.Last(l => l.StartsWith("DVP RUN", StringComparison.Ordinal));
 		DvpSnapshot x = rig.e.Snapshot(1, rig.ring, 0);
 		Check(rig.warn.Count(w => w == "DVP: RollDetection Off — roll skip disabled") == 1 && rig.warn.Count == 2,   // + the DevCoverageFrozen degree warning
 			"DV-T27 one RollDetection-Off Warning (" + string.Join(" | ", rig.warn) + ")");
@@ -468,6 +524,6 @@ static partial class Program
 
 	static void D3Tests()
 	{
-		T14(); T15(); T16(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); T27(); T28T29(); TDriftR4(); R1();
+		T14(); T15(); T16(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); CalibTests(); T27(); T28T29(); TDriftR4(); R1();
 	}
 }

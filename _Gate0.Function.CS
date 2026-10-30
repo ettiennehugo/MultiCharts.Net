@@ -1163,7 +1163,10 @@ namespace PowerLanguage.Function
 			if (intent.entry != EGate0Entry.None) intent.entry = EGate0Entry.None;   // an unfilled signal lives one bar only
 			int side; double stop, target;
 			if (!Kd02Signal(m_kd, m_kdRing, c, kd02StopK, kd02StopPadAtr, out side, out stop, out target)) return;
-			enter(side, EGate0Entry.Market, double.NaN, Math.Round(stop / tick) * tick, Math.Round(target / tick) * tick, side < 0 ? "KD02S" : "KD02L");
+			// tick grid: the stop rounds away from the close (a stop just inside a tick must not round onto the entry), the target to nearest
+			double st = (side > 0 ? Math.Floor(stop / tick + 1e-9) : Math.Ceiling(stop / tick - 1e-9)) * tick, tg = Math.Round(target / tick) * tick;
+			if (side > 0 ? !(tg > c) : !(tg < c)) return;   // target rounded onto the close: no edge left
+			enter(side, EGate0Entry.Market, double.NaN, st, tg, side < 0 ? "KD02S" : "KD02L");
 		}
 
 		/// <summary>

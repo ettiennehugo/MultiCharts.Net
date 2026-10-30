@@ -23,6 +23,8 @@ namespace PowerLanguage.Strategy
 	//     _BarRing.Function.CS, _ProfileMath.Function.CS, _ProfileStats.Function.CS (KDE h_cv for the HVN/LVN sensitivity arm, PR #18),
 	//     _Gmm.Function.CS (shared EM core used by the GMM / sigma mixture families 12 and 13)
 	//     _LevelRef.Function.CS, _RollDetector.Function.CS (roll window / roll detection; PR #19 branch)
+	//     _DvpEngine.Function.CS      (DVP engine; the KD-02 canary, Variant 8 / 130..133, hosts one; PR-D8. Import it before
+	//                                  _Gate0.Function.CS — _Gate0 does not compile without it even when KD-02 is not run)
 	//     the _CustomSignal / _VolumeProfileBase / _VolumeProfileFuturesBase chain and their helper functions
 	//   New with this strategy:
 	//     _Gate0.Function.CS          (the pure Gate-0 engine: level families, KDE/GMM, DV sources, bootstrap, verdicts, canaries)
@@ -119,6 +121,14 @@ namespace PowerLanguage.Strategy
 	//                 touch only; SL = TP = 0.15 x ATR20d
 	//    7 PS-03      naive 80% rule: open outside the prior value area, enter on the first 30m close back inside,
 	//                 target the prior POC, stop 0.25 x VA width beyond the entry edge
+	//    8 KD-02      (PR-D8) DVP fade: on a closed 15m bar, close beyond the t-1 DVP fit's +-2 sigma rail -> fade at market;
+	//                 stop = the t-1 +-3 sigma rail + 0.1 x ATR (rounded away from the close), target = the t fit's POC
+	//                 (re-read every 15m bar), time stop 19 bars; common G0-b rules (RTH, flat 15:55, roll sessions out).
+	//                 Development window only: the DVP stream is never fed on/after 2025-01-01. Journals Kd02 fills,
+	//                 POC-reach rate and time stops, then the DVP RUN and DVP CAL (Calibrate coverage) lines.
+	//  130..133 KD-02 sweep: 130 = time 19 / stop 3.0 sigma (= Variant 8), 131 = 40 / 3.0, 132 = 19 / 2.5, 133 = 40 / 2.5.
+	//                 Configure rejects other values ("canary variant out of range": 9..99, 124..129, 134+) and
+	//                 "KD-02 parameters out of range" (minutes < 1, time stop < 1, stop k <= 2, pad < 0).
 	//  100..123 A2-53 sweep: idx = Variant - 100; gap g = {0.3, 0.5, 0.8}%[idx / 8]; j = 1 + (idx / 4) % 2;
 	//                 bar = 30m if (idx / 2) % 2 == 0 else 15m; vol filter ON if idx % 2 == 0 else OFF.
 	//                 e.g. 100 = 0.3% j1 30m on, 101 = same filter off, 102 = 0.3% j1 15m on, 104 = 0.3% j2 30m on,
