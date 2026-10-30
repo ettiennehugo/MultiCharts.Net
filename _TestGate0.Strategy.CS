@@ -33,8 +33,9 @@ namespace PowerLanguage.Strategy
 	//                assume raw prices). Other CME index futures (NQ, RTY, YM) work; tick size is read from the symbol.
 	//   Data1      : 1-minute bars (recommended: the dev window 2016–2024 only exists as 1m history) or tick bars
 	//                (only ~2 years of ticks exist, mostly after the dev window). The engine re-aggregates Data1 into
-	//                1m / 5m / 30m buckets itself, so tick, second or 1-minute Data1 all work; do not use bars longer
-	//                than 1 minute.
+	//                1m / 5m / 15m / 30m buckets itself. StartCalc THROWS unless Data1 is 1-tick, 1-minute or N-second bars
+	//                with N dividing 60, chart type Regular (Gate0Data1.Check): bars longer than 1 minute, multi-tick, volume
+	//                (Contract), range (Point), Renko and other variable-duration bars are rejected.
 	//   Data2      : not used. Leave it off the chart (nothing reads it).
 	//   Session    : "CME Globex" session template (18:00–17:00 ET). RTH (09:30–16:00 ET) is derived internally.
 	//   Time zone  : any; bar times are converted to US Eastern by _VolumeProfileFuturesBase.
@@ -78,8 +79,9 @@ namespace PowerLanguage.Strategy
 	//    2 Naked POCs             [NPOC] prior RTH POCs not traded since they formed, age 2..15
 	//    3 Initial balance        [IBH, IBL] prior session 09:30-10:30 high / low
 	//    4 Overnight              [ONH, ONL] this morning's Globex overnight high / low (18:00 -> 09:30)
-	//    5 AVWAP anchors          [AV_PH, AV_PL] from the prior RTH high / low bar, [AV_WK, AV_MO] week / month, [AV_OPEN]
-	//                             prior RTH open, [AV_PC] prior RTH close; all valued at the RTH open
+	//    5 AVWAP anchors          [AV_PH, AV_PL] from the prior RTH high / low bar, [AV_WK, AV_MO] week / month,
+	//                             [AV_PC] prior RTH close; all valued at the RTH open. AV_OPEN (prior RTH open) is
+	//                             RETIRED (= the prior session VWAP, type VWAP in Variant 6); Holm m = 36
 	//    6 VWAP                   [VWAP, VWAP+1, VWAP-1] prior RTH session VWAP and +-1 sigma at its close
 	//    7 Weekly profile         [WPOC, WVAH, WVAL] prior week (the 09:30-11:30 range profile was dropped)
 	//    8 Composite value area   [CVAH, CVAL] composite of the last CompositeSessions = 5 RTH sessions (pre-registered)
@@ -164,7 +166,11 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;   // A2-39 needs the roll; not an [Input]
+			// A2-39 needs the roll; not an [Input]. Series is NOT blind here (PR #46 review): _VolumeProfileFuturesBase.tradingDayKey =
+			// GlobexDate = _CmeSessionClock.GlobexTradingDayEt (ET >= 18:00 -> next date), so Series tests the 18:00 ET Globex-open
+			// bar, and the SeriesKeyWarning probe (01:00 vs 20:00 key) does not fire. Before the D8 canary baseline, check
+			// rollDays ~ 36 for 2016-2024 in the G0 done journal (not verifiable off-MC).
+			RollDetection = ERollDetection.Series;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "G0LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "G0SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "G0LX", EOrderAction.Sell));
@@ -184,6 +190,8 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			if (Mode == EGate0Mode.Strategy)
 				throw new ArgumentException("_TestGate0: Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary");
+			string resErr = Gate0Data1.Check(Bars.Info.Resolution.ChartType.ToString(), Bars.Info.Resolution.Type.ToString(), (long)Bars.Info.Resolution.Size);   // educator review G2
+			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
 			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();
 			string err = m_g0.Configure();

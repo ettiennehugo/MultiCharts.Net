@@ -621,7 +621,7 @@ namespace PowerLanguage.Strategy
 			for (int i = 0; i < m_flowHistoryDone.Length; i++) m_flowHistoryDone[i] = false;
 			if (!OrderFlowEnabled) return;
 			if (FlowTickSource != EFlowTickSource.DataLoader) FlowCfg.QuotesExpected = false;
-			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg);
+			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg) { journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
 		}
 
 		protected override void StopCalc()

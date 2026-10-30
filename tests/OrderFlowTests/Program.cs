@@ -286,6 +286,69 @@ static class Program
 			Check(new OF.FlowConfig().McBidAsk == OF.EMcBidAsk.Off && Near(new OF.FlowConfig().mcVolTolerance, 0.005), "S1 defaults Off, tolerance 0.005");
 		}
 
+		// ---- PR G: CumDelta Truncated flag + MaxBars cap warning ----
+		{
+			var warns = new List<string>();
+			var ec = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false }) { warnOnce = w => warns.Add(w) };
+			Check(ec.Cfg.MaxBars == 5000 && ec.BarCap == 5000, "G1 default cap 5000 bars");
+			double gpx = 100;
+			for (int n = 1; n <= 5000; n++) { gpx += TICK; ec.AddTrade(Ms(n * 10), gpx, 1); ec.CloseBar(Bar(n, Ms(n * 10 + 5))); }   // every trade an uptick: delta +1 per bar
+			var c5000 = ec.CumDelta(0);
+			Check(Near(c5000.Value, 5000) && !c5000.Truncated && ec.DroppedBars == 0 && warns.Count == 0, "G1 at the cap (5000 bars): full CumDelta, not Truncated, no warning got " + c5000);
+			gpx += TICK; ec.AddTrade(Ms(50010), gpx, 1); ec.CloseBar(Bar(5001, Ms(50015)));
+			var c5001 = ec.CumDelta(0);
+			Check(Near(c5001.Value, 5000) && c5001.Truncated && ec.DroppedBars == 1, "G1 bar 5001 drops bar 1: CumDelta Truncated (partial sum of the kept 5000) got " + c5001);
+			Check(c5001.IsAvailable && c5001.Source == Src.TickRule && c5001.ToString().EndsWith(" trunc"), "G1 Truncated value stays available, tagged ' trunc'");
+			Check(warns.Count == 1 && warns[0].StartsWith("OF MaxBars cap 5000 hit at bar 5001"), "G1 one warning when the cap is first hit: " + (warns.Count > 0 ? warns[0] : "none"));
+			gpx += TICK; ec.AddTrade(Ms(50020), gpx, 1); ec.CloseBar(Bar(5002, Ms(50025)));
+			Check(warns.Count == 1 && ec.DroppedBars == 2 && ec.CumDelta(0).Truncated, "G1 warning once only; later drops still Truncated");
+			Check(!ec.BarDelta(0).Truncated && !OF.FlowValue.Unavailable().Truncated, "G1 BarDelta / Unavailable never Truncated");
+
+			// small cap (min 10): a new reset period is complete; the period that lost bars is Truncated
+			var es = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, MaxBars = 3 });   // no sinks: must not throw
+			Check(es.BarCap == 10, "G2 cap floor 10");
+			var sA = T0.Date; var sB = T0.Date.AddDays(1);
+			int bn = 0; gpx = 100;
+			for (int k = 0; k < 12; k++) { bn++; gpx += TICK; es.AddTrade(Ms(bn * 10), gpx, 1); es.CloseBar(Bar(bn, Ms(bn * 10 + 5), session: sA)); }
+			Check(es.DroppedBars == 2 && es.CumDelta(0).Truncated && Near(es.CumDelta(0).Value, 10), "G2 session A 12 bars, cap 10: Truncated, sums the kept 10");
+			bn++; gpx += TICK; es.AddTrade(Ms(bn * 10), gpx, 1); es.CloseBar(Bar(bn, Ms(bn * 10 + 5), session: sB));
+			Check(!es.CumDelta(0).Truncated && Near(es.CumDelta(0).Value, 1) && es.CumDelta(1).Truncated, "G2 new reset period complete; prior period still Truncated");
+			for (int k = 0; k < 9; k++) { bn++; gpx += TICK; es.AddTrade(Ms(bn * 10), gpx, 1); es.CloseBar(Bar(bn, Ms(bn * 10 + 5), session: sB)); }
+			Check(!es.CumDelta(0).Truncated && Near(es.CumDelta(0).Value, 10), "G2 period B fills the cap exactly (all A dropped): not Truncated");
+			bn++; gpx += TICK; es.AddTrade(Ms(bn * 10), gpx, 1); es.CloseBar(Bar(bn, Ms(bn * 10 + 5), session: sB));
+			Check(es.CumDelta(0).Truncated && Near(es.CumDelta(0).Value, 10), "G2 period B's first bar dropped: Truncated");
+		}
+
+		// ---- PR G: journal line on the session's first quality downgrade ----
+		{
+			var lines = new List<string>();
+			var ej = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = true }) { journal = j => lines.Add(j) };
+			int t = 0, n = 0;
+			Action<DateTime, bool> close = (sess, fresh) =>
+			{
+				n++; t += 10000;
+				if (fresh) { ej.AddQuote(Ms(t - 100), true, 99.75); ej.AddQuote(Ms(t - 100), false, 100.00); }
+				ej.AddTrade(Ms(t - 50), 100.00, 1);
+				ej.CloseBar(Bar(n, Ms(t), session: sess));
+			};
+			var js1 = T0.Date; var js2 = T0.Date.AddDays(1);
+			close(js1, true); close(js1, true);
+			Check(lines.Count == 0 && ej.Closed(0).Quality == Q.High, "J1 Quote/High session: no journal line");
+			close(js1, false);                                     // stale quote -> TickRule / Medium
+			Check(lines.Count == 1 && lines[0] == "OF quality downgrade session(" + js1.ToString("yyyy-MM-dd") + ") bar(3) High->Medium source(TickRule) staleQuoteTrades(1)",
+				"J1 first downgrade journaled: " + (lines.Count > 0 ? lines[0] : "none"));
+			ej.CloseBar(new OF.BarInput { BarNumber = ++n, CloseTime = Ms(t += 10000), SessionKey = js1, ResetKey = js1, Regime = Regime.IogHistoryNoMagnifier });   // -> Unknown
+			Check(lines.Count == 1 && ej.Closed(0).Quality == Q.Unknown, "J1 a further downgrade in the same session is not journaled again");
+			close(js2, true);
+			Check(lines.Count == 1, "J2 a new session's first bar sets its baseline (no line)");
+			close(js2, false);
+			Check(lines.Count == 2 && lines[1].Contains("session(" + js2.ToString("yyyy-MM-dd") + ")") && lines[1].Contains("High->Medium"), "J2 next session's first downgrade journaled once");
+			var en = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false });   // journal null: no throw
+			en.AddTrade(Ms(10), 100, 1); en.CloseBar(Bar(1, Ms(20)));
+			en.CloseBar(new OF.BarInput { BarNumber = 2, CloseTime = Ms(40), SessionKey = T0.Date, ResetKey = T0.Date, Regime = Regime.IogHistoryNoMagnifier });
+			Check(en.Closed(0).Quality == Q.Unknown, "J3 no journal sink: downgrade handled silently");
+		}
+
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
 	}

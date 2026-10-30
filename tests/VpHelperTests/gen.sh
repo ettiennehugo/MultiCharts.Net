@@ -11,3 +11,11 @@ mkdir -p "$here/Generated"
 { echo "using System; using System.Collections.Generic;"; echo "namespace PowerLanguage.Function { public sealed class _OrderFlow {"
   awk '/\/\/ <order-flow>/ {on=1; next} /\/\/ <\/order-flow>/ {on=0} on' "$root/_OrderFlow.Function.CS"
   echo "} }"; } > "$here/Generated/OrderFlow.cs"
+# PR #47: MC-free confluence rules (zone split width rule, distinct sources, duplicate-stream check).
+{ echo "using System; using System.Collections.Generic;"; echo "namespace PowerLanguage.Function {"
+  awk '/\/\/ <vpconf-rules>/ {on=1; next} /\/\/ <\/vpconf-rules>/ {on=0} on' "$root/_VpConfluenceEngine.Function.CS"
+  echo "}"; } > "$here/Generated/VpConfluenceRules.cs"
+# PR I: MC-free VWAP roll-reset rule + VwapConfig (opt-in Week/Month reset at a roll, default off).
+{ echo "using System;"; echo "namespace PowerLanguage.Function {"
+  awk '/\/\/ <vwap-roll-rules>/ {on=1; next} /\/\/ <\/vwap-roll-rules>/ {on=0} on' "$root/_VpVwapEngine.Function.CS"
+  echo "}"; } > "$here/Generated/VwapRollRules.cs"

@@ -63,10 +63,10 @@ namespace PowerLanguage.Strategy
 		{
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
+			internal static readonly Encoding s_utf8NoBom = new UTF8Encoding(false);   // no BOM (CS-16's choice kept); shared with TradeJournal
 
 			private string m_logFilePath;
 			private IOutput m_output; //MC main output window
-			private StreamWriter m_writer;   // guarded by s_lock, opened lazily and kept open (CS-16)
 
 			private LogFileSingleton(IOutput output)
 			{
@@ -79,7 +79,7 @@ namespace PowerLanguage.Strategy
 					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
 					Directory.CreateDirectory(dir);                       // no-op when it exists
 					m_logFilePath = Path.Combine(dir, logFilename);
-					File.AppendAllText(m_logFilePath, "", Encoding.UTF8);  // prove we can write here
+					File.AppendAllText(m_logFilePath, "", s_utf8NoBom);  // prove we can write here
 					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
@@ -97,46 +97,37 @@ namespace PowerLanguage.Strategy
 					if (s_instance == null)
 					{
 						s_instance = new LogFileSingleton(output);
-						LogFileSingleton instance = s_instance;
-						AppDomain.CurrentDomain.ProcessExit += (s, e) => instance.Close();
-						AppDomain.CurrentDomain.DomainUnload += (s, e) => instance.Close();   // study DLL reload
 					}
 
 					return s_instance;
 				}
 			}
 
-			public void WriteTrace(ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
+			/// <summary>Full path of the process-wide trace CSV.</summary>
+			public string FilePath { get { return m_logFilePath; } }
+
+			/// <summary>
+			/// One File.AppendAllText per line under s_lock (CS-16 reverted): no handle is held between lines, so a log file that was
+			/// deleted, moved or locked while MultiCharts runs is simply recreated on the next line instead of every later line going
+			/// into an unlinked handle. output = the calling signal's Output (the singleton's own m_output belongs to whichever signal
+			/// created it first and may since have been removed from the chart).
+			/// </summary>
+			public void WriteTrace(IOutput output, ETraceLevel level, DateTime timestamp, string zoneLabel, string signalName, string symbol, string runId, string message)
 			{
 				lock (s_lock)
 				{
 					try
 					{
-						if (m_writer == null)
-						{
-							var fs = new FileStream(m_logFilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-							m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };   // no BOM mid-file, every line on disk
-						}
 						string csvMessage = escapeCsv(message);
 						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
 						// CS-9: the bar time's zone (Bars.Info.TimeZone: Local / GMT / Exchange), not the PC offset that "zzz" printed
-						m_writer.WriteLine($"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}");
+						string line = $"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}";
+						File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, s_utf8NoBom);
 					}
 					catch (Exception ex)
 					{
-						try { if (m_writer != null) m_writer.Dispose(); } catch { }
-						m_writer = null;   // reopen on next write
-						m_output.WriteLine($"Error writing to log file: {ex.Message}");
+						try { (output ?? m_output).WriteLine($"Error writing to log file {m_logFilePath}: {ex.Message}"); } catch { }
 					}
-				}
-			}
-
-			public void Close()
-			{
-				lock (s_lock)
-				{
-					try { if (m_writer != null) m_writer.Dispose(); } catch { }
-					m_writer = null;
 				}
 			}
 
@@ -170,13 +161,13 @@ namespace PowerLanguage.Strategy
 			private readonly object m_lock = new object();
 			private readonly string m_path;
 			private readonly string m_header;
-			private StreamWriter m_writer;
-
-			public TradeJournal(string runId) : this(runId, "MCJournal_", HEADER) { }
+			private readonly IOutput m_output;   // the owning signal's Output, for write errors
+			public TradeJournal(string runId, IOutput output) : this(runId, "MCJournal_", HEADER, output) { }
 
 			/// <summary>CS-8 reuses the writer for MCEvents_&lt;runId&gt;.csv with its own header.</summary>
-			public TradeJournal(string runId, string prefix, string header)
+			public TradeJournal(string runId, string prefix, string header, IOutput output)
 			{
+				m_output = output;
 				m_header = header;
 				string name = prefix + runId + ".csv";
 				try
@@ -195,25 +186,21 @@ namespace PowerLanguage.Strategy
 
 			public void Write(string csvLine)
 			{
+				// One File.AppendAllText per line under the lock, no held-open handle (same reason as LogFileSingleton.WriteTrace).
+				// The header goes in front of the first line whenever the file does not exist (new run, or deleted mid-run).
+				// IO errors (e.g. the file open in Excel) are reported to output and the line is dropped; they never reach the strategy.
 				lock (m_lock)
 				{
-					if (m_writer == null)
+					try
 					{
-						bool fresh = !File.Exists(m_path);
-						var fs = new FileStream(m_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-						m_writer = new StreamWriter(fs, new UTF8Encoding(false)) { AutoFlush = true };
-						if (fresh) m_writer.WriteLine(m_header);
+						string text = csvLine + System.Environment.NewLine;
+						if (!File.Exists(m_path)) text = m_header + System.Environment.NewLine + text;
+						File.AppendAllText(m_path, text, LogFileSingleton.s_utf8NoBom);
 					}
-					m_writer.WriteLine(csvLine);
-				}
-			}
-
-			public void Close()
-			{
-				lock (m_lock)
-				{
-					try { if (m_writer != null) m_writer.Dispose(); } catch { }
-					m_writer = null;
+					catch (Exception ex)
+					{
+						try { if (m_output != null) m_output.WriteLine($"Error writing to {m_path}: {ex.Message}"); } catch { }
+					}
 				}
 			}
 		}
@@ -348,7 +335,9 @@ namespace PowerLanguage.Strategy
 		private HashSet<string> m_journalWritten;              // CS-1: trades already written (identity key)
 
 		//interface methods
-		public _CustomSignal(object _ctx) : base(_ctx) { }
+		// Input defaults belong in the constructor: an assignment in Create() would overwrite the user's Format Study value if the
+		// host applies inputs before Create() (e.g. on a reload/recompile while applied), silently turning tracing off.
+		public _CustomSignal(object _ctx) : base(_ctx) { TraceLevel = ETraceLevel.None; }
 
 
 		//methods
@@ -371,8 +360,14 @@ namespace PowerLanguage.Strategy
 		{
 			if (TraceLevel >= traceLevel)
 			{
-				if (m_logger == null) m_logger = LogFileSingleton.GetInstance(Output);
-				m_logger.WriteTrace(traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
+				if (m_logger == null)
+				{
+					m_logger = LogFileSingleton.GetInstance(Output);
+					// The singleton is process-wide, so its "Log file created" line is printed once per MultiCharts process, into the
+					// Output of whichever signal traced first. Tell THIS signal's Output where its lines go, once per instance.
+					try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
+				}
+				m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
 			}
 		}
 
@@ -919,7 +914,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_dailyAggDay; private double m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC;
 		private double m_dailyTodayOpen = double.NaN; private DateTime m_dailyTodayKey = DateTime.MinValue;
 		private readonly _RthCloseSelector m_dailyRth = new _RthCloseSelector();   // S2: RTH close of the aggregated day
-		private bool m_dailyBasisLogged;
+		private bool m_dailyBasisLogged, m_rollKeyWarned;
 
 		/// <summary>M-DAILY context, or null when NeedsDaily is false.</summary>
 		internal _DailyContext DailyContext
@@ -940,7 +935,7 @@ namespace PowerLanguage.Strategy
 			m_daily = null;
 			m_dailyLastStreamBar = m_dailyLastWeekBar = int.MinValue;
 			m_dailyAggDay = DateTime.MinValue; m_dailyTodayOpen = double.NaN; m_dailyTodayKey = DateTime.MinValue;
-			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false;
+			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false; m_rollKeyWarned = false;
 			if (!NeedsDaily) return;
 			if (DailyConfig.dataStream > 0) requireDataStream("DailyConfig.dataStream", DailyConfig.dataStream);
 			if (DailyConfig.weeklyStream > 0) requireDataStream("DailyConfig.weeklyStream", DailyConfig.weeklyStream);
@@ -981,7 +976,18 @@ namespace PowerLanguage.Strategy
 				int pi = HtfClosedIndex(DailyConfig.dataStream), pno = pb.CurrentBar - pi;
 				if (pno > m_dailyLastStreamBar && tradingDayKey(pb.Time[pi]) < key) { m_dailyLastStreamBar = pno; m_daily.AddDay(tradingDayKey(pb.Time[pi]), pb.Open[pi], pb.High[pi], pb.Low[pi], pb.Close[pi]); }
 			}
-			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close)
+			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close).
+			// PR #46 review Q3: this is the real spread only if the roll bar is the first new-contract bar, i.e. the trading-day key
+			// starts where the vendor splices. On an ETH futures chart keyed by calendar date a Globex-open (18:00 ET) splice puts
+			// new-contract bars in the evening stub BEFORE the flagged 00:00 bar, so PrevClose is already new-contract and the
+			// offset is ~0 (the spread stays in history and in ATR). Futures hosts must key days by the Globex trading day
+			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _Test6 do). Warned once below.
+			if (roll && m_daily.Days > 0 && !m_rollKeyWarned && tradingDayKey(t.Date.AddHours(1)) == tradingDayKey(t.Date.AddHours(20))
+				&& Bars.Info.Resolution.Type.ToString() != "Day" && Bars.Info.Category.ToString() == "Future")
+			{
+				m_rollKeyWarned = true;
+				engineSink(ETraceLevel.Warning)?.Invoke("DAILY roll offset on a calendar-keyed intraday futures chart: if the vendor splices at the 18:00 ET Globex open the offset is ~0; key days by the Globex trading day (_CmeSessionClock.GlobexTradingDayEt)");
+			}
 			if (roll && m_daily.Days > 0) m_daily.OnRoll(key, Bars.Open[0] - m_daily.PrevClose);
 			if (DailyConfig.dataStream > 0)
 			{
@@ -1715,8 +1721,10 @@ namespace PowerLanguage.Strategy
 		/// <summary>VPF-4 / S4: roll detection mode. Not an [Input].</summary>
 		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
 		/// <summary>
-		/// VPF-4 Series: a trading-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
-		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
+		/// VPF-4 Series: a trading-day open gapping >= RollGapTicks from the prior close inside the contract's roll window
+		/// (_RollDetector.SeriesWindow: Monday of the customary roll date's week through the third Friday), at most once per
+		/// contract, or a change of Bars.Info.Name. On an intraday futures chart whose tradingDayKey is the calendar date the
+		/// detector is keyed by the Globex trading day instead (fix-i), so the Sunday/18:00 ET open is the first bar of its day.
 		/// </summary>
 		protected int RollGapTicks { get; set; } = 8;
 		/// <summary>VPF-4 Table: trading dates (tradingDayKey) on which the continuous series switched contract (set by the strategy).</summary>
@@ -1725,6 +1733,16 @@ namespace PowerLanguage.Strategy
 		private readonly _RollDetector m_rollDet = new _RollDetector();
 		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
 		private bool m_rollWarned;
+		// fix-i: detector keyed by _CmeSessionClock.GlobexTradingDayEt. Decided ONCE, on the first closed bar the detector steps
+		// (PR #51 review): a derived class that turns Series on only after that bar stays on tradingDayKey (pre-existing edge).
+		// Side effect for SeriesOrTable on an intraday futures chart: Table dates are matched against the Globex day too, so a
+		// Monday RollDates entry now fires on the Sunday 18:00 ET open instead of the first bar after Monday midnight.
+		private bool m_rollGlobexKey;
+		private TimeZoneInfo m_rollEtTz;           // PR #51 N2: cached ET zone for the Globex key (lazy)
+
+		/// <summary>PR #51 review: diagnostics of the last detected Data1 roll: "gapPts(..) gapX(..) barTime(..) prevClose(..) open(..)"
+		/// (gap / prev / open are NaN when the roll came from a Table date or a name change). Null before the first roll.</summary>
+		protected string RollSpliceDiag { get; private set; }
 
 		/// <summary>VPF-4: Data1 bars (1-based, Bars.FullSymbolData.Current) on which a roll was detected so far.</summary>
 		public IList<int> RollBars { get { return m_rollDet.RollBars; } }
@@ -1734,6 +1752,8 @@ namespace PowerLanguage.Strategy
 			m_rollDet.Reset();
 			m_rollPending = null;
 			m_rollWarned = false;
+			m_rollGlobexKey = false;
+			RollSpliceDiag = null;
 		}
 
 		// settings are read live (derived StartCalc may set them after base.StartCalc, as VPF-4 allowed)
@@ -1761,13 +1781,31 @@ namespace PowerLanguage.Strategy
 			}
 			if (Bars.Status != EBarState.Close) return;
 			configureRollDetector();
+			if (!m_rollWarned)
+			{
+				// educator review R1: Series is blind on intraday calendar-keyed charts. calendarKeyed probe: 01:00 and 20:00 of the
+				// same date share a key only when tradingDayKey is the calendar date (a Globex / Forex key rolls in the evening).
+				// fix-i: on a futures chart Series is re-keyed by the Globex trading day (no warning); other categories still warn.
+				m_rollWarned = true;
+				DateTime d0 = Bars.Time[0].Date;
+				string res = Bars.Info.Resolution.Type.ToString();
+				bool calendarKeyed = tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20));
+				m_rollGlobexKey = m_rollDet.series && calendarKeyed && _RollDetector.IsIntraday(res)
+					&& Bars.Info.Category.ToString() == "Future";
+				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, res, calendarKeyed && !m_rollGlobexKey);
+				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
+			}
 			int bar = Bars.FullSymbolData.Current;
 			string name = Bars.Info.Name;
-			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (m_rollGlobexKey && m_rollEtTz == null) m_rollEtTz = findTz("Eastern Standard Time");
+			DateTime day = m_rollGlobexKey ? _CmeSessionClock.GlobexTradingDayEt(ToZone(Bars.Time[0], m_rollEtTz)) : tradingDayKey(Bars.Time[0]);
 			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
 			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
 			{
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name})");
+				double tk = tickSize(), g = m_rollDet.LastGap;
+				RollSpliceDiag = string.Format(System.Globalization.CultureInfo.InvariantCulture, "gapPts({0:0.00}) gapX({1:0.00}) barTime({2:yyyy-MM-dd HH:mm}) prevClose({3:0.00}) open({4:0.00})",
+					g, RollGapTicks > 0 && tk > 0 ? g / (RollGapTicks * tk) : double.NaN, Bars.Time[0], m_rollDet.LastPrevClose, m_rollDet.LastOpen);
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name}) {RollSpliceDiag}");
 				if (m_rollPending != null) foreach (_RollPending p in m_rollPending) if (p != null) p.Arm(Bars.Time[0]);
 			}
 		}
@@ -1933,19 +1971,16 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			m_holidays = new PowerLanguage.Function._NyseHolidays(this);
-			TraceLevel = ETraceLevel.None;
 		}
 
 		/// <summary>
 		/// Static state (log file, TradeManager snapshot) is process-wide and shared by every signal instance.
-		/// The log file handle is closed on process exit/domain unload.
+		/// No log file handle is held (each line is one File.AppendAllText), so there is nothing to close.
 		/// </summary>
 		protected override void Destroy()
 		{
-			if (m_journal != null) m_journal.Close();
 			m_journal = null;
-			if (m_eventFile != null) m_eventFile.Close();   // CS-8
-			m_eventFile = null;
+			m_eventFile = null;   // CS-8
 			m_logger = null;
 			base.Destroy();
 		}
@@ -1977,11 +2012,10 @@ namespace PowerLanguage.Strategy
 			m_runLogged = false;
 			m_runEndLogged = false;
 			m_tick = 0;   // tickSize() re-resolved on first use
-			if (m_journal != null) m_journal.Close();
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
 			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
-			if (m_eventFile != null) m_eventFile.Close();      // CS-8: one events file per run
+			// CS-8: one events file per run
 			m_eventFile = null;
 			m_events.Clear();
 			m_eventsSteppedBar = -1;
@@ -2275,7 +2309,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_journal == null)
 				{
-					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS) : new TradeJournal(RunId);
+					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS, Output) : new TradeJournal(RunId, Output);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
 				m_journal.Write(sb.ToString());
@@ -2429,9 +2463,11 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>CS-6: bar time (chart zone) converted to the zone with Windows or IANA id <paramref name="tzId"/>. DST-aware.</summary>
-		protected DateTime ToZone(DateTime barTime, string tzId)
+		protected DateTime ToZone(DateTime barTime, string tzId) { return ToZone(barTime, findTz(tzId)); }
+
+		/// <summary>PR #51 N2: ToZone with an already-resolved destination zone (callers on every bar cache the lookup).</summary>
+		protected DateTime ToZone(DateTime barTime, TimeZoneInfo dst)
 		{
-			TimeZoneInfo dst = findTz(tzId);
 			if (barTime.Kind == DateTimeKind.Utc) return TimeZoneInfo.ConvertTimeFromUtc(barTime, dst);
 			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
 			TimeZoneInfo src = BarTimeZone ?? TimeZoneInfo.Local;
@@ -2600,7 +2636,7 @@ namespace PowerLanguage.Strategy
 				var hdr = new StringBuilder(EVENTS_HEADER_BASE);
 				for (int i = 0; i < h.Length; i++) hdr.Append(",mfeR_").Append(h[i]).Append(",maeR_").Append(h[i]);
 				hdr.Append(",completedBy,context");
-				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString());
+				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString(), Output);
 				trace(ETraceLevel.Journal, $"EVENTS file({m_eventFile.Path_})");
 			}
 			var sb = new StringBuilder();

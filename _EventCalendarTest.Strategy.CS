@@ -7,7 +7,8 @@ namespace PowerLanguage.Strategy
 	/// M-EVENT acceptance strategy (specs/m-event-spec.md rev 2, EV-8.10 / P-EV1 / roll check). Places NO orders.
 	///
 	/// SETUP: an ES/NQ (CME equity index) chart, 1-5 minute bars, Exchange time zone, several years of data
-	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke) or Info (probe / roll).
+	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke), Info (probe) or Journal (roll: EVROLL lines
+	/// need Info, the VPF-4 roll splice lines with RollSpliceDiag need Journal).
 	///
 	/// RUN (Mode input):
 	///   0 smoke - EventConfig.enabled with defaults. Expect the "EVENT created ..." journal line; with the PR A empty table also
@@ -28,6 +29,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_lastDay = DateTime.MinValue, m_lastSplice = DateTime.MinValue;
 		private int m_probeCount, m_probeDst, m_probeMismatch, m_rollCount;
 		private EventRec m_pending; private bool m_hasPending;
+		private bool m_startLogged;   // startup line written for this run
 
 		public _EventCalendarTest(object _ctx) : base(_ctx) { Mode = 0; ProbeTier = 1; }
 
@@ -41,13 +43,36 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			try { Output.WriteLine($"{GetType().Name}: EVTEST StartCalc traceLevel({TraceLevel}) mode({Mode})"); } catch { }   // before base: visible even if base.StartCalc throws
 			base.StartCalc();
 			m_lastDay = m_lastSplice = DateTime.MinValue;
 			m_probeCount = m_probeDst = m_probeMismatch = m_rollCount = 0; m_hasPending = false;
+			m_startLogged = false;
+		}
+
+		/// <summary>One EVTEST summary per run so an empty run is visible (also echoed to Output, independent of TraceLevel).</summary>
+		protected override void StopCalc()
+		{
+			if (m_startLogged)
+			{
+				string msg = $"EVTEST end mode({Mode}) rolls({m_rollCount}) probes({m_probeCount}) dst({m_probeDst}) mismatch({m_probeMismatch}) lastDay({m_lastDay:yyyy-MM-dd}) lastSplice({m_lastSplice:yyyy-MM-dd})";
+				try { Output.WriteLine($"{GetType().Name}: {msg}"); } catch { }
+				try { if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg); } catch { }
+			}
+			base.StopCalc();
 		}
 
 		protected override void CalcBar()
 		{
+			if (!m_startLogged)
+			{
+				// First bar of the run, BEFORE base.CalcBar() so a throw in the base still leaves this line in Output. Echoed to
+				// Output so a run with TraceLevel None / no EventCalendar is visible.
+				m_startLogged = true;
+				string msg = $"EVTEST start mode({Mode}) probeTier({ProbeTier}) traceLevel({TraceLevel}) rollDetection({RollDetection}) eventCalendar({(EventCalendar == null ? "null" : "ok")})";
+				try { Output.WriteLine($"{GetType().Name}: {msg}"); } catch { }
+				try { if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg); } catch { }
+			}
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			_EventCalendar ev = EventCalendar;
@@ -90,7 +115,7 @@ namespace PowerLanguage.Strategy
 			for (DateTime d = a; d < b; d = d.AddDays(1)) if (EventRules.IsNyseBusinessDay(d)) off++;
 			if (rule > m_lastSplice) off = -off;
 			if (traceOn(ETraceLevel.Info))
-				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount})");
+				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount}) {RollSpliceDiag}");
 		}
 	}
 }

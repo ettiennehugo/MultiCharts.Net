@@ -30,6 +30,26 @@ namespace PowerLanguage.Function
 
 	public enum EGate0Entry { None = 0, Market = 1, Limit = 2 }
 
+	/// <summary>Educator review G2: Data1 resolution guard for _TestGate0. The engine re-aggregates Data1 into 1m/5m/15m/30m
+	/// buckets by bar close time, so a Data1 bar must never span more than one minute or straddle a minute boundary.
+	/// Accepted: Tick size 1 (each bar is one trade); Second with a size that divides 60 (1,2,3,4,5,6,10,12,15,20,30,60);
+	/// Minute size 1; all only with ChartType Regular. Rejected: Minute > 1, Hour/Day/Week/Month/Quarter/Year, multi-tick
+	/// bars (Tick > 1), Contract (= volume bars), Point / PointOriginal (= range bars), Change, and any non-Regular chart
+	/// type (Renko, Kagi, point-and-figure, ...): their duration is data-dependent and one bar can span several minutes in
+	/// quiet markets, so the guard cannot prove they stay within one minute. Arguments are Resolution.ChartType.ToString(),
+	/// Resolution.Type.ToString() (EResolution name) and Resolution.Size. Returns null if accepted, else the reason.</summary>
+	public static class Gate0Data1
+	{
+		public static string Check(string chartType, string type, long size)
+		{
+			if (type == "Second" && size <= 0)   // explicit: never reaches 60 % size
+				return "Data1 is " + size + " Second " + chartType + " bars; the bar size must be a positive number of seconds that divides 60 (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60)";
+			bool ok = chartType == "Regular" && ((type == "Tick" && size == 1) || (type == "Minute" && size == 1) || (type == "Second" && size <= 60 && 60 % size == 0));
+			return ok ? null : "Data1 is " + size + " " + type + " " + chartType + " bars; Gate 0 needs 1-tick, 1-minute or N-second bars (N divides 60). " +
+				"Bars longer than 1 minute (or of variable duration: multi-tick, volume/Contract, range/Point, Renko, ...) silently corrupt the 1m buckets and canaries";
+		}
+	}
+
 	public struct Gate0Bar
 	{
 		public DateTime et;    // bar close time, Eastern
@@ -281,8 +301,10 @@ namespace PowerLanguage.Function
 		public const int DvRotExpirySessions = 5, DvTrendExpirySessions = 10, DvTrendArmBars = 2, DvTrendLookback = 20, DvPendingBars = 26;
 		public static readonly int[] DvRotBars = { 6, 12 };
 		/// <summary>Every level type a verdict run can produce; Holm is applied per run with m = this count (conservative: valid
-		/// across the per-family runs, which never see the other families' p-values).</summary>
-		public static readonly string[] AllTypes = { "POC", "VAH", "VAL", "NPOC", "IBH", "IBL", "ONH", "ONL", "AV_PH", "AV_PL", "AV_WK", "AV_MO", "AV_OPEN", "AV_PC",
+		/// across the per-family runs, which never see the other families' p-values). NEW PRE-REGISTRATION (educator review G4):
+		/// AV_OPEN (prior-RTH-open AVWAP = the prior session VWAP, a duplicate of type VWAP) is RETIRED, not renumbered: m 37 -> 36.
+		/// Do not reuse the name AV_OPEN for a different level.</summary>
+		public static readonly string[] AllTypes = { "POC", "VAH", "VAL", "NPOC", "IBH", "IBL", "ONH", "ONL", "AV_PH", "AV_PL", "AV_WK", "AV_MO", "AV_PC",
 			"VWAP", "VWAP+1", "VWAP-1", "WPOC", "WVAH", "WVAL", "CVAH", "CVAL", "SP_HI", "SP_LO", "SPV_HI", "SPV_LO", "DV_ROT_POC_R6", "DV_ROT_POC_R12", "DV_TREND_HVN",
 			"HVN", "LVN", "HVN_HCV", "LVN_HCV", "GMM_MU", "GMM_EDGE", "SIG_MU", "SIG_EDGE" };
 
@@ -339,6 +361,7 @@ namespace PowerLanguage.Function
 		public IList<Gate0DvLevel> DvLevels { get { return m_dv; } }
 		public double SessionVwap { get { return m_cur != null ? m_cur.vwap.Value : double.NaN; } }
 		public double Atr20d { get { return m_atrD.Value; } }
+		public double Atr5 { get { return m_atr5.Value; } }
 		public double Atr30 { get { return m_atr30.Value; } }
 
 		/// <summary>A2-53 sweep cell: Variant 100..123 -> idx = Variant-100; gap g = {0.3,0.5,0.8}%[idx/8]; j = 1 + (idx/4)%2;
@@ -408,6 +431,10 @@ namespace PowerLanguage.Function
 			if (m_b5.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on5m(e, o, h, l, c, v);
 			if (m_b15.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on15m(e, o, h, l, c, v);
 			if (m_b30.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on30m(e, o, h, l, c, v);
+			// Educator review G1 (both analysts), NEW PRE-REGISTRATION: the intraday ATRs restart at the splice like the daily one,
+			// so the first 5m/30m TR on the new contract is that bucket's own range, not the cross-contract gap. Done AFTER the
+			// PreBar flush: on tick data a bucket still open from the old contract closes here and keeps its legitimate TR.
+			if (b.roll) { m_atr5.ResetPrev(); m_atr30.ResetPrev(); }
 			double tp = (b.h + b.l + b.c) / 3;
 			if (!rth && m_prevRth) m_avPc.Reset();
 			m_prevRth = rth;
@@ -472,6 +499,7 @@ namespace PowerLanguage.Function
 			// A2-39 Reset: forget every multi-session source built on the old contract
 			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
 			m_bars30.Clear(); m_dvPending.Clear(); m_dv.Clear(); m_rotCool.Clear(); m_trendCool = 0;
+			// ATR5/ATR30 restart in Bar(), after the PreBar flush of buckets still open from the old contract (see there).
 			m_atrD.ResetPrev(); m_rollSplice = true;
 		}
 
@@ -646,7 +674,6 @@ namespace PowerLanguage.Function
 				add("AV_PH", p1.avHi.Value, 1); add("AV_PL", p1.avLo.Value, 1);
 				if (m_avWeek.Ready) add("AV_WK", m_avWeek.Value, 1);
 				if (m_avMonth.Ready) add("AV_MO", m_avMonth.Value, 1);
-				if (p1.vwap.Ready) add("AV_OPEN", p1.vwap.Value, 1);
 				if (m_avPc.Ready) add("AV_PC", m_avPc.Value, 1);
 			}
 			if (p1 != null && Fam(EGate0Family.Vwap) && p1.vwap.Ready)

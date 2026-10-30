@@ -17,7 +17,8 @@ static class Program
 
 	static int Main()
 	{
-		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt();
+		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf();
+		VwapRollReset();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
@@ -446,4 +447,163 @@ static class Program
 			&& Enum.GetValues(typeof(ELevelKind)).Length == 28, "D0a DVP kinds appended in order 20..27");
 		Check(LevelRef.Line(ELevelKind.DvpVah, 100, D0, D0, D0, 1, "DVP1:x").StudyType == "DvpVah" && LevelRef.Line(ELevelKind.DvpConf, 100, D0, D0, D0, 1, null).StudyType == "DvpConf", "D0a DVP StudyType strings for A2-33");
 	}
+
+	// PR #47 (PR F scope): VpConfluence rules (extracted from _VpConfluenceEngine <vpconf-rules>) plus source checks on the engine/base.
+	static void VpConf()
+	{
+		const double tol = 1.0, atr = 400;          // 4 ticks x 0.25; 3% x 400 = 12 > 4 x tol = 4
+		double f = VpConfluenceRules.DefaultSplitAtrFraction;
+		Check(f == 0.03 && VpConfluenceRules.MinSplitCount == 3 && VpConfluenceRules.SplitTolMultiple == 4.0, "split constants: 3% Atr20d, >= 3 anchors, 4 x tol");
+		// anchors chained within tol (they join), widths 0.02 x ATR (8) and 0.04 x ATR (16)
+		var narrow = new List<double> { 100, 101, 102, 103, 104, 105, 106, 107, 108 };
+		var wide = new List<double> { 100, 101, 102, 103, 104, 105, 106, 107, 108.5, 109, 110, 111, 112, 113, 114, 115, 116 };
+		Check(VpConfluenceRules.SplitAt(narrow, 0, narrow.Count, tol, atr, f) == -1, "width 0.02 x Atr20d: one zone");
+		int sp = VpConfluenceRules.SplitAt(wide, 0, wide.Count, tol, atr, f);
+		Check(sp == 8 && VpConfluenceRules.SplitAt(wide, 0, sp, tol, atr, f) == -1 && VpConfluenceRules.SplitAt(wide, sp, wide.Count, tol, atr, f) == -1,
+			"width 0.04 x Atr20d: two zones, split at the largest gap (107 | 108.5) [" + sp + "]");
+		Check(VpConfluenceRules.SplitAt(wide, 0, wide.Count, tol, atr, f) > 0 && 1.5 <= tol * 1.5, "no gap > tol veto: a largest gap of 1.5 (<= 2 x tol) still splits");
+		Check(VpConfluenceRules.SplitAt(narrow, 0, narrow.Count, tol, double.NaN, f) > 0 && VpConfluenceRules.SplitWidth(tol, double.NaN, f) == 4.0,
+			"Atr20d NaN: falls back to 4 x tol (width 8 > 4 splits)");
+		Check(VpConfluenceRules.SplitWidth(tol, 50, f) == 4.0 && VpConfluenceRules.SplitWidth(tol, 0, f) == 4.0 && VpConfluenceRules.SplitWidth(tol, double.PositiveInfinity, f) == 4.0,
+			"limit = max(4 x tol, 3% x Atr20d); bad ATR -> 4 x tol");
+		Check(VpConfluenceRules.SplitAt(new List<double> { 100, 120 }, 0, 2, tol, double.NaN, f) == -1, "fewer than 3 anchors never split");
+		Check(VpConfluenceRules.SplitAt(new List<double> { 100, 101, 102, 103, 104, 105, 109, 110 }, 0, 8, tol, double.NaN, f) == 6, "split index = first anchor above the largest gap");
+		// V5: independent sources are distinct (stream, profile window) ids, not survivors
+		Check(VpConfluenceRules.DistinctCount(new[] { "ds1:s10", "ds1:s10" }) == 1, "two survivors from the same profile/stream (acceptance + rejection) count 1 source");
+		Check(VpConfluenceRules.DistinctCount(new[] { "ds1:s10", "ds2:s10", "ds1:s50", "", null }) == 3, "distinct sources across streams / windows; empty ids ignored");
+		// duplicate enabled streams are rejected at StartCalc
+		string e = VpConfluenceRules.DuplicateStreamError(1, 1, -1);
+		Check(e == "ConfluenceDataStream2 = ConfluenceDataStream1 (1): each confluence slot needs its own stream", "duplicate stream error text: " + e);
+		Check(VpConfluenceRules.DuplicateStreamError(2, 3, 2) != null && VpConfluenceRules.DuplicateStreamError(1, -1, -1) == null && VpConfluenceRules.DuplicateStreamError(1, 0, 0) == null
+			&& VpConfluenceRules.DuplicateStreamError(1, 2, 3) == null, "only enabled (>= 1) duplicates are rejected");
+		// ---- behaviour (review round 2): the rules the engine now delegates to ----
+		// Partition: realistic ES Atr20d ~ 60 (3% = 1.8 < 4 x tol = 4, the floor binds)
+		var z = new List<int[]>(); var sp2 = new List<int[]>();
+		var es = new List<double> { 5000, 5001, 5002, 5003, 5004, 5005 };            // width 5 > 4: split
+		VpConfluenceRules.Partition(es, 0, es.Count, tol, 60, f, z, sp2);
+		Check(z.Count == 2 && sp2.Count == 1 && z[0][0] == 0 && z[z.Count - 1][1] == es.Count && z[0][1] == z[1][0], "ES Atr20d 60: width 5 > max(4, 1.8) splits into 2 zones");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5001.5, 5003 }, 0, 3, tol, 60, f, z, null);
+		Check(z.Count == 1, "ES Atr20d 60: width 3 <= 4 stays one zone");
+		Check(Near(VpConfluenceRules.SplitWidth(0.25, 60, f), 1.8) , "ES Atr20d 60 with tol 0.25 (1 tick): limit = 3% x 60 = 1.8");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5001, 5002 }, 0, 3, 0.25, 60, f, z, null);
+		Check(z.Count == 2, "ES Atr20d 60, tol 0.25: 3 anchors over 2 pts > 1.8 split");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5010 }, 0, 2, 0.25, 60, f, z, null);
+		Check(z.Count == 1, ">= 3-anchor condition: 2 anchors 10 pts apart are never split");
+		z.Clear(); VpConfluenceRules.Partition(wide, 0, wide.Count, tol, double.NaN, f, z, null);
+		bool cover = z.Count > 2 && z[0][0] == 0 && z[z.Count - 1][1] == wide.Count; for (int i = 1; i < z.Count; i++) cover &= z[i][0] == z[i - 1][1];
+		Check(cover, "Partition ranges tile the cluster in order (" + z.Count + " zones, NaN ATR)");
+		// ZoneSourceCounts (V5) over the engine's survivor interface
+		int ns, np;
+		Func<string, string, bool, double, IVpConfSurvivor> S = (svid, p, ind, c) => new TSurv { Anchor = new TAnc { SourceVolumeId = svid, ProfileId = p }, Independent = ind, Credit = c };
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s10", true, 1), S("", "ds1:s50", true, 1), S("ds2:s10", "ds2:s10", true, 1) }, out ns, out np);
+		Check(ns == 3 && np == 3, "ZoneSourceCounts: two labels of one source count once; empty source id -> own profile [" + ns + "," + np + "]");
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s30", true, 0.5) }, out ns, out np);
+		Check(ns == 1 && np == 2, "ZoneSourceCounts: developing child remapped to its parent's source adds no source [" + ns + "," + np + "]");
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("a", "a", true, 1), S("b", "b", false, 1), S("c", "c", true, 0) }, out ns, out np);
+		Check(ns == 1 && np == 1, "ZoneSourceCounts: non-independent and zero-credit survivors excluded");
+		Check(VpConfluenceRules.SourceId("", "p") == "p" && VpConfluenceRules.SourceId(null, "p") == "p" && VpConfluenceRules.SourceId("s", "p") == "s", "SourceId: source else profile");
+		// DevelopingHits over the cluster: every developing non-overlay anchor in [lo, hi) is listed with its own survivor's credit
+		var an = new[] { new TAnc { ProfileId = "d0", Developing = true }, new TAnc { ProfileId = "c1" }, new TAnc { ProfileId = "o2", Developing = true, Overlay = true },
+			new TAnc { ProfileId = "d3", Developing = true }, new TAnc { ProfileId = "d4", Developing = true }, new TAnc { ProfileId = "d5", Developing = true } };
+		var sv = new IVpConfSurvivor[] { new TSurv { Anchor = an[0], Credit = 0.5, Independent = true }, new TSurv { Anchor = an[1], Credit = 1 }, new TSurv { Anchor = an[2], Credit = 0.3 }, new TSurv { Anchor = an[4], Credit = 0 } };
+		List<string> dh = null;
+		double ds = VpConfluenceRules.DevelopingHits(an, 0, 5, sv, (x, own, c) => x.ProfileId + ":" + (own != null ? "own" : "none") + ":" + c, ref dh);
+		Check(dh != null && string.Join(",", dh) == "d0:own:0.5,d3:none:0,d4:none:0" && Near(ds, 0.5),
+			"DevelopingHits: developing non-overlay anchors in range listed; absorbed/refused carry 0; score sums credit [" + (dh == null ? "null" : string.Join(",", dh)) + "]");
+		List<string> dh2 = null;
+		Check(VpConfluenceRules.DevelopingHits(an, 1, 3, sv, (x, own, c) => x.ProfileId, ref dh2) == 0 && dh2 == null, "DevelopingHits: none (and no list allocated) without developing anchors");
+		// EmitZones: zones emitted in order, splits reported, and the host's Atr20d (provider) reaches the split
+		var em = new List<string>(); var spl = new List<string>(); int calls = 0;
+		var es2 = new List<double> { 5000, 5000.5, 5001, 5001.5, 5002, 5002.5, 5003 };     // 3 pts wide, tol 0.25: 4 x tol = 1
+		int nz = VpConfluenceRules.EmitZones(es2, 0, es2.Count, 0.25, () => { calls++; return 60.0; }, f, (lo2, hi2) => em.Add(lo2 + "-" + hi2), (lo2, hi2, at, hatr) => spl.Add(at + "@" + hatr));
+		bool tile = em.Count == nz && nz >= 2 && em[0].StartsWith("0-") && em[em.Count - 1].EndsWith("-" + es2.Count);
+		Check(tile && spl.Count == nz - 1 && spl[0].EndsWith("@60") && calls == 1, "EmitZones: ES host Atr20d 60 (limit 1.8) splits 3 pts; zones in order, splits journaled with the host ATR [" + string.Join(" ", em) + "]");
+		em.Clear(); spl.Clear();
+		VpConfluenceRules.EmitZones(es2, 0, es2.Count, 0.25, () => 400.0, f, (lo2, hi2) => em.Add(lo2 + "-" + hi2), (lo2, hi2, at, hatr) => spl.Add(at + "@" + hatr));
+		Check(em.Count == 1 && em[0] == "0-" + es2.Count && spl.Count == 0, "EmitZones: host Atr20d 400 (limit 12) keeps one zone: the host ATR, not 4 x tol, decides");
+		em.Clear();
+		VpConfluenceRules.EmitZones(es2, 0, es2.Count, 0.25, () => double.NaN, f, (lo2, hi2) => em.Add(lo2 + "-" + hi2), null);
+		Check(em.Count >= 3, "EmitZones: NaN host ATR falls back to 4 x tol (1 pt)");
+		// HostAtr20d: the host's daily Atr20d passes through only when M-DAILY is on
+		Check(VpConfluenceRules.HostAtr20d(true, () => 60) == 60 && double.IsNaN(VpConfluenceRules.HostAtr20d(false, () => 60)) && double.IsNaN(VpConfluenceRules.HostAtr20d(true, null)), "HostAtr20d: daily Atr20d when NeedsDaily, else NaN");
+		// ValidateStreams throws; NeedsAtr20d
+		bool threw = false; try { VpConfluenceRules.ValidateStreams(2, 3, 2); } catch (ArgumentException ex) { threw = ex.Message.StartsWith("ConfluenceDataStream3 = ConfluenceDataStream1 (2)"); }
+		Check(threw, "ValidateStreams throws ArgumentException on a duplicate enabled stream");
+		threw = false; try { VpConfluenceRules.ValidateStreams(1, -1, -1); VpConfluenceRules.ValidateStreams(1, 0, 0); } catch (ArgumentException) { threw = true; }
+		Check(!threw, "ValidateStreams accepts distinct / disabled slots");
+		Check(VpConfluenceRules.NeedsAtr20d(true, 0.03, 1, -1, -1) && !VpConfluenceRules.NeedsAtr20d(true, 0, 1, 2, 3) && !VpConfluenceRules.NeedsAtr20d(true, 0.03, -1, 0, -1), "NeedsAtr20d: only with an ATR fraction and an enabled slot");
+		Check(!VpConfluenceRules.NeedsAtr20d(false, 0.03, 1, 2, 3), "NeedsAtr20d: no M-DAILY for a host that does not use confluence zones (default config)");
+		// source pins on comment-stripped source: each glue line appears exactly once (commented-out / duplicated lines fail)
+		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
+		if (dir == null) { Check(false, "repo root with _VpConfluenceEngine.Function.CS not found"); return; }
+		Func<string, string> strip = p => System.Text.RegularExpressions.Regex.Replace(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, p)), @"//[^\n]*", "");
+		string eng = strip("_VpConfluenceEngine.Function.CS"), bas = strip("_VolumeProfileBase.Strategy.CS");
+		Func<string, string, int> count = (hay, needle) => { int n = 0, i = 0; while ((i = hay.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; } return n; };
+		Action<string, string, string> pin1 = (hay, needle, what) => Check(count(hay, needle) == 1, what + " (exactly once, uncommented)");
+		pin1(eng, "VpConfluenceRules.EmitZones(m_prices, lo, hi, tol, m_owner.confluenceAtr20d, atrFraction, (zlo, zhi) => addZone(cluster, zlo, zhi, tol), (a, b, split, atr) => journalSplit(a, b, split, tol, atrFraction, atr));", "engine emits zones and feeds the host Atr20d through EmitZones");
+		pin1(eng, "VpConfluenceRules.ZoneSourceCounts(survivors, out nSources, out nProfiles);", "engine counts sources through ZoneSourceCounts");
+		pin1(eng, "zone.independentSources = nSources;", "engine sets independentSources only from ZoneSourceCounts");
+		pin1(eng, "zone.developingScore = VpConfluenceRules.DevelopingHits(cluster, loIdx, hiIdx, survivors, developingHit, ref zone.developingHits);", "engine lists developing hits through DevelopingHits");
+		Check(!eng.Contains("m_atr20d") && !eng.Contains("svIds") && !eng.Contains("m_zones") && !eng.Contains("gap <= tol") && eng.Contains("VPCONF split"),
+			"no engine-side glue left (no m_atr20d / svIds / m_zones / own gap test); splits journaled");
+		pin1(bas, "return VpConfluenceRules.HostAtr20d(NeedsDaily, () => DailyContext == null ? double.NaN : DailyContext.Atr20d);", "base feeds the daily Atr20d through HostAtr20d");
+		pin1(bas, "VpConfluenceRules.ValidateStreams(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3);", "base StartCalc calls ValidateStreams");
+		pin1(bas, "if (VpConfluenceRules.NeedsAtr20d(UsesConfluenceZones, ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;", "base enables M-DAILY only for confluence users");
+		pin1(bas, "protected bool UsesConfluenceZones { get; set; } = false;", "UsesConfluenceZones defaults off");
+		Check(count(bas, "NeedsDaily = true") == 1, "no other path turns on M-DAILY in the VP base");
+		Func<string, string, string> body = (hay, sig) => { int i = hay.IndexOf(sig, StringComparison.Ordinal); if (i < 0) return null; int o = hay.IndexOf('{', i), d = 0, j = o; for (; j < hay.Length; j++) { if (hay[j] == '{') d++; else if (hay[j] == '}' && --d == 0) break; } return System.Text.RegularExpressions.Regex.Replace(hay.Substring(o + 1, j - o - 1), @"\s+", " ").Trim(); };
+		Check(body(bas, "internal double confluenceAtr20d()") == "return VpConfluenceRules.HostAtr20d(NeedsDaily, () => DailyContext == null ? double.NaN : DailyContext.Atr20d);", "confluenceAtr20d body is exactly the HostAtr20d feed");
+		Check(count(eng, "zone.independentSources =") == 1, "independentSources assigned once in the engine (no override after ZoneSourceCounts)");
+		Check(count(eng, "addZone(cluster") == 1, "zones are added only through the EmitZones callback");
+		Check(strip("_DeltaDivRevFuturesLELX.Strategy.CS").Contains("UsesConfluenceZones = true;") && strip("_VolumeProfileTest1.Strategy.CS").Contains("UsesConfluenceZones = TraceConfluence;"), "confluence-zone users declare UsesConfluenceZones");
+		Check(!eng.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP") && !bas.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP"), "fallback timeframe weight removed");
+		int c0 = bas.IndexOf("protected override void Create()"), c1 = bas.IndexOf("protected override void Destroy()");
+		string create = c0 >= 0 && c1 > c0 ? bas.Substring(c0, c1 - c0) : "";
+		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),
+			"Create allocates no stream packs, VWAP or confluence engines (lazy)");
+	}
+	// PR I: opt-in Week/Month VWAP reset at a roll (VwapConfig.resetPeriodSlotsOnRoll, default false = unchanged)
+	static void VwapRollReset()
+	{
+		Check(!new VwapConfig().resetPeriodSlotsOnRoll, "PR I: VwapConfig.resetPeriodSlotsOnRoll defaults to false");
+		// wiring pins (comment-stripped source): config passed through, default off and not hard-wired, reset only on closed bars
+		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpVwapEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
+		if (dir == null) { Check(false, "PR I: repo root with _VpVwapEngine.Function.CS not found"); return; }
+		Func<string, string> strip = q => System.Text.RegularExpressions.Regex.Replace(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, q)), @"//[^\n]*", "");
+		string veng = strip("_VpVwapEngine.Function.CS"), vbas = strip("_VolumeProfileBase.Strategy.CS");
+		Func<string, string, int> count = (hay, needle) => { int n = 0, i = 0; while ((i = hay.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; } return n; };
+		Check(count(vbas, "eng.resetPeriodOnRoll = VwapConfig.resetPeriodSlotsOnRoll;") == 1 && count(vbas, "resetPeriodOnRoll =") == 1, "PR I: configureVwap passes the config flag through (exactly once, no other assignment)");
+		Check(count(veng, "public bool resetPeriodSlotsOnRoll = false;") == 1 && count(veng, "public bool resetPeriodOnRoll;") == 1 && count(veng, "resetPeriodOnRoll =") == 0, "PR I: default off, not hard-wired in the engine");
+		Check(count(vbas, "protected VwapConfig VwapConfig { get; } = new VwapConfig();") == 1 && count(vbas, "resetPeriodSlotsOnRoll = true") == 0, "PR I: base uses the default VwapConfig (no hard-wired true)");
+		Check(count(veng, "if (rollSlot && bars.Status == EBarState.Close &&") == 1, "PR I: roll reset only on closed bars");
+		Check(count(veng, "bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));") == 1, "PR I: roll slots = RollDate, or Week/Month with the flag");
+		Check(count(vbas, "if (VwapConfig.resetPeriodSlotsOnRoll && RollDetection == ERollDetection.Off)") == 1, "PR I: warns when the flag is on but RollDetection is Off");
+		Check(count(veng, "if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $\"VWAP roll reset {label} type({type}) Data{datastream} ") == 1
+			&& count(veng, "else if (parent.TraceLevel >= ETraceLevel.Journal)") == 0 && count(veng, "VWAP at roll") == 0 && count(veng, "Resetting RollDate VWAP") == 0,
+			"PR I: each roll reset logged exactly once, at Journal (also at Debug), with label and stream");
+		Check(count(vbas, "trace(ETraceLevel.Warning, \"VWAP resetPeriodSlotsOnRoll is on but RollDetection is Off") == 1, "PR I: the Off warning is at ETraceLevel.Warning");
+		// default off: only RollDate resets at a roll (unchanged behaviour)
+		Check(VwapRollRules.ResetsAtRoll(true, false, false, true), "PR I: RollDate resets at a roll (flag off)");
+		Check(!VwapRollRules.ResetsAtRoll(false, true, false, true), "PR I: Week/Month do not reset at a roll when off");
+		// opt-in
+		Check(VwapRollRules.ResetsAtRoll(false, true, true, true), "PR I: Week/Month reset at a roll when on");
+		Check(!VwapRollRules.ResetsAtRoll(false, false, true, true), "PR I: other slots (Session/Length/Quarter/FromDate) never reset at a roll");
+		// no roll -> never
+		Check(!VwapRollRules.ResetsAtRoll(true, false, true, false) && !VwapRollRules.ResetsAtRoll(false, true, true, false), "PR I: no rollOn, no reset");
+		// accumulator walk: Week VWAP over 3 bars, roll on bar 2 (closing roll bar stays, prior sums dropped)
+		double[] px = { 100, 110, 120 }, vol = { 1, 1, 1 }; bool[] roll = { false, true, false };
+		foreach (bool on in new[] { false, true })
+		{
+			double pv = 0, v = 0;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (VwapRollRules.ResetsAtRoll(false, true, on, roll[i])) { pv = 0; v = 0; }
+				pv += px[i] * vol[i]; v += vol[i];
+			}
+			double vw = pv / v;
+			Check(on ? Math.Abs(vw - 115) < 1e-9 : Math.Abs(vw - 110) < 1e-9, "PR I: Week VWAP walk " + (on ? "on -> 115 (roll bar + after)" : "off -> 110 (spans the roll)"));
+		}
+	}
 }
+class TAnc : IVpConfAnchor { public string SourceVolumeId { get; set; } public string ProfileId { get; set; } public bool Developing { get; set; } public bool Overlay { get; set; } }
+class TSurv : IVpConfSurvivor { public IVpConfAnchor Anchor { get; set; } public bool Independent { get; set; } public double Credit { get; set; } }

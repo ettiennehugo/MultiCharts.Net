@@ -40,17 +40,13 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_CONFLUENCE_STREAM_WEIGHT_3 = 1.50;  // highest timeframe
 		public const double DEFAULT_CONFLUENCE_NAKED_MULTIPLIER = 1.15; // naked modifies the POC credit; it is not a second source
 		public const double DEFAULT_CONFLUENCE_REFINEMENT = 0.25;       // one nested child per parent already in the zone
-		internal const double MAX_PARENT_CREDIT_MULTIPLIER = 1.25;   // a refined child never lifts its parent above 1.25 x credit
 		public const double DEFAULT_CONFLUENCE_OVERLAY_FACTOR = 0.50;   // VWAP context only; never acceptance or rejection
 		public const double DEFAULT_CONFLUENCE_SHARE_PIVOT = 0.15;      // volume-share factor pivot
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
 		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
 		internal const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale
-		internal const double CLUSTER_SPLIT_TOL_MULTIPLE = 4.0;      // a confluence cluster wider than 4 x tol may split
-		internal const int CLUSTER_MIN_SPLIT_COUNT = 3;              // ... and only when it holds at least this many anchors
-		internal const int ZONE_TOP_SURVIVORS = 3;                   // survivors kept per zone
-		internal const double FALLBACK_TIMEFRAME_WEIGHT_STEP = 0.25; // stream weight = 1 + step x timeframeRank when unset
+		internal const int CONFLUENCE_NODES_PER_PROFILE = 3;         // HVNs and LVNs (each, top by volume) taken from each lookback profile
 		internal const double SHARE_FACTOR_MIN = 0.5;                // volume-share factor clamp
 		internal const double SHARE_FACTOR_MAX = 1.5;
 		internal const double LEVEL_MATCH_TICK_FRACTION = 0.51;      // > half a tick: neighbouring levels never match
@@ -70,7 +66,7 @@ namespace PowerLanguage.Strategy
 			Week = 4,              // reset on the first bar whose exchange-session date is in a new (Monday-start) week
 			Month = 5,             // ... in a new month
 			Quarter = 6,           // ... in a new calendar quarter
-			RollDate = 7           // reset on the VPF-4 roll bar (futures base, Data1 stream only; RollDetection must be on)
+			RollDate = 7           // reset on the VPF-4 roll bar (futures base; rollOn(ds) on the slot's stream, Data n uses the Data1 root; RollDetection must be on)
 		}
 
 		/// <summary>
@@ -351,6 +347,7 @@ namespace PowerLanguage.Strategy
 			public double volumeShare;
 			public bool naked;
 			public bool independent;       // full credit. A refinement is not an independent source.
+			public bool developing;        // PR #47: the label comes from a developing (incomplete) profile
 		}
 
 		/// <summary>
@@ -380,7 +377,7 @@ namespace PowerLanguage.Strategy
 			public double acceptanceScore;
 			public double rejectionScore;
 			public double contextScore;    // VWAP overlays only
-			public int independentSources;
+			public int independentSources; // PR #47 (V5): distinct independent volume masses (stream, profile window), not survivors
 			public EConfluenceRole role;
 			public EConfluenceLocation location;
 			public ESuggestedUse suggestedUse;    // Target | Entry | Conflict
@@ -390,8 +387,14 @@ namespace PowerLanguage.Strategy
 			public double invalidationAbove;
 			public int hitCount;
 			public int streamCount;
-			public int profileCount;       // independent volume masses; same value as independentSources
+			public int profileCount;       // distinct profiles among the independent survivors (>= independentSources when equal windows merge)
 			public readonly List<ConfluenceHit> hits = new List<ConfluenceHit>();
+			/// <summary>PR #47: the developing profile's confluence so far, separate from the scored hits and tagged developing.
+			/// Every developing-profile label in the zone; credit 0 when it was absorbed into its parent's source or refused.
+			/// Null (allocated lazily) when no developing profile has a label in the zone.</summary>
+			public List<ConfluenceHit> developingHits;
+			public double developingScore; // sum of developingHits credit (already inside rawScore; report only)
+			public bool HasDeveloping { get { return developingHits != null && developingHits.Count > 0; } }
 			public readonly List<ConfluenceDrop> dropped = new List<ConfluenceDrop>();
 
 			public bool HasStream(int dataStream)
@@ -617,6 +620,29 @@ namespace PowerLanguage.Strategy
 		/// When true, HVN peaks and LVN troughs (other than the POC) are confluence anchors. Default true.
 		/// </summary>
 		public bool ConfluenceIncludeHvns { get; set; }
+		/// <summary>PR #47: a confluence cluster of >= 3 anchors splits at its largest gap when wider than
+		/// max(4 x ConfluenceAlignTicks x tick, this x Atr20d). Atr20d is the host's M-DAILY value (NeedsDaily); while it is not
+		/// ready the 4 x tol rule alone applies. Default VpConfluenceRules.DefaultSplitAtrFraction (0.03). Protected config, not an [Input].</summary>
+		protected internal double ConfluenceSplitAtrFraction { get; set; } = VpConfluenceRules.DefaultSplitAtrFraction;
+
+		/// <summary>PR #47: host Atr20d for the confluence split, NaN when the host has no M-DAILY context (NeedsDaily false) or it is not ready.</summary>
+		internal double confluenceAtr20d()
+		{
+			return VpConfluenceRules.HostAtr20d(NeedsDaily, () => DailyContext == null ? double.NaN : DailyContext.Atr20d);
+		}
+
+		/// <summary>PR #47 review: a strategy that reads confluence zones / targets sets this (Create or before base.StartCalc) so
+		/// the base builds M-DAILY for the 3% x Atr20d split. Default false: no daily context; zones use the 4 x tol limit.</summary>
+		protected bool UsesConfluenceZones { get; set; } = false;
+		private bool m_confluenceAtrWarned;
+
+		/// <summary>PR #47: journal line from the confluence engine (text built only when the journal is on).</summary>
+		internal void confluenceJournal(Func<string> text)
+		{
+			if (text == null || !traceOn(ETraceLevel.Journal)) return;
+			trace(ETraceLevel.Journal, text());
+		}
+
 		/// <summary>VPB-10: an LVN wider than this fraction of the profile's range is dropped. (0, 1]. Default DEFAULT_MAX_LVN_PCT_OF_RANGE (0.12). Not an [Input].</summary>
 		public double MaxLvnFractionOfRange { get; set; } = DEFAULT_MAX_LVN_PCT_OF_RANGE;
 		/// <summary>
@@ -660,6 +686,8 @@ namespace PowerLanguage.Strategy
 			requireDataStream("Vwap1DataStream", Vwap1DataStream, Vwap1Type);
 			requireDataStream("Vwap2DataStream", Vwap2DataStream, Vwap2Type);
 			requireDataStream("Vwap3DataStream", Vwap3DataStream, Vwap3Type);
+			// PR #47: a duplicate enabled confluence stream double-counts the same volume (V5); reject it here, not in the setters.
+			VpConfluenceRules.ValidateStreams(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3);
 		}
 
 		// requireUnitInterval / requireAtLeast / requireNonNegative / requireDataStream(name, stream) live in _CustomSignal (spec CS-3).
@@ -1345,12 +1373,8 @@ namespace PowerLanguage.Strategy
 			m_confluenceGeneration = 1;
 			m_confluenceBuiltGeneration = -1;
 			m_volumePctDirty = true;
-
-			m_streams = new Dictionary<int, StreamPack>();
-			m_vwap1 = new _VpVwapEngine { label = "VWAP1" };
-			m_vwap2 = new _VpVwapEngine { label = "VWAP2" };
-			m_vwap3 = new _VpVwapEngine { label = "VWAP3" };
-			m_confluenceEngine = new _VpConfluenceEngine(this);
+			// PR #47: allocate lazily. m_streams is created by hookStreams, a VWAP engine by StartCalc only for an enabled slot,
+			// and the confluence engine by ensureConfluenceZones on first use.
 		}
 
 		protected override void Destroy()
@@ -1361,14 +1385,19 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
+			// and a confluence slot is on. Hosts that already set NeedsDaily are unaffected.
+			m_confluenceAtrWarned = false;
+			if (VpConfluenceRules.NeedsAtr20d(UsesConfluenceZones, ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
 			base.StartCalc();
 			validateInputs();
 			unhookStreams();
-			m_streams.Clear();
 			hookStreams();
-			configureVwap(m_vwap1, Vwap1Type, Vwap1Length, Vwap1FromDate, Vwap1DataStream, "VwapFromDate", "VwapDataStream");
-			configureVwap(m_vwap2, Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
-			configureVwap(m_vwap3, Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
+			m_vwap1 = configureVwap(m_vwap1, "VWAP1", Vwap1Type, Vwap1Length, Vwap1FromDate, Vwap1DataStream, "VwapFromDate", "VwapDataStream");
+			m_vwap2 = configureVwap(m_vwap2, "VWAP2", Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
+			m_vwap3 = configureVwap(m_vwap3, "VWAP3", Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
+			if (VwapConfig.resetPeriodSlotsOnRoll && RollDetection == ERollDetection.Off)
+				trace(ETraceLevel.Warning, "VWAP resetPeriodSlotsOnRoll is on but RollDetection is Off: Week / Month slots will not reset at a roll (use RollDetection.Table).");
 			foreach (var kv in m_streams)
 			{
 				if (kv.Value != null)
@@ -1426,7 +1455,7 @@ namespace PowerLanguage.Strategy
 		public VpExtra ExtraVolumeProfileForBar(int datastream, int barIndex)
 		{
 			if (barIndex < 1) return null;
-			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
+			if (m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 				return null;
 
 			// VPB-28: a query must not rewrite history. Only the developing profile is refreshed, and only as of the
@@ -1540,7 +1569,7 @@ namespace PowerLanguage.Strategy
 		public bool IsNewVolumeProfile(int datastream, int barIndex)
 		{
 			if (barIndex < 1) return false;
-			if (!m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
+			if (m_streams == null || !m_streams.TryGetValue(datastream, out StreamPack streamPack) || streamPack.pack == null)
 			{
 				if (traceOn(ETraceLevel.Verbose)) trace(ETraceLevel.Verbose, $"IsNewVolumeProfile: no volume profile collection on data stream {datastream}.");
 				return false;
@@ -1719,8 +1748,11 @@ namespace PowerLanguage.Strategy
 							" (currently " + ExecInfo.MaxBarsBack + "). Use auto-detect or raise it.");
 		}
 
-		private void configureVwap(_VpVwapEngine eng, EVwapType type, int length, string fromText, int stream, string dateInputName, string streamInputName)
+		// PR #47: lazy. A disabled slot keeps no engine (null; every reader null-checks); an enabled one is created on first use.
+		private _VpVwapEngine configureVwap(_VpVwapEngine eng, string label, EVwapType type, int length, string fromText, int stream, string dateInputName, string streamInputName)
 		{
+			if (type == EVwapType.Disabled) return null;
+			if (eng == null) eng = new _VpVwapEngine { label = label };
 			eng.parent = this;
 			eng.type = type;
 			eng.length = length;
@@ -1728,14 +1760,14 @@ namespace PowerLanguage.Strategy
 			eng.fromDate = DateTime.MinValue;
 			eng.Reset();
 
-			if (type == EVwapType.Disabled) return;
-
 			eng.datastream = stream;
-			if (type != EVwapType.AdaptiveFromDate) return;
+			eng.resetPeriodOnRoll = VwapConfig.resetPeriodSlotsOnRoll;
+			if (type != EVwapType.AdaptiveFromDate) return eng;
 
 			if (!tryParseDate(fromText, out DateTime dt))
 				throw new ArgumentException(dateInputName + " must be a date string (yyyy-MM-dd or yyyy-MM-dd HH:mm[:ss]) when Type is AdaptiveFromDate.");
 			eng.fromDate = dt;
+			return eng;
 		}
 
 		private void stepVwap(_VpVwapEngine eng)
@@ -2297,7 +2329,15 @@ namespace PowerLanguage.Strategy
 			bool sameBars = b1 == m_confluenceBuiltBar1 && b2 == m_confluenceBuiltBar2 && b3 == m_confluenceBuiltBar3;
 			if (!m_confluenceDirty && m_confluenceBuiltGeneration == m_confluenceGeneration && sameBars)
 				return;
-			if (m_confluenceEngine == null) m_confluenceEngine = new _VpConfluenceEngine(this);
+			if (m_confluenceEngine == null)
+			{
+				m_confluenceEngine = new _VpConfluenceEngine(this);
+				if (!UsesConfluenceZones && !m_confluenceAtrWarned && ConfluenceSplitAtrFraction > 0 && traceOn(ETraceLevel.Warning))
+				{
+					m_confluenceAtrWarned = true;
+					trace(ETraceLevel.Warning, "VPCONF: confluence zones used but UsesConfluenceZones is false; no M-DAILY, split uses the 4 x tol limit");
+				}
+			}
 			m_confluenceEngine.Rebuild();
 			m_confluenceDirty = false;
 			m_confluenceBuiltGeneration = m_confluenceGeneration;
@@ -2430,6 +2470,7 @@ namespace PowerLanguage.Strategy
 
 		private void hookStreams()
 		{
+			if (m_streams == null) m_streams = new Dictionary<int, StreamPack>();
 			m_streams.Clear();
 			for (int s = 1; s <= MaxDataStream; ++s)
 			{
@@ -2445,6 +2486,7 @@ namespace PowerLanguage.Strategy
 
 		private void unhookStreams()
 		{
+			if (m_streams == null) return;
 			foreach (var stream in m_streams)
 			{
 				if (stream.Value.pack == null || stream.Value.handler == null) continue;
@@ -2947,6 +2989,10 @@ namespace PowerLanguage.Strategy
 		protected ProfileStatsConfig ProfileStats { get; } = new ProfileStatsConfig();
 		/// <summary>VP-3 per-bar ladder (enabled=false: not created; on the futures base it forces OrderFlowEnabled).</summary>
 		protected BarLadderConfig BarLadders { get; } = new BarLadderConfig();
+		/// <summary>VWAP slot options; resetPeriodSlotsOnRoll (default false) resets Week / Month slots at a roll too. Needs RollDetection != Off;
+		/// RollDetection.Table is the reproducible roll source for it (Series misses some contracts; see the manual).
+		/// Set resetPeriodSlotsOnRoll before base.StartCalc() (constructor / Create): configureVwap copies it there, later changes are ignored.</summary>
+		protected VwapConfig VwapConfig { get; } = new VwapConfig();
 
 		private bool m_rangeOn;
 		private readonly List<RangeProfileHandle> m_rangeHandles = new List<RangeProfileHandle>();

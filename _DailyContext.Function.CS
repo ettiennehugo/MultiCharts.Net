@@ -22,6 +22,9 @@ namespace PowerLanguage.Function
 		public int dataStream = 0;      // 0 = aggregate Data1 per trading day (fallback); n = Data n daily bars (same unadjusted symbol)
 		public int weeklyStream = 0;    // 0 = weekly high/low from the daily bars (Monday-start weeks); n = Data n weekly bars
 		public int atrLength = 20;      // Wilder ATR (seed = SMA of the first atrLength TRs)
+		// PR #46 (Ettienne, DECIDED): false = ATR carries on across a roll from the roll-adjusted history, skipping only the
+		// splice day's true range (no 20-day NaN blackout); true (default, old behaviour) = §0.3 reseed after every roll.
+		public bool atrRestartOnRoll = true;
 		public int smaLength = 200;
 		public int rsiLength = 2;       // Wilder RSI
 		public int[] tsmomLookbacks = { 252, 126, 63 };
@@ -299,8 +302,9 @@ namespace PowerLanguage.Function
 			for (int i = 0; i < m_count; i++) { var x = at(i); x.o += d; x.h += d; x.l += d; x.c += d; x.rthc += d; set(i, x); }
 			m_smaSum = 0; for (int i = 0; i < Math.Min(m_count, config.smaLength); i++) m_smaSum += at(i).c;
 			m_wkH += d; m_wkL += d; m_prevWkH += d; m_prevWkL += d;   // weekly-stream values too, until the next weekly bar replaces them
-			m_atr = double.NaN; m_trSeed = 0; m_trSeen = 0;   // §0.3: Wilder ATR restarts its seed
-			journal?.Invoke($"{label} roll reset {date:yyyy-MM-dd}: history adjusted by {d:0.#####}, ATR reseeding");
+			// §0.3: Wilder ATR restarts its seed, unless atrRestartOnRoll is false (TRs are spread-invariant, so the running ATR carries on)
+			if (config.atrRestartOnRoll) { m_atr = double.NaN; m_trSeed = 0; m_trSeen = 0; }
+			journal?.Invoke($"{label} roll reset {date:yyyy-MM-dd}: history adjusted by {d:0.#####}, " + (config.atrRestartOnRoll ? "ATR reseeding" : "ATR carried on (splice-day TR skipped)"));
 		}
 	}
 

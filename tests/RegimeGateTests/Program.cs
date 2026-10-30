@@ -231,6 +231,14 @@ static class Program
 		rc2 = new RegimeConfig(); RegimeGate.ApplyArm(gc, rc2);
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { k = 0.6 }) != u, "hash sensitive to host core");
 		Check(RegimeGate.Hash(rc2, new RegimeGateConfig { placeboSeed = 1 }, new A263Config()) != u, "hash sensitive to placebo seed");
+		// PR #46 review Q1: roll handling is hashed (an Off dev build cannot share a hash with a Table holdout build)
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { rollDetection = "Off" }) != u, "hash sensitive to RollDetection");
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { rollToYear = 2030 }) != u, "hash sensitive to the roll table years");
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { rollDatesDigest = "0000000000000000" }) != u, "hash sensitive to the roll-date digest");
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { tradingDay = "Calendar" }) != u, "hash sensitive to the trading-day key");
+		Check(RegimeGate.Hash(rc2, gc, new A263Config { atrRestartOnRoll = true }) != u && !new A263Config().atrRestartOnRoll, "hash sensitive to host.atrRestartOnRoll (default false = ATR carried across rolls)");
+		Check(new A263Config().rollDatesDigest == "fdd63bd8f179a8d4" && new A263Config().rollDetection == "Table" && new A263Config().tradingDay == "Globex18ET",
+			"A263Config roll defaults = the Table / Globex build (digest also pinned in EventTests)");
 		// ruling 5: the hash is over the NAMED prereg field list, not field order or record length
 		var fields = RegimeGate.CanonFields(rc2, gc, new A263Config());
 		var extra = new Dictionary<string, string>(fields); extra["zz.appended"] = "1"; extra["host.futureField"] = "x"; extra["aa.first"] = "2";
@@ -344,7 +352,9 @@ static class Program
 			Check(cnt.noRth == 3 && cnt.sessions == 6, arm + ": noRth counted on halt days only (Jul 4, Thanksgiving, MLK), not half days: " + cnt.Suffix());
 		}
 		var cc = new RegimeGateCounts(); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, RegimeState.Neutral(3), t, -1)); cc.Add(RegimeGate.Decide(ERegimeGateArm.G, St(true, 2, t.AddDays(-1), false), t, 2));
-		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0)", "counts suffix: " + cc.Suffix());
+		Check(cc.Suffix() == " nSess(2) nUsable(1) nWarm(1) nInv(0) nFb(0) nBlock(1) nNoRth(0) nAtrNaN(0) nRollAtrNaN(0)", "counts suffix: " + cc.Suffix());
+		var ca = new RegimeGateCounts(); ca.AddAtr(true, false); ca.AddAtr(true, true); ca.AddAtr(true, true); ca.AddAtr(false, true); ca.AddAtr(true, true, true);
+		Check(ca.atrNaN == 3 && ca.rollAtrNaN == 2 && ca.Suffix().EndsWith(" nAtrNaN(3) nRollAtrNaN(2)"), "rulings (h): ATR NaN days counted, post-roll subset separate, no-RTH days excluded: " + ca.Suffix());
 	}
 
 	// ---------------- ruling 4: the label used on day D does not change when day D's bars are removed ----------------
@@ -369,5 +379,7 @@ static class Program
 		}
 	}
 
-	const string PinnedU = "26b38655261cc0bf", PinnedG = "9c1da7b123ca9441", PinnedA = "3d9814a5f264c353";   // re-pin only with a new trial (ruling 5: named-field hash)
+	// re-pin only with a new trial (ruling 5: named-field hash). PR #46 review Q1: re-pinned for host.rollDetection/rollYears/rollDates/tradingDay; re-pinned again for host.atrRestartOnRoll (Ettienne's ATR carry decision)
+	// (was U=26b38655261cc0bf G=9c1da7b123ca9441 A=3d9814a5f264c353, the pre-roll Off builds; those builds are void, see specs/a2-63-rulings.md).
+	const string PinnedU = "0af309b4220ef9c8", PinnedG = "b82e06fe0e07d09e", PinnedA = "5d0a364e767bd8ae";
 }
