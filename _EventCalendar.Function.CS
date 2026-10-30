@@ -1177,6 +1177,7 @@ namespace PowerLanguage.Function
 			if (config == null) return label + ": no config";
 			string v = config.Validate();
 			if (v != null) return v;
+			m_warnedClasses = 0;   // re-Configure: warn again for the (possibly new) class set
 			m_clock = new _CmeSessionClock(null);
 			m_est = m_clock.Eastern;
 			m_table = table ?? EventRules.Table();
@@ -1314,6 +1315,7 @@ namespace PowerLanguage.Function
 				foreach (var f in c[5].Split('|'))
 				{
 					EEventFlags fl; if (!Enum.TryParse(f.Trim(), false, out fl) || !Enum.IsDefined(typeof(EEventFlags), fl)) { err = "bad flag '" + f + "'"; return false; }
+					if (fl == EEventFlags.NoCoverage) { err = "flag NoCoverage is query-only, not allowed in a CSV row"; return false; }
 					r.flags |= fl;
 				}
 			r.refPeriod = c[6].Length > 0 ? c[6] : null;
@@ -1600,7 +1602,10 @@ namespace PowerLanguage.Function
 
 		/// <summary>True when the calendar has no coverage for `kind` on `day`: the engine is disabled (table missing / hash
 		/// mismatch), the kind's class was not built (not in config.classes), or the day is Unknown for the kind. Independent of
-		/// allowPartialCoverage (which only decides whether Unknown blocks).</summary>
+		/// allowPartialCoverage (which only decides whether Unknown blocks).
+		/// Note: this kind overload COUNTS a kind of an unbuilt class as no coverage, whereas NoCoverage(day, mask) and
+		/// NoCoverageYear(y, mask) mask with config.classes and only ever report classes that were built.
+		/// Before Configure() all three return false.</summary>
 		public bool NoCoverage(EEventKind kind, DateTime day)
 		{
 			if (m_disabled) return true;
@@ -1608,7 +1613,8 @@ namespace PowerLanguage.Function
 			if ((kindClass(kind) & config.classes) == 0) return true;
 			return unknownKinds(day).Contains(kind);
 		}
-		/// <summary>True when some kind of a class in `mask` that was built has no coverage on `day` (disabled engine included).</summary>
+		/// <summary>True when some kind of a class in `mask` that was built has no coverage on `day` (disabled engine included).
+		/// Unlike NoCoverage(kind, day), classes not in config.classes are ignored here (never counted).</summary>
 		public bool NoCoverage(DateTime day, EEventClassMask mask = EEventClassMask.All)
 		{
 			if (m_disabled) return true;
@@ -1632,7 +1638,8 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Warn once per class when an explicit query mask (not All) asks for a class that was not built (not in config.classes): the
-		/// query silently finds nothing for it. No allocation after the first warning per class.</summary>
+		/// query silently finds nothing for it. No allocation after the first warning per class. A mask equal to All (=7, also
+		/// when spelled out as Macro|Calendar|Energy) never warns. The warned set is reset by Configure().</summary>
 		void checkMask(EEventClassMask mask)
 		{
 			if (!m_configured || config == null || mask == EEventClassMask.All) return;   // All = the default "everything built"

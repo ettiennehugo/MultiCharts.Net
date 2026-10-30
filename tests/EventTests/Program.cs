@@ -344,6 +344,18 @@ static class Program
 		var bad = new _EventCalendar { config = new EventConfig { enabled = true }, corrections = null, barDuration = TimeSpan.FromMinutes(1), tableShaExpected = "0000000000000000" };
 		bad.error = s => { }; bad.Configure();
 		Check(bad.Disabled && bad.NoCoverage(new DateTime(2026, 3, 12)) && bad.NoCoverageYear(2026), "H: disabled engine -> NoCoverage");
+		Check(bad.NoCoverage(EEventKind.Cpi, new DateTime(2026, 3, 12)), "H: disabled engine -> NoCoverage(kind, day)");
+		// unbuilt-class check in IsInWindowAt and EventsOn (fresh engines, Macro|Calendar built)
+		var wa = new List<string>(); var ea = Eng(null, tbl, null, null, wa); Bar(ea, ET(2026, 3, 12, 9, 0)); wa.Clear();
+		ea.IsInWindowAt(ea.NowUtc, ea.NowUtc, EEventTier.None, 0, 0, EEventClassMask.Energy, out r);
+		Check(wa.Count(s => s.Contains("not built") && s.Contains("Energy")) == 1, "H: IsInWindowAt warns for an unbuilt class (" + string.Join(" | ", wa) + ")");
+		var wb = new List<string>(); var eb = Eng(null, tbl, null, null, wb); Bar(eb, ET(2026, 3, 12, 9, 0)); wb.Clear();
+		eb.EventsOn(new DateTime(2026, 3, 11), EEventClassMask.Energy);
+		Check(wb.Count(s => s.Contains("not built") && s.Contains("Energy")) == 1, "H: EventsOn warns for an unbuilt class (" + string.Join(" | ", wb) + ")");
+		// re-Configure resets the warned set
+		eb.Configure(); Bar(eb, ET(2026, 3, 12, 9, 1)); wb.Clear();
+		eb.EventsOn(new DateTime(2026, 3, 11), EEventClassMask.Energy);
+		Check(wb.Count(s => s.Contains("not built")) == 1, "H: re-Configure resets warn-once");
 		// real table, partial=true still reports NoCoverage on a hole day even though it does not block
 		var real = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = true }, table = EventRules.Table(), corrections = EventRules.Corrections, coverageHoles = EventRules.CoverageHoles(), barDuration = TimeSpan.FromMinutes(1) };
 		Check(real.Configure() == null, "H: real configure");
@@ -442,6 +454,8 @@ static class Program
 		Check(e2.EventsOnExPost(new DateTime(2026, 2, 13)).All(r => r.kind != EEventKind.Ppi), "CSV retime cancels original");
 		string sha = EventRules.Sha256(File.ReadAllBytes(p));
 		Check(e2.config.Canon().Contains("csvSha=" + sha), "CSV SHA-256 in Canon");
+		string errNc = Eng().LoadCsv("action,kind,date_et,time_et,tier,flags,ref_period,announced_et,source\nadd,Cpi,2026-02-11,08:30,T1,Scheduled|NoCoverage,Jan 2026,,x\n");
+		Check(errNc != null && errNc.Contains("line 2") && errNc.Contains("NoCoverage"), "CSV rejects the query-only NoCoverage flag: " + errNc);
 		File.Delete(p);
 	}
 
