@@ -20,13 +20,13 @@ namespace PowerLanguage.Function
 		/// <summary>Opt-in (educator review V1): Week / Month VWAP slots also reset at a contract roll (rollOn on the slot's
 		/// stream, on the closing roll bar, like RollDate: committed sums dropped, the roll bar stays). Default false = unchanged:
 		/// they reset on the period key only. Needs RollDetection != Off (else rollOn never fires; the base warns once). Quarter is not affected.
-		/// WARNING: with RollDetection = Series on intraday charts rolls are currently over-detected (about 72 detections vs about 33
-		/// real rolls, 1m @ES 2016-2024; manual App F Known issues), so Week / Month VWAPs would also reset on spurious "rolls" until
-		/// PR #51 (RollDetection.Series fix) merges. Use RollDetection = Table (EventRules.RollDate) with this flag. When rollOn fires
-		/// may change with #51.
+		/// RollDetection.Series (PR #51) keys days by the Globex trading day and takes one splice per contract inside the rule week;
+		/// the live 1m @ES 2016-2024 run found 30 rolls (M17 / Z19 splice early on the rule-day Thursday 18:00 reopen; U18, U19, U21
+		/// undetectable). RollDetection = Table (EventRules.RollDate) stays the reproducible choice with this flag.
 		/// Read once by configureVwap during the base StartCalc: set it in the derived constructor / Create (or before calling
 		/// base.StartCalc()); changing it after base.StartCalc() has no effect until the next StartCalc. Each roll reset of a
-		/// RollDate / Week / Month slot is journaled at ETraceLevel.Journal ("VWAP roll reset ...").</summary>
+		/// RollDate / Week / Month slot is journaled once at ETraceLevel.Journal ("VWAP roll reset <label> type() Data<n> bar()"; also on
+		/// at Verbose / Debug, no separate Debug line).</summary>
 		public bool resetPeriodSlotsOnRoll = false;
 	}
 
@@ -156,14 +156,14 @@ namespace PowerLanguage.Function
 				warnIfGap(bar);
 				m_curBar = bar;
 			}
-			// Week / Month opt-in roll reset: see VwapConfig.resetPeriodSlotsOnRoll. Until PR #51 merges, RollDetection.Series over-detects
-			// rolls on intraday charts (spurious resets); prefer RollDetection.Table.
+			// Week / Month opt-in roll reset: see VwapConfig.resetPeriodSlotsOnRoll (RollDetection.Table is the
+			// reproducible roll source; Series misses some contracts, see the manual).
+			// One line per reset at TraceLevel >= Journal (Journal is also on at Verbose / Debug), with the slot label and stream.
 			bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));
 			if (rollSlot && bars.Status == EBarState.Close &&
 				VwapRollRules.ResetsAtRoll(type == EVwapType.RollDate, type == EVwapType.Week || type == EVwapType.Month, resetPeriodOnRoll, parent.vwapRollOn(datastream)))
 			{
-				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, type == EVwapType.RollDate ? $"Resetting RollDate VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}" : $"Resetting {type} VWAP at roll {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
-				else if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $"VWAP roll reset {label} type({type}) Data{datastream} bar({bars.Time[0]:yyyy-MM-dd HH:mm:ss})");
+				if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $"VWAP roll reset {label} type({type}) Data{datastream} bar({bars.Time[0]:yyyy-MM-dd HH:mm:ss})");
 				clearSums();
 			}
 			setProvisional(priceAt(bars, 0), volume(bars, 0));
