@@ -124,8 +124,11 @@ namespace PowerLanguage.Strategy
 	//    8 KD-02      (PR-D8) DVP fade: on a closed 15m bar, close beyond the t-1 DVP fit's +-2 sigma rail -> fade at market;
 	//                 stop = the t-1 +-3 sigma rail + 0.1 x ATR (rounded away from the close), target = the t fit's POC
 	//                 (re-read every 15m bar), time stop 19 bars; common G0-b rules (RTH, flat 15:55, roll sessions out).
-	//                 Development window only: the DVP stream is never fed on/after 2025-01-01. Journals Kd02 fills,
-	//                 POC-reach rate and time stops, then the DVP RUN and DVP CAL (Calibrate coverage) lines.
+	//                 A re-read POC that is not strictly beyond the entry is not applied (targetHeld). Development window
+	//                 only: the DVP stream is never fed on/after 2025-01-01. Half days are unknown to Gate0 (halfDay = false).
+	//                 d* is not frozen yet (PR-D9): the fallback is Calibrate, traded d = 1, one "DVP DEGREE" Warning.
+	//                 Journal (Trace >= Journal): DVP FIT lines per refit; at the last bar "G0-b KD02 ... fills() pocReached()
+	//                 rate() timeStops() targetHeld()", then DVP RUN, then the DVP CAL coverage lines (input to the d* freeze).
 	//  130..133 KD-02 sweep: 130 = time 19 / stop 3.0 sigma (= Variant 8), 131 = 40 / 3.0, 132 = 19 / 2.5, 133 = 40 / 2.5.
 	//                 Configure rejects other values ("canary variant out of range": 9..99, 124..129, 134+) and
 	//                 "KD-02 parameters out of range" (minutes < 1, time stop < 1, stop k <= 2, pad < 0).
@@ -260,6 +263,7 @@ namespace PowerLanguage.Strategy
 			m_done = true;
 			if (Mode == EGate0Mode.Canary)
 			{
+				m_g0.FinishCanary();   // KD-02: G0-b KD02 summary, DVP RUN, DVP CAL
 				printTotals();
 				return;
 			}

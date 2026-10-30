@@ -800,6 +800,7 @@ namespace PowerLanguage.Function
 		/// per age, Holm across ALL Gate-0 types, quality terciles, half-life from _LevelStudy.Analyse) plus a session block-bootstrap CI.</summary>
 		public List<Gate0Result> Finish()
 		{
+			FinishCanary();
 			var res = new List<Gate0Result>();
 			if (!StudyMode) return res;
 			study.Finish();
@@ -1095,15 +1096,21 @@ namespace PowerLanguage.Function
 		public int Kd02Fills { get; private set; }
 		public int Kd02PocReached { get; private set; }
 		public int Kd02TimeStops { get; private set; }
+		/// <summary>KD-02: re-read POC targets not applied because they were not strictly beyond the entry (signal close).</summary>
+		public int Kd02TargetHeld { get; private set; }
+		private double m_kdEntry = double.NaN;
 		public double Kd02PocReachRate { get { return Kd02Fills > 0 ? (double)Kd02PocReached / Kd02Fills : double.NaN; } }
 		internal _DvpEngine Kd02Engine { get { return m_kd; } }
 		internal _BarRing Kd02Ring { get { return m_kdRing; } }
 
-		/// <summary>The DVP config the KD-02 canary runs on: the DV-1 defaults (d per degMode; until PR-D9 freezes d* this is the
-		/// DevCoverageFrozen fallback, d = 1) with the stop rail k added to sigmaList when it is not already there.</summary>
+		/// <summary>The DVP config the KD-02 canary runs on: the DV-1 defaults with the stop rail k added to sigmaList when it is not
+		/// already there. degMode stays DevCoverageFrozen; until PR-D9 freezes d* that falls back to Calibrate (DV-2.2 / DV-3.6): every
+		/// d is fitted, the reported and traded degree is d = 1, and one "DVP DEGREE: no frozen d*" Warning is journaled. journalFits is
+		/// on (§16 item 10): the journaled refits feed DvpCalib, whose DVP CAL coverage lines (for KD-08 / the PR-D9 freeze) are
+		/// written by FinishCanary after DVP RUN. Without a journal sink nothing is journaled and no DvpCalib is created.</summary>
 		public DvpConfig Kd02Config()
 		{
-			var c = new DvpConfig(); c.enabled = true; c.journalFits = false;
+			var c = new DvpConfig(); c.enabled = true; c.journalFits = true; c.journalRails = false;   // rails journal (DV-11.2) is not needed by the canary
 			if (Array.IndexOf(c.sigmaList, kd02StopK) < 0)
 			{
 				var l = new List<double>(c.sigmaList); l.Add(kd02StopK); l.Sort(); c.sigmaList = l.ToArray();
@@ -1117,7 +1124,7 @@ namespace PowerLanguage.Function
 			DvpConfig c = Kd02Config();
 			List<string> errs = c.Validate(); if (errs != null && errs.Count > 0) return "KD-02 DVP config: " + string.Join("; ", errs);
 			Action<string> j = journal;
-			m_kd = new _DvpEngine(c, "G0KD02", "ES", tick, true, true, null, j == null ? (Action<string>)null : (x => j("G0-b KD02 warning: " + x)));
+			m_kd = new _DvpEngine(c, "G0KD02", "ES", tick, true, true, j, j == null ? (Action<string>)null : (x => j("G0-b KD02 warning: " + x)));
 			m_kdRing = new _BarRing(DvpStream.RingNeed(c));
 			m_kdB = new Gate0Bucket(kd02Minutes);
 			return null;
@@ -1132,6 +1139,21 @@ namespace PowerLanguage.Function
 			m_kdB.Add(b.et, b.o, b.h, b.l, b.c, b.v); m_kdDay = b.day;
 			if (m_kdB.PostBar(b.et)) kd02Close(m_kdB.end, m_kdB.o, m_kdB.h, m_kdB.l, m_kdB.c, m_kdB.v);
 			kd02Track(b);
+		}
+
+		private bool m_canaryFinished;
+		/// <summary>End of run for the canaries (idempotent; _TestGate0 calls it on the last bar, Finish calls it too). KD-02 journals
+		/// its summary "G0-b KD02 fills() pocReached() rate() timeStops() targetHeld()" and finishes its DVP engine, which writes the
+		/// DVP RUN line and then the DVP CAL coverage lines (DV-11.3, DV-3.6). Other canaries: nothing (their totals are host-side).</summary>
+		public void FinishCanary()
+		{
+			if (m_canaryFinished) return;
+			m_canaryFinished = true;
+			if (m_kd == null) return;
+			if (journal != null)
+				journal(string.Format(CultureInfo.InvariantCulture, "G0-b KD02 {0} fills({1}) pocReached({2}) rate({3}) timeStops({4}) targetHeld({5})",
+					CanaryName, Kd02Fills, Kd02PocReached, Kd02Fills > 0 ? Kd02PocReachRate.ToString("0.000", CultureInfo.InvariantCulture) : "n/a", Kd02TimeStops, Kd02TargetHeld));
+			m_kd.Finish();
 		}
 
 		/// <summary>Per Data1 bar: fill bookkeeping and the POC-reach count (a touch of the target in effect on this bar).</summary>
@@ -1157,7 +1179,13 @@ namespace PowerLanguage.Function
 				if (m_kdHeld >= kd02TimeStop) { Kd02TimeStops++; intent.flatten = true; intent.entry = EGate0Entry.None; return; }
 				DvpRails nr = m_kd.RailsOf(1, m_kdRing, 0);   // target re-read each bar: for bar t+1 the "t-1 fit" ends at t
 				double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
-				if (!double.IsNaN(poc)) intent.target = Math.Round(poc / tick) * tick;
+				// same rule as at entry: a target that is not strictly beyond the entry (the signal close) is not applied; the previous
+				// target stays (counted in Kd02TargetHeld)
+				if (!double.IsNaN(poc))
+				{
+					double tg2 = Math.Round(poc / tick) * tick;
+					if (double.IsNaN(m_kdEntry) || (m_mp > 0 ? tg2 > m_kdEntry : tg2 < m_kdEntry)) intent.target = tg2; else Kd02TargetHeld++;
+				}
 				return;
 			}
 			if (intent.entry != EGate0Entry.None) intent.entry = EGate0Entry.None;   // an unfilled signal lives one bar only
@@ -1166,6 +1194,7 @@ namespace PowerLanguage.Function
 			// tick grid: the stop rounds away from the close (a stop just inside a tick must not round onto the entry), the target to nearest
 			double st = (side > 0 ? Math.Floor(stop / tick + 1e-9) : Math.Ceiling(stop / tick - 1e-9)) * tick, tg = Math.Round(target / tick) * tick;
 			if (side > 0 ? !(tg > c) : !(tg < c)) return;   // target rounded onto the close: no edge left
+			m_kdEntry = c;
 			enter(side, EGate0Entry.Market, double.NaN, st, tg, side < 0 ? "KD02S" : "KD02L");
 		}
 

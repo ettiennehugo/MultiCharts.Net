@@ -421,11 +421,13 @@ static class Program
 		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02Minutes = 0 }.Configure() != null
 			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02StopPadAtr = -0.1 }.Configure() != null, "KD02 parameters out of range rejected (minutes < 1, pad < 0; stop k comes from the Variant decode)");
 		var cfg = new Gate0Engine { kd02StopK = 2.5 }.Kd02Config();
-		Check(cfg.enabled && !cfg.journalFits && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
+		Check(cfg.enabled && cfg.journalFits && !cfg.journalRails && cfg.degMode == EDvpDegMode.DevCoverageFrozen && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
 			&& new DvpConfig().sigmaList.Length + (Array.IndexOf(new DvpConfig().sigmaList, 2.5) < 0 ? 1 : 0) == cfg.sigmaList.Length, "KD02 config: the stop rail k is added to sigmaList (sorted, once)");
 
 		// simulated run: mean-reverting 1m prices, fills simulated from the intent (market entry next bar, stop/target/flatten exits)
-		var g = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; Check(g.Configure() == null, "KD02 run configures");
+		var jl = new List<string>();
+		var g = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = jl.Add }; Check(g.Configure() == null, "KD02 run configures");
+		double entryC = double.NaN; int badTgt = 0;
 		var r = new Random(17); double p = 4800, anchor = 4800; int mp = 0; double stp = double.NaN, tgt = double.NaN;
 		int entries = 0, badGeom = 0, badTime = 0, exits = 0;
 		var start = new DateTime(2024, 9, 2); int bars = 0, fedAfterEnd = -1;
@@ -449,9 +451,13 @@ static class Program
 					double sc = g.Kd02Ring[0].c;   // the signal close: the DVP bar just closed
 					bool geom = g.intent.side < 0 ? g.intent.stop > sc && g.intent.target < sc : g.intent.stop < sc && g.intent.target > sc;
 					if (!geom || Math.Abs(g.intent.stop * 4 - Math.Round(g.intent.stop * 4)) > 1e-9 || Math.Abs(g.intent.target * 4 - Math.Round(g.intent.target * 4)) > 1e-9) badGeom++;
-					mp = g.intent.side; stp = g.intent.stop; tgt = g.intent.target;
+					mp = g.intent.side; stp = g.intent.stop; tgt = g.intent.target; entryC = sc;
 				}
-				else if (mp != 0 && !double.IsNaN(g.intent.target)) tgt = g.intent.target;   // the POC target is re-read each DVP bar
+				else if (mp != 0 && !double.IsNaN(g.intent.target))
+				{
+					tgt = g.intent.target;
+					if (mp > 0 ? !(tgt > entryC) : !(tgt < entryC)) badTgt++;   // re-read targets stay strictly beyond the entry
+				}   // the POC target is re-read each DVP bar
 			}
 		}
 		Check(entries > 0 && g.Kd02Fills > 0 && g.Kd02Fills <= entries && exits > 0, "KD02 simulated run trades (entries " + entries + ", fills " + g.Kd02Fills + ", exits " + exits + ")");
@@ -459,6 +465,25 @@ static class Program
 		Check(g.Kd02PocReached <= g.Kd02Fills && g.Kd02TimeStops >= 0 && (g.Kd02Fills == 0 ? double.IsNaN(g.Kd02PocReachRate) : g.Kd02PocReachRate >= 0 && g.Kd02PocReachRate <= 1),
 			"KD02 POC-reach " + g.Kd02PocReached + "/" + g.Kd02Fills + ", time stops " + g.Kd02TimeStops);
 		Check(fedAfterEnd >= 0 && g.Kd02Ring.Count == fedAfterEnd, "KD02 holdout: the DVP stream is never fed on/after DevEnd");
+		Check(badTgt == 0 && g.Kd02TargetHeld >= 0, "KD02 re-read targets never at or through the entry (held " + g.Kd02TargetHeld + ")");
+
+		// end of run: the finish hook journals the KD02 summary, then DVP RUN, then the DVP CAL coverage lines; idempotent
+		int before = jl.Count;
+		Check(!jl.Any(l => l.StartsWith("DVP RUN") || l.StartsWith("DVP CAL") || l.StartsWith("G0-b KD02 KD02")), "KD02: no end-of-run lines before the finish hook");
+		Check(jl.Count(l => l.StartsWith("G0-b KD02 warning: DVP DEGREE: no frozen d*") && l.Contains("falls back to d = 1")) == 1, "KD02 unfrozen fallback (Calibrate, d = 1): exactly one DVP DEGREE warning");
+		Check(jl.Any(l => l.StartsWith("DVP FIT")), "KD02 journalFits on: DVP FIT lines journaled");
+		Check(!jl.Any(l => l.StartsWith("DVP RAIL")), "KD02 journalRails off: no DVP RAIL lines");
+		g.FinishCanary(); var tail = jl.Skip(before).ToList();
+		g.FinishCanary(); g.Finish();
+		string sum = string.Format(System.Globalization.CultureInfo.InvariantCulture, "G0-b KD02 KD02[15m stop=3.0s time=19] fills({0}) pocReached({1}) rate({2:0.000}) timeStops({3}) targetHeld({4})",
+			g.Kd02Fills, g.Kd02PocReached, g.Kd02PocReachRate, g.Kd02TimeStops, g.Kd02TargetHeld);
+		Check(tail.Count >= 4 && tail[0] == sum && tail[1].StartsWith("DVP RUN runId(G0KD02) stream(Data1)") && tail.Skip(2).All(l => l.StartsWith("DVP CAL runId(G0KD02) stream(Data1)"))
+			&& tail.Last().Contains(" summary H(") && tail.Any(l => l.Contains(" year(2024) d(1) windows(")) && !tail.Any(l => l.Contains(" year(2025)")),
+			"KD02 finish hook: summary, DVP RUN, DVP CAL (" + (tail.Count > 0 ? tail[0] : "-") + ")");
+		Check(jl.Count == before + tail.Count, "KD02 finish hook is idempotent (FinishCanary twice + Finish)");
+		var noJ = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; noJ.Configure(); noJ.FinishCanary();
+		var lv = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5, journal = jl.Add }; lv.Configure(); int b2 = jl.Count; lv.FinishCanary();
+		Check(jl.Count == b2, "FinishCanary: other canaries journal nothing, no journal sink is safe");
 
 		// the signal rule on the run's own engine and ring (any state where the t-1 rails exist)
 		var e2 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; e2.Configure();
