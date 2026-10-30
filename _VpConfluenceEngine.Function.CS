@@ -61,6 +61,68 @@ namespace PowerLanguage.Function
 			return set.Count;
 		}
 
+		/// <summary>PR #47 review: the cluster's zones. Applies SplitAt recursively to prices[lo..hi) and appends each final zone as
+		/// {start, end} to `zones` (ascending); every split taken is appended to `splits` as {lo, hi, at} when splits is not null.</summary>
+		public static void Partition(IList<double> prices, int lo, int hi, double tol, double atr20d, double atrFraction, List<int[]> zones, List<int[]> splits)
+		{
+			if (prices == null || zones == null || hi <= lo) return;
+			int at = SplitAt(prices, lo, hi, tol, atr20d, atrFraction);
+			if (at < 0) { zones.Add(new[] { lo, hi }); return; }
+			if (splits != null) splits.Add(new[] { lo, hi, at });
+			Partition(prices, lo, at, tol, atr20d, atrFraction, zones, splits);
+			Partition(prices, at, hi, tol, atr20d, atrFraction, zones, splits);
+		}
+
+		/// <summary>The volume mass an anchor belongs to: its (remapped) source id, else its own profile id.</summary>
+		public static string SourceId(string sourceVolumeId, string profileId)
+		{
+			return string.IsNullOrEmpty(sourceVolumeId) ? profileId : sourceVolumeId;
+		}
+
+		/// <summary>V5 zone counts over the zone's survivors: independentSources = distinct SourceId of the credited
+		/// independent survivors (labels of one volume mass count once); profileCount = their distinct profiles.</summary>
+		public static void ZoneSourceCounts(IList<string> sourceVolumeIds, IList<string> profileIds, IList<bool> independent, IList<double> credit,
+			out int independentSources, out int profileCount)
+		{
+			var src = new List<string>(); var prof = new List<string>();
+			for (int i = 0; i < sourceVolumeIds.Count; i++)
+			{
+				if (!(credit[i] > 0) || !independent[i]) continue;
+				src.Add(SourceId(sourceVolumeIds[i], profileIds[i]));
+				prof.Add(profileIds[i]);
+			}
+			independentSources = DistinctCount(src);
+			profileCount = DistinctCount(prof);
+		}
+
+		/// <summary>Developing confluence: indexes of the zone's anchors to list in developingHits (every developing, non-overlay
+		/// anchor, in order) and the credit each carries (its survivor's credit when it survived with credit > 0, else 0;
+		/// survivorCredit[i] is NaN when anchor i has no survivor). Returns developingScore.</summary>
+		public static double DevelopingHits(IList<bool> developing, IList<bool> overlay, IList<double> survivorCredit, List<int> index, List<double> credit)
+		{
+			double score = 0;
+			for (int i = 0; i < developing.Count; i++)
+			{
+				if (!developing[i] || overlay[i]) continue;
+				double c = survivorCredit[i] > 0 ? survivorCredit[i] : 0;
+				index.Add(i); credit.Add(c); score += c;
+			}
+			return score;
+		}
+
+		/// <summary>VP hosts need M-DAILY (Atr20d) only when the split uses ATR and at least one confluence slot is enabled.</summary>
+		public static bool NeedsAtr20d(double atrFraction, int ds1, int ds2, int ds3)
+		{
+			return atrFraction > 0 && (ds1 >= 1 || ds2 >= 1 || ds3 >= 1);
+		}
+
+		/// <summary>StartCalc: throws ArgumentException(DuplicateStreamError) for duplicate enabled confluence streams.</summary>
+		public static void ValidateStreams(int ds1, int ds2, int ds3)
+		{
+			string e = DuplicateStreamError(ds1, ds2, ds3);
+			if (e != null) throw new ArgumentException(e);
+		}
+
 		/// <summary>StartCalc check: every enabled confluence slot (stream >= 1) needs its own stream. Returns the error or null.</summary>
 		public static string DuplicateStreamError(int ds1, int ds2, int ds3)
 		{
@@ -141,7 +203,8 @@ namespace PowerLanguage.Function
 		private int m_htfRank = -1;
 		private int m_htfAge = int.MaxValue;
 		private double m_atr20d = double.NaN;                          // host M-DAILY Atr20d for this rebuild (NaN = 4 x tol fallback)
-		private readonly List<double> m_prices = new List<double>();   // cluster prices for VpConfluenceRules.SplitAt
+		private readonly List<double> m_prices = new List<double>();
+		private readonly List<int[]> m_zones = new List<int[]>(), m_splits = new List<int[]>();   // VpConfluenceRules.Partition output   // cluster prices for VpConfluenceRules.SplitAt
 
 		public _VpConfluenceEngine(_VolumeProfileBase owner)
 		{
@@ -202,19 +265,18 @@ namespace PowerLanguage.Function
 				for (int i = 0; i < cluster.Count; i++) m_prices.Add(cluster[i].price);
 			}
 			double atrFraction = m_owner.ConfluenceSplitAtrFraction;
-			int split = VpConfluenceRules.SplitAt(m_prices, lo, hi, tol, m_atr20d, atrFraction);
-			if (split < 0)
+			m_zones.Clear(); m_splits.Clear();
+			VpConfluenceRules.Partition(m_prices, lo, hi, tol, m_atr20d, atrFraction, m_zones, m_splits);
+			for (int k = 0; k < m_splits.Count; k++)
 			{
-				addZone(cluster, lo, hi, tol);
-				return;
+				int a = m_splits[k][0], b = m_splits[k][1], split = m_splits[k][2];
+				m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
+					"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
+					b - a, m_prices[a], m_prices[b - 1], m_prices[b - 1] - m_prices[a], VpConfluenceRules.SplitWidth(tol, m_atr20d, atrFraction),
+					m_prices[split], m_prices[split] - m_prices[split - 1], m_atr20d,
+					VpConfluenceRules.AtrReady(m_atr20d) ? "atr" : "tol-fallback"));
 			}
-			m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
-				"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
-				hi - lo, m_prices[lo], m_prices[hi - 1], m_prices[hi - 1] - m_prices[lo], VpConfluenceRules.SplitWidth(tol, m_atr20d, atrFraction),
-				m_prices[split], m_prices[split] - m_prices[split - 1], m_atr20d,
-				VpConfluenceRules.AtrReady(m_atr20d) ? "atr" : "tol-fallback"));
-			emitClusters(cluster, lo, split, tol);
-			emitClusters(cluster, split, hi, tol);
+			for (int k = 0; k < m_zones.Count; k++) addZone(cluster, m_zones[k][0], m_zones[k][1], tol);
 		}
 
 		private void collectAnchors(List<Anchor> anchors)
@@ -476,14 +538,16 @@ namespace PowerLanguage.Function
 			double acc = 0;
 			double rej = 0;
 			double ctx = 0;
-			var sourceIds = new List<string>();     // PR #47: independent survivors' volume masses (stream, profile window)
-			var profileIds = new List<string>();    // ... and their profiles
+			// PR #47: V5 counts come from VpConfluenceRules.ZoneSourceCounts over all survivors
+			var svIds = new List<string>(survivors.Count); var svProfiles = new List<string>(survivors.Count);
+			var svIndependent = new List<bool>(survivors.Count); var svCredit = new List<double>(survivors.Count);
 			var streams = new HashSet<int>();
 			Survivor anchorPick = null;
 
 			for (int i = 0; i < survivors.Count; i++)
 			{
 				Survivor s = survivors[i];
+				svIds.Add(s.anchor.sourceVolumeId); svProfiles.Add(s.anchor.profileId); svIndependent.Add(s.independent); svCredit.Add(s.credit);
 				if (s.credit <= 0) continue;
 				if (isOverlay(s.anchor.kind))
 					ctx += s.credit;
@@ -492,12 +556,7 @@ namespace PowerLanguage.Function
 				else
 					acc += s.credit;
 
-				if (s.independent)
-				{
-					sourceIds.Add(string.IsNullOrEmpty(s.anchor.sourceVolumeId) ? s.anchor.profileId : s.anchor.sourceVolumeId);
-					profileIds.Add(s.anchor.profileId);
-					streams.Add(s.anchor.dataStream);
-				}
+				if (s.independent) streams.Add(s.anchor.dataStream);
 				zone.hits.Add(toHit(s));
 				if (anchorPick == null || betterAnchor(s, anchorPick))
 					anchorPick = s;
@@ -530,8 +589,10 @@ namespace PowerLanguage.Function
 			zone.rejectionScore = rej;
 			zone.contextScore = ctx;
 			zone.rawScore = acc + rej;
-			zone.independentSources = VpConfluenceRules.DistinctCount(sourceIds);   // V5: distinct sources, not survivors
-			zone.profileCount = VpConfluenceRules.DistinctCount(profileIds);
+			int nSources, nProfiles;
+			VpConfluenceRules.ZoneSourceCounts(svIds, svProfiles, svIndependent, svCredit, out nSources, out nProfiles);
+			zone.independentSources = nSources;   // V5: distinct sources, not survivors
+			zone.profileCount = nProfiles;
 			addDevelopingHits(zone, cluster, loIdx, hiIdx, survivors);
 			zone.streamCount = streams.Count;
 			zone.hitCount = zone.hits.Count;
@@ -551,24 +612,24 @@ namespace PowerLanguage.Function
 		// parent's source (assignDevelopingSources) or refused carries credit 0. developingScore sums the credited ones.
 		private static void addDevelopingHits(ConfluenceZone zone, List<Anchor> cluster, int lo, int hi, List<Survivor> survivors)
 		{
-			zone.developingScore = 0;
-			for (int i = lo; i < hi; i++)
+			int n = hi - lo;
+			var dev = new List<bool>(n); var over = new List<bool>(n); var cr = new List<double>(n); var own = new Survivor[n];
+			for (int i = 0; i < n; i++)
 			{
-				Anchor a = cluster[i];
-				if (!a.developing || a.overlay) continue;
-				Survivor own = null;
+				Anchor a = cluster[lo + i];
 				for (int k = 0; k < survivors.Count; k++)
-					if (object.ReferenceEquals(survivors[k].anchor, a)) { own = survivors[k]; break; }
-				ConfluenceHit h;
-				if (own != null && own.credit > 0) h = toHit(own);
-				else
-				{
-					h = toHit(new Survivor { anchor = a, absorbed = "" });
-					h.weight = 0; h.credit = 0; h.independent = false;
-				}
+					if (object.ReferenceEquals(survivors[k].anchor, a)) { own[i] = survivors[k]; break; }
+				dev.Add(a.developing); over.Add(a.overlay); cr.Add(own[i] != null ? own[i].credit : double.NaN);
+			}
+			var idx = new List<int>(); var credit = new List<double>();
+			zone.developingScore = VpConfluenceRules.DevelopingHits(dev, over, cr, idx, credit);
+			for (int j = 0; j < idx.Count; j++)
+			{
+				int i = idx[j];
+				ConfluenceHit h = credit[j] > 0 ? toHit(own[i]) : toHit(new Survivor { anchor = cluster[lo + i], absorbed = "" });
+				if (!(credit[j] > 0)) { h.weight = 0; h.credit = 0; h.independent = false; }
 				if (zone.developingHits == null) zone.developingHits = new List<ConfluenceHit>();
 				zone.developingHits.Add(h);
-				zone.developingScore += h.credit;
 			}
 		}
 
@@ -578,7 +639,7 @@ namespace PowerLanguage.Function
 			for (int i = lo; i < hi; i++)
 			{
 				Anchor a = cluster[i];
-				string id = string.IsNullOrEmpty(a.sourceVolumeId) ? a.profileId : a.sourceVolumeId;
+				string id = VpConfluenceRules.SourceId(a.sourceVolumeId, a.profileId);
 				if (!groups.TryGetValue(id, out List<Anchor> list))
 				{
 					list = new List<Anchor>();

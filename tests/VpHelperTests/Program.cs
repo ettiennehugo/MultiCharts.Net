@@ -475,17 +475,57 @@ static class Program
 		Check(e == "ConfluenceDataStream2 = ConfluenceDataStream1 (1): each confluence slot needs its own stream", "duplicate stream error text: " + e);
 		Check(VpConfluenceRules.DuplicateStreamError(2, 3, 2) != null && VpConfluenceRules.DuplicateStreamError(1, -1, -1) == null && VpConfluenceRules.DuplicateStreamError(1, 0, 0) == null
 			&& VpConfluenceRules.DuplicateStreamError(1, 2, 3) == null, "only enabled (>= 1) duplicates are rejected");
+		// ---- behaviour (review round 2): the rules the engine now delegates to ----
+		// Partition: realistic ES Atr20d ~ 60 (3% = 1.8 < 4 x tol = 4, the floor binds)
+		var z = new List<int[]>(); var sp2 = new List<int[]>();
+		var es = new List<double> { 5000, 5001, 5002, 5003, 5004, 5005 };            // width 5 > 4: split
+		VpConfluenceRules.Partition(es, 0, es.Count, tol, 60, f, z, sp2);
+		Check(z.Count == 2 && sp2.Count == 1 && z[0][0] == 0 && z[z.Count - 1][1] == es.Count && z[0][1] == z[1][0], "ES Atr20d 60: width 5 > max(4, 1.8) splits into 2 zones");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5001.5, 5003 }, 0, 3, tol, 60, f, z, null);
+		Check(z.Count == 1, "ES Atr20d 60: width 3 <= 4 stays one zone");
+		Check(Near(VpConfluenceRules.SplitWidth(0.25, 60, f), 1.8) , "ES Atr20d 60 with tol 0.25 (1 tick): limit = 3% x 60 = 1.8");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5001, 5002 }, 0, 3, 0.25, 60, f, z, null);
+		Check(z.Count == 2, "ES Atr20d 60, tol 0.25: 3 anchors over 2 pts > 1.8 split");
+		z.Clear(); VpConfluenceRules.Partition(new List<double> { 5000, 5010 }, 0, 2, 0.25, 60, f, z, null);
+		Check(z.Count == 1, ">= 3-anchor condition: 2 anchors 10 pts apart are never split");
+		z.Clear(); VpConfluenceRules.Partition(wide, 0, wide.Count, tol, double.NaN, f, z, null);
+		bool cover = z.Count > 2 && z[0][0] == 0 && z[z.Count - 1][1] == wide.Count; for (int i = 1; i < z.Count; i++) cover &= z[i][0] == z[i - 1][1];
+		Check(cover, "Partition ranges tile the cluster in order (" + z.Count + " zones, NaN ATR)");
+		// ZoneSourceCounts (V5)
+		int ns, np;
+		VpConfluenceRules.ZoneSourceCounts(new[] { "ds1:s10", "ds1:s10", "", "ds2:s10" }, new[] { "ds1:s10", "ds1:s10", "ds1:s50", "ds2:s10" }, new[] { true, true, true, true }, new[] { 1.0, 1.0, 1.0, 1.0 }, out ns, out np);
+		Check(ns == 3 && np == 3, "ZoneSourceCounts: two labels of one source count once; empty source id -> own profile [" + ns + "," + np + "]");
+		VpConfluenceRules.ZoneSourceCounts(new[] { "ds1:s10", "ds1:s10" }, new[] { "ds1:s10", "ds1:s30" }, new[] { true, true }, new[] { 1.0, 0.5 }, out ns, out np);
+		Check(ns == 1 && np == 2, "ZoneSourceCounts: developing child remapped to its parent's source adds no source [" + ns + "," + np + "]");
+		VpConfluenceRules.ZoneSourceCounts(new[] { "a", "b", "c" }, new[] { "a", "b", "c" }, new[] { true, false, true }, new[] { 1.0, 1.0, 0.0 }, out ns, out np);
+		Check(ns == 1 && np == 1, "ZoneSourceCounts: non-independent and zero-credit survivors excluded");
+		Check(VpConfluenceRules.SourceId("", "p") == "p" && VpConfluenceRules.SourceId(null, "p") == "p" && VpConfluenceRules.SourceId("s", "p") == "s", "SourceId: source else profile");
+		// DevelopingHits
+		var di = new List<int>(); var dc = new List<double>();
+		double ds = VpConfluenceRules.DevelopingHits(new[] { true, false, true, true, true }, new[] { false, false, true, false, false }, new[] { 0.5, 1.0, 0.3, double.NaN, 0.0 }, di, dc);
+		Check(di.Count == 3 && di[0] == 0 && di[1] == 3 && di[2] == 4 && dc[0] == 0.5 && dc[1] == 0 && dc[2] == 0 && Near(ds, 0.5),
+			"DevelopingHits: every developing non-overlay anchor listed; absorbed/refused carry 0; score sums credit");
+		di.Clear(); dc.Clear();
+		Check(VpConfluenceRules.DevelopingHits(new[] { false, false }, new[] { false, false }, new[] { 1.0, 1.0 }, di, dc) == 0 && di.Count == 0, "DevelopingHits: none when no developing anchors");
+		// ValidateStreams throws; NeedsAtr20d
+		bool threw = false; try { VpConfluenceRules.ValidateStreams(2, 3, 2); } catch (ArgumentException ex) { threw = ex.Message.StartsWith("ConfluenceDataStream3 = ConfluenceDataStream1 (2)"); }
+		Check(threw, "ValidateStreams throws ArgumentException on a duplicate enabled stream");
+		threw = false; try { VpConfluenceRules.ValidateStreams(1, -1, -1); VpConfluenceRules.ValidateStreams(1, 0, 0); } catch (ArgumentException) { threw = true; }
+		Check(!threw, "ValidateStreams accepts distinct / disabled slots");
+		Check(VpConfluenceRules.NeedsAtr20d(0.03, 1, -1, -1) && !VpConfluenceRules.NeedsAtr20d(0, 1, 2, 3) && !VpConfluenceRules.NeedsAtr20d(0.03, -1, 0, -1), "NeedsAtr20d: only with an ATR fraction and an enabled slot");
 		// source checks: the engine and base use the rules, expose developing confluence, and allocate lazily
 		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
 		if (dir == null) { Check(false, "repo root with _VpConfluenceEngine.Function.CS not found"); return; }
 		string eng = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"));
 		string bas = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "_VolumeProfileBase.Strategy.CS"));
-		Check(eng.Contains("zone.independentSources = VpConfluenceRules.DistinctCount(sourceIds)") && !eng.Contains("independent++"), "engine: independentSources = distinct sources");
-		Check(eng.Contains("VpConfluenceRules.SplitAt(m_prices, lo, hi, tol, m_atr20d, atrFraction)") && !eng.Contains("gap <= tol") && eng.Contains("VPCONF split"), "engine: width-rule split with Atr20d, no gap > tol veto, splits journaled");
+		Check(eng.Contains("VpConfluenceRules.ZoneSourceCounts(svIds, svProfiles, svIndependent, svCredit, out nSources, out nProfiles)") && eng.Contains("zone.independentSources = nSources;"), "engine wires V5 counts through ZoneSourceCounts");
+		Check(eng.Contains("VpConfluenceRules.Partition(m_prices, lo, hi, tol, m_atr20d, atrFraction, m_zones, m_splits)") && eng.Contains("addZone(cluster, m_zones[k][0], m_zones[k][1], tol)") && !eng.Contains("gap <= tol") && eng.Contains("VPCONF split"),
+			"engine emits one zone per Partition range, journals splits");
 		Check(!eng.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP") && !bas.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP"), "fallback timeframe weight removed");
-		Check(bas.Contains("VpConfluenceRules.DuplicateStreamError(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)"), "base: StartCalc rejects duplicate confluence streams");
-		Check(eng.Contains("developing = s.anchor.developing") && eng.Contains("zone.developingHits.Add(h)") && bas.Contains("public bool developing;") && bas.Contains("public List<ConfluenceHit> developingHits;"),
-			"developing confluence exposed separately and tagged (ConfluenceHit.developing, ConfluenceZone.developingHits)");
+		Check(bas.Contains("VpConfluenceRules.ValidateStreams(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3);"), "base StartCalc calls ValidateStreams");
+		Check(bas.Contains("if (VpConfluenceRules.NeedsAtr20d(ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;"), "base StartCalc enables M-DAILY for the ATR split");
+		Check(eng.Contains("zone.developingScore = VpConfluenceRules.DevelopingHits(dev, over, cr, idx, credit)") && eng.Contains("developing = s.anchor.developing") && bas.Contains("public List<ConfluenceHit> developingHits;"),
+			"engine wires developing hits through DevelopingHits and tags them");
 		int c0 = bas.IndexOf("protected override void Create()"), c1 = bas.IndexOf("protected override void Destroy()");
 		string create = c0 >= 0 && c1 > c0 ? bas.Substring(c0, c1 - c0) : "";
 		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),

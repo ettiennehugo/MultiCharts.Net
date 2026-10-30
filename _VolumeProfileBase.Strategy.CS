@@ -684,8 +684,7 @@ namespace PowerLanguage.Strategy
 			requireDataStream("Vwap2DataStream", Vwap2DataStream, Vwap2Type);
 			requireDataStream("Vwap3DataStream", Vwap3DataStream, Vwap3Type);
 			// PR #47: a duplicate enabled confluence stream double-counts the same volume (V5); reject it here, not in the setters.
-			string dup = VpConfluenceRules.DuplicateStreamError(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3);
-			if (dup != null) throw new ArgumentException(dup);
+			VpConfluenceRules.ValidateStreams(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3);
 		}
 
 		// requireUnitInterval / requireAtLeast / requireNonNegative / requireDataStream(name, stream) live in _CustomSignal (spec CS-3).
@@ -1383,6 +1382,9 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
+			// and a confluence slot is on. Hosts that already set NeedsDaily are unaffected.
+			if (VpConfluenceRules.NeedsAtr20d(ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
 			base.StartCalc();
 			validateInputs();
 			unhookStreams();
