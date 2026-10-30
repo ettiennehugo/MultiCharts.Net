@@ -42,7 +42,7 @@ static class Program
 
 	static void Main()
 	{
-		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); Perf();
+		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); NoCoverageFlag(); Perf();
 		{   // PR D / PR #46 review: _Test6 RollDates = EventRules.RollDate, pinned to CME-published roll dates (not the generated CSV)
 			var cme = new[] { new DateTime(2021, 12, 9), new DateTime(2022, 3, 10), new DateTime(2022, 6, 13), new DateTime(2022, 9, 12),
 				new DateTime(2025, 3, 17), new DateTime(2026, 6, 15), new DateTime(2027, 9, 13) };
@@ -302,6 +302,54 @@ static class Program
 		var d = e.ClassifyExPost(new DateTime(2024, 3, 6));
 		Check(d.eiaRuleOnly && d.count == 0 && d.maxTier == EEventTier.None && !d.firstReleaseEt.HasValue && d.Has(EEventKind.EiaPetroleum), "Energy-only day: Macro count 0");
 		Check((Gen(2026).First(x => x.kind == EEventKind.EiaPetroleum && x.etTime.Month == 3).flags & EEventFlags.RuleOnly) == 0, "EIA 2026 published");
+	}
+
+	// ---- PR H: NoCoverage flag on query results + warn once for a queried class that was not built
+	static void NoCoverageFlag()
+	{
+		var tbl = new List<EventRec> { T1(EEventKind.Cpi, ET(2026, 3, 11, 8, 30)) };
+		var w = new List<string>();
+		var e = new _EventCalendar { config = new EventConfig { enabled = true }, table = tbl, corrections = new EventCorrection[0], barDuration = TimeSpan.FromMinutes(1), firstBarUtc = U(ET(2026, 1, 2, 9, 0)) };
+		e.warnOnce = s => w.Add(s);
+		Check(e.Configure() == null, "H: configure");
+		Bar(e, ET(2026, 1, 5, 9, 0));
+		// day / kind
+		Check(e.NoCoverage(EEventKind.Cpi, new DateTime(2026, 1, 5)) && e.NoCoverage(new DateTime(2026, 1, 5), EEventClassMask.Macro), "H: Unknown day -> NoCoverage (kind, day)");
+		Check(!e.NoCoverage(EEventKind.Cpi, new DateTime(2026, 3, 12)) && !e.NoCoverage(new DateTime(2026, 3, 12), EEventClassMask.Macro), "H: covered day -> no NoCoverage");
+		Check(e.NoCoverage(EEventKind.EiaPetroleum, new DateTime(2026, 3, 12)), "H: kind of an unbuilt class (Energy) -> NoCoverage");
+		Check(!e.NoCoverage(new DateTime(2026, 1, 5), EEventClassMask.Calendar), "H: Unknown Macro kind does not flag a Calendar-only mask");
+		// EventDay
+		Check(e.ClassifyExPost(new DateTime(2026, 1, 5)).noCoverage, "H: EventDay.noCoverage on an Unknown day");
+		// window result: the blocking record is marked NoCoverage, a real event is not
+		EventRec r;
+		Check(e.IsInWindowAt(U(ET(2026, 1, 5, 8, 59)), U(ET(2026, 1, 5, 9, 0)), EEventTier.T1, 5, 10, EEventClassMask.Macro, out r) && r.NoCoverage && (r.flags & EEventFlags.NoCoverage) != 0, "H: fail-closed window result carries NoCoverage");
+		Bar(e, ET(2026, 3, 11, 8, 31));
+		Check(e.IsInWindowAt(U(ET(2026, 3, 11, 8, 30)), U(ET(2026, 3, 11, 8, 31)), EEventTier.T1, 5, 10, EEventClassMask.Macro, out r) && !r.NoCoverage && r.kind == EEventKind.Cpi, "H: real event result has no NoCoverage");
+		// year: the synthetic table has no table kinds other than Cpi -> 2026 lacks table kinds
+		Check(e.NoCoverageYear(2026, EEventClassMask.Macro) && !e.NoCoverageYear(2026, EEventClassMask.Energy), "H: NoCoverageYear for a year built without table kinds; unbuilt class never counts");
+		// warn once per unbuilt class, never for All or built classes
+		w.Clear();
+		e.NextEvent(EEventTier.T1, out r);
+		e.EventsOn(new DateTime(2026, 3, 11));
+		Check(w.Count == 0, "H: no warning for Macro / All masks");
+		e.IsInWindow(EEventTier.T2, 0, 0, EEventClassMask.Energy);
+		e.EventsOnExPost(new DateTime(2026, 3, 11), false, EEventClassMask.Energy);
+		e.NextEvent(e.NowUtc, EEventTier.None, EEventClassMask.Energy | EEventClassMask.Macro, out r);
+		Check(w.Count(s => s.Contains("not built")) == 1 && w[0].Contains("Energy"), "H: unbuilt class warns once (" + string.Join(" | ", w) + ")");
+		var e4 = Eng(c => c.classes = EEventClassMask.Macro, tbl, null, null, w);
+		Bar(e4, ET(2026, 3, 12, 9, 0)); w.Clear(); e4.PrevEvent(e4.NowUtc, EEventTier.None, EEventClassMask.Calendar | EEventClassMask.Energy, out r);
+		e4.PrevEvent(e4.NowUtc, EEventTier.None, EEventClassMask.Calendar, out r);
+		Check(w.Count == 1 && w[0].Contains("Calendar") && w[0].Contains("Energy"), "H: one warning naming both missing classes, then silent");
+		// disabled engine (hash mismatch) has no coverage anywhere
+		var bad = new _EventCalendar { config = new EventConfig { enabled = true }, corrections = null, barDuration = TimeSpan.FromMinutes(1), tableShaExpected = "0000000000000000" };
+		bad.error = s => { }; bad.Configure();
+		Check(bad.Disabled && bad.NoCoverage(new DateTime(2026, 3, 12)) && bad.NoCoverageYear(2026), "H: disabled engine -> NoCoverage");
+		// real table, partial=true still reports NoCoverage on a hole day even though it does not block
+		var real = new _EventCalendar { config = new EventConfig { enabled = true, allowPartialCoverage = true }, table = EventRules.Table(), corrections = EventRules.Corrections, coverageHoles = EventRules.CoverageHoles(), barDuration = TimeSpan.FromMinutes(1) };
+		Check(real.Configure() == null, "H: real configure");
+		Bar(real, ET(2020, 9, 15, 10, 0));
+		Check(real.NoCoverage(EEventKind.GdpAdvance, new DateTime(2020, 9, 15)) && real.Classify(new DateTime(2020, 9, 15)).noCoverage && !real.IsInWindow(EEventTier.None, 0, 0), "H: hole day NoCoverage under partial=true (not blocking)");
+		Check(!real.NoCoverage(EEventKind.Cpi, new DateTime(2020, 9, 11)), "H: covered kind on a covered day");
 	}
 
 	// ---- EV-4.6b: a kind starting after the first bar is Unknown before its coverage (no engine disable)
