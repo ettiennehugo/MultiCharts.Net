@@ -163,7 +163,7 @@ namespace PowerLanguage.Function
 				VwapRollRules.ResetsAtRoll(type == EVwapType.RollDate, type == EVwapType.Week || type == EVwapType.Month, resetPeriodOnRoll, parent.vwapRollOn(datastream)))
 			{
 				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, type == EVwapType.RollDate ? $"Resetting RollDate VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}" : $"Resetting {type} VWAP at roll {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
-				if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $"VWAP roll reset {label} type({type}) Data{datastream} bar({bars.Time[0]:yyyy-MM-dd HH:mm:ss})");
+				else if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $"VWAP roll reset {label} type({type}) Data{datastream} bar({bars.Time[0]:yyyy-MM-dd HH:mm:ss})");
 				clearSums();
 			}
 			setProvisional(priceAt(bars, 0), volume(bars, 0));
