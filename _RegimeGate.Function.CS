@@ -49,6 +49,18 @@ namespace PowerLanguage.Function
 		public int contracts = 1;
 		/// <summary>CME early-close days (ruling 2): exit on the first bar closing at or after the early close minus this.</summary>
 		public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
+		// PR #46 review (Q1): roll handling is part of the hashed build. _Test6.StartCalc overwrites these with the values it actually
+		// runs (RollDetection.ToString(), its table years, _RollDetector.DatesDigest(RollDates), its trading-day key), so an Off build
+		// and a Table build cannot share a hash. Defaults = the intended build.
+		public string rollDetection = "Table";
+		public int rollFromYear = 2000, rollToYear = 2035;
+		/// <summary>_RollDetector.DatesDigest of EventRules.RollDate(y, 3/6/9/12) for 2000-2035 with RollRuleMondayFrom = 2022-04-01
+		/// (pinned in tests/EventTests and tests/RegimeGateTests).</summary>
+		public string rollDatesDigest = RollDatesDigest2000To2035;
+		public const string RollDatesDigest2000To2035 = "fdd63bd8f179a8d4";
+		/// <summary>Trading-day key: "Globex18ET" = _CmeSessionClock.GlobexTradingDayEt (ET >= 18:00 -> next date).</summary>
+		public string tradingDay = "Globex18ET";
+		public bool atrRestartOnRoll = false;                     // PR #46: DailyConfig.atrRestartOnRoll (DECIDED: ATR carries on across rolls)
 	}
 
 	/// <summary>One session's gate decision, read once at the 09:30 latch and held for the session.</summary>
@@ -72,6 +84,15 @@ namespace PowerLanguage.Function
 	public sealed class RegimeGateCounts
 	{
 		public int sessions, usable, warmup, invalid, fallback, blocked, noRth;
+		/// <summary>PR #46 rulings (h): RTH sessions whose latch saw Atr20d = NaN (no entry, ruling 1), and the subset after a
+		/// detected roll (the post-roll ATR20d blackout: applyRoll reseeds Wilder, ~20 sessions per roll). Counting only.</summary>
+		public int atrNaN, rollAtrNaN;
+		public void AddAtr(bool atrIsNaN, bool afterRoll, bool noRthDay = false)
+		{
+			if (noRthDay || !atrIsNaN) return;
+			atrNaN++;
+			if (afterRoll) rollAtrNaN++;
+		}
 		public void Add(RegimeGateDecision d, bool noRthDay = false)
 		{
 			sessions++;
@@ -82,7 +103,7 @@ namespace PowerLanguage.Function
 			if (d.wouldBlock) blocked++;
 			if (noRthDay) noRth++;
 		}
-		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nFb(" + fallback + ") nBlock(" + blocked + ") nNoRth(" + noRth + ")"; }
+		public string Suffix() { return " nSess(" + sessions + ") nUsable(" + usable + ") nWarm(" + warmup + ") nInv(" + invalid + ") nFb(" + fallback + ") nBlock(" + blocked + ") nNoRth(" + noRth + ") nAtrNaN(" + atrNaN + ") nRollAtrNaN(" + rollAtrNaN + ")"; }
 	}
 
 	public static class RegimeGate
@@ -158,6 +179,7 @@ namespace PowerLanguage.Function
 			"rg.fallback", "rg.publish", "rg.atrPctLookback", "rg.parkinsonBars", "rg.bicDiagnostic", "rg.rollSuspectZ", "rg.gapBusinessDays",
 			"gate.arm", "gate.blocked", "gate.seed",
 			"host.k", "host.atrLength", "host.rthOpen", "host.activeEnd", "host.exitTime", "host.rthClose", "host.contracts", "host.halfDayExitBefore",
+			"host.rollDetection", "host.rollYears", "host.rollDates", "host.tradingDay", "host.atrRestartOnRoll",
 		};
 
 		/// <summary>All config fields by name (a superset of HashFields is allowed; extras are journaled, not hashed).</summary>
@@ -179,6 +201,8 @@ namespace PowerLanguage.Function
 			f["host.k"] = n(h.k); f["host.atrLength"] = h.atrLength.ToString(IC); f["host.rthOpen"] = h.rthOpen.ToString("c", IC); f["host.activeEnd"] = h.activeEnd.ToString("c", IC);
 			f["host.exitTime"] = h.exitTime.ToString("c", IC); f["host.rthClose"] = h.rthClose.ToString("c", IC); f["host.contracts"] = h.contracts.ToString(IC);
 			f["host.halfDayExitBefore"] = h.halfDayExitBefore.ToString("c", IC);
+			f["host.rollDetection"] = h.rollDetection ?? ""; f["host.rollYears"] = h.rollFromYear.ToString(IC) + "-" + h.rollToYear.ToString(IC);
+			f["host.rollDates"] = h.rollDatesDigest ?? ""; f["host.tradingDay"] = h.tradingDay ?? ""; f["host.atrRestartOnRoll"] = h.atrRestartOnRoll ? "1" : "0";
 			return f;
 		}
 
