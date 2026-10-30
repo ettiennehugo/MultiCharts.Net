@@ -129,6 +129,29 @@ static class Program
 			Check(Regex.IsMatch(src, @"HostConfig\.rollDetection\s*=\s*RollDetection\.ToString\(\)") && Regex.IsMatch(src, @"HostConfig\.rollDatesDigest\s*=\s*_RollDetector\.DatesDigest\(RollDates\)"), "_Test6 hashes the roll mode and date digest it runs");
 			Check(Regex.IsMatch(src, @"HostConfig\.atrRestartOnRoll\s*=\s*false\s*;") && Regex.IsMatch(src, @"DailyConfig\.atrRestartOnRoll\s*=\s*HostConfig\.atrRestartOnRoll\s*;"), "_Test6 carries ATR20d across rolls (atrRestartOnRoll = false, hashed) - rulings (h)");
 		}
+		// PR #51 review item 2: host-side Globex key in _CustomSignal (no suite compiles it, so a source check like _Test6's).
+		// Kills: key forced off, Future-category gate removed, intraday gate removed, warning not suppressed, day not re-keyed.
+		{
+			string dir = AppContext.BaseDirectory, path = null;
+			for (var di = new DirectoryInfo(dir); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			var assigns = Regex.Matches(src, @"\bm_rollGlobexKey\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => Regex.Replace(m.Groups[1].Value, @"\s+", " ").Trim()).ToList();
+			Check(path != null && assigns.Count == 2 && assigns.Contains("false")
+				&& assigns.Contains("m_rollDet.series && calendarKeyed && _RollDetector.IsIntraday(res) && Bars.Info.Category.ToString() == \"Future\""),
+				"_CustomSignal Globex key = series && calendarKeyed && intraday && Future (reset false only) [" + string.Join(" | ", assigns) + "]");
+			Check(Regex.IsMatch(src, @"DateTime\s+day\s*=\s*m_rollGlobexKey\s*\?\s*_CmeSessionClock\.GlobexTradingDayEt\("), "_CustomSignal detector day = GlobexTradingDayEt when keyed");
+			Check(Regex.IsMatch(src, @"SeriesKeyWarning\(m_rollDet\.series,\s*res,\s*calendarKeyed\s*&&\s*!m_rollGlobexKey\)"), "_CustomSignal warns only when calendar-keyed and not Globex-keyed");
+		}
+		Check(_RollDetector.IsIntraday("Minute") && _RollDetector.IsIntraday("Tick") && !_RollDetector.IsIntraday("Day") && !_RollDetector.IsIntraday("Week"), "IsIntraday: Minute/Tick yes, Day/Week no");
+		// diagnostics: gap / prior close / open of the Series bar
+		{
+			var d = new _RollDetector { series = true };
+			d.Step(1, new DateTime(2025, 3, 14), 100, 100, "@ES", 0.25); d.Step(2, new DateTime(2025, 3, 17), 112.5, 100, "@ES", 0.25);
+			Check(d.LastGap == 12.5 && d.LastOpen == 112.5 && d.LastPrevClose == 100, "Series roll diagnostics: gap 12.5 pts, open, prior close");
+			var t = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 18) } };
+			t.Step(1, new DateTime(2025, 3, 17), 100, 100, "@ES", 0.25); t.Step(2, new DateTime(2025, 3, 18), 100, 100, "@ES", 0.25);
+			Check(t.RollBars.Count == 1 && double.IsNaN(t.LastGap), "Table roll diagnostics: gap NaN");
+		}
 		// DatesDigest: order / duplicate insensitive, sensitive to a date
 		{
 			var a = new[] { new DateTime(2022, 6, 13), new DateTime(2022, 3, 10) }; var b = new[] { new DateTime(2022, 3, 10), new DateTime(2022, 6, 13), new DateTime(2022, 6, 13) };
@@ -211,7 +234,15 @@ static class Program
 		}
 		var byQ = kept.GroupBy(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3)).ToList();
 		Console.WriteLine($"fix-i replay: {ev.Count} EVROLL -> {n} splices; 2022+: {string.Join(" ", kept.Where(d => d.Year >= 2022).Select(d => d.ToString("yyyy-MM-dd")))}");
-		Check(ev.Count == 72 && n >= 28 && n <= 33 && byQ.All(g => g.Count() == 1), $"fix-i replay of the MC run: 72 -> {n} (<= 1 per contract)");
+		Check(ev.Count == 72 && byQ.All(g => g.Count() == 1), $"fix-i replay of the MC run: 72 -> {n} (<= 1 per contract)");
+		// PR #51 B2: pin every quarter. Expected splice per contract (expiry -> splice day), and the contracts Series cannot
+		// detect in this data: M17 (no >= 8-tick open gap in Jun 2017, dxFeed) and U18/U19/Z19/U21 (no gap in the rule week;
+		// the only candidates were in expiry week, +2 sessions, which B1's window now excludes: no roll beats a wrong one).
+		var expect = "2016-12-05 2017-03-06 2017-09-04 2017-12-04 2018-03-05 2018-06-04 2018-12-10 2019-03-04 2019-06-10 2020-03-09 2020-06-08 2020-09-07 2020-12-07 2021-03-08 2021-06-07 2021-12-06 2022-03-07 2022-06-13 2022-09-12 2022-12-12 2023-03-13 2023-06-12 2023-09-11 2023-12-11 2024-03-11 2024-06-17 2024-09-16 2024-12-16".Split(' ').Select(DateTime.Parse).ToList();
+		var noSplice = new[] { "2017-06-16", "2018-09-21", "2019-09-20", "2019-12-20", "2021-09-17" }.Select(DateTime.Parse).ToList();
+		var exp2 = new List<DateTime>(); for (int y = 2016; y <= 2024; y++) for (int m = 3; m <= 12; m += 3) { var e = _RollDetector.ThirdFriday(y, m); if (e >= new DateTime(2016, 12, 1)) exp2.Add(e); }
+		Check(exp2.Count == 33 && exp2.All(e => noSplice.Contains(e) ^ expect.Any(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3) == e)), "fix-i B2: 33 contracts = 28 pinned + 5 listed undetectable (M17 U18 U19 Z19 U21)");
+		Check(kept.SequenceEqual(expect), $"fix-i B2 replay keeps exactly the pinned 28 splices [{string.Join(" ", kept.Except(expect).Select(d => "+" + d.ToString("yyyy-MM-dd")).Concat(expect.Except(kept).Select(d => "-" + d.ToString("yyyy-MM-dd"))))}]");
 		Check(kept.Where(d => d >= new DateTime(2022, 4, 1)).All(d => d == RuleRoll(_RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3))) && kept.Contains(new DateTime(2022, 6, 13)), "fix-i replay: 2022+ kept splices all at offset 0, ESM22 2022-06-13");
 	}
 }
