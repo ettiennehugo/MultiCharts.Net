@@ -66,7 +66,7 @@ namespace PowerLanguage.Strategy
 			Week = 4,              // reset on the first bar whose exchange-session date is in a new (Monday-start) week
 			Month = 5,             // ... in a new month
 			Quarter = 6,           // ... in a new calendar quarter
-			RollDate = 7           // reset on the VPF-4 roll bar (futures base, Data1 stream only; RollDetection must be on)
+			RollDate = 7           // reset on the VPF-4 roll bar (futures base; rollOn(ds) on the slot's stream, Data n uses the Data1 root; RollDetection must be on)
 		}
 
 		/// <summary>
@@ -1396,6 +1396,8 @@ namespace PowerLanguage.Strategy
 			m_vwap1 = configureVwap(m_vwap1, "VWAP1", Vwap1Type, Vwap1Length, Vwap1FromDate, Vwap1DataStream, "VwapFromDate", "VwapDataStream");
 			m_vwap2 = configureVwap(m_vwap2, "VWAP2", Vwap2Type, Vwap2Length, Vwap2FromDate, Vwap2DataStream, "Vwap2FromDate", "Vwap2DataStream");
 			m_vwap3 = configureVwap(m_vwap3, "VWAP3", Vwap3Type, Vwap3Length, Vwap3FromDate, Vwap3DataStream, "Vwap3FromDate", "Vwap3DataStream");
+			if (VwapConfig.resetPeriodSlotsOnRoll && RollDetection == ERollDetection.Off)
+				trace(ETraceLevel.Warning, "VWAP resetPeriodSlotsOnRoll is on but RollDetection is Off: Week / Month slots will not reset at a roll (use RollDetection.Table).");
 			foreach (var kv in m_streams)
 			{
 				if (kv.Value != null)
@@ -2987,7 +2989,8 @@ namespace PowerLanguage.Strategy
 		protected ProfileStatsConfig ProfileStats { get; } = new ProfileStatsConfig();
 		/// <summary>VP-3 per-bar ladder (enabled=false: not created; on the futures base it forces OrderFlowEnabled).</summary>
 		protected BarLadderConfig BarLadders { get; } = new BarLadderConfig();
-		/// <summary>VWAP slot options; resetPeriodSlotsOnRoll (default false) resets Week / Month slots at a roll too.</summary>
+		/// <summary>VWAP slot options; resetPeriodSlotsOnRoll (default false) resets Week / Month slots at a roll too. Needs RollDetection != Off;
+		/// until PR #51 merges RollDetection.Series over-detects rolls on intraday charts, so use RollDetection.Table with it.</summary>
 		protected VwapConfig VwapConfig { get; } = new VwapConfig();
 
 		private bool m_rangeOn;

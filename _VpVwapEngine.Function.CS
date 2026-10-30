@@ -19,7 +19,11 @@ namespace PowerLanguage.Function
 	{
 		/// <summary>Opt-in (educator review V1): Week / Month VWAP slots also reset at a contract roll (rollOn on the slot's
 		/// stream, on the closing roll bar, like RollDate: committed sums dropped, the roll bar stays). Default false = unchanged:
-		/// they reset on the period key only. Needs RollDetection != Off (else rollOn never fires). Quarter is not affected.</summary>
+		/// they reset on the period key only. Needs RollDetection != Off (else rollOn never fires; the base warns once). Quarter is not affected.
+		/// WARNING: with RollDetection = Series on intraday charts rolls are currently over-detected (about 72 detections vs about 33
+		/// real rolls, 1m @ES 2016-2024; manual App F Known issues), so Week / Month VWAPs would also reset on spurious "rolls" until
+		/// PR #51 (RollDetection.Series fix) merges. Use RollDetection = Table (EventRules.RollDate) with this flag. When rollOn fires
+		/// may change with #51.</summary>
 		public bool resetPeriodSlotsOnRoll = false;
 	}
 
@@ -149,11 +153,13 @@ namespace PowerLanguage.Function
 				warnIfGap(bar);
 				m_curBar = bar;
 			}
+			// Week / Month opt-in roll reset: see VwapConfig.resetPeriodSlotsOnRoll. Until PR #51 merges, RollDetection.Series over-detects
+			// rolls on intraday charts (spurious resets); prefer RollDetection.Table.
 			bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));
 			if (rollSlot && bars.Status == EBarState.Close &&
 				VwapRollRules.ResetsAtRoll(type == EVwapType.RollDate, type == EVwapType.Week || type == EVwapType.Month, resetPeriodOnRoll, parent.vwapRollOn(datastream)))
 			{
-				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting {type} VWAP at roll {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, type == EVwapType.RollDate ? $"Resetting RollDate VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}" : $"Resetting {type} VWAP at roll {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 				clearSums();
 			}
 			setProvisional(priceAt(bars, 0), volume(bars, 0));
