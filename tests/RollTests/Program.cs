@@ -141,6 +141,8 @@ static class Program
 				"_CustomSignal Globex key = series && calendarKeyed && intraday && Future (reset false only) [" + string.Join(" | ", assigns) + "]");
 			Check(Regex.IsMatch(src, @"DateTime\s+day\s*=\s*m_rollGlobexKey\s*\?\s*_CmeSessionClock\.GlobexTradingDayEt\("), "_CustomSignal detector day = GlobexTradingDayEt when keyed");
 			Check(Regex.IsMatch(src, @"SeriesKeyWarning\(m_rollDet\.series,\s*res,\s*calendarKeyed\s*&&\s*!m_rollGlobexKey\)"), "_CustomSignal warns only when calendar-keyed and not Globex-keyed");
+			// Analyst 1 N1: the splice line is journaled at ETraceLevel.Journal (kills Journal -> Info)
+			Check(Regex.IsMatch(src, @"if\s*\(\s*traceOn\(ETraceLevel\.Journal\)\s*\)\s*trace\(ETraceLevel\.Journal,\s*\$""VPF-4 roll splice detected"), "_CustomSignal roll splice line at ETraceLevel.Journal");
 		}
 		Check(_RollDetector.IsIntraday("Minute") && _RollDetector.IsIntraday("Tick") && !_RollDetector.IsIntraday("Day") && !_RollDetector.IsIntraday("Week"), "IsIntraday: Minute/Tick yes, Day/Week no");
 		// diagnostics: gap / prior close / open of the Series bar
@@ -151,6 +153,25 @@ static class Program
 			var t = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 18) } };
 			t.Step(1, new DateTime(2025, 3, 17), 100, 100, "@ES", 0.25); t.Step(2, new DateTime(2025, 3, 18), 100, 100, "@ES", 0.25);
 			Check(t.RollBars.Count == 1 && double.IsNaN(t.LastGap), "Table roll diagnostics: gap NaN");
+			// Analyst 1 N4: a Table roll after a Series roll on the SAME detector clears the diagnostics (kills "not cleared")
+			var st = new _RollDetector { series = true, table = true, dates = new HashSet<DateTime> { new DateTime(2025, 6, 2) } };
+			st.Step(1, new DateTime(2025, 3, 14), 100, 100, "@ES", 0.25); st.Step(2, new DateTime(2025, 3, 17), 112.5, 100, "@ES", 0.25);
+			bool seriesSet = st.LastGap == 12.5;
+			st.Step(3, new DateTime(2025, 6, 2), 112.5, 112.5, "@ES", 0.25);
+			Check(seriesSet && st.RollBars.Count == 2 && double.IsNaN(st.LastGap) && double.IsNaN(st.LastOpen) && double.IsNaN(st.LastPrevClose), "SeriesOrTable: Table roll after a Series roll clears diagnostics to NaN");
+			// Analyst 1 N3: a DOWN gap is a splice too and LastGap is its magnitude (kills the signed-gap mutant)
+			var dn = new _RollDetector { series = true };
+			dn.Step(1, new DateTime(2025, 3, 14), 100, 100, "@ES", 0.25);
+			Check(dn.Step(2, new DateTime(2025, 3, 17), 87.5, 100, "@ES", 0.25) && dn.LastGap == 12.5 && dn.LastOpen == 87.5, "Series: down-gap roll detected, LastGap = |gap| 12.5");
+		}
+		// Analyst 1 N2: the window ends on the FRIDAY of the rule week (kills the Thursday-end mutant), pre- and post-2022
+		{
+			DateTime ex;
+			Check(_RollDetector.SeriesWindow(new DateTime(2025, 3, 21), out ex) && ex == new DateTime(2025, 3, 21) && !_RollDetector.SeriesWindow(new DateTime(2025, 3, 24), out ex), "SeriesWindow 2025-03: Friday 03-21 in, Monday after out");
+			Check(_RollDetector.SeriesWindow(new DateTime(2019, 9, 13), out ex) && ex == new DateTime(2019, 9, 20) && !_RollDetector.SeriesWindow(new DateTime(2019, 9, 16), out ex), "SeriesWindow 2019-09: rule-week Friday 09-13 in, expiry week out");
+			var fr = new _RollDetector { series = true };
+			fr.Step(1, new DateTime(2019, 9, 12), 100, 100, "@ES", 0.25);
+			Check(fr.Step(2, new DateTime(2019, 9, 13), 112.5, 100, "@ES", 0.25), "Series: a splice on the rule-week Friday (2019-09-13) is kept");
 		}
 		// DatesDigest: order / duplicate insensitive, sensitive to a date
 		{
