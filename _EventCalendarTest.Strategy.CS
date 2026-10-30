@@ -114,7 +114,7 @@ namespace PowerLanguage.Strategy
 			for (DateTime d = a; d < b; d = d.AddDays(1)) if (EventRules.IsNyseBusinessDay(d)) off++;
 			if (rule > m_lastSplice) off = -off;
 			if (traceOn(ETraceLevel.Info))
-				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount})");
+				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount}) {RollSpliceDiag}");
 		}
 	}
 }
