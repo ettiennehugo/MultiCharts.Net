@@ -7,7 +7,8 @@ namespace PowerLanguage.Strategy
 	/// M-EVENT acceptance strategy (specs/m-event-spec.md rev 2, EV-8.10 / P-EV1 / roll check). Places NO orders.
 	///
 	/// SETUP: an ES/NQ (CME equity index) chart, 1-5 minute bars, Exchange time zone, several years of data
-	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke) or Info (probe / roll).
+	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke), Info (probe) or Journal (roll: EVROLL lines
+	/// need Info, the VPF-4 roll splice lines with RollSpliceDiag need Journal).
 	///
 	/// RUN (Mode input):
 	///   0 smoke - EventConfig.enabled with defaults. Expect the "EVENT created ..." journal line; with the PR A empty table also
@@ -114,7 +115,7 @@ namespace PowerLanguage.Strategy
 			for (DateTime d = a; d < b; d = d.AddDays(1)) if (EventRules.IsNyseBusinessDay(d)) off++;
 			if (rule > m_lastSplice) off = -off;
 			if (traceOn(ETraceLevel.Info))
-				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount})");
+				trace(ETraceLevel.Info, $"EVROLL splice({m_lastSplice:yyyy-MM-dd}) rule({rule:yyyy-MM-dd}) offsetSessions({off}) n({m_rollCount}) {RollSpliceDiag}");
 		}
 	}
 }

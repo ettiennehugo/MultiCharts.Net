@@ -1721,8 +1721,10 @@ namespace PowerLanguage.Strategy
 		/// <summary>VPF-4 / S4: roll detection mode. Not an [Input].</summary>
 		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
 		/// <summary>
-		/// VPF-4 Series: a trading-day open gapping >= RollGapTicks from the prior close inside the quarterly roll window
-		/// (days 1-21 of Mar/Jun/Sep/Dec, the run-up to the third-Friday expiry), or a change of Bars.Info.Name.
+		/// VPF-4 Series: a trading-day open gapping >= RollGapTicks from the prior close inside the contract's roll window
+		/// (_RollDetector.SeriesWindow: Monday of the customary roll date's week through the third Friday), at most once per
+		/// contract, or a change of Bars.Info.Name. On an intraday futures chart whose tradingDayKey is the calendar date the
+		/// detector is keyed by the Globex trading day instead (fix-i), so the Sunday/18:00 ET open is the first bar of its day.
 		/// </summary>
 		protected int RollGapTicks { get; set; } = 8;
 		/// <summary>VPF-4 Table: trading dates (tradingDayKey) on which the continuous series switched contract (set by the strategy).</summary>
@@ -1731,6 +1733,16 @@ namespace PowerLanguage.Strategy
 		private readonly _RollDetector m_rollDet = new _RollDetector();
 		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
 		private bool m_rollWarned;
+		// fix-i: detector keyed by _CmeSessionClock.GlobexTradingDayEt. Decided ONCE, on the first closed bar the detector steps
+		// (PR #51 review): a derived class that turns Series on only after that bar stays on tradingDayKey (pre-existing edge).
+		// Side effect for SeriesOrTable on an intraday futures chart: Table dates are matched against the Globex day too, so a
+		// Monday RollDates entry now fires on the Sunday 18:00 ET open instead of the first bar after Monday midnight.
+		private bool m_rollGlobexKey;
+		private TimeZoneInfo m_rollEtTz;           // PR #51 N2: cached ET zone for the Globex key (lazy)
+
+		/// <summary>PR #51 review: diagnostics of the last detected Data1 roll: "gapPts(..) gapX(..) barTime(..) prevClose(..) open(..)"
+		/// (gap / prev / open are NaN when the roll came from a Table date or a name change). Null before the first roll.</summary>
+		protected string RollSpliceDiag { get; private set; }
 
 		/// <summary>VPF-4: Data1 bars (1-based, Bars.FullSymbolData.Current) on which a roll was detected so far.</summary>
 		public IList<int> RollBars { get { return m_rollDet.RollBars; } }
@@ -1740,6 +1752,8 @@ namespace PowerLanguage.Strategy
 			m_rollDet.Reset();
 			m_rollPending = null;
 			m_rollWarned = false;
+			m_rollGlobexKey = false;
+			RollSpliceDiag = null;
 		}
 
 		// settings are read live (derived StartCalc may set them after base.StartCalc, as VPF-4 allowed)
@@ -1771,19 +1785,27 @@ namespace PowerLanguage.Strategy
 			{
 				// educator review R1: Series is blind on intraday calendar-keyed charts. calendarKeyed probe: 01:00 and 20:00 of the
 				// same date share a key only when tradingDayKey is the calendar date (a Globex / Forex key rolls in the evening).
+				// fix-i: on a futures chart Series is re-keyed by the Globex trading day (no warning); other categories still warn.
 				m_rollWarned = true;
 				DateTime d0 = Bars.Time[0].Date;
-				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, Bars.Info.Resolution.Type.ToString(),
-					tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20)));
+				string res = Bars.Info.Resolution.Type.ToString();
+				bool calendarKeyed = tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20));
+				m_rollGlobexKey = m_rollDet.series && calendarKeyed && _RollDetector.IsIntraday(res)
+					&& Bars.Info.Category.ToString() == "Future";
+				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, res, calendarKeyed && !m_rollGlobexKey);
 				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
 			}
 			int bar = Bars.FullSymbolData.Current;
 			string name = Bars.Info.Name;
-			DateTime day = tradingDayKey(Bars.Time[0]);
+			if (m_rollGlobexKey && m_rollEtTz == null) m_rollEtTz = findTz("Eastern Standard Time");
+			DateTime day = m_rollGlobexKey ? _CmeSessionClock.GlobexTradingDayEt(ToZone(Bars.Time[0], m_rollEtTz)) : tradingDayKey(Bars.Time[0]);
 			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
 			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
 			{
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name})");
+				double tk = tickSize(), g = m_rollDet.LastGap;
+				RollSpliceDiag = string.Format(System.Globalization.CultureInfo.InvariantCulture, "gapPts({0:0.00}) gapX({1:0.00}) barTime({2:yyyy-MM-dd HH:mm}) prevClose({3:0.00}) open({4:0.00})",
+					g, RollGapTicks > 0 && tk > 0 ? g / (RollGapTicks * tk) : double.NaN, Bars.Time[0], m_rollDet.LastPrevClose, m_rollDet.LastOpen);
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name}) {RollSpliceDiag}");
 				if (m_rollPending != null) foreach (_RollPending p in m_rollPending) if (p != null) p.Arm(Bars.Time[0]);
 			}
 		}
@@ -2441,9 +2463,11 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>CS-6: bar time (chart zone) converted to the zone with Windows or IANA id <paramref name="tzId"/>. DST-aware.</summary>
-		protected DateTime ToZone(DateTime barTime, string tzId)
+		protected DateTime ToZone(DateTime barTime, string tzId) { return ToZone(barTime, findTz(tzId)); }
+
+		/// <summary>PR #51 N2: ToZone with an already-resolved destination zone (callers on every bar cache the lookup).</summary>
+		protected DateTime ToZone(DateTime barTime, TimeZoneInfo dst)
 		{
-			TimeZoneInfo dst = findTz(tzId);
 			if (barTime.Kind == DateTimeKind.Utc) return TimeZoneInfo.ConvertTimeFromUtc(barTime, dst);
 			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
 			TimeZoneInfo src = BarTimeZone ?? TimeZoneInfo.Local;

@@ -48,7 +48,8 @@ namespace PowerLanguage.Function
 	public enum EEventFlags : ushort
 	{
 		None = 0, Sep = 1, Quad = 2, Unscheduled = 4, Scheduled = 8, Delayed = 16, Canceled = 32, Csv = 64, RuleOnly = 128,
-		Pm = 256   // spec-silent: the 16:00 SPXW PM-settled record of MonthlyOpex
+		Pm = 256,  // spec-silent: the 16:00 SPXW PM-settled record of MonthlyOpex
+		NoCoverage = 512   // query result only (never in the table): a synthetic record for a day the calendar does not cover
 	}
 
 	[Flags]
@@ -81,6 +82,8 @@ namespace PowerLanguage.Function
 			return r;
 		}
 
+		/// <summary>True on a query result that reports missing coverage (an Unknown day of this kind), not a real event.</summary>
+		public bool NoCoverage { get { return (flags & EEventFlags.NoCoverage) != 0; } }
 		public string KindName { get { return kind == EEventKind.Custom ? "Custom:" + name : kind.ToString(); } }
 	}
 
@@ -94,6 +97,13 @@ namespace PowerLanguage.Function
 		public TimeSpan? firstReleaseEt; // earliest macro release (ET time of day)
 		public int count;                // R2.1-g: Macro-class records only (like maxTier / firstReleaseEt)
 		public bool eiaRuleOnly;         // R2.1-e: an EIA release on the day is RuleOnly (outside the published exception table)
+		public bool noCoverage;          // a kind of a built class (config.classes) is Unknown on THIS day (coverage hole, before its
+		                                 // first covered month, after its coverage end), or the engine is disabled. Scoped per kind and
+		                                 // day: a table kind missing from the whole year's build (e.g. JacksonHole / ChairTestimony,
+		                                 // absent 2016-2025) does NOT set it, else it would be true every day; see NoCoverageYear.
+		public ulong noCoverageKinds;    // bit (1 << kind) per requested (built-class) kind that is Unknown on the day
+		/// <summary>True when `kind` is requested (built class) and Unknown on the day.</summary>
+		public bool NoCoverageOf(EEventKind kind) { return (noCoverageKinds & (1UL << (int)kind)) != 0; }
 
 		public bool Has(EEventKind k) { return (kindsMask & (1UL << (int)k)) != 0; }
 	}
@@ -1134,6 +1144,8 @@ namespace PowerLanguage.Function
 		HashSet<EEventKind> m_tableKindsPresent = new HashSet<EEventKind>();
 		HashSet<int> m_warnedYears = new HashSet<int>();
 		bool m_configured, m_dailyWarned;
+		byte m_warnedClasses;         // classes already warned as queried but not built (warn once per class)
+		Dictionary<int, ulong> m_yearMissing;   // year -> table kinds (bit 1 << kind) missing from its build; lazily allocated
 		bool m_disabled;              // EV-4.6b: table missing / hash mismatch only; every query is neutral
 		// EV-4.6b per-kind Unknown spans (ET trading days, inclusive): before coverage start, interior holes, after coverage end
 		struct CovSpan { public EEventKind kind; public DateTime from, to; public string why; }
@@ -1170,6 +1182,7 @@ namespace PowerLanguage.Function
 			if (config == null) return label + ": no config";
 			string v = config.Validate();
 			if (v != null) return v;
+			m_warnedClasses = 0;   // re-Configure: warn again for the (possibly new) class set
 			m_clock = new _CmeSessionClock(null);
 			m_est = m_clock.Eastern;
 			m_table = table ?? EventRules.Table();
@@ -1307,6 +1320,7 @@ namespace PowerLanguage.Function
 				foreach (var f in c[5].Split('|'))
 				{
 					EEventFlags fl; if (!Enum.TryParse(f.Trim(), false, out fl) || !Enum.IsDefined(typeof(EEventFlags), fl)) { err = "bad flag '" + f + "'"; return false; }
+					if (fl == EEventFlags.NoCoverage) { err = "flag NoCoverage is query-only, not allowed in a CSV row"; return false; }
 					r.flags |= fl;
 				}
 			r.refPeriod = c[6].Length > 0 ? c[6] : null;
@@ -1347,6 +1361,12 @@ namespace PowerLanguage.Function
 			var missing = new List<string>();
 			foreach (var k in EventRules.TableKinds) { bool any = false; foreach (var r in list) if (r.kind == k) { any = true; break; } if (!any) missing.Add(k.ToString()); }
 			if (missing.Count > 0 && m_warnedYears.Add(y)) warn(y + " table kinds missing: " + string.Join(",", missing));
+			if (missing.Count > 0)
+			{
+				ulong mm = 0; foreach (var k in EventRules.TableKinds) if (missing.Contains(k.ToString())) mm |= 1UL << (int)k;
+				if (m_yearMissing == null) m_yearMissing = new Dictionary<int, ulong>();
+				m_yearMissing[y] = mm;
+			}
 
 			var keep = new List<EventRec>(list.Count);
 			foreach (var r0 in list)
@@ -1585,6 +1605,55 @@ namespace PowerLanguage.Function
 		}
 		public bool CoverageBlocks(DateTime day, EEventClassMask mask) { EEventKind k; return CoverageBlocks(day, mask, EEventTier.None, out k); }
 
+		/// <summary>True when the calendar has no coverage for `kind` on `day`: the engine is disabled (table missing / hash
+		/// mismatch), the kind's class was not built (not in config.classes), or the day is Unknown for the kind. Independent of
+		/// allowPartialCoverage (which only decides whether Unknown blocks).
+		/// Note: this kind overload COUNTS a kind of an unbuilt class as no coverage, whereas NoCoverage(day, mask) and
+		/// NoCoverageYear(y, mask) mask with config.classes and only ever report classes that were built.
+		/// Before Configure() all three return false.</summary>
+		public bool NoCoverage(EEventKind kind, DateTime day)
+		{
+			if (m_disabled) return true;
+			if (!m_configured) return false;
+			if ((kindClass(kind) & config.classes) == 0) return true;
+			return unknownKinds(day).Contains(kind);
+		}
+		/// <summary>True when some kind of a class in `mask` that was built has no coverage on `day` (disabled engine included).
+		/// Unlike NoCoverage(kind, day), classes not in config.classes are ignored here (never counted).</summary>
+		public bool NoCoverage(DateTime day, EEventClassMask mask = EEventClassMask.All)
+		{
+			if (m_disabled) return true;
+			if (!m_configured) return false;
+			EEventClassMask m = mask & config.classes;
+			foreach (var k in unknownKinds(day)) if ((kindClass(k) & m) != 0) return true;
+			return false;
+		}
+		/// <summary>True when year `y` was built without some table kind of a class in `mask` (the "table kinds missing" warning),
+		/// or the engine is disabled. Builds the year if needed.</summary>
+		public bool NoCoverageYear(int y, EEventClassMask mask = EEventClassMask.All)
+		{
+			if (m_disabled) return true;
+			if (!m_configured) return false;
+			year(y);
+			ulong mm;
+			if (m_yearMissing == null || !m_yearMissing.TryGetValue(y, out mm)) return false;
+			EEventClassMask m = mask & config.classes;
+			foreach (var k in EventRules.TableKinds) if ((mm & (1UL << (int)k)) != 0 && (kindClass(k) & m) != 0) return true;
+			return false;
+		}
+
+		/// <summary>Warn once per class when an explicit query mask (not All) asks for a class that was not built (not in config.classes): the
+		/// query silently finds nothing for it. No allocation after the first warning per class. A mask equal to All (=7, also
+		/// when spelled out as Macro|Calendar|Energy) never warns. The warned set is reset by Configure().</summary>
+		void checkMask(EEventClassMask mask)
+		{
+			if (!m_configured || config == null || mask == EEventClassMask.All) return;   // All = the default "everything built"
+			byte miss = (byte)((byte)mask & (byte)EEventClassMask.All & ~(byte)config.classes & ~m_warnedClasses);
+			if (miss == 0) return;
+			m_warnedClasses |= miss;
+			warn("query asks for class " + (EEventClassMask)miss + " which was not built (classes=" + config.classes + "); it never matches");
+		}
+
 		void coverageDay(DateTime day)
 		{
 			var uk = unknownKinds(day);
@@ -1667,6 +1736,7 @@ namespace PowerLanguage.Function
 		public bool NextEvent(DateTime nowUtc, EEventTier minTier, EEventClassMask mask, out EventRec e)
 		{
 			e = default(EventRec);
+			checkMask(mask);
 			int y = ToEt(nowUtc).Year;
 			for (int yy = y; yy <= y + 1; ++yy)
 			{
@@ -1679,6 +1749,7 @@ namespace PowerLanguage.Function
 		public bool PrevEvent(DateTime nowUtc, EEventTier minTier, EEventClassMask mask, out EventRec e)
 		{
 			e = default(EventRec);
+			checkMask(mask);
 			int y = ToEt(nowUtc).Year;
 			for (int yy = y; yy >= y - 1; --yy)
 			{
@@ -1704,11 +1775,12 @@ namespace PowerLanguage.Function
 		public bool IsInWindow(EEventTier minTier, int preMin, int postMin, EEventClassMask mask = EEventClassMask.Macro)
 		{ EventRec e; return windowHit(minTier, preMin, postMin, mask, out e, true); }
 		public bool IsInWindowAt(DateTime openUtc, DateTime closeUtc, EEventTier minTier, int preMin, int postMin, EEventClassMask mask, out EventRec e)
-		{ return window(openUtc, closeUtc, minTier, preMin, postMin, mask, out e); }
+		{ checkMask(mask); return window(openUtc, closeUtc, minTier, preMin, postMin, mask, out e); }
 
 		bool windowHit(EEventTier minTier, int preMin, int postMin, EEventClassMask mask, out EventRec e, bool warnDaily)
 		{
 			e = default(EventRec);
+			checkMask(mask);
 			if (m_disabled || m_now == DateTime.MinValue) return false;   // disabled (EV-4.6b) or no bar stepped yet
 			if (DailyBars) { if (warnDaily) dailyQuery(); return false; }
 			return window(m_open, m_now, minTier, preMin, postMin, mask, out e);
@@ -1722,7 +1794,7 @@ namespace PowerLanguage.Function
 			if (!config.allowPartialCoverage && m_unk.Count > 0)
 			{
 				DateTime td = TradingDayOf(close);
-				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, effTier(uk), EEventFlags.None); return true; }
+				if (CoverageBlocks(td, mask, minTier, out uk)) { e = EventRec.Make(uk, td, effTier(uk), EEventFlags.NoCoverage); return true; }
 			}
 			TimeSpan pre = TimeSpan.FromMinutes(preMin), post = TimeSpan.FromMinutes(postMin);
 			DateTime lo = open - post, hi = close + pre;
@@ -1752,6 +1824,7 @@ namespace PowerLanguage.Function
 		public List<EventRec> EventsOn(DateTime day, EEventClassMask mask = EEventClassMask.All)
 		{
 			day = day.Date;
+			checkMask(mask);
 			long key = (day.Ticks << 3) | (long)mask;
 			DayCache c;
 			if (m_dayCache.TryGetValue(key, out c) && m_now >= c.from && m_now < c.until) return c.list;
@@ -1775,6 +1848,7 @@ namespace PowerLanguage.Function
 		{
 			var l = new List<EventRec>();
 			day = day.Date;
+			checkMask(mask);
 			foreach (var yy in new[] { day.Year - 1, day.Year })
 			{
 				var yr = year(yy); int[] idx;
@@ -1824,6 +1898,10 @@ namespace PowerLanguage.Function
 				}
 			}
 			d.isRollWeek = IsRollWeek(day);
+			// per kind and day: only kinds that are requested (config.classes) AND Unknown on this day; a year-wide missing table
+			// kind is reported by NoCoverageYear only (no event table is fabricated for it)
+			foreach (var uk in unknownKinds(day)) if ((kindClass(uk) & config.classes) != 0) d.noCoverageKinds |= 1UL << (int)uk;
+			d.noCoverage = m_disabled || d.noCoverageKinds != 0;
 			return d;
 		}
 
