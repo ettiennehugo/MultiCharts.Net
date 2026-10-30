@@ -18,6 +18,7 @@ static class Program
 	static int Main()
 	{
 		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf();
+		VwapRollReset();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
@@ -561,6 +562,33 @@ static class Program
 		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),
 			"Create allocates no stream packs, VWAP or confluence engines (lazy)");
 	}
+	// PR I: opt-in Week/Month VWAP reset at a roll (VwapConfig.resetPeriodSlotsOnRoll, default false = unchanged)
+	static void VwapRollReset()
+	{
+		Check(!new VwapConfig().resetPeriodSlotsOnRoll, "PR I: VwapConfig.resetPeriodSlotsOnRoll defaults to false");
+		// default off: only RollDate resets at a roll (unchanged behaviour)
+		Check(VwapRollRules.ResetsAtRoll(true, false, false, true), "PR I: RollDate resets at a roll (flag off)");
+		Check(!VwapRollRules.ResetsAtRoll(false, true, false, true), "PR I: Week/Month do not reset at a roll when off");
+		// opt-in
+		Check(VwapRollRules.ResetsAtRoll(false, true, true, true), "PR I: Week/Month reset at a roll when on");
+		Check(!VwapRollRules.ResetsAtRoll(false, false, true, true), "PR I: other slots (Session/Length/Quarter/FromDate) never reset at a roll");
+		// no roll -> never
+		Check(!VwapRollRules.ResetsAtRoll(true, false, true, false) && !VwapRollRules.ResetsAtRoll(false, true, true, false), "PR I: no rollOn, no reset");
+		// accumulator walk: Week VWAP over 3 bars, roll on bar 2 (closing roll bar stays, prior sums dropped)
+		double[] px = { 100, 110, 120 }, vol = { 1, 1, 1 }; bool[] roll = { false, true, false };
+		foreach (bool on in new[] { false, true })
+		{
+			double pv = 0, v = 0;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (VwapRollRules.ResetsAtRoll(false, true, on, roll[i])) { pv = 0; v = 0; }
+				pv += px[i] * vol[i]; v += vol[i];
+			}
+			double vw = pv / v;
+			Check(on ? Math.Abs(vw - 115) < 1e-9 : Math.Abs(vw - 110) < 1e-9, "PR I: Week VWAP walk " + (on ? "on -> 115 (roll bar + after)" : "off -> 110 (spans the roll)"));
+		}
+	}
 }
 class TAnc : IVpConfAnchor { public string SourceVolumeId { get; set; } public string ProfileId { get; set; } public bool Developing { get; set; } public bool Overlay { get; set; } }
-class TSurv : IVpConfSurvivor { public IVpConfAnchor Anchor { get; set; } public bool Independent { get; set; } public double Credit { get; set; } }
+class TSurv : IVpConfSurvivor { public IVpConfAnchor Anchor { get; set; } public bool Independent { get; set; } public double Credit { get; set; } 
+}

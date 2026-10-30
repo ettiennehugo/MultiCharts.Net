@@ -13,6 +13,29 @@ namespace PowerLanguage.Function
 	// Spec VPB-9 (analyst-base-class-spec.md): _VpVwapEngine moved verbatim out of _VolumeProfileBase.Strategy.CS into its own
 	// helper file, per the CS-0 probe convention (_SignalJournal.Function.CS: plain class in PowerLanguage.Function, class name = file name).
 
+	// <vwap-roll-rules>
+	/// <summary>VWAP slot options (protected VwapConfig on _VolumeProfileBase; no [Input]s). Read once in StartCalc.</summary>
+	public sealed class VwapConfig
+	{
+		/// <summary>Opt-in (educator review V1): Week / Month VWAP slots also reset at a contract roll (rollOn on the slot's
+		/// stream, on the closing roll bar, like RollDate: committed sums dropped, the roll bar stays). Default false = unchanged:
+		/// they reset on the period key only. Needs RollDetection != Off (else rollOn never fires). Quarter is not affected.</summary>
+		public bool resetPeriodSlotsOnRoll = false;
+	}
+
+	/// <summary>MC-free reset rule of the period VWAP slots (tested in VpHelperTests).</summary>
+	public static class VwapRollRules
+	{
+		/// <summary>True when a closing bar that fires rollOn resets the slot: always for RollDate; for Week / Month only when
+		/// resetPeriodSlotsOnRoll is on; never otherwise.</summary>
+		public static bool ResetsAtRoll(bool isRollDate, bool isWeekOrMonth, bool resetPeriodSlotsOnRoll, bool rollOn)
+		{
+			if (!rollOn) return false;
+			return isRollDate || (isWeekOrMonth && resetPeriodSlotsOnRoll);
+		}
+	}
+	// </vwap-roll-rules>
+
 	/// <summary>
 	/// Self-contained VWAP accumulator. Stepped from CalcBar against a data stream's Bars.
 	/// Allows IOG and calculations on same bars by calculating provisional values and only
@@ -27,6 +50,7 @@ namespace PowerLanguage.Function
 		public DateTime fromDate;
 		public int datastream;
 		public string label;
+		public bool resetPeriodOnRoll;            // VwapConfig.resetPeriodSlotsOnRoll (Week / Month only), set by configureVwap
 
 		public double value;
 		public double sigma;
@@ -125,9 +149,11 @@ namespace PowerLanguage.Function
 				warnIfGap(bar);
 				m_curBar = bar;
 			}
-			if (type == EVwapType.RollDate && bars.Status == EBarState.Close && parent.vwapRollOn(datastream))
+			bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));
+			if (rollSlot && bars.Status == EBarState.Close &&
+				VwapRollRules.ResetsAtRoll(type == EVwapType.RollDate, type == EVwapType.Week || type == EVwapType.Month, resetPeriodOnRoll, parent.vwapRollOn(datastream)))
 			{
-				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting RollDate VWAP {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
+				if (parent.TraceLevel >= ETraceLevel.Debug) parent.trace(ETraceLevel.Debug, $"Resetting {type} VWAP at roll {bars.Time[0]:yyyy-MM-dd HH:mm:ss}");
 				clearSums();
 			}
 			setProvisional(priceAt(bars, 0), volume(bars, 0));

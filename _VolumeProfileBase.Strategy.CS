@@ -1759,6 +1759,7 @@ namespace PowerLanguage.Strategy
 			eng.Reset();
 
 			eng.datastream = stream;
+			eng.resetPeriodOnRoll = VwapConfig.resetPeriodSlotsOnRoll;
 			if (type != EVwapType.AdaptiveFromDate) return eng;
 
 			if (!tryParseDate(fromText, out DateTime dt))
@@ -2986,6 +2987,8 @@ namespace PowerLanguage.Strategy
 		protected ProfileStatsConfig ProfileStats { get; } = new ProfileStatsConfig();
 		/// <summary>VP-3 per-bar ladder (enabled=false: not created; on the futures base it forces OrderFlowEnabled).</summary>
 		protected BarLadderConfig BarLadders { get; } = new BarLadderConfig();
+		/// <summary>VWAP slot options; resetPeriodSlotsOnRoll (default false) resets Week / Month slots at a roll too.</summary>
+		protected VwapConfig VwapConfig { get; } = new VwapConfig();
 
 		private bool m_rangeOn;
 		private readonly List<RangeProfileHandle> m_rangeHandles = new List<RangeProfileHandle>();
