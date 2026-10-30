@@ -18,6 +18,7 @@ static class Program
 	static int Main()
 	{
 		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf();
+		VwapRollReset();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
@@ -560,6 +561,45 @@ static class Program
 		string create = c0 >= 0 && c1 > c0 ? bas.Substring(c0, c1 - c0) : "";
 		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),
 			"Create allocates no stream packs, VWAP or confluence engines (lazy)");
+	}
+	// PR I: opt-in Week/Month VWAP reset at a roll (VwapConfig.resetPeriodSlotsOnRoll, default false = unchanged)
+	static void VwapRollReset()
+	{
+		Check(!new VwapConfig().resetPeriodSlotsOnRoll, "PR I: VwapConfig.resetPeriodSlotsOnRoll defaults to false");
+		// wiring pins (comment-stripped source): config passed through, default off and not hard-wired, reset only on closed bars
+		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpVwapEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
+		if (dir == null) { Check(false, "PR I: repo root with _VpVwapEngine.Function.CS not found"); return; }
+		Func<string, string> strip = q => System.Text.RegularExpressions.Regex.Replace(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, q)), @"//[^\n]*", "");
+		string veng = strip("_VpVwapEngine.Function.CS"), vbas = strip("_VolumeProfileBase.Strategy.CS");
+		Func<string, string, int> count = (hay, needle) => { int n = 0, i = 0; while ((i = hay.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; } return n; };
+		Check(count(vbas, "eng.resetPeriodOnRoll = VwapConfig.resetPeriodSlotsOnRoll;") == 1 && count(vbas, "resetPeriodOnRoll =") == 1, "PR I: configureVwap passes the config flag through (exactly once, no other assignment)");
+		Check(count(veng, "public bool resetPeriodSlotsOnRoll = false;") == 1 && count(veng, "public bool resetPeriodOnRoll;") == 1 && count(veng, "resetPeriodOnRoll =") == 0, "PR I: default off, not hard-wired in the engine");
+		Check(count(vbas, "protected VwapConfig VwapConfig { get; } = new VwapConfig();") == 1 && count(vbas, "resetPeriodSlotsOnRoll = true") == 0, "PR I: base uses the default VwapConfig (no hard-wired true)");
+		Check(count(veng, "if (rollSlot && bars.Status == EBarState.Close &&") == 1, "PR I: roll reset only on closed bars");
+		Check(count(veng, "bool rollSlot = type == EVwapType.RollDate || (resetPeriodOnRoll && (type == EVwapType.Week || type == EVwapType.Month));") == 1, "PR I: roll slots = RollDate, or Week/Month with the flag");
+		Check(count(vbas, "if (VwapConfig.resetPeriodSlotsOnRoll && RollDetection == ERollDetection.Off)") == 1, "PR I: warns when the flag is on but RollDetection is Off");
+		Check(count(veng, "else if (parent.TraceLevel >= ETraceLevel.Journal) parent.trace(ETraceLevel.Journal, $\"VWAP roll reset ") == 1, "PR I: each roll reset journaled once (Debug line, else Journal line)");
+		// default off: only RollDate resets at a roll (unchanged behaviour)
+		Check(VwapRollRules.ResetsAtRoll(true, false, false, true), "PR I: RollDate resets at a roll (flag off)");
+		Check(!VwapRollRules.ResetsAtRoll(false, true, false, true), "PR I: Week/Month do not reset at a roll when off");
+		// opt-in
+		Check(VwapRollRules.ResetsAtRoll(false, true, true, true), "PR I: Week/Month reset at a roll when on");
+		Check(!VwapRollRules.ResetsAtRoll(false, false, true, true), "PR I: other slots (Session/Length/Quarter/FromDate) never reset at a roll");
+		// no roll -> never
+		Check(!VwapRollRules.ResetsAtRoll(true, false, true, false) && !VwapRollRules.ResetsAtRoll(false, true, true, false), "PR I: no rollOn, no reset");
+		// accumulator walk: Week VWAP over 3 bars, roll on bar 2 (closing roll bar stays, prior sums dropped)
+		double[] px = { 100, 110, 120 }, vol = { 1, 1, 1 }; bool[] roll = { false, true, false };
+		foreach (bool on in new[] { false, true })
+		{
+			double pv = 0, v = 0;
+			for (int i = 0; i < 3; ++i)
+			{
+				if (VwapRollRules.ResetsAtRoll(false, true, on, roll[i])) { pv = 0; v = 0; }
+				pv += px[i] * vol[i]; v += vol[i];
+			}
+			double vw = pv / v;
+			Check(on ? Math.Abs(vw - 115) < 1e-9 : Math.Abs(vw - 110) < 1e-9, "PR I: Week VWAP walk " + (on ? "on -> 115 (roll bar + after)" : "off -> 110 (spans the roll)"));
+		}
 	}
 }
 class TAnc : IVpConfAnchor { public string SourceVolumeId { get; set; } public string ProfileId { get; set; } public bool Developing { get; set; } public bool Overlay { get; set; } }
