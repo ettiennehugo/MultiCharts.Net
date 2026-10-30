@@ -293,7 +293,7 @@ static class Program
 		var gp = lv.ToDictionary(m => DateTime.Parse(m.Groups[1].Value), m => double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture));
 		Check(gp[new DateTime(2024, 12, 16)] == 2.25 && new[] { "2024-03-11", "2024-06-17", "2024-09-16" }.All(x => gp[DateTime.Parse(x)] >= 60), "live: weak 2.25 pt gap 2024-12-16 still wins its window (other 2024 rolls >= 60 pts)");
 		Check(new[] { "2017-03-06", "2018-06-04", "2021-06-07", "2021-12-06" }.All(x => gp[DateTime.Parse(x)] <= 3.5), "live: 2017-03/2018-06/2021-06/2021-12 gaps all <= 3.5 pts");
-		// Analyst 2 nits (PR #55): the Thursday halt-reopen gap sizes, 2022+ offset 0 on the live fixture, and a negative replay
+		// Analyst 2 nits (PR #55, RollTests nits; PR #57): the Thursday halt-reopen gap sizes, 2022+ offset 0 on the live fixture, and a negative replay
 		Check(gp[new DateTime(2017, 6, 9)] == 6.00 && gp[new DateTime(2019, 12, 13)] == 7.75, "live: ESM17 gap 6.00 pts, ESZ19 gap 7.75 pts");
 		var rxOff = new Regex(@"EVROLL splice\((\d{4}-\d\d-\d\d)\) rule\((\d{4}-\d\d-\d\d)\) offsetSessions\((-?\d+)\)");
 		var offs = live.Select(x => rxOff.Match(x)).Where(m => m.Success && DateTime.Parse(m.Groups[1].Value) >= new DateTime(2022, 4, 1)).ToList();
@@ -311,6 +311,20 @@ static class Program
 			if (det3.Step(k3++, d, op, pc, "@ES", 0.25)) kept3.Add(d);
 			if (det3.Step(k3++, d.AddDays(1), op + 50, op, "@ES", 0.25)) extraAccepted++;      // extra 200-tick gap the next day: same contract
 		}
+		// the gap floor itself (Analyst 2, PR #57): on every live splice day, which is inside the roll window, a 7-tick gap
+		// (gapTicks - 1) is rejected and an 8-tick gap (gapTicks) is accepted, each on a fresh detector
+		int inWin = 0, below = 0, atFloor = 0; DateTime exw;
+		foreach (var m in lv)
+		{
+			DateTime d = DateTime.Parse(m.Groups[1].Value); double pc = double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+			if (_RollDetector.SeriesWindow(d, out exw)) inWin++;
+			var d7 = new _RollDetector { series = true }; d7.Step(1, d.AddDays(-3), pc, pc, "@ES", 0.25);
+			if (d7.Step(2, d, pc + 7 * 0.25, pc, "@ES", 0.25)) below++;
+			var d8 = new _RollDetector { series = true }; d8.Step(1, d.AddDays(-3), pc, pc, "@ES", 0.25);
+			if (d8.Step(2, d, pc - 8 * 0.25, pc, "@ES", 0.25)) atFloor++;
+		}
+		Check(new _RollDetector().gapTicks == 8 && inWin == lv.Count && below == 0 && atFloor == lv.Count,
+			$"gap floor: every splice day in the window ({inWin}/{lv.Count}); 7 ticks rejected ({below} accepted), 8 ticks accepted ({atFloor})");
 		Check(smallAccepted == 0 && extraAccepted == 0 && kept3.SequenceEqual(liveExpect), $"negative replay: 1-tick and extra same-contract gaps rejected, the 30 splices kept (small {smallAccepted}, extra {extraAccepted}, kept {kept3.Count})");
 	}
 }
