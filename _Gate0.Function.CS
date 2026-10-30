@@ -41,7 +41,9 @@ namespace PowerLanguage.Function
 	{
 		public static string Check(string chartType, string type, long size)
 		{
-			bool ok = chartType == "Regular" && ((type == "Tick" && size == 1) || (type == "Minute" && size == 1) || (type == "Second" && size >= 1 && size <= 60 && 60 % size == 0));
+			if (type == "Second" && size <= 0)   // explicit: never reaches 60 % size
+				return "Data1 is " + size + " Second " + chartType + " bars; the bar size must be a positive number of seconds that divides 60 (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60)";
+			bool ok = chartType == "Regular" && ((type == "Tick" && size == 1) || (type == "Minute" && size == 1) || (type == "Second" && size <= 60 && 60 % size == 0));
 			return ok ? null : "Data1 is " + size + " " + type + " " + chartType + " bars; Gate 0 needs 1-tick, 1-minute or N-second bars (N divides 60). " +
 				"Bars longer than 1 minute (or of variable duration: multi-tick, volume/Contract, range/Point, Renko, ...) silently corrupt the 1m buckets and canaries";
 		}

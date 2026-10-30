@@ -86,6 +86,11 @@ static class Program
 		Check(Gate0Data1.Check("Regular", "Minute", 5) != null && Gate0Data1.Check("Regular", "Minute", 0) != null && Gate0Data1.Check("Regular", "Hour", 1) != null && Gate0Data1.Check("Regular", "Day", 1) != null, "Data1 guard rejects bars longer than 1 minute");
 		Check(Gate0Data1.Check("Regular", "Tick", 100) != null && Gate0Data1.Check("Regular", "Contract", 500) != null && Gate0Data1.Check("Regular", "Point", 4) != null && Gate0Data1.Check("Regular", "PointOriginal", 4) != null && Gate0Data1.Check("Regular", "Change", 2) != null && Gate0Data1.Check("Regular", "Second", 7) != null && Gate0Data1.Check("Regular", "Second", 90) != null, "Data1 guard rejects multi-tick, volume, range and misaligned second bars");
 		Check(Gate0Data1.Check("Regular", "Minute", 5).Contains("5 Minute"), "Data1 guard message names the resolution");
+		Check(Gate0Data1.Check("Regular", "Tick", 2) != null, "Data1 guard rejects (Regular, Tick, 2)");
+		Check(Gate0Data1.Check("Regular", "Minute", 2) != null, "Data1 guard rejects (Regular, Minute, 2)");
+		{ string m0 = Gate0Data1.Check("Regular", "Second", 0); Check(m0 != null && m0.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, 0) with the positive-seconds message"); }
+		{ string mn = Gate0Data1.Check("Regular", "Second", -60); Check(mn != null && mn.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, -60) with the positive-seconds message"); }
+		Check(Gate0Data1.Check("Regular", "Second", 30) == null, "Data1 guard accepts (Regular, Second, 30)");
 		Check(Gate0Data1.Check("Renko", "Minute", 1) != null && Gate0Data1.Check("Kagi", "Tick", 1) != null, "Data1 guard rejects non-Regular chart types");
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 31, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "5m bucket end");
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 35, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "end-stamped bar on a boundary stays in its bucket");
