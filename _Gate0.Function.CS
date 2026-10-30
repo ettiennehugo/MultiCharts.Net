@@ -335,6 +335,7 @@ namespace PowerLanguage.Function
 		public IList<Gate0DvLevel> DvLevels { get { return m_dv; } }
 		public double SessionVwap { get { return m_cur != null ? m_cur.vwap.Value : double.NaN; } }
 		public double Atr20d { get { return m_atrD.Value; } }
+		public double Atr5 { get { return m_atr5.Value; } }
 		public double Atr30 { get { return m_atr30.Value; } }
 
 		/// <summary>A2-53 sweep cell: Variant 100..123 -> idx = Variant-100; gap g = {0.3,0.5,0.8}%[idx/8]; j = 1 + (idx/4)%2;
@@ -386,6 +387,10 @@ namespace PowerLanguage.Function
 			if (m_b5.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on5m(e, o, h, l, c, v);
 			if (m_b15.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on15m(e, o, h, l, c, v);
 			if (m_b30.PreBar(b.et, out e, out o, out h, out l, out c, out v)) on30m(e, o, h, l, c, v);
+			// Educator review G1 (both analysts), NEW PRE-REGISTRATION: the intraday ATRs restart at the splice like the daily one,
+			// so the first 5m/30m TR on the new contract is that bucket's own range, not the cross-contract gap. Done AFTER the
+			// PreBar flush: on tick data a bucket still open from the old contract closes here and keeps its legitimate TR.
+			if (b.roll) { m_atr5.ResetPrev(); m_atr30.ResetPrev(); }
 			double tp = (b.h + b.l + b.c) / 3;
 			if (!rth && m_prevRth) m_avPc.Reset();
 			m_prevRth = rth;
@@ -450,6 +455,7 @@ namespace PowerLanguage.Function
 			// A2-39 Reset: forget every multi-session source built on the old contract
 			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
 			m_bars30.Clear(); m_dvPending.Clear(); m_dv.Clear(); m_rotCool.Clear(); m_trendCool = 0;
+			// ATR5/ATR30 restart in Bar(), after the PreBar flush of buckets still open from the old contract (see there).
 			m_atrD.ResetPrev(); m_rollSplice = true;
 		}
 

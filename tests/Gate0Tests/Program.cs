@@ -237,6 +237,61 @@ static class Program
 			}
 		}
 
+		// ---- educator review G1: ATR5 and ATR30 restart at a roll (only the splice TR is dropped) ----
+		{
+			Func<double, bool, int, Gate0Engine> runRoll = (gap, flag, endMin) =>
+			{
+				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
+				for (int d = 0; d < 6; d++)
+				{
+					var day = rs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					bool first = true; if (sd++ == 3) rp += gap;
+					for (var t = day.AddHours(-5).AddMinutes(1); t <= day.AddMinutes(endMin); t = t.AddMinutes(1))
+					{ re.Bar(new Gate0Bar(t, day, rp, rp + 0.25, rp - 0.25, rp, 100, flag && sd == 4 && first)); first = false; }
+				}
+				return re;
+			};
+			Gate0Engine flat = runRoll(0, false, 960), rolled = runRoll(100, true, 960), unflagged = runRoll(100, false, 960);
+			Check(Near(flat.Atr5, 0.5) && Near(flat.Atr30, 0.5), "roll control: ATR5/ATR30 = bucket range 0.5 (" + flat.Atr5 + "/" + flat.Atr30 + ")");
+			Check(BitConverter.DoubleToInt64Bits(rolled.Atr5) == BitConverter.DoubleToInt64Bits(flat.Atr5), "ATR5 restarts at a roll: the 100-pt splice gap never enters TR (" + rolled.Atr5 + ")");
+			Check(BitConverter.DoubleToInt64Bits(rolled.Atr30) == BitConverter.DoubleToInt64Bits(flat.Atr30), "ATR30 restarts at a roll: the 100-pt splice gap never enters TR (" + rolled.Atr30 + ")");
+			Check(unflagged.Atr30 > flat.Atr30 + 1, "without the roll flag the same gap inflates ATR30 (test has teeth: " + unflagged.Atr30 + ")");
+			Check(unflagged.Atr5 > flat.Atr5, "without the roll flag the same gap inflates ATR5 (teeth: " + unflagged.Atr5 + ")");
+			// PR #43 review (Analyst 1): sessions end at 15:58, off a bucket boundary, so the old contract's last 5m/30m bucket
+			// is still open when the roll bar arrives and is flushed by its PreBar. The reset must come after that flush.
+			Gate0Engine flat58 = runRoll(0, false, 958), rolled58 = runRoll(100, true, 958);
+			Check(BitConverter.DoubleToInt64Bits(rolled58.Atr5) == BitConverter.DoubleToInt64Bits(flat58.Atr5), "ATR5 restarts at a roll when the old session ends off a bucket boundary (15:58: " + rolled58.Atr5 + ")");
+			Check(BitConverter.DoubleToInt64Bits(rolled58.Atr30) == BitConverter.DoubleToInt64Bits(flat58.Atr30), "ATR30 restarts at a roll when the old session ends off a bucket boundary (15:58: " + rolled58.Atr30 + ")");
+		}
+
+		// ---- PR #43 nit: off-boundary stamps (stand-in for tick data) - the old-contract bucket still open at the roll closes BEFORE
+		// the ATR restart. NOTE: these are 1-minute bars stamped at :30, not real ticks; any stamp that leaves a 5m/30m bucket
+		// pending at the roll exercises the same path. ----
+		{
+			Func<double, bool, Gate0Engine> runOffStamp = (gap, flag) =>
+			{
+				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
+				for (int d = 0; d < 6; d++)
+				{
+					var day = rs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+					bool first = true; if (sd++ == 3) rp += gap;
+					var last = day.AddHours(16).AddSeconds(-30);
+					for (var t = day.AddHours(-5).AddSeconds(30); t <= last; t = t.AddMinutes(1))
+					{
+						if (sd == 3 && t == last) rp += 1.0;   // old contract: the last bar (bucket still pending at the roll) jumps 1 pt and stays
+						double tpx = rp;
+						re.Bar(new Gate0Bar(t, day, tpx, tpx + 0.25, tpx - 0.25, tpx, 100, flag && sd == 4 && first)); first = false;
+					}
+				}
+				return re;
+			};
+			Gate0Engine ctl = runOffStamp(0, false), rol = runOffStamp(100, true);
+			Check(ctl.Atr30 > 0.5 && BitConverter.DoubleToInt64Bits(rol.Atr5) == BitConverter.DoubleToInt64Bits(ctl.Atr5) && BitConverter.DoubleToInt64Bits(rol.Atr30) == BitConverter.DoubleToInt64Bits(ctl.Atr30),
+				"off-boundary stamps (1m bars at :30, tick stand-in): the pending old-contract bucket keeps its true range; only the splice TR is dropped (" + rol.Atr30 + " vs " + ctl.Atr30 + ")");
+		}
+
 		// ---- smoke: random walk across the holdout boundary never records holdout events ----
 		var eng = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 };
 		Check(eng.Configure() == null, "configure smoke engine");
