@@ -77,6 +77,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (MaxDataStream >= 2) ConfluenceDataStream2 = 2;
 			if (MaxDataStream >= 3) ConfluenceDataStream3 = 3;
+			UsesConfluenceZones = TraceConfluence;   // PR #47: zones are read only by the confluence trace
 			base.StartCalc();
 			if (TraceDataStream < 1)
 				throw new ArgumentException("TraceDataStream must be a chart data stream index >= 1 (1 = Data1).");

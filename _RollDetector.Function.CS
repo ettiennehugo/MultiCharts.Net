@@ -31,6 +31,35 @@ namespace PowerLanguage.Function
 
 		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; }
 
+		/// <summary>PR #46 review: digest of a roll-date set for the config hash (RegimeGate host.rollDates). FNV-1a 64 over the UTF-8
+		/// of the distinct dates sorted ascending, each as "yyyy-MM-dd;"; 16 lower-case hex digits. Order- and duplicate-insensitive.</summary>
+		public static string DatesDigest(IEnumerable<DateTime> dates)
+		{
+			var l = new List<DateTime>(); if (dates != null) foreach (var d in dates) if (!l.Contains(d.Date)) l.Add(d.Date);
+			l.Sort();
+			var sb = new System.Text.StringBuilder();
+			foreach (var d in l) sb.Append(d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append(';');
+			ulong h = 14695981039346656037UL;
+			foreach (byte b in System.Text.Encoding.UTF8.GetBytes(sb.ToString())) { h ^= b; h *= 1099511628211UL; }
+			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
+		}
+
+		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
+		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
+		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
+		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
+		public static string SeriesKeyWarning(bool series, string resolutionType, bool calendarKeyed)
+		{
+			if (!series || !calendarKeyed) return null;
+			switch (resolutionType ?? "")
+			{
+				case "Day": case "Week": case "Month": case "Quarter": case "Year": return null;
+			}
+			return "RollDetection Series on an intraday chart (" + resolutionType + ") keyed by calendar date: Series only tests the first bar after midnight "
+				+ "and misses the Globex-open roll gap; use RollDetection = Table (RollDates) or key days by the Globex trading day "
+				+ "(override tradingDayKey with _CmeSessionClock.GlobexTradingDayEt: ET >= 18:00 belongs to the next date)";
+		}
+
 		/// <summary>Feed one CLOSED bar. Returns true when this call recorded a roll on `bar` (false on a repeat call for the same bar).
 		/// prevClose is the prior bar's close (ignored on bar 1).</summary>
 		public bool Step(int bar, DateTime tradingDay, double open, double prevClose, string name, double tick)
