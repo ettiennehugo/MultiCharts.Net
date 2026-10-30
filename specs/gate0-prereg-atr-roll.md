@@ -15,10 +15,10 @@ Every rule that reads ATR5 or ATR30 from the roll session until the excess has d
 - **Canary ATR rules** (~L955-983): A2-24 (i) R = ATR5 (~L961); A2-24 (iii) the 2×ATR5-from-VWAP fade (~L973); DV-01 `need = dv01K * ATR5` (~L983).
 - **DV-10** (~L1032): band check using `a = m_atr30.Value`.
 - **dvBar atrPrev** (~L536-539): the ATR30 before each 30m bar feeds the DV rotation box width (w = 1.5×ATR30), the breakout range (1.5×ATR30) and the trend-leg threshold (3×ATR30), so it changes which DV_ROT_POC_R6/R12 and DV_TREND_HVN levels exist.
-- ATR20d, Holm m, the costs and all other constants are unchanged.
+- ATR20d, the costs and all other constants are unchanged. Holm m is not changed by this amendment, but it is changed by the companion pre-registration in **PR #44** (AV_OPEN retired, `Holm m = 36`; recorded in the #44 PR body and the journaled pre-registration line). Gate-0 runs after both merge are one new trial under #43 + #44 together.
 
 ## 3. Consequence for earlier results
 Gate-0 runs made before this change (G0 level study Variants 0-13, controls, G0-b canaries 0..7 and the A2-53 sweep) belong to a **different trial**. They must not be pooled with, or compared as replications of, runs on the amended engine. Journal and config hashes change. After merge, the G0 study, the controls and the G0-b canaries are re-run. The roll session ±1 stays excluded from scoring, as before.
 
 ## 4. Verification (no results)
-`tests/Gate0Tests`: the splice tests (minute data ending at 16:00 and at 15:58, plus tick-style 30-second stamps with an old-contract bucket pending at the roll) require ATR5/ATR30 to be bit-identical to the no-gap control. The unflagged-gap controls show that ATR5 and ATR30 inflate without the reset. The 15:58 and tick tests fail on 5385c90 (reset inside `onRoll`) and pass on this branch.
+`tests/Gate0Tests`: the splice tests (minute data ending at 16:00 and at 15:58, plus 1-minute bars stamped at :30 as a stand-in for tick data with an old-contract bucket pending at the roll) require ATR5/ATR30 to be bit-identical to the no-gap control. The unflagged-gap controls show that ATR5 and ATR30 inflate without the reset. The 15:58 and off-boundary-stamp tests fail on 5385c90 (reset inside `onRoll`) and pass on this branch.

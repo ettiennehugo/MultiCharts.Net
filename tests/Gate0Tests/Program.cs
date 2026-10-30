@@ -265,9 +265,11 @@ static class Program
 			Check(BitConverter.DoubleToInt64Bits(rolled58.Atr30) == BitConverter.DoubleToInt64Bits(flat58.Atr30), "ATR30 restarts at a roll when the old session ends off a bucket boundary (15:58: " + rolled58.Atr30 + ")");
 		}
 
-		// ---- PR #43 nit: on tick data the old-contract bucket still open at the roll closes BEFORE the ATR restart ----
+		// ---- PR #43 nit: off-boundary stamps (stand-in for tick data) - the old-contract bucket still open at the roll closes BEFORE
+		// the ATR restart. NOTE: these are 1-minute bars stamped at :30, not real ticks; any stamp that leaves a 5m/30m bucket
+		// pending at the roll exercises the same path. ----
 		{
-			Func<double, bool, Gate0Engine> runTick = (gap, flag) =>
+			Func<double, bool, Gate0Engine> runOffStamp = (gap, flag) =>
 			{
 				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
 				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
@@ -285,9 +287,9 @@ static class Program
 				}
 				return re;
 			};
-			Gate0Engine ctl = runTick(0, false), rol = runTick(100, true);
+			Gate0Engine ctl = runOffStamp(0, false), rol = runOffStamp(100, true);
 			Check(ctl.Atr30 > 0.5 && BitConverter.DoubleToInt64Bits(rol.Atr5) == BitConverter.DoubleToInt64Bits(ctl.Atr5) && BitConverter.DoubleToInt64Bits(rol.Atr30) == BitConverter.DoubleToInt64Bits(ctl.Atr30),
-				"tick data: the pending old-contract bucket keeps its true range; only the splice TR is dropped (" + rol.Atr30 + " vs " + ctl.Atr30 + ")");
+				"off-boundary stamps (1m bars at :30, tick stand-in): the pending old-contract bucket keeps its true range; only the splice TR is dropped (" + rol.Atr30 + " vs " + ctl.Atr30 + ")");
 		}
 
 		// ---- smoke: random walk across the holdout boundary never records holdout events ----
