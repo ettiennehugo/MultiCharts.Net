@@ -67,20 +67,23 @@ static class Program
 		Func<DateTime, int, double> gap = (d, m) => d == new DateTime(2025, 3, 12) ? 2.5 : d == new DateTime(2025, 4, 8) ? 3.0 : d == new DateTime(2025, 3, 24) ? 2.25 : 0.75;
 		var s = Series(60, gap, d => "ES", start);
 
-		// 1. ported detector == pre-S4 futures-base detector
-		foreach (var mode in new[] { (true, false), (false, true), (true, true) })
+		// 1. ported detector == pre-S4 futures-base detector (Table only since fix-i: Series is intentionally different now)
 		{
-			var r = new Ref { series = mode.Item1, table = mode.Item2 }; r.dates.Add(new DateTime(2025, 3, 17));
+			var r = new Ref { series = false, table = true }; r.dates.Add(new DateTime(2025, 3, 17));
 			for (int i = 0; i < s.Length; i++) r.Step(s, i, 0.25);
-			var det = new _RollDetector { series = mode.Item1, table = mode.Item2, dates = r.dates };
+			var det = new _RollDetector { series = false, table = true, dates = r.dates };
 			var got = Run(det, s, 0.25, true);
-			Check(got.SequenceEqual(r.rolls) && det.RollBars.SequenceEqual(r.rolls), $"S4 port identical to VPF-4 (series={mode.Item1} table={mode.Item2}) rolls [{string.Join(",", got)}]");
+			Check(got.SequenceEqual(r.rolls) && det.RollBars.SequenceEqual(r.rolls), $"S4 port identical to VPF-4 (table) rolls [{string.Join(",", got)}]");
 		}
-		var ds = new _RollDetector { series = true };
-		var sr = Run(ds, s, 0.25);
-		int b0312 = s.First(x => x.day == new DateTime(2025, 3, 12)).bar;
-		Check(sr.Count == 1 && sr[0] == b0312, "S4 series: only the in-window gap >= 8 ticks (Mar 12), not Mar 24 / Apr 8");
-		Check(Run(new _RollDetector { series = true, gapTicks = 11 }, s, 0.25).Count == 0, "S4 series: gapTicks threshold respected");
+		// fix-i: Series window is Mon 2025-03-17 .. Fri 03-21 (rule Monday 03-17, third Friday 03-21): the 03-12 gap is out now
+		Check(Run(new _RollDetector { series = true }, s, 0.25).Count == 0, "fix-i series: a gap before the roll-date week (Mar 12) is not a splice");
+		{
+			var s2 = Series(60, (d, m) => d == new DateTime(2025, 3, 18) ? 2.5 : d == new DateTime(2025, 3, 20) ? 3.0 : 0.75, d => "ES", start);
+			var sr = Run(new _RollDetector { series = true }, s2, 0.25);
+			Check(sr.Count == 1 && sr[0] == s2.First(x => x.day == new DateTime(2025, 3, 18)).bar, "fix-i series: first in-window gap >= 8 ticks only (Mar 18, not the Mar 20 one: one per contract)");
+			Check(Run(new _RollDetector { series = true, gapTicks = 13 }, s2, 0.25).Count == 0, "S4 series: gapTicks threshold respected");
+		}
+		FixI();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -133,5 +136,82 @@ static class Program
 		}
 		Console.WriteLine($"RollTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
+	}
+
+	// ---- fix-i: Series over-detection on intraday @ES (72 EVROLL lines for ~33 rolls, specs/evroll-mode2-run-2026-10-30.csv) ----
+
+	static DateTime GlobexDay(DateTime et) { return et.Hour >= 18 ? et.Date.AddDays(1) : et.Date; }   // = _CmeSessionClock.GlobexTradingDayEt
+
+	// Hourly ET bars of a Globex week: Sun 18:00 .. Fri 16:00, 17:00-18:00 halt Mon-Thu. Every Sunday open gaps weekendGap points
+	// (an ordinary weekend gap, > the 8-tick = 2 pt threshold), every weekday reopen haltGap; the splice (spread points) is at
+	// the Sunday open of the Globex day spliceDay. key: Globex day (fixed host) or calendar date (pre-fix host).
+	static B[] Intraday(DateTime from, DateTime to, double weekendGap, double haltGap, Func<DateTime, double> spliceAt, bool globexKey)
+	{
+		var l = new List<B>(); double px = 2000; int bar = 1; double prevC = px;
+		for (DateTime t = from; t < to; t = t.AddHours(1))
+		{
+			var dow = t.DayOfWeek;
+			bool open = !(dow == DayOfWeek.Saturday || (dow == DayOfWeek.Friday && t.Hour >= 17) || (dow == DayOfWeek.Sunday && t.Hour < 18) || t.Hour == 17);
+			if (!open) continue;
+			double o = prevC;
+			if (l.Count > 0)
+			{
+				DateTime pt = l[l.Count - 1].time;
+				if ((t - pt).TotalHours > 24) o += (bar % 2 == 0 ? weekendGap : -weekendGap) + spliceAt(GlobexDay(t));
+				else if ((t - pt).TotalHours > 1) o += haltGap;
+			}
+			double c = o + (bar % 3 - 1) * 0.25;
+			l.Add(new B { bar = bar++, day = globexKey ? GlobexDay(t) : t.Date, time = t, o = o, c = c, name = "@ES" });
+			prevC = c;
+		}
+		return l.ToArray();
+	}
+
+	static DateTime RuleRoll(DateTime expiry) { return expiry >= new DateTime(2022, 4, 1) ? expiry.AddDays(-4) : expiry.AddDays(-8); }
+	static DateTime MondayOf(DateTime d) { return d.AddDays(-(((int)d.DayOfWeek + 6) % 7)); }
+
+	static void FixI()
+	{
+		// (a) one quarter, Feb-Apr 2025: 3.5 pt weekend gaps every week + 1 pt weekday halt gaps; real splice (+25 pt) at the
+		//     Sunday 03-16 18:00 ET open (Globex Monday 03-17 = the 2022+ rule date).
+		DateTime spl = new DateTime(2025, 3, 17);
+		var a = Intraday(new DateTime(2025, 2, 2, 18, 0, 0), new DateTime(2025, 4, 26), 3.5, 1.0, d => d == spl ? 25 : 0, true);
+		var ra = Run(new _RollDetector { series = true }, a, 0.25);
+		Check(ra.Count == 1 && a.First(x => x.bar == ra[0]).day == spl, $"fix-i (a) weekend gaps + one splice -> exactly 1 detection on {spl:yyyy-MM-dd} [{string.Join(",", ra.Select(q => a.First(x => x.bar == q).day.ToString("MM-dd")))}]");
+		var ac = Intraday(new DateTime(2025, 2, 2, 18, 0, 0), new DateTime(2025, 4, 26), 3.5, 1.0, d => d == spl ? 25 : 0, false);
+		var refA = new Ref { series = true }; for (int i = 0; i < ac.Length; i++) refA.Step(ac, i, 0.25);
+		Check(refA.rolls.Count == 3, $"fix-i (a) pre-fix detector on the calendar key reproduces the bug: every Sunday open of Mar 1-21 ({refA.rolls.Count})");
+
+		// (b)+(c) 2016-11 .. 2024-12: weekend gaps every week, the vendor splice at the Sunday open of the Monday of the rule
+		//     date's week (2022+: the rule Monday itself). Per contract <= 1 (= 1), on that Monday; ESM22 2022-06-13.
+		var spliceDays = new HashSet<DateTime>(); var expiries = new List<DateTime>();
+		for (int y = 2016; y <= 2024; y++) for (int m = 3; m <= 12; m += 3)
+		{
+			DateTime e = _RollDetector.ThirdFriday(y, m); if (e < new DateTime(2016, 11, 1)) continue;
+			expiries.Add(e); spliceDays.Add(MondayOf(RuleRoll(e)));
+		}
+		var b = Intraday(new DateTime(2016, 10, 30, 18, 0, 0), new DateTime(2024, 12, 31), 4.0, 1.5, d => spliceDays.Contains(d) ? 12 : 0, true);
+		var rb = Run(new _RollDetector { series = true }, b, 0.25).Select(x => b.First(y => y.bar == x).day).ToList();
+		bool perQ = expiries.All(e => rb.Count(d => d <= e && d > e.AddMonths(-3)) <= 1);
+		Check(perQ, "fix-i (b) per-quarter Series count never above 1");
+		Check(rb.Count == expiries.Count && rb.All(spliceDays.Contains), $"fix-i (b) one detection per contract on the splice Monday ({rb.Count}/{expiries.Count})");
+		Check(rb.Where(d => d >= new DateTime(2022, 4, 1)).All(d => expiries.Any(e => RuleRoll(e) == d)), "fix-i (c) 2022+ detections at offset 0 (= the rule Monday)");
+		Check(rb.Contains(new DateTime(2022, 6, 13)) && !rb.Any(d => d.Year == 2022 && d.Month == 6 && d.Day != 13), "fix-i (c) ESM22 splice 2022-06-13");
+		Check(_RollDetector.RollRuleMondayFrom == new DateTime(2022, 4, 1), "fix-i RollRuleMondayFrom == EventRules cut-over 2022-04-01");
+
+		// replay of the MC evidence: every EVROLL splice day of the run fed as a qualifying gap (with a non-gap day before it)
+		string dir = AppContext.BaseDirectory, path = null;
+		for (var di = new DirectoryInfo(dir); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "tests", "RollTests", "evroll-mode2-run-2026-10-30.csv"); if (File.Exists(fp)) path = fp; }
+		var ev = path == null ? new List<DateTime>() : File.ReadAllLines(path).Select(x => Regex.Match(x, @"EVROLL splice\((\d{4}-\d\d-\d\d)\)")).Where(m => m.Success).Select(m => DateTime.Parse(m.Groups[1].Value)).ToList();
+		var det = new _RollDetector { series = true }; int n = 0, k = 1; var kept = new List<DateTime>();
+		foreach (var d in ev)
+		{
+			det.Step(k++, d.AddDays(-1), 100, 100, "@ES", 0.25);
+			if (det.Step(k++, d, 110, 100, "@ES", 0.25)) { n++; kept.Add(d); }
+		}
+		var byQ = kept.GroupBy(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3)).ToList();
+		Console.WriteLine($"fix-i replay: {ev.Count} EVROLL -> {n} splices; 2022+: {string.Join(" ", kept.Where(d => d.Year >= 2022).Select(d => d.ToString("yyyy-MM-dd")))}");
+		Check(ev.Count == 72 && n >= 28 && n <= 33 && byQ.All(g => g.Count() == 1), $"fix-i replay of the MC run: 72 -> {n} (<= 1 per contract)");
+		Check(kept.Where(d => d >= new DateTime(2022, 4, 1)).All(d => d == RuleRoll(_RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3))) && kept.Contains(new DateTime(2022, 6, 13)), "fix-i replay: 2022+ kept splices all at offset 0, ESM22 2022-06-13");
 	}
 }
