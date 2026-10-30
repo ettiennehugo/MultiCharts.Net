@@ -42,6 +42,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			try { Output.WriteLine($"{GetType().Name}: EVTEST StartCalc traceLevel({TraceLevel}) mode({Mode})"); } catch { }   // before base: visible even if base.StartCalc throws
 			base.StartCalc();
 			m_lastDay = m_lastSplice = DateTime.MinValue;
 			m_probeCount = m_probeDst = m_probeMismatch = m_rollCount = 0; m_hasPending = false;
@@ -62,15 +63,16 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar();
 			if (!m_startLogged)
 			{
-				// First bar of the run: also echoed to Output so a run with TraceLevel None / no EventCalendar is visible.
+				// First bar of the run, BEFORE base.CalcBar() so a throw in the base still leaves this line in Output. Echoed to
+				// Output so a run with TraceLevel None / no EventCalendar is visible.
 				m_startLogged = true;
 				string msg = $"EVTEST start mode({Mode}) probeTier({ProbeTier}) traceLevel({TraceLevel}) rollDetection({RollDetection}) eventCalendar({(EventCalendar == null ? "null" : "ok")})";
 				try { Output.WriteLine($"{GetType().Name}: {msg}"); } catch { }
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg);
+				try { if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, msg); } catch { }
 			}
+			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			_EventCalendar ev = EventCalendar;
 			if (ev == null) return;

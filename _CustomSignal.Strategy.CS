@@ -63,6 +63,7 @@ namespace PowerLanguage.Strategy
 		{
 			private static LogFileSingleton s_instance;
 			private static readonly object s_lock = new object();
+			internal static readonly Encoding s_utf8NoBom = new UTF8Encoding(false);   // no BOM (CS-16's choice kept); shared with TradeJournal
 
 			private string m_logFilePath;
 			private IOutput m_output; //MC main output window
@@ -78,7 +79,7 @@ namespace PowerLanguage.Strategy
 					string dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "MCSignalLogs");
 					Directory.CreateDirectory(dir);                       // no-op when it exists
 					m_logFilePath = Path.Combine(dir, logFilename);
-					File.AppendAllText(m_logFilePath, "", Encoding.UTF8);  // prove we can write here
+					File.AppendAllText(m_logFilePath, "", s_utf8NoBom);  // prove we can write here
 					m_output.WriteLine($"Log file created {m_logFilePath}");
 				}
 				catch (Exception ex)
@@ -121,7 +122,7 @@ namespace PowerLanguage.Strategy
 						// CS-3: runId column after the symbol (parsers that search the message text, e.g. _VolumeProfileBaseLog, are unaffected)
 						// CS-9: the bar time's zone (Bars.Info.TimeZone: Local / GMT / Exchange), not the PC offset that "zzz" printed
 						string line = $"{level},{timestamp:yyyy-MM-dd HH:mm:ss} {zoneLabel},{signalName},{symbol},{runId},{csvMessage}";
-						File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, Encoding.UTF8);
+						File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, s_utf8NoBom);
 					}
 					catch (Exception ex)
 					{
@@ -160,11 +161,13 @@ namespace PowerLanguage.Strategy
 			private readonly object m_lock = new object();
 			private readonly string m_path;
 			private readonly string m_header;
-			public TradeJournal(string runId) : this(runId, "MCJournal_", HEADER) { }
+			private readonly IOutput m_output;   // the owning signal's Output, for write errors
+			public TradeJournal(string runId, IOutput output) : this(runId, "MCJournal_", HEADER, output) { }
 
 			/// <summary>CS-8 reuses the writer for MCEvents_&lt;runId&gt;.csv with its own header.</summary>
-			public TradeJournal(string runId, string prefix, string header)
+			public TradeJournal(string runId, string prefix, string header, IOutput output)
 			{
+				m_output = output;
 				m_header = header;
 				string name = prefix + runId + ".csv";
 				try
@@ -185,11 +188,19 @@ namespace PowerLanguage.Strategy
 			{
 				// One File.AppendAllText per line under the lock, no held-open handle (same reason as LogFileSingleton.WriteTrace).
 				// The header goes in front of the first line whenever the file does not exist (new run, or deleted mid-run).
+				// IO errors (e.g. the file open in Excel) are reported to output and the line is dropped; they never reach the strategy.
 				lock (m_lock)
 				{
-					string text = csvLine + System.Environment.NewLine;
-					if (!File.Exists(m_path)) text = m_header + System.Environment.NewLine + text;
-					File.AppendAllText(m_path, text, Encoding.UTF8);
+					try
+					{
+						string text = csvLine + System.Environment.NewLine;
+						if (!File.Exists(m_path)) text = m_header + System.Environment.NewLine + text;
+						File.AppendAllText(m_path, text, LogFileSingleton.s_utf8NoBom);
+					}
+					catch (Exception ex)
+					{
+						try { if (m_output != null) m_output.WriteLine($"Error writing to {m_path}: {ex.Message}"); } catch { }
+					}
 				}
 			}
 		}
@@ -324,7 +335,9 @@ namespace PowerLanguage.Strategy
 		private HashSet<string> m_journalWritten;              // CS-1: trades already written (identity key)
 
 		//interface methods
-		public _CustomSignal(object _ctx) : base(_ctx) { }
+		// Input defaults belong in the constructor: an assignment in Create() would overwrite the user's Format Study value if the
+		// host applies inputs before Create() (e.g. on a reload/recompile while applied), silently turning tracing off.
+		public _CustomSignal(object _ctx) : base(_ctx) { TraceLevel = ETraceLevel.None; }
 
 
 		//methods
@@ -1936,7 +1949,6 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			m_holidays = new PowerLanguage.Function._NyseHolidays(this);
-			TraceLevel = ETraceLevel.None;
 		}
 
 		/// <summary>
@@ -2275,7 +2287,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_journal == null)
 				{
-					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS) : new TradeJournal(RunId);
+					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS, Output) : new TradeJournal(RunId, Output);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
 				m_journal.Write(sb.ToString());
@@ -2600,7 +2612,7 @@ namespace PowerLanguage.Strategy
 				var hdr = new StringBuilder(EVENTS_HEADER_BASE);
 				for (int i = 0; i < h.Length; i++) hdr.Append(",mfeR_").Append(h[i]).Append(",maeR_").Append(h[i]);
 				hdr.Append(",completedBy,context");
-				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString());
+				m_eventFile = new TradeJournal(RunId, "MCEvents_", hdr.ToString(), Output);
 				trace(ETraceLevel.Journal, $"EVENTS file({m_eventFile.Path_})");
 			}
 			var sb = new StringBuilder();
