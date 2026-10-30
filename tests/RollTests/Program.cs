@@ -256,14 +256,42 @@ static class Program
 		var byQ = kept.GroupBy(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3)).ToList();
 		Console.WriteLine($"fix-i replay: {ev.Count} EVROLL -> {n} splices; 2022+: {string.Join(" ", kept.Where(d => d.Year >= 2022).Select(d => d.ToString("yyyy-MM-dd")))}");
 		Check(ev.Count == 72 && byQ.All(g => g.Count() == 1), $"fix-i replay of the MC run: 72 -> {n} (<= 1 per contract)");
-		// PR #51 B2: pin every quarter. Expected splice per contract (expiry -> splice day), and the contracts Series cannot
-		// detect in this data: M17 (no >= 8-tick open gap in Jun 2017, dxFeed) and U18/U19/Z19/U21 (no gap in the rule week;
-		// the only candidates were in expiry week, +2 sessions, which B1's window now excludes: no roll beats a wrong one).
+		// PR #51 B2 (this fixture): the pre-PR #51 run only, which had no EVROLL line on the Thursday 18:00 halt reopen of the
+		// pre-2022 rule date, so this replay of it keeps 28 splices. ESM17 (2017-06-09) and ESZ19 (2019-12-13) are missing here
+		// because they are absent from this input, not because Series cannot detect them: the live run (-c fixture below) has both.
 		var expect = "2016-12-05 2017-03-06 2017-09-04 2017-12-04 2018-03-05 2018-06-04 2018-12-10 2019-03-04 2019-06-10 2020-03-09 2020-06-08 2020-09-07 2020-12-07 2021-03-08 2021-06-07 2021-12-06 2022-03-07 2022-06-13 2022-09-12 2022-12-12 2023-03-13 2023-06-12 2023-09-11 2023-12-11 2024-03-11 2024-06-17 2024-09-16 2024-12-16".Split(' ').Select(DateTime.Parse).ToList();
-		var noSplice = new[] { "2017-06-16", "2018-09-21", "2019-09-20", "2019-12-20", "2021-09-17" }.Select(DateTime.Parse).ToList();
-		var exp2 = new List<DateTime>(); for (int y = 2016; y <= 2024; y++) for (int m = 3; m <= 12; m += 3) { var e = _RollDetector.ThirdFriday(y, m); if (e >= new DateTime(2016, 12, 1)) exp2.Add(e); }
-		Check(exp2.Count == 33 && exp2.All(e => noSplice.Contains(e) ^ expect.Any(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3) == e)), "fix-i B2: 33 contracts = 28 pinned + 5 listed undetectable (M17 U18 U19 Z19 U21)");
-		Check(kept.SequenceEqual(expect), $"fix-i B2 replay keeps exactly the pinned 28 splices [{string.Join(" ", kept.Except(expect).Select(d => "+" + d.ToString("yyyy-MM-dd")).Concat(expect.Except(kept).Select(d => "-" + d.ToString("yyyy-MM-dd"))))}]");
+		Check(kept.SequenceEqual(expect), $"fix-i B2 replay of the pre-PR #51 fixture keeps exactly its 28 splices (M17/Z19 not in this input) [{string.Join(" ", kept.Except(expect).Select(d => "+" + d.ToString("yyyy-MM-dd")).Concat(expect.Except(kept).Select(d => "-" + d.ToString("yyyy-MM-dd"))))}]");
 		Check(kept.Where(d => d >= new DateTime(2022, 4, 1)).All(d => d == RuleRoll(_RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3))) && kept.Contains(new DateTime(2022, 6, 13)), "fix-i replay: 2022+ kept splices all at offset 0, ESM22 2022-06-13");
+
+		// Live Mode 2 run after PR #51 (TraceLevel Journal, 2026-10-30-c): 30 detected rolls. Every contract Dec 2016 .. Dec 2024
+		// (33) is either pinned below or one of the 3 Series cannot detect in this data: U18/U19/U21 (no >= 8-tick open gap in the
+		// rule week; the only candidates were in expiry week, which B1's window excludes: no roll beats a wrong one).
+		// ESM17 2017-06-09 and ESZ19 2019-12-13 are Thursday 18:00 halt reopens on the pre-2022 Thursday rule date (Globex Friday).
+		var live = new List<string>();
+		for (var di = new DirectoryInfo(dir); di != null && live.Count == 0; di = di.Parent) { string fp = Path.Combine(di.FullName, "tests", "RollTests", "evroll-mode2-run-2026-10-30-c.csv"); if (File.Exists(fp)) live = File.ReadAllLines(fp).ToList(); }
+		var rx = new Regex(@"EVROLL splice\((\d{4}-\d\d-\d\d)\).* n\((\d+)\) gapPts\(([\d.]+)\).* prevClose\(([\d.]+)\) open\(([\d.]+)\)");
+		var lv = live.Select(x => rx.Match(x)).Where(m => m.Success).ToList();
+		var liveExpect = "2016-12-05 2017-03-06 2017-06-09 2017-09-04 2017-12-04 2018-03-05 2018-06-04 2018-12-10 2019-03-04 2019-06-10 2019-12-13 2020-03-09 2020-06-08 2020-09-07 2020-12-07 2021-03-08 2021-06-07 2021-12-06 2022-03-07 2022-06-13 2022-09-12 2022-12-12 2023-03-13 2023-06-12 2023-09-11 2023-12-11 2024-03-11 2024-06-17 2024-09-16 2024-12-16".Split(' ').Select(DateTime.Parse).ToList();
+		var noSplice = new[] { "2018-09-21", "2019-09-20", "2021-09-17" }.Select(DateTime.Parse).ToList();
+		var exp2 = new List<DateTime>(); for (int y = 2016; y <= 2024; y++) for (int m = 3; m <= 12; m += 3) { var e = _RollDetector.ThirdFriday(y, m); if (e >= new DateTime(2016, 12, 1)) exp2.Add(e); }
+		Check(exp2.Count == 33 && exp2.All(e => noSplice.Contains(e) ^ liveExpect.Any(d => _RollDetector.ThirdFriday(d.Year, ((d.Month - 1) / 3 + 1) * 3) == e)), "live B2: 33 contracts = 30 pinned + 3 listed undetectable (U18 U19 U21)");
+		Check(live.Count(x => x.Contains("EVROLL")) == 30 && live.Count(x => x.Contains("VPF-4")) == 30, $"live fixture: 30 EVROLL / 30 VPF-4 lines ({live.Count(x => x.Contains("EVROLL"))}/{live.Count(x => x.Contains("VPF-4"))})");
+		Check(!live.Any(x => x.Contains("calendar-keyed")), "live fixture: no calendar-key warning");
+		var logged = lv.Select(m => DateTime.Parse(m.Groups[1].Value)).ToList();
+		Check(logged.SequenceEqual(liveExpect) && lv.Select(m => int.Parse(m.Groups[2].Value)).SequenceEqual(Enumerable.Range(1, 30)), "live fixture: the 30 logged splices are exactly the pinned set, n(1..30)");
+		// replay through the real detector with the logged prevClose/open (a non-gap bar on the previous day first)
+		var det2 = new _RollDetector { series = true }; int k2 = 1; var kept2 = new List<DateTime>();
+		foreach (var m in lv)
+		{
+			DateTime d = DateTime.Parse(m.Groups[1].Value); double pc = double.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture), op = double.Parse(m.Groups[5].Value, System.Globalization.CultureInfo.InvariantCulture);
+			det2.Step(k2++, d.AddDays(-1), pc, pc, "@ES", 0.25);
+			if (det2.Step(k2++, d, op, pc, "@ES", 0.25)) kept2.Add(d);
+		}
+		Check(kept2.SequenceEqual(liveExpect), $"live replay keeps exactly the pinned 30 splices [{string.Join(" ", kept2.Except(liveExpect).Select(d => "+" + d.ToString("yyyy-MM-dd")).Concat(liveExpect.Except(kept2).Select(d => "-" + d.ToString("yyyy-MM-dd"))))}]");
+		Check(kept2.Contains(new DateTime(2017, 6, 9)) && kept2.Contains(new DateTime(2019, 12, 13)), "live replay: ESM17 2017-06-09 and ESZ19 2019-12-13 (Thursday halt reopens) detected");
+		// weak-gap visibility: 2024-12-16 wins its window on 2.25 pts (gapX 1.13) vs ~60 for the other 2024 rolls
+		var gp = lv.ToDictionary(m => DateTime.Parse(m.Groups[1].Value), m => double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture));
+		Check(gp[new DateTime(2024, 12, 16)] == 2.25 && new[] { "2024-03-11", "2024-06-17", "2024-09-16" }.All(x => gp[DateTime.Parse(x)] >= 60), "live: weak 2.25 pt gap 2024-12-16 still wins its window (other 2024 rolls >= 60 pts)");
+		Check(new[] { "2017-03-06", "2018-06-04", "2021-06-07", "2021-12-06" }.All(x => gp[DateTime.Parse(x)] <= 3.5), "live: 2017-03/2018-06/2021-06/2021-12 gaps all <= 3.5 pts");
 	}
 }
