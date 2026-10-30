@@ -13,6 +13,67 @@ namespace PowerLanguage.Function
 	// Spec VPB-9 (analyst-base-class-spec.md): _VpConfluenceEngine moved verbatim out of _VolumeProfileBase.Strategy.CS into its own
 	// helper file, per the CS-0 probe convention (_SignalJournal.Function.CS: plain class in PowerLanguage.Function, class name = file name).
 
+	// <vpconf-rules>
+	/// <summary>
+	/// PR #47 (PR F scope): MC-free confluence rules, extracted by tests/VpHelperTests/gen.sh.
+	/// Zone split as a width rule: a cluster of at least MinSplitCount anchors splits at its largest gap when its width
+	/// exceeds max(SplitTolMultiple x tol, atrFraction x Atr20d). When Atr20d is not ready (NaN / not positive) the width
+	/// limit falls back to SplitTolMultiple x tol. There is no gap > tol veto: the largest gap always splits a too-wide cluster.
+	/// </summary>
+	public static class VpConfluenceRules
+	{
+		public const double SplitTolMultiple = 4.0;          // a cluster wider than 4 x tol may split (was CLUSTER_SPLIT_TOL_MULTIPLE)
+		public const int MinSplitCount = 3;                  // ... and only when it holds at least this many anchors (was CLUSTER_MIN_SPLIT_COUNT)
+		public const double DefaultSplitAtrFraction = 0.03;  // 3% of Atr20d (protected _VolumeProfileBase.ConfluenceSplitAtrFraction)
+		private const double Eps = 1e-12;
+
+		public static bool AtrReady(double atr20d) { return !double.IsNaN(atr20d) && !double.IsInfinity(atr20d) && atr20d > 0; }
+
+		/// <summary>Width a cluster may span before it splits.</summary>
+		public static double SplitWidth(double tol, double atr20d, double atrFraction)
+		{
+			double w = SplitTolMultiple * tol;
+			if (AtrReady(atr20d) && atrFraction > 0 && atrFraction * atr20d > w) w = atrFraction * atr20d;
+			return w;
+		}
+
+		/// <summary>prices[lo..hi) ascending. Returns the first index of the upper part (split at the largest gap; the
+		/// lowest such gap on a tie), or -1 when the cluster stays one zone.</summary>
+		public static int SplitAt(IList<double> prices, int lo, int hi, double tol, double atr20d, double atrFraction)
+		{
+			if (prices == null || hi - lo < MinSplitCount) return -1;
+			if (prices[hi - 1] - prices[lo] <= SplitWidth(tol, atr20d, atrFraction) + Eps) return -1;
+			int split = -1;
+			double gap = 0;
+			for (int i = lo + 1; i < hi; i++)
+			{
+				double g = prices[i] - prices[i - 1];
+				if (g > gap) { gap = g; split = i; }
+			}
+			return split > lo ? split : -1;
+		}
+
+		/// <summary>Distinct non-empty ids (independent sources = distinct volume masses, i.e. (stream, profile window)).</summary>
+		public static int DistinctCount(IEnumerable<string> ids)
+		{
+			var set = new HashSet<string>();
+			if (ids != null) foreach (var s in ids) if (!string.IsNullOrEmpty(s)) set.Add(s);
+			return set.Count;
+		}
+
+		/// <summary>StartCalc check: every enabled confluence slot (stream >= 1) needs its own stream. Returns the error or null.</summary>
+		public static string DuplicateStreamError(int ds1, int ds2, int ds3)
+		{
+			int[] ds = { ds1, ds2, ds3 };
+			for (int j = 1; j < 3; j++)
+				for (int i = 0; i < j; i++)
+					if (ds[j] >= 1 && ds[j] == ds[i])
+						return "ConfluenceDataStream" + (j + 1) + " = ConfluenceDataStream" + (i + 1) + " (" + ds[j] + "): each confluence slot needs its own stream";
+			return null;
+		}
+	}
+	// </vpconf-rules>
+
 	/// <summary>
 	/// Rebuilds <see cref="m_confluenceZones"/> on the owning study.
 	/// The zone list itself stays on <see cref="_VolumeProfileBase"/>.
@@ -79,6 +140,8 @@ namespace PowerLanguage.Function
 		private double m_htfVal;
 		private int m_htfRank = -1;
 		private int m_htfAge = int.MaxValue;
+		private double m_atr20d = double.NaN;                          // host M-DAILY Atr20d for this rebuild (NaN = 4 x tol fallback)
+		private readonly List<double> m_prices = new List<double>();   // cluster prices for VpConfluenceRules.SplitAt
 
 		public _VpConfluenceEngine(_VolumeProfileBase owner)
 		{
@@ -101,6 +164,7 @@ namespace PowerLanguage.Function
 			assignDevelopingSources(anchors);
 
 			double tol = confluenceTolerance();
+			m_atr20d = m_owner.confluenceAtr20d();
 			anchors.Sort((a, b) => a.price.CompareTo(b.price));
 
 			List<Anchor> cluster = new List<Anchor>();
@@ -128,38 +192,27 @@ namespace PowerLanguage.Function
 
 		// Index range instead of GetRange. A split used to copy both sides; the anchors
 		// stay in price order, so [lo, hi) is the same cluster the copy would have been.
+		// PR #47: width rule (VpConfluenceRules.SplitAt). The anchors are sorted ascending, so m_prices mirrors the cluster.
 		private void emitClusters(List<Anchor> cluster, int lo, int hi, double tol)
 		{
 			if (cluster == null || hi <= lo) return;
-			double priceLo = cluster[lo].price;
-			double priceHi = cluster[lo].price;
-			for (int i = lo + 1; i < hi; i++)
+			if (lo == 0 && hi == cluster.Count)
 			{
-				if (cluster[i].price < priceLo) priceLo = cluster[i].price;
-				if (cluster[i].price > priceHi) priceHi = cluster[i].price;
+				m_prices.Clear();
+				for (int i = 0; i < cluster.Count; i++) m_prices.Add(cluster[i].price);
 			}
-			int count = hi - lo;
-			if (priceHi - priceLo <= CLUSTER_SPLIT_TOL_MULTIPLE * tol + PRICE_EPSILON || count < CLUSTER_MIN_SPLIT_COUNT)
-			{
-				addZone(cluster, lo, hi, tol);
-				return;
-			}
-			int split = -1;
-			double gap = 0;
-			for (int i = lo + 1; i < hi; i++)
-			{
-				double g = cluster[i].price - cluster[i - 1].price;
-				if (g > gap)
-				{
-					gap = g;
-					split = i;
-				}
-			}
-			if (split <= lo || gap <= tol)
+			double atrFraction = m_owner.ConfluenceSplitAtrFraction;
+			int split = VpConfluenceRules.SplitAt(m_prices, lo, hi, tol, m_atr20d, atrFraction);
+			if (split < 0)
 			{
 				addZone(cluster, lo, hi, tol);
 				return;
 			}
+			m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
+				"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
+				hi - lo, m_prices[lo], m_prices[hi - 1], m_prices[hi - 1] - m_prices[lo], VpConfluenceRules.SplitWidth(tol, m_atr20d, atrFraction),
+				m_prices[split], m_prices[split] - m_prices[split - 1], m_atr20d,
+				VpConfluenceRules.AtrReady(m_atr20d) ? "atr" : "tol-fallback"));
 			emitClusters(cluster, lo, split, tol);
 			emitClusters(cluster, split, hi, tol);
 		}
@@ -423,8 +476,8 @@ namespace PowerLanguage.Function
 			double acc = 0;
 			double rej = 0;
 			double ctx = 0;
-			int independent = 0;
-			var sources = new HashSet<string>();
+			var sourceIds = new List<string>();     // PR #47: independent survivors' volume masses (stream, profile window)
+			var profileIds = new List<string>();    // ... and their profiles
 			var streams = new HashSet<int>();
 			Survivor anchorPick = null;
 
@@ -441,8 +494,8 @@ namespace PowerLanguage.Function
 
 				if (s.independent)
 				{
-					independent++;
-					sources.Add(s.anchor.sourceVolumeId);
+					sourceIds.Add(string.IsNullOrEmpty(s.anchor.sourceVolumeId) ? s.anchor.profileId : s.anchor.sourceVolumeId);
+					profileIds.Add(s.anchor.profileId);
 					streams.Add(s.anchor.dataStream);
 				}
 				zone.hits.Add(toHit(s));
@@ -477,8 +530,9 @@ namespace PowerLanguage.Function
 			zone.rejectionScore = rej;
 			zone.contextScore = ctx;
 			zone.rawScore = acc + rej;
-			zone.independentSources = independent;
-			zone.profileCount = independent;
+			zone.independentSources = VpConfluenceRules.DistinctCount(sourceIds);   // V5: distinct sources, not survivors
+			zone.profileCount = VpConfluenceRules.DistinctCount(profileIds);
+			addDevelopingHits(zone, cluster, loIdx, hiIdx, survivors);
 			zone.streamCount = streams.Count;
 			zone.hitCount = zone.hits.Count;
 			zone.role = acc > 0 && rej > 0 ? EConfluenceRole.Mixed : pickRole(survivors, acc, rej);
@@ -490,6 +544,32 @@ namespace PowerLanguage.Function
 			zone.invalidationBelow = lo - tol;
 			zone.invalidationAbove = hi + tol;
 			m_owner.m_confluenceZones.Add(zone);
+		}
+
+		// PR #47: the developing profile's confluence so far, kept apart from the scored hits. Every developing-profile anchor
+		// in the zone is listed (tagged developing). One that survived carries its credit; one absorbed into its completed
+		// parent's source (assignDevelopingSources) or refused carries credit 0. developingScore sums the credited ones.
+		private static void addDevelopingHits(ConfluenceZone zone, List<Anchor> cluster, int lo, int hi, List<Survivor> survivors)
+		{
+			zone.developingScore = 0;
+			for (int i = lo; i < hi; i++)
+			{
+				Anchor a = cluster[i];
+				if (!a.developing || a.overlay) continue;
+				Survivor own = null;
+				for (int k = 0; k < survivors.Count; k++)
+					if (object.ReferenceEquals(survivors[k].anchor, a)) { own = survivors[k]; break; }
+				ConfluenceHit h;
+				if (own != null && own.credit > 0) h = toHit(own);
+				else
+				{
+					h = toHit(new Survivor { anchor = a, absorbed = "" });
+					h.weight = 0; h.credit = 0; h.independent = false;
+				}
+				if (zone.developingHits == null) zone.developingHits = new List<ConfluenceHit>();
+				zone.developingHits.Add(h);
+				zone.developingScore += h.credit;
+			}
 		}
 
 		private List<Survivor> collapseSameSource(List<Anchor> cluster, int lo, int hi)
@@ -543,8 +623,9 @@ namespace PowerLanguage.Function
 
 		private Survivor makeSurvivor(Anchor a, string absorbedLabels, bool volume)
 		{
+			// PR #47: StartCalc rejects duplicate enabled streams, so every anchor's stream maps to exactly one slot weight
+			// (collectStream / addVwap skip weight <= 0); the old 1 + 0.25 x rank fallback is gone.
 			double weight = rankWeightFor(a.dataStream);
-			if (weight <= 0) weight = 1.0 + FALLBACK_TIMEFRAME_WEIGHT_STEP * a.timeframeRank;
 			double credit;
 			if (a.overlay)
 				credit = DEFAULT_CONFLUENCE_OVERLAY_FACTOR * weight;
@@ -675,7 +756,8 @@ namespace PowerLanguage.Function
 				credit = s.credit,
 				volumeShare = s.anchor.volumeShare,
 				naked = s.anchor.naked,
-				independent = s.independent
+				independent = s.independent,
+				developing = s.anchor.developing
 			};
 		}
 

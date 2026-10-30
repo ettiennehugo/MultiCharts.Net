@@ -17,7 +17,7 @@ static class Program
 
 	static int Main()
 	{
-		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt();
+		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
@@ -445,5 +445,50 @@ static class Program
 			&& (int)ELevelKind.DvpLvn == 24 && (int)ELevelKind.DvpSigma == 25 && (int)ELevelKind.DvpFib == 26 && (int)ELevelKind.DvpConf == 27
 			&& Enum.GetValues(typeof(ELevelKind)).Length == 28, "D0a DVP kinds appended in order 20..27");
 		Check(LevelRef.Line(ELevelKind.DvpVah, 100, D0, D0, D0, 1, "DVP1:x").StudyType == "DvpVah" && LevelRef.Line(ELevelKind.DvpConf, 100, D0, D0, D0, 1, null).StudyType == "DvpConf", "D0a DVP StudyType strings for A2-33");
+	}
+
+	// PR #47 (PR F scope): VpConfluence rules (extracted from _VpConfluenceEngine <vpconf-rules>) plus source checks on the engine/base.
+	static void VpConf()
+	{
+		const double tol = 1.0, atr = 400;          // 4 ticks x 0.25; 3% x 400 = 12 > 4 x tol = 4
+		double f = VpConfluenceRules.DefaultSplitAtrFraction;
+		Check(f == 0.03 && VpConfluenceRules.MinSplitCount == 3 && VpConfluenceRules.SplitTolMultiple == 4.0, "split constants: 3% Atr20d, >= 3 anchors, 4 x tol");
+		// anchors chained within tol (they join), widths 0.02 x ATR (8) and 0.04 x ATR (16)
+		var narrow = new List<double> { 100, 101, 102, 103, 104, 105, 106, 107, 108 };
+		var wide = new List<double> { 100, 101, 102, 103, 104, 105, 106, 107, 108.5, 109, 110, 111, 112, 113, 114, 115, 116 };
+		Check(VpConfluenceRules.SplitAt(narrow, 0, narrow.Count, tol, atr, f) == -1, "width 0.02 x Atr20d: one zone");
+		int sp = VpConfluenceRules.SplitAt(wide, 0, wide.Count, tol, atr, f);
+		Check(sp == 8 && VpConfluenceRules.SplitAt(wide, 0, sp, tol, atr, f) == -1 && VpConfluenceRules.SplitAt(wide, sp, wide.Count, tol, atr, f) == -1,
+			"width 0.04 x Atr20d: two zones, split at the largest gap (107 | 108.5) [" + sp + "]");
+		Check(VpConfluenceRules.SplitAt(wide, 0, wide.Count, tol, atr, f) > 0 && 1.5 <= tol * 1.5, "no gap > tol veto: a largest gap of 1.5 (<= 2 x tol) still splits");
+		Check(VpConfluenceRules.SplitAt(narrow, 0, narrow.Count, tol, double.NaN, f) > 0 && VpConfluenceRules.SplitWidth(tol, double.NaN, f) == 4.0,
+			"Atr20d NaN: falls back to 4 x tol (width 8 > 4 splits)");
+		Check(VpConfluenceRules.SplitWidth(tol, 50, f) == 4.0 && VpConfluenceRules.SplitWidth(tol, 0, f) == 4.0 && VpConfluenceRules.SplitWidth(tol, double.PositiveInfinity, f) == 4.0,
+			"limit = max(4 x tol, 3% x Atr20d); bad ATR -> 4 x tol");
+		Check(VpConfluenceRules.SplitAt(new List<double> { 100, 120 }, 0, 2, tol, double.NaN, f) == -1, "fewer than 3 anchors never split");
+		Check(VpConfluenceRules.SplitAt(new List<double> { 100, 101, 102, 103, 104, 105, 109, 110 }, 0, 8, tol, double.NaN, f) == 6, "split index = first anchor above the largest gap");
+		// V5: independent sources are distinct (stream, profile window) ids, not survivors
+		Check(VpConfluenceRules.DistinctCount(new[] { "ds1:s10", "ds1:s10" }) == 1, "two survivors from the same profile/stream (acceptance + rejection) count 1 source");
+		Check(VpConfluenceRules.DistinctCount(new[] { "ds1:s10", "ds2:s10", "ds1:s50", "", null }) == 3, "distinct sources across streams / windows; empty ids ignored");
+		// duplicate enabled streams are rejected at StartCalc
+		string e = VpConfluenceRules.DuplicateStreamError(1, 1, -1);
+		Check(e == "ConfluenceDataStream2 = ConfluenceDataStream1 (1): each confluence slot needs its own stream", "duplicate stream error text: " + e);
+		Check(VpConfluenceRules.DuplicateStreamError(2, 3, 2) != null && VpConfluenceRules.DuplicateStreamError(1, -1, -1) == null && VpConfluenceRules.DuplicateStreamError(1, 0, 0) == null
+			&& VpConfluenceRules.DuplicateStreamError(1, 2, 3) == null, "only enabled (>= 1) duplicates are rejected");
+		// source checks: the engine and base use the rules, expose developing confluence, and allocate lazily
+		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
+		if (dir == null) { Check(false, "repo root with _VpConfluenceEngine.Function.CS not found"); return; }
+		string eng = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"));
+		string bas = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "_VolumeProfileBase.Strategy.CS"));
+		Check(eng.Contains("zone.independentSources = VpConfluenceRules.DistinctCount(sourceIds)") && !eng.Contains("independent++"), "engine: independentSources = distinct sources");
+		Check(eng.Contains("VpConfluenceRules.SplitAt(m_prices, lo, hi, tol, m_atr20d, atrFraction)") && !eng.Contains("gap <= tol") && eng.Contains("VPCONF split"), "engine: width-rule split with Atr20d, no gap > tol veto, splits journaled");
+		Check(!eng.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP") && !bas.Contains("FALLBACK_TIMEFRAME_WEIGHT_STEP"), "fallback timeframe weight removed");
+		Check(bas.Contains("VpConfluenceRules.DuplicateStreamError(ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)"), "base: StartCalc rejects duplicate confluence streams");
+		Check(eng.Contains("developing = s.anchor.developing") && eng.Contains("zone.developingHits.Add(h)") && bas.Contains("public bool developing;") && bas.Contains("public List<ConfluenceHit> developingHits;"),
+			"developing confluence exposed separately and tagged (ConfluenceHit.developing, ConfluenceZone.developingHits)");
+		int c0 = bas.IndexOf("protected override void Create()"), c1 = bas.IndexOf("protected override void Destroy()");
+		string create = c0 >= 0 && c1 > c0 ? bas.Substring(c0, c1 - c0) : "";
+		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),
+			"Create allocates no stream packs, VWAP or confluence engines (lazy)");
 	}
 }
