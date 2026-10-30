@@ -628,10 +628,13 @@ namespace PowerLanguage.Strategy
 		/// <summary>PR #47: host Atr20d for the confluence split, NaN when the host has no M-DAILY context (NeedsDaily false) or it is not ready.</summary>
 		internal double confluenceAtr20d()
 		{
-			if (!NeedsDaily) return double.NaN;
-			_DailyContext d = DailyContext;
-			return d == null ? double.NaN : d.Atr20d;
+			return VpConfluenceRules.HostAtr20d(NeedsDaily, () => DailyContext == null ? double.NaN : DailyContext.Atr20d);
 		}
+
+		/// <summary>PR #47 review: a strategy that reads confluence zones / targets sets this (Create or before base.StartCalc) so
+		/// the base builds M-DAILY for the 3% x Atr20d split. Default false: no daily context; zones use the 4 x tol limit.</summary>
+		protected bool UsesConfluenceZones { get; set; } = false;
+		private bool m_confluenceAtrWarned;
 
 		/// <summary>PR #47: journal line from the confluence engine (text built only when the journal is on).</summary>
 		internal void confluenceJournal(Func<string> text)
@@ -1384,7 +1387,8 @@ namespace PowerLanguage.Strategy
 		{
 			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
 			// and a confluence slot is on. Hosts that already set NeedsDaily are unaffected.
-			if (VpConfluenceRules.NeedsAtr20d(ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
+			m_confluenceAtrWarned = false;
+			if (VpConfluenceRules.NeedsAtr20d(UsesConfluenceZones, ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
 			base.StartCalc();
 			validateInputs();
 			unhookStreams();
@@ -2322,7 +2326,15 @@ namespace PowerLanguage.Strategy
 			bool sameBars = b1 == m_confluenceBuiltBar1 && b2 == m_confluenceBuiltBar2 && b3 == m_confluenceBuiltBar3;
 			if (!m_confluenceDirty && m_confluenceBuiltGeneration == m_confluenceGeneration && sameBars)
 				return;
-			if (m_confluenceEngine == null) m_confluenceEngine = new _VpConfluenceEngine(this);
+			if (m_confluenceEngine == null)
+			{
+				m_confluenceEngine = new _VpConfluenceEngine(this);
+				if (!UsesConfluenceZones && !m_confluenceAtrWarned && ConfluenceSplitAtrFraction > 0 && traceOn(ETraceLevel.Warning))
+				{
+					m_confluenceAtrWarned = true;
+					trace(ETraceLevel.Warning, "VPCONF: confluence zones used but UsesConfluenceZones is false; no M-DAILY, split uses the 4 x tol limit");
+				}
+			}
 			m_confluenceEngine.Rebuild();
 			m_confluenceDirty = false;
 			m_confluenceBuiltGeneration = m_confluenceGeneration;

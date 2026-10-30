@@ -20,6 +20,11 @@ namespace PowerLanguage.Function
 	/// exceeds max(SplitTolMultiple x tol, atrFraction x Atr20d). When Atr20d is not ready (NaN / not positive) the width
 	/// limit falls back to SplitTolMultiple x tol. There is no gap > tol veto: the largest gap always splits a too-wide cluster.
 	/// </summary>
+	/// <summary>The engine's anchor as the rules see it.</summary>
+	public interface IVpConfAnchor { string SourceVolumeId { get; } string ProfileId { get; } bool Developing { get; } bool Overlay { get; } }
+	/// <summary>The engine's same-source survivor as the rules see it.</summary>
+	public interface IVpConfSurvivor { IVpConfAnchor Anchor { get; } bool Independent { get; } double Credit { get; } }
+
 	public static class VpConfluenceRules
 	{
 		public const double SplitTolMultiple = 4.0;          // a cluster wider than 4 x tol may split (was CLUSTER_SPLIT_TOL_MULTIPLE)
@@ -81,39 +86,69 @@ namespace PowerLanguage.Function
 
 		/// <summary>V5 zone counts over the zone's survivors: independentSources = distinct SourceId of the credited
 		/// independent survivors (labels of one volume mass count once); profileCount = their distinct profiles.</summary>
-		public static void ZoneSourceCounts(IList<string> sourceVolumeIds, IList<string> profileIds, IList<bool> independent, IList<double> credit,
-			out int independentSources, out int profileCount)
+		public static void ZoneSourceCounts(IReadOnlyList<IVpConfSurvivor> survivors, out int independentSources, out int profileCount)
 		{
 			var src = new List<string>(); var prof = new List<string>();
-			for (int i = 0; i < sourceVolumeIds.Count; i++)
-			{
-				if (!(credit[i] > 0) || !independent[i]) continue;
-				src.Add(SourceId(sourceVolumeIds[i], profileIds[i]));
-				prof.Add(profileIds[i]);
-			}
+			if (survivors != null)
+				for (int i = 0; i < survivors.Count; i++)
+				{
+					IVpConfSurvivor s = survivors[i];
+					if (!(s.Credit > 0) || !s.Independent) continue;
+					src.Add(SourceId(s.Anchor.SourceVolumeId, s.Anchor.ProfileId));
+					prof.Add(s.Anchor.ProfileId);
+				}
 			independentSources = DistinctCount(src);
 			profileCount = DistinctCount(prof);
 		}
 
-		/// <summary>Developing confluence: indexes of the zone's anchors to list in developingHits (every developing, non-overlay
-		/// anchor, in order) and the credit each carries (its survivor's credit when it survived with credit > 0, else 0;
-		/// survivorCredit[i] is NaN when anchor i has no survivor). Returns developingScore.</summary>
-		public static double DevelopingHits(IList<bool> developing, IList<bool> overlay, IList<double> survivorCredit, List<int> index, List<double> credit)
+		/// <summary>The cluster's zones: Partition, then emitZone(start, end) once per final range in ascending order, after
+		/// onSplit(lo, hi, at) for every split taken (journal). Returns the number of zones emitted.</summary>
+		public static int EmitZones(IList<double> prices, int lo, int hi, double tol, Func<double> hostAtr20d, double atrFraction,
+			Action<int, int> emitZone, Action<int, int, int, double> onSplit)
+		{
+			double atr20d = hostAtr20d != null ? hostAtr20d() : double.NaN;   // the host's Atr20d, read once per cluster
+			var zones = new List<int[]>(); var splits = new List<int[]>();
+			Partition(prices, lo, hi, tol, atr20d, atrFraction, zones, splits);
+			if (onSplit != null) foreach (var sp in splits) onSplit(sp[0], sp[1], sp[2], atr20d);
+			foreach (var z in zones) emitZone(z[0], z[1]);
+			return zones.Count;
+		}
+
+		/// <summary>Developing confluence for cluster[lo..hi): every developing, non-overlay anchor, in order, becomes
+		/// makeHit(anchor, its survivor or null, credit), where credit is the survivor's credit when > 0, else 0 (absorbed into
+		/// its parent's source or refused). Hits go to `hits` (allocated on the first one; stays null when none).
+		/// Returns developingScore (sum of credits).</summary>
+		public static double DevelopingHits<THit>(IReadOnlyList<IVpConfAnchor> cluster, int lo, int hi, IReadOnlyList<IVpConfSurvivor> survivors,
+			Func<IVpConfAnchor, IVpConfSurvivor, double, THit> makeHit, ref List<THit> hits)
 		{
 			double score = 0;
-			for (int i = 0; i < developing.Count; i++)
+			for (int i = lo; i < hi; i++)
 			{
-				if (!developing[i] || overlay[i]) continue;
-				double c = survivorCredit[i] > 0 ? survivorCredit[i] : 0;
-				index.Add(i); credit.Add(c); score += c;
+				IVpConfAnchor a = cluster[i];
+				if (!a.Developing || a.Overlay) continue;
+				IVpConfSurvivor own = null;
+				if (survivors != null)
+					for (int k = 0; k < survivors.Count; k++)
+						if (object.ReferenceEquals(survivors[k].Anchor, a)) { own = survivors[k]; break; }
+				double c = own != null && own.Credit > 0 ? own.Credit : 0;
+				if (hits == null) hits = new List<THit>();
+				hits.Add(makeHit(a, c > 0 ? own : null, c));
+				score += c;
 			}
 			return score;
 		}
 
-		/// <summary>VP hosts need M-DAILY (Atr20d) only when the split uses ATR and at least one confluence slot is enabled.</summary>
-		public static bool NeedsAtr20d(double atrFraction, int ds1, int ds2, int ds3)
+		/// <summary>VP hosts build M-DAILY (Atr20d) only when the strategy declares it uses confluence zones
+		/// (UsesConfluenceZones), the split uses ATR, and at least one confluence slot is enabled.</summary>
+		public static bool NeedsAtr20d(bool usesConfluenceZones, double atrFraction, int ds1, int ds2, int ds3)
 		{
-			return atrFraction > 0 && (ds1 >= 1 || ds2 >= 1 || ds3 >= 1);
+			return usesConfluenceZones && atrFraction > 0 && (ds1 >= 1 || ds2 >= 1 || ds3 >= 1);
+		}
+
+		/// <summary>The host's Atr20d for the split: dailyAtr() when M-DAILY is on (needsDaily), else NaN (4 x tol fallback).</summary>
+		public static double HostAtr20d(bool needsDaily, Func<double> dailyAtr)
+		{
+			return needsDaily && dailyAtr != null ? dailyAtr() : double.NaN;
 		}
 
 		/// <summary>StartCalc: throws ArgumentException(DuplicateStreamError) for duplicate enabled confluence streams.</summary>
@@ -153,8 +188,12 @@ namespace PowerLanguage.Function
 	/// </summary>
 	internal sealed class _VpConfluenceEngine
 	{
-		private sealed class Anchor
+		private sealed class Anchor : IVpConfAnchor
 		{
+			string IVpConfAnchor.SourceVolumeId { get { return sourceVolumeId; } }
+			string IVpConfAnchor.ProfileId { get { return profileId; } }
+			bool IVpConfAnchor.Developing { get { return developing; } }
+			bool IVpConfAnchor.Overlay { get { return overlay; } }
 			public int dataStream;
 			public int profileStartBar;
 			public int profileEndBar;
@@ -172,8 +211,11 @@ namespace PowerLanguage.Function
 			public DateTime windowEnd;
 		}
 
-		private sealed class Survivor
+		private sealed class Survivor : IVpConfSurvivor
 		{
+			IVpConfAnchor IVpConfSurvivor.Anchor { get { return anchor; } }
+			bool IVpConfSurvivor.Independent { get { return independent; } }
+			double IVpConfSurvivor.Credit { get { return credit; } }
 			public Anchor anchor;
 			public double baseCredit;
 			public double credit;
@@ -202,9 +244,7 @@ namespace PowerLanguage.Function
 		private double m_htfVal;
 		private int m_htfRank = -1;
 		private int m_htfAge = int.MaxValue;
-		private double m_atr20d = double.NaN;                          // host M-DAILY Atr20d for this rebuild (NaN = 4 x tol fallback)
-		private readonly List<double> m_prices = new List<double>();
-		private readonly List<int[]> m_zones = new List<int[]>(), m_splits = new List<int[]>();   // VpConfluenceRules.Partition output   // cluster prices for VpConfluenceRules.SplitAt
+		private readonly List<double> m_prices = new List<double>();   // cluster prices for VpConfluenceRules.EmitZones
 
 		public _VpConfluenceEngine(_VolumeProfileBase owner)
 		{
@@ -227,7 +267,6 @@ namespace PowerLanguage.Function
 			assignDevelopingSources(anchors);
 
 			double tol = confluenceTolerance();
-			m_atr20d = m_owner.confluenceAtr20d();
 			anchors.Sort((a, b) => a.price.CompareTo(b.price));
 
 			List<Anchor> cluster = new List<Anchor>();
@@ -265,18 +304,16 @@ namespace PowerLanguage.Function
 				for (int i = 0; i < cluster.Count; i++) m_prices.Add(cluster[i].price);
 			}
 			double atrFraction = m_owner.ConfluenceSplitAtrFraction;
-			m_zones.Clear(); m_splits.Clear();
-			VpConfluenceRules.Partition(m_prices, lo, hi, tol, m_atr20d, atrFraction, m_zones, m_splits);
-			for (int k = 0; k < m_splits.Count; k++)
-			{
-				int a = m_splits[k][0], b = m_splits[k][1], split = m_splits[k][2];
-				m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
-					"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
-					b - a, m_prices[a], m_prices[b - 1], m_prices[b - 1] - m_prices[a], VpConfluenceRules.SplitWidth(tol, m_atr20d, atrFraction),
-					m_prices[split], m_prices[split] - m_prices[split - 1], m_atr20d,
-					VpConfluenceRules.AtrReady(m_atr20d) ? "atr" : "tol-fallback"));
-			}
-			for (int k = 0; k < m_zones.Count; k++) addZone(cluster, m_zones[k][0], m_zones[k][1], tol);
+			VpConfluenceRules.EmitZones(m_prices, lo, hi, tol, m_owner.confluenceAtr20d, atrFraction, (zlo, zhi) => addZone(cluster, zlo, zhi, tol), (a, b, split, atr) => journalSplit(a, b, split, tol, atrFraction, atr));
+		}
+
+		private void journalSplit(int a, int b, int split, double tol, double atrFraction, double atr20d)
+		{
+			m_owner.confluenceJournal(() => string.Format(CultureInfo.InvariantCulture,
+				"VPCONF split anchors({0}) range({1}-{2}) width({3}) limit({4}) at({5}) gap({6}) atr20d({7}) basis({8})",
+				b - a, m_prices[a], m_prices[b - 1], m_prices[b - 1] - m_prices[a], VpConfluenceRules.SplitWidth(tol, atr20d, atrFraction),
+				m_prices[split], m_prices[split] - m_prices[split - 1], atr20d,
+				VpConfluenceRules.AtrReady(atr20d) ? "atr" : "tol-fallback"));
 		}
 
 		private void collectAnchors(List<Anchor> anchors)
@@ -538,16 +575,12 @@ namespace PowerLanguage.Function
 			double acc = 0;
 			double rej = 0;
 			double ctx = 0;
-			// PR #47: V5 counts come from VpConfluenceRules.ZoneSourceCounts over all survivors
-			var svIds = new List<string>(survivors.Count); var svProfiles = new List<string>(survivors.Count);
-			var svIndependent = new List<bool>(survivors.Count); var svCredit = new List<double>(survivors.Count);
 			var streams = new HashSet<int>();
 			Survivor anchorPick = null;
 
 			for (int i = 0; i < survivors.Count; i++)
 			{
 				Survivor s = survivors[i];
-				svIds.Add(s.anchor.sourceVolumeId); svProfiles.Add(s.anchor.profileId); svIndependent.Add(s.independent); svCredit.Add(s.credit);
 				if (s.credit <= 0) continue;
 				if (isOverlay(s.anchor.kind))
 					ctx += s.credit;
@@ -590,10 +623,10 @@ namespace PowerLanguage.Function
 			zone.contextScore = ctx;
 			zone.rawScore = acc + rej;
 			int nSources, nProfiles;
-			VpConfluenceRules.ZoneSourceCounts(svIds, svProfiles, svIndependent, svCredit, out nSources, out nProfiles);
+			VpConfluenceRules.ZoneSourceCounts(survivors, out nSources, out nProfiles);
 			zone.independentSources = nSources;   // V5: distinct sources, not survivors
 			zone.profileCount = nProfiles;
-			addDevelopingHits(zone, cluster, loIdx, hiIdx, survivors);
+			zone.developingScore = VpConfluenceRules.DevelopingHits(cluster, loIdx, hiIdx, survivors, developingHit, ref zone.developingHits);
 			zone.streamCount = streams.Count;
 			zone.hitCount = zone.hits.Count;
 			zone.role = acc > 0 && rej > 0 ? EConfluenceRole.Mixed : pickRole(survivors, acc, rej);
@@ -607,30 +640,15 @@ namespace PowerLanguage.Function
 			m_owner.m_confluenceZones.Add(zone);
 		}
 
-		// PR #47: the developing profile's confluence so far, kept apart from the scored hits. Every developing-profile anchor
+		// PR #47: VpConfluenceRules.DevelopingHits builder. The developing profile's confluence so far, kept apart from the scored hits. Every developing-profile anchor
 		// in the zone is listed (tagged developing). One that survived carries its credit; one absorbed into its completed
 		// parent's source (assignDevelopingSources) or refused carries credit 0. developingScore sums the credited ones.
-		private static void addDevelopingHits(ConfluenceZone zone, List<Anchor> cluster, int lo, int hi, List<Survivor> survivors)
+		private static ConfluenceHit developingHit(IVpConfAnchor a, IVpConfSurvivor own, double credit)
 		{
-			int n = hi - lo;
-			var dev = new List<bool>(n); var over = new List<bool>(n); var cr = new List<double>(n); var own = new Survivor[n];
-			for (int i = 0; i < n; i++)
-			{
-				Anchor a = cluster[lo + i];
-				for (int k = 0; k < survivors.Count; k++)
-					if (object.ReferenceEquals(survivors[k].anchor, a)) { own[i] = survivors[k]; break; }
-				dev.Add(a.developing); over.Add(a.overlay); cr.Add(own[i] != null ? own[i].credit : double.NaN);
-			}
-			var idx = new List<int>(); var credit = new List<double>();
-			zone.developingScore = VpConfluenceRules.DevelopingHits(dev, over, cr, idx, credit);
-			for (int j = 0; j < idx.Count; j++)
-			{
-				int i = idx[j];
-				ConfluenceHit h = credit[j] > 0 ? toHit(own[i]) : toHit(new Survivor { anchor = cluster[lo + i], absorbed = "" });
-				if (!(credit[j] > 0)) { h.weight = 0; h.credit = 0; h.independent = false; }
-				if (zone.developingHits == null) zone.developingHits = new List<ConfluenceHit>();
-				zone.developingHits.Add(h);
-			}
+			if (own != null) return toHit((Survivor)own);
+			ConfluenceHit h = toHit(new Survivor { anchor = (Anchor)a, absorbed = "" });
+			h.weight = 0; h.credit = 0; h.independent = false;
+			return h;
 		}
 
 		private List<Survivor> collapseSameSource(List<Anchor> cluster, int lo, int hi)

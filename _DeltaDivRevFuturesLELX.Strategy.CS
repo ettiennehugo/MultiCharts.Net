@@ -75,6 +75,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			UsesConfluenceZones = true;   // PR #47: ranks confluence targets; enables Atr20d for the zone split
 
 			RiskPercent = 0.01;
 			ProfitFactor = 2.0;
