@@ -33,8 +33,9 @@ namespace PowerLanguage.Strategy
 	//                assume raw prices). Other CME index futures (NQ, RTY, YM) work; tick size is read from the symbol.
 	//   Data1      : 1-minute bars (recommended: the dev window 2016–2024 only exists as 1m history) or tick bars
 	//                (only ~2 years of ticks exist, mostly after the dev window). The engine re-aggregates Data1 into
-	//                1m / 5m / 30m buckets itself, so tick, second or 1-minute Data1 all work; do not use bars longer
-	//                than 1 minute.
+	//                1m / 5m / 15m / 30m buckets itself. StartCalc THROWS unless Data1 is 1-tick, 1-minute or N-second bars
+	//                with N dividing 60, chart type Regular (Gate0Data1.Check): bars longer than 1 minute, multi-tick, volume
+	//                (Contract), range (Point), Renko and other variable-duration bars are rejected.
 	//   Data2      : not used. Leave it off the chart (nothing reads it).
 	//   Session    : "CME Globex" session template (18:00–17:00 ET). RTH (09:30–16:00 ET) is derived internally.
 	//   Time zone  : any; bar times are converted to US Eastern by _VolumeProfileFuturesBase.
@@ -184,6 +185,8 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			if (Mode == EGate0Mode.Strategy)
 				throw new ArgumentException("_TestGate0: Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary");
+			string resErr = Gate0Data1.Check(Bars.Info.Resolution.ChartType.ToString(), Bars.Info.Resolution.Type.ToString(), (long)Bars.Info.Resolution.Size);   // educator review G2
+			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
 			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();
 			string err = m_g0.Configure();
