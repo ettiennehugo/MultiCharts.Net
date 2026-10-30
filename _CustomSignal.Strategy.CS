@@ -919,7 +919,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_dailyAggDay; private double m_dailyAggO, m_dailyAggH, m_dailyAggL, m_dailyAggC;
 		private double m_dailyTodayOpen = double.NaN; private DateTime m_dailyTodayKey = DateTime.MinValue;
 		private readonly _RthCloseSelector m_dailyRth = new _RthCloseSelector();   // S2: RTH close of the aggregated day
-		private bool m_dailyBasisLogged;
+		private bool m_dailyBasisLogged, m_rollKeyWarned;
 
 		/// <summary>M-DAILY context, or null when NeedsDaily is false.</summary>
 		internal _DailyContext DailyContext
@@ -940,7 +940,7 @@ namespace PowerLanguage.Strategy
 			m_daily = null;
 			m_dailyLastStreamBar = m_dailyLastWeekBar = int.MinValue;
 			m_dailyAggDay = DateTime.MinValue; m_dailyTodayOpen = double.NaN; m_dailyTodayKey = DateTime.MinValue;
-			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false;
+			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false; m_rollKeyWarned = false;
 			if (!NeedsDaily) return;
 			if (DailyConfig.dataStream > 0) requireDataStream("DailyConfig.dataStream", DailyConfig.dataStream);
 			if (DailyConfig.weeklyStream > 0) requireDataStream("DailyConfig.weeklyStream", DailyConfig.weeklyStream);
@@ -981,7 +981,18 @@ namespace PowerLanguage.Strategy
 				int pi = HtfClosedIndex(DailyConfig.dataStream), pno = pb.CurrentBar - pi;
 				if (pno > m_dailyLastStreamBar && tradingDayKey(pb.Time[pi]) < key) { m_dailyLastStreamBar = pno; m_daily.AddDay(tradingDayKey(pb.Time[pi]), pb.Open[pi], pb.High[pi], pb.Low[pi], pb.Close[pi]); }
 			}
-			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close)
+			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close).
+			// PR #46 review Q3: this is the real spread only if the roll bar is the first new-contract bar, i.e. the trading-day key
+			// starts where the vendor splices. On an ETH futures chart keyed by calendar date a Globex-open (18:00 ET) splice puts
+			// new-contract bars in the evening stub BEFORE the flagged 00:00 bar, so PrevClose is already new-contract and the
+			// offset is ~0 (the spread stays in history and in ATR). Futures hosts must key days by the Globex trading day
+			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _Test6 do). Warned once below.
+			if (roll && m_daily.Days > 0 && !m_rollKeyWarned && tradingDayKey(t.Date.AddHours(1)) == tradingDayKey(t.Date.AddHours(20))
+				&& Bars.Info.Resolution.Type.ToString() != "Day" && Bars.Info.Category.ToString() == "Future")
+			{
+				m_rollKeyWarned = true;
+				engineSink(ETraceLevel.Warning)?.Invoke("DAILY roll offset on a calendar-keyed intraday futures chart: if the vendor splices at the 18:00 ET Globex open the offset is ~0; key days by the Globex trading day (_CmeSessionClock.GlobexTradingDayEt)");
+			}
 			if (roll && m_daily.Days > 0) m_daily.OnRoll(key, Bars.Open[0] - m_daily.PrevClose);
 			if (DailyConfig.dataStream > 0)
 			{

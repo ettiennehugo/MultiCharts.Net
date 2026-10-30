@@ -226,11 +226,15 @@ namespace PowerLanguage.Function
 			return s;
 		}
 
-		public DateTime GlobexDateEt(DateTime et)
+		public DateTime GlobexDateEt(DateTime et) { return GlobexTradingDayEt(et, GlobexOpen); }
+
+		/// <summary>Shared Globex trading-day key (PR #46 review): an ET time at or after the Globex open (default 18:00 ET) belongs
+		/// to the NEXT date (Sunday 18:00 -> Monday). Used by GlobexDate (so _VolumeProfileFuturesBase.tradingDayKey / Gate0) and by
+		/// _Test6.tradingDayKey, so a roll spliced at the Globex open lands on the first bar of the roll trading day.</summary>
+		public static DateTime GlobexTradingDayEt(DateTime et) { return GlobexTradingDayEt(et, DefaultGlobexOpen); }
+		public static DateTime GlobexTradingDayEt(DateTime et, TimeSpan globexOpen)
 		{
-			if (et.TimeOfDay >= GlobexOpen)
-				return et.Date.AddDays(1);
-			return et.Date;
+			return et.TimeOfDay >= globexOpen ? et.Date.AddDays(1) : et.Date;
 		}
 
 		/// <summary>Single label. Priority: RTH > Premarket > PostMarket > NewYork > Europe > Asia.</summary>

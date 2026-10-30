@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using PowerLanguage.Function;
 
 // Off-MC tests for _RollDetector / _RollPending (Phase 3 S4).
@@ -112,6 +114,22 @@ static class Program
 		Check(_RollDetector.SeriesKeyWarning(true, "Minute", false) == null, "R1 no warn: Globex key");
 		Check(_RollDetector.SeriesKeyWarning(false, "Minute", true) == null, "R1 no warn: Table only");
 		Check((_RollDetector.SeriesKeyWarning(true, "Minute", true) ?? "").Contains("Table"), "R1 warning points to Table");
+		// PR #46 review (M1): fail if _Test6 stops running Table mode on Globex days (no suite compiles _Test6/_CustomSignal, so a
+		// source check). Needs _Test6.Strategy.CS on disk (searched upwards from the test directory).
+		{
+			string dir = AppContext.BaseDirectory, path = null;
+			for (var di = new DirectoryInfo(dir); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_Test6.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			var assigns = Regex.Matches(src, @"\bRollDetection\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => m.Groups[1].Value.Trim()).ToList();
+			Check(path != null && assigns.Count == 1 && assigns[0] == "ERollDetection.Table", "_Test6 sets RollDetection = ERollDetection.Table exactly once [" + string.Join(" | ", assigns) + "]");
+			Check(Regex.IsMatch(src, @"override\s+DateTime\s+tradingDayKey\s*\([^)]*\)\s*\{\s*return\s+_CmeSessionClock\.GlobexTradingDayEt\("), "_Test6 tradingDayKey = _CmeSessionClock.GlobexTradingDayEt");
+			Check(Regex.IsMatch(src, @"HostConfig\.rollDetection\s*=\s*RollDetection\.ToString\(\)") && Regex.IsMatch(src, @"HostConfig\.rollDatesDigest\s*=\s*_RollDetector\.DatesDigest\(RollDates\)"), "_Test6 hashes the roll mode and date digest it runs");
+		}
+		// DatesDigest: order / duplicate insensitive, sensitive to a date
+		{
+			var a = new[] { new DateTime(2022, 6, 13), new DateTime(2022, 3, 10) }; var b = new[] { new DateTime(2022, 3, 10), new DateTime(2022, 6, 13), new DateTime(2022, 6, 13) };
+			Check(_RollDetector.DatesDigest(a) == _RollDetector.DatesDigest(b) && _RollDetector.DatesDigest(a) != _RollDetector.DatesDigest(new[] { new DateTime(2022, 6, 9), new DateTime(2022, 3, 10) }), "DatesDigest order/dup-insensitive, date-sensitive");
+		}
 		Console.WriteLine($"RollTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

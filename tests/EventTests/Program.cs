@@ -29,6 +29,7 @@ static class Program
 	/// <summary>Step one bar whose CLOSE is `etClose` (ET).</summary>
 	static void Bar(_EventCalendar e, DateTime etClose, int barMin = 1, bool splice = false)
 	{ DateTime c = U(etClose); e.Step(etClose, c.AddMinutes(-barMin), c, splice); }
+	const string RollDigestPin = "fdd63bd8f179a8d4";
 	static string FindUp(string rel)
 	{
 		for (var d = new DirectoryInfo(Directory.GetCurrentDirectory()); d != null; d = d.Parent) { string p = Path.Combine(d.FullName, rel); if (File.Exists(p)) return p; }
@@ -57,6 +58,11 @@ static class Program
 				if (EventRules.RollDate(exp.Year, exp.Month) != rr) { all = false; Console.WriteLine("roll table mismatch " + r[0]); }
 			}
 			Check(all, "PR D: roll_splices_2016_2024.csv rule_roll was regenerated from EventRules.RollDate (36 rows)");
+			// PR #46 review Q1: _Test6's RollDates (2000-2035) digest = A263Config.RollDatesDigest2000To2035 (also pinned in RegimeGateTests)
+			var set = new List<DateTime>(); for (int y = 2000; y <= 2035; y++) for (int m = 3; m <= 12; m += 3) set.Add(EventRules.RollDate(y, m));
+			string dg = PowerLanguage.Function._RollDetector.DatesDigest(set);
+			Console.WriteLine("roll dates digest 2000-2035 = " + dg);
+			Check(set.Count == 144 && dg == RollDigestPin, "_Test6 roll-date digest pinned (re-pin = new build, update A263Config.RollDatesDigest2000To2035)");
 		}
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);

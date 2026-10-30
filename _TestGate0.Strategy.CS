@@ -164,7 +164,11 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;   // A2-39 needs the roll; not an [Input]
+			// A2-39 needs the roll; not an [Input]. Series is NOT blind here (PR #46 review): _VolumeProfileFuturesBase.tradingDayKey =
+			// GlobexDate = _CmeSessionClock.GlobexTradingDayEt (ET >= 18:00 -> next date), so Series tests the 18:00 ET Globex-open
+			// bar, and the SeriesKeyWarning probe (01:00 vs 20:00 key) does not fire. Before the D8 canary baseline, check
+			// rollDays ~ 36 for 2016-2024 in the G0 done journal (not verifiable off-MC).
+			RollDetection = ERollDetection.Series;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "G0LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "G0SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "G0LX", EOrderAction.Sell));

@@ -27,7 +27,7 @@ static class Program
 
 	static void Main()
 	{
-		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay();
+		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay(); EveningSplice();
 		Console.WriteLine($"DailyTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -196,5 +196,46 @@ static class Program
 		var normal = new _RthCloseSelector(); DateTime nd = new DateTime(2024, 11, 26);
 		for (int i = 0; i < tod.Length; i++) normal.Observe(nd, clock.IsRthValueBarEt(nd.AddHours(tod[i])), px[i]);
 		Check(Near(normal.Observe(nd.AddDays(1), false, 0), 6), "S2 normal day: RTH close = the 16:00 bar");
+	}
+
+	// PR #46 review Q3: an ETH futures chart whose vendor splices at the 18:00 ET Globex open. Mirrors _CustomSignal.stepDaily
+	// (dataStream 0): Table flag on the first bar of a new key listed in RollDates, AddDay(previous key), then
+	// OnRoll(key, roll-bar open - PrevClose). Globex key (_CmeSessionClock.GlobexTradingDayEt): offset = the spread.
+	// Calendar key: the Sunday-evening stub is already new-contract, so the offset is ~0 and the old-contract history is not
+	// difference-adjusted (the stub day's TR is dropped by the ATR reseed here; the level history keeps the spread).
+	static void EveningSplice()
+	{
+		DateTime roll = new DateTime(2024, 3, 11), splice = new DateTime(2024, 3, 10, 18, 0, 0);   // Mon roll; Globex opens Sun 18:00 ET
+		const double spread = 40;
+		Func<Func<DateTime, DateTime>, double[]> run = key =>
+		{
+			var d = Ctx(); double offset = double.NaN; DateTime aggDay = DateTime.MinValue; double o = 0, h = 0, l = 0, c = 0; bool first = true;
+			int k = 0;
+			for (DateTime t = new DateTime(2024, 1, 1, 18, 0, 0); t < new DateTime(2024, 4, 20); t = t.AddHours(1))
+			{
+				var dw = t.DayOfWeek; var tod = t.TimeOfDay;
+				if (tod.Hours == 17) continue;                                                     // daily 17:00-18:00 ET halt
+				if (dw == DayOfWeek.Saturday || (dw == DayOfWeek.Friday && tod.Hours >= 18) || (dw == DayOfWeek.Sunday && tod.Hours < 18)) continue;
+				double px = 4000 + 10 * Math.Sin(k++ * 0.7) + (t >= splice ? spread : 0);
+				double bo = px, bh = px + 3, bl = px - 3, bc = px + 1;
+				DateTime kk = key(t);
+				bool r = !first && kk != aggDay && kk == roll;
+				if (kk != aggDay)
+				{
+					if (aggDay != DateTime.MinValue) d.AddDay(aggDay, o, h, l, c);
+					aggDay = kk; o = bo; h = bh; l = bl;
+				}
+				else { h = Math.Max(h, bh); l = Math.Min(l, bl); }
+				c = bc; first = false;
+				if (r && d.Days > 0) { offset = bo - d.PrevClose; d.OnRoll(kk, offset); }
+			}
+			return new[] { offset, d.Atr20d };
+		};
+		var gx = run(t => _CmeSessionClock.GlobexTradingDayEt(t));
+		var cal = run(t => t.Date);
+		Check(_CmeSessionClock.GlobexTradingDayEt(splice) == roll && _CmeSessionClock.GlobexTradingDayEt(splice.AddMinutes(-1)) == roll.AddDays(-1)
+			&& _CmeSessionClock.GlobexTradingDayEt(new DateTime(2024, 3, 11, 16, 59, 0)) == roll, "Globex key: ET >= 18:00 -> next date");
+		Check(Math.Abs(gx[0] - spread) < 25, "evening splice, Globex key: roll offset ~ the spread (" + gx[0].ToString("0.##") + ")");
+		Check(Math.Abs(cal[0]) < 25 && Math.Abs(cal[0]) < Math.Abs(gx[0]) - 20, "evening splice, calendar key: offset ~0, the known failure (" + cal[0].ToString("0.##") + ")");
 	}
 }

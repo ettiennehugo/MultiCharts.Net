@@ -37,16 +37,20 @@ namespace PowerLanguage.Strategy
 	//   applied OFFLINE to all arms equally; the MC run trades them so G/A = U's trades minus the blocked days (§4.1 equivalence).
 	//
 	// ROLLS (educator review A2 7a / R1): RollDetection = Table, set in StartCalc (no [Input]). RollDates = EventRules.RollDate(y, m)
-	//   for every quarterly month of RollTableFromYear-RollTableToYear: the customary roll date (Thursday eight days before the
-	//   third Friday; the Monday before it from 2023). That is the rule that generated tools/m-event/out/roll_splices_2016_2024.csv
+	//   for every quarterly month of HostConfig.rollFromYear-rollToYear (2000-2035): the customary roll date (Thursday eight days before the
+	//   third Friday; the Monday before it for contracts expiring from EventRules.RollRuleMondayFrom = 2022-04-01, i.e. from ESM22,
+	//   rolled Mon 2022-06-13). That is the rule that generated tools/m-event/out/roll_splices_2016_2024.csv
 	//   (tools/m-event/roll_splices.py, column rule_roll); tests/EventTests checks the two agree for 2016-2024. Nothing reads the CSV
 	//   at run time (an MC study has no repo path), and its observed_splice column is still empty: the vendor's actual splice
-	//   date is unverified (fill it from _EventCalendarTest Mode 2 EVROLL lines). Series is NOT used: this host keys days by
-	//   calendar date, so Series would only test the bar after midnight. Known limitation: with calendar keys the roll flag lands
-	//   on the first bar of the listed calendar date, not on the 18:00 ET Globex open before it. The REGGATE header journals
-	//   roll(Table n dates from-to); turning rolls on is a new build of every arm (prereg §8): the journal changes.
+	//   date is unverified (fill it from _EventCalendarTest Mode 2 EVROLL lines; PR #46 review: a blocker before any dev run).
+	//   Series is NOT used. DAY KEY (PR #46 review Q3b): tradingDayKey = the Globex trading day (_CmeSessionClock.GlobexTradingDayEt,
+	//   ET >= 18:00 -> next date), so a splice at the 18:00 ET Globex open lands on the first bar of the roll day and the M-DAILY
+	//   roll offset is the real calendar spread. M-DAILY days / ATR20d are therefore Globex days (18:00-17:00 ET). The REGGATE header
+	//   journals roll(Table n dates from-to digest) dayKey(); RollDetection, the table years, the date digest and the day key are
+	//   RegimeGate hash fields (host.roll*, host.tradingDay); turning rolls on is a new build of every arm (prereg §8): the journal changes.
 	//
-	// IMPORT ORDER: _RegimeEngine.Function.CS (and its _Gmm/_Rng), _RegimeGate.Function.CS, _CustomSignal chain, this file.
+	// IMPORT ORDER: _EventCalendar.Function.CS, _RollDetector.Function.CS, _CmeSessionClock.Function.CS, _RegimeEngine.Function.CS
+	//   (and its _Gmm/_Rng), _RegimeGate.Function.CS, _CustomSignal chain, this file.
 	// ================================================================================================================
 	public class _Test6 : _CustomSignal
 	{
@@ -55,8 +59,6 @@ namespace PowerLanguage.Strategy
 		/// <summary>A2-63 core (pre-registered; do not change without a new pre-registration).</summary>
 		protected A263Config HostConfig { get; } = new A263Config();
 
-		/// <summary>Roll table years (EventRules.RollDate = tools/m-event/out/roll_splices_2016_2024.csv rule_roll, checked by EventTests).</summary>
-		private const int RollTableFromYear = 2000, RollTableToYear = 2035;
 		private const string EntryName = "A263LE", ExitName = "A263LX";
 		private const string Et = "Eastern Standard Time";
 		private IOrderPriced m_le;
@@ -80,17 +82,28 @@ namespace PowerLanguage.Strategy
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, ExitName, EOrderAction.Sell));
 		}
 
+		/// <summary>PR #46 review Q3(b): days are Globex trading days (ET >= 18:00 -> next date), the key Gate0 uses via
+		/// _VolumeProfileFuturesBase.GlobexDate. A roll spliced at the 18:00 ET Globex open then lands on the first bar of the roll
+		/// day, and the M-DAILY roll offset (_CustomSignal stepDaily: roll-bar open - PrevClose) is new-contract open minus the
+		/// old contract's last close instead of ~0.</summary>
+		protected override DateTime tradingDayKey(DateTime barTime) { return _CmeSessionClock.GlobexTradingDayEt(ToZone(barTime, Et)); }
+
 		protected override void StartCalc()
 		{
 			string err = RegimeGateConfig.Validate();
 			if (err != null) throw new ArgumentException(err);
 			RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig);   // before base.StartCalc: the engines are created there
 			NeedsDaily = true;
-			// educator review A2 7a / R1: roll detection ON, Table mode (Series is blind on this calendar-keyed intraday host).
+			// educator review A2 7a / R1: roll detection ON, Table mode (tests/RollTests source-checks this line). Table years =
+			// HostConfig.rollFromYear-rollToYear (EventRules.RollDate = roll_splices_2016_2024.csv rule_roll, checked by EventTests).
 			RollDetection = ERollDetection.Table;
 			if (RollDates.Count == 0)
-				for (int y = RollTableFromYear; y <= RollTableToYear; y++)
+				for (int y = HostConfig.rollFromYear; y <= HostConfig.rollToYear; y++)
 					for (int m = 3; m <= 12; m += 3) RollDates.Add(EventRules.RollDate(y, m));
+			// PR #46 review Q1: hash what actually runs
+			HostConfig.rollDetection = RollDetection.ToString();
+			HostConfig.rollDatesDigest = _RollDetector.DatesDigest(RollDates);
+			HostConfig.tradingDay = "Globex18ET";
 			DailyConfig.atrLength = HostConfig.atrLength;
 			base.StartCalc();
 			m_core = new A263Core(HostConfig);
@@ -127,7 +140,7 @@ namespace PowerLanguage.Strategy
 						Resolution res = Bars.Info.Resolution;
 						bool fiveMin = res.Type == EResolution.Minute && res.Size == 5;
 						trace(ETraceLevel.Journal, $"REGGATE header version({RegimeGate.Version}) arm({RegimeGateConfig.arm}) cfg({m_cfgHash}) seed({RegimeGateConfig.placeboSeed}) " +
-							$"symbol({Bars.Info.Name}) bar({res.Type} {res.Size}) roll({RollDetection} {RollDates.Count} dates {RollTableFromYear}-{RollTableToYear}) barDeviation({(fiveMin ? 0 : 1)}) firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm}) canon[{RegimeGate.Canon(RegimeConfig, RegimeGateConfig, HostConfig)}]");
+							$"symbol({Bars.Info.Name}) bar({res.Type} {res.Size}) roll({RollDetection} {RollDates.Count} dates {HostConfig.rollFromYear}-{HostConfig.rollToYear} digest {HostConfig.rollDatesDigest}) dayKey({HostConfig.tradingDay}) barDeviation({(fiveMin ? 0 : 1)}) firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm}) canon[{RegimeGate.Canon(RegimeConfig, RegimeGateConfig, HostConfig)}]");
 						if (!fiveMin) trace(ETraceLevel.Journal, $"REGGATE deviation bar size {res.Type} {res.Size} used instead of 5 Minute (ruling 2)");
 					}
 					trace(ETraceLevel.Journal, RegimeGate.Line(d, m_core.HasSignal, m_cfgHash, RegimeGateConfig.placeboSeed) + m_core.Suffix() + m_counts.Suffix());
