@@ -300,8 +300,10 @@ namespace PowerLanguage.Function
 		public const int DvRotExpirySessions = 5, DvTrendExpirySessions = 10, DvTrendArmBars = 2, DvTrendLookback = 20, DvPendingBars = 26;
 		public static readonly int[] DvRotBars = { 6, 12 };
 		/// <summary>Every level type a verdict run can produce; Holm is applied per run with m = this count (conservative: valid
-		/// across the per-family runs, which never see the other families' p-values).</summary>
-		public static readonly string[] AllTypes = { "POC", "VAH", "VAL", "NPOC", "IBH", "IBL", "ONH", "ONL", "AV_PH", "AV_PL", "AV_WK", "AV_MO", "AV_OPEN", "AV_PC",
+		/// across the per-family runs, which never see the other families' p-values). NEW PRE-REGISTRATION (educator review G4):
+		/// AV_OPEN (prior-RTH-open AVWAP = the prior session VWAP, a duplicate of type VWAP) is RETIRED, not renumbered: m 37 -> 36.
+		/// Do not reuse the name AV_OPEN for a different level.</summary>
+		public static readonly string[] AllTypes = { "POC", "VAH", "VAL", "NPOC", "IBH", "IBL", "ONH", "ONL", "AV_PH", "AV_PL", "AV_WK", "AV_MO", "AV_PC",
 			"VWAP", "VWAP+1", "VWAP-1", "WPOC", "WVAH", "WVAL", "CVAH", "CVAL", "SP_HI", "SP_LO", "SPV_HI", "SPV_LO", "DV_ROT_POC_R6", "DV_ROT_POC_R12", "DV_TREND_HVN",
 			"HVN", "LVN", "HVN_HCV", "LVN_HCV", "GMM_MU", "GMM_EDGE", "SIG_MU", "SIG_EDGE" };
 
@@ -650,7 +652,6 @@ namespace PowerLanguage.Function
 				add("AV_PH", p1.avHi.Value, 1); add("AV_PL", p1.avLo.Value, 1);
 				if (m_avWeek.Ready) add("AV_WK", m_avWeek.Value, 1);
 				if (m_avMonth.Ready) add("AV_MO", m_avMonth.Value, 1);
-				if (p1.vwap.Ready) add("AV_OPEN", p1.vwap.Value, 1);
 				if (m_avPc.Ready) add("AV_PC", m_avPc.Value, 1);
 			}
 			if (p1 != null && Fam(EGate0Family.Vwap) && p1.vwap.Ready)
