@@ -362,6 +362,15 @@ static class Program
 		Bar(real, ET(2020, 9, 15, 10, 0));
 		Check(real.NoCoverage(EEventKind.GdpAdvance, new DateTime(2020, 9, 15)) && real.Classify(new DateTime(2020, 9, 15)).noCoverage && !real.IsInWindow(EEventTier.None, 0, 0), "H: hole day NoCoverage under partial=true (not blocking)");
 		Check(!real.NoCoverage(EEventKind.Cpi, new DateTime(2020, 9, 11)), "H: covered kind on a covered day");
+		// S1: per kind and day. JacksonHole / ChairTestimony are missing from every 2016-2025 build, but a covered day is not flagged
+		Bar(real, ET(2019, 6, 12, 10, 0)); var cd = real.Classify(new DateTime(2019, 6, 12));
+		Check(real.NoCoverageYear(2019, EEventClassMask.Macro) && !cd.noCoverage && cd.noCoverageKinds == 0, "H: year-missing table kind does not flag every day (" + cd.noCoverageKinds + ")");
+		var hd = real.Classify(new DateTime(2020, 9, 15));
+		Check(hd.noCoverage && hd.NoCoverageOf(EEventKind.GdpAdvance) && !hd.NoCoverageOf(EEventKind.Cpi) && !hd.NoCoverageOf(EEventKind.JacksonHole), "H: hole day flags only the uncovered requested kind");
+		// drop-check mutant: an Unknown kind of an unrequested class must not flag the day
+		var eM = Eng(c => c.classes = EEventClassMask.Calendar, tbl, null, null, new List<string>()); Bar(eM, ET(2026, 1, 5, 9, 0));
+		Check(eM.NoCoverage(EEventKind.Cpi, new DateTime(2026, 1, 5)) && !eM.ClassifyExPost(new DateTime(2026, 1, 5)).noCoverage, "H: unrequested class never flags EventDay.noCoverage");
+		Check(e.ClassifyExPost(new DateTime(2026, 1, 5)).NoCoverageOf(EEventKind.Cpi) && !e.ClassifyExPost(new DateTime(2026, 3, 12)).noCoverage, "H: requested Unknown kind flags its day only");
 	}
 
 	// ---- EV-4.6b: a kind starting after the first bar is Unknown before its coverage (no engine disable)

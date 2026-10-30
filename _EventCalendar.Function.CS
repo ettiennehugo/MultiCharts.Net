@@ -97,8 +97,13 @@ namespace PowerLanguage.Function
 		public TimeSpan? firstReleaseEt; // earliest macro release (ET time of day)
 		public int count;                // R2.1-g: Macro-class records only (like maxTier / firstReleaseEt)
 		public bool eiaRuleOnly;         // R2.1-e: an EIA release on the day is RuleOnly (outside the published exception table)
-		public bool noCoverage;          // a kind of a built class (config.classes) is Unknown on the day, or its year lacks a table
-		                                 // kind, or the engine is disabled: the calendar cannot say the day is event-free
+		public bool noCoverage;          // a kind of a built class (config.classes) is Unknown on THIS day (coverage hole, before its
+		                                 // first covered month, after its coverage end), or the engine is disabled. Scoped per kind and
+		                                 // day: a table kind missing from the whole year's build (e.g. JacksonHole / ChairTestimony,
+		                                 // absent 2016-2025) does NOT set it, else it would be true every day; see NoCoverageYear.
+		public ulong noCoverageKinds;    // bit (1 << kind) per requested (built-class) kind that is Unknown on the day
+		/// <summary>True when `kind` is requested (built class) and Unknown on the day.</summary>
+		public bool NoCoverageOf(EEventKind kind) { return (noCoverageKinds & (1UL << (int)kind)) != 0; }
 
 		public bool Has(EEventKind k) { return (kindsMask & (1UL << (int)k)) != 0; }
 	}
@@ -1893,7 +1898,10 @@ namespace PowerLanguage.Function
 				}
 			}
 			d.isRollWeek = IsRollWeek(day);
-			d.noCoverage = NoCoverage(day, config.classes) || NoCoverageYear(day.Year, config.classes);
+			// per kind and day: only kinds that are requested (config.classes) AND Unknown on this day; a year-wide missing table
+			// kind is reported by NoCoverageYear only (no event table is fabricated for it)
+			foreach (var uk in unknownKinds(day)) if ((kindClass(uk) & config.classes) != 0) d.noCoverageKinds |= 1UL << (int)uk;
+			d.noCoverage = m_disabled || d.noCoverageKinds != 0;
 			return d;
 		}
 
