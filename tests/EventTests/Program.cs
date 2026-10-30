@@ -42,7 +42,12 @@ static class Program
 	static void Main()
 	{
 		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); Perf();
-		{   // PR D: _Test6 RollDates = EventRules.RollDate; must equal the repo roll table rule_roll column (2016-2024)
+		{   // PR D / PR #46 review: _Test6 RollDates = EventRules.RollDate, pinned to CME-published roll dates (not the generated CSV)
+			var cme = new[] { new DateTime(2021, 12, 9), new DateTime(2022, 3, 10), new DateTime(2022, 6, 13), new DateTime(2022, 9, 12),
+				new DateTime(2025, 3, 17), new DateTime(2026, 6, 15), new DateTime(2027, 9, 13) };
+			foreach (var d in cme) Check(EventRules.RollDate(d.Year, d.Month) == d, "CME roll date " + d.ToString("yyyy-MM-dd"));
+			// The generated table must match the rule too. NOTE: needs tools/m-event/out/roll_splices_2016_2024.csv on disk (FindUp from the
+			// test directory); a checkout without the file fails here with FileNotFoundException.
 			string rp = FindUp("tools/m-event/out/roll_splices_2016_2024.csv");
 			var rows = File.ReadAllLines(rp).Skip(1).Where(l => l.Trim().Length > 0).Select(l => l.Split(',')).ToList();
 			bool all = rows.Count == 36;
@@ -51,7 +56,7 @@ static class Program
 				DateTime exp = DateTime.ParseExact(r[1], "yyyy-MM-dd", CultureInfo.InvariantCulture), rr = DateTime.ParseExact(r[2], "yyyy-MM-dd", CultureInfo.InvariantCulture);
 				if (EventRules.RollDate(exp.Year, exp.Month) != rr) { all = false; Console.WriteLine("roll table mismatch " + r[0]); }
 			}
-			Check(all, "PR D: EventRules.RollDate == roll_splices_2016_2024.csv rule_roll (36 rows)");
+			Check(all, "PR D: roll_splices_2016_2024.csv rule_roll was regenerated from EventRules.RollDate (36 rows)");
 		}
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
@@ -512,8 +517,8 @@ static class Program
 	// ---- PR27 review (analysts 1+2): roll cutover, coverage holes/end, DST, half day, widths, hash
 	static void Pr27()
 	{
-		// roll cutover 2022-07-01 (Wayback 20220609055445 Thursday rule / 20220610060819 Monday rule)
-		Check(EventRules.RollDate(2022, 6) == new DateTime(2022, 6, 9) && EventRules.RollDate(2022, 9) == new DateTime(2022, 9, 12), "ESM22 rolls Thu 06-09, ESU22 Mon 09-12");
+		// roll cutover 2022-04-01 (Wayback 20220610060819 lists ESM22 Mon 6/13; PR #46 review)
+		Check(EventRules.RollDate(2022, 6) == new DateTime(2022, 6, 13) && EventRules.RollDate(2022, 9) == new DateTime(2022, 9, 12), "ESM22 rolls Mon 06-13, ESU22 Mon 09-12");
 		Check(EventRules.RollDate(2022, 3) == new DateTime(2022, 3, 10), "ESH22 rolls Thu 03-10");
 		// FromYmdhm width assert
 		bool t8 = false, t13 = false;

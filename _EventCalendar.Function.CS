@@ -171,9 +171,12 @@ namespace PowerLanguage.Function
 		/// days before expiration" wording. Wayback (CDX listing of https://www.cmegroup.com/trading/equity-index/rolldates.html):
 		/// capture 20220609055445 still shows the Thursday rule (ESM22 roll Thu 2022-06-09, ESU22 Thu 2022-09-08); capture
 		/// 20220610060819 (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html)
-		/// is the first with the Monday rule. ESM22 therefore rolled Thu 06-09 and the Monday rule starts with ESU22 (Mon 2022-09-12);
-		/// cutover 2022-07-01 sits between them.</summary>
-		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 7, 1);
+		/// is the first with the Monday rule and lists ESM22 roll Mon 2022-06-13 (exp 6/17), ESU22 Mon 09-12, ESZ22 Mon 12-12;
+		/// ESH22 rolled Thu 03-10 (Sierra Chart support, 2022-06-09: the June->Sep roll "will occur this coming Monday June 13,
+		/// rather than today, June 9"). So ESM22 is the first Monday roll (PR #46 review, analysts 1+2); the cutover may be any date
+		/// in (2022-03-18, 2022-06-17]: 2022-04-01. Vendors may still have spliced ESM22 on 06-09 (announced days before): VERIFY
+		/// against observed splices (tools/m-event/out/roll_splices_2016_2024.csv observed_splice).</summary>
+		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 4, 1);
 
 		// ISM Report On Business release calendar. Source: https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/
 		// (fetched 2026-10-22; 2026: Mfg Jan 5 ... Dec 1, Svc Jan 7 ... Dec 3, 10:00 ET). The 1st / 3rd NYSE business day rule reproduces
@@ -466,8 +469,8 @@ namespace PowerLanguage.Function
 	//   fed_hist_2020.html         686ec7998d50e8c0  https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm
 	//   fed_pr_20200303.html       caa2e79d587296b8  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200303a.htm
 	//   fed_pr_20200315.html       f6914aa595895b72  https://www.federalreserve.gov/newsevents/pressreleases/monetary20200315a.htm
-	//   wayback 2022-06-10 06:08:19 UTC (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html): first capture with the Monday rule: 2022-09 roll Mon 9/12; 2022-12 Mon 12/12 (ESM22 had already rolled Thu 6/9)
-	//   wayback 2022-06-09 05:54:45 UTC (https://web.archive.org/web/20220609055445/https://www.cmegroup.com/trading/equity-index/rolldates.html): last capture with the Thursday rule: 2022-06 roll Thu 6/9; 2022-09 Thu 9/8
+	//   wayback 2022-06-10 06:08:19 UTC (https://web.archive.org/web/20220610060819/https://www.cmegroup.com/trading/equity-index/rolldates.html): first capture with the Monday rule: 2022-09 roll Mon 9/12; 2022-12 Mon 12/12; 2022-06 roll Mon 6/13 (ESM22 is the first Monday roll; cutover 2022-04-01, PR #46 review)
+	//   wayback 2022-06-09 05:54:45 UTC (https://web.archive.org/web/20220609055445/https://www.cmegroup.com/trading/equity-index/rolldates.html): last capture with the Thursday rule: 2022-06 roll Thu 6/9; 2022-09 Thu 9/8 (superseded the next day by the Monday rule, ESM22 Mon 6/13)
 	// NOTE time assumed 08:30 (not in the source): BEA GdpAdvance/GdpSecond/GdpThird/Pce rows 2016-2024 (ALFRED dates only) and every RetailSales row (Census sheet has dates only).
 	// NOTE GdpSecond 2019-02-28 (2018Q4): (m-1)%3 tags it Second; it was the shutdown 'Initial' estimate. s_corrections moves GdpAdvance 2018Q4 to 02-28 and cancels GdpSecond 2018Q4.
 	// NOTE FomcMinutes 2020-04-08 (ref 2020-03-15) is flagged Unscheduled: minutes of an unscheduled meeting, known only at the instant.
