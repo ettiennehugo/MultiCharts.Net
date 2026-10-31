@@ -91,6 +91,9 @@ namespace PowerLanguage.Function
 		public int stratKillTrades = 20;
 		public int staleBars = 3;
 		public int minContracts = 1;
+		/// <summary>MM evaluations after an approved entry with no position before the one-per-strategy "PT Max % Capital at Risk
+		/// per Position" warning (MC does not expose that PT setting to studies; spec §8 step 5). 0 = off.</summary>
+		public int fillCheckEvals = 3;
 		public double idmCap = 2.5;
 		/// <summary>Outer hard ceiling on the combined WIDENED open + new risk of all strategies, fraction of book (0.10 = 10%).
 		/// Set by the _PortfolioRiskManager TotalRiskCapPct [Input] (spec §5.4 item 0); both it and heatCap apply, the tighter binds.</summary>
@@ -116,6 +119,7 @@ namespace PowerLanguage.Function
 			if (!(stratKillR < 0) || stratKillTrades < 1) e.Add($"stratKillR={stratKillR} stratKillTrades={stratKillTrades}");
 			if (staleBars < 1) e.Add($"staleBars={staleBars}");
 			if (minContracts < 1) e.Add($"minContracts={minContracts}");
+			if (fillCheckEvals < 0) e.Add($"fillCheckEvals={fillCheckEvals}");
 			if (!(idmCap >= 1)) e.Add($"idmCap={idmCap}");
 			if (!(totalRiskCap > 0 && totalRiskCap <= 1)) e.Add($"totalRiskCap={totalRiskCap} (0 < cap <= 1)");
 			return e.Count == 0 ? null : "PortMmConfig invalid: " + string.Join(", ", e);
@@ -133,7 +137,7 @@ namespace PowerLanguage.Function
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
 			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) maxTradeRisk({maxTradeRisk}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
-				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) totalRiskCap({totalRiskCap})";
+				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) fillCheck({fillCheckEvals}) totalRiskCap({totalRiskCap})";
 		}
 	}
 
@@ -210,6 +214,7 @@ namespace PowerLanguage.Function
 					case "stratkilltrades": integer(warnings, p, 1, 10000, ref c.stratKillTrades); break;
 					case "stalebars": integer(warnings, p, 1, 10000, ref c.staleBars); break;
 					case "mincontracts": integer(warnings, p, 1, 100000, ref c.minContracts); break;
+					case "fillcheckevals": integer(warnings, p, 0, 1000, ref c.fillCheckEvals); break;
 					case "idmcap": { double x; if (tryNum(v, out x) && x >= 1 && x <= 10) c.idmCap = x; else bad(warnings, p, "a number in [1, 10]"); break; }
 					default:
 						if (!n.StartsWith("_") && !n.StartsWith("$")) warnings.Add($"PortMmConfig: unknown field '{p.Name}' ignored");   // "_comment"-style keys are allowed
@@ -508,6 +513,37 @@ namespace PowerLanguage.Function
 		private readonly Dictionary<int, string> m_skipLogged = new Dictionary<int, string>();
 		private readonly HashSet<int> m_skippedNow = new HashSet<int>();
 		private readonly HashSet<int> m_rwWarned = new HashSet<int>();
+		// approved-but-unfilled entries (lazy: allocated on the first approval); PT drops orders silently when its
+		// "Max % Capital at Risk per Position" is below the approved risk, and studies cannot read that setting
+		private sealed class PendingFill { public int qty; public double risk; public int evals; public bool approved; }
+		private Dictionary<int, PendingFill> m_pendingFill;
+		private HashSet<int> m_fillWarned;
+
+		private void notePending(PortStratView s, int qty, double risk)
+		{
+			if (m_pendingFill == null) { m_pendingFill = new Dictionary<int, PendingFill>(); m_fillWarned = new HashSet<int>(); }
+			PendingFill p;
+			if (!m_pendingFill.TryGetValue(s.index, out p)) { p = new PendingFill(); m_pendingFill[s.index] = p; }
+			p.qty = qty; p.risk = risk; p.approved = true;   // latest approval; evals keeps counting while it stays unfilled
+		}
+
+		/// <summary>One Warning per strategy when approved entries never turn into a position; re-armed after a fill.</summary>
+		private void checkFills(IList<PortStratView> v)
+		{
+			if (m_pendingFill == null) return;
+			foreach (var s in v)
+			{
+				if (s.position != 0) { m_pendingFill.Remove(s.index); m_fillWarned.Remove(s.index); continue; }   // filled -> re-arm
+				PendingFill p;
+				if (!m_pendingFill.TryGetValue(s.index, out p)) continue;
+				if (s.state != EPortState.Armed || !p.approved) { m_pendingFill.Remove(s.index); continue; }   // withdrew or no longer approved: not a drop
+				p.approved = false;
+				if (++p.evals >= config.fillCheckEvals && m_fillWarned.Add(s.index))
+					journal?.Invoke($"PORT Warning: {s.id}#{s.index} entry approved (qty {(p.qty)}, risk ${p.risk:0.00}) but no position after {p.evals} MM evaluations - " +
+						"likely Portfolio Trader 'Max % Capital at Risk per Position' set below the approved risk; it must be >= 1% (maxTradeRisk)");
+			}
+		}
+
 
 		/// <summary>Deny one entry attempt and journal it at Info once per (strategy, reason); re-logged when the reason changes or the skip clears.</summary>
 		private void skip(PortDecision di, PortStratView s, string reason, string detail)
@@ -542,6 +578,7 @@ namespace PowerLanguage.Function
 			Mult = mult;
 
 			updateKills(v);
+			checkFills(v);
 			updateClusters(day.Date, v);
 
 			double heat = 0; var clHeat = new Dictionary<int, double>(); int open = 0;
@@ -633,6 +670,7 @@ namespace PowerLanguage.Function
 				if (clHeat[c] + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${clHeat[c]:0.00} room ${Math.Max(0, clusterCapD - clHeat[c]):0.00} cap ${clusterCapD:0.00}"); continue; }
 				if (_PortRiskCap.Breaks(total, r, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${r:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				heat += r; clHeat[c] += r; total += r;
+				if (config.fillCheckEvals > 0) notePending(s, nq, r);
 				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
 				open++;
 			}

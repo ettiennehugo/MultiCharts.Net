@@ -331,6 +331,34 @@ static class Program
 			Check(Near(mc.maxTradeRisk, 0.008) && mw.Count == 0, "JSON maxTradeRisk 0.008 accepted");
 			Check(!System.Text.RegularExpressions.Regex.IsMatch(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../_PortMM.Function.CS")), @"q\s*=\s*qMax|Math\.Floor\(room"), "no rev 1 heat-room trimming left in _PortMM");
 		}
+		{   // PT 'Max % Capital at Risk per Position' drop detector (approved, never filled)
+			var fj = new List<string>(); var fm = MM(null, fj);
+			Func<List<string>, int> nw = l => l.Count(x => x.StartsWith("PORT Warning") && x.Contains("Max % Capital at Risk per Position"));
+			var a0 = V(0, r: 250);
+			for (int k = 0; k < 2; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 0, "fill check: no warning before the window (3 evaluations)");
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			var fw = fj.FirstOrDefault(x => x.Contains("Max % Capital at Risk per Position")) ?? "";
+			Check(nw(fj) == 1 && fw.Contains("S0#0") && fw.Contains("qty 20") && fw.Contains("risk $5000.00") && fw.Contains(">= 1%"), "fill check: approved 3 times with no position -> one Warning with strategy, qty and risk $");
+			for (int k = 0; k < 5; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 1, "fill check: one Warning per strategy, no spam");
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Long, pos: 20, riskOpen: 5000) });
+			for (int k = 0; k < 4; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 2, "fill check: re-armed after a fill -> warns again on the next silent drop");
+			var gj = new List<string>(); var gm = MM(null, gj);
+			gm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			gm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Long, pos: 20, riskOpen: 5000) });
+			for (int k = 0; k < 3; k++) { gm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Flat) }); gm.Decide(D0, 1000000, true, new List<PortStratView> { a0 }); }
+			Check(nw(gj) == 0, "fill check: filled entry, or signal withdrawing (not Armed) -> no warning");
+			var hj = new List<string>(); var hm = MM(c => c.heatCap = 0.04, hj);
+			hm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			for (int k = 0; k < 5; k++) hm.Decide(D0, 1000000, true, new List<PortStratView> { V(9, EPortState.Flat, pos: 1, riskOpen: 39000), a0 });
+			Check(nw(hj) == 0, "fill check: entry later skipped by the MM (not approved) -> no warning");
+			var oj = new List<string>(); var om = MM(c => c.fillCheckEvals = 0, oj);
+			for (int k = 0; k < 6; k++) om.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(oj) == 0, "fill check: fillCheckEvals 0 -> off");
+		}
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

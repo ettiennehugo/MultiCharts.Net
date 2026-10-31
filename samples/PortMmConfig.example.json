@@ -58,6 +58,7 @@
 
   "_minContracts": "below this size after scaling the entry is denied, integer >= 1",
   "minContracts": 1,
+  "fillCheckEvals": 3,
 
   "_idmCap": "VolTarget: cap on the diversification multiplier, [1, 10]",
   "idmCap": 2.5
