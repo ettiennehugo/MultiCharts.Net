@@ -1,4 +1,4 @@
-# VpConfluence: completeness-weighted developing profiles (spec, rev 2: decisions applied)
+# VpConfluence: completeness-weighted developing profiles (spec, rev 3: approved)
 
 | Rev | Date | Change |
 |---|---|---|
@@ -41,7 +41,7 @@ credit'    = credit x w_complete
 
 **Half days.** With the time basis, the prior-session median overstates `expected`, so `w` stays low for the whole short session. That errs conservative and never reaches 1 before close. Once the profile closes, `pocComplete` sets w = 1, so nothing gets stuck. A precise fix (scale `expected` by the RTH length from `_EventCalendar.isHalfDay`) would couple the engine to the calendar. Not proposed for v1. **DECIDED (Q3): accept the lower weight, no calendar dependency.** The median ignores a single prior half day automatically. Partial profiles (`isPartial`, the window began before the first bar) are excluded from the reference set.
 
-**Nesting.** `applyNested` (L780-785) sets a refined child to `REFINEMENT x parent.credit`. The parent is completed (`completedOnly`), so its credit is unchanged. The developing child's refinement credit is then multiplied by its own `w_complete`. Apply w in one place, after `applyNested`, to the survivor's `credit`, with `baseCredit` keeping the unweighted value.
+**Nesting.** `applyNested` (L780-785) sets a refined child to `REFINEMENT x parent.credit`. The parent is completed (`completedOnly`), so its credit is unchanged. The developing child's refinement credit is then multiplied by its own `w_complete`. Apply w in one place, after `applyNested`, to the survivor's `credit`. A new field `rawCredit` keeps the unweighted value: the credit after `applyNested` and before w (for a refined child, `REFINEMENT x parent.credit`). `baseCredit` is unchanged and stays the pre-nesting `makeSurvivor` credit, so it is not the value w scales.
 
 ## 4. independentSources: recommendation
 
@@ -74,7 +74,7 @@ All work happens inside `Rebuild()`, which only runs when the confluence engine 
 3. `collectStream` (L331-344): after the loop, compute the reference medians from the completed, non-partial extras. `addProfile` (L346-372) sets `completeness` on developing anchors.
 4. `addZone` (L560-565): after `applyNested(survivors)`, do `s.credit *= s.anchor.completeness` for developing survivors (one place).
 5. `addZone` L626: pass the threshold to `ZoneSourceCounts`. L629 is unchanged.
-6. `toHit` (L823-840) / `ConfluenceHit` (base L336): add `completeness` and `rawCredit` (= baseCredit).
+6. `toHit` (L823-840) / `ConfluenceHit` (base L336): add `completeness` and `rawCredit` (the post-`applyNested`, pre-weight credit; not `baseCredit`, which is the pre-nesting credit).
 7. Base L600-640: the six protected properties plus the enums.
 8. Untouched: `EmitZones` (L106) / `SplitAt` (L47), because clustering is by price and weighting does not move anchors. `collapseEqualWindows` and `assignDevelopingSources` are also untouched.
 

@@ -1,0 +1,467 @@
+PortfolioSignalObject.cs
+#region Assembly PLStudiesProxy, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLStudiesProxy.dll
+#endregion
+
+using ATCenterProxy.interop;
+using System.Runtime.ExceptionServices;
+
+namespace PowerLanguage.Strategy
+{
+	public abstract class PortfolioSignalObject : SignalObject, IPortfolio
+	{
+		protected PortfolioSignalObject(object _ctx);
+
+		public MTPA_MCSymbolCurrency PortfolioCurrency { get; }
+		public IPortfolioData MyPortfolioData { get; }
+		public IPortfolioData CommonPortfolioData { get; }
+		public IROList<IPortfolioStrategy> PortfolioStrategies { get; }
+
+		protected sealed override void BeforeInitializeImpl();
+		[HandleProcessCorruptedStateExceptions]
+		protected override void Dispose(bool A_0);
+	}
+}
+
+IPortfolio.cs
+#region Assembly PLTypes, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll
+#endregion
+
+using ATCenterProxy.interop;
+
+namespace PowerLanguage.Strategy
+{
+	//
+	// Summary:
+	//     Allows signals to interact with each other and with MultiCharts Portfolio Trader.
+	public interface IPortfolio
+	{
+		//
+		// Summary:
+		//     Allows access to all strategies.
+		IROList<IPortfolioStrategy> PortfolioStrategies { get; }
+		//
+		// Summary:
+		//     Allows access to common variables in MultiCharts Portfolio Trader.
+		IPortfolioData CommonPortfolioData { get; }
+		//
+		// Summary:
+		//     Allows access to variables of the current strategy.
+		IPortfolioData MyPortfolioData { get; }
+		//
+		// Summary:
+		//     Allows access to currency of the account.
+		MTPA_MCSymbolCurrency PortfolioCurrency { get; }
+	}
+}
+
+
+IPortfolioStrategy.cs
+#region Assembly PLTypes, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll
+#endregion
+
+using System;
+
+namespace PowerLanguage.Strategy
+{
+	//
+	// Summary:
+	//     Allows access to strategy applied to specific traded symbol.
+	public interface IPortfolioStrategy : IDisposable
+	{
+		//
+		// Summary:
+		//     Returns collection of the signals, which form the strategy.
+		IStrategy[] Signals { get; }
+		//
+		// Summary:
+		//     Allows/forbids order placement.
+		bool Paused { get; set; }
+		//
+		// Summary:
+		//     Returns the amount of capital in currency of the account that is taken by the
+		//     strategy for marginal security (maximum loss).
+		double RiskCapital { get; }
+		//
+		// Summary:
+		//     Text message that is displayed in the "Custom Text" column of Portfolio Real-Time
+		//     Window.
+		string Status { set; }
+		//
+		// Summary:
+		//     Returns/set the number of contracts to open market position. Allowed values:
+		//     1) Less than "0" - not set. The number of contracts specified in code for each
+		//     order is used. 2) "0" - default value. The number of contracts specified in Strategy
+		//     Properties is used, no matter what number of contracts is specified for each
+		//     order in code and in the Strategy Properties. 3) More than "0" - the set value
+		//     is used for every entry, no matter what number of contracts is specified for
+		//     each order in code and in the Strategy Properties.
+		int EntryContracts { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids entry order placement.
+		bool AllowEntries { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids long entry order placement.
+		bool AllowEntriesLong { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids short entry order placement.
+		bool AllowEntriesShort { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids exit order placement.
+		bool AllowExits { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids long exit order placement.
+		bool AllowExitsLong { get; set; }
+		//
+		// Summary:
+		//     Allows/forbids short exit order placement.
+		bool AllowExitsShort { get; set; }
+		//
+		// Summary:
+		//     Allows access to variables of the strategy.
+		IPortfolioData PortfolioData { get; }
+		//
+		// Summary:
+		//     Returns index of the strategy in portfolio.
+		int MyIndex { get; }
+
+		//
+		// Summary:
+		//     Forced closing of open market position.
+		void ForceClosePosition();
+		//
+		// Summary:
+		//     Partial closing of open market position.
+		void PartialClosePosition(bool isNextBar, int contracts);
+	}
+}
+
+
+ISignal.cs
+#region Assembly PLTypes, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll
+#endregion
+
+
+namespace PowerLanguage
+{
+	//
+	// Summary:
+	//     Common base interface for data access.
+	//
+	// Remarks:
+	//     Enjoy IStudy type and C#!
+	//
+	//     Enjoy it more!
+	public interface IStudy
+	{
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Text Drawings.
+		ITextContainer DrwText { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing the environment.
+		IApplicationInfo Environment { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for controlling study’s calculation.
+		ICalculationControl ExecControl { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing information regarding
+		//     study’s context.
+		ICalculationInfo ExecInfo { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing strategy information.
+		IStrategyPerformance StrategyInfo { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Arrow Drawings.
+		IArrowContainer DrwArrow { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Trend Line Drawings.
+		ITrendLineContainer DrwTrendLine { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Expert Commentary.
+		IExpertCommentary ExpertCommentary { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing current series' TPO data.
+		IInstrumentTPO TPOBars { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Output Window.
+		IOutput Output { get; }
+		//
+		// Summary:
+		//     Read-only property. The maximum index number of datastreams present on the chart.
+		int MaxDataStream { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing current series' data.
+		IInstrument Bars { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns study name.
+		string Name { get; }
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing Alerts.
+		IAlert Alerts { get; }
+
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing data series on a particular
+		//     datastream. Datastream number is provided in the parameter.
+		IInstrument BarsOfData(int dataStream);
+		//
+		// Summary:
+		//     Read-only property. Indicates whether there is a series with given number on
+		//     the chart.
+		//
+		// Parameters:
+		//   dataStream:
+		//     Data stream number.
+		bool IsExist(int dataStream);
+		//
+		// Summary:
+		//     Read-only property. Provides an interface for accessing TPO's data series on
+		//     a particular datastream. Datastream number is provided in the parameter.
+		IInstrumentTPO TPOBarsOfData(int dataStream);
+	}
+}
+
+
+IStrategy.cs
+#region Assembly PLTypes, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll
+#endregion
+
+using ATCenterProxy.interop;
+
+namespace PowerLanguage
+{
+	//
+	// Summary:
+	//     An interface describing the strategy.
+	public interface IStrategy : IStudy
+	{
+		//
+		// Summary:
+		//     Read-only property. Returns strategy's MarketPosition.
+		int PositionSide { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns 'Initial Capital' from the Strategy Properties window.
+		double InitialCapital { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns 'Slippage' from the Strategy Properties window.
+		double Slippage { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns 'Commission' from the Strategy Properties window.
+		double Commission { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns a read-only collection of all strategy positions.
+		IROList<IMarketPosition> Positions { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns strategy's current position.
+		IMarketPosition CurrentPosition { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns an interface which provides Portfolio Perfomance.
+		IPortfolioPerformance Portfolio { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the total number of trades.
+		int TotalTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the total number of bars during which winning trades
+		//     were open.
+		int TotalBarsWinTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the total number of bars during which losing trades
+		//     were open.
+		int TotalBarsLosTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the total number of bars during which even trades
+		//     (without profit and loss) were open.
+		int TotalBarsEvenTrades { get; }
+		//
+		// Summary:
+		//     Returns a ratio of profitable trades to total number of trades expressed in percent
+		//     ( 100*(NumWinTrades/TotalTrades)).
+		double PercentProfit { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns total number or profitable trades.
+		int NumWinTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns total number or losing trades.
+		int NumLosTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns total number of trades that did not bring any profit
+		//     or loss.
+		int NumEvenTrades { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns maximum potential loss (drawdown) during entire trading
+		//     period.
+		double MaxDrawDown { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns maximum number of sequential unprofitable trades.
+		int MaxLotsHeld { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns maximum number of sequential profitable trades.
+		int MaxConsecWinners { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns maximum number of sequential unprofitable trades.
+		int MaxConsecLosers { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns non-negative number with maximum profit of a single
+		//     trade.
+		double LargestWinTrade { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns non-positive number with maximum loss of a single
+		//     trade.
+		double LargestLosTrade { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns non-negative number that indicates total strategy
+		//     profit.
+		double GrossProfit { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns a non-positive number that indicates total strategy
+		//     loss.
+		double GrossLoss { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the average length of winning trades in terms of
+		//     bars.
+		double AvgBarsWinTrade { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the average length of losing trades in terms of bars.
+		double AvgBarsLosTrade { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns the average length of even trades (without profit
+		//     and loss) in terms of bars.
+		double AvgBarsEvenTrade { get; }
+		//
+		// Summary:
+		//     Read-only property. Returns 'Interest Rate' from the Strategy Properties window.
+		double InterestRate { get; }
+		//
+		// Summary:
+		//     Returns currency code from Strategy settings (Base Currency)
+		MTPA_MCSymbolCurrency StrategyCurrencyCode { get; }
+	}
+}
+
+MTPA_MCSymbolCurrency.cs
+#region Assembly ATCenterProxy.interop, Version=1.0.0.0, Culture=neutral, PublicKeyToken=efd7b80f12d76097
+// C:\Program Files\TS Support\MultiCharts .NET64\ATCenterProxy.interop.dll
+#endregion
+
+namespace ATCenterProxy.interop
+{
+	public enum MTPA_MCSymbolCurrency
+	{
+		eMTPA_MCSC_NONE = 0,
+		eMTPA_MCSC_USD = 1,
+		eMTPA_MCSC_EUR = 2,
+		eMTPA_MCSC_AUD = 3,
+		eMTPA_MCSC_GBP = 4,
+		eMTPA_MCSC_NZD = 5,
+		eMTPA_MCSC_CAD = 6,
+		eMTPA_MCSC_CHF = 7,
+		eMTPA_MCSC_HKD = 8,
+		eMTPA_MCSC_JPY = 9,
+		eMTPA_MCSC_NOK = 10,
+		eMTPA_MCSC_SEK = 11,
+		eMTPA_MCSC_SGD = 12,
+		eMTPA_MCSC_TRY = 13,
+		eMTPA_MCSC_ZAR = 14
+	}
+}
+
+
+
+IPortfolioData.cs
+#region Assembly PLTypes, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null
+// C:\Program Files\TS Support\MultiCharts .NET64\PLTypes.dll
+#endregion
+
+using System.Reflection;
+
+namespace PowerLanguage.Strategy
+{
+	//
+	// Summary:
+	//     Allows strategies to access and operate data between each other in MultiCharts
+	//     Portfolio Trader.
+	[DefaultMember("Item")]
+	public interface IPortfolioData
+	{
+		//
+		// Summary:
+		//     Indexer for data objects.
+		object this[string name] { get; set; }
+
+		//
+		// Summary:
+		//     Returns true if variable exists, otherwise false.
+		//
+		// Parameters:
+		//   name:
+		//     Variable name
+		bool ContainsKey(string name);
+	}
+}
+
+
+
+I could not find documentation on the Multicharts .Net portfolio trading but I did find documentation on Multicharts which has it's own scripting language (called something like PowerScript) it illustrates the ideas in that scripting language, here's the link https://www.multicharts.com/trading-software/index.php?title=Category:Portfolio_Trading 
+
+The below C# code is the Multicharts .Net equivalents of the example scripts.
+
+Below are the names of the strategy scripts in the Multicharts.Net repository:
+- Portfolio_Rank_MM.Strategy.CS
+- Portfolio_Rank_Signal_Base.Strategy.CS
+- Portfolio_Rotation.Strategy.CS
+- Portfolio_Rotation_MM.Strategy.CS
+- Portfolio_SpreadTradingSystem_Master.Strategy.CS
+- Portfolio_SpreadTradingSystem_Slave.Strategy.CS
+
+
+
+
+
+
+
