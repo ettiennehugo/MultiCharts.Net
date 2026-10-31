@@ -496,7 +496,7 @@ static class Program
 		var zg = z.Diag;
 		Check(zg.signals == 0 && z.Trades == 0 && zg.dvpBars == zg.Kd02ReasonSum() && zg.data1ZeroVol == zg.data1Bars && zg.data1Bars > 0,
 			"KD02 zero volume: no signals, invariant holds (dvpBars " + zg.dvpBars + ", " + z.CanaryDiagLine() + ")");
-		Check(zg.pocNaN > 0, "KD02 zero volume: POC NaN counted (" + z.CanaryDiagLine() + ")");
+		Check(zg.pocNaN > 0 && zg.railNaN == 0, "KD02 zero volume: POC NaN counted, never labelled railNaN when the POC is NaN (" + z.CanaryDiagLine() + ")");
 		Check(zw.Count(l => l.StartsWith("G0-b KD02 warning: DVP window volume is 0")) == 1 && zw.Count(l => l.Contains("valid DVP fit but the POC rail is NaN")) == 1,
 			"KD02 zero volume: one zero-window-volume warning and one POC-NaN warning (" + string.Join(" | ", zw) + ")");
 		int decisions = zg.noSnap + zg.noRails + zg.atrBad + zg.insideBand + zg.railNaN + zg.pocNaN + zg.geomFail + zg.tgtOnClose + zg.signals;

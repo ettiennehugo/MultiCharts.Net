@@ -1351,12 +1351,28 @@ namespace PowerLanguage.Function
 			DvpRails r = e.RailsOf(1, ring, 1);
 			if (r == null) { if (dec != null) dec.reason = EKd02Skip.NoRails; return false; }
 			if (!(s.atr > 0)) { if (dec != null) dec.reason = EKd02Skip.AtrBad; return false; }
-			double up = r.RailPrice(ELevelKind.DvpSigma, 2), dn = r.RailPrice(ELevelKind.DvpSigma, -2);
-			DvpRails nr = e.RailsOf(1, ring, 0);
-			double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
-			if (dec != null) { dec.up = up; dec.dn = dn; dec.poc = poc; }
+			double up = r.RailPrice(ELevelKind.DvpSigma, 2), dn = r.RailPrice(ELevelKind.DvpSigma, -2), poc = double.NaN;
+			if (dec != null) { dec.up = up; dec.dn = dn; }
 			if (c > up) side = -1; else if (c < dn) side = 1;
-			else { if (dec != null) dec.reason = double.IsNaN(up) || double.IsNaN(dn) ? EKd02Skip.RailNaN : EKd02Skip.InsideBand; return false; }
+			else
+			{
+				if (dec != null)
+				{
+					if (double.IsNaN(up) || double.IsNaN(dn))
+					{
+						// diagnostics only (dec given): label a NaN band; when the POC is NaN too it is pocNaN, the root cause (zero window volume)
+						DvpRails pr = e.RailsOf(1, ring, 0);
+						dec.poc = pr != null ? pr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
+						dec.reason = double.IsNaN(dec.poc) ? EKd02Skip.PocNaN : EKd02Skip.RailNaN;
+					}
+					else dec.reason = EKd02Skip.InsideBand;
+				}
+				return false;
+			}
+			// the POC (target) fit ends at t: computed only once a side is chosen, as before the diagnostics
+			DvpRails nr = e.RailsOf(1, ring, 0);
+			poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
+			if (dec != null) dec.poc = poc;
 			double rail = r.RailPrice(ELevelKind.DvpSigma, -side * stopK);
 			if (dec != null) dec.rail = rail;
 			if (double.IsNaN(rail) || double.IsNaN(poc)) { side = 0; if (dec != null) dec.reason = double.IsNaN(poc) ? EKd02Skip.PocNaN : EKd02Skip.RailNaN; return false; }
