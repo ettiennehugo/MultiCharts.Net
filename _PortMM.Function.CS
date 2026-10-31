@@ -90,6 +90,9 @@ namespace PowerLanguage.Function
 		public int staleBars = 3;
 		public int minContracts = 1;
 		public double idmCap = 2.5;
+		/// <summary>Outer hard ceiling on the combined WIDENED open + new risk of all strategies, fraction of book (0.10 = 10%).
+		/// Set by the _PortfolioRiskManager TotalRiskCapPct [Input] (spec §5.4 item 0); both it and heatCap apply, the tighter binds.</summary>
+		public double totalRiskCap = 0.10;
 
 		public string Validate()
 		{
@@ -111,6 +114,7 @@ namespace PowerLanguage.Function
 			if (staleBars < 1) e.Add($"staleBars={staleBars}");
 			if (minContracts < 1) e.Add($"minContracts={minContracts}");
 			if (!(idmCap >= 1)) e.Add($"idmCap={idmCap}");
+			if (!(totalRiskCap > 0 && totalRiskCap <= 1)) e.Add($"totalRiskCap={totalRiskCap} (0 < cap <= 1)");
 			return e.Count == 0 ? null : "PortMmConfig invalid: " + string.Join(", ", e);
 		}
 
@@ -126,7 +130,7 @@ namespace PowerLanguage.Function
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
 			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
-				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts})";
+				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) totalRiskCap({totalRiskCap})";
 		}
 	}
 
@@ -278,6 +282,7 @@ namespace PowerLanguage.Function
 		public EPortState state;
 		public int side;                // pending entry side (+1/-1)
 		public double rDollar = double.NaN;   // $ per contract of 1R
+		public double rDollarW = double.NaN;  // pm.R$w: $ per contract at the widened stop (NaN = rDollar)
 		public int qtyCode;
 		public double riskOpen;
 		public double vol = double.NaN; // $ daily vol per contract
@@ -360,6 +365,35 @@ namespace PowerLanguage.Function
 
 		/// <summary>startPortfolio initialisation of pm.R$w.</summary>
 		public static void Init(Action<string, object> set) { set(_PortKeys.RDollarW, double.NaN); }
+	}
+
+	/// <summary>M-PORT total open-risk cap (spec §5.4 item 0): the TotalRiskCapPct [Input] and the widened-risk check.</summary>
+	public static class _PortRiskCap
+	{
+		public const double DefaultPct = 10;
+
+		/// <summary>Input percent (0, 100] -> fraction. NaN/inf/<= 0 -> default 10% with a warning; > 100 -> clamped to 100% with a warning.</summary>
+		public static double Fraction(double pct, out string warning)
+		{
+			warning = null;
+			if (double.IsNaN(pct) || double.IsInfinity(pct) || pct <= 0)
+			{ warning = $"TotalRiskCapPct({pct}) must be in (0, 100]: using the default {DefaultPct}%"; return DefaultPct / 100; }
+			if (pct > 100) { warning = $"TotalRiskCapPct({pct}) > 100: clamped to 100%"; return 1.0; }
+			return pct / 100;
+		}
+
+		/// <summary>Widened $ per contract: pm.R$w when finite and >= pm.R$, else pm.R$.</summary>
+		public static double Rw(double rDollar, double rDollarW)
+		{
+			return double.IsNaN(rDollarW) || double.IsInfinity(rDollarW) || !(rDollarW >= rDollar) ? rDollar : rDollarW;
+		}
+
+		/// <summary>True when the new widened risk would push the combined total strictly over the cap (exactly at the cap is allowed). Unknown risk (NaN) breaks it.</summary>
+		public static bool Breaks(double total, double newRisk, double capDollar)
+		{
+			if (double.IsNaN(newRisk) || newRisk < 0) return true;
+			return total + newRisk > capDollar + 1e-9;
+		}
 	}
 
 	/// <summary>Pure M-PORT math (spec §5.3, §5.5).</summary>
@@ -465,6 +499,19 @@ namespace PowerLanguage.Function
 		public bool DayStopped { get { return m_dayStopped; } }
 
 		public string Configure() { return config.Validate(); }
+		/// <summary>Combined widened open + accepted-new risk after the last Decide, $.</summary>
+		public double TotalRisk { get; private set; }
+		private readonly Dictionary<int, string> m_skipLogged = new Dictionary<int, string>();
+
+		/// <summary>Deny one candidate and journal it at Info once per (strategy, reason) until the strategy stops being a candidate.</summary>
+		private void skip(PortDecision di, PortStratView s, string reason, string detail)
+		{
+			di.reason = reason;
+			string last;
+			if (m_skipLogged.TryGetValue(s.index, out last) && last == reason) return;
+			m_skipLogged[s.index] = reason;
+			journal?.Invoke($"PORT Info: skip {s.id}#{s.index} {reason}: {detail}");
+		}
 
 		/// <summary>
 		/// One MM calculation. day = trading-day key of the step; initialCapital = book starting capital; currencyOk = portfolio
@@ -492,6 +539,7 @@ namespace PowerLanguage.Function
 			updateClusters(day.Date, v);
 
 			double heat = 0; var clHeat = new Dictionary<int, double>(); int open = 0;
+			double capDollar = config.totalRiskCap * book;   // outer ceiling, widened risk (pm.riskOpen already uses the active = widened stop)
 			for (int i = 0; i < n; i++)
 			{
 				var s = v[i]; double r = s.publishes && s.riskOpen > 0 ? s.riskOpen : 0;
@@ -528,6 +576,8 @@ namespace PowerLanguage.Function
 				if (why != null) { if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why; continue; }
 				cand.Add(i);
 			}
+			foreach (var s in v) if (!cand.Exists(ci => v[ci].index == s.index)) m_skipLogged.Remove(s.index);   // re-log after the entry clears
+			double total = heat;
 			cand.Sort((a, b) =>
 			{
 				double sa = v[a].score, sb = v[b].score;
@@ -542,8 +592,9 @@ namespace PowerLanguage.Function
 			foreach (int i in cand)
 			{
 				var s = v[i];
-				if (mult <= 0) { d[i].reason = m_dayStopped ? "daily stop" : "dd throttle"; continue; }
-				if (open >= config.maxPositions) { d[i].reason = "maxPositions"; continue; }
+				double rw1 = _PortRiskCap.Rw(s.rDollar, s.rDollarW);
+				if (mult <= 0) { skip(d[i], s, m_dayStopped ? "daily stop" : "dd throttle", $"mult({mult}) risk ${rw1 * Math.Max(0, s.qtyCode):0.00}/qtyCode total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				int q = _PortMath.Size(config, mult, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
 				double rUnit = s.rDollar > 0 ? s.rDollar : double.NaN;
 				if (q == -1)
@@ -551,25 +602,39 @@ namespace PowerLanguage.Function
 					if (!double.IsNaN(rUnit) && s.qtyCode > 0)
 					{
 						double r = rUnit * s.qtyCode; int c = m_clusterId[i];
-						if (heat + r > config.heatCap * book + 1e-9) { d[i].reason = "heat cap"; continue; }
-						if (clHeat[c] + r > config.clusterCap * book + 1e-9) { d[i].reason = "cluster cap"; continue; }
-						heat += r; clHeat[c] += r;
+						if (heat + r > config.heatCap * book + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} heat ${heat:0.00} cap ${config.heatCap * book:0.00}"); continue; }
+						if (clHeat[c] + r > config.clusterCap * book + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}"); continue; }
+						double rwc = rw1 * s.qtyCode;
+						if (_PortRiskCap.Breaks(total, rwc, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${rwc:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+						heat += r; clHeat[c] += r; total += rwc;
+					}
+					else
+					{   // unmeasurable risk cannot pass the outer ceiling
+						skip(d[i], s, "total risk cap", $"risk unknown (no pm.R$/qtyCode) total ${total:0.00} cap ${capDollar:0.00}"); continue;
 					}
 				}
 				else
 				{
-					if (q < config.minContracts) { d[i].reason = "size < minContracts"; continue; }
+					if (q < config.minContracts) { skip(d[i], s, "size < minContracts", $"q({q}) risk ${q * rw1:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 					int c = m_clusterId[i];
 					double room = Math.Min(config.heatCap * book - heat, config.clusterCap * book - clHeat[c]);
 					int qMax = room > 0 ? (int)Math.Floor(room / rUnit + 1e-9) : 0;
 					if (q > qMax) q = qMax;
-					if (q < config.minContracts) { d[i].reason = heat + rUnit > config.heatCap * book ? "heat cap" : "cluster cap"; continue; }
-					heat += q * rUnit; clHeat[c] += q * rUnit;
+					if (q < config.minContracts)
+					{
+						bool hc = heat + rUnit > config.heatCap * book;
+						skip(d[i], s, hc ? "heat cap" : "cluster cap", hc ? $"risk ${rUnit:0.00}/contract heat ${heat:0.00} cap ${config.heatCap * book:0.00}" : $"risk ${rUnit:0.00}/contract cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}");
+						continue;
+					}
+					double rwq = q * rw1;   // the outer cap never cuts q: it skips
+					if (_PortRiskCap.Breaks(total, rwq, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${rwq:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+					heat += q * rUnit; clHeat[c] += q * rUnit; total += rwq;
 				}
 				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
 				open++;
 			}
 			Heat = book > 0 ? heat / book : double.NaN;
+			TotalRisk = total;
 
 			for (int i = 0; i < n; i++)
 			{
