@@ -450,6 +450,8 @@ namespace PowerLanguage.Strategy
 			public int listedGeneration = -1;
 			public List<IProfile> listedCache;
 			public int[] listedStarts = new int[0];   // profileStartBar(listedCache[i]), ascending
+			public int emptySkipped;                  // Empty profiles dropped by the last listing (diagnostic)
+			public HashSet<int> emptySeen;            // lazy: distinct start bars of Empty profiles seen this run (running total)
 			public int resolveGeneration = -1;
 			public readonly Dictionary<int, IProfile> resolved = new Dictionary<int, IProfile>();   // bars < calc bar
 			public int cachedBarA = -1;               // calc bar memo (its window can still grow)
@@ -1427,6 +1429,7 @@ namespace PowerLanguage.Strategy
 			if (VpConfluenceRules.NeedsAtr20d(UsesConfluenceZones, ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
 			base.StartCalc();
 			validateInputs();
+			m_hookRetried = false; m_zeroVolumeWarned = false; m_zeroVolumeBars = 0; m_vpDiagSummaryDone = false;
 			unhookStreams();
 			hookStreams();
 			m_vwap1 = configureVwap(m_vwap1, "VWAP1", Vwap1Type, Vwap1Length, Vwap1FromDate, Vwap1DataStream, "VwapFromDate", "VwapDataStream");
@@ -1459,6 +1462,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+			vpConnectionDiagnostics();
 			processPendingProfileChanges();
 			stepVwap(m_vwap1);
 			stepVwap(m_vwap2);
@@ -1530,6 +1534,22 @@ namespace PowerLanguage.Strategy
 		/// collection after a full change; profiles that ended before the first calculated bar may be missing, so callers that
 		/// need exactly <paramref name="count"/> profiles should fall back to ExtraVolumeProfileForBar when fewer are returned.
 		/// </summary>
+		public bool IsProfileStreamConnected(int datastream)
+		{
+			StreamPack sp;
+			return m_streams != null && m_streams.TryGetValue(datastream, out sp) && sp != null && sp.pack != null;
+		}
+
+		/// <summary>Start bars (1-based, ascending, -1 = unreadable) of the listed non-empty MC profiles on a stream; empty when
+		/// the stream is not connected. Shared cache: callers must not modify the array.</summary>
+		public int[] ProfileStartBars(int datastream)
+		{
+			StreamPack sp;
+			if (m_streams == null || !m_streams.TryGetValue(datastream, out sp) || sp == null || sp.pack == null) return new int[0];
+			List<IProfile> listed = listedProfiles(sp);
+			return sp.listedStarts.Length == listed.Count ? sp.listedStarts : new int[0];
+		}
+
 		public List<VpExtra> RecentCompletedProfiles(int datastream, int count, int asOfBar)
 		{
 			var result = new List<VpExtra>();
@@ -2452,11 +2472,19 @@ namespace PowerLanguage.Strategy
 				return list;
 			}
 
+			int empties = 0;
 			try
 			{
 				foreach (IProfile vp in sp.pack.Items)
 				{
-					if (vp == null || vp.Empty) continue;
+					if (vp == null) continue;
+					if (vp.Empty)
+					{
+						empties++;
+						if (sp.emptySeen == null) sp.emptySeen = new HashSet<int>();
+						sp.emptySeen.Add(profileStartBar(vp));
+						continue;
+					}
 					list.Add(vp);
 				}
 			}
@@ -2467,6 +2495,7 @@ namespace PowerLanguage.Strategy
 				sp.listedGeneration = sp.generation;
 				return list;
 			}
+			sp.emptySkipped = empties;
 			list.Sort((a, b) => profileStartBar(a).CompareTo(profileStartBar(b)));
 			var starts = new int[list.Count];
 			for (int i = 0; i < list.Count; i++) starts[i] = profileStartBar(list[i]);
@@ -2504,6 +2533,7 @@ namespace PowerLanguage.Strategy
 			return (high - low) + PRICE_EPSILON >= need;
 		}
 
+		// LELX no-profiles diagnosis: every hook outcome is logged; Data1 not connected is a Warning (it used to be silent).
 		private void hookStreams()
 		{
 			if (m_streams == null) m_streams = new Dictionary<int, StreamPack>();
@@ -2511,13 +2541,82 @@ namespace PowerLanguage.Strategy
 			for (int s = 1; s <= MaxDataStream; ++s)
 			{
 				IProfilesCollection pack = getPack(s);
-				if (pack == null || !pack.Visible) continue; // VP not enabled on this stream
+				if (pack == null || !pack.Visible)
+				{
+					// VP not enabled on this stream
+					string why = pack == null ? "no profile" : "hidden";
+					if (s == 1)
+						trace(ETraceLevel.Warning, $"VP hook Data1 not connected ({why}): no visible MultiCharts volume profile on Data1; completed-profile targets disabled");
+					else if (traceOn(ETraceLevel.Info))
+						trace(ETraceLevel.Info, $"VP hook Data{s} not connected ({why})");
+					continue;
+				}
+				if (traceOn(ETraceLevel.Info))
+				{
+					int count = -1;
+					try { count = pack.Items == null ? 0 : pack.Items.Count; } catch { count = -1; }
+					trace(ETraceLevel.Info, $"VP hook Data{s} connected profiles({count})");
+				}
 				StreamPack sp = new StreamPack(s);
 				sp.pack = pack;
 				sp.handler = delegate (bool full) { onVpChanged(sp, full); };
 				pack.EChanged += sp.handler;
 				m_streams.Add(s, sp);
 			}
+		}
+
+		private bool m_hookRetried;
+		private bool m_zeroVolumeWarned;
+		private int m_zeroVolumeBars;
+		private bool m_vpDiagSummaryDone;
+
+		// First calc bar: retry the hook once when Data1 was not connected at StartCalc (VP load race). Closed Data1 bars with zero
+		// volume are counted (Warning on the first); on the last bar one Info line reports empty profiles skipped and the count.
+		private void vpConnectionDiagnostics()
+		{
+			if (!m_hookRetried)
+			{
+				m_hookRetried = true;
+				if (!IsProfileStreamConnected(1))
+				{
+					unhookStreams();
+					hookStreams();
+					trace(IsProfileStreamConnected(1) ? ETraceLevel.Info : ETraceLevel.Warning, $"VP hook retry on first calc bar: Data1 connected({IsProfileStreamConnected(1)})");
+				}
+			}
+			if (Bars.Status == EBarState.Close && Bars.Volume[0] == 0)
+			{
+				m_zeroVolumeBars++;
+				if (!m_zeroVolumeWarned)
+				{
+					m_zeroVolumeWarned = true;
+					trace(ETraceLevel.Warning, $"Data1 closed bar has zero volume (bar {Bars.FullSymbolData.Current}): check Build Volume On / feed volume; profiles may be empty");
+				}
+			}
+			if (!m_vpDiagSummaryDone && Bars.LastBarOnChart && Bars.Status == EBarState.Close) emitVpRunSummary("lastBar");
+		}
+
+		// Once per run: on the last closed bar, or from StopCalc when the run ends before reaching it.
+		private void emitVpRunSummary(string when)
+		{
+			if (m_vpDiagSummaryDone) return;
+			m_vpDiagSummaryDone = true;
+			if (!traceOn(ETraceLevel.Info)) return;
+			var sb = new System.Text.StringBuilder();
+			if (m_streams != null)
+				foreach (var kv in m_streams)
+					if (kv.Value != null)
+					{
+						try { listedProfiles(kv.Value); } catch { }
+						sb.Append($" Data{kv.Key}(listed {kv.Value.listedStarts.Length}, empty now {kv.Value.emptySkipped}, empty total {(kv.Value.emptySeen == null ? 0 : kv.Value.emptySeen.Count)})");
+					}
+			trace(ETraceLevel.Info, $"VP run summary at({when}): connected streams({(m_streams == null ? 0 : m_streams.Count)}){sb} zeroVolumeClosedBars({m_zeroVolumeBars})");
+		}
+
+		protected override void StopCalc()
+		{
+			try { emitVpRunSummary("stopCalc"); } catch { }
+			base.StopCalc();
 		}
 
 		private void unhookStreams()
