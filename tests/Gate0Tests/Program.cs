@@ -181,7 +181,9 @@ static class Program
 
 		// ---- configuration ----
 		Check(Gate0Engine.DevEnd == new DateTime(2025, 1, 1), "development window ends 2025-01-01");
-		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }.Configure() != null, "canary variant out of range rejected");
+		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 9 }.Configure() != null, "canary variant out of range rejected (9; 8 = KD02 since PR-D8)");
+		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 134 }.Configure() != null && new Gate0Engine { mode = EGate0Mode.Canary, variant = 129 }.Configure() != null
+			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "KD-02 sweep cell out of range rejected (129, 134; 124..129 unused)");
 		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "A2-53 sweep cell out of range rejected");
 		Check(new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 14 }.Configure() != null, "level variant out of range rejected");
 		Check(new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 }.Configure() == null, "valid configuration accepted");
@@ -229,8 +231,8 @@ static class Program
 			Check(ce2.Count == 0, "no pre-registration line in Canary mode");
 		}
 
-		// ---- every canary (0..7 and a sweep cell) runs over bars without throwing ----
-		foreach (int cvn in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 100, 111, 123 })
+		// ---- every canary (0..8 and the sweep cells) runs over bars without throwing ----
+		foreach (int cvn in new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 100, 111, 123, 130, 133 })
 		{
 			bool ok = true;
 			try
@@ -248,6 +250,8 @@ static class Program
 			catch (Exception) { ok = false; }
 			Check(ok, "canary " + cvn + " runs");
 		}
+
+		Kd02Tests();
 
 		// ---- every family runs and emits its types ----
 		{
@@ -397,5 +401,135 @@ static class Program
 			double p = (Math.Min(d[a], d[b]) - d[m]) / max;
 			if (p >= prom) lvn.Add(new[] { (m + lo) * tick, p });
 		}
+	}
+
+	// ---- PR-D8 KD-02 canary: decode, configuration, laziness, the signal rule and a simulated run ----
+	static void Kd02Tests()
+	{
+		int ts; double k;
+		Check(Gate0Engine.DecodeKd02(8, out ts, out k) && ts == 19 && k == 3.0, "KD02 Variant 8 = default cell (19 bars, 3 sigma)");
+		var cells = new[] { 130, 131, 132, 133 }.Select(v => { Gate0Engine.DecodeKd02(v, out ts, out k); return ts + "/" + k.ToString(System.Globalization.CultureInfo.InvariantCulture); }).ToArray();
+		Check(string.Join(" ", cells) == "19/3 40/3 19/2.5 40/2.5", "KD02 sweep cells 130..133 = {19,40} x {3.0,2.5}: " + string.Join(" ", cells));
+		Check(!Gate0Engine.DecodeKd02(7, out ts, out k) && !Gate0Engine.DecodeKd02(129, out ts, out k) && !Gate0Engine.DecodeKd02(134, out ts, out k), "KD02 decode rejects 7, 129, 134");
+		var ok = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 };
+		Check(ok.Configure() == null && ok.Kd02Engine != null && ok.Kd02Ring != null && ok.CanaryName == "KD02[15m stop=3.0s time=19]", "KD02 configures, allocates its DVP engine: " + ok.CanaryName);
+		var c131 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 131 }; c131.Configure();
+		Check(c131.CanaryName == "KD02[15m stop=3.0s time=40]", "KD02 cell 131 name: " + c131.CanaryName);
+		bool lazy = new[] { 0, 4, 5, 7, 108 }.All(v => { var e = new Gate0Engine { mode = EGate0Mode.Canary, variant = v }; e.Configure(); return e.Kd02Engine == null && e.Kd02Ring == null; })
+			&& new Func<bool>(() => { var e = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 3 }; e.Configure(); return e.Kd02Engine == null; })();
+		Check(lazy, "KD02 laziness: no DVP engine for the other canaries or the level study");
+		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02Minutes = 0 }.Configure() != null
+			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02StopPadAtr = -0.1 }.Configure() != null, "KD02 parameters out of range rejected (minutes < 1, pad < 0; stop k comes from the Variant decode)");
+		var cfg = new Gate0Engine { kd02StopK = 2.5 }.Kd02Config();
+		Check(cfg.enabled && cfg.journalFits && !cfg.journalRails && cfg.degMode == EDvpDegMode.DevCoverageFrozen && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
+			&& new DvpConfig().sigmaList.Length + (Array.IndexOf(new DvpConfig().sigmaList, 2.5) < 0 ? 1 : 0) == cfg.sigmaList.Length, "KD02 config: the stop rail k is added to sigmaList (sorted, once)");
+
+		// simulated run: mean-reverting 1m prices, fills simulated from the intent (market entry next bar, stop/target/flatten exits)
+		var jl = new List<string>();
+		var g = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = jl.Add }; Check(g.Configure() == null, "KD02 run configures");
+		double entryC = double.NaN; int badTgt = 0;
+		var r = new Random(17); double p = 4800, anchor = 4800; int mp = 0; double stp = double.NaN, tgt = double.NaN;
+		int entries = 0, badGeom = 0, badTime = 0, exits = 0;
+		var start = new DateTime(2024, 9, 2); int bars = 0, fedAfterEnd = -1;
+		for (int d = 0; d < 140; d++)
+		{
+			var day = start.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			if (day >= Gate0Engine.DevEnd && fedAfterEnd < 0) fedAfterEnd = g.Kd02Ring.Count;
+			for (var t = day.AddHours(-6); t < day.AddHours(17); t = t.AddMinutes(1))
+			{
+				if (r.NextDouble() < 0.002) anchor += (r.NextDouble() - 0.5) * 40;
+				double o = p, c = Math.Round((p + 0.02 * (anchor - p) + (r.NextDouble() - 0.5) * 3) * 4) / 4; p = c;
+				double h = Math.Max(o, c) + 0.25, l = Math.Min(o, c) - 0.25;
+				if (mp != 0 && ((mp > 0 && (l <= stp || h >= tgt)) || (mp < 0 && (h >= stp || l <= tgt)) || g.intent.flatten)) { mp = 0; exits++; }
+				g.Bar(new Gate0Bar(t, day, o, h, l, c, 100), mp);
+				bars++;
+				if (mp == 0 && g.intent.entry == EGate0Entry.Market && g.intent.side != 0 && g.intent.tag != null && g.intent.tag.StartsWith("KD02"))
+				{
+					entries++;
+					var tod = t.TimeOfDay;
+					if (tod < new TimeSpan(9, 30, 0) || tod >= new TimeSpan(15, 55, 0)) badTime++;
+					double sc = g.Kd02Ring[0].c;   // the signal close: the DVP bar just closed
+					bool geom = g.intent.side < 0 ? g.intent.stop > sc && g.intent.target < sc : g.intent.stop < sc && g.intent.target > sc;
+					if (!geom || Math.Abs(g.intent.stop * 4 - Math.Round(g.intent.stop * 4)) > 1e-9 || Math.Abs(g.intent.target * 4 - Math.Round(g.intent.target * 4)) > 1e-9) badGeom++;
+					mp = g.intent.side; stp = g.intent.stop; tgt = g.intent.target; entryC = sc;
+				}
+				else if (mp != 0 && !double.IsNaN(g.intent.target))
+				{
+					tgt = g.intent.target;
+					if (mp > 0 ? !(tgt > entryC) : !(tgt < entryC)) badTgt++;   // re-read targets stay strictly beyond the entry
+				}   // the POC target is re-read each DVP bar
+			}
+		}
+		Check(entries > 0 && g.Kd02Fills > 0 && g.Kd02Fills <= entries && exits > 0, "KD02 simulated run trades (entries " + entries + ", fills " + g.Kd02Fills + ", exits " + exits + ")");
+		Check(badTime == 0 && badGeom == 0, "KD02 entries in RTH before 15:55, stop beyond / target toward the close, both on the tick grid (" + badTime + "/" + badGeom + ")");
+		Check(g.Kd02PocReached <= g.Kd02Fills && g.Kd02TimeStops >= 0 && (g.Kd02Fills == 0 ? double.IsNaN(g.Kd02PocReachRate) : g.Kd02PocReachRate >= 0 && g.Kd02PocReachRate <= 1),
+			"KD02 POC-reach " + g.Kd02PocReached + "/" + g.Kd02Fills + ", time stops " + g.Kd02TimeStops);
+		Check(fedAfterEnd >= 0 && g.Kd02Ring.Count == fedAfterEnd, "KD02 holdout: the DVP stream is never fed on/after DevEnd");
+		Check(badTgt == 0 && g.Kd02TargetHeld >= 0, "KD02 re-read targets never at or through the entry (held " + g.Kd02TargetHeld + ")");
+
+		// end of run: the finish hook journals the KD02 summary, then DVP RUN, then the DVP CAL coverage lines; idempotent
+		int before = jl.Count;
+		Check(!jl.Any(l => l.StartsWith("DVP RUN") || l.StartsWith("DVP CAL") || l.StartsWith("G0-b KD02 KD02")), "KD02: no end-of-run lines before the finish hook");
+		Check(jl.Count(l => l.StartsWith("G0-b KD02 warning: DVP DEGREE: no frozen d*") && l.Contains("falls back to d = 1")) == 1, "KD02 unfrozen fallback (Calibrate, d = 1): exactly one DVP DEGREE warning");
+		Check(jl.Any(l => l.StartsWith("DVP FIT")), "KD02 journalFits on: DVP FIT lines journaled");
+		Check(!jl.Any(l => l.StartsWith("DVP RAIL")), "KD02 journalRails off: no DVP RAIL lines");
+		g.FinishCanary(); var tail = jl.Skip(before).ToList();
+		g.FinishCanary(); g.Finish();
+		string sum = string.Format(System.Globalization.CultureInfo.InvariantCulture, "G0-b KD02 KD02[15m stop=3.0s time=19] fills({0}) pocReached({1}) rate({2:0.000}) timeStops({3}) targetHeld({4})",
+			g.Kd02Fills, g.Kd02PocReached, g.Kd02PocReachRate, g.Kd02TimeStops, g.Kd02TargetHeld);
+		Check(tail.Count >= 4 && tail[0] == sum && tail[1].StartsWith("DVP RUN runId(G0KD02) stream(Data1)") && tail.Skip(2).All(l => l.StartsWith("DVP CAL runId(G0KD02) stream(Data1)"))
+			&& tail.Last().Contains(" summary H(") && tail.Any(l => l.Contains(" year(2024) d(1) windows(")) && !tail.Any(l => l.Contains(" year(2025)")),
+			"KD02 finish hook: summary, DVP RUN, DVP CAL (" + (tail.Count > 0 ? tail[0] : "-") + ")");
+		Check(jl.Count == before + tail.Count, "KD02 finish hook is idempotent (FinishCanary twice + Finish)");
+		var noJ = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; noJ.Configure(); noJ.FinishCanary();
+		var lv = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5, journal = jl.Add }; lv.Configure(); int b2 = jl.Count; lv.FinishCanary();
+		Check(jl.Count == b2, "FinishCanary: other canaries journal nothing, no journal sink is safe");
+		// StopCalc fallback: a run stopped early (never reached DevEnd / the last bar) still writes its end-of-run lines, tagged partial
+		var pj = new List<string>(); var pe = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = pj.Add }; pe.Configure();
+		var pr = new Random(5); double pq = 4800; var pd = new DateTime(2024, 3, 4);
+		for (int dd = 0; dd < 7; dd++)
+		{
+			var day = pd.AddDays(dd); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			for (var t = day.AddHours(-6); t < day.AddHours(17); t = t.AddMinutes(1))
+			{ double o = pq, c = Math.Round((pq + 0.02 * (4800 - pq) + (pr.NextDouble() - 0.5) * 3) * 4) / 4; pq = c; pe.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 100)); }
+		}
+		int pb = pj.Count; pe.FinishCanary(true); var ptail = pj.Skip(pb).ToList(); pe.FinishCanary(true); pe.FinishCanary(); pe.Finish();
+		Check(ptail.Count >= 2 && ptail[0].StartsWith("G0-b KD02 KD02[") && ptail[0].EndsWith(") partial") && ptail[1].StartsWith("DVP RUN runId(G0KD02)")
+			&& ptail.Skip(2).All(l => l.StartsWith("DVP CAL")) && pj.Count == pb + ptail.Count, "KD02 early stop: partial summary, DVP RUN, DVP CAL, written once (" + (ptail.Count > 0 ? ptail[0] : "-") + ")");
+		Check(!tail[0].Contains("partial"), "KD02 normal finish is not tagged partial");
+		var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+		while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"))) dir = dir.Parent;
+		string tg0 = dir == null ? "" : System.IO.File.ReadAllText(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"));
+		int sc0 = tg0.IndexOf("protected override void StopCalc()", StringComparison.Ordinal);
+		Check(sc0 > 0 && tg0.IndexOf("if (!m_done && m_g0 != null && Mode == EGate0Mode.Canary) m_g0.FinishCanary(true);", sc0, StringComparison.Ordinal) > sc0
+			&& tg0.IndexOf("FinishCanary(true)", sc0, StringComparison.Ordinal) < tg0.IndexOf("m_g0 = null", sc0, StringComparison.Ordinal), "_TestGate0.StopCalc calls FinishCanary(true) before releasing the engine");
+
+		// the signal rule on the run's own engine and ring (any state where the t-1 rails exist)
+		var e2 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; e2.Configure();
+		var r2 = new Random(3); double q = 4800; bool tested = false; var st2 = new DateTime(2024, 3, 4);
+		for (int d = 0; d < 14 && !tested; d++)
+		{
+			var day = st2.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			for (var t = day.AddHours(-6); t < day.AddHours(17) && !tested; t = t.AddMinutes(1))
+			{
+				double o = q, c = Math.Round((q + 0.02 * (4800 - q) + (r2.NextDouble() - 0.5) * 3) * 4) / 4; q = c;
+				e2.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 100));
+				var de = e2.Kd02Engine; var ring = e2.Kd02Ring;
+				DvpSnapshot sn = de.Snapshot(1, ring, 1); DvpRails r1 = sn != null ? de.RailsOf(1, ring, 1) : null, r0 = de.RailsOf(1, ring, 0);
+				if (r1 == null || r0 == null || !(sn.atr > 0)) continue;
+				double up = r1.RailPrice(ELevelKind.DvpSigma, 2), dn = r1.RailPrice(ELevelKind.DvpSigma, -2), poc = r0.RailPrice(ELevelKind.DvpPoc, 0);
+				if (double.IsNaN(up) || double.IsNaN(dn) || double.IsNaN(poc) || !(poc < up && poc > dn)) continue;
+				int side; double s1, t1;
+				bool hi = Gate0Engine.Kd02Signal(de, ring, up + 0.25, 3.0, 0.1, out side, out s1, out t1);
+				bool hiOk = hi && side == -1 && t1 == poc && s1 == r1.RailPrice(ELevelKind.DvpSigma, 3.0) + 0.1 * sn.atr;
+				bool lw = Gate0Engine.Kd02Signal(de, ring, dn - 0.25, 3.0, 0.1, out side, out s1, out t1);
+				bool loOk = lw && side == 1 && t1 == poc && s1 == r1.RailPrice(ELevelKind.DvpSigma, -3.0) - 0.1 * sn.atr;
+				bool mid = !Gate0Engine.Kd02Signal(de, ring, (up + dn) / 2, 3.0, 0.1, out side, out s1, out t1) && side == 0 && double.IsNaN(s1) && double.IsNaN(t1);
+				bool at = !Gate0Engine.Kd02Signal(de, ring, up, 3.0, 0.1, out side, out s1, out t1);   // strictly beyond the rail
+				Check(hiOk && loOk && mid && at, "KD02 rule: short above +2s (stop +3s + 0.1 ATR, target POC of t), long below -2s (mirror), none inside or on the rail");
+				tested = true;
+			}
+		}
+		Check(tested, "KD02 rule test found a bar with t-1 rails");
 	}
 }

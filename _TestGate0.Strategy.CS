@@ -23,6 +23,8 @@ namespace PowerLanguage.Strategy
 	//     _BarRing.Function.CS, _ProfileMath.Function.CS, _ProfileStats.Function.CS (KDE h_cv for the HVN/LVN sensitivity arm, PR #18),
 	//     _Gmm.Function.CS (shared EM core used by the GMM / sigma mixture families 12 and 13)
 	//     _LevelRef.Function.CS, _RollDetector.Function.CS (roll window / roll detection; PR #19 branch)
+	//     _DvpEngine.Function.CS      (DVP engine; the KD-02 canary, Variant 8 / 130..133, hosts one; PR-D8. Import it before
+	//                                  _Gate0.Function.CS — _Gate0 does not compile without it even when KD-02 is not run)
 	//     the _CustomSignal / _VolumeProfileBase / _VolumeProfileFuturesBase chain and their helper functions
 	//   New with this strategy:
 	//     _Gate0.Function.CS          (the pure Gate-0 engine: level families, KDE/GMM, DV sources, bootstrap, verdicts, canaries)
@@ -119,6 +121,31 @@ namespace PowerLanguage.Strategy
 	//                 touch only; SL = TP = 0.15 x ATR20d
 	//    7 PS-03      naive 80% rule: open outside the prior value area, enter on the first 30m close back inside,
 	//                 target the prior POC, stop 0.25 x VA width beyond the entry edge
+	//    8 KD-02      (PR-D8) DVP fade: on a closed 15m bar, close beyond the t-1 DVP fit's +-2 sigma rail -> fade at market;
+	//                 stop = the t-1 +-3 sigma rail + 0.1 x ATR (rounded away from the close), target = the t fit's POC
+	//                 (re-read every 15m bar), time stop 19 bars; common G0-b rules (RTH, flat 15:55, roll sessions out).
+	//                 A re-read POC that is not strictly beyond the entry is not applied (targetHeld). Development window
+	//                 only: the DVP stream is never fed on/after 2025-01-01.
+	//                 d* is not frozen yet (PR-D9): the fallback is Calibrate, traded d = 1, one "DVP DEGREE" Warning.
+	//                 Journal (Trace >= Journal): DVP FIT lines per refit; at the last bar "G0-b KD02 ... fills() pocReached()
+	//                 rate() timeStops() targetHeld()", then DVP RUN, then the DVP CAL coverage lines. If the run stops early
+	//                 (StopCalc before DevEnd / the last bar) the same lines are written there, the summary tagged " partial".
+	//                 VOLUME: a 2016-2024 15m run at Trace = Journal writes about 200k DVP FIT lines (one file append each, slow);
+	//                 for the PF verdict alone run below Journal (no DVP journal, no DvpCalib).
+	//                 Accepted limitation (Ettienne Hugo, 2026-10-31): Gate0 has no session calendar, so the DVP stream gets
+	//                 halfDay = false. Gate0's RTH window (IsRthTime) is a fixed 09:30-16:00 ET, not calendar-aware; on a half
+	//                 day the session ends early only because the data stops at 13:00 ET.
+	//                 d* FREEZE (Ettienne Hugo, 2026-10-31): d* is NOT frozen from KD-02. It comes from a dedicated host run of
+	//                 _DvpEngineTest, degMode = Calibrate, journal on, @ES 15m over the 2016-2024 dev window; its pooled DVP CAL
+	//                 table (d* = argmin score, ties to the lower d) goes into DvpFrozenDegree in PR-D9. Until then KD-02 keeps
+	//                 the d = 1 fallback. Stop rounding away from the close and the skip when the target rounds onto the
+	//                 close: approved (Ettienne Hugo, 2026-10-31). These two rules apply ONLY to this Gate0 KD-02 canary; live
+	//                 strategies use the cost floor (stop = max(structural, 14 ticks), costFloorTicks) and the 1% per-trade
+	//                 risk budget (skip if q x widened stop x $50 > 0.01 x equity, never shrink q): engines-manual
+	//                 "Cost floor (catalogue §2.1)". Sweep grid {19, 40} x {3.0, 2.5} sigma: kept.
+	//  130..133 KD-02 sweep: 130 = time 19 / stop 3.0 sigma (= Variant 8), 131 = 40 / 3.0, 132 = 19 / 2.5, 133 = 40 / 2.5.
+	//                 Configure rejects other values ("canary variant out of range": 9..99, 124..129, 134+) and
+	//                 "KD-02 parameters out of range" (minutes < 1, time stop < 1, stop k <= 2, pad < 0).
 	//  100..123 A2-53 sweep: idx = Variant - 100; gap g = {0.3, 0.5, 0.8}%[idx / 8]; j = 1 + (idx / 4) % 2;
 	//                 bar = 30m if (idx / 2) % 2 == 0 else 15m; vol filter ON if idx % 2 == 0 else OFF.
 	//                 e.g. 100 = 0.3% j1 30m on, 101 = same filter off, 102 = 0.3% j1 15m on, 104 = 0.3% j2 30m on,
@@ -201,6 +228,9 @@ namespace PowerLanguage.Strategy
 
 		protected override void StopCalc()
 		{
+			// fallback: a canary run that stopped before DevEnd / LastBarOnChart (aborted, recalculated) still writes its end-of-run
+			// lines, tagged partial; FinishCanary is idempotent, so a normal finish() before this writes nothing more
+			if (!m_done && m_g0 != null && Mode == EGate0Mode.Canary) m_g0.FinishCanary(true);
 			m_g0 = null; m_configured = false;
 			base.StopCalc();
 		}
@@ -250,6 +280,7 @@ namespace PowerLanguage.Strategy
 			m_done = true;
 			if (Mode == EGate0Mode.Canary)
 			{
+				m_g0.FinishCanary();   // KD-02: G0-b KD02 summary, DVP RUN, DVP CAL
 				printTotals();
 				return;
 			}
