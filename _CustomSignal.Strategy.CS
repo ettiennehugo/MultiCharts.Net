@@ -316,6 +316,7 @@ namespace PowerLanguage.Strategy
 		private bool m_loadAccounts;
 		private bool m_unknownAppWarned;
 		private bool m_fractionWarned;          // CS-4
+		private bool m_widenedCloserWarned;   // M-PORT rev 2: closer widened stop warned once per instance
 		private bool m_lastEquityFromAccount;   // CS-4: last equityAvailable came from the broker account
 		private bool m_volumeMbbWarned;
 		private bool m_tradingDayWarned;
@@ -1582,6 +1583,7 @@ namespace PowerLanguage.Strategy
 		protected void portfolioArm(int side, double entry, double stop, int qtyCode, double widenedStop = double.NaN)
 		{
 			if (!m_portOn) return;
+			warnWidenedCloser(entry, stop, widenedStop);
 			double bpv = Bars.Info.BigPointValue;
 			double rd = Math.Abs(entry - stop) * bpv;
 			if (!(rd > 0) || double.IsNaN(rd) || double.IsInfinity(rd)) return;
@@ -2808,6 +2810,13 @@ namespace PowerLanguage.Strategy
 			public bool roundLots;
 		}
 
+		/// <summary>M-PORT rev 2: one Warning per strategy instance when a widened stop is closer than the structural stop (ignored, structural used).</summary>
+		private void warnWidenedCloser(double entry, double stop, double widenedStop)
+		{
+			if (_PortArm.WarnCloserOnce(ref m_widenedCloserWarned, entry, stop, widenedStop))
+				trace(ETraceLevel.Warning, $"widened stop({widenedStop}) is closer to entry({entry}) than the structural stop({stop}): ignored, using the structural stop (pm.R$w = NaN); warned once per instance");
+		}
+
 		/// <summary>
 		/// CS-4: units so that |entry - stop| x BigPointValue x units ≈ equity x riskFraction, then the limits. riskFraction is a
 		/// fraction in (0, 1] (0.01 = 1%). Returns 0 with a traced reason (bad BPV, stop too close, zero equity, notional cap).
@@ -2845,10 +2854,16 @@ namespace PowerLanguage.Strategy
 			}
 			qty = applyRoundLots(qty, limits.roundLots);
 			bool willArm = m_portOn && bars == Bars;
-			if (qty > 0 && !willArm && !double.IsNaN(widenedStop) && _PortArm.SkipForBudget(willArm, qty, entry, stop, widenedStop, bpv, equityAvailable(_PortArm.TradeBudgetFraction)))
+			if (qty > 0 && !willArm && !double.IsNaN(widenedStop))
 			{
-				trace(ETraceLevel.Debug, $"sizeForRisk - 0: qty({qty}) x widened stop({widenedStop}) risk > {_PortArm.TradeBudgetFraction:P0} of equity, trade skipped");
-				return 0;
+				warnWidenedCloser(entry, stop, widenedStop);
+				double budget = equityAvailable(_PortArm.TradeBudgetFraction);   // only when a skip is possible
+				if (_PortArm.SkipForBudget(willArm, qty, entry, stop, widenedStop, bpv, budget))
+				{
+					double risk = qty * _PortArm.RDollarW(entry, stop, widenedStop, bpv);
+					trace(ETraceLevel.Info, $"sizeForRisk - 0: trade skipped, qty({qty}) x widened stop {Math.Abs(entry - widenedStop) / tickSize():0.##} ticks = risk ${risk:0.00} > budget ${budget:0.00} ({_PortArm.TradeBudgetFraction:P0} of equity)");
+					return 0;
+				}
 			}
 			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
 			else if (willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
