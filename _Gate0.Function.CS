@@ -50,6 +50,45 @@ namespace PowerLanguage.Function
 		}
 	}
 
+	/// <summary>KD-02 diagnostics (kd02-zero-entries): why Kd02Signal returned no signal on a DVP bar that passed the session gates.</summary>
+	public enum EKd02Skip { None = 0, NoSnap = 1, NoRails = 2, AtrBad = 3, InsideBand = 4, RailNaN = 5, PocNaN = 6, GeomFail = 7 }
+
+	/// <summary>KD-02 diagnostics: the inputs of one signal decision (filled by Kd02Signal when passed; reused, never per bar).</summary>
+	public sealed class Kd02Decision
+	{
+		public EKd02Skip reason;
+		public double up = double.NaN, dn = double.NaN, poc = double.NaN, rail = double.NaN, atr = double.NaN;
+		public bool fitValid, manValid; public int rowsEff;
+		public void Clear() { reason = EKd02Skip.None; up = dn = poc = rail = atr = double.NaN; fitValid = manValid = false; rowsEff = 0; }
+	}
+
+	/// <summary>Canary diagnostics (kd02-zero-entries). Allocated by Configure in Canary mode only. Report-only: nothing here
+	/// changes a decision. Day counters apply to every canary; the KD-02 counters are incremented exactly where kd02Close /
+	/// Kd02Signal return, so for KD-02: dvpBars == Kd02ReasonSum() + signals (a DVP bar ends in exactly one bucket).</summary>
+	public sealed class Gate0CanaryDiag
+	{
+		// every canary (RTH opens seen in Canary mode)
+		public int rthDays, liveDays, skipRoll, skipNoPrior, skipNoAtr, skipDevEnd, signals;
+		// KD-02 per DVP bar
+		public int dvpBars, outsideRth, after1555, notLive, notTradeable, inPosition, noSnap, noRails, atrBad, insideBand, railNaN, pocNaN, geomFail, tgtOnClose;
+		public int signalExpired;              // an unfilled KD-02 signal cancelled at the next DVP bar (a later event, not in the sum)
+		public long data1Bars, data1ZeroVol;   // Data1 bars fed to the DVP stream / of those with volume <= 0
+		public int Kd02ReasonSum() { return outsideRth + after1555 + notLive + notTradeable + inPosition + noSnap + noRails + atrBad + insideBand + railNaN + pocNaN + geomFail + tgtOnClose; }
+		internal void Count(EKd02Skip r)
+		{
+			switch (r)
+			{
+				case EKd02Skip.NoSnap: noSnap++; break;
+				case EKd02Skip.NoRails: noRails++; break;
+				case EKd02Skip.AtrBad: atrBad++; break;
+				case EKd02Skip.InsideBand: insideBand++; break;
+				case EKd02Skip.RailNaN: railNaN++; break;
+				case EKd02Skip.PocNaN: pocNaN++; break;
+				case EKd02Skip.GeomFail: geomFail++; break;
+			}
+		}
+	}
+
 	public struct Gate0Bar
 	{
 		public DateTime et;    // bar close time, Eastern
@@ -315,6 +354,9 @@ namespace PowerLanguage.Function
 		public long seed = 33;
 		public double vaPct = 0.70;
 		public Action<string> journal;
+		/// <summary>Warning / Debug sinks (kd02-zero-entries diagnostics; null = off, nothing is formatted). _TestGate0 passes
+		/// engineSink(Warning) / engineSink(Debug).</summary>
+		public Action<string> warn, debug;
 		// canary parameters (catalogue values where it gives one; see the _TestGate0 header for the rest)
 		public double a253Gap = 0.005; public int a253Bar = 1, a253Minutes = 30; public bool a253Filter = true;
 		public double dv01F = 0.15, dv01K = 1.0;
@@ -331,6 +373,16 @@ namespace PowerLanguage.Function
 		/// <summary>Canary: sessions skipped live because they are a roll day or the session right after a roll splice (the session
 		/// BEFORE a roll is only known afterwards: the strategy drops its trades from the reported totals via InRollWindow).</summary>
 		public int RollSkips { get; private set; }
+		/// <summary>Canary diagnostics (null outside Canary mode).</summary>
+		public Gate0CanaryDiag Diag { get { return m_diag; } }
+		private Gate0CanaryDiag m_diag;
+		private HashSet<string> m_warned;
+		private void warnOnce(string key, string msg)
+		{
+			var w = warn ?? journal; if (w == null) return;
+			if (m_warned == null) m_warned = new HashSet<string>();
+			if (m_warned.Add(key)) w(msg);
+		}
 		/// <summary>True when this is a verdict run (single family, 20 controls). Variant 0 is an overview only.</summary>
 		public bool VerdictRun { get { return mode == EGate0Mode.Canary || variant != 0; } }
 
@@ -396,6 +448,7 @@ namespace PowerLanguage.Function
 			if (mode == EGate0Mode.Canary && !((variant >= 0 && variant <= 8) || (variant >= 100 && variant <= 123) || (variant >= 130 && variant <= 133))) return "Canary Variant must be 0..8, 100..123 (A2-53 sweep) or 130..133 (KD-02 sweep)";
 			if (mode != EGate0Mode.Canary && (variant < 0 || variant > 13)) return "level-study Variant must be 0..13";
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.A2_53) DecodeA253(variant, out a253Gap, out a253Bar, out a253Minutes, out a253Filter);
+			if (mode == EGate0Mode.Canary && m_diag == null) m_diag = new Gate0CanaryDiag();
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.KD02)
 			{
 				DecodeKd02(variant, out kd02TimeStop, out kd02StopK);
@@ -922,6 +975,16 @@ namespace PowerLanguage.Function
 			bool rollDay = m_cur.roll, afterRoll = sessionDays.Count >= 2 && rollDays.Contains(sessionDays[sessionDays.Count - 2]);
 			m_skipDay = b.day >= DevEnd || rollDay || afterRoll || m_prior == null || !(m_atrD.Value > 0);
 			m_rthLive = !m_skipDay;
+			if (m_diag != null)
+			{
+				// one reason per RTH open, in this precedence (diagnostics only; the skip itself is unchanged)
+				m_diag.rthDays++;
+				if (b.day >= DevEnd) m_diag.skipDevEnd++;
+				else if (rollDay || afterRoll) m_diag.skipRoll++;
+				else if (m_prior == null) m_diag.skipNoPrior++;
+				else if (!(m_atrD.Value > 0)) m_diag.skipNoAtr++;
+				else m_diag.liveDays++;
+			}
 			if (rollDay || afterRoll) { RollSkips++; if (journal != null) journal(string.Format(CultureInfo.InvariantCulture, "G0-b roll-skip {0:yyyy-MM-dd} total({1})", b.day, RollSkips)); }
 			m_sessHi = b.h; m_sessLo = b.l;
 			m_priorClose = m_prior != null ? m_prior.rthC : double.NaN;
@@ -954,6 +1017,7 @@ namespace PowerLanguage.Function
 
 		private void enter(int side, EGate0Entry kind, double px, double stop, double target, string tag)
 		{
+			if (m_diag != null) m_diag.signals++;
 			intent.side = side; intent.entry = kind; intent.entryPrice = px; intent.stop = stop; intent.target = target; intent.tag = tag; intent.flatten = false;
 		}
 
@@ -1146,6 +1210,7 @@ namespace PowerLanguage.Function
 			DateTime e; double o, h, l, c, v;
 			if (m_kdB.PreBar(b.et, out e, out o, out h, out l, out c, out v)) kd02Close(e, o, h, l, c, v);
 			if (b.roll) m_kdRollCur = true;
+			if (m_diag != null) { m_diag.data1Bars++; if (!(b.v > 0)) m_diag.data1ZeroVol++; }
 			m_kdB.Add(b.et, b.o, b.h, b.l, b.c, b.v); m_kdDay = b.day;
 			if (m_kdB.PostBar(b.et)) kd02Close(m_kdB.end, m_kdB.o, m_kdB.h, m_kdB.l, m_kdB.c, m_kdB.v);
 			kd02Track(b);
@@ -1176,15 +1241,32 @@ namespace PowerLanguage.Function
 			if (m_mp < 0 ? b.l <= intent.target : b.h >= intent.target) { m_kdReachedThis = true; Kd02PocReached++; }
 		}
 
+		private int m_kdZeroRun;          // consecutive DVP bars with volume <= 0 (zero-window-volume warning)
+		private Kd02Decision m_kdDec;      // reused decision record (allocated on the first signal decision)
+
 		private void kd02Close(DateTime end, double o, double h, double l, double c, double v)
 		{
 			var rb = new RingBar { bar = m_kdBar++, time = end, tradingDay = m_kdDay, o = o, h = h, l = l, c = c, v = v, rth = IsRthTime(end.TimeOfDay), rollBar = m_kdRollCur };
 			m_kdRollCur = false;
 			m_kdRing.Add(rb);
 			m_kd.OnBar(1, m_kdRing, false);   // halfDay unknown in Gate0 (no calendar): false
-			if (!m_rthLive || !IsRthTime(end.TimeOfDay) || end.TimeOfDay >= new TimeSpan(15, 55, 0) || !m_kd.Tradeable(1)) return;
+			var dg = m_diag; dg.dvpBars++;
+			// diagnostics only (Ettienne decides the behaviour): a DVP window whose total volume is 0 has no volume-weighted manifold
+			if (v > 0) m_kdZeroRun = 0;
+			else if (++m_kdZeroRun == m_kd.Config.winLen)
+				warnOnce("kd02zerovol", string.Format(CultureInfo.InvariantCulture,
+					"G0-b KD02 warning: DVP window volume is 0 ({0} consecutive {1}m bars with volume 0, ending {2:yyyy-MM-dd HH:mm} ET); Data1 volume is 0 on {3:0.0}% of {4} bars so far. "
+					+ "The volume-weighted POC/value area cannot form, so KD-02 produces no signal (check the chart's volume field / Trade Volume vs Tick Count)",
+					m_kdZeroRun, kd02Minutes, end, dg.data1Bars > 0 ? 100.0 * dg.data1ZeroVol / dg.data1Bars : 0.0, dg.data1Bars));
+			// same gates and order of effect as before; split only so each return is counted once
+			TimeSpan tod = end.TimeOfDay;
+			if (!IsRthTime(tod)) { dg.outsideRth++; return; }
+			if (tod >= new TimeSpan(15, 55, 0)) { dg.after1555++; return; }
+			if (!m_rthLive) { dg.notLive++; return; }
+			if (!m_kd.Tradeable(1)) { dg.notTradeable++; return; }
 			if (m_mp != 0)
 			{
+				dg.inPosition++;
 				m_kdHeld++;
 				if (m_kdHeld >= kd02TimeStop) { Kd02TimeStops++; intent.flatten = true; intent.entry = EGate0Entry.None; return; }
 				DvpRails nr = m_kd.RailsOf(1, m_kdRing, 0);   // target re-read each bar: for bar t+1 the "t-1 fit" ends at t
@@ -1199,14 +1281,51 @@ namespace PowerLanguage.Function
 				}
 				return;
 			}
-			if (intent.entry != EGate0Entry.None) intent.entry = EGate0Entry.None;   // an unfilled signal lives one bar only
+			if (intent.entry != EGate0Entry.None) { intent.entry = EGate0Entry.None; dg.signalExpired++; }   // an unfilled signal lives one bar only
 			int side; double stop, target;
-			if (!Kd02Signal(m_kd, m_kdRing, c, kd02StopK, kd02StopPadAtr, out side, out stop, out target)) return;
+			if (m_kdDec == null) m_kdDec = new Kd02Decision();
+			var dec = m_kdDec;
+			if (!Kd02Signal(m_kd, m_kdRing, c, kd02StopK, kd02StopPadAtr, out side, out stop, out target, dec))
+			{
+				dg.Count(dec.reason);
+				if ((dec.reason == EKd02Skip.PocNaN || dec.reason == EKd02Skip.RailNaN) && dec.fitValid)
+					warnOnce("kd02railnan", string.Format(CultureInfo.InvariantCulture,
+						"G0-b KD02 warning: valid DVP fit but {0} rail is NaN at {1:yyyy-MM-dd HH:mm} ET (manifold valid({2}) rowsEff({3}) up({4}) dn({5}) poc({6})); KD-02 skips such bars (counted as {7})",
+						dec.reason == EKd02Skip.PocNaN ? "the POC" : "a sigma", end, dec.manValid, dec.rowsEff, F2(dec.up), F2(dec.dn), F2(dec.poc), dec.reason == EKd02Skip.PocNaN ? "pocNaN" : "railNaN"));
+				kd02Trace(end, c, dec, double.NaN, double.NaN, dec.reason.ToString());
+				return;
+			}
 			// tick grid: the stop rounds away from the close (a stop just inside a tick must not round onto the entry), the target to nearest
 			double st = (side > 0 ? Math.Floor(stop / tick + 1e-9) : Math.Ceiling(stop / tick - 1e-9)) * tick, tg = Math.Round(target / tick) * tick;
-			if (side > 0 ? !(tg > c) : !(tg < c)) return;   // target rounded onto the close: no edge left
+			if (side > 0 ? !(tg > c) : !(tg < c)) { dg.tgtOnClose++; kd02Trace(end, c, dec, st, tg, "TgtOnClose"); return; }   // target rounded onto the close: no edge left
 			m_kdEntry = c;
+			kd02Trace(end, c, dec, st, tg, side < 0 ? "SignalShort" : "SignalLong");
 			enter(side, EGate0Entry.Market, double.NaN, st, tg, side < 0 ? "KD02S" : "KD02L");
+		}
+
+		private static string F2(double x) { return double.IsNaN(x) ? "NaN" : x.ToString("0.00", CultureInfo.InvariantCulture); }
+
+		/// <summary>Debug trace of one KD-02 signal decision (only when a Debug sink is set: nothing is formatted otherwise).</summary>
+		private void kd02Trace(DateTime end, double c, Kd02Decision d, double stop, double tgt, string reason)
+		{
+			if (debug == null) return;
+			debug(string.Format(CultureInfo.InvariantCulture, "G0-b KD02 decision {0:yyyy-MM-dd HH:mm} c({1}) +2s({2}) -2s({3}) poc({4}) stop({5}) tgt({6}) reason({7})",
+				end, F2(c), F2(d.up), F2(d.dn), F2(d.poc), F2(stop), F2(tgt), reason));
+		}
+
+		/// <summary>Canary diagnostics fragment for the G0-b totals line: "signals() rollSkips() rollDays() sessions() liveDays() skips{...}"
+		/// (the KD-02 per-bar reasons are present only for KD-02).</summary>
+		public string CanaryDiagLine()
+		{
+			var d = m_diag ?? new Gate0CanaryDiag();
+			var sb = new StringBuilder();
+			sb.AppendFormat(CultureInfo.InvariantCulture, "signals({0}) rollSkips({1}) rollDays({2}) sessions({3}) rthDays({4}) liveDays({5}) skips{{noPrior={6},noAtr={7},devEnd={8},roll={9}",
+				d.signals, RollSkips, rollDays.Count, sessionDays.Count, d.rthDays, d.liveDays, d.skipNoPrior, d.skipNoAtr, d.skipDevEnd, d.skipRoll);
+			if (m_kd != null)
+				sb.AppendFormat(CultureInfo.InvariantCulture, ",dvpBars={0},notLive={1},outsideRth={2},after1555={3},notTradeable={4},inPosition={5},noSnap={6},noRails={7},atrBad={8},insideBand={9},pocNaN={10},railNaN={11},geomFail={12},tgtOnClose={13},expired={14},zeroVol1={15}/{16}",
+					d.dvpBars, d.notLive, d.outsideRth, d.after1555, d.notTradeable, d.inPosition, d.noSnap, d.noRails, d.atrBad, d.insideBand, d.pocNaN, d.railNaN, d.geomFail, d.tgtOnClose, d.signalExpired, d.data1ZeroVol, d.data1Bars);
+			sb.Append('}');
+			return sb.ToString();
 		}
 
 		/// <summary>
@@ -1217,18 +1336,32 @@ namespace PowerLanguage.Function
 		/// </summary>
 		internal static bool Kd02Signal(_DvpEngine e, _BarRing ring, double c, double stopK, double stopPadAtr, out int side, out double stop, out double target)
 		{
+			return Kd02Signal(e, ring, c, stopK, stopPadAtr, out side, out stop, out target, null);
+		}
+
+		/// <summary>Same rule; when dec is given it receives the skip reason and the rails used (diagnostics, no behaviour change:
+		/// a NaN +-2 sigma rail returned false before too, it is now reported as RailNaN instead of falling into InsideBand).</summary>
+		internal static bool Kd02Signal(_DvpEngine e, _BarRing ring, double c, double stopK, double stopPadAtr, out int side, out double stop, out double target, Kd02Decision dec)
+		{
 			side = 0; stop = target = double.NaN;
+			if (dec != null) dec.Clear();
 			DvpSnapshot s = e.Snapshot(1, ring, 1);
-			DvpRails r = s != null ? e.RailsOf(1, ring, 1) : null;
-			if (r == null || !(s.atr > 0)) return false;
+			if (dec != null && s != null) { dec.fitValid = s.valid; dec.manValid = s.manValid; dec.rowsEff = s.manRowsEff; dec.atr = s.atr; }
+			if (s == null) { if (dec != null) dec.reason = EKd02Skip.NoSnap; return false; }
+			DvpRails r = e.RailsOf(1, ring, 1);
+			if (r == null) { if (dec != null) dec.reason = EKd02Skip.NoRails; return false; }
+			if (!(s.atr > 0)) { if (dec != null) dec.reason = EKd02Skip.AtrBad; return false; }
 			double up = r.RailPrice(ELevelKind.DvpSigma, 2), dn = r.RailPrice(ELevelKind.DvpSigma, -2);
-			if (c > up) side = -1; else if (c < dn) side = 1; else return false;
-			double rail = r.RailPrice(ELevelKind.DvpSigma, -side * stopK);
 			DvpRails nr = e.RailsOf(1, ring, 0);
 			double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
-			if (double.IsNaN(rail) || double.IsNaN(poc)) { side = 0; return false; }
+			if (dec != null) { dec.up = up; dec.dn = dn; dec.poc = poc; }
+			if (c > up) side = -1; else if (c < dn) side = 1;
+			else { if (dec != null) dec.reason = double.IsNaN(up) || double.IsNaN(dn) ? EKd02Skip.RailNaN : EKd02Skip.InsideBand; return false; }
+			double rail = r.RailPrice(ELevelKind.DvpSigma, -side * stopK);
+			if (dec != null) dec.rail = rail;
+			if (double.IsNaN(rail) || double.IsNaN(poc)) { side = 0; if (dec != null) dec.reason = double.IsNaN(poc) ? EKd02Skip.PocNaN : EKd02Skip.RailNaN; return false; }
 			stop = rail - side * stopPadAtr * s.atr; target = poc;
-			if (side < 0 ? !(target < c && stop > c) : !(target > c && stop < c)) { side = 0; stop = target = double.NaN; return false; }   // geometry sanity
+			if (side < 0 ? !(target < c && stop > c) : !(target > c && stop < c)) { side = 0; stop = target = double.NaN; if (dec != null) dec.reason = EKd02Skip.GeomFail; return false; }   // geometry sanity
 			return true;
 		}
 

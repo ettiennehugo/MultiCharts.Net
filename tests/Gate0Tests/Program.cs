@@ -467,6 +467,41 @@ static class Program
 		Check(fedAfterEnd >= 0 && g.Kd02Ring.Count == fedAfterEnd, "KD02 holdout: the DVP stream is never fed on/after DevEnd");
 		Check(badTgt == 0 && g.Kd02TargetHeld >= 0, "KD02 re-read targets never at or through the entry (held " + g.Kd02TargetHeld + ")");
 
+		// kd02-zero-entries diagnostics: every DVP bar lands in exactly one bucket; day counters cover every RTH open
+		var dg = g.Diag;
+		Check(dg != null && dg.dvpBars > 0 && dg.dvpBars == dg.Kd02ReasonSum() + dg.signals && dg.signals >= g.Kd02Fills,
+			"KD02 diag invariant: dvpBars(" + (dg == null ? -1 : dg.dvpBars) + ") == sum(reasons)(" + (dg == null ? -1 : dg.Kd02ReasonSum()) + ") + signals(" + (dg == null ? -1 : dg.signals) + "), fills " + g.Kd02Fills + ")");
+		Check(dg.rthDays == dg.liveDays + dg.skipRoll + dg.skipNoPrior + dg.skipNoAtr + dg.skipDevEnd && dg.liveDays > 0 && dg.skipNoPrior >= 1 && dg.skipDevEnd > 0,
+			"KD02 diag day counters add up (rth " + dg.rthDays + " live " + dg.liveDays + " noPrior " + dg.skipNoPrior + " noAtr " + dg.skipNoAtr + " devEnd " + dg.skipDevEnd + ")");
+		Check(dg.pocNaN == 0 && dg.data1ZeroVol == 0 && !jl.Any(l => l.Contains("DVP window volume is 0")), "KD02 diag: volume > 0 => no POC NaN, no zero-volume warning");
+		string dl = g.CanaryDiagLine();
+		Check(dl.StartsWith("signals(" + dg.signals + ") rollSkips(0) rollDays(0) sessions(") && dl.Contains("skips{noPrior=") && dl.Contains(",pocNaN=0,") && dl.Contains(",expired=") && dl.EndsWith("}"), "KD02 diag line: " + dl);
+		var c5 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5 }; c5.Configure();
+		Check(c5.Diag != null && !c5.CanaryDiagLine().Contains("dvpBars") && new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 3 }.Diag == null, "diag: allocated in Canary mode only, KD-02 fields only for KD-02");
+
+		// zero volume on every bar (the KD-02 zero-entries reproduction): no signals, POC NaN counted, one warning, behaviour unchanged
+		var zw = new List<string>(); var zd = new List<string>();
+		var z = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, warn = zw.Add, debug = zd.Add }; z.Configure();
+		var zr = new Random(17); double zp = 4800, za = 4800; var zs = new DateTime(2024, 9, 2);
+		for (int d = 0; d < 70; d++)
+		{
+			var day = zs.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			for (var t = day.AddHours(-6); t < day.AddHours(17); t = t.AddMinutes(1))
+			{
+				if (zr.NextDouble() < 0.002) za += (zr.NextDouble() - 0.5) * 40;
+				double o = zp, c = Math.Round((zp + 0.02 * (za - zp) + (zr.NextDouble() - 0.5) * 3) * 4) / 4; zp = c;
+				z.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 0), 0);
+			}
+		}
+		var zg = z.Diag;
+		Check(zg.signals == 0 && z.Trades == 0 && zg.dvpBars == zg.Kd02ReasonSum() && zg.data1ZeroVol == zg.data1Bars && zg.data1Bars > 0,
+			"KD02 zero volume: no signals, invariant holds (dvpBars " + zg.dvpBars + ", " + z.CanaryDiagLine() + ")");
+		Check(zg.pocNaN > 0, "KD02 zero volume: POC NaN counted (" + z.CanaryDiagLine() + ")");
+		Check(zw.Count(l => l.StartsWith("G0-b KD02 warning: DVP window volume is 0")) == 1 && zw.Count(l => l.Contains("valid DVP fit but the POC rail is NaN")) == 1,
+			"KD02 zero volume: one zero-window-volume warning and one POC-NaN warning (" + string.Join(" | ", zw) + ")");
+		int decisions = zg.noSnap + zg.noRails + zg.atrBad + zg.insideBand + zg.railNaN + zg.pocNaN + zg.geomFail + zg.tgtOnClose + zg.signals;
+		Check(zd.Count == decisions && zd.All(l => l.StartsWith("G0-b KD02 decision ")) && zd.Any(l => l.EndsWith("reason(PocNaN)")), "KD02 Debug: one line per signal decision (" + zd.Count + "/" + decisions + ")");
+
 		// end of run: the finish hook journals the KD02 summary, then DVP RUN, then the DVP CAL coverage lines; idempotent
 		int before = jl.Count;
 		Check(!jl.Any(l => l.StartsWith("DVP RUN") || l.StartsWith("DVP CAL") || l.StartsWith("G0-b KD02 KD02")), "KD02: no end-of-run lines before the finish hook");

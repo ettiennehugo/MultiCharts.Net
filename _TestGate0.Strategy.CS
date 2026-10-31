@@ -127,6 +127,9 @@ namespace PowerLanguage.Strategy
 	//                 A re-read POC that is not strictly beyond the entry is not applied (targetHeld). Development window
 	//                 only: the DVP stream is never fed on/after 2025-01-01.
 	//                 d* is not frozen yet (PR-D9): the fallback is Calibrate, traded d = 1, one "DVP DEGREE" Warning.
+	//                 Diagnostics (kd02-zero-entries): the G0-b canary line adds signals() rollSkips() rollDays() sessions() rthDays()
+	//                 liveDays() skips{...} (one bucket per DVP bar); Warning: zero DVP window volume, NaN POC/sigma rail on a valid fit;
+	//                 Debug: one "G0-b KD02 decision" line per signal decision.
 	//                 Journal (Trace >= Journal): DVP FIT lines per refit; at the last bar "G0-b KD02 ... fills() pocReached()
 	//                 rate() timeStops() targetHeld()", then DVP RUN, then the DVP CAL coverage lines. If the run stops early
 	//                 (StopCalc before DevEnd / the last bar) the same lines are written there, the summary tagged " partial".
@@ -219,7 +222,7 @@ namespace PowerLanguage.Strategy
 				throw new ArgumentException("_TestGate0: Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary");
 			string resErr = Gate0Data1.Check(Bars.Info.Resolution.ChartType.ToString(), Bars.Info.Resolution.Type.ToString(), (long)Bars.Info.Resolution.Size);   // educator review G2
 			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
-			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal) };
+			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal), warn = engineSink(ETraceLevel.Warning), debug = engineSink(ETraceLevel.Debug) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();
 			string err = m_g0.Configure();
 			if (!string.IsNullOrEmpty(err)) throw new ArgumentException("_TestGate0: " + err);
@@ -292,7 +295,7 @@ namespace PowerLanguage.Strategy
 		private void printTotals()
 		{
 			if (!traceOn(ETraceLevel.Journal)) return;
-			trace(ETraceLevel.Journal, $"G0-b canary({m_g0.CanaryName}) entries({m_g0.Trades}) rollSkips({m_g0.RollSkips}) cumGross({m_gross:F2}) cumNet({m_net:F2}) - read NET profit factor in the Strategy Performance Report; > 1.0 = BUG");
+			trace(ETraceLevel.Journal, $"G0-b canary({m_g0.CanaryName}) entries({m_g0.Trades}) {m_g0.CanaryDiagLine()} cumGross({m_gross:F2}) cumNet({m_net:F2}) - read NET profit factor in the Strategy Performance Report; > 1.0 = BUG");
 			split("all", d => true);
 			split("ex-roll", d => !m_g0.InRollWindow(d));
 			split("2016-2024", d => d >= new DateTime(2016, 1, 1) && d < Gate0Engine.DevEnd && !m_g0.InRollWindow(d));
