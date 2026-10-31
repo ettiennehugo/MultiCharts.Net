@@ -315,6 +315,21 @@ namespace PowerLanguage.Function
 			return r > 0 && !double.IsInfinity(r) ? r : double.NaN;
 		}
 
+		/// <summary>True for a finite widened stop closer to entry than the structural stop (a strategy bug: it is ignored, R$w = NaN).</summary>
+		public static bool WidenedCloser(double entry, double stop, double widenedStop)
+		{
+			if (double.IsNaN(widenedStop) || double.IsInfinity(widenedStop)) return false;
+			return Math.Abs(entry - widenedStop) < Math.Abs(entry - stop);
+		}
+
+		/// <summary>One warning per strategy instance: true (and sets the flag) the first time a closer widened stop is seen.</summary>
+		public static bool WarnCloserOnce(ref bool warned, double entry, double stop, double widenedStop)
+		{
+			if (warned || !WidenedCloser(entry, stop, widenedStop)) return false;
+			warned = true;
+			return true;
+		}
+
 		/// <summary>pm.riskNew = Rw x qtyCode, Rw = R$ when R$w is NaN.</summary>
 		public static double RiskNew(double rDollar, double rDollarW, int qtyCode)
 		{
