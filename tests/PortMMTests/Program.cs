@@ -66,7 +66,7 @@ static class Program
 		// cluster cap 2% = 20000: two strategies in EQIDX, first takes 5000, second limited to 15000/500 = 30 -> but size 10 ok; third ...
 		mm = MM(c => c.riskPerTrade = 0.015); views = new List<PortStratView> { V(0, cl: "EQ"), V(1, cl: "EQ"), V(2, cl: "EN") };
 		d = mm.Decide(D0, 1000000, true, views);
-		Check(d[0].entryContracts == 30 && d[1].entryContracts == 10 && d[2].entryContracts == 30, $"cluster cap 2% shared by the seed cluster ({d[0].entryContracts},{d[1].entryContracts},{d[2].entryContracts})");
+		Check(d[0].entryContracts == 30 && !d[1].allowEntries && d[1].reason == "cluster cap" && d[2].entryContracts == 30, $"cluster cap 2% shared by the seed cluster: no room for 30 -> skipped, never cut ({d[0].entryContracts},{d[1].entryContracts},{d[2].entryContracts})");
 		// maxPositions
 		mm = MM(c => c.maxPositions = 1); d = mm.Decide(D0, 1000000, true, new List<PortStratView> { V(0), V(1) });
 		Check(d[0].allowEntries && !d[1].allowEntries && d[1].reason == "maxPositions", "maxPositions");
@@ -127,7 +127,7 @@ static class Program
 		mm = MM(c => c.riskPerTrade = 0.015);
 		var s0 = V(0, cl: "A"); var s1 = V(1, cl: "B"); s0.uRet = a; s1.uRet = b;
 		d = mm.Decide(D0.AddDays(100), 1000000, true, new List<PortStratView> { s0, s1 });
-		Check(d[0].entryContracts == 30 && d[1].entryContracts == 10, $"rho >= 0.9 merges clusters ({d[0].entryContracts},{d[1].entryContracts})");
+		Check(d[0].entryContracts == 30 && !d[1].allowEntries && d[1].reason == "cluster cap", $"rho >= 0.9 merges clusters ({d[0].entryContracts},{d[1].entryContracts})");
 		Check(mm.Rho != null && Near(mm.Rho[0, 1], 1, 1e-9), "rho matrix published");
 
 		// exits are never part of a decision: PortDecision has no exit flags; forceClose only from kill/flatten
@@ -249,7 +249,33 @@ static class Program
 			td = MM(c => c.heatCap = 0.04).Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Flat, pos: 1, riskOpen: 39800), V(1) });
 			Check(!td[1].allowEntries && td[1].reason == "heat cap", "cap: heat (4%) tighter than the 10% total cap binds");
 			td = MM(c => c.sizing = EPortSizing.CodeSize).Decide(D0, 1000000, true, new List<PortStratView> { V(0, r: double.NaN) });
-			Check(!td[0].allowEntries && td[0].reason == "total risk cap", "cap: CodeSize with unknown R$ cannot pass the ceiling");
+			Check(!td[0].allowEntries && td[0].reason == "no R$", "CodeSize with unknown R$ is skipped as no R$");
+			{   // review #67: size never cut to heat/cluster room; pre-candidate rejections at Info; dedupe re-logs on change/clear
+				var lj = new List<string>(); var lm = MM(c => { c.riskPerTrade = 0.015; c.heatCap = 0.04; }); lm.journal = x => lj.Add(x);
+				var lv = new List<PortStratView> { V(0, EPortState.Flat, pos: 1, riskOpen: 30000), V(1) };   // wants 30 x 500 = 15000, room 10000
+				var ld = lm.Decide(D0, 1000000, true, lv);
+				Check(!ld[1].allowEntries && ld[1].entryContracts == -1 && ld[1].reason == "heat cap", "room 10000 < risk 15000 -> skipped, not trimmed to 20");
+				Check(lj.Any(x => x.StartsWith("PORT Info: skip") && x.Contains("heat cap") && x.Contains("risk $15000.00") && x.Contains("room $10000.00")), "room skip journaled at Info with risk $ and room $");
+				lj.Clear(); var sv = V(1); sv.stale = true;
+				lm.Decide(D0, 1000000, true, new List<PortStratView> { sv });
+				Check(lj.Count == 1 && lj[0].StartsWith("PORT Info: skip") && lj[0].Contains(" stale:") && lj[0].Contains("risk $") && lj[0].Contains("cap $"), "stale rejection journaled at Info");
+				lm.Decide(D0, 1000000, true, new List<PortStratView> { sv });
+				Check(lj.Count == 1, "same reason pending -> not re-journaled");
+				var nv = V(1, r: double.NaN); lm.Decide(D0, 1000000, true, new List<PortStratView> { nv });
+				Check(lj.Count == 2 && lj[1].Contains(" no R$:"), "reason change -> re-journaled (no R$ at Info)");
+				lm.Decide(D0, 1000000, true, new List<PortStratView> { V(1) });   // clears (allowed)
+				lm.Decide(D0, 1000000, true, new List<PortStratView> { nv });
+				Check(lj.Count == 3, "after the skip clears, the same reason is journaled again");
+				lj.Clear(); var ucv = V(1); ucv.currencyOk = false; lm.Decide(D0, 1000000, true, new List<PortStratView> { ucv });
+				Check(lj.Count == 1 && lj[0].Contains("currency not USD"), "currency rejection journaled at Info");
+				lj.Clear(); var pv = V(1); pv.paused = true; lm.Decide(D0, 1000000, true, new List<PortStratView> { pv });
+				Check(lj.Count == 1 && lj[0].Contains("paused/killed"), "paused rejection journaled at Info");
+				lj.Clear(); lm.Decide(D0, 1000000, true, new List<PortStratView> { V(1, EPortState.Long, pos: 1), V(2, EPortState.Flat) });
+				Check(lj.Count == 0, "in position / not Armed are not entry attempts -> silent");
+				lj.Clear(); lm.Decide(D0, 1000000, true, new List<PortStratView> { nv }); var cd = MM(c => c.sizing = EPortSizing.CodeSize); var cj = new List<string>(); cd.journal = x => cj.Add(x);
+				cd.Decide(D0, 1000000, true, new List<PortStratView> { V(0, r: double.NaN) });
+				Check(cj.Count == 1 && cj[0].StartsWith("PORT Info: skip") && cj[0].Contains(" no R$:"), "CodeSize no R$ journaled at Info");
+			}
 
 			// every skip touched logs at Info (Ettienne's rule)
 			Func<List<string>, string, bool> info = (lj, reason) => lj.Exists(x => x.StartsWith("PORT Info: skip ") && x.Contains(" " + reason + ": "));

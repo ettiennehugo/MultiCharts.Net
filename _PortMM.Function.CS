@@ -502,11 +502,12 @@ namespace PowerLanguage.Function
 		/// <summary>Combined widened open + accepted-new risk after the last Decide, $.</summary>
 		public double TotalRisk { get; private set; }
 		private readonly Dictionary<int, string> m_skipLogged = new Dictionary<int, string>();
+		private readonly HashSet<int> m_skippedNow = new HashSet<int>();
 
-		/// <summary>Deny one candidate and journal it at Info once per (strategy, reason) until the strategy stops being a candidate.</summary>
+		/// <summary>Deny one entry attempt and journal it at Info once per (strategy, reason); re-logged when the reason changes or the skip clears.</summary>
 		private void skip(PortDecision di, PortStratView s, string reason, string detail)
 		{
-			di.reason = reason;
+			di.reason = reason; m_skippedNow.Add(s.index);
 			string last;
 			if (m_skipLogged.TryGetValue(s.index, out last) && last == reason) return;
 			m_skipLogged[s.index] = reason;
@@ -519,7 +520,7 @@ namespace PowerLanguage.Function
 		/// </summary>
 		public PortDecision[] Decide(DateTime day, double initialCapital, bool currencyOk, IList<PortStratView> v)
 		{
-			int n = v.Count; var d = new PortDecision[n];
+			int n = v.Count; var d = new PortDecision[n]; m_skippedNow.Clear();
 			for (int i = 0; i < n; i++) d[i] = new PortDecision { index = v[i].index };   // deny-all (Rank/Rotation pattern)
 
 			double book = initialCapital; foreach (var s in v) if (s.publishes && !double.IsNaN(s.pnl)) book += s.pnl;
@@ -572,11 +573,21 @@ namespace PowerLanguage.Function
 				if (why == null && s.state != EPortState.Armed) why = s.state.ToString();
 				if (why == null && s.position != 0) why = "in position";
 				if (why == null && (s.side != 1 && s.side != -1)) why = "no side";
-				if (why == null && config.sizing != EPortSizing.CodeSize && !(s.rDollar > 0)) why = "no R$";
-				if (why != null) { if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why; continue; }
+				if (why == null && !(s.rDollar > 0)) why = "no R$";   // CodeSize too: unmeasurable risk cannot pass heat/cluster/total caps
+				if (why != null)
+				{
+					bool entryAttempt = why == "stale" || why == "no R$" || why == "currency not USD" || why == "paused/killed";
+					if (entryAttempt)
+					{   // a rejected entry attempt: journal at Info (once per strategy+reason), keep an earlier reason (e.g. kill)
+						string prior = d[i].reason;
+						skip(d[i], s, why, $"risk ${(s.rDollar > 0 ? s.rDollar * Math.Max(1, s.qtyCode) : double.NaN):0.00} pm.R$ {s.rDollar} pm.R$w {s.rDollarW} heat ${heat:0.00} cap ${config.totalRiskCap * book:0.00}");
+						if (!string.IsNullOrEmpty(prior)) d[i].reason = prior;
+					}
+					else if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why;
+					continue;
+				}
 				cand.Add(i);
 			}
-			foreach (var s in v) if (!cand.Exists(ci => v[ci].index == s.index)) m_skipLogged.Remove(s.index);   // re-log after the entry clears
 			double total = heat;
 			cand.Sort((a, b) =>
 			{
@@ -610,7 +621,7 @@ namespace PowerLanguage.Function
 					}
 					else
 					{   // unmeasurable risk cannot pass the outer ceiling
-						skip(d[i], s, "total risk cap", $"risk unknown (no pm.R$/qtyCode) total ${total:0.00} cap ${capDollar:0.00}"); continue;
+						skip(d[i], s, "no qtyCode", $"qtyCode({s.qtyCode}) risk unknown total ${total:0.00} cap ${capDollar:0.00}"); continue;
 					}
 				}
 				else
@@ -618,12 +629,11 @@ namespace PowerLanguage.Function
 					if (q < config.minContracts) { skip(d[i], s, "size < minContracts", $"q({q}) risk ${q * rw1:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 					int c = m_clusterId[i];
 					double room = Math.Min(config.heatCap * book - heat, config.clusterCap * book - clHeat[c]);
-					int qMax = room > 0 ? (int)Math.Floor(room / rUnit + 1e-9) : 0;
-					if (q > qMax) q = qMax;
-					if (q < config.minContracts)
+					double rq = q * rUnit;   // size is never cut to fit the room: it is skipped
+					if (rq > room + 1e-9)
 					{
-						bool hc = heat + rUnit > config.heatCap * book;
-						skip(d[i], s, hc ? "heat cap" : "cluster cap", hc ? $"risk ${rUnit:0.00}/contract heat ${heat:0.00} cap ${config.heatCap * book:0.00}" : $"risk ${rUnit:0.00}/contract cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}");
+						bool hc = heat + rq > config.heatCap * book + 1e-9;
+						skip(d[i], s, hc ? "heat cap" : "cluster cap", hc ? $"risk ${rq:0.00} (q {q}) room ${Math.Max(0, room):0.00} heat ${heat:0.00} cap ${config.heatCap * book:0.00}" : $"risk ${rq:0.00} (q {q}) room ${Math.Max(0, room):0.00} cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}");
 						continue;
 					}
 					double rwq = q * rw1;   // the outer cap never cuts q: it skips
@@ -634,6 +644,7 @@ namespace PowerLanguage.Function
 				open++;
 			}
 			Heat = book > 0 ? heat / book : double.NaN;
+			foreach (int k in new List<int>(m_skipLogged.Keys)) if (!m_skippedNow.Contains(k)) m_skipLogged.Remove(k);   // cleared -> re-log next time
 			TotalRisk = total;
 
 			for (int i = 0; i < n; i++)
