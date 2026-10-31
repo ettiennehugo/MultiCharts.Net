@@ -170,6 +170,17 @@ Notation: the window is bars i = 0..n−1, where i = n−1 is bar t−1. y_i = s
 - **DV-7.5 240m stream.** No winLen sweep (rev 4: the former {240, 120} sweep is removed). The 240m stream is **diagnostic only**; MT-07 trades 60m only. No winLen 90 trial (Q4 **DECIDED (Ettienne Hugo, 2026-10-23)**).
 - **DV-7.6 ETH/RTH.** ETH is primary (all bars). RTH is the sensitivity arm, a second engine config built only from bars with `RingBar.rth`. `rthShare` = RTH volume / window volume is journaled and split into {< 50%, ≥ 50%}.
 - **DV-7.7 Sessions, 24h charts and half-days.** Session boundaries are `tradingDayKey(t)` changes on the stream's own bars, never calendar dates. On the futures base this is the Globex date (verified: `_VolumeProfileFuturesBase` L356 overrides `tradingDayKey` with `GlobexDate`), so a 24h chart's session starts at 18:00 ET. The RTH arm (DV-7.6) requires the futures base. On the generic base `isRthBar` always returns true (verified, `_CustomSignal` L516; futures override L512), so `rthShare` is journaled as NaN and the RTH arm is refused with a Warning. Half-day sessions (`todHalfDay`; base false at L546, futures override L491) are **not** removed from fit windows, because bars are bars. They are flagged `halfDay=1` on `DVP RAIL` and on A2-33 samples. The A2-33 once-per-session sample (Q8) is taken on the first closed bar of the new `tradingDayKey`, including half-days.
+- **DV-7.8 KD-02 canary diagnostics (PR #68, report-only).** `Gate0CanaryDiag`, allocated in Canary mode only. No decision reads it.
+  - **DV-7.8.1 Counters.**
+    - Every canary, one per RTH open, in this precedence: `devEnd` > `roll` (the roll session or the session after it) > `noPrior` > `noAtr` > `liveDays`. Also `rthDays` and `signals` (`enter()` calls).
+    - KD-02, one bucket per DVP bar, in this order: `outsideRth`, `after1555`, `notLive`, `notTradeable`, `inPosition`, then the `Kd02Signal` reasons. Those are `noSnap`, `noRails`, `atrBad`, `insideBand`, and `pocNaN` / `railNaN` (`pocNaN` wins whenever the POC is NaN, including when the ±2σ band is NaN too), then `geomFail` and `tgtOnClose`; otherwise the bar is a signal.
+    - Also `expired` (an unfilled signal cancelled at the next DVP bar; a later event, outside the sum) and `zeroVol1` = Data1 bars with volume ≤ 0 / Data1 bars fed.
+    - Warnings, once per run: DVP window volume 0 (winLen consecutive zero-volume DVP bars), and a NaN POC or σ rail on a valid fit. Debug: one `G0-b KD02 decision` line per signal decision.
+  - **DV-7.8.2 G0-b canary line.** `G0-b canary(name) entries() signals() rollSkips() rollDays() sessions() rthDays() liveDays() skips{noPrior=,noAtr=,devEnd=,roll=[,dvpBars=,notLive=,outsideRth=,after1555=,notTradeable=,inPosition=,noSnap=,noRails=,atrBad=,insideBand=,pocNaN=,railNaN=,geomFail=,tgtOnClose=,expired=,zeroVol1=z/n]} cumGross() cumNet()`. The bracketed fields appear for KD-02 only.
+    - **Invariants** (tested in Gate0Tests and checkable from the log alone):
+      - `dvpBars == outsideRth + after1555 + notLive + notTradeable + inPosition + noSnap + noRails + atrBad + insideBand + pocNaN + railNaN + geomFail + tgtOnClose + signals`
+      - `rthDays == liveDays + noPrior + noAtr + devEnd + roll`
+    - `rollSkips` counts sessions on or after DevEnd too, so `rollSkips ≈ 2 × rollDays` only approximately.
 
 ---
 
