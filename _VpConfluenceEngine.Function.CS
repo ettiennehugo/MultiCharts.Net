@@ -329,7 +329,10 @@ namespace PowerLanguage.Function
 			public bool independent;
 			public string absorbed = "";
 			public string parentSource;
-			public double rawCredit = double.NaN;   // credit before the completeness weight (set only when the weight is applied)
+			// Credit after applyNested and before the completeness weight (set only when the weight is applied). Not baseCredit:
+			// baseCredit is the makeSurvivor credit before nesting, so for a refined child it is not the REFINEMENT x parent value
+			// that the weight scales. The spec's "(= baseCredit)" means this unweighted value.
+			public double rawCredit = double.NaN;
 		}
 
 		// One volume-share lookup per extra per rebuild. shareAt used to sum levels and

@@ -727,6 +727,7 @@ static class Program
 			"set { m_confluenceDevSourceThreshold = VpConfluenceRules.RequireRange(\"ConfluenceDevSourceThreshold\", value, 0, VpConfluenceRules.MaxDevSourceThreshold); }" })
 			Check(count(bas, prop) == 1, "DW pin config: " + prop);
 		Check(!System.Text.RegularExpressions.Regex.IsMatch(bas, @"\[Input\][^;{]*ConfluenceDev"), "DW: no [Input] for the dev-weight config");
+		Check(count(strip("_VolumeProfileTest1.Strategy.CS"), "kinds.Append(\"/w=\");") == 1 && count(strip("_VolumeProfileTest1.Strategy.CS"), "if (z.hits[h].developing)") == 1, "DW pin: Test1 zone trace shows w= on developing hits");
 		Check(count(eng, "rawCredit = double.IsNaN(s.rawCredit) ? s.credit : s.rawCredit") == 1 && count(eng, "completeness = s.anchor.completeness,") == 1, "DW pin: hits carry completeness and rawCredit");
 	}
 	// PR I: opt-in Week/Month VWAP reset at a roll (VwapConfig.resetPeriodSlotsOnRoll, default false = unchanged)

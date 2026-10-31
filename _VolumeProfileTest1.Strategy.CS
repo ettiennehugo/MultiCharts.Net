@@ -397,6 +397,12 @@ namespace PowerLanguage.Strategy
 					kinds.Append(z.hits[h].profileAge);
 					kinds.Append("/");
 					kinds.Append(z.hits[h].sourceVolumeId);
+					// dev-weight spec §8: developing hits show their completeness weight (completed hits are w 1 and unchanged)
+					if (z.hits[h].developing)
+					{
+						kinds.Append("/w=");
+						kinds.Append(z.hits[h].completeness.ToString("0.###", CultureInfo.InvariantCulture));
+					}
 					if (!string.IsNullOrEmpty(z.hits[h].absorbedLabels))
 					{
 						kinds.Append("~");
