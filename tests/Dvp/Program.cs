@@ -590,6 +590,7 @@ static partial class Program
 		D5Tests();
 		D6Tests();
 		D7Tests();
+		OverflowTests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
