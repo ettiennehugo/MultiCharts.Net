@@ -76,7 +76,7 @@ namespace PowerLanguage.Function
 			var sb = new System.Text.StringBuilder();
 			foreach (var d in l) sb.Append(d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append(';');
 			ulong h = 14695981039346656037UL;
-			foreach (byte b in System.Text.Encoding.UTF8.GetBytes(sb.ToString())) { h ^= b; h *= 1099511628211UL; }
+			unchecked { foreach (byte b in System.Text.Encoding.UTF8.GetBytes(sb.ToString())) { h ^= b; h *= 1099511628211UL; } }   // FNV-1a wraps mod 2^64 by design
 			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
 		}
 

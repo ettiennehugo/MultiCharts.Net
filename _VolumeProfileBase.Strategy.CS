@@ -122,7 +122,7 @@ namespace PowerLanguage.Strategy
 				return datastream == o.datastream && startBar == o.startBar;
 			}
 			public override bool Equals(object o) { return o is VpKey k && Equals(k); }
-			public override int GetHashCode() { return datastream ^ (startBar * 397); }
+			public override int GetHashCode() { return unchecked(datastream ^ (startBar * 397)); }   // hash: wrap intended
 		};
 
 		/// <summary>

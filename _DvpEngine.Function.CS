@@ -1409,7 +1409,7 @@ namespace PowerLanguage.Function
 		public static ulong Fnv1a64(string s)
 		{
 			ulong h = 14695981039346656037UL;
-			for (int i = 0; i < s.Length; i++) { h ^= s[i]; h *= 1099511628211UL; }
+			unchecked { for (int i = 0; i < s.Length; i++) { h ^= s[i]; h *= 1099511628211UL; } }   // FNV-1a wraps mod 2^64 by design; MC compiles checked
 			return h;
 		}
 

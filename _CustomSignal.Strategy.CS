@@ -1568,24 +1568,25 @@ namespace PowerLanguage.Strategy
 			MyPortfolioData[_PortKeys.Ret] = m_portRet;
 			MyPortfolioData[_PortKeys.URet] = m_portURet;
 			MyPortfolioData[_PortKeys.RiskNew] = 0.0;
+			_PortArm.Init((k, v) => MyPortfolioData[k] = v);   // rev 2: pm.R$w = NaN until armed
 			MyPortfolioData[_PortKeys.State] = (int)EPortState.Flat;
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"PORT publish on: id({Name}@{Bars.Info.Name}) family({PortfolioFamily}) cluster({PortfolioCluster})");
 		}
 
 		/// <summary>
 		/// M-PORT: declare the pending entry of this bar (call next to the entry Send; sizeForRisk calls it for Data1 automatically).
-		/// side +1/-1, qtyCode = contracts the code would trade. No-op outside Portfolio Trader.
+		/// side +1/-1, qtyCode = contracts the code would trade (sized on the structural stop). No-op outside Portfolio Trader.
+		/// widenedStop (rev 2, optional) = the stop the order carries after a cost floor; publishes pm.R$w (NaN when not given,
+		/// not finite or closer than stop). pm.R$ stays the structural $/contract.
 		/// </summary>
-		protected void portfolioArm(int side, double entry, double stop, int qtyCode)
+		protected void portfolioArm(int side, double entry, double stop, int qtyCode, double widenedStop = double.NaN)
 		{
 			if (!m_portOn) return;
 			double bpv = Bars.Info.BigPointValue;
 			double rd = Math.Abs(entry - stop) * bpv;
 			if (!(rd > 0) || double.IsNaN(rd) || double.IsInfinity(rd)) return;
 			m_portRDollar = rd; m_portStop = stop; m_portArmBar = Bars.CurrentBar;
-			MyPortfolioData[_PortKeys.RDollar] = rd;
-			MyPortfolioData[_PortKeys.QtyCode] = qtyCode;
-			MyPortfolioData[_PortKeys.RiskNew] = rd * Math.Max(0, qtyCode);
+			_PortArm.Write((k, v) => MyPortfolioData[k] = v, rd, _PortArm.RDollarW(entry, stop, widenedStop, bpv), qtyCode);
 			MyPortfolioData[_PortKeys.Side] = side > 0 ? 1 : -1;
 			if (StrategyInfo.MarketPosition == 0) MyPortfolioData[_PortKeys.State] = (int)EPortState.Armed;
 		}
@@ -2811,8 +2812,10 @@ namespace PowerLanguage.Strategy
 		/// CS-4: units so that |entry - stop| x BigPointValue x units ≈ equity x riskFraction, then the limits. riskFraction is a
 		/// fraction in (0, 1] (0.01 = 1%). Returns 0 with a traced reason (bad BPV, stop too close, zero equity, notional cap).
 		/// With default(SizingLimits) it equals stopLossBasedPositionSize(bars, entry, stop, riskFraction).
+		/// widenedStop (M-PORT rev 2, optional): the cost-floored stop the order will carry. Size stays on the structural stop; when this
+		/// call does not arm (chart run or Data2) and qty x |entry - widenedStop| x BPV > 1% of equity, returns 0 (never a smaller qty).
 		/// </summary>
-		protected int sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits)
+		protected int sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits, double widenedStop = double.NaN)
 		{
 			if (bars == null || entry <= 0 || riskFraction <= 0 || riskFraction > 1)
 			{
@@ -2841,8 +2844,14 @@ namespace PowerLanguage.Strategy
 				if (qty <= 0) { trace(ETraceLevel.Debug, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
 			}
 			qty = applyRoundLots(qty, limits.roundLots);
+			bool willArm = m_portOn && bars == Bars;
+			if (qty > 0 && !willArm && !double.IsNaN(widenedStop) && _PortArm.SkipForBudget(willArm, qty, entry, stop, widenedStop, bpv, equityAvailable(_PortArm.TradeBudgetFraction)))
+			{
+				trace(ETraceLevel.Debug, $"sizeForRisk - 0: qty({qty}) x widened stop({widenedStop}) risk > {_PortArm.TradeBudgetFraction:P0} of equity, trade skipped");
+				return 0;
+			}
 			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
-			else if (m_portOn && bars == Bars) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty);   // M-PORT: the code size of the pending entry
+			else if (willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
 			return qty;
 		}
 
