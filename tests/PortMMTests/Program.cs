@@ -359,6 +359,71 @@ static class Program
 			for (int k = 0; k < 6; k++) om.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
 			Check(nw(oj) == 0, "fill check: fillCheckEvals 0 -> off");
 		}
+		{   // PR-C: per-strategy session / weekly throttles (§5.4 4a/4b), T-P5/6/7/11/12/13/14
+			double[] cum = { 0 };
+			Func<int, DateTime, EPortState, int, PortStratView> TV = (ti, td, ts, tp) => { var x = V(ti, ts, pos: tp, pnl: cum[0]); x.day = td; return x; };
+			Action<_PortMM, DateTime, double> TR = (tm, td, tr) =>
+			{   // one closed trade of 10 contracts x R$500 (1R = $5000) on the strategy's day td
+				tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Long, 10) });
+				cum[0] += tr * 5000;
+				tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Flat, 0) });
+			};
+			Func<_PortMM, DateTime, PortDecision> PR = (tm, td) => tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Armed, 0) })[0];
+			var tj = new List<string>(); var tm1 = MM(null, tj);
+			TR(tm1, D0, -1); Check(PR(tm1, D0).allowEntries, "T-P5: one loss -> still allowed");
+			TR(tm1, D0, 2); TR(tm1, D0, -1);
+			var t5 = PR(tm1, D0);
+			Check(!t5.allowEntries && t5.reason == "session stop" && !t5.forceClose && !t5.pause, "T-P5: 2 losses in a session (winner between does not reset) -> session stop, no force-close/pause");
+			Check(tj.Any(x => x.StartsWith("PORT Info: skip") && x.Contains("session stop") && x.Contains("risk $") && x.Contains("budget $")), "T-P5: session stop skip logged at Info with risk $ and budget $");
+			var t5b = PR(tm1, D0.AddDays(1));
+			Check(t5b.allowEntries && t5b.entryContracts > 0, "T-P5: allowed again on the strategy's next pm.day");
+			// T-P14 scratch boundary
+			cum[0] = 0; var tm2 = MM();
+			TR(tm2, D0, -0.05); TR(tm2, D0, -0.05); Check(PR(tm2, D0).allowEntries, "T-P14: R -0.05 x2 are scratches, not losses");
+			TR(tm2, D0, -0.0501); TR(tm2, D0, -0.0501); Check(PR(tm2, D0).reason == "session stop", "T-P14: R -0.0501 x2 are losses");
+			// T-P6 weekly
+			cum[0] = 0; var wj = new List<string>(); var tm3 = MM(null, wj);
+			TR(tm3, D0, -2.9); var w0 = PR(tm3, D0.AddDays(1));
+			Check(w0.allowEntries && w0.entryContracts == (int)Math.Floor(0.005 * (100000000 + cum[0]) / 500 + 1e-9), "T-P6: -2.9R week -> full size");
+			TR(tm3, D0.AddDays(1), -0.1); var w1 = PR(tm3, D0.AddDays(2));
+			int full = (int)Math.Floor(0.005 * (100000000 + cum[0]) / 500 + 1e-9);
+			Check(w1.allowEntries && w1.entryContracts == (int)Math.Floor(0.5 * 0.005 * (100000000 + cum[0]) / 500 + 1e-9) && w1.entryContracts < full, "T-P6: -3.0R week -> size halved");
+			Check(wj.Any(x => x.StartsWith("PORT weekly halve")), "T-P6: halve journalled");
+			TR(tm3, D0.AddDays(2), -3); var w2 = PR(tm3, D0.AddDays(3));
+			Check(!w2.allowEntries && w2.reason == "weekly observe" && wj.Any(x => x.Contains("PORT observe")), "T-P6: -6R week -> observe only (PORT observe)");
+			var w3 = PR(tm3, new DateTime(2024, 3, 17));   // Sunday-evening ETH key: Monday's week
+			Check(w3.allowEntries && w3.entryContracts == (int)Math.Floor(0.005 * (100000000 + cum[0]) / 500 + 1e-9), "T-P6: Sunday key belongs to next week -> observe and halve cleared, full size");
+			Check(_PortMM.IsoWeek(new DateTime(2024, 3, 17)) == new DateTime(2024, 3, 18) && _PortMM.IsoWeek(new DateTime(2024, 3, 16)) == D0, "T-P6: ISO week mapping (Sat -> this Monday, Sun -> next Monday)");
+			// T-P7 interplay: dd 0.5 x weekly 0.5 = 0.25
+			cum[0] = 0; var tm4 = MM(c => { c.dailyLossStop = 0.5; c.dailyLossFlatten = 0.6; }); TR(tm4, D0, -3);
+			cum[0] = 20000000; tm4.Decide(D0.AddDays(1), 100000000, true, new List<PortStratView> { TV(0, D0.AddDays(1), EPortState.Flat, 0) });   // peak 1.2e8
+			cum[0] = 20000000 - 8400000; var w4 = PR(tm4, D0.AddDays(2));   // dd 7% -> 0.5
+			Check(tm4.Mult == 0.5 && w4.entryContracts == (int)Math.Floor(0.25 * 0.005 * (100000000 + cum[0]) / 500 + 1e-9), $"T-P7: dd 0.5 x weekly 0.5 = 0.25 size ({w4.entryContracts} {tm4.Mult})");
+			// T-P11 reversal
+			cum[0] = 0; var tm5 = MM();
+			tm5.Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Long, 10) });
+			cum[0] -= 5000; tm5.Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Short, -10) });
+			cum[0] -= 5000; tm5.Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Flat, 0) });
+			Check(PR(tm5, D0).reason == "session stop", "T-P11: reversal (+10 -> -10) records a closed trade");
+			// T-P12 per-strategy day keys
+			cum[0] = 0; var tm6 = MM(); TR(tm6, D0, -1); TR(tm6, D0, -1);
+			var es = TV(0, D0, EPortState.Armed, 0); var clv = V(1); clv.day = D0.AddDays(1); clv.cluster = "x";
+			var d12 = tm6.Decide(D0.AddDays(1), 100000000, true, new List<PortStratView> { es, clv });
+			Check(!d12[0].allowEntries && d12[0].reason == "session stop" && d12[1].allowEntries, "T-P12: ES session stop not reset by CL's new pm.day");
+			// T-P13 CodeSize
+			cum[0] = 0; var tm7 = MM(c => c.sizing = EPortSizing.CodeSize); TR(tm7, D0, -3);
+			var w7 = PR(tm7, D0.AddDays(1));
+			Check(!w7.allowEntries && w7.reason == "throttle under CodeSize", "T-P13: CodeSize + weekly halve -> skip");
+			cum[0] = 20000000; var tm8 = MM(c => { c.sizing = EPortSizing.CodeSize; c.dailyLossStop = 0.5; c.dailyLossFlatten = 0.6; });
+			tm8.Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Flat, 0) });
+			cum[0] = 20000000 - 8400000; var w8 = PR(tm8, D0.AddDays(1));
+			Check(!w8.allowEntries && w8.reason == "throttle under CodeSize", "T-P13: CodeSize + ddSteps 0.5 -> skip");
+			var w9 = MM(c => c.sizing = EPortSizing.CodeSize).Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Armed, 0) })[0];
+			Check(w9.allowEntries && w9.entryContracts == -1, "T-P13: CodeSize at mult 1 -> allowed with code qty");
+			// validation + JSON
+			Check(new PortMmConfig { weeklyObserveR = -3, weeklyHalveR = -3 }.Validate() != null && new PortMmConfig { weeklyHalveMult = 1 }.Validate() != null
+				&& new PortMmConfig { stratDailyLosses = 0 }.Validate() != null && new PortMmConfig { scratchR = 1 }.Validate() != null && new PortMmConfig().Validate() == null, "PR-C config validation");
+		}
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

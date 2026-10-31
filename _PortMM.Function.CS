@@ -89,6 +89,13 @@ namespace PowerLanguage.Function
 		public double dailyLossFlatten = 0.03;
 		public double stratKillR = -8;
 		public int stratKillTrades = 20;
+		/// <summary>§5.4 4a: losing closes (R &lt; -scratchR) in a strategy's own session (pm.day) that deny its entries for that session.</summary>
+		public int stratDailyLosses = 2;
+		/// <summary>|R| &lt;= scratchR is a scratch: not a loss for 4a, still summed into weekly R.</summary>
+		public double scratchR = 0.05;
+		/// <summary>§5.4 4b: weekly closed R &lt;= weeklyHalveR ⇒ size × weeklyHalveMult; &lt;= weeklyObserveR ⇒ entries denied (observe only).
+		/// Both clear at the strategy's first session of the next ISO week (hard-coded; no Manual reset option).</summary>
+		public double weeklyHalveR = -3, weeklyHalveMult = 0.5, weeklyObserveR = -6;
 		public int staleBars = 3;
 		public int minContracts = 1;
 		/// <summary>MM evaluations after an approved entry with no position before the one-per-strategy "PT Max % Capital at Risk
@@ -117,6 +124,10 @@ namespace PowerLanguage.Function
 			if (ddRecoverHighDays < 1) e.Add($"ddRecoverHighDays={ddRecoverHighDays}");
 			if (!(dailyLossStop > 0) || !(dailyLossFlatten > dailyLossStop) || !(dailyLossFlatten < 1)) e.Add($"dailyLossStop={dailyLossStop} dailyLossFlatten={dailyLossFlatten} (0 < stop < flatten < 1)");
 			if (!(stratKillR < 0) || stratKillTrades < 1) e.Add($"stratKillR={stratKillR} stratKillTrades={stratKillTrades}");
+			if (stratDailyLosses < 1) e.Add($"stratDailyLosses={stratDailyLosses}");
+			if (!(scratchR >= 0 && scratchR < 1)) e.Add($"scratchR={scratchR}");
+			if (!(weeklyObserveR < weeklyHalveR && weeklyHalveR < 0)) e.Add($"weeklyObserveR={weeklyObserveR} weeklyHalveR={weeklyHalveR} (observe < halve < 0)");
+			if (!(weeklyHalveMult > 0 && weeklyHalveMult < 1)) e.Add($"weeklyHalveMult={weeklyHalveMult}");
 			if (staleBars < 1) e.Add($"staleBars={staleBars}");
 			if (minContracts < 1) e.Add($"minContracts={minContracts}");
 			if (fillCheckEvals < 0) e.Add($"fillCheckEvals={fillCheckEvals}");
@@ -137,7 +148,7 @@ namespace PowerLanguage.Function
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
 			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) maxTradeRisk({maxTradeRisk}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
-				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) fillCheck({fillCheckEvals}) totalRiskCap({totalRiskCap})";
+				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) session({stratDailyLosses} losses, scratch {scratchR}R) weekly(halve {weeklyHalveR}R x{weeklyHalveMult}, observe {weeklyObserveR}R) stale({staleBars}) minContracts({minContracts}) fillCheck({fillCheckEvals}) totalRiskCap({totalRiskCap})";
 		}
 	}
 
@@ -212,6 +223,16 @@ namespace PowerLanguage.Function
 							break;
 						}
 					case "stratkilltrades": integer(warnings, p, 1, 10000, ref c.stratKillTrades); break;
+					case "stratdailylosses": integer(warnings, p, 1, 1000, ref c.stratDailyLosses); break;
+					case "scratchr": num(warnings, p, 0, 1, true, ref c.scratchR); break;
+					case "weeklyhalvemult": num(warnings, p, 0, 1, false, ref c.weeklyHalveMult); break;
+					case "weeklyhalver":
+					case "weeklyobserver":
+						{
+							double x;
+							if (tryNum(v, out x) && x < 0) { if (n == "weeklyhalver") c.weeklyHalveR = x; else c.weeklyObserveR = x; } else bad(warnings, p, "a negative number of R");
+							break;
+						}
 					case "stalebars": integer(warnings, p, 1, 10000, ref c.staleBars); break;
 					case "mincontracts": integer(warnings, p, 1, 100000, ref c.minContracts); break;
 					case "fillcheckevals": integer(warnings, p, 0, 1000, ref c.fillCheckEvals); break;
@@ -298,6 +319,7 @@ namespace PowerLanguage.Function
 		public string cluster = "";
 		public int position;            // signed contracts (PositionSide x |CurrentPosition|), from IStrategy
 		public double pnl;              // closed + open P&L in $
+		public DateTime day = DateTime.MinValue;   // pm.day: the strategy's own trading day (4a/4b); MinValue ⇒ the book day
 		public double score = double.NaN;
 		public _PortReturns ret, uRet;
 	}
@@ -497,6 +519,7 @@ namespace PowerLanguage.Function
 		private sealed class KillTracker
 		{
 			public int lastPos; public double pnlAtOpen; public double riskAtOpen; public readonly Queue<double> r = new Queue<double>(); public bool killed; public string reason = "";
+			public DateTime sessDay = DateTime.MinValue, week = DateTime.MinValue; public int sessLosses; public double weekR;
 		}
 
 		public double Mult { get; private set; } = 1;
@@ -577,7 +600,7 @@ namespace PowerLanguage.Function
 			if (m_dayStopped) mult = 0;
 			Mult = mult;
 
-			updateKills(v);
+			updateKills(v, day);
 			checkFills(v);
 			updateClusters(day.Date, v);
 
@@ -650,8 +673,22 @@ namespace PowerLanguage.Function
 				if (!double.IsNaN(s.rDollarW) && !double.IsInfinity(s.rDollarW) && s.rDollarW < s.rDollar && m_rwWarned.Add(s.index))
 					journal?.Invoke($"PORT Warning: {s.id}#{s.index} pm.R$w {s.rDollarW} < pm.R$ {s.rDollar} (bad publisher) - using pm.R$ (warned once)");
 				if (mult <= 0) { skip(d[i], s, m_dayStopped ? "daily stop" : "dd throttle", $"mult({mult}) risk ${rw1 * Math.Max(0, s.qtyCode):0.00}/qtyCode total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+				string tw; double sm = throttle(s, out tw); KillTracker tk = tracker(s.index);
+				if (sm <= 0)
+				{
+					skip(d[i], s, tw, tw == "session stop"
+						? $"losses({tk.sessLosses}) >= {config.stratDailyLosses} on {tk.sessDay:yyyy-MM-dd} risk ${rw1 * Math.Max(1, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}"
+						: $"PORT observe: week R {tk.weekR:0.00} <= {config.weeklyObserveR}R risk ${rw1 * Math.Max(1, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}");
+					continue;
+				}
+				double m = mult * sm;   // approved throttles only (ddSteps x weekly halve); caps below never resize
+				if (config.sizing == EPortSizing.CodeSize && m < 1)
+				{   // T-P13: EntryContracts -1 cannot be scaled
+					skip(d[i], s, "throttle under CodeSize", $"mult {m:0.###} (dd {mult:0.###} x {(tw ?? "none")} {sm:0.###}) qtyCode {s.qtyCode} risk ${rw1 * Math.Max(0, s.qtyCode):0.00} budget ${tradeCap:0.00}");
+					continue;
+				}
 				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-				int q = _PortMath.Size(config, mult, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
+				int q = _PortMath.Size(config, m, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
 				int nq;   // contracts whose risk is checked; never changed by any cap below (skip only)
 				if (q == -1)
 				{   // CodeSize: the strategy's own qty
@@ -719,25 +756,59 @@ namespace PowerLanguage.Function
 		private static double max(List<double> a) { double m = double.MinValue; foreach (var x in a) if (x > m) m = x; return m; }
 
 		/// <summary>Closed-trade R per strategy: on position open remember pnl and initial risk (R$ x |position|); on flat, R = dPnl / risk.</summary>
-		private void updateKills(IList<PortStratView> v)
+		private void updateKills(IList<PortStratView> v, DateTime bookDay)
 		{
 			foreach (var s in v)
 			{
 				if (!s.publishes) continue;
 				KillTracker k = tracker(s.index);
-				if (k.lastPos == 0 && s.position != 0)
+				DateTime sd = (s.day != DateTime.MinValue ? s.day : bookDay).Date;
+				if (sd != k.sessDay) { k.sessDay = sd; k.sessLosses = 0; }   // 4a resets on the strategy's own new session
+				DateTime wk = IsoWeek(sd);
+				if (wk != k.week) { k.week = wk; k.weekR = 0; }               // 4b halve and observe both clear on a new ISO week
+				bool flip = k.lastPos != 0 && s.position != 0 && Math.Sign(k.lastPos) != Math.Sign(s.position);   // reversal = close + open
+				if (k.lastPos != 0 && (s.position == 0 || flip))
+				{
+					if (k.riskAtOpen > 0) closed(s, k, (s.pnl - k.pnlAtOpen) / k.riskAtOpen);
+					else journal?.Invoke($"PORT kill-R missing {s.id}#{s.index}: trade opened without pm.R$, not recorded");
+				}
+				if (s.position != 0 && (k.lastPos == 0 || flip))
 				{
 					k.pnlAtOpen = s.pnl;
-					k.riskAtOpen = s.rDollar > 0 ? s.rDollar * Math.Abs(s.position) : double.NaN;
-				}
-				else if (k.lastPos != 0 && s.position == 0 && k.riskAtOpen > 0)
-				{
-					k.r.Enqueue((s.pnl - k.pnlAtOpen) / k.riskAtOpen); while (k.r.Count > config.stratKillTrades) k.r.Dequeue();
-					double sum = 0; foreach (var x in k.r) sum += x;
-					if (!k.killed && sum <= config.stratKillR) { k.killed = true; k.reason = $"cumulative {sum:0.0}R over last {k.r.Count} trades <= {config.stratKillR}R"; journal?.Invoke($"PORT kill {s.id}#{s.index}: {k.reason}"); }
+					k.riskAtOpen = s.rDollar > 0 ? s.rDollar * Math.Abs((double)s.position) : double.NaN;
 				}
 				k.lastPos = s.position;
 			}
+		}
+
+		private void closed(PortStratView s, KillTracker k, double rr)
+		{
+			if (double.IsNaN(rr) || double.IsInfinity(rr)) return;
+			k.r.Enqueue(rr); while (k.r.Count > config.stratKillTrades) k.r.Dequeue();
+			double sum = 0; foreach (var x in k.r) sum += x;
+			if (!k.killed && sum <= config.stratKillR) { k.killed = true; k.reason = $"cumulative {sum:0.0}R over last {k.r.Count} trades <= {config.stratKillR}R"; journal?.Invoke($"PORT kill {s.id}#{s.index}: {k.reason}"); }
+			if (rr < -config.scratchR) k.sessLosses++;   // |R| <= scratchR is a scratch
+			double before = k.weekR; k.weekR += rr;
+			if (k.sessLosses == config.stratDailyLosses && rr < -config.scratchR) journal?.Invoke($"PORT session stop {s.id}#{s.index}: {k.sessLosses} losses on {k.sessDay:yyyy-MM-dd}, entries denied for the session");
+			if (before > config.weeklyObserveR && k.weekR <= config.weeklyObserveR) journal?.Invoke($"PORT weekly observe {s.id}#{s.index}: week R {k.weekR:0.00} <= {config.weeklyObserveR}R, observe only until next ISO week");
+			else if (before > config.weeklyHalveR && k.weekR <= config.weeklyHalveR) journal?.Invoke($"PORT weekly halve {s.id}#{s.index}: week R {k.weekR:0.00} <= {config.weeklyHalveR}R, size x{config.weeklyHalveMult} until next ISO week");
+		}
+
+		/// <summary>Monday of the ISO week of a trading day; a Sunday (evening ETH) key belongs to the following Monday's week.</summary>
+		public static DateTime IsoWeek(DateTime d)
+		{
+			d = d.Date; if (d.DayOfWeek == DayOfWeek.Sunday) d = d.AddDays(1);
+			return d.AddDays(-(((int)d.DayOfWeek + 6) % 7));
+		}
+
+		/// <summary>Per-strategy throttle multiplier (§5.2 gates 3–5) and its reason: 0 = session stop / weekly observe, weeklyHalveMult, or 1.</summary>
+		private double throttle(PortStratView s, out string why)
+		{
+			why = null; KillTracker k = tracker(s.index);
+			if (k.sessLosses >= config.stratDailyLosses) { why = "session stop"; return 0; }
+			if (k.weekR <= config.weeklyObserveR) { why = "weekly observe"; return 0; }
+			if (k.weekR <= config.weeklyHalveR) { why = "weekly halve"; return config.weeklyHalveMult; }
+			return 1;
 		}
 
 		private void updateClusters(DateTime day, IList<PortStratView> v)

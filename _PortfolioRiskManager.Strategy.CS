@@ -135,7 +135,7 @@ namespace PowerLanguage.Strategy
 			v.score = num(pd, _PortKeys.Score);
 			v.ret = get(pd, _PortKeys.Ret) as _PortReturns;
 			v.uRet = get(pd, _PortKeys.URet) as _PortReturns;
-			o = get(pd, _PortKeys.Day); if (o is DateTime && day == DateTime.MinValue) day = (DateTime)o;
+			o = get(pd, _PortKeys.Day); if (o is DateTime) { v.day = (DateTime)o; if (day == DateTime.MinValue) day = v.day; }
 			o = get(pd, _PortKeys.Stamp);
 			if (!(o is DateTime)) v.stale = true;
 			else if (sig != null)
