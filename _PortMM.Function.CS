@@ -184,7 +184,12 @@ namespace PowerLanguage.Function
 	{
 		/// <summary>Load from a file. Empty path = defaults (no warning). Returns the config to use (never null).</summary>
 		public static PortMmConfig LoadFile(string path, PortMmConfig defaults, List<string> warnings, List<string> info)
+		{ bool rejected; return LoadFile(path, defaults, warnings, info, out rejected); }
+
+		/// <summary>As LoadFile; rejected = the file was read but failed as a whole (not JSON / not an object / Validate failed).</summary>
+		public static PortMmConfig LoadFile(string path, PortMmConfig defaults, List<string> warnings, List<string> info, out bool rejected)
 		{
+			rejected = false;
 			if (string.IsNullOrWhiteSpace(path)) return defaults;
 			string json;
 			try
@@ -193,14 +198,19 @@ namespace PowerLanguage.Function
 				json = File.ReadAllText(path);
 			}
 			catch (Exception ex) { warnings.Add($"PortMmConfig: cannot read '{path}' ({ex.GetType().Name}: {ex.Message}), using code defaults"); return defaults; }
-			PortMmConfig c = Parse(json, defaults, warnings, path);
+			PortMmConfig c = Parse(json, defaults, warnings, out rejected, path);
 			if (!ReferenceEquals(c, defaults)) info.Add($"PortMmConfig loaded from '{path}': {c}");
 			return c;
 		}
 
 		/// <summary>Merge the JSON text onto a copy of the defaults. Returns defaults itself when the text is rejected as a whole.</summary>
 		public static PortMmConfig Parse(string json, PortMmConfig defaults, List<string> warnings, string source = "json")
+		{ bool rejected; return Parse(json, defaults, warnings, out rejected, source); }
+
+		/// <summary>As Parse; rejected = true when the text was rejected as a whole (defaults returned).</summary>
+		public static PortMmConfig Parse(string json, PortMmConfig defaults, List<string> warnings, out bool rejected, string source = "json")
 		{
+			rejected = true;
 			JObject o;
 			try
 			{
@@ -280,6 +290,7 @@ namespace PowerLanguage.Function
 			}
 			string err = c.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: {source} rejected ({err}), using code defaults"); return defaults; }
+			rejected = false;
 			return c;
 		}
 
@@ -291,11 +302,9 @@ namespace PowerLanguage.Function
 			string err = code == null ? "null" : code.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: code Config invalid ({err}), using ForProfile({profile})"); code = PortMmConfig.ForProfile(profile); fallback = true; }
 			if (string.IsNullOrWhiteSpace(path)) return code;
-			int before = warnings.Count;
-			PortMmConfig c = LoadFile(path, code, warnings, info);
-			if (ReferenceEquals(c, code))
-				for (int i = before; i < warnings.Count; i++)
-					if (warnings[i].Contains(" rejected (")) { c = PortMmConfig.ForProfile(profile); fallback = true; break; }
+			bool rejected;
+			PortMmConfig c = LoadFile(path, code, warnings, info, out rejected);
+			if (rejected) { c = PortMmConfig.ForProfile(profile); fallback = true; }
 			return c;
 		}
 
@@ -917,26 +926,37 @@ namespace PowerLanguage.Function
 		{
 			if (day == m_advDay) return;   // daily, after the merge
 			m_advDay = day;
-			int u, u3; Counts(v.Count, i => live(v[i]), m_clusterId, m_seeds, m_rho, out u, out u3);
+			int u, u3, unk; List<int> picked;
+			Counts(v.Count, i => live(v[i]), m_clusterId, m_seeds, m_rho, out u, out u3, out unk, out picked);
 			Uncorr = u; Uncorr03 = u3;
-			journal?.Invoke(AdvisoryLine(config.profile, config.rhoMerge, u, u3));
+			var ids = new List<string>(picked.Count); foreach (int i in picked) ids.Add(v[i].id);
+			journal?.Invoke(AdvisoryLine(config.profile, config.rhoMerge, u, u3, unk, ids));
 		}
 
 		/// <summary>The daily advisory journal line; "eligible" only when uncorr ≥ 3 AND uncorr03 ≥ 3 (P9). Never switches anything.</summary>
-		public static string AdvisoryLine(EPortProfile profile, double rhoMerge, int u, int u3)
+		public static string AdvisoryLine(EPortProfile profile, double rhoMerge, int u, int u3, int unknownPairs = 0, IList<string> picked = null)
 		{
 			bool ok = u >= 3 && u3 >= 3;
-			return $"PORT advisory: uncorr={u} (ρ≥{rhoMerge} clusters), uncorr03={u3} (greedy ρ<0.3) - scaled-book {(ok ? "eligible" : "not eligible")} when uncorr≥3 and uncorr03≥3; switch manually (profile {profile})";
+			string unk = unknownPairs > 0 ? $", ρ unknown for {unknownPairs} pair(s) (counted as correlated until rhoMinDays)" : "";
+			string ids = picked != null ? $" [{string.Join(",", picked)}]" : "";
+			return $"PORT advisory: uncorr={u} (ρ≥{rhoMerge} clusters), uncorr03={u3}{ids} (greedy ρ<0.3{unk}) - scaled-book {(ok ? "eligible" : "not eligible")} when uncorr≥3 and uncorr03≥3; switch manually (profile {profile})";
 		}
 
 		/// <summary>uncorr = distinct merged clusters with ≥ 1 live strategy; uncorr03 = greedy (table order) set of live strategies with
 		/// pairwise ρ &lt; 0.3 (NaN ρ = unknown ⇒ correlated; same pm.cluster seed ⇒ ρ 1).</summary>
 		public static void Counts(int n, Func<int, bool> isLive, int[] clusterId, string[] seeds, double[,] rho, out int uncorr, out int uncorr03)
+		{ int unk; List<int> picked; Counts(n, isLive, clusterId, seeds, rho, out uncorr, out uncorr03, out unk, out picked); }
+
+		/// <summary>As Counts; unknownPairs = live pairs (different seeds) with NaN ρ; picked = the greedy set (indices, table order).</summary>
+		public static void Counts(int n, Func<int, bool> isLive, int[] clusterId, string[] seeds, double[,] rho, out int uncorr, out int uncorr03, out int unknownPairs, out List<int> picked)
 		{
+			unknownPairs = 0; var lv = new List<int>();
 			var cl = new HashSet<int>(); var pick = new List<int>();
 			for (int i = 0; i < n; i++)
 			{
 				if (!isLive(i)) continue;
+				foreach (int j in lv) if (!(seeds != null && !string.IsNullOrEmpty(seeds[i]) && seeds[i] == seeds[j]) && (rho == null || double.IsNaN(rho[i, j]))) unknownPairs++;
+				lv.Add(i);
 				cl.Add(clusterId != null && i < clusterId.Length ? clusterId[i] : i);
 				bool ok = true;
 				foreach (int j in pick)
@@ -947,7 +967,7 @@ namespace PowerLanguage.Function
 				}
 				if (ok) pick.Add(i);
 			}
-			uncorr = cl.Count; uncorr03 = pick.Count;
+			uncorr = cl.Count; uncorr03 = pick.Count; picked = pick;
 		}
 
 		/// <summary>Strategy returns when it has >= rhoMinDays of them, else the underlying's (spec §5.5).</summary>

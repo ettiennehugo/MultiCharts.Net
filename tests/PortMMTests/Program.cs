@@ -547,6 +547,24 @@ static class Program
 			Check(_PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3).Contains("- scaled-book eligible") && _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 2).Contains("not eligible")
 				&& _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 2, 3).Contains("not eligible") && _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3).Contains("uncorr≥3 and uncorr03≥3; switch manually"), "T-P9: eligible only when both counts >= 3");
 
+			// PR-D review: F1 scaled-book sample, F2 rejected flag, ρ unknown + picked ids in the advisory
+			string ssb = System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../samples/PortMmConfig.scaled-book.json"); w.Clear(); inf.Clear(); bool rj;
+			var psb = PortMmConfigLoader.LoadFile(ssb, st, w, inf, out rj);
+			Check(!rj && w.Count == 0 && psb.ToString() == sb.ToString() && Near(psb.bookVolTarget, 0.10), $"F1: samples/PortMmConfig.scaled-book.json on a Starter base equals ForProfile(ScaledBook) ({string.Join(" | ", w)})");
+			w.Clear(); PortMmConfigLoader.Parse("{\"clusterCap\": 0.02}", st, w, out rj); bool rj2; PortMmConfigLoader.Parse("{\"maxPositions\": 3}", st, w, out rj2); bool rj3; PortMmConfigLoader.Parse("[1]", st, w, out rj3);
+			Check(rj && !rj2 && rj3, "F2: Parse reports rejected via out flag");
+			w.Clear(); string tf2 = System.IO.Path.GetTempFileName(); System.IO.File.WriteAllText(tf2, "{\"_note\": \"rejected ( text only in a comment\", \"maxPositions\": 3}");
+			rc = PortMmConfigLoader.Resolve(st, EPortProfile.Starter, tf2, w, inf, out fb); System.IO.File.Delete(tf2);
+			Check(!fb && rc.maxPositions == 3, "F2: fallback no longer depends on warning text");
+			int uk; List<int> pk; R[0, 1] = R[1, 0] = double.NaN;
+			_PortMM.Counts(3, i => true, new[] { 0, 1, 2 }, new[] { "A", "B", "C" }, R, out u, out u3, out uk, out pk);
+			Check(uk == 1 && u3 == 1 && pk.SequenceEqual(new[] { 0 }), $"advisory: unknown pairs counted ({uk}, {u3})");
+			string al = _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 1, 2, new[] { "S0" });
+			Check(al.Contains("ρ unknown for 2 pair(s)") && al.Contains("uncorr03=1 [S0]") && al.Contains("not eligible"), "advisory line: ρ unknown + picked ids");
+			Check(!_PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3, 0, new string[0]).Contains("unknown"), "advisory line: no ρ unknown note when all known");
+			var ajx = new List<string>(); MP(EPortProfile.Starter, null, ajx).Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), V(2, cl: "GC") });
+			Check(ajx.Any(x => x.StartsWith("PORT advisory") && x.Contains("uncorr03=1 [S0]") && x.Contains("ρ unknown for 3 pair(s)")), "advisory: no history -> ρ unknown, picked S0");
+
 			// T-P5 / T-P6 under both profiles (P5: same results)
 			foreach (var pf in new[] { EPortProfile.Starter, EPortProfile.ScaledBook })
 			{
