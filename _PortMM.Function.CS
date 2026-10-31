@@ -947,7 +947,8 @@ namespace PowerLanguage.Function
 		public static void Counts(int n, Func<int, bool> isLive, int[] clusterId, string[] seeds, double[,] rho, out int uncorr, out int uncorr03)
 		{ int unk; List<int> picked; Counts(n, isLive, clusterId, seeds, rho, out uncorr, out uncorr03, out unk, out picked); }
 
-		/// <summary>As Counts; unknownPairs = live pairs (different seeds) with NaN ρ; picked = the greedy set (indices, table order).</summary>
+		/// <summary>As Counts; unknownPairs = ALL live pairs (different pm.cluster seeds) whose ρ is NaN, not only pairs involving the picked set;
+		/// picked = the greedy set (indices, table order).</summary>
 		public static void Counts(int n, Func<int, bool> isLive, int[] clusterId, string[] seeds, double[,] rho, out int uncorr, out int uncorr03, out int unknownPairs, out List<int> picked)
 		{
 			unknownPairs = 0; var lv = new List<int>();
