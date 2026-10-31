@@ -10,6 +10,9 @@
   "_riskPerTrade": "RiskParity: book fraction risked per new entry at multiplier 1, (0, 1)",
   "riskPerTrade": 0.005,
 
+  "_maxTradeRisk": "hard per-trade cap: n x widened R$ (pm.R$w, else pm.R$) > this x book => skip (never resized), (0, 0.01], >= riskPerTrade",
+  "maxTradeRisk": 0.01,
+
   "_heatCap": "max (open risk + new risk) / book equity, (0, 1]",
   "heatCap": 0.04,
 
@@ -55,6 +58,7 @@
 
   "_minContracts": "below this size after scaling the entry is denied, integer >= 1",
   "minContracts": 1,
+  "fillCheckEvals": 3,
 
   "_idmCap": "VolTarget: cap on the diversification multiplier, [1, 10]",
   "idmCap": 2.5

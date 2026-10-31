@@ -75,6 +75,8 @@ namespace PowerLanguage.Function
 		public EPortSizing sizing = EPortSizing.RiskParity;
 		public double bookVolTarget = 0.10;
 		public double riskPerTrade = 0.005;
+		/// <summary>Hard per-trade cap (spec §5.1 P1): n × widened R$ (pm.R$w, else pm.R$) &gt; this × book ⇒ skip, never resize. ≤ 0.01.</summary>
+		public double maxTradeRisk = 0.01;
 		public double heatCap = 0.04;
 		public double clusterCap = 0.02;
 		public double rhoMerge = 0.9;
@@ -89,6 +91,9 @@ namespace PowerLanguage.Function
 		public int stratKillTrades = 20;
 		public int staleBars = 3;
 		public int minContracts = 1;
+		/// <summary>MM evaluations after an approved entry with no position before the one-per-strategy "PT Max % Capital at Risk
+		/// per Position" warning (MC does not expose that PT setting to studies; spec §8 step 5). 0 = off.</summary>
+		public int fillCheckEvals = 3;
 		public double idmCap = 2.5;
 		/// <summary>Outer hard ceiling on the combined WIDENED open + new risk of all strategies, fraction of book (0.10 = 10%).
 		/// Set by the _PortfolioRiskManager TotalRiskCapPct [Input] (spec §5.4 item 0); both it and heatCap apply, the tighter binds.</summary>
@@ -99,6 +104,7 @@ namespace PowerLanguage.Function
 			var e = new List<string>();
 			if (!(bookVolTarget > 0)) e.Add($"bookVolTarget={bookVolTarget}");
 			if (!(riskPerTrade > 0 && riskPerTrade < 1)) e.Add($"riskPerTrade={riskPerTrade}");
+			if (!(maxTradeRisk > 0 && maxTradeRisk <= 0.01 && riskPerTrade <= maxTradeRisk)) e.Add($"maxTradeRisk={maxTradeRisk} (0 < riskPerTrade <= maxTradeRisk <= 0.01)");
 			if (!(heatCap > 0 && heatCap <= 1)) e.Add($"heatCap={heatCap}");
 			if (!(clusterCap > 0 && clusterCap <= heatCap)) e.Add($"clusterCap={clusterCap} (0 < clusterCap <= heatCap)");
 			if (!(rhoMerge > 0 && rhoMerge <= 1)) e.Add($"rhoMerge={rhoMerge}");
@@ -113,6 +119,7 @@ namespace PowerLanguage.Function
 			if (!(stratKillR < 0) || stratKillTrades < 1) e.Add($"stratKillR={stratKillR} stratKillTrades={stratKillTrades}");
 			if (staleBars < 1) e.Add($"staleBars={staleBars}");
 			if (minContracts < 1) e.Add($"minContracts={minContracts}");
+			if (fillCheckEvals < 0) e.Add($"fillCheckEvals={fillCheckEvals}");
 			if (!(idmCap >= 1)) e.Add($"idmCap={idmCap}");
 			if (!(totalRiskCap > 0 && totalRiskCap <= 1)) e.Add($"totalRiskCap={totalRiskCap} (0 < cap <= 1)");
 			return e.Count == 0 ? null : "PortMmConfig invalid: " + string.Join(", ", e);
@@ -129,8 +136,8 @@ namespace PowerLanguage.Function
 		public override string ToString()
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
-			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
-				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) totalRiskCap({totalRiskCap})";
+			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) maxTradeRisk({maxTradeRisk}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
+				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) stale({staleBars}) minContracts({minContracts}) fillCheck({fillCheckEvals}) totalRiskCap({totalRiskCap})";
 		}
 	}
 
@@ -187,6 +194,7 @@ namespace PowerLanguage.Function
 						}
 					case "bookvoltarget": num(warnings, p, 0, 5, false, ref c.bookVolTarget); break;
 					case "riskpertrade": num(warnings, p, 0, 1, false, ref c.riskPerTrade); break;
+					case "maxtraderisk": num(warnings, p, 0, 1, false, ref c.maxTradeRisk); break;
 					case "heatcap": num(warnings, p, 0, 1, true, ref c.heatCap); break;
 					case "clustercap": num(warnings, p, 0, 1, true, ref c.clusterCap); break;
 					case "rhomerge": num(warnings, p, 0, 1, true, ref c.rhoMerge); break;
@@ -206,6 +214,7 @@ namespace PowerLanguage.Function
 					case "stratkilltrades": integer(warnings, p, 1, 10000, ref c.stratKillTrades); break;
 					case "stalebars": integer(warnings, p, 1, 10000, ref c.staleBars); break;
 					case "mincontracts": integer(warnings, p, 1, 100000, ref c.minContracts); break;
+					case "fillcheckevals": integer(warnings, p, 0, 1000, ref c.fillCheckEvals); break;
 					case "idmcap": { double x; if (tryNum(v, out x) && x >= 1 && x <= 10) c.idmCap = x; else bad(warnings, p, "a number in [1, 10]"); break; }
 					default:
 						if (!n.StartsWith("_") && !n.StartsWith("$")) warnings.Add($"PortMmConfig: unknown field '{p.Name}' ignored");   // "_comment"-style keys are allowed
@@ -503,6 +512,38 @@ namespace PowerLanguage.Function
 		public double TotalRisk { get; private set; }
 		private readonly Dictionary<int, string> m_skipLogged = new Dictionary<int, string>();
 		private readonly HashSet<int> m_skippedNow = new HashSet<int>();
+		private readonly HashSet<int> m_rwWarned = new HashSet<int>();
+		// approved-but-unfilled entries (lazy: allocated on the first approval); PT drops orders silently when its
+		// "Max % Capital at Risk per Position" is below the approved risk, and studies cannot read that setting
+		private sealed class PendingFill { public int qty; public double risk; public int evals; public bool approved; }
+		private Dictionary<int, PendingFill> m_pendingFill;
+		private HashSet<int> m_fillWarned;
+
+		private void notePending(PortStratView s, int qty, double risk)
+		{
+			if (m_pendingFill == null) { m_pendingFill = new Dictionary<int, PendingFill>(); m_fillWarned = new HashSet<int>(); }
+			PendingFill p;
+			if (!m_pendingFill.TryGetValue(s.index, out p)) { p = new PendingFill(); m_pendingFill[s.index] = p; }
+			p.qty = qty; p.risk = risk; p.approved = true;   // latest approval; evals keeps counting while it stays unfilled
+		}
+
+		/// <summary>One Warning per strategy when approved entries never turn into a position; re-armed after a fill.</summary>
+		private void checkFills(IList<PortStratView> v)
+		{
+			if (m_pendingFill == null) return;
+			foreach (var s in v)
+			{
+				if (s.position != 0) { m_pendingFill.Remove(s.index); m_fillWarned.Remove(s.index); continue; }   // filled -> re-arm
+				PendingFill p;
+				if (!m_pendingFill.TryGetValue(s.index, out p)) continue;
+				if (s.state != EPortState.Armed || !p.approved) { m_pendingFill.Remove(s.index); continue; }   // withdrew or no longer approved: not a drop
+				p.approved = false;
+				if (++p.evals >= config.fillCheckEvals && m_fillWarned.Add(s.index))
+					journal?.Invoke($"PORT Warning: {s.id}#{s.index} entry approved (qty {(p.qty)}, risk ${p.risk:0.00}) but no position after {p.evals} MM evaluations - " +
+						"likely Portfolio Trader 'Max % Capital at Risk per Position' set below the approved risk; it must be >= 1% (maxTradeRisk)");
+			}
+		}
+
 
 		/// <summary>Deny one entry attempt and journal it at Info once per (strategy, reason); re-logged when the reason changes or the skip clears.</summary>
 		private void skip(PortDecision di, PortStratView s, string reason, string detail)
@@ -537,6 +578,7 @@ namespace PowerLanguage.Function
 			Mult = mult;
 
 			updateKills(v);
+			checkFills(v);
 			updateClusters(day.Date, v);
 
 			double heat = 0; var clHeat = new Dictionary<int, double>(); int open = 0;
@@ -600,46 +642,35 @@ namespace PowerLanguage.Function
 
 			int[] active = activeIdx(v);
 			double idm = config.sizing == EPortSizing.VolTarget ? _PortMath.Idm(active, m_rho, m_clusterId, config.idmCap) : 1;
+			double tradeCap = config.maxTradeRisk * book, heatCapD = config.heatCap * book, clusterCapD = config.clusterCap * book;
 			foreach (int i in cand)
 			{
 				var s = v[i];
-				double rw1 = _PortRiskCap.Rw(s.rDollar, s.rDollarW);
+				double rw1 = _PortRiskCap.Rw(s.rDollar, s.rDollarW);   // widened $/contract; NaN/inf/closer-than-structural ⇒ structural
+				if (!double.IsNaN(s.rDollarW) && !double.IsInfinity(s.rDollarW) && s.rDollarW < s.rDollar && m_rwWarned.Add(s.index))
+					journal?.Invoke($"PORT Warning: {s.id}#{s.index} pm.R$w {s.rDollarW} < pm.R$ {s.rDollar} (bad publisher) - using pm.R$ (warned once)");
 				if (mult <= 0) { skip(d[i], s, m_dayStopped ? "daily stop" : "dd throttle", $"mult({mult}) risk ${rw1 * Math.Max(0, s.qtyCode):0.00}/qtyCode total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				int q = _PortMath.Size(config, mult, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
-				double rUnit = s.rDollar > 0 ? s.rDollar : double.NaN;
+				int nq;   // contracts whose risk is checked; never changed by any cap below (skip only)
 				if (q == -1)
-				{   // CodeSize: heat/cluster checks on the code quantity when R$ is known
-					if (!double.IsNaN(rUnit) && s.qtyCode > 0)
-					{
-						double r = rUnit * s.qtyCode; int c = m_clusterId[i];
-						if (heat + r > config.heatCap * book + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} heat ${heat:0.00} cap ${config.heatCap * book:0.00}"); continue; }
-						if (clHeat[c] + r > config.clusterCap * book + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}"); continue; }
-						double rwc = rw1 * s.qtyCode;
-						if (_PortRiskCap.Breaks(total, rwc, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${rwc:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-						heat += r; clHeat[c] += r; total += rwc;
-					}
-					else
-					{   // unmeasurable risk cannot pass the outer ceiling
-						skip(d[i], s, "no qtyCode", $"qtyCode({s.qtyCode}) risk unknown total ${total:0.00} cap ${capDollar:0.00}"); continue;
-					}
+				{   // CodeSize: the strategy's own qty
+					if (s.qtyCode <= 0) { skip(d[i], s, "no qtyCode", $"qtyCode({s.qtyCode}) risk unknown cap ${tradeCap:0.00}"); continue; }
+					nq = s.qtyCode;
 				}
 				else
 				{
 					if (q < config.minContracts) { skip(d[i], s, "size < minContracts", $"q({q}) risk ${q * rw1:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-					int c = m_clusterId[i];
-					double room = Math.Min(config.heatCap * book - heat, config.clusterCap * book - clHeat[c]);
-					double rq = q * rUnit;   // size is never cut to fit the room: it is skipped
-					if (rq > room + 1e-9)
-					{
-						bool hc = heat + rq > config.heatCap * book + 1e-9;
-						skip(d[i], s, hc ? "heat cap" : "cluster cap", hc ? $"risk ${rq:0.00} (q {q}) room ${Math.Max(0, room):0.00} heat ${heat:0.00} cap ${config.heatCap * book:0.00}" : $"risk ${rq:0.00} (q {q}) room ${Math.Max(0, room):0.00} cluster ${clHeat[c]:0.00} cap ${config.clusterCap * book:0.00}");
-						continue;
-					}
-					double rwq = q * rw1;   // the outer cap never cuts q: it skips
-					if (_PortRiskCap.Breaks(total, rwq, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${rwq:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-					heat += q * rUnit; clHeat[c] += q * rUnit; total += rwq;
+					nq = q;
 				}
+				int c = m_clusterId[i];
+				double r = nq * rw1;   // WIDENED risk for every check (spec §5.2)
+				if (r > tradeCap + 1e-9) { skip(d[i], s, "per-trade budget", $"widened risk ${r:0.00} (n {nq} x Rw {rw1:0.00}) > budget ${tradeCap:0.00} ({config.maxTradeRisk:P2} of book)"); continue; }
+				if (heat + r > heatCapD + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} (n {nq}) heat ${heat:0.00} room ${Math.Max(0, heatCapD - heat):0.00} cap ${heatCapD:0.00}"); continue; }
+				if (clHeat[c] + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${clHeat[c]:0.00} room ${Math.Max(0, clusterCapD - clHeat[c]):0.00} cap ${clusterCapD:0.00}"); continue; }
+				if (_PortRiskCap.Breaks(total, r, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${r:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+				heat += r; clHeat[c] += r; total += r;
+				if (config.fillCheckEvals > 0) notePending(s, nq, r);
 				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
 				open++;
 			}

@@ -64,9 +64,9 @@ static class Program
 		d = mm.Decide(D0, 1000000, true, views);
 		Check(d[1].allowEntries && d[1].entryContracts == 10 && !d[2].allowEntries && d[2].reason == "heat cap", $"heat cap reduces/denies ({d[1].entryContracts}, {d[2].reason})");
 		// cluster cap 2% = 20000: two strategies in EQIDX, first takes 5000, second limited to 15000/500 = 30 -> but size 10 ok; third ...
-		mm = MM(c => c.riskPerTrade = 0.015); views = new List<PortStratView> { V(0, cl: "EQ"), V(1, cl: "EQ"), V(2, cl: "EN") };
+		mm = MM(c => { c.riskPerTrade = 0.0075; c.clusterCap = 0.01; }); views = new List<PortStratView> { V(0, cl: "EQ"), V(1, cl: "EQ"), V(2, cl: "EN") };
 		d = mm.Decide(D0, 1000000, true, views);
-		Check(d[0].entryContracts == 30 && !d[1].allowEntries && d[1].reason == "cluster cap" && d[2].entryContracts == 30, $"cluster cap 2% shared by the seed cluster: no room for 30 -> skipped, never cut ({d[0].entryContracts},{d[1].entryContracts},{d[2].entryContracts})");
+		Check(d[0].entryContracts == 15 && !d[1].allowEntries && d[1].reason == "cluster cap" && d[2].entryContracts == 15, $"cluster cap 2% shared by the seed cluster: no room for 30 -> skipped, never cut ({d[0].entryContracts},{d[1].entryContracts},{d[2].entryContracts})");
 		// maxPositions
 		mm = MM(c => c.maxPositions = 1); d = mm.Decide(D0, 1000000, true, new List<PortStratView> { V(0), V(1) });
 		Check(d[0].allowEntries && !d[1].allowEntries && d[1].reason == "maxPositions", "maxPositions");
@@ -124,10 +124,10 @@ static class Program
 		Check(h[1].forceClose && !h[1].pause, "own Halted state -> flatten");
 
 		// clusters from returns: two seeds with rho ~1 merge -> share the 2% budget
-		mm = MM(c => c.riskPerTrade = 0.015);
+		mm = MM(c => { c.riskPerTrade = 0.0075; c.clusterCap = 0.01; });
 		var s0 = V(0, cl: "A"); var s1 = V(1, cl: "B"); s0.uRet = a; s1.uRet = b;
 		d = mm.Decide(D0.AddDays(100), 1000000, true, new List<PortStratView> { s0, s1 });
-		Check(d[0].entryContracts == 30 && !d[1].allowEntries && d[1].reason == "cluster cap", $"rho >= 0.9 merges clusters ({d[0].entryContracts},{d[1].entryContracts})");
+		Check(d[0].entryContracts == 15 && !d[1].allowEntries && d[1].reason == "cluster cap", $"rho >= 0.9 merges clusters ({d[0].entryContracts},{d[1].entryContracts})");
 		Check(mm.Rho != null && Near(mm.Rho[0, 1], 1, 1e-9), "rho matrix published");
 
 		// exits are never part of a decision: PortDecision has no exit flags; forceClose only from kill/flatten
@@ -251,11 +251,11 @@ static class Program
 			td = MM(c => c.sizing = EPortSizing.CodeSize).Decide(D0, 1000000, true, new List<PortStratView> { V(0, r: double.NaN) });
 			Check(!td[0].allowEntries && td[0].reason == "no R$", "CodeSize with unknown R$ is skipped as no R$");
 			{   // review #67: size never cut to heat/cluster room; pre-candidate rejections at Info; dedupe re-logs on change/clear
-				var lj = new List<string>(); var lm = MM(c => { c.riskPerTrade = 0.015; c.heatCap = 0.04; }); lm.journal = x => lj.Add(x);
-				var lv = new List<PortStratView> { V(0, EPortState.Flat, pos: 1, riskOpen: 30000), V(1) };   // wants 30 x 500 = 15000, room 10000
+				var lj = new List<string>(); var lm = MM(c => { c.riskPerTrade = 0.0075; c.heatCap = 0.04; }); lm.journal = x => lj.Add(x);
+				var lv = new List<PortStratView> { V(0, EPortState.Flat, pos: 1, riskOpen: 35000), V(1) };   // wants 15 x 500 = 7500, room 5000
 				var ld = lm.Decide(D0, 1000000, true, lv);
-				Check(!ld[1].allowEntries && ld[1].entryContracts == -1 && ld[1].reason == "heat cap", "room 10000 < risk 15000 -> skipped, not trimmed to 20");
-				Check(lj.Any(x => x.StartsWith("PORT Info: skip") && x.Contains("heat cap") && x.Contains("risk $15000.00") && x.Contains("room $10000.00")), "room skip journaled at Info with risk $ and room $");
+				Check(!ld[1].allowEntries && ld[1].entryContracts == -1 && ld[1].reason == "heat cap", "room 5000 < risk 7500 -> skipped, not trimmed to 10");
+				Check(lj.Any(x => x.StartsWith("PORT Info: skip") && x.Contains("heat cap") && x.Contains("risk $7500.00") && x.Contains("room $5000.00")), "room skip journaled at Info with risk $ and room $");
 				lj.Clear(); var sv = V(1); sv.stale = true;
 				lm.Decide(D0, 1000000, true, new List<PortStratView> { sv });
 				Check(lj.Count == 1 && lj[0].StartsWith("PORT Info: skip") && lj[0].Contains(" stale:") && lj[0].Contains("risk $") && lj[0].Contains("cap $"), "stale rejection journaled at Info");
@@ -297,6 +297,68 @@ static class Program
 				"Info: every sizeForRisk skip (bad args, minStopTicks, zero size, notional cap, round lots, 1% budget) traces at Info");
 		}
 
+		{   // PR-B: widened risk (pm.R$w) for the 1% per-trade budget, heat and cluster caps; skip, never cut
+			Func<int, double, double, string, PortStratView> W = (wi, wr, ww, wcl) => { var x = V(wi, r: wr, cl: wcl); x.rDollarW = ww; return x; };
+			var bj = new List<string>(); var bm = MM(null, bj);
+			var bd = bm.Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 350, "") });
+			Check(bd[0].allowEntries && bd[0].entryContracts == 20, "T-P16: n from structural (20, not 14); widened 7000 <= 1% -> allowed");
+			bd = MM(null, bj).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 600, "") });
+			Check(!bd[0].allowEntries && bd[0].entryContracts == -1 && bd[0].reason == "per-trade budget", "T-P16: widened 12000 > 1% -> skipped 'per-trade budget', never resized");
+			Check(bj.Any(x => x.StartsWith("PORT Info: skip") && x.Contains("per-trade budget") && x.Contains("$12000.00") && x.Contains("budget $10000.00")), "per-trade skip at Info with risk $ and budget $");
+			bd = MM().Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 500, "") });
+			Check(bd[0].allowEntries && bd[0].entryContracts == 20, "T-P16: exactly 1% (10000) -> allowed (> not >=)");
+			bd = MM().Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, double.NaN, "") });
+			Check(bd[0].allowEntries && bd[0].entryContracts == 20, "T-P16: pm.R$w NaN -> Rw = pm.R$");
+			var wj = new List<string>(); var wm = MM(null, wj);
+			bd = wm.Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 200, "") });
+			wm.Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 200, "") });
+			Check(bd[0].allowEntries && bd[0].entryContracts == 20 && wj.Count(x => x.StartsWith("PORT Warning") && x.Contains("pm.R$w")) == 1, "T-P16: pm.R$w < pm.R$ -> Rw = pm.R$, one warning per strategy");
+			bd = MM(c => { c.heatCap = 0.015; c.clusterCap = 0.015; }).Decide(D0, 1000000, true, new List<PortStratView> { V(9, EPortState.Flat, pos: 1, riskOpen: 8000), W(1, 250, 400, "") });
+			Check(!bd[1].allowEntries && bd[1].entryContracts == -1 && bd[1].reason == "heat cap", "T-P18 heat on widened: 8000 + 20x400 = 16000 > 15000 -> skipped (structural 13000 would pass)");
+			bd = MM(c => c.clusterCap = 0.01).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 250, 300, "EQ"), W(1, 250, 300, "EQ") });
+			Check(bd[0].allowEntries && bd[0].entryContracts == 20 && !bd[1].allowEntries && bd[1].reason == "cluster cap", "T-P18 cluster on widened: 6000 + 6000 > 10000 -> second skipped, first keeps n (structural 10000 would pass)");
+			var cm = MM(c => c.sizing = EPortSizing.CodeSize); var cx = W(0, 250, 600, ""); cx.qtyCode = 20;
+			bd = cm.Decide(D0, 1000000, true, new List<PortStratView> { cx });
+			Check(!bd[0].allowEntries && bd[0].reason == "per-trade budget", "T-P18(iii) CodeSize qtyCode 20 x 600 = 12000 -> 'per-trade budget'");
+			cx.rDollarW = 350; cm = MM(c => c.sizing = EPortSizing.CodeSize);
+			bd = cm.Decide(D0, 1000000, true, new List<PortStratView> { cx });
+			Check(bd[0].allowEntries && bd[0].entryContracts == -1 && Near(cm.TotalRisk, 7000) && Near(cm.Heat, 0.007), "T-P18(iii) CodeSize allowed; heat/total use 20 x Rw 350 = 7000");
+			var vc = new PortMmConfig { maxTradeRisk = 0.02 }; Check(vc.Validate() != null, "maxTradeRisk 0.02 > 0.01 -> invalid");
+			vc = new PortMmConfig { riskPerTrade = 0.015 }; Check(vc.Validate() != null, "riskPerTrade > maxTradeRisk -> invalid");
+			var mw = new List<string>(); var mc = PortMmConfigLoader.Parse("{ \"maxTradeRisk\": 0.02 }", new PortMmConfig(), mw);
+			Check(Near(mc.maxTradeRisk, 0.01) && mw.Count > 0, "T-P10 add: JSON maxTradeRisk 0.02 rejected -> defaults");
+			mw.Clear(); mc = PortMmConfigLoader.Parse("{ \"maxTradeRisk\": 0.008 }", new PortMmConfig(), mw);
+			Check(Near(mc.maxTradeRisk, 0.008) && mw.Count == 0, "JSON maxTradeRisk 0.008 accepted");
+			Check(!System.Text.RegularExpressions.Regex.IsMatch(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../_PortMM.Function.CS")), @"q\s*=\s*qMax|Math\.Floor\(room"), "no rev 1 heat-room trimming left in _PortMM");
+		}
+		{   // PT 'Max % Capital at Risk per Position' drop detector (approved, never filled)
+			var fj = new List<string>(); var fm = MM(null, fj);
+			Func<List<string>, int> nw = l => l.Count(x => x.StartsWith("PORT Warning") && x.Contains("Max % Capital at Risk per Position"));
+			var a0 = V(0, r: 250);
+			for (int k = 0; k < 2; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 0, "fill check: no warning before the window (3 evaluations)");
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			var fw = fj.FirstOrDefault(x => x.Contains("Max % Capital at Risk per Position")) ?? "";
+			Check(nw(fj) == 1 && fw.Contains("S0#0") && fw.Contains("qty 20") && fw.Contains("risk $5000.00") && fw.Contains(">= 1%"), "fill check: approved 3 times with no position -> one Warning with strategy, qty and risk $");
+			for (int k = 0; k < 5; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 1, "fill check: one Warning per strategy, no spam");
+			fm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Long, pos: 20, riskOpen: 5000) });
+			for (int k = 0; k < 4; k++) fm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(fj) == 2, "fill check: re-armed after a fill -> warns again on the next silent drop");
+			var gj = new List<string>(); var gm = MM(null, gj);
+			gm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			gm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Long, pos: 20, riskOpen: 5000) });
+			for (int k = 0; k < 3; k++) { gm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, EPortState.Flat) }); gm.Decide(D0, 1000000, true, new List<PortStratView> { a0 }); }
+			Check(nw(gj) == 0, "fill check: filled entry, or signal withdrawing (not Armed) -> no warning");
+			var hj = new List<string>(); var hm = MM(c => c.heatCap = 0.04, hj);
+			hm.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			for (int k = 0; k < 5; k++) hm.Decide(D0, 1000000, true, new List<PortStratView> { V(9, EPortState.Flat, pos: 1, riskOpen: 39000), a0 });
+			Check(nw(hj) == 0, "fill check: entry later skipped by the MM (not approved) -> no warning");
+			var oj = new List<string>(); var om = MM(c => c.fillCheckEvals = 0, oj);
+			for (int k = 0; k < 6; k++) om.Decide(D0, 1000000, true, new List<PortStratView> { a0 });
+			Check(nw(oj) == 0, "fill check: fillCheckEvals 0 -> off");
+		}
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
