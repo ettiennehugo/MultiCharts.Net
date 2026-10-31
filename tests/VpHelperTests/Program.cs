@@ -17,7 +17,7 @@ static class Program
 
 	static int Main()
 	{
-		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf();
+		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf(); VpDevWeight();
 		VwapRollReset();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
@@ -495,11 +495,11 @@ static class Program
 		// ZoneSourceCounts (V5) over the engine's survivor interface
 		int ns, np;
 		Func<string, string, bool, double, IVpConfSurvivor> S = (svid, p, ind, c) => new TSurv { Anchor = new TAnc { SourceVolumeId = svid, ProfileId = p }, Independent = ind, Credit = c };
-		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s10", true, 1), S("", "ds1:s50", true, 1), S("ds2:s10", "ds2:s10", true, 1) }, out ns, out np);
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s10", true, 1), S("", "ds1:s50", true, 1), S("ds2:s10", "ds2:s10", true, 1) }, VpConfluenceRules.DefaultDevSourceThreshold, out ns, out np);
 		Check(ns == 3 && np == 3, "ZoneSourceCounts: two labels of one source count once; empty source id -> own profile [" + ns + "," + np + "]");
-		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s30", true, 0.5) }, out ns, out np);
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("ds1:s10", "ds1:s10", true, 1), S("ds1:s10", "ds1:s30", true, 0.5) }, VpConfluenceRules.DefaultDevSourceThreshold, out ns, out np);
 		Check(ns == 1 && np == 2, "ZoneSourceCounts: developing child remapped to its parent's source adds no source [" + ns + "," + np + "]");
-		VpConfluenceRules.ZoneSourceCounts(new[] { S("a", "a", true, 1), S("b", "b", false, 1), S("c", "c", true, 0) }, out ns, out np);
+		VpConfluenceRules.ZoneSourceCounts(new[] { S("a", "a", true, 1), S("b", "b", false, 1), S("c", "c", true, 0) }, VpConfluenceRules.DefaultDevSourceThreshold, out ns, out np);
 		Check(ns == 1 && np == 1, "ZoneSourceCounts: non-independent and zero-credit survivors excluded");
 		Check(VpConfluenceRules.SourceId("", "p") == "p" && VpConfluenceRules.SourceId(null, "p") == "p" && VpConfluenceRules.SourceId("s", "p") == "s", "SourceId: source else profile");
 		// DevelopingHits over the cluster: every developing non-overlay anchor in [lo, hi) is listed with its own survivor's credit
@@ -541,7 +541,7 @@ static class Program
 		Func<string, string, int> count = (hay, needle) => { int n = 0, i = 0; while ((i = hay.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; } return n; };
 		Action<string, string, string> pin1 = (hay, needle, what) => Check(count(hay, needle) == 1, what + " (exactly once, uncommented)");
 		pin1(eng, "VpConfluenceRules.EmitZones(m_prices, lo, hi, tol, m_owner.confluenceAtr20d, atrFraction, (zlo, zhi) => addZone(cluster, zlo, zhi, tol), (a, b, split, atr) => journalSplit(a, b, split, tol, atrFraction, atr));", "engine emits zones and feeds the host Atr20d through EmitZones");
-		pin1(eng, "VpConfluenceRules.ZoneSourceCounts(survivors, out nSources, out nProfiles);", "engine counts sources through ZoneSourceCounts");
+		pin1(eng, "VpConfluenceRules.ZoneSourceCounts(survivors, m_devSourceThreshold, out nSources, out nProfiles);", "engine counts sources through ZoneSourceCounts");
 		pin1(eng, "zone.independentSources = nSources;", "engine sets independentSources only from ZoneSourceCounts");
 		pin1(eng, "zone.developingScore = VpConfluenceRules.DevelopingHits(cluster, loIdx, hiIdx, survivors, developingHit, ref zone.developingHits);", "engine lists developing hits through DevelopingHits");
 		Check(!eng.Contains("m_atr20d") && !eng.Contains("svIds") && !eng.Contains("m_zones") && !eng.Contains("gap <= tol") && eng.Contains("VPCONF split"),
@@ -561,6 +561,173 @@ static class Program
 		string create = c0 >= 0 && c1 > c0 ? bas.Substring(c0, c1 - c0) : "";
 		Check(create.Length > 0 && !create.Contains("new _VpConfluenceEngine") && !create.Contains("new _VpVwapEngine") && !create.Contains("new Dictionary<int, StreamPack>"),
 			"Create allocates no stream packs, VWAP or confluence engines (lazy)");
+	}
+	// ---- vp-confluence-developing-weight-spec.md (rev 2, approved 2026-10-31): completeness-weighted developing profiles ----
+	const double REFINEMENT = 0.25;   // _VolumeProfileBase.DEFAULT_CONFLUENCE_REFINEMENT (pinned below)
+
+	// main @ 3f9e9be ZoneSourceCounts, verbatim (the Off-mode reference for test 13).
+	static void LegacyZoneSourceCounts(IReadOnlyList<IVpConfSurvivor> survivors, out int independentSources, out int profileCount)
+	{
+		var src = new List<string>(); var prof = new List<string>();
+		if (survivors != null)
+			for (int i = 0; i < survivors.Count; i++)
+			{
+				IVpConfSurvivor s = survivors[i];
+				if (!(s.Credit > 0) || !s.Independent) continue;
+				src.Add(VpConfluenceRules.SourceId(s.Anchor.SourceVolumeId, s.Anchor.ProfileId));
+				prof.Add(s.Anchor.ProfileId);
+			}
+		independentSources = VpConfluenceRules.DistinctCount(src);
+		profileCount = VpConfluenceRules.DistinctCount(prof);
+	}
+
+	// Mirror of the engine's addZone scoring after applyNested: weight loop (skipped when Off), acc/rej/ctx sums, ZoneSourceCounts,
+	// DevelopingHits. legacy = main's path (no weight loop, legacy counts). Serialised with "R" so equal strings = identical doubles.
+	static string ZoneOut(List<TSurv> svIn, IVpConfAnchor[] cluster, EDevWeighting mode, double threshold, bool legacy)
+	{
+		var sv = new List<TSurv>();
+		foreach (var x in svIn) sv.Add(new TSurv { Anchor = x.Anchor, Independent = x.Independent, Credit = x.Credit, Completeness = x.Completeness, Overlay = x.Overlay, Rejection = x.Rejection });
+		var raw = new double[sv.Count];
+		for (int i = 0; i < sv.Count; i++) raw[i] = sv[i].Credit;
+		if (!legacy && mode != EDevWeighting.Off)
+			foreach (var s in sv) if (s.Anchor.Developing && !s.Anchor.Overlay) s.Credit *= s.Completeness;
+		double acc = 0, rej = 0, ctx = 0; var hits = new System.Text.StringBuilder();
+		for (int i = 0; i < sv.Count; i++)
+		{
+			var s = sv[i]; if (s.Credit <= 0) continue;
+			if (s.Overlay) ctx += s.Credit; else if (s.Rejection) rej += s.Credit; else acc += s.Credit;
+			hits.Append(s.Anchor.ProfileId).Append('=').Append(s.Credit.ToString("R")).Append(';');
+		}
+		int ns, np; var ro = sv.ConvertAll(x => (IVpConfSurvivor)x);
+		if (legacy) LegacyZoneSourceCounts(ro, out ns, out np); else VpConfluenceRules.ZoneSourceCounts(ro, mode == EDevWeighting.Off ? 0 : threshold, out ns, out np);
+		List<string> dh = null;
+		double dscore = VpConfluenceRules.DevelopingHits(cluster, 0, cluster.Length, ro, (a, own, c) => a.ProfileId + ":" + c.ToString("R"), ref dh);
+		return "acc=" + acc.ToString("R") + " rej=" + rej.ToString("R") + " ctx=" + ctx.ToString("R") + " raw=" + (acc + rej).ToString("R") + " src=" + ns + " prof=" + np
+			+ " dev=" + dscore.ToString("R") + " devHits=" + (dh == null ? "null" : string.Join(",", dh)) + " hits=" + hits;
+	}
+
+	static void VpDevWeight()
+	{
+		const double st = VpConfluenceRules.DefaultDevStartFraction, mn = VpConfluenceRules.DefaultDevMinWeight, nr = VpConfluenceRules.DefaultDevNoRefWeight;
+		Func<double, double, EDevRamp, double, double, double, double> W = (el, ex, rp, s, m, n) => VpConfluenceRules.Weigh(el, ex, rp, s, m, n).w;
+		// 14. defaults
+		Check(VpConfluenceRules.DefaultDevWeighting == EDevWeighting.Time && VpConfluenceRules.DefaultDevRamp == EDevRamp.Linear && st == 0.10 && mn == 0.10 && nr == 0.50
+			&& VpConfluenceRules.DefaultDevSourceThreshold == 0.67 && VpConfluenceRules.MaxDevSourceThreshold == 1.01, "DW14 defaults: Time, Linear, start 0.10, min 0.10, noRef 0.50, threshold 0.67");
+		// 2. linear / sqrt
+		Check(Near(W(40, 80, EDevRamp.Linear, st, mn, nr), 0.5), "DW2 linear 40/80 = 0.5");
+		Check(Near(W(40, 80, EDevRamp.Sqrt, st, mn, nr), 0.7071067811865476), "DW2 sqrt 40/80 = 0.7071");
+		// 3. below start: weight 0 (listed in developingHits with credit 0: see DW12)
+		var b3 = VpConfluenceRules.Weigh(7, 80, EDevRamp.Linear, st, mn, nr);
+		Check(b3.w == 0 && b3.belowStart && !b3.noRef, "DW3 raw 0.0875 < start 0.10: w 0");
+		// 4. floor
+		Check(Near(W(12, 100, EDevRamp.Linear, st, 0.25, nr), 0.25), "DW4 floor: raw 0.12, min 0.25 -> 0.25");
+		// 5. clamp
+		var b5 = VpConfluenceRules.Weigh(120, 80, EDevRamp.Linear, st, mn, nr);
+		Check(b5.w == 1 && b5.raw == 1 && W(120, 80, EDevRamp.Sqrt, st, mn, nr) == 1, "DW5 raw > 1 clamps to 1");
+		// 6. no reference
+		var b6 = VpConfluenceRules.Weigh(40, double.NaN, EDevRamp.Linear, st, mn, nr);
+		Check(b6.noRef && b6.w == 0.5 && W(40, 0, EDevRamp.Linear, st, mn, 0.3) == 0.3, "DW6 no reference -> noRef weight");
+		Check(VpConfluenceRules.Weigh(EDevWeighting.Time, 40, VpConfluenceRules.Median(new List<double>()), 0, 0, EDevRamp.Linear, st, mn, nr).w == 0.5, "DW6 empty reference set -> median NaN -> 0.50");
+		// 7. median ignores one half day; partial excluded
+		Check(VpConfluenceRules.Median(new List<double> { 81, 40, 82 }) == 81, "DW7 median of {81, 40 (half day), 82} = 81");
+		Check(VpConfluenceRules.Median(new List<double> { 80, 82 }) == 81 && VpConfluenceRules.Median(new List<double> { 5 }) == 5, "DW7 even count: mean of the middle two");
+		var unsorted = new List<double> { 3, 1, 2 }; VpConfluenceRules.Median(unsorted);
+		Check(unsorted[0] == 3 && unsorted[1] == 1, "DW7 Median does not reorder its input");
+		Check(VpConfluenceRules.IsReference(true, false, 10) && !VpConfluenceRules.IsReference(true, true, 10) && !VpConfluenceRules.IsReference(false, false, 10)
+			&& !VpConfluenceRules.IsReference(true, false, 0), "DW7 reference = completed, not partial, startBar >= 1");
+		// 8. volume / either
+		Check(Near(VpConfluenceRules.Weigh(EDevWeighting.Volume, 70, 80, 300, 1000, EDevRamp.Linear, st, mn, nr).w, 0.3), "DW8 volume 300/1000 = 0.3");
+		Check(Near(VpConfluenceRules.Weigh(EDevWeighting.Either, 70, 80, 300, 1000, EDevRamp.Linear, st, mn, nr).w, 0.875)
+			&& Near(VpConfluenceRules.Weigh(EDevWeighting.Either, 20, 80, 600, 1000, EDevRamp.Linear, st, mn, nr).w, 0.6), "DW8 Either = max(time, volume)");
+		Check(VpConfluenceRules.Weigh(EDevWeighting.Off, 1, 80, 1, 1000, EDevRamp.Linear, st, mn, nr).w == 1, "DW Off: w 1");
+		Check(VpConfluenceRules.Weigh(EDevWeighting.Volume, 70, 80, double.NaN, 1000, EDevRamp.Linear, st, mn, nr).noRef, "DW8 volume basis without a snapshot total -> noRef");
+		// 9. weekly references weekly only: per-stream medians
+		double sessMed = VpConfluenceRules.Median(new List<double> { 81, 80, 79 }), weekMed = VpConfluenceRules.Median(new List<double> { 405, 400, 410 });
+		Check(Near(W(40, sessMed, EDevRamp.Linear, st, mn, nr), 0.5) && Near(W(101, weekMed, EDevRamp.Linear, st, mn, nr), 101.0 / 405), "DW9 session vs weekly stream: each against its own median");
+		// mutation resistance: asymmetric values (30/80, sqrt, min 0.2)
+		double ma = W(30, 80, EDevRamp.Sqrt, st, 0.2, nr);
+		Check(Near(ma, Math.Sqrt(0.375)), "DWm sqrt(30/80) = 0.6124 [" + ma + "]");
+		Check(!Near(ma, 0.375) && !Near(ma, 1) && !Near(ma, 0.2) && !Near(ma, Math.Sqrt(80.0 / 30)), "DWm not linear / clamp / min / swapped");
+		Check(Near(W(30, 80, EDevRamp.Linear, st, 0.2, nr), 0.375) && Near(W(15, 80, EDevRamp.Linear, st, 0.2, nr), 0.2), "DWm linear 0.375; 0.1875 floors to 0.2");
+		Check(W(10, 100, EDevRamp.Linear, st, 0.05, nr) > 0 && W(10, 100, EDevRamp.Linear, st, 0.05, nr) == 0.1, "DWm boundary raw == start credits (> 0)");
+		Check(W(9.999, 100, EDevRamp.Linear, st, 0.05, nr) == 0, "DWm just below start: 0");
+		// setters: range checks throw
+		Func<Action, bool> throws = a => { try { a(); return false; } catch (ArgumentException) { return true; } };
+		Check(throws(() => VpConfluenceRules.RequireRange("x", -0.01, 0, 1)) && throws(() => VpConfluenceRules.RequireRange("x", 1.0001, 0, 1)) && throws(() => VpConfluenceRules.RequireRange("x", double.NaN, 0, 1))
+			&& throws(() => VpConfluenceRules.RequireRange("x", 1.02, 0, 1.01)) && !throws(() => VpConfluenceRules.RequireRange("x", 1.01, 0, 1.01)) && !throws(() => VpConfluenceRules.RequireRange("x", 0, 0, 1)),
+			"DW setter range check: NaN / out of range throw, bounds accepted");
+		// 11. independentSources threshold
+		int ns, np;
+		Func<double, double, int> srcAt = (w, th) => { VpConfluenceRules.ZoneSourceCounts(new IVpConfSurvivor[] { new TSurv { Anchor = new TAnc { SourceVolumeId = "c", ProfileId = "c" }, Independent = true, Credit = 1 },
+			new TSurv { Anchor = new TAnc { SourceVolumeId = "d", ProfileId = "d", Developing = true }, Independent = true, Credit = w, Completeness = w } }, th, out ns, out np); return ns; };
+		Check(srcAt(0.66, 0.67) == 1 && srcAt(0.67, 0.67) == 2 && srcAt(0.80, 0.67) == 2, "DW11 threshold 0.67: w 0.66 no, 0.67 counts (boundary), 0.80 counts once");
+		Check(srcAt(1.0, 1.01) == 1 && srcAt(0.6, 0.5) == 2 && srcAt(0.4, 0.5) == 1, "DW11 threshold 1.01 never; 0.5: w 0.6 yes, 0.4 no");
+		VpConfluenceRules.ZoneSourceCounts(new IVpConfSurvivor[] { new TSurv { Anchor = new TAnc { SourceVolumeId = "d", ProfileId = "d", Developing = true }, Independent = true, Credit = 0.3, Completeness = 0.3 } }, 0.67, out ns, out np);
+		Check(ns == 0 && np == 0, "DW11 profileCount follows the same rule");
+		VpConfluenceRules.ZoneSourceCounts(new IVpConfSurvivor[] { new TSurv { Anchor = new TAnc { SourceVolumeId = "c", ProfileId = "c" }, Independent = true, Credit = 1, Completeness = 1 } }, 1.01, out ns, out np);
+		Check(ns == 1, "DW11 completed survivors ignore the threshold");
+		// fixture: completed c1 (POC 1.2), completed c2 rejection (0.8), developing own-source d3 (w 0.4), developing remapped d4 -> c1 (w 0.4), overlay v (0.5)
+		var c1 = new TAnc { SourceVolumeId = "c1", ProfileId = "c1" }; var c2 = new TAnc { SourceVolumeId = "c2", ProfileId = "c2" };
+		var d3 = new TAnc { SourceVolumeId = "d3", ProfileId = "d3", Developing = true }; var d4 = new TAnc { SourceVolumeId = "c1", ProfileId = "d4", Developing = true };
+		var ov = new TAnc { SourceVolumeId = "overlay:Vwap1", ProfileId = "overlay:Vwap1", Overlay = true };
+		var cluster = new IVpConfAnchor[] { c1, d3, c2, d4, ov };
+		Func<double, List<TSurv>> fx = w => new List<TSurv> {
+			new TSurv { Anchor = c1, Independent = true, Credit = 1.2 }, new TSurv { Anchor = c2, Independent = true, Credit = 0.8, Rejection = true },
+			new TSurv { Anchor = d3, Independent = true, Credit = 0.9, Completeness = w }, new TSurv { Anchor = d4, Independent = true, Credit = 0.7, Completeness = w },
+			new TSurv { Anchor = ov, Independent = false, Credit = 0.5, Overlay = true } };
+		// 13. Off: identical to main on the fixture (all fields, exact doubles), at any threshold incl. 1.01
+		string main = ZoneOut(fx(1), cluster, EDevWeighting.Off, 0.67, true);
+		Check(ZoneOut(fx(1), cluster, EDevWeighting.Off, 0.67, false) == main && ZoneOut(fx(1), cluster, EDevWeighting.Off, 1.01, false) == main, "DW13 Off: zone output identical to main [" + main + "]");
+		// 1. completed survivors unchanged by weighting; overlays unchanged (context score)
+		string on = ZoneOut(fx(0.4), cluster, EDevWeighting.Time, 0.67, false);
+		Check(on.Contains("ctx=0.5 ") && on.Contains("c1=1.2;") && on.Contains("c2=0.8;") && on.Contains("rej=0.8 ") && main.Contains("ctx=0.5 "), "DW1 completed credits and overlay context unchanged [" + on + "]");
+		Check(on.Contains("d3=" + (0.9 * 0.4).ToString("R") + ";") && on.Contains("d4=" + (0.7 * 0.4).ToString("R") + ";"), "DW credit' = credit x w");
+		Check(on.Contains(" src=2 ") && main.Contains(" src=3 "), "DW11 fixture: w 0.4 own-source developing dropped from independentSources (3 -> 2)");
+		Check(ZoneOut(fx(1), cluster, EDevWeighting.Time, 0.67, false) == main, "DW1 Time with every w = 1 equals Off / main");
+		// 12. developingScore = sum of weighted credits; null with no developing anchor
+		Check(on.Contains(" dev=" + (0.9 * 0.4 + 0.7 * 0.4).ToString("R") + " ") && on.Contains("devHits=d3:" + (0.9 * 0.4).ToString("R") + ",d4:" + (0.7 * 0.4).ToString("R") + " "), "DW12 developingScore = weighted sum [" + on + "]");
+		string zeroW = ZoneOut(fx(0), cluster, EDevWeighting.Time, 0.67, false);
+		Check(zeroW.Contains("devHits=d3:0,d4:0 ") && zeroW.Contains(" dev=0 ") && !zeroW.Contains("d3=") , "DW3 w 0: hit listed in developingHits with credit 0, not scored");
+		Check(ZoneOut(new List<TSurv> { new TSurv { Anchor = c1, Independent = true, Credit = 1.2 } }, new IVpConfAnchor[] { c1 }, EDevWeighting.Time, 0.67, false).Contains("devHits=null"), "DW12 no developing anchor: developingHits null");
+		// 10. nested developing child: credit = 0.25 x parent x w (weight applied after applyNested)
+		double parent = 1.6, wn = 0.457;
+		var nest = new List<TSurv> { new TSurv { Anchor = c1, Independent = true, Credit = parent }, new TSurv { Anchor = d3, Independent = false, Credit = REFINEMENT * parent, Completeness = wn } };
+		string nz = ZoneOut(nest, new IVpConfAnchor[] { c1, d3 }, EDevWeighting.Time, 0.67, false);
+		Check(nz.Contains("d3=" + (REFINEMENT * parent * wn).ToString("R") + ";") && nz.Contains(" src=1 "), "DW10 nested developing child = 0.25 x parent x w [" + nz + "]");
+		// journal line (spec §8)
+		var j = VpConfluenceRules.Weigh(EDevWeighting.Time, 37, 81, 0, 0, EDevRamp.Linear, st, mn, nr);
+		string jl = VpConfluenceRules.DevWeightLine(2, "ds2:s1234", EDevWeighting.Time, j, EDevRamp.Linear, st, 3, 0.67);
+		Check(jl == "VPCONF devweight ds(2) profile(ds2:s1234) basis(time) elapsed(37) expected(81) raw(0.457) ramp(linear) w(0.457) refN(3) source(no)", "DW journal line: " + jl);
+		string jn = VpConfluenceRules.DevWeightLine(2, "ds2:s9", EDevWeighting.Time, VpConfluenceRules.Weigh(5, double.NaN, EDevRamp.Linear, st, mn, nr), EDevRamp.Linear, st, 0, 0.67);
+		string js = VpConfluenceRules.DevWeightLine(2, "ds2:s9", EDevWeighting.Time, VpConfluenceRules.Weigh(5, 81, EDevRamp.Linear, st, mn, nr), EDevRamp.Linear, st, 3, 0.67);
+		string jy = VpConfluenceRules.DevWeightLine(1, "ds1:s9", EDevWeighting.Volume, VpConfluenceRules.Weigh(700, 1000, EDevRamp.Linear, st, mn, nr), EDevRamp.Linear, st, 3, 0.67);
+		Check(jn.Contains("basis(noref)") && jn.Contains("w(0.500)") && js.Contains("w(0) start(0.10)") && jy.Contains("basis(volume)") && jy.Contains("source(yes)"), "DW journal: noref / below start / source yes [" + jn + " | " + js + " | " + jy + "]");
+		// ---- source pins (comment-stripped) ----
+		string dir = AppContext.BaseDirectory; while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir, "_VpConfluenceEngine.Function.CS"))) dir = System.IO.Path.GetDirectoryName(dir);
+		if (dir == null) { Check(false, "DW repo root not found"); return; }
+		Func<string, string> strip = p => System.Text.RegularExpressions.Regex.Replace(System.IO.File.ReadAllText(System.IO.Path.Combine(dir, p)), @"//[^\n]*", "");
+		string eng = strip("_VpConfluenceEngine.Function.CS"), bas = strip("_VolumeProfileBase.Strategy.CS");
+		Func<string, string, int> count = (hay, needle) => { int n = 0, i = 0; while ((i = hay.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; } return n; };
+		Check(count(eng, "s.credit *= s.anchor.completeness;") == 1 && eng.IndexOf("applyNested(survivors);", StringComparison.Ordinal) >= 0
+			&& eng.IndexOf("s.credit *= s.anchor.completeness;", StringComparison.Ordinal) > eng.IndexOf("applyNested(survivors);", StringComparison.Ordinal)
+			&& count(eng, "applyNested(survivors);") == 1, "DW pin: weight applied exactly once, after applyNested");
+		Check(count(eng, "if (m_devMode != EDevWeighting.Off)") == 1 && count(eng, "if (!s.anchor.developing || s.anchor.overlay) continue;") == 1, "DW pin: weight loop skipped when Off; developing non-overlay only");
+		Check(count(eng, "VpConfluenceRules.ZoneSourceCounts(survivors, m_devSourceThreshold, out nSources, out nProfiles);") == 1
+			&& count(eng, "m_devSourceThreshold = m_devMode == EDevWeighting.Off ? 0 : m_owner.ConfluenceDevSourceThreshold;") == 1, "DW pin: ZoneSourceCounts gets the config threshold (0 when Off)");
+		Check(count(eng, "bool weigh = m_devMode != EDevWeighting.Off && hasDeveloping(extras);") == 1 && count(eng, "if (weigh) referenceMedians(") == 1
+			&& count(eng, "if (m_refBars == null) { m_refBars = new List<double>(8); m_refVols = new List<double>(8); }") == 1, "DW pin: medians / scratch only when weighting is on and a developing profile exists");
+		Check(count(eng, "if (anchors[i].developing && !anchors[i].overlay) anchors[i].completeness = d.w;") == 1 && count(eng, "public double completeness = 1;") == 1, "DW pin: completeness default 1, set only on developing non-overlay anchors");
+		Check(count(eng, "VpConfluenceRules.IsReference(e.pocComplete, e.isPartial, e.startBar)") == 1, "DW pin: reference set filter");
+		Check(count(bas, "public const double DEFAULT_CONFLUENCE_REFINEMENT = 0.25;") == 1, "DW pin: REFINEMENT 0.25");
+		foreach (var prop in new[] { "protected internal EDevWeighting ConfluenceDevWeighting { get; set; } = VpConfluenceRules.DefaultDevWeighting;",
+			"protected internal EDevRamp ConfluenceDevRamp { get; set; } = VpConfluenceRules.DefaultDevRamp;",
+			"set { m_confluenceDevStartFraction = VpConfluenceRules.RequireRange(\"ConfluenceDevStartFraction\", value, 0, 1); }",
+			"set { m_confluenceDevMinWeight = VpConfluenceRules.RequireRange(\"ConfluenceDevMinWeight\", value, 0, 1); }",
+			"set { m_confluenceDevNoRefWeight = VpConfluenceRules.RequireRange(\"ConfluenceDevNoRefWeight\", value, 0, 1); }",
+			"set { m_confluenceDevSourceThreshold = VpConfluenceRules.RequireRange(\"ConfluenceDevSourceThreshold\", value, 0, VpConfluenceRules.MaxDevSourceThreshold); }" })
+			Check(count(bas, prop) == 1, "DW pin config: " + prop);
+		Check(!System.Text.RegularExpressions.Regex.IsMatch(bas, @"\[Input\][^;{]*ConfluenceDev"), "DW: no [Input] for the dev-weight config");
+		Check(count(eng, "rawCredit = double.IsNaN(s.rawCredit) ? s.credit : s.rawCredit") == 1 && count(eng, "completeness = s.anchor.completeness,") == 1, "DW pin: hits carry completeness and rawCredit");
 	}
 	// PR I: opt-in Week/Month VWAP reset at a roll (VwapConfig.resetPeriodSlotsOnRoll, default false = unchanged)
 	static void VwapRollReset()
@@ -606,4 +773,4 @@ static class Program
 	}
 }
 class TAnc : IVpConfAnchor { public string SourceVolumeId { get; set; } public string ProfileId { get; set; } public bool Developing { get; set; } public bool Overlay { get; set; } }
-class TSurv : IVpConfSurvivor { public IVpConfAnchor Anchor { get; set; } public bool Independent { get; set; } public double Credit { get; set; } }
+class TSurv : IVpConfSurvivor { public IVpConfAnchor Anchor { get; set; } public bool Independent { get; set; } public double Credit { get; set; } public double Completeness { get; set; } = 1; public bool Overlay; public bool Rejection; }

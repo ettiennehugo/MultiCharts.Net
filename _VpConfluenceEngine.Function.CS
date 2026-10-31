@@ -23,7 +23,24 @@ namespace PowerLanguage.Function
 	/// <summary>The engine's anchor as the rules see it.</summary>
 	public interface IVpConfAnchor { string SourceVolumeId { get; } string ProfileId { get; } bool Developing { get; } bool Overlay { get; } }
 	/// <summary>The engine's same-source survivor as the rules see it.</summary>
-	public interface IVpConfSurvivor { IVpConfAnchor Anchor { get; } bool Independent { get; } double Credit { get; } }
+	/// <summary>Completeness: the developing weight w_complete applied to Credit (1 for completed profiles and overlays).</summary>
+	public interface IVpConfSurvivor { IVpConfAnchor Anchor { get; } bool Independent { get; } double Credit { get; } double Completeness { get; } }
+
+	/// <summary>Developing-profile weighting basis (vp-confluence-developing-weight-spec.md §3, §5). Off = w 1 (pre-spec behaviour).</summary>
+	public enum EDevWeighting { Off, Time, Volume, Either }
+	/// <summary>Shape of the completeness ramp r(raw).</summary>
+	public enum EDevRamp { Linear, Sqrt }
+
+	/// <summary>One developing profile's weight and how it was reached (journal / tests).</summary>
+	public struct VpDevWeight
+	{
+		public double w;          // w_complete in [0, 1]
+		public double raw;        // elapsed / expected clamped to [0, 1]; NaN when there was no reference
+		public double elapsed;
+		public double expected;   // median of the reference set; NaN when there was none
+		public bool noRef;        // no completed reference: w = noRef weight
+		public bool belowStart;   // raw < start: w = 0
+	}
 
 	public static class VpConfluenceRules
 	{
@@ -31,6 +48,91 @@ namespace PowerLanguage.Function
 		public const int MinSplitCount = 3;                  // ... and only when it holds at least this many anchors (was CLUSTER_MIN_SPLIT_COUNT)
 		public const double DefaultSplitAtrFraction = 0.03;  // 3% of Atr20d (protected _VolumeProfileBase.ConfluenceSplitAtrFraction)
 		private const double Eps = 1e-12;
+
+		// Developing-profile completeness weight (spec §5 defaults, DECIDED 2026-10-30 / noRef 2026-10-31).
+		public const EDevWeighting DefaultDevWeighting = EDevWeighting.Time;
+		public const EDevRamp DefaultDevRamp = EDevRamp.Linear;
+		public const double DefaultDevStartFraction = 0.10;
+		public const double DefaultDevMinWeight = 0.10;
+		public const double DefaultDevNoRefWeight = 0.50;
+		public const double DefaultDevSourceThreshold = 0.67;
+		public const double MaxDevSourceThreshold = 1.01;    // 1.01 = a developing profile never counts as a source
+
+		/// <summary>Config setter check: throws ArgumentException when value is NaN or outside [lo, hi].</summary>
+		public static double RequireRange(string name, double value, double lo, double hi)
+		{
+			if (double.IsNaN(value) || value < lo || value > hi)
+				throw new ArgumentException(name + " must be between " + lo.ToString(System.Globalization.CultureInfo.InvariantCulture) + " and "
+					+ hi.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+			return value;
+		}
+
+		/// <summary>Median of the values (mean of the middle two for an even count); NaN when empty. Does not reorder `values`.</summary>
+		public static double Median(IList<double> values)
+		{
+			if (values == null || values.Count == 0) return double.NaN;
+			var v = new double[values.Count];
+			values.CopyTo(v, 0);
+			Array.Sort(v);
+			int n = v.Length;
+			return (n & 1) == 1 ? v[n / 2] : 0.5 * (v[n / 2 - 1] + v[n / 2]);
+		}
+
+		/// <summary>Spec §3 for one basis: raw = elapsed / expected clamped to [0, 1]; w = 0 when raw &lt; start, else max(min, ramp(raw)).
+		/// No usable reference (expected NaN / not positive) or no usable elapsed (NaN / negative) gives noRef.</summary>
+		public static VpDevWeight Weigh(double elapsed, double expected, EDevRamp ramp, double start, double min, double noRef)
+		{
+			var r = new VpDevWeight { elapsed = elapsed, expected = expected, raw = double.NaN };
+			if (double.IsNaN(expected) || double.IsInfinity(expected) || !(expected > 0) || double.IsNaN(elapsed) || elapsed < 0)
+			{
+				r.noRef = true;
+				r.w = noRef;
+				return r;
+			}
+			double raw = elapsed / expected;
+			if (raw > 1) raw = 1;
+			if (raw < 0) raw = 0;
+			r.raw = raw;
+			if (raw < start) { r.belowStart = true; r.w = 0; return r; }
+			double shaped = ramp == EDevRamp.Sqrt ? Math.Sqrt(raw) : raw;
+			r.w = shaped > min ? shaped : min;
+			return r;
+		}
+
+		/// <summary>Spec §3: completeness weight of one developing profile. Off: 1. Time: bars; Volume: snapshot volume; Either: the larger of the two.</summary>
+		public static VpDevWeight Weigh(EDevWeighting mode, double elapsedBars, double expectedBars, double elapsedVol, double expectedVol,
+			EDevRamp ramp, double start, double min, double noRef)
+		{
+			switch (mode)
+			{
+				case EDevWeighting.Time: return Weigh(elapsedBars, expectedBars, ramp, start, min, noRef);
+				case EDevWeighting.Volume: return Weigh(elapsedVol, expectedVol, ramp, start, min, noRef);
+				case EDevWeighting.Either:
+				{
+					VpDevWeight t = Weigh(elapsedBars, expectedBars, ramp, start, min, noRef);
+					VpDevWeight v = Weigh(elapsedVol, expectedVol, ramp, start, min, noRef);
+					return v.w > t.w ? v : t;
+				}
+				default: return new VpDevWeight { w = 1, raw = 1, elapsed = elapsedBars, expected = expectedBars };
+			}
+		}
+
+		/// <summary>Spec §3: a lookback profile is a reference for the developing weight when it is completed, not partial
+		/// (window began before the first bar) and has a start bar.</summary>
+		public static bool IsReference(bool pocComplete, bool isPartial, int startBar) { return pocComplete && !isPartial && startBar >= 1; }
+
+		/// <summary>Spec §8 journal line for one developing profile.</summary>
+		public static string DevWeightLine(int datastream, string profileId, EDevWeighting mode, VpDevWeight d, EDevRamp ramp, double start, int refN, double sourceThreshold)
+		{
+			var ci = System.Globalization.CultureInfo.InvariantCulture;
+			string basis = d.noRef ? "noref" : mode.ToString().ToLowerInvariant();
+			string text = "VPCONF devweight ds(" + datastream.ToString(ci) + ") profile(" + profileId + ") basis(" + basis + ")"
+				+ " elapsed(" + d.elapsed.ToString("0.###", ci) + ") expected(" + (double.IsNaN(d.expected) ? "na" : d.expected.ToString("0.###", ci)) + ")"
+				+ " raw(" + (double.IsNaN(d.raw) ? "na" : d.raw.ToString("0.000", ci)) + ") ramp(" + ramp.ToString().ToLowerInvariant() + ")"
+				+ " w(" + (d.belowStart ? "0" : d.w.ToString("0.000", ci)) + ")";
+			if (d.belowStart) text += " start(" + start.ToString("0.00", ci) + ")";
+			return text + " refN(" + refN.ToString(ci) + ") source(" + (d.w >= sourceThreshold ? "yes" : "no") + ")";
+		}
 
 		public static bool AtrReady(double atr20d) { return !double.IsNaN(atr20d) && !double.IsInfinity(atr20d) && atr20d > 0; }
 
@@ -85,8 +187,9 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>V5 zone counts over the zone's survivors: independentSources = distinct SourceId of the credited
-		/// independent survivors (labels of one volume mass count once); profileCount = their distinct profiles.</summary>
-		public static void ZoneSourceCounts(IReadOnlyList<IVpConfSurvivor> survivors, out int independentSources, out int profileCount)
+		/// independent survivors (labels of one volume mass count once); profileCount = their distinct profiles.
+		/// Spec §4: a developing survivor counts (in both) only when its Completeness >= devSourceThreshold.</summary>
+		public static void ZoneSourceCounts(IReadOnlyList<IVpConfSurvivor> survivors, double devSourceThreshold, out int independentSources, out int profileCount)
 		{
 			var src = new List<string>(); var prof = new List<string>();
 			if (survivors != null)
@@ -94,6 +197,7 @@ namespace PowerLanguage.Function
 				{
 					IVpConfSurvivor s = survivors[i];
 					if (!(s.Credit > 0) || !s.Independent) continue;
+					if (s.Anchor.Developing && s.Completeness < devSourceThreshold) continue;
 					src.Add(SourceId(s.Anchor.SourceVolumeId, s.Anchor.ProfileId));
 					prof.Add(s.Anchor.ProfileId);
 				}
@@ -117,7 +221,8 @@ namespace PowerLanguage.Function
 		/// <summary>Developing confluence for cluster[lo..hi): every developing, non-overlay anchor, in order, becomes
 		/// makeHit(anchor, its survivor or null, credit), where credit is the survivor's credit when > 0, else 0 (absorbed into
 		/// its parent's source or refused). Hits go to `hits` (allocated on the first one; stays null when none).
-		/// Returns developingScore (sum of credits).</summary>
+		/// Returns developingScore (sum of credits). Credit is already completeness-weighted (spec §4), so the score is the weighted sum;
+		/// a label weighted to 0 (raw &lt; start) is still listed, with credit 0.</summary>
 		public static double DevelopingHits<THit>(IReadOnlyList<IVpConfAnchor> cluster, int lo, int hi, IReadOnlyList<IVpConfSurvivor> survivors,
 			Func<IVpConfAnchor, IVpConfSurvivor, double, THit> makeHit, ref List<THit> hits)
 		{
@@ -209,6 +314,7 @@ namespace PowerLanguage.Function
 			public string profileId;
 			public DateTime windowStart;
 			public DateTime windowEnd;
+			public double completeness = 1;   // spec §3 w_complete; 1 for completed profiles, overlays and when weighting is Off
 		}
 
 		private sealed class Survivor : IVpConfSurvivor
@@ -216,12 +322,14 @@ namespace PowerLanguage.Function
 			IVpConfAnchor IVpConfSurvivor.Anchor { get { return anchor; } }
 			bool IVpConfSurvivor.Independent { get { return independent; } }
 			double IVpConfSurvivor.Credit { get { return credit; } }
+			double IVpConfSurvivor.Completeness { get { return anchor.completeness; } }
 			public Anchor anchor;
 			public double baseCredit;
 			public double credit;
 			public bool independent;
 			public string absorbed = "";
 			public string parentSource;
+			public double rawCredit = double.NaN;   // credit before the completeness weight (set only when the weight is applied)
 		}
 
 		// One volume-share lookup per extra per rebuild. shareAt used to sum levels and
@@ -245,6 +353,11 @@ namespace PowerLanguage.Function
 		private int m_htfRank = -1;
 		private int m_htfAge = int.MaxValue;
 		private readonly List<double> m_prices = new List<double>();   // cluster prices for VpConfluenceRules.EmitZones
+		// Spec §6: developing weight scratch, allocated on the first stream with a developing profile while weighting is on.
+		private List<double> m_refBars;
+		private List<double> m_refVols;
+		private EDevWeighting m_devMode;
+		private double m_devSourceThreshold;
 
 		public _VpConfluenceEngine(_VolumeProfileBase owner)
 		{
@@ -259,6 +372,9 @@ namespace PowerLanguage.Function
 			m_htfVal = 0;
 			m_htfRank = -1;
 			m_htfAge = int.MaxValue;
+			m_devMode = m_owner.ConfluenceDevWeighting;
+			// Off keeps the pre-spec source count (every credited developing survivor counts); completeness is 1 there anyway.
+			m_devSourceThreshold = m_devMode == EDevWeighting.Off ? 0 : m_owner.ConfluenceDevSourceThreshold;
 
 			List<Anchor> anchors = new List<Anchor>(64);
 			collectAnchors(anchors);
@@ -334,13 +450,75 @@ namespace PowerLanguage.Function
 			int current = m_owner.streamItemBarIndex(datastream);
 			if (current < 1) return;
 			List<VpExtra> extras = m_owner.confluenceLookbackExtras(datastream);
+			bool weigh = m_devMode != EDevWeighting.Off && hasDeveloping(extras);
+			double refBars = double.NaN, refVols = double.NaN;
+			int refN = 0;
+			if (weigh) referenceMedians(extras, current, out refBars, out refVols, out refN);
 			for (int age = 0; age < extras.Count; age++)
 			{
 				VpExtra extra = extras[age];
 				if (extra == null) continue;
 				int start = extra.startBar >= 1 ? extra.startBar : current;
+				int before = anchors.Count;
 				addProfile(anchors, extra, datastream, start, age, rank, rankWeight, current);
+				if (weigh && !extra.pocComplete) weighDeveloping(anchors, before, extra, datastream, start, current, refBars, refVols, refN);
 			}
+		}
+
+		private static bool hasDeveloping(List<VpExtra> extras)
+		{
+			for (int i = 0; i < extras.Count; i++)
+				if (extras[i] != null && !extras[i].pocComplete) return true;
+			return false;
+		}
+
+		private static int elapsedBars(VpExtra extra, int startBar, int current)
+		{
+			// Same window clip as addProfile.
+			int endBar = extra.endBar >= startBar ? extra.endBar : startBar;
+			if (endBar > current) endBar = current;
+			return endBar - startBar + 1;
+		}
+
+		// Spec §3: the reference set is the completed, non-partial lookback profiles on this stream (same window type).
+		private void referenceMedians(List<VpExtra> extras, int current, out double medBars, out double medVols, out int refN)
+		{
+			if (m_refBars == null) { m_refBars = new List<double>(8); m_refVols = new List<double>(8); }
+			m_refBars.Clear();
+			m_refVols.Clear();
+			bool vol = m_devMode == EDevWeighting.Volume || m_devMode == EDevWeighting.Either;
+			double tick = vol ? m_owner.helperTickSize() : 0;
+			for (int i = 0; i < extras.Count; i++)
+			{
+				VpExtra e = extras[i];
+				if (e == null || !VpConfluenceRules.IsReference(e.pocComplete, e.isPartial, e.startBar)) continue;
+				m_refBars.Add(elapsedBars(e, e.startBar, current));
+				if (vol)
+				{
+					double total = snapFor(e, tick).total;
+					if (total > 0) m_refVols.Add(total);   // levels not read: no volume reference from this profile
+				}
+			}
+			refN = m_refBars.Count;
+			medBars = VpConfluenceRules.Median(m_refBars);
+			medVols = VpConfluenceRules.Median(m_refVols);
+		}
+
+		// Sets completeness on the developing profile's anchors (indices [from, anchors.Count)) and journals one line.
+		private void weighDeveloping(List<Anchor> anchors, int from, VpExtra extra, int datastream, int startBar, int current, double refBars, double refVols, int refN)
+		{
+			double elapsedVol = double.NaN;
+			if (m_devMode == EDevWeighting.Volume || m_devMode == EDevWeighting.Either)
+			{
+				double total = snapFor(extra, m_owner.helperTickSize()).total;
+				if (total > 0) elapsedVol = total;
+			}
+			VpDevWeight d = VpConfluenceRules.Weigh(m_devMode, elapsedBars(extra, startBar, current), refBars, elapsedVol, refVols,
+				m_owner.ConfluenceDevRamp, m_owner.ConfluenceDevStartFraction, m_owner.ConfluenceDevMinWeight, m_owner.ConfluenceDevNoRefWeight);
+			for (int i = from; i < anchors.Count; i++)
+				if (anchors[i].developing && !anchors[i].overlay) anchors[i].completeness = d.w;
+			m_owner.confluenceJournal(() => VpConfluenceRules.DevWeightLine(datastream, "ds" + datastream.ToString() + ":s" + startBar.ToString(), m_devMode, d,
+				m_owner.ConfluenceDevRamp, m_owner.ConfluenceDevStartFraction, refN, m_devSourceThreshold));
 		}
 
 		private void addProfile(List<Anchor> anchors, VpExtra extra, int datastream, int startBar, int age, int rank, double rankWeight, int current)
@@ -562,6 +740,15 @@ namespace PowerLanguage.Function
 			List<Survivor> survivors = collapseSameSource(cluster, loIdx, hiIdx);
 			if (survivors.Count == 0) return;
 			applyNested(survivors);
+			// Spec §3 / §7.4: the developing weight, applied once, after nesting (it also scales a developing child's REFINEMENT bonus).
+			if (m_devMode != EDevWeighting.Off)
+				for (int i = 0; i < survivors.Count; i++)
+				{
+					Survivor s = survivors[i];
+					if (!s.anchor.developing || s.anchor.overlay) continue;
+					s.rawCredit = s.credit;
+					s.credit *= s.anchor.completeness;
+				}
 
 			ConfluenceZone zone = new ConfluenceZone();
 			double lo = cluster[loIdx].price;
@@ -623,7 +810,7 @@ namespace PowerLanguage.Function
 			zone.contextScore = ctx;
 			zone.rawScore = acc + rej;
 			int nSources, nProfiles;
-			VpConfluenceRules.ZoneSourceCounts(survivors, out nSources, out nProfiles);
+			VpConfluenceRules.ZoneSourceCounts(survivors, m_devSourceThreshold, out nSources, out nProfiles);
 			zone.independentSources = nSources;   // V5: distinct sources, not survivors
 			zone.profileCount = nProfiles;
 			zone.developingScore = VpConfluenceRules.DevelopingHits(cluster, loIdx, hiIdx, survivors, developingHit, ref zone.developingHits);
@@ -836,7 +1023,9 @@ namespace PowerLanguage.Function
 				volumeShare = s.anchor.volumeShare,
 				naked = s.anchor.naked,
 				independent = s.independent,
-				developing = s.anchor.developing
+				developing = s.anchor.developing,
+				completeness = s.anchor.completeness,
+				rawCredit = double.IsNaN(s.rawCredit) ? s.credit : s.rawCredit
 			};
 		}
 

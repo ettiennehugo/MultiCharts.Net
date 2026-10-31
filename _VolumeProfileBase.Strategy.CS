@@ -348,6 +348,8 @@ namespace PowerLanguage.Strategy
 			public bool naked;
 			public bool independent;       // full credit. A refinement is not an independent source.
 			public bool developing;        // PR #47: the label comes from a developing (incomplete) profile
+			public double completeness;    // dev-weight spec: w_complete applied to credit (1 when completed, an overlay, or weighting Off)
+			public double rawCredit;       // dev-weight spec: credit before the completeness weight (= credit when no weight applied)
 		}
 
 		/// <summary>
@@ -393,7 +395,7 @@ namespace PowerLanguage.Strategy
 			/// Every developing-profile label in the zone; credit 0 when it was absorbed into its parent's source or refused.
 			/// Null (allocated lazily) when no developing profile has a label in the zone.</summary>
 			public List<ConfluenceHit> developingHits;
-			public double developingScore; // sum of developingHits credit (already inside rawScore; report only)
+			public double developingScore; // sum of developingHits credit, completeness-weighted (already inside rawScore; report only)
 			public bool HasDeveloping { get { return developingHits != null && developingHits.Count > 0; } }
 			public readonly List<ConfluenceDrop> dropped = new List<ConfluenceDrop>();
 
@@ -624,6 +626,40 @@ namespace PowerLanguage.Strategy
 		/// max(4 x ConfluenceAlignTicks x tick, this x Atr20d). Atr20d is the host's M-DAILY value (NeedsDaily); while it is not
 		/// ready the 4 x tol rule alone applies. Default VpConfluenceRules.DefaultSplitAtrFraction (0.03). Protected config, not an [Input].</summary>
 		protected internal double ConfluenceSplitAtrFraction { get; set; } = VpConfluenceRules.DefaultSplitAtrFraction;
+
+		// vp-confluence-developing-weight-spec.md §5: completeness weight for developing profiles. Protected config, not [Input]s.
+		/// <summary>Developing-profile weighting basis. Off = full credit (pre-spec behaviour). Default Time.</summary>
+		protected internal EDevWeighting ConfluenceDevWeighting { get; set; } = VpConfluenceRules.DefaultDevWeighting;
+		/// <summary>Completeness ramp shape. Default Linear.</summary>
+		protected internal EDevRamp ConfluenceDevRamp { get; set; } = VpConfluenceRules.DefaultDevRamp;
+		private double m_confluenceDevStartFraction = VpConfluenceRules.DefaultDevStartFraction;
+		private double m_confluenceDevMinWeight = VpConfluenceRules.DefaultDevMinWeight;
+		private double m_confluenceDevNoRefWeight = VpConfluenceRules.DefaultDevNoRefWeight;
+		private double m_confluenceDevSourceThreshold = VpConfluenceRules.DefaultDevSourceThreshold;
+		/// <summary>Below this completeness fraction a developing label gets credit 0 (still listed). [0, 1]. Default 0.10.</summary>
+		protected internal double ConfluenceDevStartFraction
+		{
+			get { return m_confluenceDevStartFraction; }
+			set { m_confluenceDevStartFraction = VpConfluenceRules.RequireRange("ConfluenceDevStartFraction", value, 0, 1); }
+		}
+		/// <summary>Weight floor once started. [0, 1]. Default 0.10.</summary>
+		protected internal double ConfluenceDevMinWeight
+		{
+			get { return m_confluenceDevMinWeight; }
+			set { m_confluenceDevMinWeight = VpConfluenceRules.RequireRange("ConfluenceDevMinWeight", value, 0, 1); }
+		}
+		/// <summary>Weight when the stream has no completed reference profile. [0, 1]. Default 0.50.</summary>
+		protected internal double ConfluenceDevNoRefWeight
+		{
+			get { return m_confluenceDevNoRefWeight; }
+			set { m_confluenceDevNoRefWeight = VpConfluenceRules.RequireRange("ConfluenceDevNoRefWeight", value, 0, 1); }
+		}
+		/// <summary>A developing profile counts in independentSources / profileCount at weight >= this. [0, 1.01] (1.01 = never). Default 0.67.</summary>
+		protected internal double ConfluenceDevSourceThreshold
+		{
+			get { return m_confluenceDevSourceThreshold; }
+			set { m_confluenceDevSourceThreshold = VpConfluenceRules.RequireRange("ConfluenceDevSourceThreshold", value, 0, VpConfluenceRules.MaxDevSourceThreshold); }
+		}
 
 		/// <summary>PR #47: host Atr20d for the confluence split, NaN when the host has no M-DAILY context (NeedsDaily false) or it is not ready.</summary>
 		internal double confluenceAtr20d()
