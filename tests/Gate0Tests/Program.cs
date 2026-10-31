@@ -484,6 +484,25 @@ static class Program
 		var noJ = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; noJ.Configure(); noJ.FinishCanary();
 		var lv = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5, journal = jl.Add }; lv.Configure(); int b2 = jl.Count; lv.FinishCanary();
 		Check(jl.Count == b2, "FinishCanary: other canaries journal nothing, no journal sink is safe");
+		// StopCalc fallback: a run stopped early (never reached DevEnd / the last bar) still writes its end-of-run lines, tagged partial
+		var pj = new List<string>(); var pe = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = pj.Add }; pe.Configure();
+		var pr = new Random(5); double pq = 4800; var pd = new DateTime(2024, 3, 4);
+		for (int dd = 0; dd < 7; dd++)
+		{
+			var day = pd.AddDays(dd); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			for (var t = day.AddHours(-6); t < day.AddHours(17); t = t.AddMinutes(1))
+			{ double o = pq, c = Math.Round((pq + 0.02 * (4800 - pq) + (pr.NextDouble() - 0.5) * 3) * 4) / 4; pq = c; pe.Bar(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 100)); }
+		}
+		int pb = pj.Count; pe.FinishCanary(true); var ptail = pj.Skip(pb).ToList(); pe.FinishCanary(true); pe.FinishCanary(); pe.Finish();
+		Check(ptail.Count >= 2 && ptail[0].StartsWith("G0-b KD02 KD02[") && ptail[0].EndsWith(") partial") && ptail[1].StartsWith("DVP RUN runId(G0KD02)")
+			&& ptail.Skip(2).All(l => l.StartsWith("DVP CAL")) && pj.Count == pb + ptail.Count, "KD02 early stop: partial summary, DVP RUN, DVP CAL, written once (" + (ptail.Count > 0 ? ptail[0] : "-") + ")");
+		Check(!tail[0].Contains("partial"), "KD02 normal finish is not tagged partial");
+		var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+		while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"))) dir = dir.Parent;
+		string tg0 = dir == null ? "" : System.IO.File.ReadAllText(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"));
+		int sc0 = tg0.IndexOf("protected override void StopCalc()", StringComparison.Ordinal);
+		Check(sc0 > 0 && tg0.IndexOf("if (!m_done && m_g0 != null && Mode == EGate0Mode.Canary) m_g0.FinishCanary(true);", sc0, StringComparison.Ordinal) > sc0
+			&& tg0.IndexOf("FinishCanary(true)", sc0, StringComparison.Ordinal) < tg0.IndexOf("m_g0 = null", sc0, StringComparison.Ordinal), "_TestGate0.StopCalc calls FinishCanary(true) before releasing the engine");
 
 		// the signal rule on the run's own engine and ring (any state where the t-1 rails exist)
 		var e2 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; e2.Configure();

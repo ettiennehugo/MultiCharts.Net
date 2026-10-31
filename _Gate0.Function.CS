@@ -1107,7 +1107,10 @@ namespace PowerLanguage.Function
 		/// already there. degMode stays DevCoverageFrozen; until PR-D9 freezes d* that falls back to Calibrate (DV-2.2 / DV-3.6): every
 		/// d is fitted, the reported and traded degree is d = 1, and one "DVP DEGREE: no frozen d*" Warning is journaled. journalFits is
 		/// on (§16 item 10): the journaled refits feed DvpCalib, whose DVP CAL coverage lines (for KD-08 / the PR-D9 freeze) are
-		/// written by FinishCanary after DVP RUN. Without a journal sink nothing is journaled and no DvpCalib is created.</summary>
+		/// written by FinishCanary after DVP RUN. Without a journal sink nothing is journaled and no DvpCalib is created.
+		/// d* freeze (Ettienne Hugo, 2026-10-31): NOT from this canary. A dedicated _DvpEngineTest run with degMode = Calibrate,
+		/// journal on, @ES 15m over the 2016-2024 dev window produces the pooled DVP CAL table; PR-D9 writes its d* into
+		/// DvpFrozenDegree. Until then KD-02 keeps the d = 1 fallback. halfDay = false here is an accepted limitation (no calendar).</summary>
 		public DvpConfig Kd02Config()
 		{
 			var c = new DvpConfig(); c.enabled = true; c.journalFits = true; c.journalRails = false;   // rails journal (DV-11.2) is not needed by the canary
@@ -1145,14 +1148,14 @@ namespace PowerLanguage.Function
 		/// <summary>End of run for the canaries (idempotent; _TestGate0 calls it on the last bar, Finish calls it too). KD-02 journals
 		/// its summary "G0-b KD02 fills() pocReached() rate() timeStops() targetHeld()" and finishes its DVP engine, which writes the
 		/// DVP RUN line and then the DVP CAL coverage lines (DV-11.3, DV-3.6). Other canaries: nothing (their totals are host-side).</summary>
-		public void FinishCanary()
+		public void FinishCanary(bool partial = false)
 		{
 			if (m_canaryFinished) return;
 			m_canaryFinished = true;
 			if (m_kd == null) return;
 			if (journal != null)
-				journal(string.Format(CultureInfo.InvariantCulture, "G0-b KD02 {0} fills({1}) pocReached({2}) rate({3}) timeStops({4}) targetHeld({5})",
-					CanaryName, Kd02Fills, Kd02PocReached, Kd02Fills > 0 ? Kd02PocReachRate.ToString("0.000", CultureInfo.InvariantCulture) : "n/a", Kd02TimeStops, Kd02TargetHeld));
+				journal(string.Format(CultureInfo.InvariantCulture, "G0-b KD02 {0} fills({1}) pocReached({2}) rate({3}) timeStops({4}) targetHeld({5}){6}",
+					CanaryName, Kd02Fills, Kd02PocReached, Kd02Fills > 0 ? Kd02PocReachRate.ToString("0.000", CultureInfo.InvariantCulture) : "n/a", Kd02TimeStops, Kd02TargetHeld, partial ? " partial" : ""));
 			m_kd.Finish();
 		}
 
@@ -1179,7 +1182,8 @@ namespace PowerLanguage.Function
 				if (m_kdHeld >= kd02TimeStop) { Kd02TimeStops++; intent.flatten = true; intent.entry = EGate0Entry.None; return; }
 				DvpRails nr = m_kd.RailsOf(1, m_kdRing, 0);   // target re-read each bar: for bar t+1 the "t-1 fit" ends at t
 				double poc = nr != null ? nr.RailPrice(ELevelKind.DvpPoc, 0) : double.NaN;
-				// same rule as at entry: a target that is not strictly beyond the entry (the signal close) is not applied; the previous
+				// checked against the SIGNAL CLOSE (m_kdEntry), not the market fill at the next bar's open, consistent with the entry
+				// rule: a target that is not strictly beyond the signal close is not applied; the previous
 				// target stays (counted in Kd02TargetHeld)
 				if (!double.IsNaN(poc))
 				{
