@@ -5,6 +5,37 @@ using PowerLanguage.Function;
 // Phase 3 VP helper unit tests (phase3-specs.md VP-1..VP-6, §0.2/§0.4/§0.6, with the Analyst 2 review corrections).
 static class Program
 {
+	// LELX: the profile fallback walk is bounded on a large chart with no profiles (log: 1.38M 'profile miss' lines, then a silent exit).
+	static void LelxWalk()
+	{
+		// The crashing run: asOf 2798382, first calculated bar 2797162 (calcBars 1221), no stored profiles, every lookup misses.
+		int asOf = 2798382, calcBars = 1221;
+		int floor = PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 0);
+		Check(floor == 2797162, "walk floor = first calculated bar");
+		int bar = asOf, misses = 0, completed = 0, steps = 0;
+		while (PowerLanguage.Strategy.LelxRules.WalkContinue(bar, floor, completed, 4, misses)) { misses++; bar--; steps++; }
+		Check(steps == calcBars && bar == floor - 1, "walk with all misses stops at the first calculated bar");
+		// oldest stored profile start tighter than the first calculated bar wins
+		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 2798000) == 2798000, "oldest stored start is the tighter floor");
+		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 100) == 2797162, "older stored start does not loosen the floor");
+		// whole-chart calc (calcBars == asOf): the miss cap is the safety net
+		floor = PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, asOf, 0);
+		Check(floor == 1, "floor never below bar 1");
+		bar = asOf; misses = 0; steps = 0;
+		while (PowerLanguage.Strategy.LelxRules.WalkContinue(bar, floor, completed, 4, misses)) { misses++; bar--; steps++; }
+		Check(steps == PowerLanguage.Strategy.LelxRules.WalkMissCap, "miss cap bounds a 2.8M-bar walk");
+		Check(!PowerLanguage.Strategy.LelxRules.WalkContinue(10, 1, 4, 4, 0), "walk stops at ProfileLookback completed");
+		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(5, 0, 0) == 5 && PowerLanguage.Strategy.LelxRules.WalkFloor(int.MaxValue, 1, 0) == int.MaxValue, "floor edge cases, no overflow");
+	}
+
+	// LELX: hurdle = ProfitFactor x actual risk after the notional cap (3 contracts x $100, PF 2 -> $600, not 2 x $10,000 budget).
+	static void LelxHurdle()
+	{
+		Check(Near(PowerLanguage.Strategy.LelxRules.RiskDollars(100, 3), 300), "risk $ = 3 x $100");
+		Check(Near(PowerLanguage.Strategy.LelxRules.MinProfit(2.0, 100, 3), 600), "hurdle = PF 2 x $300 = $600");
+		Check(Near(PowerLanguage.Strategy.LelxRules.MinProfit(2.0, 100, 0), 0) && Near(PowerLanguage.Strategy.LelxRules.MinProfit(2.0, -1, 3), 0), "no qty or bad risk -> 0");
+	}
+
 	static int s_fail, s_pass;
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
 	static bool Near(double a, double b, double tol = 1e-9) { return Math.Abs(a - b) <= tol; }
@@ -18,7 +49,7 @@ static class Program
 	static int Main()
 	{
 		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf(); VpDevWeight();
-		VwapRollReset();
+		VwapRollReset(); LelxWalk(); LelxHurdle();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}
