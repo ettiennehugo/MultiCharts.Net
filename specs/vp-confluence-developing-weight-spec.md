@@ -1,9 +1,10 @@
-# VpConfluence: completeness-weighted developing profiles (spec, rev 2: decisions applied)
+# VpConfluence: completeness-weighted developing profiles (spec, rev 3: approved)
 
 | Rev | Date | Change |
 |---|---|---|
 | 1 | 2026-10-30 | Draft for review |
 | 2 | 2026-10-30 | Ettienne Hugo decisions: Time on by default; developing sources count at w >= 0.67; half days accept lower weight; Linear ramp, start 0.10, min 0.10; weight scales nested REFINEMENT bonus. NoRef 0.50 still open. |
+| 3 | 2026-10-31 | Approved (noRef 0.50). Either fallback: only bases with a reference compete; noRef only when neither has one (PR #61 B2). |
 
 Date: 2026-10-30 (rev 2). Base: `origin/main` @ `93ff256` (includes PR #47 `55b4840`). Scope: `_VpConfluenceEngine.Function.CS`, `_VolumeProfileBase.Strategy.CS` (config + zone fields), `tests/VpHelperTests/Program.cs`. PriceAction library unchanged. One PR, separate from anything else.
 
@@ -34,13 +35,13 @@ credit'    = credit x w_complete
 
 **Volume basis (option).** `elapsed = snap.total(P)` and `expected = median snap.total of the completed lookback profiles`. Strengths: it tracks how much auction actually happened, and on a half day it gets close to "complete" faster because volume is front-loaded. Weaknesses: volume is U-shaped within a session (the open is heavy, so it overstates early), a 4-profile median is noisy around rolls and event days, and `snap.total` is missing when levels are not read (falls back to `DEFAULT_CONFLUENCE_SHARE_PIVOT` paths). **Recommendation: Time is the default and Volume is an enum option.**
 
-**Max(time, volume)** is offered as a third mode ("Either") for review. It is not the default.
+**Max(time, volume)** is offered as a third mode ("Either"). It is not the default. **Either fallback (rev 3, approved 2026-10-31, PR #61 B2):** only the bases that have a reference compete (a basis with no completed reference, or a volume basis with no snapshot total, is left out), and w is the larger of those. `DevNoRefWeight` (0.50) applies only when neither basis has a reference. The journal names the basis used: `basis(either:time)` or `basis(either:volume)`, or `basis(noref)` when neither has a reference.
 
 **Multi-timeframe.** The reference is always the same stream, so session windows compare to sessions and weekly to weeks. The rank weight `ConfluenceWeightN` still multiplies first, so `credit = rankWeight x shareFactor x naked x w_complete`.
 
 **Half days.** With the time basis, the prior-session median overstates `expected`, so `w` stays low for the whole short session. That errs conservative and never reaches 1 before close. Once the profile closes, `pocComplete` sets w = 1, so nothing gets stuck. A precise fix (scale `expected` by the RTH length from `_EventCalendar.isHalfDay`) would couple the engine to the calendar. Not proposed for v1. **DECIDED (Q3): accept the lower weight, no calendar dependency.** The median ignores a single prior half day automatically. Partial profiles (`isPartial`, the window began before the first bar) are excluded from the reference set.
 
-**Nesting.** `applyNested` (L780-785) sets a refined child to `REFINEMENT x parent.credit`. The parent is completed (`completedOnly`), so its credit is unchanged. The developing child's refinement credit is then multiplied by its own `w_complete`. Apply w in one place, after `applyNested`, to the survivor's `credit`, with `baseCredit` keeping the unweighted value.
+**Nesting.** `applyNested` (L780-785) sets a refined child to `REFINEMENT x parent.credit`. The parent is completed (`completedOnly`), so its credit is unchanged. The developing child's refinement credit is then multiplied by its own `w_complete`. Apply w in one place, after `applyNested`, to the survivor's `credit`. A new field `rawCredit` keeps the unweighted value: the credit after `applyNested` and before w (for a refined child, `REFINEMENT x parent.credit`). `baseCredit` is unchanged and stays the pre-nesting `makeSurvivor` credit, so it is not the value w scales.
 
 ## 4. independentSources: recommendation
 
@@ -73,7 +74,7 @@ All work happens inside `Rebuild()`, which only runs when the confluence engine 
 3. `collectStream` (L331-344): after the loop, compute the reference medians from the completed, non-partial extras. `addProfile` (L346-372) sets `completeness` on developing anchors.
 4. `addZone` (L560-565): after `applyNested(survivors)`, do `s.credit *= s.anchor.completeness` for developing survivors (one place).
 5. `addZone` L626: pass the threshold to `ZoneSourceCounts`. L629 is unchanged.
-6. `toHit` (L823-840) / `ConfluenceHit` (base L336): add `completeness` and `rawCredit` (= baseCredit).
+6. `toHit` (L823-840) / `ConfluenceHit` (base L336): add `completeness` and `rawCredit` (the post-`applyNested`, pre-weight credit; not `baseCredit`, which is the pre-nesting credit).
 7. Base L600-640: the six protected properties plus the enums.
 8. Untouched: `EmitZones` (L106) / `SplitAt` (L47), because clustering is by price and weighting does not move anchors. `collapseEqualWindows` and `assignDevelopingSources` are also untouched.
 

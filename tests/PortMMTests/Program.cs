@@ -209,6 +209,13 @@ static class Program
 			Check(!_PortArm.SkipForBudget(false, q4, entry, 4999, 4999.5, bpv, budget), "T-P21 widened closer than structural: ignored");
 			Check(_PortArm.SkipForBudget(false, q4, 5000, 5001, 5003.5, bpv, budget), "T-P21 short side skips");
 			Check(!_PortArm.SkipForBudget(false, 0, entry, 4999, 4996.5, bpv, budget), "T-P21 qty 0: nothing to skip");
+			bool warned = false;
+			Check(!_PortArm.WarnCloserOnce(ref warned, entry, 4998, double.NaN) && !_PortArm.WarnCloserOnce(ref warned, entry, 4998, 4996.5) && !_PortArm.WarnCloserOnce(ref warned, entry, 4998, 4998) && !warned,
+				"T-P21 no warning for NaN, wider or equal widened stop");
+			Check(_PortArm.WarnCloserOnce(ref warned, entry, 4998, 4999) && warned, "T-P21 closer widened stop warns the first time");
+			Check(!_PortArm.WarnCloserOnce(ref warned, entry, 4998, 4999) && !_PortArm.WarnCloserOnce(ref warned, 5000, 5002, 5001), "T-P21 closer widened stop warns only once per instance");
+			Check(_PortArm.WidenedCloser(5000, 5002, 5001) && double.IsNaN(_PortArm.RDollarW(5000, 5002, 5001, bpv)) && !_PortArm.SkipForBudget(false, 100, 5000, 5002, 5001, bpv, budget),
+				"T-P21 closer widened stop: structural used (R$w NaN, no skip even at a large qty)");
 		}
 
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");

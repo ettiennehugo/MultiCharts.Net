@@ -7,7 +7,6 @@
     <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
     <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
   </PropertyGroup>
   <ItemGroup>
