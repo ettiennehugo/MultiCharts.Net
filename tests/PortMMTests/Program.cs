@@ -271,7 +271,7 @@ static class Program
 				lj.Clear(); var pv = V(1); pv.paused = true; lm.Decide(D0, 1000000, true, new List<PortStratView> { pv });
 				Check(lj.Count == 1 && lj[0].Contains("paused/killed"), "paused rejection journaled at Info");
 				lj.Clear(); lm.Decide(D0, 1000000, true, new List<PortStratView> { V(1, EPortState.Long, pos: 1), V(2, EPortState.Flat) });
-				Check(lj.Count == 0, "in position / not Armed are not entry attempts -> silent");
+				Check(lj.Count(x => !x.Contains("no pm.day")) == 0, "in position / not Armed are not entry attempts -> silent");
 				lj.Clear(); lm.Decide(D0, 1000000, true, new List<PortStratView> { nv }); var cd = MM(c => c.sizing = EPortSizing.CodeSize); var cj = new List<string>(); cd.journal = x => cj.Add(x);
 				cd.Decide(D0, 1000000, true, new List<PortStratView> { V(0, r: double.NaN) });
 				Check(cj.Count == 1 && cj[0].StartsWith("PORT Info: skip") && cj[0].Contains(" no R$:"), "CodeSize no R$ journaled at Info");
@@ -423,6 +423,24 @@ static class Program
 			// validation + JSON
 			Check(new PortMmConfig { weeklyObserveR = -3, weeklyHalveR = -3 }.Validate() != null && new PortMmConfig { weeklyHalveMult = 1 }.Validate() != null
 				&& new PortMmConfig { stratDailyLosses = 0 }.Validate() != null && new PortMmConfig { scratchR = 1 }.Validate() != null && new PortMmConfig().Validate() == null, "PR-C config validation");
+		}
+		{   // PR-C review: F8 JSON keys, F6 missing pm.day warning, F2 gate order
+			var jw = new List<string>();
+			var jc = PortMmConfigLoader.Parse("{\"stratDailyLosses\": 3, \"scratchR\": 0.1, \"weeklyHalveR\": -2, \"weeklyHalveMult\": 0.25, \"weeklyObserveR\": -5}", new PortMmConfig(), jw);
+			Check(jc.stratDailyLosses == 3 && Near(jc.scratchR, 0.1) && Near(jc.weeklyHalveR, -2) && Near(jc.weeklyHalveMult, 0.25) && Near(jc.weeklyObserveR, -5) && jw.Count == 0, "F8: JSON parses all five PR-C keys");
+			var jw2 = new List<string>();
+			var jc2 = PortMmConfigLoader.Parse("{\"weeklyHalveR\": 1}", new PortMmConfig(), jw2);
+			Check(Near(jc2.weeklyHalveR, -3) && jw2.Any(x => x.Contains("weeklyHalveR")), "F8: bad weeklyHalveR (1) warns and keeps -3");
+			var jw3 = new List<string>();
+			var jc3 = PortMmConfigLoader.Parse("{\"weeklyHalveR\": -6, \"weeklyObserveR\": -3}", new PortMmConfig(), jw3);
+			Check(new PortMmConfig { weeklyHalveR = -6, weeklyObserveR = -3 }.Validate() != null && Near(jc3.weeklyHalveR, -3) && Near(jc3.weeklyObserveR, -6) && jw3.Count > 0, "F8: halve -6 / observe -3 rejected (defaults kept, warned)");
+			var nj = new List<string>(); var nm = MM(null, nj);
+			for (int k = 0; k < 3; k++) { nm.Decide(D0.AddDays(k), 1000000, true, new List<PortStratView> { V(0, EPortState.Long, pos: 2) }); nm.Decide(D0.AddDays(k), 1000000, true, new List<PortStratView> { V(0) }); }
+			Check(nj.Count(x => x.Contains("no pm.day, 4a/4b use book day")) == 1, "F6: missing pm.day -> one Warning per strategy");
+			var oj = new List<string>(); var om = MM(c => { c.sizing = EPortSizing.CodeSize; c.maxPositions = 1; c.dailyLossStop = 0.5; c.dailyLossFlatten = 0.6; }, oj);
+			om.Decide(D0, 1000000, true, new List<PortStratView> { V(0, pnl: 200000), V(1, EPortState.Long, pos: 2, pnl: 0) });
+			var od = om.Decide(D0.AddDays(1), 1000000, true, new List<PortStratView> { V(0, pnl: 130000), V(1, EPortState.Long, pos: 2, pnl: 0) });
+			Check(om.Mult < 1 && od[0].reason == "maxPositions", $"F2: maxPositions checked before the CodeSize throttle ({od[0].reason} {om.Mult})");
 		}
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);

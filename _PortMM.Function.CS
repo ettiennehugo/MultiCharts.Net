@@ -682,12 +682,12 @@ namespace PowerLanguage.Function
 					continue;
 				}
 				double m = mult * sm;   // approved throttles only (ddSteps x weekly halve); caps below never resize
+				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				if (config.sizing == EPortSizing.CodeSize && m < 1)
 				{   // T-P13: EntryContracts -1 cannot be scaled
 					skip(d[i], s, "throttle under CodeSize", $"mult {m:0.###} (dd {mult:0.###} x {(tw ?? "none")} {sm:0.###}) qtyCode {s.qtyCode} risk ${rw1 * Math.Max(0, s.qtyCode):0.00} budget ${tradeCap:0.00}");
 					continue;
 				}
-				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				int q = _PortMath.Size(config, m, book, s.rDollar, s.qtyCode, s.vol, Math.Max(1, active.Length), idm);
 				int nq;   // contracts whose risk is checked; never changed by any cap below (skip only)
 				if (q == -1)
@@ -762,6 +762,11 @@ namespace PowerLanguage.Function
 			{
 				if (!s.publishes) continue;
 				KillTracker k = tracker(s.index);
+				if (s.day == DateTime.MinValue && s.position != k.lastPos)   // warn when 4a/4b actually key a trade on the book day
+				{
+					if (m_noDayWarned == null) m_noDayWarned = new HashSet<int>();
+					if (m_noDayWarned.Add(s.index)) journal?.Invoke($"PORT Warning {s.id}#{s.index}: no pm.day, 4a/4b use book day (warned once)");
+				}
 				DateTime sd = (s.day != DateTime.MinValue ? s.day : bookDay).Date;
 				if (sd != k.sessDay) { k.sessDay = sd; k.sessLosses = 0; }   // 4a resets on the strategy's own new session
 				DateTime wk = IsoWeek(sd);
@@ -780,6 +785,8 @@ namespace PowerLanguage.Function
 				k.lastPos = s.position;
 			}
 		}
+
+		private HashSet<int> m_noDayWarned;   // lazy: strategies warned once for missing pm.day
 
 		private void closed(PortStratView s, KillTracker k, double rr)
 		{
