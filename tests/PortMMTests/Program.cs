@@ -172,6 +172,45 @@ static class Program
 			var cp = def.Copy(); cp.ddSteps[0].dd = 0.07; Check(Near(def.ddSteps[0].dd, 0.05), "Copy is deep");
 		}
 
+		// T-P19 (rev 2 §3): portfolioArm always writes pm.R$w (NaN when not widened), pm.riskNew = Rw x qtyCode, pm.R$ stays structural.
+		{
+			var pd = new Dictionary<string, object>(); Action<string, object> set = (k, v) => pd[k] = v;
+			_PortArm.Init(set);
+			Check(pd.ContainsKey(_PortKeys.RDollarW) && double.IsNaN((double)pd[_PortKeys.RDollarW]), "T-P19 startPortfolio initialises pm.R$w = NaN");
+			Check(_PortKeys.RDollarW == "pm.R$w" && _PortKeys.Version == 1, "T-P19 key name pm.R$w, pm.ver stays 1");
+			double bpv = 50, entry = 5000, stop = 4998, wide = 4996.5;   // ES: 8-tick structural, 14-tick floor
+			double rd = Math.Abs(entry - stop) * bpv, rdw = _PortArm.RDollarW(entry, stop, wide, bpv);
+			Check(Near(rd, 100) && Near(rdw, 175), "T-P19 R$w = |entry - widened| x BPV");
+			_PortArm.Write(set, rd, rdw, 5);
+			Check(Near((double)pd[_PortKeys.RDollar], 100) && Near((double)pd[_PortKeys.RDollarW], 175) && (int)pd[_PortKeys.QtyCode] == 5 && Near((double)pd[_PortKeys.RiskNew], 875),
+				"T-P19 widened arm: R$ structural, R$w widened, riskNew = R$w x qty");
+			_PortArm.Write(set, rd, _PortArm.RDollarW(entry, stop, double.NaN, bpv), 5);
+			Check(double.IsNaN((double)pd[_PortKeys.RDollarW]) && Near((double)pd[_PortKeys.RiskNew], 500), "T-P19 later arm without widenedStop overwrites pm.R$w with NaN (no stale key), riskNew = R$ x qty");
+			Check(double.IsNaN(_PortArm.RDollarW(entry, stop, 4999, bpv)), "T-P19 widened stop closer than structural -> NaN");
+			Check(double.IsNaN(_PortArm.RDollarW(entry, stop, double.PositiveInfinity, bpv)), "T-P19 infinite widened stop -> NaN");
+			Check(Near(_PortArm.RDollarW(entry, stop, stop, bpv), 100), "T-P19 widened == structural -> R$w = R$");
+			Check(Near(_PortArm.RDollarW(5000, 5002, 5003.5, bpv), 175), "T-P19 short side");
+			Check(Near(_PortArm.RiskNew(100, double.NaN, -1), 0), "T-P19 riskNew never negative");
+		}
+		// T-P21 (rev 2 §5.1 step 5): sizeForRisk sizes on the structural stop; skips (returns 0, never a smaller qty) only when it will not arm
+		// and finalQty x widened R$ > 1% of equity; exactly 1% is allowed.
+		{
+			double bpv = 50, eq = 100000, budget = eq * _PortArm.TradeBudgetFraction, entry = 5000;
+			Func<double, int> qty = r => (int)Math.Floor(0.005 * eq / r);   // CS-4 0.5% on the structural stop
+			int q8 = qty(100);   // 8 ticks
+			Check(q8 == 5 && !_PortArm.SkipForBudget(false, q8, entry, 4998, 4996.5, bpv, budget), "T-P21 8-tick structural, 14-tick floor: 5 x 175 = 875 <= 1000, trade");
+			int q4 = qty(50);    // 4 ticks
+			Check(q4 == 10 && _PortArm.SkipForBudget(false, q4, entry, 4999, 4996.5, bpv, budget), "T-P21 4-tick structural: 10 x 175 = 1750 > 1000, skip");
+			Check(!_PortArm.SkipForBudget(false, 3, entry, 4999, 4996.5, bpv, budget), "T-P21 finalQty after maxQty(3): 525 <= 1000, trade");
+			Check(!_PortArm.SkipForBudget(false, 5, entry, 4998, 4996, bpv, budget), "T-P21 exactly 1% (5 x 200 = 1000) is allowed");
+			Check(_PortArm.SkipForBudget(false, 5, entry, 4998, 4995.75, bpv, budget), "T-P21 just over 1% skips");
+			Check(!_PortArm.SkipForBudget(true, q4, entry, 4999, 4996.5, bpv, budget), "T-P21 portfolio Data1 (arms): no skip, MM decides");
+			Check(!_PortArm.SkipForBudget(false, q4, entry, 4999, double.NaN, bpv, budget), "T-P21 no widenedStop: no skip");
+			Check(!_PortArm.SkipForBudget(false, q4, entry, 4999, 4999.5, bpv, budget), "T-P21 widened closer than structural: ignored");
+			Check(_PortArm.SkipForBudget(false, q4, 5000, 5001, 5003.5, bpv, budget), "T-P21 short side skips");
+			Check(!_PortArm.SkipForBudget(false, 0, entry, 4999, 4996.5, bpv, budget), "T-P21 qty 0: nothing to skip");
+		}
+
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

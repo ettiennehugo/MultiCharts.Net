@@ -22,6 +22,8 @@ namespace PowerLanguage.Function
 		public const string Ver = "pm.ver", Id = "pm.id", Family = "pm.family", Cluster = "pm.cluster";
 		public const string Eq = "pm.eq", Pnl = "pm.pnl", Ret = "pm.ret", URet = "pm.uRet", Vol = "pm.vol";
 		public const string RDollar = "pm.R$", QtyCode = "pm.qtyCode", RiskNew = "pm.riskNew", RiskOpen = "pm.riskOpen", OpenR = "pm.openR";
+		/// <summary>Optional (rev 2 §3): $ per contract at the widened stop (cost floor); NaN/absent = pm.R$. Always written by portfolioArm.</summary>
+		public const string RDollarW = "pm.R$w";
 		public const string State = "pm.state", Side = "pm.side", Regime = "pm.regime", Score = "pm.score", Stamp = "pm.stamp", Day = "pm.day", Pos = "pm.pos";
 		/// <summary>Optional (phase3 §3.3 / Q10): G-R filtered regime probabilities, double[] (empty = unknown), written at the session close
 		/// only when RegimeConfig.publish is set; a new array each time (copy-on-write, never mutated after publishing).</summary>
@@ -294,6 +296,55 @@ namespace PowerLanguage.Function
 		public bool forceClose, pause;
 		public string status = "";
 		public string reason = "";
+	}
+
+	/// <summary>M-PORT rev 2 (spec §3, §5.1 step 5): pure publisher-side helpers for pm.R$w and the sizeForRisk 1% skip.
+	/// _CustomSignal calls these so the off-MC tests (T-P19, T-P21) run the shipped logic.</summary>
+	public static class _PortArm
+	{
+		/// <summary>Per-trade budget of the chart-side skip: a fixed 1% of equity (never the MM's riskPerTrade).</summary>
+		public const double TradeBudgetFraction = 0.01;
+
+		/// <summary>$ per contract at the widened stop; NaN when widenedStop is not given/finite or is closer to entry than the structural stop.</summary>
+		public static double RDollarW(double entry, double stop, double widenedStop, double bpv)
+		{
+			if (double.IsNaN(widenedStop) || double.IsInfinity(widenedStop)) return double.NaN;
+			double ds = Math.Abs(entry - stop), dw = Math.Abs(entry - widenedStop);
+			if (!(dw >= ds)) return double.NaN;
+			double r = dw * bpv;
+			return r > 0 && !double.IsInfinity(r) ? r : double.NaN;
+		}
+
+		/// <summary>pm.riskNew = Rw x qtyCode, Rw = R$ when R$w is NaN.</summary>
+		public static double RiskNew(double rDollar, double rDollarW, int qtyCode)
+		{
+			return (double.IsNaN(rDollarW) ? rDollar : rDollarW) * Math.Max(0, qtyCode);
+		}
+
+		/// <summary>True when qty x widened R$ is strictly above the $ budget (exactly at the budget is allowed).</summary>
+		public static bool OverTradeBudget(int qty, double rDollarW, double budget)
+		{
+			return qty > 0 && !double.IsNaN(rDollarW) && (double)qty * rDollarW > budget;
+		}
+
+		/// <summary>sizeForRisk skip: only when it will not arm (chart run or Data2); qty is the final qty (after maxQty, notional cap, round lots).</summary>
+		public static bool SkipForBudget(bool willArm, int qty, double entry, double stop, double widenedStop, double bpv, double budget)
+		{
+			if (willArm) return false;
+			return OverTradeBudget(qty, RDollarW(entry, stop, widenedStop, bpv), budget);
+		}
+
+		/// <summary>The keys portfolioArm writes; pm.R$w is always written (NaN when not widened) so no stale value survives.</summary>
+		public static void Write(Action<string, object> set, double rDollar, double rDollarW, int qtyCode)
+		{
+			set(_PortKeys.RDollar, rDollar);
+			set(_PortKeys.RDollarW, rDollarW);
+			set(_PortKeys.QtyCode, qtyCode);
+			set(_PortKeys.RiskNew, RiskNew(rDollar, rDollarW, qtyCode));
+		}
+
+		/// <summary>startPortfolio initialisation of pm.R$w.</summary>
+		public static void Init(Action<string, object> set) { set(_PortKeys.RDollarW, double.NaN); }
 	}
 
 	/// <summary>Pure M-PORT math (spec §5.3, §5.5).</summary>
