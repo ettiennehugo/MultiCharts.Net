@@ -1,31 +1,60 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
 
 // Phase 3 VP helper unit tests (phase3-specs.md VP-1..VP-6, §0.2/§0.4/§0.6, with the Analyst 2 review corrections).
 static class Program
 {
-	// LELX: the profile fallback walk is bounded on a large chart with no profiles (log: 1.38M 'profile miss' lines, then a silent exit).
+	// LELX: the profile fallback walk is bounded by the miss cap only (log: 1.38M 'profile miss' lines, then a silent exit).
+	sealed class P { public int start, end; public bool complete; }
 	static void LelxWalk()
 	{
-		// The crashing run: asOf 2798382, first calculated bar 2797162 (calcBars 1221), no stored profiles, every lookup misses.
-		int asOf = 2798382, calcBars = 1221;
-		int floor = PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 0);
-		Check(floor == 2797162, "walk floor = first calculated bar");
-		int bar = asOf, misses = 0, completed = 0, steps = 0;
-		while (PowerLanguage.Strategy.LelxRules.WalkContinue(bar, floor, completed, 4, misses)) { misses++; bar--; steps++; }
-		Check(steps == calcBars && bar == floor - 1, "walk with all misses stops at the first calculated bar");
-		// oldest stored profile start tighter than the first calculated bar wins
-		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 2798000) == 2798000, "oldest stored start is the tighter floor");
-		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, calcBars, 100) == 2797162, "older stored start does not loosen the floor");
-		// whole-chart calc (calcBars == asOf): the miss cap is the safety net
-		floor = PowerLanguage.Strategy.LelxRules.WalkFloor(asOf, asOf, 0);
-		Check(floor == 1, "floor never below bar 1");
-		bar = asOf; misses = 0; steps = 0;
-		while (PowerLanguage.Strategy.LelxRules.WalkContinue(bar, floor, completed, 4, misses)) { misses++; bar--; steps++; }
-		Check(steps == PowerLanguage.Strategy.LelxRules.WalkMissCap, "miss cap bounds a 2.8M-bar walk");
-		Check(!PowerLanguage.Strategy.LelxRules.WalkContinue(10, 1, 4, 4, 0), "walk stops at ProfileLookback completed");
-		Check(PowerLanguage.Strategy.LelxRules.WalkFloor(5, 0, 0) == 5 && PowerLanguage.Strategy.LelxRules.WalkFloor(int.MaxValue, 1, 0) == int.MaxValue, "floor edge cases, no overflow");
+		int cap = PowerLanguage.Strategy.LelxRules.WalkMissCap;
+		// The crashing run: asOf 2798382 on a 2.8M-bar chart, every lookup misses -> stops at the miss cap, not bar 1.
+		int misses, stopped, lookups = 0;
+		int n = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(2798382, 4, b => { lookups++; return null; }, p => p.start, p => p.complete,
+			(p, o) => { }, null, out misses, out stopped);
+		Check(n == 0 && misses == cap && lookups == cap && stopped == 2798382 - cap, "2.8M-bar walk with no profiles stops at the miss cap");
+		Check(!PowerLanguage.Strategy.LelxRules.WalkContinue(10, 4, 4, 0) && !PowerLanguage.Strategy.LelxRules.WalkContinue(0, 0, 4, 0)
+			&& !PowerLanguage.Strategy.LelxRules.WalkContinue(10, 0, 4, cap) && PowerLanguage.Strategy.LelxRules.WalkContinue(1, 0, 4, cap - 1), "walk condition: lookback, bar 1, miss cap");
+	}
+
+	// LELX early run: targets build as on main. Calc starts at bar 5001 (MaxBarsBack region before it), nothing is stored yet, but
+	// closed profiles older than the first calculated bar are found (built on demand), newest first; developing one skipped.
+	// LELX: walking profile start bars visits one bar per profile and finds the same profiles as the bar walk.
+	static void LelxWalkStarts()
+	{
+		var profs = new List<P>(); var startsL = new List<int>();
+		for (int s = 1; s <= 2798000; s += 1380) { profs.Add(new P { start = s, end = s + 1379, complete = s + 1379 < 2798000 }); startsL.Add(s); }
+		int[] starts = startsL.ToArray();
+		Func<int, P> lookup = b => { int i = Array.BinarySearch(starts, b); if (i < 0) i = ~i - 1; return i >= 0 && b <= profs[i].end ? profs[i] : null; };
+		int lookups = 0; var a = new List<int>(); var b2 = new List<int>(); int m1, m2, s1, s2;
+		int n1 = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(2798382, starts, 4, x => { lookups++; return lookup(x); }, p => p.start, p => p.complete, (p, o) => a.Add(p.start), null, out m1, out s1);
+		int n2 = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(2798382, 4, lookup, p => p.start, p => p.complete, (p, o) => b2.Add(p.start), null, out m2, out s2);
+		bool same = n1 == n2 && a.Count == b2.Count; for (int i = 0; same && i < a.Count; i++) same = a[i] == b2[i];
+		Check(n1 == 4 && same && lookups <= 6, "start-bar walk: same 4 profiles as the bar walk with one lookup per profile");
+		int lk = 0, mm, ss;
+		PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(2798382, starts, 4, x => { lk++; return null; }, p => p.start, p => p.complete, (p, o) => { }, null, out mm, out ss);
+		Check(lk == Math.Min(starts.Length, PowerLanguage.Strategy.LelxRules.WalkMissCap) && mm == lk, "start-bar walk: misses capped, one per listed start");
+	}
+
+	static void LelxWalkEarlyRun()
+	{
+		var profs = new List<P>();
+		for (int s = 1; s <= 5001; s += 390) profs.Add(new P { start = s, end = Math.Min(s + 389, 5390), complete = s + 389 < 5001 });
+		Func<int, P> lookup = b => { foreach (var p in profs) if (b >= p.start && b <= p.end) return p; return null; };
+		var got = new List<int>(); int misses, stopped;
+		int n = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(5002, 4, lookup, p => p.start, p => p.complete,
+			(p, o) => got.Add(p.start), null, out misses, out stopped);
+		int dev = profs[profs.Count - 1].start;
+		Check(n == 4 && got.Count == 4 && got[0] == dev - 390 && got[3] == dev - 4 * 390 && misses == 0, "early run: 4 older closed profiles found (all before the first calculated bar)");
+		bool allBeforeCalc = true; foreach (int st in got) if (st + 389 >= 5001) allBeforeCalc = false;
+		Check(allBeforeCalc, "early run: found profiles end before the first calculated bar (old floors would have returned none)");
+		// a chart with gaps: misses are counted but older profiles are still reached
+		var gap = new P { start = 100, end = 200, complete = true };
+		n = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(1000, 4, b => b >= 100 && b <= 200 ? gap : null, p => p.start, p => p.complete,
+			(p, o) => { }, null, out misses, out stopped);
+		Check(n == 1 && misses == 800 + 99 && stopped == 0, "walk passes gaps to bar 1 and counts each profile once");
 	}
 
 	// LELX: hurdle = ProfitFactor x actual risk after the notional cap (3 contracts x $100, PF 2 -> $600, not 2 x $10,000 budget).
@@ -49,7 +78,7 @@ static class Program
 	static int Main()
 	{
 		Rng(); Ring(); RollWin(); RangeProfile(); Weekly(); Ladder(); Stats(); Fvgs(); Bootstrap(); Kde(); Vt(); VpConf(); VpDevWeight();
-		VwapRollReset(); LelxWalk(); LelxHurdle();
+		VwapRollReset(); LelxWalk(); LelxWalkEarlyRun(); LelxWalkStarts(); LelxHurdle();
 		Console.WriteLine($"VpHelperTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;
 	}

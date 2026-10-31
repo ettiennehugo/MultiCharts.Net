@@ -25,21 +25,87 @@ namespace PowerLanguage.Strategy
 		/// <summary>Safety net for the profile fallback walk (bars without a profile before it stops).</summary>
 		public const int WalkMissCap = 20000;
 
-		/// <summary>Lowest 1-based bar the profile walk may visit: the first calculated bar (asOf - calcBars + 1) or the
-		/// oldest stored completed profile start, whichever is higher (tighter). Never below 1.</summary>
-		public static int WalkFloor(int asOf, int calcBars, int oldestStoredStart)
+		/// <summary>Loop condition of the profile walk: down to bar 1 (no floor, so closed profiles older than anything
+		/// stored are still built on demand, as on main), until lookback completed profiles or WalkMissCap misses.</summary>
+		public static bool WalkContinue(int barIndex, int completed, int lookback, int misses)
 		{
-			long first = (long)asOf - Math.Max(calcBars, 1) + 1;
-			long floor = Math.Max(1L, first);
-			if (oldestStoredStart > floor) floor = oldestStoredStart;
-			if (floor > asOf) floor = Math.Max(1, asOf);
-			return (int)floor;
+			return barIndex >= 1 && completed < lookback && misses < WalkMissCap;
 		}
 
-		/// <summary>Loop condition of the bounded profile walk.</summary>
-		public static bool WalkContinue(int barIndex, int floor, int completed, int lookback, int misses)
+		/// <summary>Backward profile walk (main's algorithm plus the miss cap). lookup(bar) returns the profile covering bar or
+		/// null; developing profiles are skipped and do not consume lookback; each distinct completed profile is passed to
+		/// onCompleted(profile, ordinal) once. Returns the number of completed profiles.</summary>
+		public static int WalkProfiles<T>(int asOf, int lookback, Func<int, T> lookup, Func<T, int> startOf, Func<T, bool> isComplete,
+			Action<T, int> onCompleted, Action<T> onDeveloping, out int misses, out int stoppedAt) where T : class
 		{
-			return barIndex >= floor && barIndex >= 1 && completed < lookback && misses < WalkMissCap;
+			return WalkProfiles<T>(asOf, null, lookback, lookup, startOf, isComplete, onCompleted, onDeveloping, out misses, out stoppedAt);
+		}
+
+		/// <summary>As above, but when <paramref name="starts"/> (ascending profile start bars) is non-empty only those bars are
+		/// looked up, newest first (one lookup per profile instead of one per bar). Null/empty starts: bar-by-bar walk.</summary>
+		public static int WalkProfiles<T>(int asOf, int[] starts, int lookback, Func<int, T> lookup, Func<T, int> startOf, Func<T, bool> isComplete,
+			Action<T, int> onCompleted, Action<T> onDeveloping, out int misses, out int stoppedAt) where T : class
+		{
+			int completed = 0;
+			misses = 0;
+			HashSet<int> seen = null;   // lazy
+			if (starts != null && starts.Length > 0)
+			{
+				stoppedAt = asOf;
+				int last = int.MaxValue;
+				for (int i = starts.Length - 1; i >= 0 && completed < lookback && misses < WalkMissCap; i--)
+				{
+					int bar = starts[i];
+					if (bar < 1 || bar > asOf || bar == last) continue;
+					last = bar;
+					stoppedAt = bar;
+					T e = lookup(bar);
+					if (e == null) { misses++; continue; }
+					int st = startOf(e);
+					if (st > 0)
+					{
+						if (seen == null) seen = new HashSet<int>();
+						if (!seen.Add(st)) continue;
+					}
+					if (!isComplete(e)) { if (onDeveloping != null) onDeveloping(e); continue; }
+					completed++;
+					onCompleted(e, completed);
+				}
+				return completed;
+			}
+			int barIndex = asOf;
+			while (WalkContinue(barIndex, completed, lookback, misses))
+			{
+				T extra = lookup(barIndex);
+				if (extra == null)
+				{
+					misses++;
+					barIndex--;
+					continue;
+				}
+				int start = startOf(extra);
+				if (start > 0)
+				{
+					if (seen == null) seen = new HashSet<int>();
+					if (!seen.Add(start))
+					{
+						barIndex = start < barIndex ? start - 1 : barIndex - 1;
+						continue;
+					}
+				}
+				int next = start > 0 && start <= barIndex ? start - 1 : barIndex - 1;
+				if (!isComplete(extra))
+				{
+					if (onDeveloping != null) onDeveloping(extra);
+					barIndex = next;
+					continue;
+				}
+				completed++;
+				onCompleted(extra, completed);
+				barIndex = next;
+			}
+			stoppedAt = barIndex;
+			return completed;
 		}
 
 		/// <summary>Dollar risk actually taken: per-contract risk x final qty (after every cap).</summary>
@@ -107,6 +173,7 @@ namespace PowerLanguage.Strategy
 		private int m_lastProtectTraceBar;
 		private int m_lastEntrySkipBar;
 		private bool m_data2ReadyTraced;
+		private HashSet<int> m_unconnectedWarned;   // lazy: streams already warned as not connected
 
 		public _DeltaDivRevFuturesLELX(object _ctx) : base(_ctx) { }
 
@@ -150,6 +217,7 @@ namespace PowerLanguage.Strategy
 			m_lastProtectTraceBar = 0;
 			m_lastEntrySkipBar = 0;
 			m_data2ReadyTraced = false;
+			m_unconnectedWarned = null;
 			clearTicket();
 			m_seenLong = false;
 		}
@@ -526,7 +594,7 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Debug, $"size dollarRiskPerContract({dollarRiskPerContract}) riskPercent({RiskPercent}) riskQty({riskQty}) notional({contractNotional:F2}) maxEquityPct({MaximumEquityPerPosPercent}) qty({qty}) pointValue({pointValue})");
 			if (qty < 1)
 			{
-				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) reason(qty below 1 riskQty({riskQty}) notionalCap) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) notional({contractNotional:F2}) qty({qty}) risk$({dollarRiskPerContract}) budget$({riskEquity})");
+				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) reason(qty below 1 riskQty({riskQty}) notionalCap) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) notional({contractNotional:F2}) qty({qty}) riskPerContract$({dollarRiskPerContract}) risk$({LelxRules.RiskDollars(dollarRiskPerContract, qty)}) budget$({riskEquity})");
 				return;
 			}
 
@@ -642,10 +710,17 @@ namespace PowerLanguage.Strategy
 			// DER-06: read the last ProfileLookback completed profiles straight from the base's extras (no per-step query with
 			// side effects). Only when fewer exist (start of a backtest, profiles older than the first calculated bar) fall back
 			// to the original backward walk, so the candidate set is unchanged.
+			if (!IsProfileStreamConnected(stream))
+			{
+				if (m_unconnectedWarned == null) m_unconnectedWarned = new HashSet<int>();
+				if (m_unconnectedWarned.Add(stream))
+					trace(ETraceLevel.Warning, $"profile targets: Data{stream} has no connected MultiCharts volume profile; POC/HVN targets from it are disabled");
+				return;
+			}
 			List<VpExtra> recent = RecentCompletedProfiles(stream, ProfileLookback, asOf);
 			if (recent.Count < ProfileLookback)
 			{
-				walkCompletedProfiles(stream, asOf, recent, close, pointValue, qty, minProfit, ref best, ref examined);
+				walkCompletedProfiles(stream, asOf, close, pointValue, qty, minProfit, ref best, ref examined);
 				return;
 			}
 			for (int p = 0; p < recent.Count; p++)
@@ -673,58 +748,26 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Original backward walk (fallback for collectCompletedProfiles), bounded: it never goes below the first calculated
-		// bar or the oldest stored completed profile start (whichever is tighter), with LelxRules.WalkMissCap as a safety
-		// net. Unbounded, it walked every chart bar to 1 with a Debug line each (1.38M lines, then a silent MC exit).
-		private void walkCompletedProfiles(int stream, int asOf, List<VpExtra> stored, double close, double pointValue, int qty, double minProfit, ref ExitCandidate best, ref int examined)
+		// Original backward walk (fallback for collectCompletedProfiles). No floor: it still reaches closed profiles older
+		// than anything stored and builds them on demand (VPB-28), as on main. Bounded only by LelxRules.WalkMissCap
+		// (unbounded, it walked every chart bar to 1 with a Debug line each: 1.38M lines, then a silent MC exit).
+		private void walkCompletedProfiles(int stream, int asOf, double close, double pointValue, int qty, double minProfit, ref ExitCandidate best, ref int examined)
 		{
-			int oldestStart = 0;
-			for (int i = 0; i < stored.Count; i++)
-				if (stored[i] != null && stored[i].startBar >= 1 && (oldestStart == 0 || stored[i].startBar < oldestStart))
-					oldestStart = stored[i].startBar;
-			int calcBars = stream == 1 ? Bars.CurrentBar : BarsOfData(stream).CurrentBar;
-			int floor = LelxRules.WalkFloor(asOf, calcBars, oldestStart);
-
-			int completed = 0;
-			int misses = 0;
-			HashSet<int> seen = null;   // lazy
-			int barIndex = asOf;
-			while (LelxRules.WalkContinue(barIndex, floor, completed, ProfileLookback, misses))
-			{
-				// no catch-all: a swallowed exception here would also hide MaxBarsBack auto-detect exceptions
-				VpExtra extra = ExtraVolumeProfileForBar(stream, barIndex);
-				if (extra == null)
-				{
-					misses++;
-					barIndex--;
-					continue;
-				}
-
-				int start = extra.startBar;
-				if (start > 0)
-				{
-					if (seen == null) seen = new HashSet<int>();
-					if (!seen.Add(start))
-					{
-						barIndex = start < barIndex ? start - 1 : barIndex - 1;
-						continue;
-					}
-				}
-
-				int next = start > 0 && start <= barIndex ? start - 1 : barIndex - 1;
-				// Developing profile is not a target and does not consume lookback.
-				if (!extra.pocComplete)
-				{
-					trace(ETraceLevel.Debug, $"profile developing stream({stream}) start({start}) end({extra.endBar}) poc({extra.poc})");
-					barIndex = next;
-					continue;
-				}
-
-				completed++;
-				considerCompletedProfile(extra, stream, completed, close, pointValue, qty, minProfit, ref best, ref examined);
-				barIndex = next;
-			}
-			trace(ETraceLevel.Debug, $"profile walk stream({stream}) from({asOf}) floor({floor}) calcBars({calcBars}) oldestStart({oldestStart}) stoppedAt({barIndex}) misses({misses}) missCap({LelxRules.WalkMissCap}) completed({completed}/{ProfileLookback})");
+			ExitCandidate localBest = best;
+			int localExamined = examined;
+			int misses, stoppedAt;
+			int[] starts = ProfileStartBars(stream);   // one lookup per listed profile; empty -> bar-by-bar (capped)
+			int completed = LelxRules.WalkProfiles<VpExtra>(asOf, starts, ProfileLookback,
+				bar => ExtraVolumeProfileForBar(stream, bar),   // no catch-all: would also hide MaxBarsBack auto-detect exceptions
+				e => e.startBar,
+				e => e.pocComplete,
+				(e, ordinal) => considerCompletedProfile(e, stream, ordinal, close, pointValue, qty, minProfit, ref localBest, ref localExamined),
+				e => { if (traceOn(ETraceLevel.Debug)) trace(ETraceLevel.Debug, $"profile developing stream({stream}) start({e.startBar}) end({e.endBar}) poc({e.poc})"); },
+				out misses, out stoppedAt);
+			best = localBest;
+			examined = localExamined;
+			if (traceOn(ETraceLevel.Debug))
+				trace(ETraceLevel.Debug, $"profile walk stream({stream}) from({asOf}) starts({starts.Length}) stoppedAt({stoppedAt}) misses({misses}) missCap({LelxRules.WalkMissCap}) completed({completed}/{ProfileLookback})");
 		}
 
 		private void consider(ref ExitCandidate best, ref int examined, double touch, double order, int sources, int kindRank, double quality, string kind, double close, double pointValue, int qty, double minProfit)

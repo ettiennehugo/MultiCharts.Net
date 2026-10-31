@@ -20,6 +20,6 @@ mkdir -p "$here/Generated"
   awk '/\/\/ <vwap-roll-rules>/ {on=1; next} /\/\/ <\/vwap-roll-rules>/ {on=0} on' "$root/_VpVwapEngine.Function.CS"
   echo "}"; } > "$here/Generated/VwapRollRules.cs"
 # fix/lelx-profile-walk-hurdle: MC-free LELX rules (bounded profile walk, profit hurdle on actual risk).
-{ echo "using System;"; echo "namespace PowerLanguage.Strategy {"
+{ echo "using System; using System.Collections.Generic;"; echo "namespace PowerLanguage.Strategy {"
   awk '/\/\/ <lelx-rules>/ {on=1; next} /\/\/ <\/lelx-rules>/ {on=0} on' "$root/_DeltaDivRevFuturesLELX.Strategy.CS"
   echo "}"; } > "$here/Generated/LelxRules.cs"
