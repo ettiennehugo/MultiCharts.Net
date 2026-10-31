@@ -1110,7 +1110,12 @@ namespace PowerLanguage.Function
 		/// written by FinishCanary after DVP RUN. Without a journal sink nothing is journaled and no DvpCalib is created.
 		/// d* freeze (Ettienne Hugo, 2026-10-31): NOT from this canary. A dedicated _DvpEngineTest run with degMode = Calibrate,
 		/// journal on, @ES 15m over the 2016-2024 dev window produces the pooled DVP CAL table; PR-D9 writes its d* into
-		/// DvpFrozenDegree. Until then KD-02 keeps the d = 1 fallback. halfDay = false here is an accepted limitation (no calendar).</summary>
+		/// DvpFrozenDegree. Until then KD-02 keeps the d = 1 fallback. halfDay = false here is an accepted limitation (no calendar;
+		/// IsRthTime is a fixed 09:30-16:00 ET window, so a half day ends early only because the data stops at 13:00 ET).
+		/// The KD-02 stop rounding away from the close and the skip when the target rounds onto the close apply ONLY to this Gate0
+		/// canary (fixed 1 contract); live strategies use the cost floor (stop = max(structural, 14 ticks), costFloorTicks) and the
+		/// 1% per-trade risk budget (skip if q x widened stop x $50 > 0.01 x equity, never shrink q): engines-manual "Cost floor
+		/// (catalogue §2.1)".</summary>
 		public DvpConfig Kd02Config()
 		{
 			var c = new DvpConfig(); c.enabled = true; c.journalFits = true; c.journalRails = false;   // rails journal (DV-11.2) is not needed by the canary

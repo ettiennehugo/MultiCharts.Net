@@ -133,12 +133,16 @@ namespace PowerLanguage.Strategy
 	//                 VOLUME: a 2016-2024 15m run at Trace = Journal writes about 200k DVP FIT lines (one file append each, slow);
 	//                 for the PF verdict alone run below Journal (no DVP journal, no DvpCalib).
 	//                 Accepted limitation (Ettienne Hugo, 2026-10-31): Gate0 has no session calendar, so the DVP stream gets
-	//                 halfDay = false; on a 13:00 close Gate0's RTH rule already ends the session.
+	//                 halfDay = false. Gate0's RTH window (IsRthTime) is a fixed 09:30-16:00 ET, not calendar-aware; on a half
+	//                 day the session ends early only because the data stops at 13:00 ET.
 	//                 d* FREEZE (Ettienne Hugo, 2026-10-31): d* is NOT frozen from KD-02. It comes from a dedicated host run of
 	//                 _DvpEngineTest, degMode = Calibrate, journal on, @ES 15m over the 2016-2024 dev window; its pooled DVP CAL
 	//                 table (d* = argmin score, ties to the lower d) goes into DvpFrozenDegree in PR-D9. Until then KD-02 keeps
 	//                 the d = 1 fallback. Stop rounding away from the close and the skip when the target rounds onto the
-	//                 close: approved (Ettienne Hugo, 2026-10-31). Sweep grid {19, 40} x {3.0, 2.5} sigma: kept.
+	//                 close: approved (Ettienne Hugo, 2026-10-31). These two rules apply ONLY to this Gate0 KD-02 canary; live
+	//                 strategies use the cost floor (stop = max(structural, 14 ticks), costFloorTicks) and the 1% per-trade
+	//                 risk budget (skip if q x widened stop x $50 > 0.01 x equity, never shrink q): engines-manual
+	//                 "Cost floor (catalogue §2.1)". Sweep grid {19, 40} x {3.0, 2.5} sigma: kept.
 	//  130..133 KD-02 sweep: 130 = time 19 / stop 3.0 sigma (= Variant 8), 131 = 40 / 3.0, 132 = 19 / 2.5, 133 = 40 / 2.5.
 	//                 Configure rejects other values ("canary variant out of range": 9..99, 124..129, 134+) and
 	//                 "KD-02 parameters out of range" (minutes < 1, time stop < 1, stop k <= 2, pad < 0).
