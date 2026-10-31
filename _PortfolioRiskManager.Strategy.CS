@@ -11,7 +11,8 @@ namespace PowerLanguage.Strategy
 	/// always set explicitly: RiskParity size, or -1 = code size), applies the 4% heat cap, 2% per correlation cluster, drawdown
 	/// throttles 5/10/15%, a daily loss stop (-2% deny, -3% flatten) and per-strategy kill switches (ForceClosePosition, then
 	/// Paused once flat). It never blocks exits. Logic lives in _PortMM (_PortMM.Function.CS, unit-tested off-MC).
-	/// No [Input]s: change the configuration by subclassing and overriding Config.
+	/// One [Input] (Ettienne, 2026-10-31): TotalRiskCapPct = outer ceiling on the combined widened open risk of all strategies,
+	/// % of book, (0, 100], default 10. Everything else: subclass and override Config.
 	/// </summary>
 	public class _PortfolioRiskManager : PortfolioSignalObject
 	{
@@ -19,7 +20,11 @@ namespace PowerLanguage.Strategy
 		private bool m_runLogged, m_currencyLogged;
 		private readonly HashSet<string> m_logged = new HashSet<string>();
 
-		public _PortfolioRiskManager(object _ctx) : base(_ctx) { }
+		/// <summary>Total open-risk cap, % of book (0, 100], default 10: a new entry whose widened risk would push the combined total
+		/// over it is skipped (never size-cut). Applies on top of heatCap; the tighter binds. Invalid values: warning, then default/clamp.</summary>
+		[Input] public double TotalRiskCapPct { get; set; }
+
+		public _PortfolioRiskManager(object _ctx) : base(_ctx) { TotalRiskCapPct = _PortRiskCap.DefaultPct; }
 
 		/// <summary>Effective configuration (code defaults). Override in a subclass for another profile.</summary>
 		protected virtual PortMmConfig Config { get { return new PortMmConfig(); } }
@@ -44,6 +49,9 @@ namespace PowerLanguage.Strategy
 			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using code defaults"); cfg = defaults; }
 			foreach (string w in warnings) Output.WriteLine("PORT Warning: " + w);
 			foreach (string i in info) Output.WriteLine("PORT Info: " + i);
+			string capWarn;
+			cfg = cfg.Copy(); cfg.totalRiskCap = _PortRiskCap.Fraction(TotalRiskCapPct, out capWarn);
+			if (capWarn != null) Output.WriteLine("PORT Warning: " + capWarn);
 			m_mm = new _PortMM { config = cfg };
 			m_mm.journal = s => Output.WriteLine(s);
 			m_runLogged = m_currencyLogged = false; m_logged.Clear();
@@ -119,6 +127,7 @@ namespace PowerLanguage.Strategy
 			o = get(pd, _PortKeys.Side); v.side = o is int ? (int)o : 0;
 			o = get(pd, _PortKeys.Pos); if (o is int) v.position = (int)o;
 			v.rDollar = num(pd, _PortKeys.RDollar);
+			v.rDollarW = num(pd, _PortKeys.RDollarW);
 			o = get(pd, _PortKeys.QtyCode); v.qtyCode = o is int ? (int)o : 0;
 			v.riskOpen = num(pd, _PortKeys.RiskOpen); if (double.IsNaN(v.riskOpen)) v.riskOpen = 0;
 			v.vol = num(pd, _PortKeys.Vol);

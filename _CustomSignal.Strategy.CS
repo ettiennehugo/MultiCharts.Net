@@ -2828,7 +2828,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (bars == null || entry <= 0 || riskFraction <= 0 || riskFraction > 1)
 			{
-				trace(ETraceLevel.Debug, $"sizeForRisk - 0: entry({entry}) riskFraction({riskFraction}) must be > 0 and riskFraction <= 1");
+				trace(ETraceLevel.Info, $"sizeForRisk - 0: entry({entry}) riskFraction({riskFraction}) must be > 0 and riskFraction <= 1");
 				return 0;
 			}
 			double bpv = bars.Info.BigPointValue;
@@ -2840,17 +2840,17 @@ namespace PowerLanguage.Strategy
 			double distance = Math.Abs(entry - stop);
 			if (limits.minStopTicks > 0 && distance < limits.minStopTicks * tickSize() - tickSize() * 1e-6)
 			{
-				trace(ETraceLevel.Debug, $"sizeForRisk - 0: stop distance {distance / tickSize():0.##} ticks < minStopTicks({limits.minStopTicks})");
+				trace(ETraceLevel.Info, $"sizeForRisk - 0: stop distance {distance / tickSize():0.##} ticks < minStopTicks({limits.minStopTicks})");
 				return 0;
 			}
 			int qty = stopLossBasedPositionSize(bars, entry, stop, riskFraction, false);
-			if (qty <= 0) { trace(ETraceLevel.Debug, "sizeForRisk - 0: risk sizing returned 0 (zero equity or zero risk)"); return 0; }
+			if (qty <= 0) { trace(ETraceLevel.Info, "sizeForRisk - 0: risk sizing returned 0 (zero equity or zero risk)"); return 0; }
 			if (limits.maxQty > 0 && qty > limits.maxQty) { trace(ETraceLevel.Debug, $"sizeForRisk - qty({qty}) capped to maxQty({limits.maxQty})"); qty = limits.maxQty; }
 			if (limits.maxNotionalFraction > 0)
 			{
 				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * bpv;
 				qty = capByNotional(qty, unit, limits.maxNotionalFraction);
-				if (qty <= 0) { trace(ETraceLevel.Debug, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
+				if (qty <= 0) { trace(ETraceLevel.Info, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
 			}
 			qty = applyRoundLots(qty, limits.roundLots);
 			bool willArm = m_portOn && bars == Bars;
@@ -2865,7 +2865,7 @@ namespace PowerLanguage.Strategy
 					return 0;
 				}
 			}
-			if (qty <= 0) trace(ETraceLevel.Debug, "sizeForRisk - 0 after round lots");
+			if (qty <= 0) trace(ETraceLevel.Info, "sizeForRisk - 0 after round lots");
 			else if (willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
 			return qty;
 		}
