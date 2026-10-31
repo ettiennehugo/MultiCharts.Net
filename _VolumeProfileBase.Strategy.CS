@@ -451,6 +451,7 @@ namespace PowerLanguage.Strategy
 			public List<IProfile> listedCache;
 			public int[] listedStarts = new int[0];   // profileStartBar(listedCache[i]), ascending
 			public int emptySkipped;                  // Empty profiles dropped by the last listing (diagnostic)
+			public HashSet<int> emptySeen;            // lazy: distinct start bars of Empty profiles seen this run (running total)
 			public int resolveGeneration = -1;
 			public readonly Dictionary<int, IProfile> resolved = new Dictionary<int, IProfile>();   // bars < calc bar
 			public int cachedBarA = -1;               // calc bar memo (its window can still grow)
@@ -2477,7 +2478,13 @@ namespace PowerLanguage.Strategy
 				foreach (IProfile vp in sp.pack.Items)
 				{
 					if (vp == null) continue;
-					if (vp.Empty) { empties++; continue; }
+					if (vp.Empty)
+					{
+						empties++;
+						if (sp.emptySeen == null) sp.emptySeen = new HashSet<int>();
+						sp.emptySeen.Add(profileStartBar(vp));
+						continue;
+					}
 					list.Add(vp);
 				}
 			}
@@ -2586,18 +2593,30 @@ namespace PowerLanguage.Strategy
 					trace(ETraceLevel.Warning, $"Data1 closed bar has zero volume (bar {Bars.FullSymbolData.Current}): check Build Volume On / feed volume; profiles may be empty");
 				}
 			}
-			if (!m_vpDiagSummaryDone && Bars.LastBarOnChart && Bars.Status == EBarState.Close)
-			{
-				m_vpDiagSummaryDone = true;
-				if (traceOn(ETraceLevel.Info))
-				{
-					var sb = new System.Text.StringBuilder();
-					if (m_streams != null)
-						foreach (var kv in m_streams)
-							if (kv.Value != null) { listedProfiles(kv.Value); sb.Append($" Data{kv.Key}(listed {kv.Value.listedStarts.Length}, empty skipped {kv.Value.emptySkipped})"); }
-					trace(ETraceLevel.Info, $"VP run summary: connected streams({(m_streams == null ? 0 : m_streams.Count)}){sb} zeroVolumeClosedBars({m_zeroVolumeBars})");
-				}
-			}
+			if (!m_vpDiagSummaryDone && Bars.LastBarOnChart && Bars.Status == EBarState.Close) emitVpRunSummary("lastBar");
+		}
+
+		// Once per run: on the last closed bar, or from StopCalc when the run ends before reaching it.
+		private void emitVpRunSummary(string when)
+		{
+			if (m_vpDiagSummaryDone) return;
+			m_vpDiagSummaryDone = true;
+			if (!traceOn(ETraceLevel.Info)) return;
+			var sb = new System.Text.StringBuilder();
+			if (m_streams != null)
+				foreach (var kv in m_streams)
+					if (kv.Value != null)
+					{
+						try { listedProfiles(kv.Value); } catch { }
+						sb.Append($" Data{kv.Key}(listed {kv.Value.listedStarts.Length}, empty now {kv.Value.emptySkipped}, empty total {(kv.Value.emptySeen == null ? 0 : kv.Value.emptySeen.Count)})");
+					}
+			trace(ETraceLevel.Info, $"VP run summary at({when}): connected streams({(m_streams == null ? 0 : m_streams.Count)}){sb} zeroVolumeClosedBars({m_zeroVolumeBars})");
+		}
+
+		protected override void StopCalc()
+		{
+			try { emitVpRunSummary("stopCalc"); } catch { }
+			base.StopCalc();
 		}
 
 		private void unhookStreams()

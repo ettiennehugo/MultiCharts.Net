@@ -35,7 +35,20 @@ static class Program
 		Check(n1 == 4 && same && lookups <= 6, "start-bar walk: same 4 profiles as the bar walk with one lookup per profile");
 		int lk = 0, mm, ss;
 		PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(2798382, starts, 4, x => { lk++; return null; }, p => p.start, p => p.complete, (p, o) => { }, null, out mm, out ss);
-		Check(lk == Math.Min(starts.Length, PowerLanguage.Strategy.LelxRules.WalkMissCap) && mm == lk, "start-bar walk: misses capped, one per listed start");
+		Check(mm == PowerLanguage.Strategy.LelxRules.WalkMissCap && lk == mm, "start-bar walk short: falls through to the bar walk, misses still capped at 20k in total");
+
+		// F1: a stored profile missing from MC's list (orphan) and one listed with an unreadable start (-1) are still found.
+		var ps = new List<P>();
+		for (int s = 1; s <= 3901; s += 390) ps.Add(new P { start = s, end = s + 389, complete = true });   // 11 closed profiles
+		Func<int, P> lk2 = x => { foreach (var q in ps) if (x >= q.start && x <= q.end) return q; return null; };
+		int[] partial = new int[] { -1, ps[2].start, ps[4].start, ps[8].start };   // ps[9], ps[10] etc. not listed
+		var got = new List<int>(); int m3, s3;
+		int n3 = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(4290, partial, 6, lk2, p => p.start, p => p.complete, (p, o) => got.Add(p.start), null, out m3, out s3);
+		Check(n3 == 6 && got.Contains(ps[10].start) && got.Contains(ps[9].start) && got.Contains(ps[8].start) && got.Contains(ps[4].start), "F1: short starts pass falls back to the bar walk and finds unlisted profiles");
+		var got2 = new List<int>(); int m4, s4;
+		int n4 = PowerLanguage.Strategy.LelxRules.WalkProfiles<P>(4290, new int[] { -1, ps[10].start }, 3, lk2, p => p.start, p => p.complete, (p, o) => got2.Add(p.start), null, out m4, out s4);
+		bool uniq = new HashSet<int>(got2).Count == got2.Count;
+		Check(n4 == 3 && uniq && got2[0] == ps[10].start && got2.Contains(ps[9].start), "F1: unreadable start -> bar walk adds the rest without duplicates");
 	}
 
 	static void LelxWalkEarlyRun()

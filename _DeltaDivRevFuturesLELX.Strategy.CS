@@ -56,7 +56,8 @@ namespace PowerLanguage.Strategy
 				for (int i = starts.Length - 1; i >= 0 && completed < lookback && misses < WalkMissCap; i--)
 				{
 					int bar = starts[i];
-					if (bar < 1 || bar > asOf || bar == last) continue;
+					if (bar < 1) continue;   // unreadable start: the bar walk below reaches it
+					if (bar > asOf || bar == last) continue;
 					last = bar;
 					stoppedAt = bar;
 					T e = lookup(bar);
@@ -71,7 +72,9 @@ namespace PowerLanguage.Strategy
 					completed++;
 					onCompleted(e, completed);
 				}
-				return completed;
+				// F1: profiles stored but not in MC's list, or listed with an unreadable start, are only reachable bar by bar.
+				// Fall through to the capped bar walk (sharing seen + misses) when the starts pass came up short.
+				if (completed >= lookback || misses >= WalkMissCap) return completed;
 			}
 			int barIndex = asOf;
 			while (WalkContinue(barIndex, completed, lookback, misses))
@@ -594,7 +597,7 @@ namespace PowerLanguage.Strategy
 			trace(ETraceLevel.Debug, $"size dollarRiskPerContract({dollarRiskPerContract}) riskPercent({RiskPercent}) riskQty({riskQty}) notional({contractNotional:F2}) maxEquityPct({MaximumEquityPerPosPercent}) qty({qty}) pointValue({pointValue})");
 			if (qty < 1)
 			{
-				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) reason(qty below 1 riskQty({riskQty}) notionalCap) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) notional({contractNotional:F2}) qty({qty}) riskPerContract$({dollarRiskPerContract}) risk$({LelxRules.RiskDollars(dollarRiskPerContract, qty)}) budget$({riskEquity})");
+				trace(ETraceLevel.Info, $"skip size time({Bars.Time[0]:MM/dd/yyyy HH:mm}) reason(qty below 1 riskQty({riskQty}) cause({(riskQty < 1 ? "riskBudget" : "notionalCap")})) swing({swingLow}) stop({stopPrice}) pointValue({pointValue}) dollarRiskPerContract({dollarRiskPerContract}) notional({contractNotional:F2}) qty({qty}) riskPerContract$({dollarRiskPerContract}) risk$({LelxRules.RiskDollars(dollarRiskPerContract, qty)}) budget$({riskEquity})");
 				return;
 			}
 
