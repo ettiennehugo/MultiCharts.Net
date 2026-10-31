@@ -1049,6 +1049,8 @@ namespace PowerLanguage.Function
 					break;
 				case EGate0Canary.DV10:
 					{
+						// educator review G8 (Ettienne Hugo, 2026-10-29): no once-per-day limit for DV-10, it re-arms after an exit.
+						// m_dayDone is set only by PS03, so for this canary the guard is just "flat".
 						if (m_dayDone || m_mp != 0) break;
 						double vw = m_wkVwap.Value, sd = m_wkVwap.Sigma, a = m_atr30.Value; int n = m_wkUpper.Count;
 						if (!(sd > 0) || !(a > 0) || n < 9) break;

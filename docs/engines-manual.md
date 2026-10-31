@@ -360,7 +360,7 @@ The canaries (Variant 0–7 in Canary mode; all flat by 15:55 ET, RTH only):
 | 1 | A2-24 (i) | fade the first VWAP touch after 09:35; stop/target 1R = ATR14(5m) |
 | 2 | A2-24 (ii) | fade a 1m close beyond VWAP ±2σ; target VWAP frozen at entry; stop 1:1 |
 | 3 | A2-24 (iii) | fade a 1m close ≥ 2 × ATR14(5m) from VWAP; target VWAP frozen; stop 1:1 |
-| 4 | DV-10 | weekly VWAP ±1σ fade when both bands moved < 0.5 × ATR30m over 8 × 30m bars; limit at the band; TP weekly VWAP; SL 0.20 × ATR20d |
+| 4 | DV-10 | weekly VWAP ±1σ fade when both bands moved < 0.5 × ATR30m over 8 × 30m bars; limit at the band; TP weekly VWAP; SL 0.20 × ATR20d; no once-per-day limit (re-arms after an exit, Ettienne Hugo 2026-10-29) |
 | 5 | A2-53 | gap ≥ 0.5%, vol filter on; fade after the 1st 30m bar if the prior close was not retraced; stop-and-reverse at the session extreme ±1 tick (one reversal) |
 | 6 | DV-01 | prior RTH POC after a move-away ≥ 1 × ATR14(5m); limit at the POC, first touch only; SL = TP = 0.15 × ATR20d |
 | 7 | PS-03 | naive 80% rule: open outside the prior VA, enter on the first 30m close back inside; target the prior POC; stop 0.25 × VA width beyond the entry edge |
@@ -2864,7 +2864,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar <= Cfg.slow) return;
-			if (rollOn(1)) { m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0; }   // directions restart; the SMAs still span the roll gap for S bars (pitfall: use a back-adjusted series if that matters)
+			if (rollOn(1)) { m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0; }   // directions restart; the SMAs still span the roll gap for S bars (pitfall: detect rolls and restart the SMAs, or accept the bias; the engines assume an unadjusted series)
 			double sl = sma(Cfg.slow), fs = sma(Cfg.fast);
 			int slowDir = double.IsNaN(m_slowPrev) ? 0 : Math.Sign(sl - m_slowPrev);
 			int fastDir = double.IsNaN(m_fastPrev) ? 0 : Math.Sign(fs - m_fastPrev);
@@ -6690,7 +6690,7 @@ protected override void CalcBar()
 
 **Tests.** `tests/ProfileTests`, `tests/VpHelperTests`, `tests/OrderFlowTests`.
 
-**VWAP reset at roll (PR #52, merged at c91cc02).** `RollDate` VWAP slots always reset at a detected roll. The opt-in `VwapConfig.resetPeriodSlotsOnRoll` (default `false`) also resets Week / Month slots at a roll. Set it before `base.StartCalc()` (constructor / `Create`); `configureVwap` copies it there and later changes are ignored. It needs `RollDetection != Off`: with it on and `RollDetection = Off` the strategy logs one Warning (`VWAP resetPeriodSlotsOnRoll is on but RollDetection is Off ...`) and Week / Month slots do not reset. `RollDetection.Table` is the reproducible roll source (Series misses some contracts, App F). Each reset is logged once at Journal and above (also visible at Verbose / Debug): `VWAP roll reset <label> type(<type>) Data<n> bar(...)`, where the label is the slot's VWAPn name. This line fires for every `RollDate` slot reset too, even with the flag off. (The single labelled line ships in the follow-up code PR to #52; at c91cc02 a Debug run logs an unlabelled Debug line instead.)
+**VWAP reset at roll (PR #52, merged at c91cc02).** `RollDate` VWAP slots always reset at a detected roll. The opt-in `VwapConfig.resetPeriodSlotsOnRoll` (default `false`) also resets Week / Month slots at a roll. Set it before `base.StartCalc()` (constructor / `Create`); `configureVwap` copies it there and later changes are ignored. It needs `RollDetection != Off`: with it on and `RollDetection = Off` the strategy logs one Warning (`VWAP resetPeriodSlotsOnRoll is on but RollDetection is Off ...`) and Week / Month slots do not reset. `RollDetection.Table` is the reproducible roll source (Series misses some contracts, App F). Each reset is logged once at Journal and above (also visible at Verbose / Debug): `VWAP roll reset <label> type(<type>) Data<n> bar(...)`, where the label is the slot's VWAPn name. This line fires for every `RollDate` slot reset too, even with the flag off.
 
 ### 4.16 M-PORT publisher and `_PortfolioRiskManager` (`_PortMM`)
 
@@ -7313,6 +7313,8 @@ public static double SplitWidth(double tol, double atr20d, double atrFraction)  
 ```
 
 **Zone width (PR #47).** Anchors within `ConfluenceAlignTicks` (tol) of each other chain into one cluster. A cluster of ≥ 3 anchors wider than `VpConfluenceRules.SplitWidth` = max(4 × tol, `ConfluenceSplitAtrFraction` × Atr20d) (default fraction 0.03; 4 × tol alone while Atr20d is not ready) is split at its largest internal gap (the lowest one on a tie). The ATR term keeps zones proportional to the market's daily range: on a quiet day 4 × tol rules, on a volatile day a zone may be up to 3% of the daily ATR wide. Atr20d comes only from M-DAILY, so a strategy that reads zones or targets sets `UsesConfluenceZones = true` in `Create()` (or before `base.StartCalc()`); the base then turns on `NeedsDaily` when a confluence slot is enabled. Without it the split uses 4 × tol and a one-time Warning says so (`VPCONF: confluence zones used but UsesConfluenceZones is false …`). Each split is journaled `VPCONF split anchors() range() width() limit() at() gap() atr20d() basis(atr|tol-fallback)`. Enabling two confluence slots on the same data stream now throws in `StartCalc`.
+
+**Acceptance and rejection from one profile.** One profile window may contribute both its best acceptance label (POC/HVN/value edge) and its best LVN rejection to the same zone, and both score (decided by Ettienne Hugo, 2026-10-29). The profile still counts once in `independentSources`; a zone where both scored has `role = Mixed`, which is not a trade direction.
 
 **Developing profile.** Labels from today's unfinished profile are tagged `ConfluenceHit.developing` and also listed in `ConfluenceZone.developingHits` (null when there are none; `HasDeveloping`). `developingScore` is their credit, already included in `rawScore` (report only). `independentSources` counts distinct independent volume masses (stream, profile window); `profileCount` the distinct profiles among them.
 
@@ -11668,7 +11670,7 @@ Features with no example: F-CONF, M-COST, M-GEX, Gate0. Each still has a snippet
 17. **Example 40 vs A2-78.** The catalogue's kill switch is book-level; the strategy-level `DailyLossStop*` rules count one strategy's closed trades. The book-level rule is `_PortfolioRiskManager` / `PortMmConfig`.
 18. **Example 39 vs PF-03.** PF-03 measures sleeve-P&L correlation; the example journals the bar-return correlation of the two instruments as a proxy.
 
-**Known issues (main e2bcc53):**
+**Known issues (main 63933a4):**
 
 1. **RollDetection.Series on intraday charts (over-detection fixed by PR #51; residual limits).** Before PR #51, 1-minute @ES 2016–2024 gave 72 splices against about 33 real quarterly rolls. With PR #51 (Globex-day key, rule-week window, one splice per contract) the live Mode 2 run (`_EventCalendarTest`, 2016-12 to 2024-12, `evroll-mode2-run-2026-10-30-c.csv`) gives **30 rolls**: 2022+ splices on the rule Monday; most earlier ones on the Monday of the rule week (offset −3, −2 after Labor Day). **Early splices:** M17 (2017-06-09) and Z19 (2019-12-13) splice on the Thursday 18:00 ET reopen of the rule day (offset +1). **Undetectable:** U18, U19 and U21 have no qualifying gap inside the window, so no roll is recorded for them. **Weak gaps can win:** the latch takes the first gap ≥ `RollGapTicks`, e.g. Z24 2024-12-16 at 2.25 pts (9 ticks, gapX 1.13), and 2017-03 (2.50), 2018-06 (3.50), 2021-06 (3.50) and 2021-12 (3.00 pts) are all ≤ 3.5 pts, so a non-roll gap could be taken instead. Use `RollDetection = Table` with `RollDates = EventRules.RollDate(y, 3/6/9/12)` (as `_Test6` does) when the roll dates must be reproducible. See §1.7 and §4.13.
 
