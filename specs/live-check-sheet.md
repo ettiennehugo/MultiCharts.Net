@@ -289,6 +289,17 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 
 ---
 
+# Check 11: M-PORT PR-D risk profiles and advisory (#73), before #73 is marked ready
+
+Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twice: once with `_PortfolioRiskManager` as the MM signal and once with `_PortfolioRiskManager_ScaledBook`, with no JSON file. Read the MM output (`PORT …` lines).
+
+- (a) **RUN line:** it shows `signal(_PortfolioRiskManager)` with `config=ok` and `profile(Starter) … heatCap(0.015) clusterCap(0.0075) maxPositions(2)` in the first run, and `signal(_PortfolioRiskManager_ScaledBook)` with `config=ok` and `profile(ScaledBook) … heatCap(0.04) clusterCap(0.02) maxPositions(6)` in the second.
+- (b) **Advisory:** exactly **one** `PORT advisory: uncorr=… uncorr03=… [ids] …` line per book day, and it says `not eligible` unless both counts are ≥ 3. With less than `rhoMinDays` of history it notes `ρ unknown`. The profile never changes during the run.
+- (c) **Optional fallback:** point `ConfigPath` at a file with `"maxTradeRisk": 0.02`. The RUN line then shows `config=fallback` and the signal's own profile values.
+- **Pass:** a–b (and c if run). **Fail:** wrong profile values, missing or repeated advisory lines, or `config=fallback` without a bad file.
+
+---
+
 # Results table (fill in)
 
 | # | Check | Date / time (ET) | Key measurement | Pass / Fail / Info | Action taken | Spec to update |
@@ -312,6 +323,7 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 | 9a | P-BA4 chart mode | | | | | P3S S1 |
 | 9b | P-R1 futures category text | | | | | CS l.1278 |
 | 10 | PR-C throttles: session stop, halve/observe (no Sunday reset), CodeSize skip, reversal | | | | | M-PORT §5.4 4a/4b, T-P13 |
+| 11 | PR-D profiles: RUN line signal / config=ok / profile, one PORT advisory per day | | | | | M-PORT §5.1/§5.1a |
 
 # Items not pinned down by documentation
 

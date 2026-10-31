@@ -16,16 +16,25 @@ static class Program
 
 	static _PortMM MM(Action<PortMmConfig> f = null, List<string> j = null)
 	{
-		var c = new PortMmConfig(); if (f != null) f(c);
+		var c = PortMmConfig.ForProfile(EPortProfile.ScaledBook); if (f != null) f(c);   // rev 1 tests repinned to ScaledBook (spec §8)
 		var m = new _PortMM { config = c }; if (j != null) m.journal = s => j.Add(s);
 		string e = m.Configure(); if (e != null) throw new Exception(e); return m;
 	}
+
+	static _PortMM MP(EPortProfile p, Action<PortMmConfig> f = null, List<string> j = null)
+	{
+		var c = PortMmConfig.ForProfile(p); if (f != null) f(c);
+		var m = new _PortMM { config = c }; if (j != null) m.journal = s => j.Add(s);
+		string e = m.Configure(); if (e != null) throw new Exception(e); return m;
+	}
+	static PortStratView W(int i, double rw, string cl, EPortState st = EPortState.Armed, int pos = 0, double riskOpen = 0)
+	{ var x = V(i, st, 1, 500, 2, cl, pos, 0, riskOpen); x.rDollarW = rw; return x; }
 
 	static void Main()
 	{
 		// config
 		Check(new PortMmConfig().Validate() == null, "defaults valid");
-		var c0 = new PortMmConfig();
+		var c0 = PortMmConfig.ForProfile(EPortProfile.ScaledBook);
 		Check(c0.sizing == EPortSizing.RiskParity && c0.heatCap == 0.04 && c0.clusterCap == 0.02 && c0.dailyLossStop == 0.02 && c0.dailyLossFlatten == 0.03 &&
 			c0.ddSteps.Select(s => s.dd).SequenceEqual(new[] { 0.05, 0.10, 0.15 }), "spec defaults (4% heat, 2% cluster, dd 5/10/15, -2%/-3%)");
 		var bad = new PortMmConfig { clusterCap = 0.05, dailyLossFlatten = 0.01, minContracts = 0 }.Validate();
@@ -48,7 +57,7 @@ static class Program
 		var z = new double[2, 2]; Check(Near(_PortMath.Idm(new[] { 0, 1 }, z, new[] { 0, 1 }, 2.5), Math.Sqrt(2)) && Near(_PortMath.Idm(new[] { 0, 1 }, new double[,] { { 1, double.NaN }, { double.NaN, 1 } }, new[] { 0, 0 }, 2.5), 1), "IDM equal weights");
 		Check(_PortMath.DdStage(c0.ddSteps, 0.049) == 0 && _PortMath.DdStage(c0.ddSteps, 0.05) == 1 && _PortMath.DdStage(c0.ddSteps, 0.12) == 2 && _PortMath.DdStage(c0.ddSteps, 0.2) == 3, "dd stages");
 		Check(_PortMath.Size(c0, 1, 100000, 500, 2, double.NaN, 1, 1) == 1 && _PortMath.Size(c0, 1, 1000000, 500, 2, double.NaN, 1, 1) == 10, "risk parity floor(mult x 0.5% x book / R$)");
-		var cv = new PortMmConfig { sizing = EPortSizing.VolTarget };
+		var cv = PortMmConfig.ForProfile(EPortProfile.ScaledBook); cv.sizing = EPortSizing.VolTarget; 
 		Check(_PortMath.Size(cv, 1, 1000000, 500, 2, 1000, 2, 1.4) == (int)Math.Floor(0.1 / Math.Sqrt(252) * 1000000 * 1.4 / 2000), "vol target size");
 		Check(_PortMath.Size(new PortMmConfig { sizing = EPortSizing.CodeSize }, 1, 1, 1, 1, 1, 1, 1) == -1, "code size = -1");
 
@@ -135,7 +144,7 @@ static class Program
 
 		// ---- JSON config (PortMmConfigLoader) ----
 		{
-			var def = new PortMmConfig();
+			var def = PortMmConfig.ForProfile(EPortProfile.ScaledBook);
 			var w = new List<string>();
 			var pc = PortMmConfigLoader.Parse("{ \"heatCap\": 0.03, \"Sizing\": \"codesize\", \"_note\": \"x\" }", def, w);
 			Check(pc != def && Near(pc.heatCap, 0.03) && pc.sizing == EPortSizing.CodeSize && Near(pc.clusterCap, 0.02) && w.Count == 0, "partial JSON overrides only present fields (case-insensitive, _comments ok)");
@@ -166,9 +175,9 @@ static class Program
 			Check(pc.maxPositions == 3 && w.Count == 0 && info.Count == 1 && info[0].Contains("maxPositions(3)"), "file load logs the effective config at Info");
 			System.IO.File.Delete(tmp);
 			string sample = System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../samples/PortMmConfig.example.json");
-			w.Clear(); info.Clear(); pc = PortMmConfigLoader.LoadFile(sample, def, w, info);
-			Check(w.Count == 0 && info.Count == 1 && pc.ToString() == def.ToString() && Near(pc.idmCap, def.idmCap) && pc.rhoMinDays == def.rhoMinDays && pc.ddRecoverHighDays == def.ddRecoverHighDays && Near(pc.bookVolTarget, def.bookVolTarget),
-				$"samples/PortMmConfig.example.json parses cleanly and equals the code defaults ({string.Join(" | ", w)})");
+			var st = new PortMmConfig(); w.Clear(); info.Clear(); pc = PortMmConfigLoader.LoadFile(sample, def, w, info);
+			Check(w.Count == 0 && info.Count == 1 && pc.ToString() == st.ToString() && Near(pc.idmCap, st.idmCap) && pc.rhoMinDays == st.rhoMinDays && pc.ddRecoverHighDays == st.ddRecoverHighDays && Near(pc.bookVolTarget, st.bookVolTarget),
+				$"samples/PortMmConfig.example.json (profile Starter) parses cleanly onto a ScaledBook base and equals the Starter defaults ({string.Join(" | ", w)})");
 			var cp = def.Copy(); cp.ddSteps[0].dd = 0.07; Check(Near(def.ddSteps[0].dd, 0.05), "Copy is deep");
 		}
 
@@ -274,7 +283,7 @@ static class Program
 				Check(lj.Count(x => !x.Contains("no pm.day")) == 0, "in position / not Armed are not entry attempts -> silent");
 				lj.Clear(); lm.Decide(D0, 1000000, true, new List<PortStratView> { nv }); var cd = MM(c => c.sizing = EPortSizing.CodeSize); var cj = new List<string>(); cd.journal = x => cj.Add(x);
 				cd.Decide(D0, 1000000, true, new List<PortStratView> { V(0, r: double.NaN) });
-				Check(cj.Count == 1 && cj[0].StartsWith("PORT Info: skip") && cj[0].Contains(" no R$:"), "CodeSize no R$ journaled at Info");
+				cj.RemoveAll(x => x.StartsWith("PORT advisory")); Check(cj.Count == 1 && cj[0].StartsWith("PORT Info: skip") && cj[0].Contains(" no R$:"), "CodeSize no R$ journaled at Info");
 			}
 
 			// every skip touched logs at Info (Ettienne's rule)
@@ -441,6 +450,148 @@ static class Program
 			om.Decide(D0, 1000000, true, new List<PortStratView> { V(0, pnl: 200000), V(1, EPortState.Long, pos: 2, pnl: 0) });
 			var od = om.Decide(D0.AddDays(1), 1000000, true, new List<PortStratView> { V(0, pnl: 130000), V(1, EPortState.Long, pos: 2, pnl: 0) });
 			Check(om.Mult < 1 && od[0].reason == "maxPositions", $"F2: maxPositions checked before the CodeSize throttle ({od[0].reason} {om.Mult})");
+		}
+		{   // PR-D: risk profiles (§5.1/§5.1a) T-P1/2/8/9/10/15/17, P2 (c) T-P20, T-P5/T-P6 under both profiles
+			var st = PortMmConfig.ForProfile(EPortProfile.Starter); var sb = PortMmConfig.ForProfile(EPortProfile.ScaledBook);
+			Func<PortMmConfig, string> dds = c => string.Join(",", c.ddSteps.Select(x => x.dd + ">" + x.mult));
+			Check(st.Validate() == null && sb.Validate() == null, "T-P1: both profiles validate");
+			Check(st.profile == EPortProfile.Starter && Near(st.bookVolTarget, 0.12) && Near(st.heatCap, 0.015) && Near(st.clusterCap, 0.0075) && st.maxPositions == 2 && dds(st) == "0.03>0.5,0.06>0.25,0.1>0", "T-P1: Starter values (§5.1)");
+			Check(sb.profile == EPortProfile.ScaledBook && Near(sb.bookVolTarget, 0.10) && Near(sb.heatCap, 0.04) && Near(sb.clusterCap, 0.02) && sb.maxPositions == 6 && dds(sb) == "0.05>0.5,0.1>0.25,0.15>0", "T-P1: ScaledBook values (§5.1)");
+			Check(new PortMmConfig().ToString() == st.ToString() && dds(new PortMmConfig()) == dds(st), "T-P1: new PortMmConfig() equals Starter");
+			var sbx = sb.Copy(); sbx.profile = EPortProfile.Starter; sbx.bookVolTarget = 0.12; sbx.heatCap = 0.015; sbx.clusterCap = 0.0075; sbx.maxPositions = 2; sbx.ddSteps = st.ddSteps;
+			Check(sbx.ToString() == st.ToString(), "T-P1: every other field identical in both profiles");
+
+			// T-P2 starter heat, book 1M: heat 15 000, cluster 7 500, per-trade 10 000
+			var d2 = MP(EPortProfile.Starter).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 500, "A"), W(1, 500, "B") });
+			Check(d2[0].allowEntries && d2[1].allowEntries && d2[0].entryContracts == 10 && d2[1].entryContracts == 10, "T-P2: two 5 000 entries in different clusters allowed");
+			d2 = MP(EPortProfile.Starter).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 500, "A"), W(1, 500, "A") });
+			Check(d2[0].allowEntries && !d2[1].allowEntries && d2[1].reason == "cluster cap", "T-P2: same cluster second 5 000 -> 10 000 > 7 500 cluster cap");
+			d2 = MP(EPortProfile.Starter).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 100, "A"), W(1, 100, "B"), W(2, 100, "C") });
+			Check(d2[0].allowEntries && d2[1].allowEntries && !d2[2].allowEntries && d2[2].reason == "maxPositions", $"T-P2: third denied by maxPositions 2 with heat room ({d2[2].reason})");
+			d2 = MP(EPortProfile.Starter).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 900, "A"), W(1, 900, "B") });
+			Check(d2[0].allowEntries && d2[0].entryContracts == 10 && !d2[1].allowEntries && d2[1].reason == "heat cap", $"T-P2: 9 000 + 9 000 -> second heat cap, first keeps n ({d2[1].reason})");
+
+			// T-P20 P2 (c)
+			Func<EPortProfile, List<PortStratView>, PortDecision[]> D = (pf, l) => MP(pf).Decide(D0, 1000000, true, l);
+			var e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 900, "EQ") });
+			Check(e[0].allowEntries && e[0].entryContracts == 10, "T-P20 (i): lone ES 9 000 > cluster 7 500 in an empty cluster -> allowed, n unchanged");
+			Check(D(EPortProfile.Starter, new List<PortStratView> { W(0, 750, "EQ") })[0].allowEntries && D(EPortProfile.Starter, new List<PortStratView> { W(0, 1000, "EQ") })[0].allowEntries, "T-P20 (i): 7 500 and 10 000 allowed");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 1000.1, "EQ") });
+			Check(!e[0].allowEntries && e[0].reason == "per-trade budget", $"T-P20 (i): 10 001 -> per-trade budget, not cluster cap ({e[0].reason})");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 900, "EQ", EPortState.Long, 10, 9000), W(1, 500, "EQ") });
+			Check(!e[1].allowEntries && e[1].reason == "cluster cap", $"T-P20 (ii): ES open 9 000 + NQ 5 000 -> cluster cap ({e[1].reason})");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 900, "EQ"), W(1, 500, "EQ") });
+			Check(e[0].allowEntries && e[0].entryContracts == 10 && !e[1].allowEntries && e[1].reason == "cluster cap", "T-P20 (iii): same step, entry allowed earlier counts as holding");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 900, "EQ", EPortState.Long, 10, 9000), W(1, 500, "CL") });
+			Check(e[1].allowEntries && e[1].entryContracts == 10, "T-P20 (iv): ES open + CL 5 000 (other cluster) allowed");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 900, "EQ", EPortState.Flat), W(1, 900, "EQ") });
+			Check(e[1].allowEntries && e[1].entryContracts == 10, "T-P20 (v): after ES closes, NQ 9 000 allowed");
+			var sbc = MP(EPortProfile.ScaledBook, c => c.clusterCap = 0.005).Decide(D0, 1000000, true, new List<PortStratView> { W(0, 900, "EQ"), W(1, 500, "EQ") });
+			Check(sbc[0].allowEntries && sbc[0].entryContracts == 10 && !sbc[1].allowEntries && sbc[1].reason == "cluster cap", "T-P20 (vi): ScaledBook same rule (lone not checked, second checked)");
+			e = D(EPortProfile.ScaledBook, new List<PortStratView> { W(0, 900, "EQ", EPortState.Long, 20, 15000), W(1, 900, "EQ") });
+			Check(!e[1].allowEntries && e[1].reason == "cluster cap", "T-P20 (vi): ScaledBook 15 000 open + 9 000 > 20 000 -> cluster cap");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 500, "EQ", EPortState.Flat, 0, 5000), W(1, 500, "EQ") });
+			Check(!e[1].allowEntries && e[1].reason == "cluster cap", "T-P20 (vii): flat publisher with seeded riskOpen 5 000 occupies the cluster -> cluster cap");
+			e = D(EPortProfile.Starter, new List<PortStratView> { W(0, 500, "EQ", EPortState.Flat, 0, 0), W(1, 500, "EQ") });
+			Check(e[1].allowEntries, "T-P20 (vii): riskOpen 0 -> cluster empty -> allowed");
+
+			// T-P10 / T-P17 JSON + fallback
+			var w = new List<string>();
+			var pj = PortMmConfigLoader.Parse("{\"maxPositions\": 3, \"profile\": \"scaledbook\"}", st, w);
+			Check(pj.profile == EPortProfile.ScaledBook && Near(pj.heatCap, 0.04) && pj.maxPositions == 3 && w.Count == 0, "T-P10: profile applied first (even listed last), fields override");
+			w.Clear(); pj = PortMmConfigLoader.Parse("{\"profile\": \"Huge\"}", sb, w);
+			Check(pj.profile == EPortProfile.ScaledBook && Near(pj.heatCap, 0.04) && w.Count == 1 && w[0].Contains("unknown profile"), "T-P10: unknown profile -> warning, subclass base kept");
+			w.Clear(); pj = PortMmConfigLoader.Parse("{\"profile\": 1}", st, w);
+			Check(pj.profile == EPortProfile.Starter && w.Count == 1, "T-P10: non-string profile -> warning");
+			string tf = System.IO.Path.GetTempFileName(); var inf = new List<string>(); bool fb;
+			System.IO.File.WriteAllText(tf, "{\"clusterCap\": 0.02}"); w.Clear();
+			var rc = PortMmConfigLoader.Resolve(PortMmConfig.ForProfile(EPortProfile.Starter), EPortProfile.Starter, tf, w, inf, out fb);
+			Check(fb && rc.ToString() == st.ToString() && w.Any(x => x.Contains("rejected")), "T-P10: starter file clusterCap 0.02 rejected -> ForProfile(Starter), fallback");
+			System.IO.File.WriteAllText(tf, "{\"maxTradeRisk\": 0.02}"); w.Clear();
+			rc = PortMmConfigLoader.Resolve(PortMmConfig.ForProfile(EPortProfile.ScaledBook), EPortProfile.ScaledBook, tf, w, inf, out fb);
+			Check(fb && rc.ToString() == sb.ToString(), "T-P10 add.: maxTradeRisk 0.02 rejected -> ForProfile(ScaledBook), fallback");
+			System.IO.File.WriteAllText(tf, "{\"maxPositions\": 1}"); w.Clear();
+			rc = PortMmConfigLoader.Resolve(PortMmConfig.ForProfile(EPortProfile.Starter), EPortProfile.Starter, tf, w, inf, out fb);
+			Check(!fb && rc.maxPositions == 1 && w.Count == 0, "T-P10: valid file -> no fallback");
+			System.IO.File.Delete(tf); w.Clear();
+			var badStarter = PortMmConfig.ForProfile(EPortProfile.Starter); badStarter.clusterCap = 0.5;
+			rc = PortMmConfigLoader.Resolve(badStarter, EPortProfile.Starter, null, w, inf, out fb);
+			Check(fb && rc.ToString() == st.ToString() && rc.profile == EPortProfile.Starter && w.Count == 1, "T-P17: invalid starter subclass Config -> ForProfile(Starter) (not ScaledBook), config=fallback");
+			rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, null, w, inf, out fb);
+			Check(fb && rc.profile == EPortProfile.ScaledBook, "T-P17: null Config -> ForProfile(Profile)");
+
+			// T-P8 / T-P9 / T-P15 advisory counts
+			var aj = new List<string>(); var am = MP(EPortProfile.Starter, null, aj);
+			am.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), V(2, cl: "GC") });
+			Check(am.Uncorr == 3, $"T-P8: ES + CL + GC -> uncorr 3 ({am.Uncorr})");
+			Check(aj.Count(x => x.StartsWith("PORT advisory")) == 1 && am.config.profile == EPortProfile.Starter && Near(am.config.heatCap, 0.015), "T-P9: one advisory line, no automatic switch");
+			am.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), V(2, cl: "GC") });
+			Check(aj.Count(x => x.StartsWith("PORT advisory")) == 1, "T-P9: advisory once per day");
+			var bm = MP(EPortProfile.Starter); bm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "EQIDX"), V(1, cl: "EQIDX"), V(2, cl: "CL") });
+			Check(bm.Uncorr == 2, "T-P8: ES + NQ (same seed) + CL -> 2");
+			var pv = V(2, cl: "GC"); pv.paused = true; var stv = V(3, cl: "SI"); stv.stale = true; var npv = V(4, cl: "HG"); npv.publishes = false;
+			var cm = MP(EPortProfile.Starter); cm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), pv, stv, npv });
+			Check(cm.Uncorr == 2, "T-P8: paused / stale / non-publishing excluded");
+			var lm2 = MP(EPortProfile.Starter, c => c.liveIds = new[] { "S0" }); lm2.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL") });
+			Check(lm2.Uncorr == 1, "T-P8: liveIds restricts live set");
+			int u, u3;
+			_PortMM.Counts(3, i => true, new[] { 0, 1, 1 }, new[] { "A", "B", "C" }, new double[,] { { 1, 0.1, 0.2 }, { 0.1, 1, 0.95 }, { 0.2, 0.95, 1 } }, out u, out u3);
+			Check(u == 2 && u3 == 2, "T-P8: CL/GC rho >= 0.9 merged -> uncorr 2");
+			var R = new double[,] { { 1, 0.1, 0.5, 0.2, 0.1 }, { 0.1, 1, 0.2, 0.35, 0.0 }, { 0.5, 0.2, 1, 0.1, 0.1 }, { 0.2, 0.35, 0.1, 1, 0.25 }, { 0.1, 0.0, 0.1, 0.25, 1 } };
+			_PortMM.Counts(5, i => true, new[] { 0, 1, 2, 3, 4 }, new[] { "A", "B", "C", "D", "E" }, R, out u, out u3);
+			Check(u == 5 && u3 == 3, $"T-P15: greedy rho<0.3 on a fixed matrix -> {{0,1,4}} = 3 ({u3})");
+			_PortMM.Counts(5, i => i != 1, new[] { 0, 1, 2, 3, 4 }, new[] { "A", "B", "C", "D", "E" }, R, out u, out u3);
+			Check(u == 4 && u3 == 3, $"T-P15: non-live skipped -> {{0,3,4}} ({u3})");
+			R[0, 1] = R[1, 0] = double.NaN; _PortMM.Counts(2, i => true, new[] { 0, 1 }, new[] { "A", "B" }, R, out u, out u3);
+			Check(u3 == 1, "T-P15: unknown rho counts as correlated");
+			Check(_PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3).Contains("- scaled-book eligible") && _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 2).Contains("not eligible")
+				&& _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 2, 3).Contains("not eligible") && _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3).Contains("uncorr≥3 and uncorr03≥3; switch manually"), "T-P9: eligible only when both counts >= 3");
+
+			// PR-D review: F1 scaled-book sample, F2 rejected flag, ρ unknown + picked ids in the advisory
+			string ssb = System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../samples/PortMmConfig.scaled-book.json"); w.Clear(); inf.Clear(); bool rj;
+			var psb = PortMmConfigLoader.LoadFile(ssb, st, w, inf, out rj);
+			Check(!rj && w.Count == 0 && psb.ToString() == sb.ToString() && Near(psb.bookVolTarget, 0.10), $"F1: samples/PortMmConfig.scaled-book.json on a Starter base equals ForProfile(ScaledBook) ({string.Join(" | ", w)})");
+			w.Clear(); PortMmConfigLoader.Parse("{\"clusterCap\": 0.02}", st, w, out rj); bool rj2; PortMmConfigLoader.Parse("{\"maxPositions\": 3}", st, w, out rj2); bool rj3; PortMmConfigLoader.Parse("[1]", st, w, out rj3);
+			Check(rj && !rj2 && rj3, "F2: Parse reports rejected via out flag");
+			w.Clear(); string tf2 = System.IO.Path.GetTempFileName(); System.IO.File.WriteAllText(tf2, "{\"_note\": \"rejected ( text only in a comment\", \"maxPositions\": 3}");
+			rc = PortMmConfigLoader.Resolve(st, EPortProfile.Starter, tf2, w, inf, out fb); System.IO.File.Delete(tf2);
+			Check(!fb && rc.maxPositions == 3, "F2: fallback no longer depends on warning text");
+			int uk; List<int> pk; R[0, 1] = R[1, 0] = double.NaN;
+			_PortMM.Counts(3, i => true, new[] { 0, 1, 2 }, new[] { "A", "B", "C" }, R, out u, out u3, out uk, out pk);
+			Check(uk == 1 && u3 == 1 && pk.SequenceEqual(new[] { 0 }), $"advisory: unknown pairs counted ({uk}, {u3})");
+			string al = _PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 1, 2, new[] { "S0" });
+			Check(al.Contains("ρ unknown for 2 pair(s)") && al.Contains("uncorr03=1 [S0]") && al.Contains("not eligible"), "advisory line: ρ unknown + picked ids");
+			Check(!_PortMM.AdvisoryLine(EPortProfile.Starter, 0.9, 3, 3, 0, new string[0]).Contains("unknown"), "advisory line: no ρ unknown note when all known");
+			var ajx = new List<string>(); MP(EPortProfile.Starter, null, ajx).Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), V(2, cl: "GC") });
+			Check(ajx.Any(x => x.StartsWith("PORT advisory") && x.Contains("uncorr03=1 [S0]") && x.Contains("ρ unknown for 3 pair(s)")), "advisory: no history -> ρ unknown, picked S0");
+
+			// T-P5 / T-P6 under both profiles (P5: same results)
+			foreach (var pf in new[] { EPortProfile.Starter, EPortProfile.ScaledBook })
+			{
+				double[] cum = { 0 }; string L = " [" + pf + "]";
+				Func<int, DateTime, EPortState, int, PortStratView> TV = (ti, td, ts, tp) => { var x = V(ti, ts, pos: tp, pnl: cum[0]); x.day = td; return x; };
+				Action<_PortMM, DateTime, double> TR = (tm, td, tr) =>
+				{
+					tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Long, 10), V(1, cl: "o") });
+					cum[0] += tr * 5000;
+					tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Flat, 0), V(1, cl: "o") });
+				};
+				Func<_PortMM, DateTime, PortDecision[]> PR = (tm, td) => tm.Decide(td, 100000000, true, new List<PortStratView> { TV(0, td, EPortState.Armed, 0), V(1, cl: "o") });
+				var t1 = MP(pf);
+				TR(t1, D0, -1); Check(PR(t1, D0)[0].allowEntries, "T-P5: one loss -> allowed" + L);
+				TR(t1, D0, 2); TR(t1, D0, -1); var p5 = PR(t1, D0);
+				Check(!p5[0].allowEntries && p5[0].reason == "session stop" && !p5[0].forceClose && p5[1].allowEntries, "T-P5: 2 losses (winner between) -> session stop, other strategy allowed, no force-close" + L);
+				Check(PR(t1, D0.AddDays(1))[0].allowEntries, "T-P5: allowed on next pm.day" + L);
+				cum[0] = 0; var wj = new List<string>(); var t3 = MP(pf, null, wj);
+				Func<int> full = () => (int)Math.Floor(0.005 * (100000000 + cum[0]) / 500 + 1e-9);
+				TR(t3, D0, -2.9); Check(PR(t3, D0.AddDays(1))[0].entryContracts == full(), "T-P6: -2.9R -> full size" + L);
+				TR(t3, D0.AddDays(1), -0.1); var h6 = PR(t3, D0.AddDays(2))[0];
+				Check(h6.allowEntries && h6.entryContracts == (int)Math.Floor(0.5 * 0.005 * (100000000 + cum[0]) / 500 + 1e-9), "T-P6: -3.0R -> halved" + L);
+				TR(t3, D0.AddDays(2), -3); var o6 = PR(t3, D0.AddDays(3))[0];
+				Check(!o6.allowEntries && o6.reason == "weekly observe" && wj.Any(x => x.Contains("PORT observe")), "T-P6: -6R -> observe" + L);
+				var r6 = PR(t3, new DateTime(2024, 3, 17))[0];
+				Check(r6.allowEntries && r6.entryContracts == full(), "T-P6: next ISO week (Sunday key) -> both cleared, full size" + L);
+			}
 		}
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);

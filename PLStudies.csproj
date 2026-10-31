@@ -546,6 +546,7 @@
     <Compile Include="_FvgDetector.Function.CS" />
     <Compile Include="_PortMM.Function.CS" />
     <Compile Include="_PortfolioRiskManager.Strategy.CS" />
+    <Compile Include="_PortfolioRiskManager_ScaledBook.Strategy.CS" />
     <Compile Include="_TestPortArm.Strategy.CS" />
     <Compile Include="_TestPortMM.Signal.CS" />
     <Compile Include="_Test1.Indicator.CS" />

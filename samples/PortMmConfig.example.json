@@ -1,11 +1,16 @@
 {
   "_comment": "M-PORT money-management config for _PortfolioRiskManager (specs/m-port-spec.md §5.1). Every field is optional: a missing field keeps its code default (shown here). Keys starting with '_' are comments. Unknown keys log a warning; a bad value logs a warning and keeps the default; a file that fails validation as a whole is ignored (code defaults).",
 
+  "_profile": "Starter (default: 1.5% heat, 0.75% cluster, 2 positions, dd 3/6/10%, vol 12%) | ScaledBook (4% / 2% / 6 / 5/10/15%, vol 10%). Applied first: replaces the base with that profile's defaults, then the fields below override. Unknown => warning, the signal's own profile kept. Switch manually once the PORT advisory line reads eligible (uncorr>=3 and uncorr03>=3).",
+  "profile": "Starter",
+
+  "_liveIds": "optional array of pm.id counted as live for the uncorr/uncorr03 advisory; omit = every publishing strategy",
+
   "_sizing": "CodeSize (EntryContracts = -1, the strategy's own CS-4 size) | RiskParity (equal $ risk per entry) | VolTarget (equal share of book vol x IDM)",
   "sizing": "RiskParity",
 
   "_bookVolTarget": "VolTarget only: annualised book volatility target, (0, 5)",
-  "bookVolTarget": 0.10,
+  "bookVolTarget": 0.12,
 
   "_riskPerTrade": "RiskParity: book fraction risked per new entry at multiplier 1, (0, 1)",
   "riskPerTrade": 0.005,
@@ -14,10 +19,10 @@
   "maxTradeRisk": 0.01,
 
   "_heatCap": "max (open risk + new risk) / book equity, (0, 1]",
-  "heatCap": 0.04,
+  "heatCap": 0.015,
 
-  "_clusterCap": "max risk per correlation cluster / book equity, (0, 1] and <= heatCap",
-  "clusterCap": 0.02,
+  "_clusterCap": "max risk per correlation cluster / book equity, (0, 1] and <= heatCap; checked only when the merged cluster is already occupied (P2 c)",
+  "clusterCap": 0.0075,
 
   "_rhoMerge": "clusters merge when max(rho, stressed rho) >= rhoMerge, (0, 1]",
   "rhoMerge": 0.9,
@@ -29,13 +34,13 @@
   "rhoMinDays": 40,
 
   "_maxPositions": "max concurrent open positions across the portfolio, integer >= 1",
-  "maxPositions": 6,
+  "maxPositions": 2,
 
   "_ddSteps": "drawdown-from-peak throttle: dd ascending in (0,1), mult non-increasing in [0,1]; mult 0 = entries off",
   "ddSteps": [
-    { "dd": 0.05, "mult": 0.5 },
-    { "dd": 0.10, "mult": 0.25 },
-    { "dd": 0.15, "mult": 0.0 }
+    { "dd": 0.03, "mult": 0.5 },
+    { "dd": 0.06, "mult": 0.25 },
+    { "dd": 0.10, "mult": 0.0 }
   ],
 
   "_ddRecoverHighDays": "throttle steps down at a new N-session equity high (or dd < half the step), integer >= 1",
