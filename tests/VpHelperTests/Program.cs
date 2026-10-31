@@ -639,6 +639,15 @@ static class Program
 		Check(Near(VpConfluenceRules.Weigh(EDevWeighting.Volume, 70, 80, 300, 1000, EDevRamp.Linear, st, mn, nr).w, 0.3), "DW8 volume 300/1000 = 0.3");
 		Check(Near(VpConfluenceRules.Weigh(EDevWeighting.Either, 70, 80, 300, 1000, EDevRamp.Linear, st, mn, nr).w, 0.875)
 			&& Near(VpConfluenceRules.Weigh(EDevWeighting.Either, 20, 80, 600, 1000, EDevRamp.Linear, st, mn, nr).w, 0.6), "DW8 Either = max(time, volume)");
+		// B2: Either uses only the bases with a reference; noRef only when neither has one
+		Func<double, double, double, double, VpDevWeight> E = (eb, xb, ev, xv) => VpConfluenceRules.Weigh(EDevWeighting.Either, eb, xb, ev, xv, EDevRamp.Linear, st, mn, nr);
+		var eV = E(4, double.NaN, 300, 1000); var eT = E(4, 80, double.NaN, 1000); var eB = E(20, 80, 600, 1000); var eB2 = E(60, 80, 300, 1000); var eN = E(4, double.NaN, double.NaN, double.NaN);
+		Check(Near(eV.w, 0.3) && eV.basis == "either:volume" && !eV.noRef, "DW B2 only volume has a reference: w 0.3 (not noRef 0.5) [" + eV.w + "]");
+		Check(eT.w == 0 && eT.belowStart && eT.basis == "either:time" && !eT.noRef, "DW B2 only time has a reference: 4/80 below start -> 0 (not noRef 0.5) [" + eT.w + "]");
+		Check(Near(eB.w, 0.6) && eB.basis == "either:volume" && Near(eB2.w, 0.75) && eB2.basis == "either:time", "DW B2 both: max wins, basis named");
+		Check(eN.noRef && eN.w == 0.5, "DW B2 neither: noRef 0.50");
+		Check(VpConfluenceRules.DevWeightLine(1, "ds1:s9", EDevWeighting.Either, eB2, EDevRamp.Linear, st, 3, 0.67).Contains("basis(either:time)")
+			&& VpConfluenceRules.DevWeightLine(1, "ds1:s9", EDevWeighting.Either, eN, EDevRamp.Linear, st, 0, 0.67).Contains("basis(noref)"), "DW B2 journal shows the basis used");
 		Check(VpConfluenceRules.Weigh(EDevWeighting.Off, 1, 80, 1, 1000, EDevRamp.Linear, st, mn, nr).w == 1, "DW Off: w 1");
 		Check(VpConfluenceRules.Weigh(EDevWeighting.Volume, 70, 80, double.NaN, 1000, EDevRamp.Linear, st, mn, nr).noRef, "DW8 volume basis without a snapshot total -> noRef");
 		// 9. weekly references weekly only: per-stream medians

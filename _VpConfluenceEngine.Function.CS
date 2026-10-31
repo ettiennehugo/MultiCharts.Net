@@ -40,6 +40,7 @@ namespace PowerLanguage.Function
 		public double expected;   // median of the reference set; NaN when there was none
 		public bool noRef;        // no completed reference: w = noRef weight
 		public bool belowStart;   // raw < start: w = 0
+		public string basis;      // Either only: "either:time" / "either:volume" (the basis used); null otherwise
 	}
 
 	public static class VpConfluenceRules
@@ -109,9 +110,14 @@ namespace PowerLanguage.Function
 				case EDevWeighting.Volume: return Weigh(elapsedVol, expectedVol, ramp, start, min, noRef);
 				case EDevWeighting.Either:
 				{
+					// PR #61 B2 (approved): only bases with a reference compete; noRef only when neither has one.
 					VpDevWeight t = Weigh(elapsedBars, expectedBars, ramp, start, min, noRef);
 					VpDevWeight v = Weigh(elapsedVol, expectedVol, ramp, start, min, noRef);
-					return v.w > t.w ? v : t;
+					if (t.noRef && v.noRef) return t;
+					bool useVol = t.noRef || (!v.noRef && v.w > t.w);
+					VpDevWeight pick = useVol ? v : t;
+					pick.basis = useVol ? "either:volume" : "either:time";
+					return pick;
 				}
 				default: return new VpDevWeight { w = 1, raw = 1, elapsed = elapsedBars, expected = expectedBars };
 			}
@@ -125,7 +131,7 @@ namespace PowerLanguage.Function
 		public static string DevWeightLine(int datastream, string profileId, EDevWeighting mode, VpDevWeight d, EDevRamp ramp, double start, int refN, double sourceThreshold)
 		{
 			var ci = System.Globalization.CultureInfo.InvariantCulture;
-			string basis = d.noRef ? "noref" : mode.ToString().ToLowerInvariant();
+			string basis = d.noRef ? "noref" : (d.basis ?? mode.ToString().ToLowerInvariant());
 			string text = "VPCONF devweight ds(" + datastream.ToString(ci) + ") profile(" + profileId + ") basis(" + basis + ")"
 				+ " elapsed(" + d.elapsed.ToString("0.###", ci) + ") expected(" + (double.IsNaN(d.expected) ? "na" : d.expected.ToString("0.###", ci)) + ")"
 				+ " raw(" + (double.IsNaN(d.raw) ? "na" : d.raw.ToString("0.000", ci)) + ") ramp(" + ramp.ToString().ToLowerInvariant() + ")"
