@@ -37,10 +37,13 @@ namespace PowerLanguage.Function
 		public const string EvtNext = "pm.evtNext";
 		// book-level values written by the MM into CommonPortfolioData
 		public const string Mult = "pm.mult", Heat = "pm.heat", Dd = "pm.dd", Rho = "pm.rho";
+		public const string Profile = "pm.profile", Uncorr = "pm.uncorr", Uncorr03 = "pm.uncorr03";
 	}
 
 	public enum EPortState { Flat = 0, Armed = 1, Long = 2, Short = 3, Exiting = 4, Halted = 5 }
 	public enum EPortSizing { CodeSize = 0, RiskParity = 1, VolTarget = 2 }
+	/// <summary>Risk profile (spec §5.1/§5.1a): Starter is the default until uncorr ≥ 3 and uncorr03 ≥ 3; switched manually only.</summary>
+	public enum EPortProfile { Starter = 0, ScaledBook = 1 }
 
 	/// <summary>Immutable ring of (day, value) daily returns; Append returns a new instance (copy-on-write, safe to share).</summary>
 	public sealed class _PortReturns
@@ -72,18 +75,21 @@ namespace PowerLanguage.Function
 	/// <summary>M-PORT configuration (spec §5.1). Code defaults; no [Input]. Override _PortfolioRiskManager.Config in a subclass to change.</summary>
 	public sealed class PortMmConfig
 	{
+		/// <summary>Base set of defaults (journalled). new PortMmConfig() = Starter; ForProfile(ScaledBook) = rev 1 numbers.</summary>
+		public EPortProfile profile = EPortProfile.Starter;
 		public EPortSizing sizing = EPortSizing.RiskParity;
-		public double bookVolTarget = 0.10;
+		public double bookVolTarget = 0.12;
 		public double riskPerTrade = 0.005;
 		/// <summary>Hard per-trade cap (spec §5.1 P1): n × widened R$ (pm.R$w, else pm.R$) &gt; this × book ⇒ skip, never resize. ≤ 0.01.</summary>
 		public double maxTradeRisk = 0.01;
-		public double heatCap = 0.04;
-		public double clusterCap = 0.02;
+		public double heatCap = 0.015;
+		/// <summary>Checked only when the merged cluster already holds a position, an entry allowed earlier this step, or seeded open risk (P2 (c), v6.1).</summary>
+		public double clusterCap = 0.0075;
 		public double rhoMerge = 0.9;
 		public int rhoWin = 60;
 		public int rhoMinDays = 40;
-		public int maxPositions = 6;
-		public PortDdStep[] ddSteps = { new PortDdStep(0.05, 0.5), new PortDdStep(0.10, 0.25), new PortDdStep(0.15, 0.0) };
+		public int maxPositions = 2;
+		public PortDdStep[] ddSteps = { new PortDdStep(0.03, 0.5), new PortDdStep(0.06, 0.25), new PortDdStep(0.10, 0.0) };
 		public int ddRecoverHighDays = 20;
 		public double dailyLossStop = 0.02;
 		public double dailyLossFlatten = 0.03;
@@ -105,6 +111,20 @@ namespace PowerLanguage.Function
 		/// <summary>Outer hard ceiling on the combined WIDENED open + new risk of all strategies, fraction of book (0.10 = 10%).
 		/// Set by the _PortfolioRiskManager TotalRiskCapPct [Input] (spec §5.4 item 0); both it and heatCap apply, the tighter binds.</summary>
 		public double totalRiskCap = 0.10;
+		/// <summary>Live strategy ids (pm.id) for the uncorr advisory; null = every publishing strategy (JSON "liveIds").</summary>
+		public string[] liveIds;
+
+		/// <summary>Spec §5.1 defaults of a profile (a fresh instance).</summary>
+		public static PortMmConfig ForProfile(EPortProfile p)
+		{
+			var c = new PortMmConfig();
+			if (p == EPortProfile.ScaledBook)
+			{
+				c.profile = EPortProfile.ScaledBook; c.bookVolTarget = 0.10; c.heatCap = 0.04; c.clusterCap = 0.02; c.maxPositions = 6;
+				c.ddSteps = new[] { new PortDdStep(0.05, 0.5), new PortDdStep(0.10, 0.25), new PortDdStep(0.15, 0.0) };
+			}
+			return c;
+		}
 
 		public string Validate()
 		{
@@ -140,6 +160,7 @@ namespace PowerLanguage.Function
 		public PortMmConfig Copy()
 		{
 			var c = (PortMmConfig)MemberwiseClone();
+			if (liveIds != null) c.liveIds = (string[])liveIds.Clone();
 			if (ddSteps != null) { c.ddSteps = new PortDdStep[ddSteps.Length]; for (int i = 0; i < ddSteps.Length; i++) c.ddSteps[i] = new PortDdStep(ddSteps[i].dd, ddSteps[i].mult); }
 			return c;
 		}
@@ -147,7 +168,7 @@ namespace PowerLanguage.Function
 		public override string ToString()
 		{
 			var dd = new List<string>(); if (ddSteps != null) foreach (var s in ddSteps) dd.Add($"{s.dd:0.###}->{s.mult:0.###}");
-			return $"sizing({sizing}) riskPerTrade({riskPerTrade}) maxTradeRisk({maxTradeRisk}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
+			return $"profile({profile}) sizing({sizing}) riskPerTrade({riskPerTrade}) maxTradeRisk({maxTradeRisk}) volTarget({bookVolTarget}) heatCap({heatCap}) clusterCap({clusterCap}) rhoMerge({rhoMerge}) rhoWin({rhoWin}) " +
 				$"maxPositions({maxPositions}) dd({string.Join(" ", dd)}) dailyStop({dailyLossStop}) dailyFlatten({dailyLossFlatten}) kill({stratKillR}R/{stratKillTrades}) session({stratDailyLosses} losses, scratch {scratchR}R) weekly(halve {weeklyHalveR}R x{weeklyHalveMult}, observe {weeklyObserveR}R) stale({staleBars}) minContracts({minContracts}) fillCheck({fillCheckEvals}) totalRiskCap({totalRiskCap})";
 		}
 	}
@@ -190,6 +211,13 @@ namespace PowerLanguage.Function
 			catch (JsonException ex) { warnings.Add($"PortMmConfig: {source} is not valid JSON ({ex.Message}), using code defaults"); return defaults; }
 
 			PortMmConfig c = Clone(defaults);
+			foreach (JProperty pp in o.Properties())
+			{   // "profile" is applied first and replaces the base; other fields then override (spec §5.1a, P8)
+				if (pp.Name.ToLowerInvariant() != "profile") continue;
+				EPortProfile pf;
+				if (pp.Value.Type == JTokenType.String && Enum.TryParse((string)pp.Value, true, out pf) && Enum.IsDefined(typeof(EPortProfile), pf)) c = PortMmConfig.ForProfile(pf);
+				else warnings.Add($"PortMmConfig: unknown profile '{pp.Value}', keeping the {defaults.profile} base");
+			}
 			foreach (JProperty p in o.Properties())
 			{
 				string n = p.Name.ToLowerInvariant();
@@ -235,6 +263,14 @@ namespace PowerLanguage.Function
 						}
 					case "stalebars": integer(warnings, p, 1, 10000, ref c.staleBars); break;
 					case "mincontracts": integer(warnings, p, 1, 100000, ref c.minContracts); break;
+					case "profile": break;   // applied above
+					case "liveids":
+						{
+							var a = v as JArray; var ids = new List<string>();
+							if (a != null) foreach (var t in a) if (t.Type == JTokenType.String) ids.Add((string)t);
+							if (a == null || ids.Count != a.Count) bad(warnings, p, "an array of pm.id strings"); else c.liveIds = ids.ToArray();
+							break;
+						}
 					case "fillcheckevals": integer(warnings, p, 0, 1000, ref c.fillCheckEvals); break;
 					case "idmcap": { double x; if (tryNum(v, out x) && x >= 1 && x <= 10) c.idmCap = x; else bad(warnings, p, "a number in [1, 10]"); break; }
 					default:
@@ -244,6 +280,22 @@ namespace PowerLanguage.Function
 			}
 			string err = c.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: {source} rejected ({err}), using code defaults"); return defaults; }
+			return c;
+		}
+
+		/// <summary>Spec §5.1a resolution: the subclass Config (invalid ⇒ ForProfile(profile)), then the JSON file (rejected ⇒
+		/// ForProfile(profile)). Never another profile. fallback = true when either was rejected (RUN line "config=fallback").</summary>
+		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, List<string> warnings, List<string> info, out bool fallback)
+		{
+			fallback = false;
+			string err = code == null ? "null" : code.Validate();
+			if (err != null) { warnings.Add($"PortMmConfig: code Config invalid ({err}), using ForProfile({profile})"); code = PortMmConfig.ForProfile(profile); fallback = true; }
+			if (string.IsNullOrWhiteSpace(path)) return code;
+			int before = warnings.Count;
+			PortMmConfig c = LoadFile(path, code, warnings, info);
+			if (ReferenceEquals(c, code))
+				for (int i = before; i < warnings.Count; i++)
+					if (warnings[i].Contains(" rejected (")) { c = PortMmConfig.ForProfile(profile); fallback = true; break; }
 			return c;
 		}
 
@@ -525,6 +577,10 @@ namespace PowerLanguage.Function
 		public double Mult { get; private set; } = 1;
 		public double Heat { get; private set; }
 		public double Drawdown { get; private set; }
+		/// <summary>§5.1a advisory (never changes profile or limits): merged clusters with ≥ 1 live strategy, and a greedy set of live
+		/// strategies with pairwise max(ρ, stressed ρ) &lt; 0.3. -1 until the first evaluation.</summary>
+		public int Uncorr { get; private set; } = -1;
+		public int Uncorr03 { get; private set; } = -1;
 		public double Book { get; private set; }
 		public double[,] Rho { get { return m_rho; } }
 		public int DdStageNow { get { return m_ddStage; } }
@@ -603,14 +659,15 @@ namespace PowerLanguage.Function
 			updateKills(v, day);
 			checkFills(v);
 			updateClusters(day.Date, v);
+			advisory(day.Date, v);
 
-			double heat = 0; var clHeat = new Dictionary<int, double>(); int open = 0;
+			double heat = 0; var clHeat = new Dictionary<int, double>(); var clCount = new Dictionary<int, int>(); int open = 0;
 			double capDollar = config.totalRiskCap * book;   // outer ceiling, widened risk (pm.riskOpen already uses the active = widened stop)
 			for (int i = 0; i < n; i++)
 			{
 				var s = v[i]; double r = s.publishes && s.riskOpen > 0 ? s.riskOpen : 0;
 				heat += r; int c = m_clusterId[i]; double h; clHeat.TryGetValue(c, out h); clHeat[c] = h + r;
-				if (s.position != 0) open++;
+				if (s.position != 0) { open++; int cc; clCount.TryGetValue(c, out cc); clCount[c] = cc + 1; }
 			}
 
 			// kill switches first: flatten, pause once flat
@@ -704,9 +761,11 @@ namespace PowerLanguage.Function
 				double r = nq * rw1;   // WIDENED risk for every check (spec §5.2)
 				if (r > tradeCap + 1e-9) { skip(d[i], s, "per-trade budget", $"widened risk ${r:0.00} (n {nq} x Rw {rw1:0.00}) > budget ${tradeCap:0.00} ({config.maxTradeRisk:P2} of book)"); continue; }
 				if (heat + r > heatCapD + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} (n {nq}) heat ${heat:0.00} room ${Math.Max(0, heatCapD - heat):0.00} cap ${heatCapD:0.00}"); continue; }
-				if (clHeat[c] + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${clHeat[c]:0.00} room ${Math.Max(0, clusterCapD - clHeat[c]):0.00} cap ${clusterCapD:0.00}"); continue; }
+				int clN; clCount.TryGetValue(c, out clN);
+				bool occupied = clN > 0 || clHeat[c] > 0;   // P2 (c): a lone entry in an empty cluster is not checked against clusterCap
+				if (occupied && clHeat[c] + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${clHeat[c]:0.00} room ${Math.Max(0, clusterCapD - clHeat[c]):0.00} cap ${clusterCapD:0.00}"); continue; }
 				if (_PortRiskCap.Breaks(total, r, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${r:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-				heat += r; clHeat[c] += r; total += r;
+				heat += r; clHeat[c] += r; total += r; clCount[c] = clN + 1;
 				if (config.fillCheckEvals > 0) notePending(s, nq, r);
 				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
 				open++;
@@ -841,6 +900,54 @@ namespace PowerLanguage.Function
 				}
 			}
 			m_clusterId = _PortMath.Clusters(m_seeds, m_rho, config.rhoMerge);
+		}
+
+		private DateTime m_advDay = DateTime.MinValue;
+
+		/// <summary>Live = in liveIds (null = all), valid pm.ver, not stale, not paused/killed, not in weekly observe (spec §5.1a).</summary>
+		private bool live(PortStratView s)
+		{
+			if (!s.publishes || s.stale || s.paused) return false;
+			KillTracker k; if (m_kill.TryGetValue(s.index, out k) && (k.killed || k.weekR <= config.weeklyObserveR)) return false;
+			if (config.liveIds != null && Array.IndexOf(config.liveIds, s.id) < 0) return false;
+			return true;
+		}
+
+		private void advisory(DateTime day, IList<PortStratView> v)
+		{
+			if (day == m_advDay) return;   // daily, after the merge
+			m_advDay = day;
+			int u, u3; Counts(v.Count, i => live(v[i]), m_clusterId, m_seeds, m_rho, out u, out u3);
+			Uncorr = u; Uncorr03 = u3;
+			journal?.Invoke(AdvisoryLine(config.profile, config.rhoMerge, u, u3));
+		}
+
+		/// <summary>The daily advisory journal line; "eligible" only when uncorr ≥ 3 AND uncorr03 ≥ 3 (P9). Never switches anything.</summary>
+		public static string AdvisoryLine(EPortProfile profile, double rhoMerge, int u, int u3)
+		{
+			bool ok = u >= 3 && u3 >= 3;
+			return $"PORT advisory: uncorr={u} (ρ≥{rhoMerge} clusters), uncorr03={u3} (greedy ρ<0.3) - scaled-book {(ok ? "eligible" : "not eligible")} when uncorr≥3 and uncorr03≥3; switch manually (profile {profile})";
+		}
+
+		/// <summary>uncorr = distinct merged clusters with ≥ 1 live strategy; uncorr03 = greedy (table order) set of live strategies with
+		/// pairwise ρ &lt; 0.3 (NaN ρ = unknown ⇒ correlated; same pm.cluster seed ⇒ ρ 1).</summary>
+		public static void Counts(int n, Func<int, bool> isLive, int[] clusterId, string[] seeds, double[,] rho, out int uncorr, out int uncorr03)
+		{
+			var cl = new HashSet<int>(); var pick = new List<int>();
+			for (int i = 0; i < n; i++)
+			{
+				if (!isLive(i)) continue;
+				cl.Add(clusterId != null && i < clusterId.Length ? clusterId[i] : i);
+				bool ok = true;
+				foreach (int j in pick)
+				{
+					bool seed = seeds != null && !string.IsNullOrEmpty(seeds[i]) && seeds[i] == seeds[j];
+					double x = rho != null ? rho[i, j] : double.NaN;
+					if (seed || double.IsNaN(x) || x >= 0.3) { ok = false; break; }
+				}
+				if (ok) pick.Add(i);
+			}
+			uncorr = cl.Count; uncorr03 = pick.Count;
 		}
 
 		/// <summary>Strategy returns when it has >= rhoMinDays of them, else the underlying's (spec §5.5).</summary>
