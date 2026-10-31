@@ -225,7 +225,7 @@ namespace PowerLanguage.Function
 		public static string Fnv1a64(string s)
 		{
 			ulong h = 14695981039346656037UL;
-			foreach (byte b in Encoding.UTF8.GetBytes(s ?? "")) { h ^= b; h *= 1099511628211UL; }
+			unchecked { foreach (byte b in Encoding.UTF8.GetBytes(s ?? "")) { h ^= b; h *= 1099511628211UL; } }   // FNV-1a wraps mod 2^64 by design
 			return h.ToString("x16", IC);
 		}
 
