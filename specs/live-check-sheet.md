@@ -336,7 +336,9 @@ Check what PR-E #78 changed: arming uses the widened stop, roundLots never overr
     - Take `entry` from the `PE ARM` line and `Close_fill`, `fillQty` and `riskOpen` from the `PE FILL` line (ES: tick 0.25, $50 per point).
     - **Pass:** `riskOpen` = (`Close_fill` − (`entry` − 6 ticks)) × 50 × `fillQty`, i.e. measured to the widened stop. Example: entry 5000.00, `Close_fill` 5001.00, `fillQty` 10 ⇒ (5001.00 − 4998.50) × 50 × 10 = 1 250.
     - **Fail:** `riskOpen` = (`Close_fill` − (`entry` − 4 ticks)) × 50 × `fillQty`, the structural-stop version (pre-PR-E behaviour; (5001.00 − 4999.00) × 50 × 10 = 1 000 in the example).
-    - Cross-check: when `Close_fill` = `entry`, `riskOpen` equals the `riskNew` printed at ARM (`fillQty` × 6 ticks × $12.50; 10 contracts ⇒ 750).
+    - Cross-check: when `Close_fill` = `entry`, `riskOpen` = `fillQty` × 6 × $12.50 (10 contracts ⇒ 750). Do not compare it with `riskNew` from ARM: that is the widened R$ × the strategy's ARM qty, and the MM's qty (starter default `sizing = RiskParity`, `_PortMM` L80) usually differs from it.
+    - The 6-tick stop is a synthetic widened stop, chosen so the widened risk stays under the 1% budget (0.5% × 6/4 = 0.75%). It is not the 14-tick cost floor: widening 4 → 14 ticks gives 1.75% and the entry is denied.
+    - If `Close_fill` ≤ `entry` − 6 ticks (or the fill price itself is at or below the widened stop), `riskOpen` is 0 (`_PortArm.RiskOpen` floors at 0). That run proves nothing, so rerun it.
 - **(b) roundLots Warning.**
     - Setup: a chart (no PT needed) with `_TestPortE` and the (b) inputs, `TraceLevel` ≤ Warning. Choose the capital so the uncapped size is above 150: with 100 000 and a 4-tick ES stop, 0.1 gives about 200.
     - Expect in the CS-1 log: `sizeForRisk - roundLots ignored on {symbol}: maxQty qty(150) kept, roundLots would give qty(100)`, where {symbol} is `Bars.Info.Name`.
