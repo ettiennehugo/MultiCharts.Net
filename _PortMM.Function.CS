@@ -8,7 +8,7 @@ using System.IO;
 namespace PowerLanguage.Function
 {
 	// ============================================================================================
-	// M-PORT (specs/m-port-spec.md rev 1): portfolio money management for MultiCharts .NET Portfolio Trader.
+	// M-PORT (specs/m-port-spec.md rev 2.7): portfolio money management for MultiCharts .NET Portfolio Trader.
 	// Pure C# (no MultiCharts types) so the whole allocator is unit-tested off-MC (tests/PortMMTests).
 	// _CustomSignal publishes the pm.* keys (_PortKeys) into MyPortfolioData; _PortfolioRiskManager (the PT money-management
 	// signal) maps PortfolioStrategies to PortStratView, calls _PortMM.Decide and applies the PortDecisions
@@ -72,7 +72,7 @@ namespace PowerLanguage.Function
 
 	public sealed class PortDdStep { public double dd; public double mult; public PortDdStep(double dd, double mult) { this.dd = dd; this.mult = mult; } }
 
-	/// <summary>M-PORT configuration (spec §5.1). Code defaults; no [Input]. Override _PortfolioRiskManager.Config in a subclass to change.</summary>
+	/// <summary>M-PORT configuration (spec §5.1). Code defaults; no [Input] on PortMmConfig; totalRiskCap comes from _PortfolioRiskManager.TotalRiskCapPct. Override _PortfolioRiskManager.Config in a subclass to change.</summary>
 	public sealed class PortMmConfig
 	{
 		/// <summary>Base set of defaults (journalled). new PortMmConfig() = Starter; ForProfile(ScaledBook) = rev 1 numbers.</summary>
@@ -188,16 +188,21 @@ namespace PowerLanguage.Function
 
 		/// <summary>As LoadFile; rejected = the file was read but failed as a whole (not JSON / not an object / Validate failed).</summary>
 		public static PortMmConfig LoadFile(string path, PortMmConfig defaults, List<string> warnings, List<string> info, out bool rejected)
+		{ bool unreadable; return LoadFile(path, defaults, warnings, info, out rejected, out unreadable); }
+
+		/// <summary>As LoadFile; unreadable = a path was given but the file is missing or could not be read (defaults returned).
+		/// The warnings name the problem only; Resolve logs the limits it actually uses.</summary>
+		public static PortMmConfig LoadFile(string path, PortMmConfig defaults, List<string> warnings, List<string> info, out bool rejected, out bool unreadable)
 		{
-			rejected = false;
+			rejected = false; unreadable = false;
 			if (string.IsNullOrWhiteSpace(path)) return defaults;
 			string json;
 			try
 			{
-				if (!File.Exists(path)) { warnings.Add($"PortMmConfig: file not found '{path}', using code defaults"); return defaults; }
+				if (!File.Exists(path)) { warnings.Add($"PortMmConfig: file not found '{path}'"); unreadable = true; return defaults; }
 				json = File.ReadAllText(path);
 			}
-			catch (Exception ex) { warnings.Add($"PortMmConfig: cannot read '{path}' ({ex.GetType().Name}: {ex.Message}), using code defaults"); return defaults; }
+			catch (Exception ex) { warnings.Add($"PortMmConfig: cannot read '{path}' ({ex.GetType().Name}: {ex.Message})"); unreadable = true; return defaults; }
 			PortMmConfig c = Parse(json, defaults, warnings, out rejected, path);
 			if (!ReferenceEquals(c, defaults)) info.Add($"PortMmConfig loaded from '{path}': {c}");
 			return c;
@@ -216,9 +221,9 @@ namespace PowerLanguage.Function
 			{
 				JToken t = JToken.Parse(json ?? "");
 				o = t as JObject;
-				if (o == null) { warnings.Add($"PortMmConfig: {source} is not a JSON object, using code defaults"); return defaults; }
+				if (o == null) { warnings.Add($"PortMmConfig: {source} rejected (not a JSON object)"); return defaults; }
 			}
-			catch (JsonException ex) { warnings.Add($"PortMmConfig: {source} is not valid JSON ({ex.Message}), using code defaults"); return defaults; }
+			catch (JsonException ex) { warnings.Add($"PortMmConfig: {source} rejected (not valid JSON: {ex.Message})"); return defaults; }
 
 			PortMmConfig c = Clone(defaults);
 			foreach (JProperty pp in o.Properties())
@@ -262,7 +267,7 @@ namespace PowerLanguage.Function
 						}
 					case "stratkilltrades": integer(warnings, p, 1, 10000, ref c.stratKillTrades); break;
 					case "stratdailylosses": integer(warnings, p, 1, 1000, ref c.stratDailyLosses); break;
-					case "scratchr": num(warnings, p, 0, 1, true, ref c.scratchR); break;
+					case "scratchr": num(warnings, p, 0, true, 1, false, ref c.scratchR); break;   // [0, 1): 0 = no scratch band
 					case "weeklyhalvemult": num(warnings, p, 0, 1, false, ref c.weeklyHalveMult); break;
 					case "weeklyhalver":
 					case "weeklyobserver":
@@ -289,22 +294,31 @@ namespace PowerLanguage.Function
 				}
 			}
 			string err = c.Validate();
-			if (err != null) { warnings.Add($"PortMmConfig: {source} rejected ({err}), using code defaults"); return defaults; }
+			if (err != null) { warnings.Add($"PortMmConfig: {source} rejected ({err})"); return defaults; }
 			rejected = false;
 			return c;
 		}
 
 		/// <summary>Spec §5.1a resolution: the subclass Config (invalid ⇒ ForProfile(profile)), then the JSON file (rejected ⇒
-		/// ForProfile(profile)). Never another profile. fallback = true when either was rejected (RUN line "config=fallback").</summary>
+		/// ForProfile(profile)); a set ConfigPath whose file is missing or unreadable ⇒ the code Config (rev 2.7, Analyst ruling approved
+		/// by Ettienne 2026-11-01). Never another profile. fallback = true in all three cases (RUN line / Status "config=fallback").</summary>
 		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, List<string> warnings, List<string> info, out bool fallback)
+		{ return Resolve(code, profile, path, null, warnings, info, out fallback); }
+
+		/// <summary>As Resolve; pathError != null = the ConfigPath property threw ("{type}: {msg}"): treated like an unreadable file,
+		/// i.e. the code Config with fallback = true and ONE Warning naming the error and the limits used.</summary>
+		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, string pathError, List<string> warnings, List<string> info, out bool fallback)
 		{
 			fallback = false;
 			string err = code == null ? "null" : code.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: code Config invalid ({err}), using ForProfile({profile})"); code = PortMmConfig.ForProfile(profile); fallback = true; }
+			string used = fallback ? $"ForProfile({profile})" : "code Config";
+			if (pathError != null) { warnings.Add($"PortMmConfig: ConfigPath failed ({pathError}), using {used} (config=fallback)"); fallback = true; return code; }
 			if (string.IsNullOrWhiteSpace(path)) return code;
-			bool rejected;
-			PortMmConfig c = LoadFile(path, code, warnings, info, out rejected);
-			if (rejected) { c = PortMmConfig.ForProfile(profile); fallback = true; }
+			bool rejected, unreadable;
+			PortMmConfig c = LoadFile(path, code, warnings, info, out rejected, out unreadable);
+			if (rejected) { warnings.Add($"PortMmConfig: '{path}' rejected, using ForProfile({profile}) (config=fallback)"); c = PortMmConfig.ForProfile(profile); fallback = true; }
+			else if (unreadable) { warnings.Add($"PortMmConfig: '{path}' not loaded, using {used} (config=fallback)"); fallback = true; }
 			return c;
 		}
 
@@ -321,10 +335,13 @@ namespace PowerLanguage.Function
 		}
 
 		private static void num(List<string> w, JProperty p, double lo, double hi, bool hiInclusive, ref double field)
+		{ num(w, p, lo, false, hi, hiInclusive, ref field); }
+
+		private static void num(List<string> w, JProperty p, double lo, bool loInclusive, double hi, bool hiInclusive, ref double field)
 		{
 			double x;
-			if (tryNum(p.Value, out x) && x > lo && (hiInclusive ? x <= hi : x < hi)) field = x;
-			else bad(w, p, string.Format(CultureInfo.InvariantCulture, "a number in ({0}, {1}{2}", lo, hi, hiInclusive ? "]" : ")"));
+			if (tryNum(p.Value, out x) && (loInclusive ? x >= lo : x > lo) && (hiInclusive ? x <= hi : x < hi)) field = x;
+			else bad(w, p, string.Format(CultureInfo.InvariantCulture, "a number in {0}{1}, {2}{3}", loInclusive ? "[" : "(", lo, hi, hiInclusive ? "]" : ")"));
 		}
 
 		private static void integer(List<string> w, JProperty p, int lo, int hi, ref int field)
@@ -427,6 +444,21 @@ namespace PowerLanguage.Function
 			return true;
 		}
 
+		/// <summary>rev 2.7 (PR-E, Ettienne 2026-11-01: "arming should use the widened stop"): the stop portfolioArm makes active
+		/// (pm.riskOpen once filled) = widenedStop when it is valid (RDollarW finite), else the structural stop.</summary>
+		public static double ActiveStop(double entry, double stop, double widenedStop, double bpv)
+		{
+			return double.IsNaN(RDollarW(entry, stop, widenedStop, bpv)) ? stop : widenedStop;
+		}
+
+		/// <summary>pm.riskOpen = |price - active stop| x BPV x |pos|; 0 when flat, with no stop, or when the stop is at/beyond breakeven; never negative.</summary>
+		public static double RiskOpen(int pos, double avgEntry, double price, double activeStop, double bpv)
+		{
+			if (pos == 0 || double.IsNaN(activeStop) || !(bpv > 0)) return 0;
+			bool beyondBe = pos > 0 ? activeStop >= avgEntry : activeStop <= avgEntry;
+			return beyondBe ? 0 : Math.Max(0, (pos > 0 ? price - activeStop : activeStop - price)) * bpv * Math.Abs((double)pos);
+		}
+
 		/// <summary>pm.riskNew = Rw x qtyCode, Rw = R$ when R$w is NaN.</summary>
 		public static double RiskNew(double rDollar, double rDollarW, int qtyCode)
 		{
@@ -457,6 +489,49 @@ namespace PowerLanguage.Function
 
 		/// <summary>startPortfolio initialisation of pm.R$w.</summary>
 		public static void Init(Action<string, object> set) { set(_PortKeys.RDollarW, double.NaN); }
+	}
+
+	/// <summary>CS-4 round lots under the hard caps (M-PORT rev 2.7, PR-E; Ettienne 2026-11-01: "roundLots should not override the maxQty
+	/// and notional caps - log a warning and keep the maxQty and notional caps if this happens"). Pure C# so tests/PortMMTests runs it.</summary>
+	public static class _PortLots
+	{
+		public const int LotSize = 100;
+		public const string CapMaxQty = "maxQty";
+		public const string CapNotional = "notional cap";
+
+		/// <summary>Round-lot policy: floor to a multiple of 100 when qty >= 100; below 100 keep the odd lot (never 0 for qty > 0).</summary>
+		public static int Floor(int qty) { return qty < LotSize ? qty : (qty / LotSize) * LotSize; }
+
+		/// <summary>The hard cap that set the final qty: the notional cap when it lowered the maxQty result, else maxQty when it lowered
+		/// the risk qty, else null (no cap bound).</summary>
+		public static string CapWon(int riskQty, int afterMaxQty, int afterNotional)
+		{
+			if (afterNotional < afterMaxQty) return CapNotional;
+			if (afterMaxQty < riskQty) return CapMaxQty;
+			return null;
+		}
+
+		/// <summary>Final qty. roundLots off: qty. No cap bound: Floor(qty) (unchanged CS-4 rounding). A cap bound: the capped qty is kept,
+		/// roundLots never replaces it; conflict = true when roundLots would have given a different qty (rounded).</summary>
+		public static int Apply(int qty, bool roundLots, string capWon, out int rounded, out bool conflict)
+		{
+			rounded = roundLots ? Floor(qty) : qty;
+			conflict = capWon != null && rounded != qty;
+			return capWon != null ? qty : rounded;
+		}
+
+		/// <summary>The Warning traced by sizeForRisk on a conflict.</summary>
+		public static string ConflictWarning(string symbol, string capWon, int capped, int rounded)
+		{
+			return $"sizeForRisk - roundLots ignored on {symbol}: {capWon} qty({capped}) kept, roundLots would give qty({rounded})";
+		}
+
+		/// <summary>Dedupe for the conflict Warning (Analyst review of PR-E): true the first time a (cap, capped, rounded) triple is seen
+		/// in this set (the caller keeps one set per signal instance), false afterwards.</summary>
+		public static bool FirstConflict(HashSet<string> seen, string capWon, int capped, int rounded)
+		{
+			return seen != null && seen.Add(capWon + "|" + capped.ToString(CultureInfo.InvariantCulture) + "|" + rounded.ToString(CultureInfo.InvariantCulture));
+		}
 	}
 
 	/// <summary>M-PORT total open-risk cap (spec §5.4 item 0): the TotalRiskCapPct [Input] and the widened-risk check.</summary>
@@ -566,6 +641,15 @@ namespace PowerLanguage.Function
 	internal sealed class _PortMM
 	{
 		public PortMmConfig config = new PortMmConfig();
+		/// <summary>True when the config resolution fell back (RUN line config=fallback); appended to every Status (spec §5.1, rev 2.7).</summary>
+		public bool configFallback;
+
+		/// <summary>PT Status column: "{state} n={n} mult={book mult} cl={cluster} {reason}" + " config=fallback" when the MM fell back.</summary>
+		public static string StatusLine(EPortState state, string n, double mult, int cluster, string reason, bool configFallback)
+		{
+			string st = $"{state} n={n} mult={mult:0.00} cl={cluster} {reason}";   // unchanged format (trailing space when no reason)
+			return configFallback ? (string.IsNullOrEmpty(reason) ? st + "config=fallback" : st + " config=fallback") : st;
+		}
 		public Action<string> journal;
 
 		private double m_peak = double.NaN, m_lastBook = double.NaN, m_dayOpenBook = double.NaN;
@@ -718,7 +802,7 @@ namespace PowerLanguage.Function
 					if (entryAttempt)
 					{   // a rejected entry attempt: journal at Info (once per strategy+reason), keep an earlier reason (e.g. kill)
 						string prior = d[i].reason;
-						skip(d[i], s, why, $"risk ${(s.rDollar > 0 ? s.rDollar * Math.Max(1, s.qtyCode) : double.NaN):0.00} pm.R$ {s.rDollar} pm.R$w {s.rDollarW} heat ${heat:0.00} cap ${config.totalRiskCap * book:0.00}");
+						skip(d[i], s, why, $"risk ${(s.rDollar > 0 ? s.rDollar * Math.Max(0, s.qtyCode) : double.NaN):0.00} pm.R$ {s.rDollar} pm.R$w {s.rDollarW} heat ${heat:0.00} heat cap ${config.heatCap * book:0.00} total cap ${capDollar:0.00}");
 						if (!string.IsNullOrEmpty(prior)) d[i].reason = prior;
 					}
 					else if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why;
@@ -750,8 +834,8 @@ namespace PowerLanguage.Function
 				if (sm <= 0)
 				{
 					skip(d[i], s, tw, tw == "session stop"
-						? $"losses({tk.sessLosses}) >= {config.stratDailyLosses} on {tk.sessDay:yyyy-MM-dd} risk ${rw1 * Math.Max(1, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}"
-						: $"PORT observe: week R {tk.weekR:0.00} <= {config.weeklyObserveR}R risk ${rw1 * Math.Max(1, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}");
+						? $"losses({tk.sessLosses}) >= {config.stratDailyLosses} on {tk.sessDay:yyyy-MM-dd} risk ${rw1 * Math.Max(0, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}"
+						: $"PORT observe: week R {tk.weekR:0.00} <= {config.weeklyObserveR}R risk ${rw1 * Math.Max(0, s.qtyCode):0.00}/qtyCode budget ${tradeCap:0.00}");
 					continue;
 				}
 				double m = mult * sm;   // approved throttles only (ddSteps x weekly halve); caps below never resize
@@ -799,7 +883,7 @@ namespace PowerLanguage.Function
 			for (int i = 0; i < n; i++)
 			{
 				var s = v[i];
-				d[i].status = $"{s.state} n={(d[i].allowEntries ? d[i].entryContracts.ToString() : "-")} mult={mult:0.00} cl={m_clusterId[i]} {d[i].reason}";
+				d[i].status = StatusLine(s.state, d[i].allowEntries ? d[i].entryContracts.ToString() : "-", mult, m_clusterId[i], d[i].reason, configFallback);
 			}
 			m_lastBook = book;
 			return d;
