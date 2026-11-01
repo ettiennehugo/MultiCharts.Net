@@ -315,15 +315,15 @@ Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twic
 
 # Check 12: M-PORT PR-E widened-stop arming, roundLots Warning, config=fallback (#78)
 
-Check what PR-E #78 changed: arming uses the widened stop, roundLots never overrides a cap, and a `ConfigPath` with a missing file falls back. Do this check after #78 is merged.
+Check what PR-E #78 changed: arming uses the widened stop, roundLots never overrides a cap, and a `ConfigPath` with a missing file falls back. #78 is merged (81f82b5); run it on that build or later.
 
 **Test code needed (not in the repo; write it first, like the L1–L7 signals).**
 
 - **`_TestPortE` signal** (derives from `_CustomSignal`, `@ES` 5 min):
     - On each closed bar while flat, it goes long: entry = `Close`, structural stop = `Close` − 4 ticks, widened stop = `Close` − 6 ticks.
     - It sizes with `sizeForRisk(Bars, entry, stop, riskFraction, limits, widenedStop)` and sends `buy next bar market` for that qty.
-    - It prints `PE ARM riskNew=` + `MyPortfolioData[_PortKeys.RiskNew]` right after `sizeForRisk`.
-    - On the first closed bar in position, it prints `PE FILL close=` + `Close` + ` riskOpen=` + `MyPortfolioData[_PortKeys.RiskOpen]` (read after `base.CalcBar()`).
+    - It prints `PE ARM entry=` + entry + ` riskNew=` + `MyPortfolioData[_PortKeys.RiskNew]` right after `sizeForRisk`, and keeps that entry for the FILL line.
+    - On the first closed bar in position, it prints `PE FILL close=` + `Close` + ` qty=` + `Math.Abs(StrategyInfo.MarketPosition)` (the filled qty) + ` riskOpen=` + `MyPortfolioData[_PortKeys.RiskOpen]` (read after `base.CalcBar()`).
     - Exit after 3 bars.
     - Inputs come from the code: `riskFraction` = 0.005, `limits` = `default(SizingLimits)` for (a); `riskFraction` = 0.1, `limits` = `{ maxQty = 150, roundLots = true }` and widened stop = `double.NaN` for (b). Without a widened stop, the off-PT 1% budget skip does not apply.
 - **`_TestPortEMM` MM signal** (derives from `_PortfolioRiskManager`): `protected override string ConfigPath { get { return @"C:\nonexistent\m-port.json"; } }`.
@@ -333,9 +333,10 @@ Check what PR-E #78 changed: arming uses the widened stop, roundLots never overr
 
 - **(a) riskOpen at the fill uses the widened stop.**
     - Setup: Portfolio Trader, one strategy (`_TestPortE` on `@ES` 5 min, the (a) inputs), MM signal `_PortfolioRiskManager`.
-    - At the fill, `pm.riskOpen` = (`Close` − widened stop) × 50 × qty, i.e. based on 6 ticks below the entry, not 4.
-    - When the fill bar closes at the entry price, `riskOpen` equals the `riskNew` printed at ARM (qty × 6 ticks × $12.50). Example: 10 contracts → 750.
-    - **Fail:** `riskOpen` matches the structural stop (qty × 4 ticks × $12.50 at the entry price, e.g. 500), which was the pre-PR-E behaviour.
+    - Take `entry` from the `PE ARM` line and `Close_fill`, `fillQty` and `riskOpen` from the `PE FILL` line (ES: tick 0.25, $50 per point).
+    - **Pass:** `riskOpen` = (`Close_fill` − (`entry` − 6 ticks)) × 50 × `fillQty`, i.e. measured to the widened stop. Example: entry 5000.00, `Close_fill` 5001.00, `fillQty` 10 ⇒ (5001.00 − 4998.50) × 50 × 10 = 1 250.
+    - **Fail:** `riskOpen` = (`Close_fill` − (`entry` − 4 ticks)) × 50 × `fillQty`, the structural-stop version (pre-PR-E behaviour; (5001.00 − 4999.00) × 50 × 10 = 1 000 in the example).
+    - Cross-check: when `Close_fill` = `entry`, `riskOpen` equals the `riskNew` printed at ARM (`fillQty` × 6 ticks × $12.50; 10 contracts ⇒ 750).
 - **(b) roundLots Warning.**
     - Setup: a chart (no PT needed) with `_TestPortE` and the (b) inputs, `TraceLevel` ≤ Warning. Choose the capital so the uncapped size is above 150: with 100 000 and a 4-tick ES stop, 0.1 gives about 200.
     - Expect in the CS-1 log: `sizeForRisk - roundLots ignored on {symbol}: maxQty qty(150) kept, roundLots would give qty(100)`, where {symbol} is `Bars.Info.Name`.
