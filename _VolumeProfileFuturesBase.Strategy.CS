@@ -600,10 +600,9 @@ namespace PowerLanguage.Strategy
 		private readonly bool[] m_flowHistoryDone = new bool[3];   // Trade, Bid, Ask
 		private int m_flowClosedBar = -1, m_flowIogBar = -1;
 		private double m_flowIogLastVol;
-		private System.Reflection.MemberInfo m_barTime, m_barClose, m_barVolume;
-		/// <summary>Spec S1, PROBE P-BA1: the ChartType member name for Volume Delta (the PG names it only in prose). Parsed at
-		/// StartCalc of the level request; an unknown name logs one Warning and the McBidAsk tier stays empty.</summary>
-		protected string McBidAskChartTypeName { get; set; } = "VolumeDelta";
+		/// <summary>Spec S1: the MultiCharts chart type (Bars.Request.Resolution.ChartType) of the McBidAsk level request.
+		/// Live Check 9a: the enum has no VolumeDelta member; FootPrint is the per-level Ask/Bid-traded chart type.</summary>
+		protected ChartType McBidAskChartType { get; set; } = ChartType.FootPrint;
 		private int m_mcLoaded; private DateTime m_mcFirst = DateTime.MaxValue, m_mcLast = DateTime.MinValue;
 		private bool m_mcHistoryDone, m_mcLoadedLogged;
 		private DateTime m_mcSession = DateTime.MinValue; private int m_mcSessBars, m_mcSessAgree, m_mcSessCover, m_mcSessCmp; private bool m_mcSessFellLogged;
@@ -615,7 +614,7 @@ namespace PowerLanguage.Strategy
 		{
 			stopOrderFlowLoads();
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
-			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false;
+			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false; m_mcDiagLogged = null; m_mcHistBatches = m_mcHistNullBatches = m_mcHistBars = 0; m_mcHistLevels = 0;
 			m_mcSession = DateTime.MinValue; m_mcSessBars = m_mcSessAgree = m_mcSessCover = m_mcSessCmp = 0; m_mcSessFellLogged = false;
 			m_flowClosedBar = -1; m_flowIogBar = -1; m_flowIogLastVol = 0;
 			for (int i = 0; i < m_flowHistoryDone.Length; i++) m_flowHistoryDone[i] = false;
@@ -660,16 +659,18 @@ namespace PowerLanguage.Strategy
 			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off) startMcLevelLoader(from);
 		}
 
-		// Spec S1 ingestion: one more request, a copy of Bars.Request with the Volume Delta chart type. PROBES P-BA1..P-BA4 open,
-		// so the chart type is parsed by name and Data2 / RTData2 / BarPriceLevels / PriceLevel members are read by reflection.
+		// Spec S1 ingestion: one more request, a copy of Bars.Request with ChartType McBidAskChartType (FootPrint). PROBES P-BA2..P-BA4 open;
+		// Data2 / RTData2 / BarPriceLevels / PriceLevel are read through the typed API.
 		private void startMcLevelLoader(DateTime from)
 		{
-			ChartType ct;
-			try { ct = (ChartType)Enum.Parse(typeof(ChartType), McBidAskChartTypeName); }
-			catch { if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"OF McBidAsk chartType({McBidAskChartTypeName}) unknown (PROBE P-BA1): tier disabled"); return; }
 			InstrumentDataRequest req = Bars.Request;
 			Resolution res = req.Resolution;
-			res.ChartType = ct;
+			// MC forum t=52737 (MC support): Data2 stays null unless the FootPrint resolution is built with CreateFootPrint
+			// (delta + footprint modes). Other chart types: set the enum directly.
+			if (McBidAskChartType == ChartType.FootPrint)
+				res = Resolution.CreateFootPrint(res.Type, res.Size, CumulativeDeltaChartType.ASK_TRADE_BID_TRADE, FootPrintChartType.BID_ASK_VOL, false);
+			else
+				res.ChartType = McBidAskChartType;
 			req.Resolution = res;
 			req.From = from;
 			req.To = DateTime.Now.AddDays(1);
@@ -678,55 +679,71 @@ namespace PowerLanguage.Strategy
 			lock (m_flowLock) m_flowLoads.Add(r);
 		}
 
+		private int m_mcHistBatches, m_mcHistNullBatches, m_mcHistBars; private long m_mcHistLevels;   // cumulative history diagnostics
+		private HashSet<string> m_mcDiagLogged;   // lazy: McBidAsk diagnostics already journaled (each once per run)
+
+		// Journal one diagnostic line once per key. Called under m_flowLock (DataLoader thread).
+		private void mcDiag(string key, string line)
+		{
+			if (m_mcDiagLogged == null) m_mcDiagLogged = new HashSet<string>();
+			if (!m_mcDiagLogged.Add(key)) return;
+			engineSink(ETraceLevel.Journal)?.Invoke(line);
+		}
+
+		// Typed PG §4.7.4 API: IDataLoaderResult.Data2 (BarPriceLevels[]) / RTData2 (BarPriceLevels?); BarPriceLevels.Levels
+		// (PriceLevel[]) and .Time; PriceLevel.Price / UpVolume / DownVolume (MC forum t=52737). No string lookups.
 		private void onMcLevels(IDataLoaderResult result)
 		{
 			lock (m_flowLock)
 			{
 				if (m_flow == null) return;
+				bool completed = false;
 				try
 				{
+					completed = result.IsCompleted;
+					mcDiag("event:" + result.Event + ":" + completed, $"OF McBidAsk diag event({result.Event}) isCompleted({completed})");
 					if (result.Event == DataLoadedEvent.History)
 					{
-						var data = reflectMember(result, "Data2") as System.Collections.IEnumerable;
-						if (data != null) foreach (object bpl in data) mcSet(bpl);
-						if (result.IsCompleted) m_mcHistoryDone = true;
+						BarPriceLevels[] data = result.Data2;
+						if (data == null) m_mcHistNullBatches++;
+						else foreach (BarPriceLevels bpl in data) { m_mcHistBars++; m_mcHistLevels += bpl.Levels == null ? 0 : bpl.Levels.Length; mcSet(bpl); }
+						m_mcHistBatches++;
+						// Cumulative over all history batches, logged once at completion.
+						if (completed) mcDiag("hist:done", $"OF McBidAsk diag history done batches({m_mcHistBatches}) nullData2Batches({m_mcHistNullBatches}) data2Bars({m_mcHistBars}) levels({m_mcHistLevels})");
 					}
 					else if (result.Event == DataLoadedEvent.RTNewBar)
 					{
-						object rt = reflectMember(result, "RTData2");
-						if (rt != null) mcSet(rt);
+						BarPriceLevels? rt = result.RTData2;
+						mcDiag("rt:" + rt.HasValue, $"OF McBidAsk diag rt rtData2({(rt.HasValue ? "bar levels(" + (rt.Value.Levels == null ? 0 : rt.Value.Levels.Length) + ")" : "none")})");
+						if (rt.HasValue) mcSet(rt.Value);
 					}
 				}
-				catch { /* member names unverified (P-BA2): bars fall through to Quote / TickRule and count as missing */ }
+				catch (Exception ex)
+				{
+					mcDiag("ex:" + ex.GetType().Name, $"OF McBidAsk diag exception({ex.GetType().FullName}) message({ex.Message})");
+				}
+				// History completion stands even when parsing failed: the loaded line then reports bars(0).
+				if (completed && result.Event == DataLoadedEvent.History) m_mcHistoryDone = true;
 			}
 		}
 
-		private void mcSet(object bpl)
+		private void mcSet(BarPriceLevels bpl)
 		{
-			if (bpl == null) return;
-			DateTime t = (DateTime)reflectMember(bpl, "Time");   // PROBE P-BA3: equals the Data1 bar stamp (unverified)
-			var levels = reflectMember(bpl, "Levels") as System.Collections.IEnumerable;
-			if (levels == null) return;
-			var px = new List<double>(); var ask = new List<double>(); var bid = new List<double>();
-			foreach (object l in levels)
+			PriceLevel[] levels = bpl.Levels;
+			if (levels == null || levels.Length == 0) return;
+			DateTime t = bpl.Time;   // PROBE P-BA3: equals the Data1 bar stamp (unverified)
+			var px = new double[levels.Length]; var ask = new double[levels.Length]; var bid = new double[levels.Length];
+			for (int k = 0; k < levels.Length; k++)
 			{
-				px.Add(Convert.ToDouble(reflectMember(l, "Price")));
-				ask.Add(Convert.ToDouble(reflectMember(l, "AskTradedValue")));   // PROBE P-BA2: names as VP ILevel (unverified)
-				bid.Add(Convert.ToDouble(reflectMember(l, "BidTradedValue")));
+				// CumulativeDeltaChartType.ASK_TRADE_BID_TRADE: Up = Ask traded, Down = Bid traded (P-BA2, unverified mapping)
+				px[k] = levels[k].Price;
+				ask[k] = levels[k].UpVolume;
+				bid[k] = levels[k].DownVolume;
 			}
-			m_flow.AddMcLevels(t, px.ToArray(), ask.ToArray(), bid.ToArray());
+			m_flow.AddMcLevels(t, px, ask, bid);
 			m_mcLoaded++;
 			if (t < m_mcFirst) m_mcFirst = t;
 			if (t > m_mcLast) m_mcLast = t;
-		}
-
-		private static object reflectMember(object o, string name)
-		{
-			if (o == null) return null;
-			var p = o.GetType().GetProperty(name);
-			if (p != null) return p.GetValue(o, null);
-			var f = o.GetType().GetField(name);
-			return f != null ? f.GetValue(o) : null;
 		}
 
 		// S1 journal: loaded line once, T9 per session, tier fall-through once per session
@@ -736,7 +753,7 @@ namespace PowerLanguage.Strategy
 			if (!m_mcLoadedLogged && m_mcHistoryDone)
 			{
 				m_mcLoadedLogged = true;
-				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk loaded bars({m_mcLoaded}) first({m_mcFirst:yyyy-MM-dd HH:mm}) last({m_mcLast:yyyy-MM-dd HH:mm}) method({_OrderFlow.McBidAskMethod})");
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk loaded bars({m_mcLoaded}) first({m_mcFirst:yyyy-MM-dd HH:mm}) last({m_mcLast:yyyy-MM-dd HH:mm}) chartType({McBidAskChartType}) method({_OrderFlow.McBidAskMethod}) mapping(UpVolume=AskTraded DownVolume=BidTraded UNVERIFIED)");
 			}
 			if (fp.SessionKey != m_mcSession)
 			{
@@ -777,26 +794,14 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// Typed PowerLanguage Bar members (no reflection), confirmed by the API dump of the MC install:
+		// struct Bar { DateTime Time; double Open/High/Low/Close; float UpVolume/DownVolume/UnchangedVolume/TotalVolume; ... }.
 		private void flowTick(int stream, Bar b)
 		{
-			object o = b;   // Bar members read by reflection: their names are not in the Programming Guide (verify in the editor)
-			DateTime t = (DateTime)barMember(o, ref m_barTime, "Time");
-			double close = Convert.ToDouble(barMember(o, ref m_barClose, "Close"));
-			if (stream == 0) m_flow.AddTrade(t, close, Convert.ToDouble(barMember(o, ref m_barVolume, "TotalVolume", "Volume", "Ticks")));
+			DateTime t = b.Time;
+			double close = b.Close;
+			if (stream == 0) m_flow.AddTrade(t, close, (double)b.TotalVolume);   // Bar.TotalVolume is float: explicit widening to double
 			else m_flow.AddQuote(t, stream == 1, close);
-		}
-
-		private static object barMember(object o, ref System.Reflection.MemberInfo cache, params string[] names)
-		{
-			if (cache == null)
-				foreach (string n in names)
-				{
-					cache = (System.Reflection.MemberInfo)o.GetType().GetProperty(n) ?? o.GetType().GetField(n);
-					if (cache != null) break;
-				}
-			if (cache is System.Reflection.PropertyInfo) return ((System.Reflection.PropertyInfo)cache).GetValue(o, null);
-			if (cache is System.Reflection.FieldInfo) return ((System.Reflection.FieldInfo)cache).GetValue(o);
-			throw new InvalidOperationException("VPF-5: Bar has none of " + string.Join("/", names));
 		}
 
 		private void updateOrderFlow()

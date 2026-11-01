@@ -41,7 +41,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 # Check 2: Bar Magnifier and Volume Delta on `@ES`
 
-**Purpose / unblocks.** (a) **Bar Magnifier.** The CAT honest-simulation rule needs 1-tick magnifier inside W-T and 1-minute before it (CAT l.109, l.3954). The MC wiki *Custom Futures* page says Bar Magnifier is **not available for Custom Futures**. `@ES` from dxFeed is a native continuous symbol, not an MC Custom Future, but this still has to be confirmed. (b) **Volume Delta.** This is the MC-BidAsk FlowQuality tier (CAT l.164; `_VolumeProfileFuturesBase` `McBidAskChartTypeName = "VolumeDelta"`, l.603) and the P-BA probes (P3S S1).
+**Purpose / unblocks.** (a) **Bar Magnifier.** The CAT honest-simulation rule needs 1-tick magnifier inside W-T and 1-minute before it (CAT l.109, l.3954). The MC wiki *Custom Futures* page says Bar Magnifier is **not available for Custom Futures**. `@ES` from dxFeed is a native continuous symbol, not an MC Custom Future, but this still has to be confirmed. (b) **Volume Delta.** This is the MC-BidAsk FlowQuality tier (CAT l.164; `_VolumeProfileFuturesBase` `McBidAskChartType = ChartType.FootPrint`, l.606; Check 9a showed the MC `ChartType` enum has no `VolumeDelta` member) and the P-BA probes (P3S S1).
 
 **Steps: Bar Magnifier** [MC wiki *Bar Magnifier*]
 
@@ -235,7 +235,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 ## P-BA4: must the chart/request be in Ask/Bid-traded mode?
 
-**Purpose / unblocks.** The MC-BidAsk tier ingestion (P3S S1 step 6). The code clones `Bars.Request` and sets `Resolution.ChartType` to `VolumeDelta` (parsed by name, P-BA1), then reads `Data2` / `RTData2` by reflection (P-BA2) (`_VolumeProfileFuturesBase` l.660–700). The PG says nothing about whether the Breakdown mode (Ask Traded vs Bid Traded) must be set on the chart (P3S l.517).
+**Purpose / unblocks.** The MC-BidAsk tier ingestion (P3S S1 step 6). The code clones `Bars.Request` and sets `Resolution.ChartType` to `McBidAskChartType` (the MC enum, default `ChartType.FootPrint`; P-BA1 closed by Check 9a), then reads `Data2` / `RTData2` by reflection (P-BA2) (`_VolumeProfileFuturesBase` l.660–700). The PG says nothing about whether the Breakdown mode (Ask Traded vs Bid Traded) must be set on the chart (P3S l.517).
 
 **Steps**
 
@@ -243,16 +243,16 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 2. Run A: chart Format Instrument → Settings → Show Delta → Volume Delta, **Breakdown = Ask Traded vs Bid Traded**, Build from Ticks (Check 2 path).
 3. Run B: same, but **Breakdown = Up Ticks vs Down Ticks**.
 4. Run C: Show Delta **off** (a regular chart).
-5. For each run, read the journal: `OF McBidAsk loaded bars(..) first(..) last(..)`, the per-session `OF T9 session(..) signAgree(..) bars(..) mcCover(..)`, any `OF tier McBidAsk->… reason(..)` fall-back, and any `chartType(...) unknown (PROBE P-BA1)` warning.
+5. For each run, read the journal: `OF McBidAsk loaded bars(..) first(..) last(..)`, the per-session `OF T9 session(..) signAgree(..) bars(..) mcCover(..)`, any `OF tier McBidAsk->… reason(..)` fall-back (it now names the `chartType(..)` used).
 
-**Record.** Per run: bars loaded, first/last, mcCover %, signAgree %, fall-back reasons, P-BA1 warning (Y/N).
+**Record.** Per run: bars loaded, first/last, mcCover %, signAgree %, fall-back reasons, chartType logged.
 
 **Pass / fail.** P-BA4 is **answered** when runs A–C are compared:
 
 - If C (and B) give the same mcCover and signAgree as A, the request is independent of chart mode.
 - If only A gives data, the chart must be in Ask/Bid mode (as BCS asserts).
 
-The check **fails** only if A also yields 0 bars. In that case also look at P-BA1 and P-BA2.
+The check **fails** only if A also yields 0 bars. In that case also look at P-BA2 and try `McBidAskChartType = ChartType.CumulativeDelta`.
 
 **If it fails.** Leave `McBidAsk = Off` and label the flow tier "Quote / TickRule". If chart mode is required, add a StartCalc assertion and a setup note: "Ask/Bid Volume Delta on Data1".
 

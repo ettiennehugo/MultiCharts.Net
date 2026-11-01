@@ -468,8 +468,8 @@ FlowValue      Absorption(int barsAgo, Side side, int edgeTicks=2, double volMul
 1. **Bid/ask volume IS readable from code.** This corrects Rev 2.5 Q1.
    - `VolumeProfile.ItemForBar(bn)` returns an `IProfile` with `POC`, `VA`, `Values`, `MaxDelta`/`MinDelta` and `HighVAForBar`/`LowVAForBar`/`POCForBar` (PG p84).
    - Each `ILevel` has `AskTradedValue`, `BidTradedValue` and `TotalValue` (PG p85).
-   - A DataLoader request with ChartType VolumeDelta or CumulativeDelta returns `BarPriceLevels { Bar, PriceLevel[] Levels, Index, Time, TickID }` per bar, which is a native footprint. Real time needs RTData2 (PG p76).
-   - **VPF-5 chain update:** insert a new tier 2, **"MC-BidAsk (High)"**, using MultiCharts' own Ask/Bid-traded split read through the VolumeDelta DataLoader request or the VolumeProfile levels. Prefer it over our own Lee-Ready. Keep our own Quote tier as the cross-check and fallback. TickRule and BarUpDown stay below.
+   - A DataLoader request with ChartType FootPrint or CumulativeDelta (the MC enum has no `VolumeDelta` member, Live Check 9a) returns `BarPriceLevels { Bar, PriceLevel[] Levels, Index, Time, TickID }` per bar, which is a native footprint. Real time needs RTData2 (PG p76).
+   - **VPF-5 chain update:** insert a new tier 2, **"MC-BidAsk (High)"**, using MultiCharts' own Ask/Bid-traded split read through the FootPrint DataLoader request or the VolumeProfile levels. Prefer it over our own Lee-Ready. Keep our own Quote tier as the cross-check and fallback. TickRule and BarUpDown stay below.
    - MC's rule puts inside-spread trades on the last recorded side (UM p35/p159), so tag the tier with the method name.
    - Acceptance test T9: on a replay day, MC-BidAsk bar delta and our Lee-Ready delta agree on sign for at least 90% of bars. That threshold is a guess; log the real figure.
 2. **Continuous futures** can't use Bar Magnifier, roll only at session end, and can't be used on Delta charts (UM p405, p145, p159; check whether these are printed or PDF page numbers). The user plans to use continuous futures. So:
@@ -503,7 +503,7 @@ Sources: **DXW** = MC wiki "DxFeed" (https://www.multicharts.com/trading-softwar
 - dxFeed's own TimeAndSale event carries `aggressorSide` (undefined/buy/sell) and the `bidPrice`/`askPrice` **at trade time**, plus `exchangeSaleConditions`, `validTick`, `type` (new/correction/cancel), `spreadLeg` and `extendedTradingHours` (DXT). Whether MC's dxFeed plug-in uses or exposes any of these: **no MC documentation, so unverified; assume not exposed**. The PG (p20–22, p71–76, p84–85) has no aggressor field, which confirms the Rev 2.5 finding for MC .NET.
 - Whether dxFeed's historical TimeAndSale via MC includes bid/ask at trade time: the vendor event has the fields (DXT), but MC only exposes separate Bid/Ask tick series. Tick alignment between those series and Trade ticks (same timestamp resolution, sequence) is **unverified**.
 
-**4. Bar Magnifier / Volume Delta on dxFeed continuous.** Bar Magnifier needs history at the detail resolution, and dxFeed supplies ticks for 2 years and minutes for 9 years (DXW). So a 1-tick magnifier is possible in principle on the last ~2 years, and a 1-minute magnifier on ~9 years. It isn't available in Portfolio Trader (BM p6). On `@ES` continuous symbols: **unverified** (see the correction in §1). The same goes for VolumeDelta chart types and DataLoader `ChartType = VolumeDelta` (PG p76) on `@ES`. If either fails, use the individual contract (`/ESZ26:XCME`) per session.
+**4. Bar Magnifier / Volume Delta on dxFeed continuous.** Bar Magnifier needs history at the detail resolution, and dxFeed supplies ticks for 2 years and minutes for 9 years (DXW). So a 1-tick magnifier is possible in principle on the last ~2 years, and a 1-minute magnifier on ~9 years. It isn't available in Portfolio Trader (BM p6). On `@ES` continuous symbols: **unverified** (see the correction in §1). The same goes for VolumeDelta chart types and DataLoader `ChartType = FootPrint` (PG p76; no `VolumeDelta` enum member) on `@ES`. If either fails, use the individual contract (`/ESZ26:XCME`) per session.
 
 **5. Time zone, session, prints.**
 - MC charts show Local or Exchange time per Format Instruments (UM p73). dxFeed timestamps are UTC epoch ms plus nanos (DXT), and MC converts them; which session template MC assigns to dxFeed CME symbols (CME Globex default vs custom) is **unverified**. Keep our `ToEastern` path and assert the chart time zone in StartCalc (the trace already logs it).
@@ -518,7 +518,7 @@ Sources: **DXW** = MC wiki "DxFeed" (https://www.multicharts.com/trading-softwar
   | Rank | Source | Requirement | Quality |
   |---|---|---|---|
   | 1 | `Aggressor` | dxFeed `aggressorSide`. **Not exposed by MC .NET** (§A3). Stays reserved; never detected today. | Exact |
-  | 2 | `MC-BidAsk` | VolumeDelta DataLoader `BarPriceLevels` or `ILevel.AskTradedValue/BidTradedValue` (PG p76, p84–85), with the chart in Ask/Bid-traded mode. It is built from dxFeed Bid/Ask ticks, so it is valid only within the **tick window (~2 yrs)**. | High |
+  | 2 | `MC-BidAsk` | FootPrint DataLoader `BarPriceLevels` or `ILevel.AskTradedValue/BidTradedValue` (PG p76, p84–85), with the chart in Ask/Bid-traded mode. It is built from dxFeed Bid/Ask ticks, so it is valid only within the **tick window (~2 yrs)**. | High |
   | 3 | `Quote` | Our Lee-Ready on DataLoader 1-tick Trade+Bid+Ask (dxFeed), `maxQuoteAgeMs`. Cross-check of tier 2 (T9). | High |
   | 4 | `TickRule` | 1-tick Trade only. | Medium |
   | 5 | `BarUpDown` | Up/Down volume, T7 passed. Gives the only flow signal **older than the tick window** (minute history back to ~2016). | Low |
@@ -544,7 +544,7 @@ Rev 2.5 §A Q1 "For IBKR historical bid/ask tick depth: unverified"; Rev 2.5 §E
 ### E. Must verify live (Ettienne)
 1. The exact continuous symbol in MC's lookup (`@ES` vs `/ES:XCME`), and whether the subscription covers CME, NYMEX, COMEX and CBOT (CL/GC/ZN need separate bundles).
 2. The earliest available tick, Bid and Ask date for ES, NQ, MES, MNQ, CL, GC and ZN (DataLoader 1-tick, QuoteField Trade/Bid/Ask). Is there any request size limit or throttling when loading 2 years of ticks?
-3. On `@ES`: does Bar Magnifier (1 tick) enable, does a Volume Delta chart open, and does a DataLoader `ChartType = VolumeDelta` request return `BarPriceLevels`?
+3. On `@ES`: does Bar Magnifier (1 tick) enable, does a Volume Delta chart open, and does a DataLoader `ChartType = FootPrint` request return `BarPriceLevels`?
 4. Is `Bars.Info` (MinMove/PriceScale/BigPointValue) correct for MES/MNQ/ZN (ZN = 1/64 tick)?
 5. Session template and time zone that MC assigns to dxFeed CME symbols, and whether ETH bars are present.
 6. Daily volume of 1-tick bars vs the dxFeed daily bar vs CME settlement volume for 3 sessions (tests filtering of block/spread/settlement prints).
