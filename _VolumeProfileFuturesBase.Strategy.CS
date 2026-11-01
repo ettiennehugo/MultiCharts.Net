@@ -142,6 +142,9 @@ namespace PowerLanguage.Strategy
 			updateSessionStats();   // VPF-2
 			stepRollDetector();     // VPF-4 (detector in _CustomSignal since S4; idempotent per bar)
 			updateOrderFlow();      // VPF-5 (no-op when OrderFlowEnabled = false)
+			if (m_flow == null) return;
+			if (mcRecalcCheck("bar")) return;   // Recalc spec §4.3: ExecControl.Recalculate() was the last statement (PROBE P-RC4)
+			flowIdleArm();                       // Recalc spec §4.3 step 5
 		}
 
 		//methods
@@ -607,6 +610,15 @@ namespace PowerLanguage.Strategy
 		private int m_mcLoaded; private DateTime m_mcFirst = DateTime.MaxValue, m_mcLast = DateTime.MinValue;
 		private bool m_mcHistoryDone, m_mcLoadedLogged;
 		private DateTime m_mcSession = DateTime.MinValue; private int m_mcSessBars, m_mcSessAgree, m_mcSessCover, m_mcSessCmp; private bool m_mcSessFellLogged;
+		// Recalc spec §4.2: the McBidAsk cache and the recalc gate outlive StartCalc/StopCalc and so ExecControl.Recalculate();
+		// only a signature change clears the cache. PROBE P-RC1: MC keeps this instance (and its fields) across Recalculate().
+		private readonly _OrderFlow.McLevelCache m_mcCache = new _OrderFlow.McLevelCache();   // under m_flowLock
+		private readonly _OrderFlow.McRecalcGate m_mcGate = new _OrderFlow.McRecalcGate();     // under m_flowLock
+		private string m_mcSig;   // this pass's request signature (null: no McBidAsk request this pass)
+		private bool m_mcCacheHit, m_mcCacheStoredLogged, m_idleArmed, m_idleTimeoutLogged, m_idleDoneLogged;
+		private volatile bool m_mcRecalcDecided;      // once per pass (the callback fallback may set it)
+		private volatile bool m_autoTradingSnap;      // Environment.IsAutoTradingMode, read on the calc thread for the callback fallback
+		private DateTime m_idleSince;
 
 		/// <summary>VPF-5: the engine (null when OrderFlowEnabled is false). Lock-free reads are safe from CalcBar.</summary>
 		protected _OrderFlow.FlowEngine Flow { get { return m_flow; } }
@@ -614,6 +626,10 @@ namespace PowerLanguage.Strategy
 		private void startOrderFlow()
 		{
 			stopOrderFlowLoads();
+			// Recalc spec §4.2: new pass. m_mcCache and the gate's recalc count are deliberately NOT reset here or in StopCalc.
+			lock (m_flowLock) m_mcGate.BeginPass();
+			m_mcSig = null; m_mcCacheHit = m_mcCacheStoredLogged = m_mcRecalcDecided = false;
+			m_idleArmed = m_idleTimeoutLogged = m_idleDoneLogged = false;
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
 			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false; m_mcDiagLogged = null; m_mcCallbacks = 0; m_mcResult = null; m_mcStarted = false; m_mcHistBatches = m_mcHistNullBatches = m_mcHistBars = 0; m_mcHistLevels = 0;
 			m_mcSession = DateTime.MinValue; m_mcSessBars = m_mcSessAgree = m_mcSessCover = m_mcSessCmp = 0; m_mcSessFellLogged = false;
@@ -631,7 +647,7 @@ namespace PowerLanguage.Strategy
 				IDataLoaderResult mr = m_mcResult;
 				// PG §4.7.4: IsCompleted is the only documented status member of IDataLoaderResult.
 				drainFlowQueue();
-				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag stop callbacks({System.Threading.Interlocked.CompareExchange(ref m_mcCallbacks, 0, 0)}) result({(mr == null ? "null" : "set")}) pending({(mr != null && !mr.IsCompleted ? 1 : 0)}) historyDone({m_mcHistoryDone})");
+				engineSink(ETraceLevel.Journal)?.Invoke(mcStopLine(mr, "stopCalc"));
 			}
 			stopOrderFlowLoads();
 			drainFlowQueue();
@@ -647,11 +663,22 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		// Calc thread only.
+		private string mcStopLine(IDataLoaderResult mr, string when)
+		{
+			// PG §4.7.4: IsCompleted is the only documented status member of IDataLoaderResult.
+			return $"OF McBidAsk diag stop callbacks({System.Threading.Interlocked.CompareExchange(ref m_mcCallbacks, 0, 0)}) result({(mr == null ? "null" : "set")}) pending({(mr != null && !mr.IsCompleted ? 1 : 0)}) historyDone({m_mcHistoryDone}) when({when})";
+		}
+
 		private void startFlowLoader()
 		{
 			m_flowLoaderStarted = true;
 			int first = Bars.FullSymbolData.Current - 1;
-			DateTime from = Bars.FullSymbolData.Time[first].AddDays(-1);   // covers the first bar's opening ticks
+			DateTime firstBar = Bars.FullSymbolData.Time[first];
+			// The last bar of the chart (PG: FullSymbolData.Count = bars on the chart; Time[k] is k bars back from Current; P-RC6 confirmed).
+			DateTime lastBar = Bars.FullSymbolData.Time[Bars.FullSymbolData.Current - Bars.FullSymbolData.Count];
+			DateTime from = firstBar.AddDays(-1);   // covers the first bar's opening ticks
+			DateTime to = lastBar.AddDays(1);       // Recalc spec §4.5: clamp to the chart (was DateTime.Now + 1 day)
 			var fields = FlowCfg.QuotesExpected
 				? new[] { RequestQuoteField.Trade, RequestQuoteField.Bid, RequestQuoteField.Ask } : new[] { RequestQuoteField.Trade };
 			for (int i = 0; i < fields.Length; i++)
@@ -659,42 +686,211 @@ namespace PowerLanguage.Strategy
 				InstrumentDataRequest req = Bars.Request;
 				req.Resolution = new Resolution(EResolution.Tick, 1);
 				req.QuoteField = fields[i];
-				req.From = from;
-				req.To = DateTime.Now.AddDays(1);
+				setRequestWindow(ref req, from, to);
 				req.Subscribe2RT = true;
 				IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, i);
 				lock (m_flowLock) m_flowLoads.Add(r);
 			}
 			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off)
 			{
-				try { startMcLevelLoader(from); }
+				try { mcStartOrReplay(firstBar, lastBar, from, to); }
 				catch (Exception ex) { engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag start exception({ex.GetType().FullName}) message({ex.Message})"); }
 			}
 		}
 
+		// Recalc spec §4.5: the request window. API dump (P-RC5/P-RC8): InstrumentDataRequest.Range is a DataRequest struct field
+		// (CreateFromTo sets RequestType FromTo); From/To are properties. Both carry the same window; TimeZone stays as copied from
+		// Bars.Request (the zone the chart bars and the session clock use).
+		private static void setRequestWindow(ref InstrumentDataRequest req, DateTime from, DateTime to)
+		{
+			req.Range = DataRequest.CreateFromTo(from, to);
+			req.From = from;
+			req.To = to;
+		}
+
+		// Calc thread only (journal text of a request window: the typed Range fields and the From/To properties).
+		private static string requestWindowText(InstrumentDataRequest req)
+		{
+			DataRequest rg = req.Range;
+			return $"range(type({rg.RequestType}) from({rg.From:yyyy-MM-dd HH:mm}) to({rg.To:yyyy-MM-dd HH:mm}) toAlwaysIsNow({rg.ToAlwaysIsNow})) " +
+				$"from({req.From:yyyy-MM-dd HH:mm}) to({req.To:yyyy-MM-dd HH:mm}) zone({req.TimeZone})";
+		}
+
+		// Recalc spec §4.2: replay the cache when it holds this request's completed history (no new request; a tail request on a
+		// live chart), otherwise clear it and request the full window. Calc thread only.
+		private void mcStartOrReplay(DateTime firstBar, DateTime lastBar, DateTime from, DateTime to)
+		{
+			Resolution cr = Bars.Request.Resolution;
+			string sig = $"{Bars.Info.Name}|{Bars.Info.DataFeed}|{cr.Type}|{cr.Size}|{McBidAskChartType}|{FlowCfg.McBidAsk}|{firstBar:yyyy-MM-dd HH:mm:ss}";
+			m_mcSig = sig;
+			bool live = Environment.IsRealTimeCalc || lastBar >= DateTime.Now.AddDays(-1);
+			string miss; int sets; long levels; DateTime cFirst, cLast; int pass, recalcs;
+			lock (m_flowLock)
+			{
+				miss = m_mcCache.MissReason(sig, firstBar, lastBar);
+				if (miss == null)
+				{
+					m_mcCache.ReplayInto(m_flow);
+					m_mcLoaded = m_mcCache.Sets; m_mcFirst = m_mcCache.First; m_mcLast = m_mcCache.Last;
+					m_mcHistoryDone = true;
+				}
+				else
+				{
+					m_mcCache.Clear();
+					m_mcCache.Signature = sig; m_mcCache.RequestFrom = from; m_mcCache.RequestTo = to;
+				}
+				sets = m_mcCache.Sets; levels = m_mcCache.Levels; cFirst = m_mcCache.First; cLast = m_mcCache.Last;
+				pass = m_mcGate.Pass; recalcs = m_mcGate.CountFor(sig);
+			}
+			if (miss != null)
+			{
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk cache miss reason({miss}) sig({sig})");
+				startMcLevelLoader(from, to, "full");
+				return;
+			}
+			m_mcCacheHit = true;
+			m_mcRecalcDecided = true;   // levels are present from the first bar: nothing to recalculate in this pass
+			DateTime tailFrom = sets > 0 ? cLast : from;
+			engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk cache hit sets({sets}) levels({levels}) first({cFirst:yyyy-MM-dd HH:mm}) last({cLast:yyyy-MM-dd HH:mm}) pass({pass}) " +
+				(live ? $"request(tail from({tailFrom:yyyy-MM-dd HH:mm}))" : "request(none)"));
+			if (recalcs > 0) engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc pass using cache pass({pass}) recalcCount({recalcs})");
+			if (live) startMcLevelLoader(tailFrom, DateTime.Now.AddDays(1), "tail");
+		}
+
 		// Spec S1 ingestion: one more request, a copy of Bars.Request with ChartType McBidAskChartType (FootPrint). PROBES P-BA2..P-BA4 open;
 		// Data2 / RTData2 / BarPriceLevels / PriceLevel are read through the typed API.
-		private void startMcLevelLoader(DateTime from)
+		private void startMcLevelLoader(DateTime from, DateTime to, string kind)
 		{
 			InstrumentDataRequest req = Bars.Request;
 			Resolution res = req.Resolution;
 			// MC forum t=52737 (MC support): Data2 stays null unless the FootPrint resolution is built with CreateFootPrint
 			// (delta + footprint modes). Other chart types: set the enum directly.
-			if (McBidAskChartType == ChartType.FootPrint)
-				res = Resolution.CreateFootPrint(res.Type, res.Size, CumulativeDeltaChartType.ASK_TRADE_BID_TRADE, FootPrintChartType.BID_ASK_VOL, false);
+			CumulativeDeltaChartType deltaType = CumulativeDeltaChartType.ASK_TRADE_BID_TRADE;
+			FootPrintChartType fpType = FootPrintChartType.BID_ASK_VOL;
+			bool fpPct = false;
+			bool footPrint = McBidAskChartType == ChartType.FootPrint;
+			if (footPrint)
+				res = Resolution.CreateFootPrint(res.Type, res.Size, deltaType, fpType, fpPct);
 			else
 				res.ChartType = McBidAskChartType;
 			req.Resolution = res;
-			req.From = from;
-			req.To = DateTime.Now.AddDays(1);
+			setRequestWindow(ref req, from, to);   // Recalc spec §4.5: last chart bar + 1 day (tail requests on a live chart: now + 1 day)
 			req.Subscribe2RT = true;
 			m_mcStarted = true;
 			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, 3);
 			m_mcResult = r;   // kept alive here and in m_flowLoads until EndLoadData
 			lock (m_flowLock) m_flowLoads.Add(r);
+			// Recalc spec §7.1: log what was built (the CreateFootPrint arguments are typed locals). API dump (P-RC9): after
+			// CreateFootPrint the resolution reads ChartType=Regular, DeltaType=None, HaveDelta=True, so Regular is expected.
+			string builder = footPrint
+				? $"builder(CreateFootPrint delta({deltaType}) footprint({fpType}) pct({fpPct})) resChartType({res.ChartType}) haveDelta({res.HaveDelta})"
+				: $"builder(ChartType) resChartType({res.ChartType}) haveDelta({res.HaveDelta})";
 			// IsCompleted is the only documented status member (PG §4.7.4); no error/status field is documented, so none is logged.
-			engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag request resType({res.Type}) resSize({res.Size}) chartType({res.ChartType}) from({req.From:yyyy-MM-dd HH:mm}) to({req.To:yyyy-MM-dd HH:mm}) " +
+			engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag request kind({kind}) resType({res.Type}) resSize({res.Size}) {builder} {requestWindowText(req)} " +
 				$"subscribe2RT({req.Subscribe2RT}) quoteField({req.QuoteField}) beginLoadData({(r == null ? "null" : "result")}) isCompleted({(r == null ? "n/a" : r.IsCompleted.ToString())})");
+		}
+
+		// Recalc spec §4.3: the gate decision. Caller holds m_flowLock. Reads no MC member (the callback fallback calls it).
+		private _OrderFlow.RecalcDecision mcRecalcDecision()
+		{
+			bool covers = m_mcCache.HistoryDone && m_mcGate.MissedBeforeDone > 0 && m_mcCache.Sets > 0
+				&& m_mcCache.First <= m_mcGate.MissedLast && m_mcCache.Last >= m_mcGate.MissedFirst;
+			return m_mcGate.Decide(m_mcHistoryDone, covers, m_autoTradingSnap, FlowCfg.McRecalcOnLoad, FlowCfg.McRecalcMax, m_mcSig);
+		}
+
+		// Caller holds m_flowLock. Reads no MC member.
+		private string mcTriggeredLine(string from)
+		{
+			return $"OF McBidAsk recalc triggered from({from}) pass({m_mcGate.Pass}) missedBars({m_mcGate.MissedBeforeDone}) missedFirst({m_mcGate.MissedFirst:yyyy-MM-dd HH:mm}) " +
+				$"missedLast({m_mcGate.MissedLast:yyyy-MM-dd HH:mm}) recalcCount({m_mcGate.CountFor(m_mcSig) + 1}/{FlowCfg.McRecalcMax})";
+		}
+
+		// Recalc spec §4.3 steps 3-4. Calc thread only (end of CalcBar, OnRecalcLastBarAfterEvent). Returns true when
+		// ExecControl.Recalculate() was called and returned (PROBE P-RC4: it is expected to unwind instead).
+		private bool mcRecalcCheck(string from)
+		{
+			if (m_mcSig == null) return false;
+			bool done; _OrderFlow.RecalcDecision d = _OrderFlow.RecalcDecision.Wait;
+			int sets = 0; long levels = 0; DateTime cFirst = DateTime.MinValue, cLast = DateTime.MinValue; string line = null;
+			lock (m_flowLock)
+			{
+				done = m_mcHistoryDone;
+				if (done && !m_mcCacheStoredLogged) { sets = m_mcCache.Sets; levels = m_mcCache.Levels; cFirst = m_mcCache.First; cLast = m_mcCache.Last; }
+				if (done && !m_mcRecalcDecided)
+				{
+					d = mcRecalcDecision();
+					m_mcRecalcDecided = true;
+					if (d == _OrderFlow.RecalcDecision.Recalc) { line = mcTriggeredLine(from); m_mcGate.NoteRecalc(m_mcSig); }
+				}
+			}
+			if (!done) return false;
+			if (!m_mcCacheStoredLogged)
+			{
+				m_mcCacheStoredLogged = true;
+				if (!m_mcCacheHit)
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk cache stored sets({sets}) levels({levels}) first({cFirst:yyyy-MM-dd HH:mm}) last({cLast:yyyy-MM-dd HH:mm}) sig({m_mcSig})");
+			}
+			if (line == null)
+			{
+				if (d != _OrderFlow.RecalcDecision.Wait)
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)})");
+				return false;
+			}
+			engineSink(ETraceLevel.Journal)?.Invoke(line);
+			drainFlowQueue();
+			ExecControl.Recalculate();   // Recalc spec §2: restarts from StartCalc; last statement, never inside a try/catch
+			return true;
+		}
+
+		// Recalc spec §4.3 step 5: on the last chart bar, while loader work is pending, ask MC for OnRecalcLastBarAfterEvent.
+		private void flowIdleArm()
+		{
+			if (m_idleArmed || !Bars.LastBarOnChart || Bars.Status != EBarState.Close || !idleWorkPending()) return;
+			m_idleArmed = true;
+			m_idleSince = DateTime.Now;
+			engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk idle poll armed ms({FlowCfg.McIdlePollMs})");
+			ExecControl.RecalcLastBarAfter(TimeSpan.FromMilliseconds(Math.Max(100, FlowCfg.McIdlePollMs)));
+		}
+
+		// Calc thread only.
+		private bool idleWorkPending()
+		{
+			bool queued; lock (m_flowQueueLock) queued = m_flowQueue.Count > 0;
+			bool mc; lock (m_flowLock) mc = m_mcSig != null && (!m_mcHistoryDone || !m_mcRecalcDecided || !m_mcCacheStoredLogged);
+			return queued || mc || tickChunksPending() > 0;
+		}
+
+		// Daily tick chunks (spec §5): not in this commit.
+		private void pumpTickChunks() { }
+		private int tickChunksPending() { return 0; }
+		private void tickChunkSummary() { }
+
+		// Recalc spec §4.3: MC calls this on the calc thread after ExecControl.RecalcLastBarAfter (forum t=43339: it does not
+		// recalculate by itself). PROBE P-RC2 (fires while history loads), P-RC3 (trace/Output usable here), P-RC4 (Recalculate here).
+		protected override void OnRecalcLastBarAfterEvent()
+		{
+			base.OnRecalcLastBarAfterEvent();
+			if (m_flow == null || !m_idleArmed) return;
+			m_autoTradingSnap = Environment.IsAutoTradingMode;
+			drainFlowQueue();
+			pumpTickChunks();
+			if (mcRecalcCheck("idle")) return;
+			if (idleWorkPending())
+			{
+				if ((DateTime.Now - m_idleSince).TotalSeconds < FlowCfg.McIdleTimeoutSec)
+					ExecControl.RecalcLastBarAfter(TimeSpan.FromMilliseconds(Math.Max(100, FlowCfg.McIdlePollMs)));
+				else if (!m_idleTimeoutLogged)
+				{
+					m_idleTimeoutLogged = true;
+					bool hd; lock (m_flowLock) hd = m_mcHistoryDone;
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk idle poll timeout sec({FlowCfg.McIdleTimeoutSec}) historyDone({hd}) chunksPending({tickChunksPending()})");
+				}
+				return;
+			}
+			if (m_idleDoneLogged) return;
+			m_idleDoneLogged = true;
+			if (m_mcStarted) engineSink(ETraceLevel.Journal)?.Invoke(mcStopLine(m_mcResult, "idle"));
+			tickChunkSummary();
 		}
 
 		private int m_mcHistBatches, m_mcHistNullBatches, m_mcHistBars; private long m_mcHistLevels;   // cumulative history diagnostics
@@ -742,6 +938,7 @@ namespace PowerLanguage.Strategy
 		// (PriceLevel[]) and .Time; PriceLevel.Price / UpVolume / DownVolume (MC forum t=52737). No string lookups.
 		private void onMcLevels(IDataLoaderResult result)
 		{
+			bool recalcNow = false;
 			try
 			{
 				System.Threading.Interlocked.Increment(ref m_mcCallbacks);
@@ -787,10 +984,25 @@ namespace PowerLanguage.Strategy
 						mcDiag("ex:" + ex.GetType().Name, $"OF McBidAsk diag exception({ex.GetType().FullName}) message({ex.Message})");
 					}
 					// History completion stands even when parsing failed: the loaded line then reports bars(0).
-					if (completed && result.Event == DataLoadedEvent.History) m_mcHistoryDone = true;
+					if (completed && result.Event == DataLoadedEvent.History)
+					{
+						m_mcHistoryDone = true;
+						m_mcCache.HistoryDone = true;   // Recalc spec §4.2: the cache now holds the request's complete history
+						// Recalc spec §4.3 step 6 fallback (McRecalcFromCallback, off): PROBE P-RC2/P-RC3. Lines are queued; the
+						// stored/triggered lines are written by the next calc-thread drain.
+						if (FlowCfg.McRecalcFromCallback && m_mcSig != null && !m_mcRecalcDecided
+							&& mcRecalcDecision() == _OrderFlow.RecalcDecision.Recalc)
+						{
+							m_mcRecalcDecided = true;
+							enqueueFlowMsg(ETraceLevel.Journal, mcTriggeredLine("callback"));
+							m_mcGate.NoteRecalc(m_mcSig);
+							recalcNow = true;
+						}
+					}
 				}
 			}
 			catch (Exception ex) { enqueueFlowMsg(ETraceLevel.Journal, $"OF McBidAsk callback exception({ex.GetType().FullName}) message({ex.Message})"); }
+			if (recalcNow) ExecControl.Recalculate();   // fallback only (off by default); last statement, outside the try (spec §6)
 		}
 
 		private void mcSet(BarPriceLevels bpl)
@@ -807,6 +1019,7 @@ namespace PowerLanguage.Strategy
 				bid[k] = levels[k].DownVolume;
 			}
 			m_flow.AddMcLevels(t, px, ask, bid);
+			m_mcCache.Add(t, px, ask, bid);   // Recalc spec §4.2 (caller holds m_flowLock)
 			m_mcLoaded++;
 			if (t < m_mcFirst) m_mcFirst = t;
 			if (t > m_mcLast) m_mcLast = t;
@@ -816,10 +1029,12 @@ namespace PowerLanguage.Strategy
 		private void mcJournal(_OrderFlow.FootprintBar fp)
 		{
 			if (FlowCfg.McBidAsk == _OrderFlow.EMcBidAsk.Off || fp == null) return;
+			// Recalc spec §4.3: a bar that closed with no level set before the history completed (caller holds m_flowLock)
+			if (fp.McMiss == "missing" && !m_mcHistoryDone) m_mcGate.NoteMissed(fp.CloseTime);
 			if (!m_mcLoadedLogged && m_mcHistoryDone)
 			{
 				m_mcLoadedLogged = true;
-				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk loaded bars({m_mcLoaded}) first({m_mcFirst:yyyy-MM-dd HH:mm}) last({m_mcLast:yyyy-MM-dd HH:mm}) chartType({McBidAskChartType}) method({_OrderFlow.McBidAskMethod}) mapping(UpVolume=AskTraded DownVolume=BidTraded UNVERIFIED)");
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk loaded bars({m_mcLoaded}) first({m_mcFirst:yyyy-MM-dd HH:mm}) last({m_mcLast:yyyy-MM-dd HH:mm}) source({(m_mcCacheHit ? "cache" : "request")}) configChartType({McBidAskChartType}) method({_OrderFlow.McBidAskMethod}) mapping(UpVolume=AskTraded DownVolume=BidTraded UNVERIFIED)");
 			}
 			if (fp.SessionKey != m_mcSession)
 			{
@@ -887,6 +1102,7 @@ namespace PowerLanguage.Strategy
 				lock (m_flowLock) mcDiag("gate", $"OF McBidAsk diag gate tickSource({FlowTickSource}) mcBidAsk({FlowCfg.McBidAsk}) startsLoader({FlowTickSource == EFlowTickSource.DataLoader})");
 			if (FlowTickSource == EFlowTickSource.DataLoader && !m_flowLoaderStarted) startFlowLoader();
 
+			m_autoTradingSnap = Environment.IsAutoTradingMode;   // Recalc spec §4.3: read here for the callback fallback
 			bool realTime = Environment.IsRealTimeCalc;
 			_OrderFlow.Regime regime;
 			if (FlowTickSource == EFlowTickSource.DataLoader) regime = _OrderFlow.Regime.TickStream;

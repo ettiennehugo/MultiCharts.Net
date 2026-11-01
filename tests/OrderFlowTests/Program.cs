@@ -396,6 +396,91 @@ static class Program
 				string hit = banned.FirstOrDefault(b => body.Contains(b));
 				Check(hit == null, "T1 " + m + " (DataLoader thread) uses no calc-thread member, found " + hit);
 			}
+			// Recalc spec §6: helpers the callback fallback calls (non-void signatures)
+			foreach (string sig in new[] { "private _OrderFlow.RecalcDecision mcRecalcDecision(", "private string mcTriggeredLine(" })
+			{
+				string body = MethodBody(src, sig);
+				Check(body != null, "R-G source guard found " + sig);
+				if (body == null) continue;
+				string hit = banned.FirstOrDefault(b => body.Contains(b));
+				Check(hit == null, "R-G " + sig + " (DataLoader thread) uses no calc-thread member, found " + hit);
+			}
+			// onMcLevels: ExecControl.Recalculate() only as the last statement, outside the try (spec §6)
+			{
+				string body = MethodBody(src, "private void onMcLevels(");
+				int rc = body == null ? -1 : body.IndexOf("ExecControl.Recalculate()");
+				int lastTry = body == null ? -1 : body.LastIndexOf("catch (Exception ex)");
+				Check(rc > lastTry && lastTry > 0 && body.Substring(rc).TrimEnd().EndsWith("}") && body.Substring(rc + "ExecControl.Recalculate();".Length).Split('\n').Skip(1).All(l => l.Trim() == "}" || l.Trim() == ""),
+					"R-G onMcLevels: Recalculate() after the try/catch and last");
+				string chk = MethodBody(src, "private bool mcRecalcCheck(");
+				int r2 = chk == null ? -1 : chk.IndexOf("ExecControl.Recalculate();");
+				Check(r2 > 0 && !chk.Contains("catch (") && chk.Substring(r2).Contains("return true;") && chk.Substring(r2 + 26).Trim().StartsWith("// ") , "R-G mcRecalcCheck: no try, Recalculate() then return");
+			}
+		}
+
+		// ---- Recalc spec §9: McLevelCache ----
+		{
+			var c = new OF.McLevelCache();
+			Check(c.MissReason("s", Ms(0), Ms(1)) == "empty" && !c.Covers(Ms(0), Ms(1)), "RC1 empty cache misses (empty)");
+			c.Signature = "s"; c.RequestFrom = Ms(0); c.RequestTo = Ms(100000);
+			double[] cp1 = { 100.00, 100.25 }, ca1 = { 1, 2 }, cb1 = { 3, 0 };
+			for (int i = 1; i <= 5; i++) c.Add(Ms(i * 10000), cp1, ca1, cb1);
+			cp1[0] = 999;   // the cache cloned its input
+			c.Add(Ms(30000), new[] { 100.00 }, new[] { 5.0 }, new[] { 0.0 });   // replace one set
+			Check(c.Sets == 5 && c.Levels == 9 && c.First == Ms(10000) && c.Last == Ms(50000), "RC1 Add counts sets/levels, replace adjusts levels: " + c.Sets + "/" + c.Levels);
+			Check(c.MissReason("s", Ms(10000), Ms(50000)) == "incomplete", "RC1 not HistoryDone -> incomplete");
+			c.HistoryDone = true;
+			Check(c.MissReason("s", Ms(10000), Ms(50000)) == null && c.Covers(Ms(0), Ms(100000)), "RC1 complete + inside the requested window -> hit");
+			Check(c.MissReason("s", Ms(10000), Ms(200000)) == "coverage", "RC1 past the requested window -> coverage");
+			Check(c.MissReason("t", Ms(10000), Ms(50000)) == "signature", "RC1 other signature -> signature");
+			Check(c.Covers(Ms(0), Ms(5000)), "RC1 coverage is the requested window, not First/Last (no levels at the edges)");
+
+			// replay == direct AddMcLevels
+			Func<bool, string> run = viaCache =>
+			{
+				var e = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, mcVolTolerance = 0.5 });
+				var cc = new OF.McLevelCache();
+				for (int i = 1; i <= 4; i++)
+				{
+					double[] lpx = { 100.00, 100.25 }, lask = { i, 1 }, lbid = { 1, 2 * i };
+					if (viaCache) cc.Add(Ms(i * 1000), lpx, lask, lbid); else e.AddMcLevels(Ms(i * 1000), lpx, lask, lbid);
+				}
+				if (viaCache) Check(cc.ReplayInto(e) == 4, "RC2 ReplayInto returns the set count");
+				var parts = new List<string>();
+				for (int i = 1; i <= 4; i++) { e.CloseBar(Bar(i, Ms(i * 1000), Regime.BarsOnly, vol: 2 + 3 * i)); parts.Add(Sig(e, 0) + "|" + e.Closed(0).Source + "|" + e.Closed(0).McDelta); }
+				return string.Join("#", parts) + "|" + e.McUsed;
+			};
+			string direct = run(false), cached = run(true);
+			Check(direct == cached && direct.EndsWith("|4"), "RC2 cache replay gives the same footprints as direct AddMcLevels: " + cached);
+			c.Clear();
+			Check(c.Sets == 0 && c.Levels == 0 && c.Signature == null && !c.HistoryDone && c.ReplayInto(new OF.FlowEngine(TICK, new OF.FlowConfig())) == 0 && c.MissReason("s", Ms(0), Ms(1)) == "empty",
+				"RC3 Clear (signature change) empties the cache");
+		}
+
+		// ---- Recalc spec §9: McRecalcGate ----
+		{
+			var cfg = new OF.FlowConfig();
+			Check(cfg.McRecalcOnLoad && cfg.McRecalcMax == 1 && cfg.McIdlePollMs == 1000 && cfg.McIdleTimeoutSec == 900 && !cfg.McRecalcFromCallback, "RG0 FlowConfig recalc defaults");
+			var g = new OF.McRecalcGate();
+			g.BeginPass();
+			Check(g.Pass == 1 && g.Decide(false, true, false, true, 1, "s") == OF.RecalcDecision.Wait, "RG1 history not done -> Wait");
+			Check(g.Decide(true, true, false, true, 1, "s") == OF.RecalcDecision.SkipNoMissed, "RG2 no missed bars -> SkipNoMissed");
+			g.NoteMissed(Ms(3000)); g.NoteMissed(Ms(1000)); g.NoteMissed(Ms(2000));
+			Check(g.MissedBeforeDone == 3 && g.MissedFirst == Ms(1000) && g.MissedLast == Ms(3000), "RG3 missed counters");
+			Check(g.Decide(true, false, false, true, 1, "s") == OF.RecalcDecision.SkipNoMissed, "RG3 cache does not cover the missed bars -> SkipNoMissed");
+			Check(g.Decide(true, true, false, false, 1, "s") == OF.RecalcDecision.SkipDisabled, "RG4 McRecalcOnLoad false -> SkipDisabled");
+			Check(g.Decide(true, true, true, true, 1, "s") == OF.RecalcDecision.SkipAutoTrading, "RG5 auto trading -> SkipAutoTrading");
+			Check(g.Decide(true, true, false, true, 1, "s") == OF.RecalcDecision.Recalc, "RG6 missed + covered -> Recalc");
+			g.NoteRecalc("s");
+			g.BeginPass();   // pass 2 (after Recalculate): missed counters restart, count kept
+			Check(g.Pass == 2 && g.MissedBeforeDone == 0 && g.RecalcCount == 1 && g.CountFor("s") == 1, "RG7 BeginPass keeps the recalc count");
+			g.NoteMissed(Ms(1000));
+			Check(g.Decide(true, true, false, true, 1, "s") == OF.RecalcDecision.SkipGuard, "RG8 second recalc for the same signature -> SkipGuard (no loop)");
+			Check(g.Decide(true, true, false, true, 1, "t") == OF.RecalcDecision.Recalc && g.CountFor("t") == 0, "RG9 a new signature may recalc once");
+			g.NoteRecalc("t");
+			Check(g.RecalcSignature == "t" && g.RecalcCount == 1, "RG9 NoteRecalc restarts the count on a new signature");
+			Check(OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipNoMissed) == "noMissedBars" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipGuard) == "guard"
+				&& OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipAutoTrading) == "autoTrading" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipDisabled) == "disabled", "RG10 skip reasons");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

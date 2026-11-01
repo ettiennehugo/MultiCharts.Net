@@ -83,6 +83,18 @@ namespace PowerLanguage.Function
 			public EMcBidAsk McBidAsk = EMcBidAsk.Off;
 			/// <summary>|sum(ask + bid) - bar volume| / bar volume must be within this for a level set to be used.</summary>
 			public double mcVolTolerance = 0.005;
+			/// <summary>Recalc spec §4: after the McBidAsk history completes, recalculate the study once (from the calc thread) so the
+			/// bars that closed before it arrived get the levels from the cache. false = never recalculate.</summary>
+			public bool McRecalcOnLoad = true;
+			/// <summary>Recalculations per cache signature (loop guard). A manual Recalculate after that gives a cache hit and no recalc.</summary>
+			public int McRecalcMax = 1;
+			/// <summary>ExecControl.RecalcLastBarAfter interval (ms) while idle work is pending (history loading, queued lines).</summary>
+			public int McIdlePollMs = 1000;
+			/// <summary>Stop the idle poll after this many seconds.</summary>
+			public int McIdleTimeoutSec = 900;
+			/// <summary>Fallback (spec §4.3 step 6), off: call ExecControl.Recalculate() from the DataLoader callback when the history
+			/// completes. PROBE P-RC2/P-RC3 decide whether this becomes the default.</summary>
+			public bool McRecalcFromCallback = false;
 		}
 
 		/// <summary>Data the caller has for the bar being closed (Data1 values).</summary>
@@ -515,6 +527,121 @@ namespace PowerLanguage.Function
 				}
 			}
 			return res;
+		}
+		/// <summary>Recalc spec §4.1: the McBidAsk level sets of one request (same {price, ask, bid} triple as AddMcLevels). Kept by the
+		/// strategy across StartCalc/StopCalc (and so across ExecControl.Recalculate) and replayed into each new FlowEngine.
+		/// Not thread-safe: the caller locks (DataLoader callbacks add, the calc thread replays).</summary>
+		public sealed class McLevelCache
+		{
+			private SortedDictionary<DateTime, double[][]> m_sets;   // lazy
+			/// <summary>Request identity (symbol, feed, resolution, chart type, mode, first bar); the caller clears the cache when it changes.</summary>
+			public string Signature;
+			/// <summary>The History event of the request completed.</summary>
+			public bool HistoryDone;
+			/// <summary>Window that was requested (chart time). Coverage is judged on it, not on First/Last: the feed may have no levels at the edges.</summary>
+			public DateTime RequestFrom = DateTime.MaxValue, RequestTo = DateTime.MinValue;
+			public DateTime First = DateTime.MaxValue, Last = DateTime.MinValue;
+			public int Sets;
+			public long Levels;
+
+			public void Add(DateTime barTime, double[] price, double[] ask, double[] bid)
+			{
+				if (price == null || ask == null || bid == null || price.Length != ask.Length || price.Length != bid.Length) return;
+				if (m_sets == null) m_sets = new SortedDictionary<DateTime, double[][]>();
+				double[][] old;
+				if (m_sets.TryGetValue(barTime, out old)) Levels -= old[0].Length; else Sets++;
+				m_sets[barTime] = new[] { (double[])price.Clone(), (double[])ask.Clone(), (double[])bid.Clone() };
+				Levels += price.Length;
+				if (barTime < First) First = barTime;
+				if (barTime > Last) Last = barTime;
+			}
+
+			/// <summary>Feed every set to the engine (AddMcLevels clones again). Returns the number of sets.</summary>
+			public int ReplayInto(FlowEngine e)
+			{
+				if (e == null || m_sets == null) return 0;
+				foreach (var kv in m_sets) e.AddMcLevels(kv.Key, kv.Value[0], kv.Value[1], kv.Value[2]);
+				return m_sets.Count;
+			}
+
+			public void Clear()
+			{
+				m_sets = null; Signature = null; HistoryDone = false;
+				RequestFrom = DateTime.MaxValue; RequestTo = DateTime.MinValue;
+				First = DateTime.MaxValue; Last = DateTime.MinValue; Sets = 0; Levels = 0;
+			}
+
+			/// <summary>History completed for a requested window that contains [from, to].</summary>
+			public bool Covers(DateTime from, DateTime to) { return HistoryDone && RequestFrom <= from && RequestTo >= to; }
+
+			/// <summary>Miss reason for the journal (empty | signature | incomplete | coverage), or null on a hit.</summary>
+			public string MissReason(string sig, DateTime from, DateTime to)
+			{
+				if (Signature == null && Sets == 0) return "empty";
+				if (Signature != sig) return "signature";
+				if (!HistoryDone) return "incomplete";
+				if (!Covers(from, to)) return "coverage";
+				return null;
+			}
+		}
+
+		/// <summary>Recalc spec §4.1: outcome of McRecalcGate.Decide.</summary>
+		public enum RecalcDecision { Wait = 0, Recalc = 1, SkipNoMissed = 2, SkipGuard = 3, SkipAutoTrading = 4, SkipDisabled = 5 }
+
+		/// <summary>Recalc spec §4.1: decides the one recalculation after the McBidAsk history completes. No MultiCharts types. The guard
+		/// counts recalcs per cache signature and survives passes; the missed-bar counters are per pass (BeginPass).</summary>
+		public sealed class McRecalcGate
+		{
+			public int RecalcCount;
+			public string RecalcSignature;
+			public int MissedBeforeDone;
+			public DateTime MissedFirst = DateTime.MaxValue, MissedLast = DateTime.MinValue;
+			/// <summary>StartCalc passes in the object's lifetime.</summary>
+			public int Pass;
+
+			/// <summary>New calculation pass: Pass++ and the missed-bar counters restart. RecalcCount/RecalcSignature are kept.</summary>
+			public void BeginPass() { Pass++; MissedBeforeDone = 0; MissedFirst = DateTime.MaxValue; MissedLast = DateTime.MinValue; }
+
+			/// <summary>A bar closed with no level set before the history completed.</summary>
+			public void NoteMissed(DateTime closeTime)
+			{
+				MissedBeforeDone++;
+				if (closeTime < MissedFirst) MissedFirst = closeTime;
+				if (closeTime > MissedLast) MissedLast = closeTime;
+			}
+
+			/// <summary>Recalcs already done for this signature.</summary>
+			public int CountFor(string sig) { return sig == RecalcSignature ? RecalcCount : 0; }
+
+			public RecalcDecision Decide(bool historyDone, bool cacheCoversMissed, bool autoTrading, bool enabled, int max, string sig)
+			{
+				if (!enabled) return RecalcDecision.SkipDisabled;
+				if (!historyDone) return RecalcDecision.Wait;
+				if (MissedBeforeDone == 0 || !cacheCoversMissed) return RecalcDecision.SkipNoMissed;
+				if (autoTrading) return RecalcDecision.SkipAutoTrading;
+				if (CountFor(sig) >= max) return RecalcDecision.SkipGuard;
+				return RecalcDecision.Recalc;
+			}
+
+			/// <summary>Record a recalc for sig (call immediately before ExecControl.Recalculate()).</summary>
+			public void NoteRecalc(string sig)
+			{
+				if (sig != RecalcSignature) { RecalcSignature = sig; RecalcCount = 0; }
+				RecalcCount++;
+			}
+
+			/// <summary>Journal reason of a skip decision.</summary>
+			public static string SkipReason(RecalcDecision d)
+			{
+				switch (d)
+				{
+					case RecalcDecision.SkipNoMissed: return "noMissedBars";
+					case RecalcDecision.SkipGuard: return "guard";
+					case RecalcDecision.SkipAutoTrading: return "autoTrading";
+					case RecalcDecision.SkipDisabled: return "disabled";
+					default: return d.ToString();
+				}
+			}
 		}
 		// </order-flow>
 	}
