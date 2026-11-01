@@ -1547,6 +1547,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		private bool m_portOn;
+		private readonly HashSet<string> m_lotWarned = new HashSet<string>();   // rev 2.7: roundLots conflict Warnings already traced
 		private _PortReturns m_portRet, m_portURet;
 		private DateTime m_portDay = DateTime.MinValue;
 		private double m_portDayStartPnl = double.NaN, m_portLastPnl = double.NaN, m_portDayClose = double.NaN, m_portPrevDayClose = double.NaN;
@@ -2859,7 +2860,7 @@ namespace PowerLanguage.Strategy
 			string capWon = _PortLots.CapWon(riskQty, maxQtyCapped, qty);
 			int capped = qty;
 			qty = _PortLots.Apply(capped, limits.roundLots, capWon, out rounded, out lotConflict);
-			if (lotConflict) trace(ETraceLevel.Warning, _PortLots.ConflictWarning(bars.Info.Name, capWon, capped, rounded));
+			if (lotConflict && _PortLots.FirstConflict(m_lotWarned, capWon, capped, rounded)) trace(ETraceLevel.Warning, _PortLots.ConflictWarning(bars.Info.Name, capWon, capped, rounded));   // once per instance per (cap, capped, rounded)
 			bool willArm = m_portOn && bars == Bars;
 			if (qty > 0 && !willArm && !double.IsNaN(widenedStop))
 			{
@@ -2872,8 +2873,7 @@ namespace PowerLanguage.Strategy
 					return 0;
 				}
 			}
-			if (qty <= 0) trace(ETraceLevel.Info, "sizeForRisk - 0 after round lots");
-			else if (willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
+			if (qty > 0 && willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
 			return qty;
 		}
 

@@ -303,17 +303,17 @@ namespace PowerLanguage.Function
 		/// ForProfile(profile)); a set ConfigPath whose file is missing or unreadable ⇒ the code Config (rev 2.7, Analyst ruling approved
 		/// by Ettienne 2026-11-01). Never another profile. fallback = true in all three cases (RUN line / Status "config=fallback").</summary>
 		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, List<string> warnings, List<string> info, out bool fallback)
-		{ return Resolve(code, profile, path, false, warnings, info, out fallback); }
+		{ return Resolve(code, profile, path, null, warnings, info, out fallback); }
 
-		/// <summary>As Resolve; pathFailed = the ConfigPath property threw (the caller logged why): treated like an unreadable file,
-		/// i.e. the code Config with fallback = true and a Warning naming the limits used.</summary>
-		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, bool pathFailed, List<string> warnings, List<string> info, out bool fallback)
+		/// <summary>As Resolve; pathError != null = the ConfigPath property threw ("{type}: {msg}"): treated like an unreadable file,
+		/// i.e. the code Config with fallback = true and ONE Warning naming the error and the limits used.</summary>
+		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, string pathError, List<string> warnings, List<string> info, out bool fallback)
 		{
 			fallback = false;
 			string err = code == null ? "null" : code.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: code Config invalid ({err}), using ForProfile({profile})"); code = PortMmConfig.ForProfile(profile); fallback = true; }
 			string used = fallback ? $"ForProfile({profile})" : "code Config";
-			if (pathFailed) { warnings.Add($"PortMmConfig: ConfigPath failed, using {used} (config=fallback)"); fallback = true; return code; }
+			if (pathError != null) { warnings.Add($"PortMmConfig: ConfigPath failed ({pathError}), using {used} (config=fallback)"); fallback = true; return code; }
 			if (string.IsNullOrWhiteSpace(path)) return code;
 			bool rejected, unreadable;
 			PortMmConfig c = LoadFile(path, code, warnings, info, out rejected, out unreadable);
@@ -524,6 +524,13 @@ namespace PowerLanguage.Function
 		public static string ConflictWarning(string symbol, string capWon, int capped, int rounded)
 		{
 			return $"sizeForRisk - roundLots ignored on {symbol}: {capWon} qty({capped}) kept, roundLots would give qty({rounded})";
+		}
+
+		/// <summary>Dedupe for the conflict Warning (Analyst review of PR-E): true the first time a (cap, capped, rounded) triple is seen
+		/// in this set (the caller keeps one set per signal instance), false afterwards.</summary>
+		public static bool FirstConflict(HashSet<string> seen, string capWon, int capped, int rounded)
+		{
+			return seen != null && seen.Add(capWon + "|" + capped.ToString(CultureInfo.InvariantCulture) + "|" + rounded.ToString(CultureInfo.InvariantCulture));
 		}
 	}
 
@@ -795,7 +802,7 @@ namespace PowerLanguage.Function
 					if (entryAttempt)
 					{   // a rejected entry attempt: journal at Info (once per strategy+reason), keep an earlier reason (e.g. kill)
 						string prior = d[i].reason;
-						skip(d[i], s, why, $"risk ${(s.rDollar > 0 ? s.rDollar * Math.Max(1, s.qtyCode) : double.NaN):0.00} pm.R$ {s.rDollar} pm.R$w {s.rDollarW} heat ${heat:0.00} heat cap ${config.heatCap * book:0.00} total cap ${capDollar:0.00}");
+						skip(d[i], s, why, $"risk ${(s.rDollar > 0 ? s.rDollar * Math.Max(0, s.qtyCode) : double.NaN):0.00} pm.R$ {s.rDollar} pm.R$w {s.rDollarW} heat ${heat:0.00} heat cap ${config.heatCap * book:0.00} total cap ${capDollar:0.00}");
 						if (!string.IsNullOrEmpty(prior)) d[i].reason = prior;
 					}
 					else if (string.IsNullOrEmpty(d[i].reason)) d[i].reason = why;

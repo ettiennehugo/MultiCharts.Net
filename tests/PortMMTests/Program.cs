@@ -256,6 +256,19 @@ static class Program
 			Check(_PortLots.ConflictWarning("@ES", _PortLots.CapMaxQty, 250, 200) == "sizeForRisk - roundLots ignored on @ES: maxQty qty(250) kept, roundLots would give qty(200)"
 				&& _PortLots.ConflictWarning("MSFT", _PortLots.CapNotional, 333, 300) == "sizeForRisk - roundLots ignored on MSFT: notional cap qty(333) kept, roundLots would give qty(300)",
 				"T-P23 warning text names roundLots, the cap, both quantities and the symbol");
+			// T-P27 (PR-E, Analyst review): the conflict Warning is traced once per instance per (cap, capped, rounded); Apply never gives 0
+			var seen = new HashSet<string>();
+			Check(_PortLots.FirstConflict(seen, _PortLots.CapMaxQty, 250, 200) && !_PortLots.FirstConflict(seen, _PortLots.CapMaxQty, 250, 200)
+				&& _PortLots.FirstConflict(seen, _PortLots.CapNotional, 250, 200) && _PortLots.FirstConflict(seen, _PortLots.CapMaxQty, 260, 200)
+				&& _PortLots.FirstConflict(seen, _PortLots.CapMaxQty, 250, 100) && !_PortLots.FirstConflict(seen, _PortLots.CapNotional, 250, 200)
+				&& _PortLots.FirstConflict(new HashSet<string>(), _PortLots.CapMaxQty, 250, 200) && !_PortLots.FirstConflict(null, _PortLots.CapMaxQty, 1, 0),
+				"T-P27 dedupe: first (cap, capped, rounded) logs, a repeat does not; another cap / qty logs; a new instance (set) logs again");
+			bool neverZero = true;
+			foreach (int q0 in Enumerable.Range(1, 1000))
+				foreach (string cw in new[] { null, _PortLots.CapMaxQty, _PortLots.CapNotional })
+					foreach (bool rl in new[] { false, true })
+						if (_PortLots.Apply(q0, rl, cw, out rounded, out conflict) <= 0) neverZero = false;
+			Check(neverZero, "T-P27 Apply never returns 0 for qty > 0 (the removed '0 after round lots' trace was unreachable)");
 		}
 
 		// T-P24 (rev 2.7, PR-E; Ettienne 2026-11-01): portfolioArm makes the widened stop active, so pm.riskOpen is the widened risk right after the fill.
@@ -351,8 +364,10 @@ static class Program
 			tj = new List<string>(); MM(c => { c.sizing = EPortSizing.CodeSize; c.heatCap = 0.0005; c.clusterCap = 0.0005; }, tj).Decide(D0, 1000000, true, new List<PortStratView> { V(0) });
 			Check(info(tj, "heat cap"), "Info: CodeSize heat cap skip");
 			string src = System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "../../../../../_CustomSignal.Strategy.CS"));
-			Check(!System.Text.RegularExpressions.Regex.IsMatch(src, @"trace\(ETraceLevel\.(Debug|Verbose), \$?""sizeForRisk - 0") && System.Text.RegularExpressions.Regex.Matches(src, @"trace\(ETraceLevel\.Info, \$?""sizeForRisk - 0").Count == 6,
-				"Info: every sizeForRisk skip (bad args, minStopTicks, zero size, notional cap, round lots, 1% budget) traces at Info");
+			Check(!System.Text.RegularExpressions.Regex.IsMatch(src, @"trace\(ETraceLevel\.(Debug|Verbose), \$?""sizeForRisk - 0") && System.Text.RegularExpressions.Regex.Matches(src, @"trace\(ETraceLevel\.Info, \$?""sizeForRisk - 0").Count == 5,
+				"Info: every sizeForRisk skip (bad args, minStopTicks, zero size, notional cap, 1% budget) traces at Info");
+			Check(!src.Contains("sizeForRisk - 0 after round lots") && System.Text.RegularExpressions.Regex.Matches(src, @"_PortLots\.FirstConflict\(m_lotWarned, capWon, capped, rounded\)\) trace\(ETraceLevel\.Warning, _PortLots\.ConflictWarning\(").Count == 1,
+				"T-P27 source: the unreachable '0 after round lots' trace is gone; the roundLots Warning is gated by FirstConflict");
 		}
 
 		{   // PR-B: widened risk (pm.R$w) for the 1% per-trade budget, heat and cluster caps; skip, never cut
@@ -645,15 +660,21 @@ static class Program
 			rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, tdir, w, inf, out fb);
 			bool rjd, unr; var w2 = new List<string>(); PortMmConfigLoader.LoadFile(tdir, cust, w2, inf, out rjd, out unr); System.IO.Directory.Delete(tdir);
 			Check(fb && rc.maxPositions == 1 && w.Any(x => x.EndsWith("using code Config (config=fallback)")) && unr && !rjd, "T-P26: unreadable path (a directory) -> code Config, config=fallback");
-			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, true, w, inf, out fb);
-			Check(fb && rc.maxPositions == 1 && w.Count == 1 && w[0] == "PortMmConfig: ConfigPath failed, using code Config (config=fallback)", "T-P26: ConfigPath threw -> code Config, config=fallback, Warning");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, "IOException: boom", w, inf, out fb);
+			Check(fb && rc.maxPositions == 1 && w.Count == 1 && w[0] == "PortMmConfig: ConfigPath failed (IOException: boom), using code Config (config=fallback)", "T-P26/T-P27: ConfigPath threw -> code Config, config=fallback, ONE Warning naming the error");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, "/ignored.json", "IOException: boom", w, inf, out fb);
+			Check(fb && rc.profile == EPortProfile.ScaledBook && w.Count(x => x.Contains("ConfigPath")) == 1 && w.Last() == "PortMmConfig: ConfigPath failed (IOException: boom), using ForProfile(ScaledBook) (config=fallback)", "T-P27: ConfigPath threw + invalid code Config -> ForProfile(P), one ConfigPath Warning");
 			w.Clear(); rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, "/nonexistent/m-port.json", w, inf, out fb);
 			Check(fb && rc.profile == EPortProfile.ScaledBook && w.Last().EndsWith("using ForProfile(ScaledBook) (config=fallback)"), "T-P26: invalid code Config + missing file -> ForProfile(P)");
-			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, false, w, inf, out fb);
+			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, null, w, inf, out fb);
 			Check(!fb && rc.maxPositions == 1 && w.Count == 0, "T-P26: no ConfigPath -> code Config, no fallback, silent");
 			var nj = new List<string>(); var stl = V(0, cl: "ES"); stl.stale = true;
 			MP(EPortProfile.Starter, null, nj).Decide(D0, 1000000, true, new List<PortStratView> { stl });
 			Check(nj.Any(x => x.Contains("skip") && x.Contains("stale") && x.Contains("heat $0.00 heat cap $15000.00 total cap $100000.00")), "T-P25 nit: pre-filter detail keeps heat, heat cap and total cap apart (" + string.Join(" | ", nj) + ")");
+			Check(nj.Any(x => x.Contains("stale") && x.Contains("risk $1000.00 ")), "T-P27 pre-filter risk = R$ x qtyCode (" + string.Join(" | ", nj) + ")");
+			var nj0 = new List<string>(); var st0 = V(0, cl: "ES", qty: 0); st0.stale = true;
+			MP(EPortProfile.Starter, null, nj0).Decide(D0, 1000000, true, new List<PortStratView> { st0 });
+			Check(nj0.Any(x => x.Contains("stale") && x.Contains("risk $0.00 ")), "T-P27 pre-filter uses Max(0, qtyCode) like the other skip details: qtyCode 0 -> risk $0.00 (" + string.Join(" | ", nj0) + ")");
 
 			// T-P8 / T-P9 / T-P15 advisory counts
 			var aj = new List<string>(); var am = MP(EPortProfile.Starter, null, aj);

@@ -47,10 +47,10 @@ namespace PowerLanguage.Strategy
 			EPortProfile prof = Profile;
 			PortMmConfig code = null;
 			try { code = Config; } catch (Exception ex) { warnings.Add($"PortMmConfig: Config failed ({ex.Message})"); }
-			string path = null; bool pathFailed = false;
-			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.GetType().Name}: {ex.Message})"); pathFailed = true; }
+			string path = null, pathError = null;
+			try { path = ConfigPath; } catch (Exception ex) { pathError = $"{ex.GetType().Name}: {ex.Message}"; }   // Resolve logs the one Warning
 			PortMmConfig cfg; bool fb;
-			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, pathFailed, warnings, info, out fb); }
+			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, pathError, warnings, info, out fb); }
 			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using ForProfile({prof})"); cfg = PortMmConfig.ForProfile(prof); fb = true; }
 			m_fallback = fb;
 			foreach (string w in warnings) Output.WriteLine("PORT Warning: " + w);
