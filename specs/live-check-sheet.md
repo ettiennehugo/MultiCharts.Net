@@ -277,13 +277,13 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 
 ---
 
-# Check 10: M-PORT PR-C session/weekly throttles (#72), before #72 is marked ready
+# Check 10: M-PORT PR-C session/weekly throttles (#72, merged)
 
 Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys differ), under **RiskParity**, plus one repeat with `"sizing": "CodeSize"`. Read the MM journal (`PORT …` lines).
 
-**Setup (test signal `_TestPortThrottle`, branch `test/port-throttle-signal`, throw-away).**
+**Setup (test signal `_TestPortThrottle`, on main since #75).**
 
-1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
+1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS`, `_CustomSignal.Strategy.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there; `_TestPortThrottle` derives from `_CustomSignal`), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
 2. Create the folder `%USERPROFILE%\Documents\_TestPortThrottle\`. It holds two optional files: `signal.json` (signal mode) and `mm.json` (MM overrides, same keys as `samples/PortMmConfig.example.json`). A missing file means defaults.
 3. Portfolio Trader: one portfolio, two strategies, each with **only** `_TestPortThrottle`: index 0 = `@ES` 5 min, index 1 = `@CL` 5 min (dxFeed), a few weeks of data including at least one Sunday-evening session. Strategy Properties size 1; Exposure / Max % capital at risk 100% / 100%.
 4. Portfolio Settings → Money management signal → `_TestPortThrottleMM`.
@@ -302,7 +302,7 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 
 ---
 
-# Check 11: M-PORT PR-D risk profiles and advisory (#73), before #73 is marked ready
+# Check 11: M-PORT PR-D risk profiles and advisory (#73, merged)
 
 Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twice: once with `_PortfolioRiskManager` as the MM signal and once with `_PortfolioRiskManager_ScaledBook`, with no JSON file. Read the MM output (`PORT …` lines).
 
