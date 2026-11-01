@@ -41,7 +41,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 # Check 2: Bar Magnifier and Volume Delta on `@ES`
 
-**Purpose / unblocks.** (a) **Bar Magnifier.** The CAT honest-simulation rule needs 1-tick magnifier inside W-T and 1-minute before it (CAT l.109, l.3954). The MC wiki *Custom Futures* page says Bar Magnifier is **not available for Custom Futures**. `@ES` from dxFeed is a native continuous symbol, not an MC Custom Future, but this still has to be confirmed. (b) **Volume Delta.** This is the MC-BidAsk FlowQuality tier (CAT l.164; `_VolumeProfileFuturesBase` `McBidAskChartTypeName = "VolumeDelta"`, l.603) and the P-BA probes (P3S S1).
+**Purpose / unblocks.** (a) **Bar Magnifier.** The CAT honest-simulation rule needs 1-tick magnifier inside W-T and 1-minute before it (CAT l.109, l.3954). The MC wiki *Custom Futures* page says Bar Magnifier is **not available for Custom Futures**. `@ES` from dxFeed is a native continuous symbol, not an MC Custom Future, but this still has to be confirmed. (b) **Volume Delta.** This is the MC-BidAsk FlowQuality tier (CAT l.164; `_VolumeProfileFuturesBase` `McBidAskChartType = ChartType.FootPrint`, l.606; Check 9a showed the MC `ChartType` enum has no `VolumeDelta` member) and the P-BA probes (P3S S1).
 
 **Steps: Bar Magnifier** [MC wiki *Bar Magnifier*]
 
@@ -235,7 +235,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 ## P-BA4: must the chart/request be in Ask/Bid-traded mode?
 
-**Purpose / unblocks.** The MC-BidAsk tier ingestion (P3S S1 step 6). The code clones `Bars.Request` and sets `Resolution.ChartType` to `VolumeDelta` (parsed by name, P-BA1), then reads `Data2` / `RTData2` by reflection (P-BA2) (`_VolumeProfileFuturesBase` l.660–700). The PG says nothing about whether the Breakdown mode (Ask Traded vs Bid Traded) must be set on the chart (P3S l.517).
+**Purpose / unblocks.** The MC-BidAsk tier ingestion (P3S S1 step 6). The code clones `Bars.Request` and sets `Resolution.ChartType` to `McBidAskChartType` (the MC enum, default `ChartType.FootPrint`; P-BA1 closed by Check 9a), then reads `Data2` / `RTData2` by reflection (P-BA2) (`_VolumeProfileFuturesBase` l.660–700). The PG says nothing about whether the Breakdown mode (Ask Traded vs Bid Traded) must be set on the chart (P3S l.517).
 
 **Steps**
 
@@ -243,16 +243,16 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 2. Run A: chart Format Instrument → Settings → Show Delta → Volume Delta, **Breakdown = Ask Traded vs Bid Traded**, Build from Ticks (Check 2 path).
 3. Run B: same, but **Breakdown = Up Ticks vs Down Ticks**.
 4. Run C: Show Delta **off** (a regular chart).
-5. For each run, read the journal: `OF McBidAsk loaded bars(..) first(..) last(..)`, the per-session `OF T9 session(..) signAgree(..) bars(..) mcCover(..)`, any `OF tier McBidAsk->… reason(..)` fall-back, and any `chartType(...) unknown (PROBE P-BA1)` warning.
+5. For each run, read the journal: `OF McBidAsk loaded bars(..) first(..) last(..)`, the per-session `OF T9 session(..) signAgree(..) bars(..) mcCover(..)`, any `OF tier McBidAsk->… reason(..)` fall-back (it now names the `chartType(..)` used).
 
-**Record.** Per run: bars loaded, first/last, mcCover %, signAgree %, fall-back reasons, P-BA1 warning (Y/N).
+**Record.** Per run: bars loaded, first/last, mcCover %, signAgree %, fall-back reasons, chartType logged.
 
 **Pass / fail.** P-BA4 is **answered** when runs A–C are compared:
 
 - If C (and B) give the same mcCover and signAgree as A, the request is independent of chart mode.
 - If only A gives data, the chart must be in Ask/Bid mode (as BCS asserts).
 
-The check **fails** only if A also yields 0 bars. In that case also look at P-BA1 and P-BA2.
+The check **fails** only if A also yields 0 bars. In that case also look at P-BA2 and try `McBidAskChartType = ChartType.CumulativeDelta`.
 
 **If it fails.** Leave `McBidAsk = Off` and label the flow tier "Quote / TickRule". If chart mode is required, add a StartCalc assertion and a setup note: "Ask/Bid Volume Delta on Data1".
 
@@ -280,6 +280,19 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 # Check 10: M-PORT PR-C session/weekly throttles (#72), before #72 is marked ready
 
 Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys differ), under **RiskParity**, plus one repeat with `"sizing": "CodeSize"`. Read the MM journal (`PORT …` lines).
+
+**Setup (test signal `_TestPortThrottle`, branch `test/port-throttle-signal`, throw-away).**
+
+1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
+2. Create the folder `%USERPROFILE%\Documents\_TestPortThrottle\`. It holds two optional files: `signal.json` (signal mode) and `mm.json` (MM overrides, same keys as `samples/PortMmConfig.example.json`). A missing file means defaults.
+3. Portfolio Trader: one portfolio, two strategies, each with **only** `_TestPortThrottle`: index 0 = `@ES` 5 min, index 1 = `@CL` 5 min (dxFeed), a few weeks of data including at least one Sunday-evening session. Strategy Properties size 1; Exposure / Max % capital at risk 100% / 100%.
+4. Portfolio Settings → Money management signal → `_TestPortThrottleMM`.
+5. The signal trades every closed 5-min bar while flat, in the direction of that bar (doji = no trade), with a 4-tick stop and a time exit after 6 bars, and arms every entry through `sizeForRisk` (`pm.R$`, `pm.day` published). Its Output lines start `THR #<symbol>` (`START` shows the mode and the settings file used).
+6. Runs:
+   - **Run 1, checks a and b:** `mm.json` = `{ "sizing": "RiskParity", "weeklyHalveR": -1, "weeklyObserveR": -2 }`, no `signal.json`. (Smaller thresholds so the weekly states trigger within days; a run with the defaults −3/−6 is optional.)
+   - **Run 2, check c:** `mm.json` = `{ "sizing": "CodeSize", "weeklyHalveR": -1, "weeklyObserveR": -2 }`. To also reach ddSteps stage 1 quickly, add `"ddSteps": [ { "dd": 0.002, "mult": 0.5 }, { "dd": 0.004, "mult": 0.25 }, { "dd": 0.5, "mult": 0.0 } ]`.
+   - **Run 3, check d:** `signal.json` = `{ "mode": "reverse" }`, `mm.json` as in run 1. While in a position held ≥ 2 bars, a bar against it sends the opposite entry (`THR … REVERSE long->short`). Expect `PORT Info: reversal _TestPortThrottle#<i> long->short allowed …` (or short->long) in the journal and the position to flip sign (the MM allows reversals since spec rev 2.5); a closed trade is recorded at the flip. If instead a `PORT Info: skip … in position` line appears, (d) fails.
+   - Change a file, then recalculate the portfolio. Optional `signal.json` keys: `stopTicks` (default 4), `holdBars` (default 6).
 
 - (a) **Session stop:** after 2 losing closes (R < −0.05) on one strategy, `PORT session stop` and then Info `skip … session stop` appear for **that strategy only**. The other strategy keeps entering. Entries resume on its next `pm.day`, and CL's new day does not clear ES's stop.
 - (b) **Weekly halve and observe:** at week R ≤ −3, `PORT weekly halve` appears and EntryContracts is about half. At ≤ −6, `PORT weekly observe` and `skip … weekly observe` (PORT observe) appear. The **Sunday-evening ETH session does not reset early**: the state clears only at the first session of the next ISO week.

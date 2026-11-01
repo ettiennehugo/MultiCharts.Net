@@ -548,6 +548,8 @@
     <Compile Include="_PortfolioRiskManager.Strategy.CS" />
     <Compile Include="_PortfolioRiskManager_ScaledBook.Strategy.CS" />
     <Compile Include="_TestPortArm.Strategy.CS" />
+    <Compile Include="_TestPortThrottle.Strategy.CS" />
+    <Compile Include="_TestPortThrottleMM.Strategy.CS" />
     <Compile Include="_TestPortMM.Signal.CS" />
     <Compile Include="_Test1.Indicator.CS" />
     <Compile Include="_Test1.Strategy.CS" />
