@@ -494,7 +494,7 @@ static class Program
 			var f4 = eb1.CloseBar(Bar(4, Ms(400)));
 			Check(f4.BacklogTrades == 3 && eb1.BacklogDropped == 3 && Near(f4.Buy + f4.Sell, 5), "BL1 trades of closed BarsOnly bars are backlog, not added to bar 4");
 			var eb2 = Engine(false);
-			var bi = Bar(1, Ms(200)); bi.OpenTime = Ms(100);
+			var bi = Bar(1, Ms(200)); bi.OpenTime = Ms(100); bi.TimeBased = true;
 			eb2.AddTrade(Ms(50), 100.00, 2); eb2.AddTrade(Ms(150), 100.25, 3);
 			var g1 = eb2.CloseBar(bi);
 			Check(g1.BacklogTrades == 1 && Near(g1.Buy + g1.Sell, 3), "BL2 first bar: trades at or before OpenTime are backlog");
@@ -553,6 +553,84 @@ static class Program
 			foreach (var c in n4) s4.Complete(c, true, 1, null);
 			s4.ReleasableInOrder();
 			Check(s4.ReadyAt(days[2].ToEt.AddHours(30)) && !s4.ReadyAt(days[0].ToEt) && s4.Pending() == 0, "TS13 RT chunk covers bars after its window; skipped days not ready; nothing pending");
+		}
+
+		// ---- PR #79 review (Analyst, 2026-11-01) ----
+		{
+			// B1: process-wide loop guard
+			var g = new OF.McRecalcLoopGuard();
+			var w = TimeSpan.FromMinutes(10);
+			Check(g.TryAcquire("a", T0, 1, w) && !g.TryAcquire("a", T0.AddMinutes(1), 1, w) && g.CountFor("a", T0.AddMinutes(1), w) == 1, "LG1 max 1: the second recalc of a signature within the window is refused");
+			Check(g.TryAcquire("b", T0.AddMinutes(1), 1, w), "LG2 keyed by signature: another signature is allowed");
+			Check(g.TryAcquire("a", T0.AddMinutes(10).AddSeconds(1), 1, w) && g.CountFor("a", T0.AddMinutes(10).AddSeconds(1), w) == 1, "LG3 allowed again after the window");
+			var g2 = new OF.McRecalcLoopGuard();
+			Check(g2.TryAcquire("s", T0, 2, w) && g2.TryAcquire("s", T0.AddSeconds(1), 2, w) && !g2.TryAcquire("s", T0.AddSeconds(2), 2, w) && !g2.TryAcquire(null, T0, 2, w) && !g2.TryAcquire("z", T0, 0, w), "LG4 max 2 allows two; null signature or max 0 never");
+			for (int i = 0; i < 80; i++) g2.TryAcquire("k" + i, T0, 1, w);
+			g2.TryAcquire("late", T0.AddHours(1), 1, w);
+			Check(g2.Signatures <= 66, "LG5 expired signatures are pruned");
+			Check(OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipProcessGuard) == "processGuard", "LG6 skip reason processGuard");
+			string vp = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string dec = MethodBody(vp, "private _OrderFlow.RecalcDecision mcRecalcDecision(") ?? "";
+			Check(vp.Contains("private static readonly _OrderFlow.McRecalcLoopGuard s_mcRecalcGuard") && vp.Contains("private static readonly object s_mcRecalcGuardLock")
+				&& dec.Contains("lock (s_mcRecalcGuardLock)") && dec.Contains("s_mcRecalcGuard.TryAcquire(") && dec.Contains("m_mcGate.Decide("), "LG7 strategy: static guard under a static lock, checked with the instance gate in mcRecalcDecision (bar/idle and callback)");
+
+			// B2: stale callbacks
+			Check(OF.LegacyStream(1001, 1000, 3) == 1 && OF.LegacyStream(1000, 1000, 3) == 0 && OF.LegacyStream(1002, 1000, 3) == 2, "SC1 this pass's legacy states map to streams 0..2");
+			Check(OF.LegacyStream(1003, 1000, 3) == -1 && OF.LegacyStream(1002, 1000, 1) == -1 && OF.LegacyStream(5000, 1000, 3) == -1 && OF.LegacyStream(999, 1000, 3) == -1, "SC2 out of range (chunk ids, earlier passes, unrequested streams) rejected");
+			Check(OF.LegacyStream(1000, 0, 3) == -1 && OF.LegacyStream("x", 1000, 3) == -1 && OF.LegacyStream(null, 1000, 3) == -1, "SC3 no legacy request this pass / non-int state rejected");
+			object r1 = new object(), r2 = new object();
+			Check(OF.IsCurrentRequest(5, 5, r1, null) && OF.IsCurrentRequest(5, 5, r1, r1) && !OF.IsCurrentRequest(5, 5, r1, r2) && !OF.IsCurrentRequest(4, 5, r1, null) && !OF.IsCurrentRequest(5, 0, r1, null) && !OF.IsCurrentRequest("5", 5, r1, null),
+				"SC4 McBidAsk callback accepted only for the current request id and result");
+			string ofd = MethodBody(vp, "private void onFlowData(") ?? "", mcl = MethodBody(vp, "private void onMcLevels(") ?? "", rep = MethodBody(vp, "private void mcStartOrReplay(") ?? "";
+			int ls = ofd.IndexOf("LegacyStream("), ft = ofd.IndexOf("flowTick(");
+			Check(ls > 0 && ft > ls && ofd.Contains("if (stream < 0) return;"), "SC5 onFlowData: legacy branch rejects stale states before any tick");
+			int ic = mcl.IndexOf("IsCurrentRequest("), ms = mcl.IndexOf("mcSet(");
+			Check(ic > 0 && ms > ic, "SC6 onMcLevels: stale callbacks dropped before any level set");
+			Check(rep.Contains("m_mcResult = null; m_mcReqId = 0;") && rep.IndexOf("m_mcReqId = 0;") < rep.IndexOf("startMcLevelLoader(tailFrom"), "SC7 cache hit clears the current request before the tail request");
+
+			// S1: empty completed cache is a miss
+			var ce = new OF.McLevelCache { Signature = "s", RequestFrom = Ms(0), RequestTo = Ms(100000), HistoryDone = true };
+			Check(ce.MissReason("s", Ms(10000), Ms(50000)) == "empty", "RC4 HistoryDone with no level set -> miss (empty)");
+			ce.Add(Ms(20000), new[] { 100.0 }, new[] { 1.0 }, new[] { 2.0 });
+			Check(ce.MissReason("s", Ms(10000), Ms(50000)) == null, "RC4 the same cache with a level set -> hit");
+
+			// S3: chunk timeout
+			var b17 = new TimeSpan(17, 0, 0);
+			var days = OF.PlanGlobexDays(new DateTime(2026, 9, 1), new DateTime(2026, 9, 2), null, b17);
+			var sch = new OF.TickChunkScheduler(days, new[] { 0, 1 }, 1, 4, 7000);
+			var n = sch.Next(DateTime.MinValue, true, null);
+			foreach (var c in n) c.IssuedAt = T0;
+			var to = TimeSpan.FromSeconds(300);
+			Check(sch.TimedOut(T0.AddSeconds(299), to).Count == 0 && sch.TimedOut(T0.AddSeconds(300), to).Count == 2 && sch.TimedOut(T0.AddHours(1), TimeSpan.Zero).Count == 0, "TO1 in-flight chunks time out after TickChunkTimeoutSec; 0 = off");
+			n[1].LastActivity = T0.AddSeconds(200);
+			var tout = sch.TimedOut(T0.AddSeconds(300), to);
+			Check(tout.Count == 1 && tout[0] == n[0], "TO2 a callback (LastActivity) restarts the silence");
+			Check(sch.Complete(tout[0], false, 0, null) == "split4" && tout[0].Replaced && sch.TimedOut(T0.AddHours(1), to).All(c => c != n[0]), "TO3 a timed-out chunk is failed and split; it no longer times out");
+			var subs = sch.Next(DateTime.MinValue, true, null);
+			foreach (var c in subs) c.IssuedAt = T0.AddSeconds(400);
+			Check(subs.Count == 4 && subs.All(c => c.Attempt == 2 && c.Sub > 0), "TO4 sub-chunks issued with attempt(2)");
+			var subOut = sch.TimedOut(T0.AddSeconds(700), to).Where(c => c.Sub > 0).ToList();
+			Check(subOut.Count == 4 && sch.Complete(subOut[0], false, 0, null) == "giveUp", "TO5 a timed-out sub-chunk gives up");
+			string pump = MethodBody(vp, "private void pumpTickChunks(") ?? "";
+			Check(pump.Contains("m_chunks.TimedOut(") && pump.Contains("req.Subscribe2RT = c.Rt && m_chunkLive;") && !pump.Contains("catch { }"), "TO6 pump: timeouts applied, RT only on a live chart, no empty catch");
+			int el = pump.IndexOf("endLoads(toEnd"), lk = pump.IndexOf("lock (m_flowLock)");
+			string stop = MethodBody(vp, "private void stopOrderFlowLoads(") ?? "";
+			Check(el > lk && !pump.Substring(lk, el - lk).Contains("DataLoader.EndLoadData") && stop.Contains("endLoads(") && !stop.Contains("DataLoader.EndLoadData"), "TO7 EndLoadData called outside m_flowLock (pump, stop)");
+
+			// nit: OpenTime cut only on time-based resolutions
+			var en = Engine(false);
+			var bn = Bar(1, Ms(200)); bn.OpenTime = Ms(100);   // TimeBased false (tick/volume/range chart)
+			en.AddTrade(Ms(50), 100.00, 2); en.AddTrade(Ms(150), 100.25, 3);
+			var gn = en.CloseBar(bn);
+			Check(gn.BacklogTrades == 0 && Near(gn.Buy + gn.Sell, 5), "BL4 non-time-based bar: OpenTime does not cut");
+			var en2 = Engine(false);
+			en2.CloseBar(Bar(1, Ms(100), Regime.BarsOnly, vol: 1, up: 1));
+			en2.AddTrade(Ms(100), 100.00, 2); en2.AddTrade(Ms(150), 100.25, 3);
+			var bn2 = Bar(2, Ms(200)); bn2.OpenTime = Ms(120);
+			var gn2 = en2.CloseBar(bn2);
+			Check(gn2.BacklogTrades == 1 && Near(gn2.Buy + gn2.Sell, 3), "BL5 non-time-based bar: the previous-close cut still applies");
+			Check(vp.Contains("TimeBased = timeBasedResolution()") && (MethodBody(vp, "private DateTime barOpenTime(") ?? "").Contains("if (!timeBasedResolution()) return DateTime.MinValue;"), "BL6 strategy sets TimeBased; no OpenTime off time-based charts");
+			Check(vp.Contains("protected bool RecalcPending"), "RP1 RecalcPending exposed to derived strategies");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

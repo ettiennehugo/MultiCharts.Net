@@ -98,6 +98,9 @@ namespace PowerLanguage.Function
 			/// <summary>Fallback (spec §4.3 step 6), off: call ExecControl.Recalculate() from the DataLoader callback when the history
 			/// completes. PROBE P-RC2/P-RC3 decide whether this becomes the default.</summary>
 			public bool McRecalcFromCallback = false;
+			/// <summary>Process-wide loop guard (review B1): at most McRecalcMax recalcs per request signature within this many seconds,
+			/// across strategy objects (PROBE P-RC1: MC may build a new object on Recalculate, which resets the instance gate).</summary>
+			public int McRecalcGuardWindowSec = 600;
 			/// <summary>Tick-chunk spec §5: one DataLoader request per Globex day and stream. false = the legacy single request (A/B only).</summary>
 			public bool TickChunkByDay = true;
 			/// <summary>Days requested at the same time (1..4; all streams of a day together).</summary>
@@ -110,6 +113,8 @@ namespace PowerLanguage.Function
 			public int TickChunkWaitMs = 0;
 			/// <summary>Chunk boundary, US Eastern (CME daily halt start), so no tick straddles two chunks.</summary>
 			public TimeSpan TickChunkBoundaryEt = new TimeSpan(17, 0, 0);
+			/// <summary>An in-flight chunk with no callback for this many seconds is failed (and split like any failure); 0 = no timeout.</summary>
+			public int TickChunkTimeoutSec = 300;
 		}
 
 		/// <summary>Data the caller has for the bar being closed (Data1 values).</summary>
@@ -122,8 +127,11 @@ namespace PowerLanguage.Function
 			public Regime Regime;
 			public double High, Low, Close, Volume, UpTicks, DownTicks;
 			/// <summary>Spec §7.3: the bar's open (previous bar's time; first bar: CloseTime − bar duration). Trades at or before
-			/// max(OpenTime, previous CloseBar's CloseTime) are backlog and not added. Default (MinValue) = no bound.</summary>
+			/// the previous CloseBar's CloseTime are backlog and not added; with TimeBased, also those at or before OpenTime.
+			/// Default (MinValue) = no bound.</summary>
 			public DateTime OpenTime;
+			/// <summary>The chart resolution is time-based (the OpenTime cut applies). Tick/volume/range bars: false (bars can share a stamp).</summary>
+			public bool TimeBased;
 		}
 
 		public struct Imbalance
@@ -334,7 +342,7 @@ namespace PowerLanguage.Function
 				bool tickRegime = b.Regime == Regime.TickStream || b.Regime == Regime.IogRealTime || b.Regime == Regime.IogMagnifierOneTick;
 				bool quotes = b.Regime == Regime.TickStream && Cfg.QuotesExpected;
 				// always consume this bar's events, whatever the regime, so later bars never see them
-				DateTime backlogCut = b.OpenTime > m_lastClose ? b.OpenTime : m_lastClose;
+				DateTime backlogCut = b.TimeBased && b.OpenTime > m_lastClose ? b.OpenTime : m_lastClose;
 				while (m_trades.HasNext(b.CloseTime))
 				{
 					Ev t = m_trades.Pop();
@@ -619,7 +627,7 @@ namespace PowerLanguage.Function
 			/// <summary>Miss reason for the journal (empty | signature | incomplete | coverage), or null on a hit.</summary>
 			public string MissReason(string sig, DateTime from, DateTime to)
 			{
-				if (Signature == null && Sets == 0) return "empty";
+				if (Sets == 0 && (Signature == null || HistoryDone)) return "empty";   // a completed request with no level set is not a hit
 				if (Signature != sig) return "signature";
 				if (!HistoryDone) return "incomplete";
 				if (!Covers(from, to)) return "coverage";
@@ -628,7 +636,68 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Recalc spec §4.1: outcome of McRecalcGate.Decide.</summary>
-		public enum RecalcDecision { Wait = 0, Recalc = 1, SkipNoMissed = 2, SkipGuard = 3, SkipAutoTrading = 4, SkipDisabled = 5 }
+		public enum RecalcDecision { Wait = 0, Recalc = 1, SkipNoMissed = 2, SkipGuard = 3, SkipAutoTrading = 4, SkipDisabled = 5, SkipProcessGuard = 6 }
+
+		/// <summary>Review B1: process-wide recalc loop guard (pure; the caller holds one static instance under a static lock). At most
+		/// max recalcs per signature within window, whatever strategy object asks. Not thread-safe: the caller locks.</summary>
+		public sealed class McRecalcLoopGuard
+		{
+			private readonly Dictionary<string, List<DateTime>> m_bySig = new Dictionary<string, List<DateTime>>();
+
+			/// <summary>Recalcs recorded for sig within (now − window, now].</summary>
+			public int CountFor(string sig, DateTime now, TimeSpan window)
+			{
+				List<DateTime> l = prune(sig, now, window);
+				return l == null ? 0 : l.Count;
+			}
+
+			/// <summary>Records a recalc and returns true when fewer than max are recorded for sig within the window; else false.</summary>
+			public bool TryAcquire(string sig, DateTime now, int max, TimeSpan window)
+			{
+				if (sig == null) return false;
+				if (m_bySig.Count > 64) pruneAll(now, window);
+				List<DateTime> l = prune(sig, now, window);
+				if ((l == null ? 0 : l.Count) >= max) return false;
+				if (l == null) m_bySig[sig] = l = new List<DateTime>();
+				l.Add(now);
+				return true;
+			}
+
+			/// <summary>Signatures tracked (tests).</summary>
+			public int Signatures { get { return m_bySig.Count; } }
+
+			private List<DateTime> prune(string sig, DateTime now, TimeSpan window)
+			{
+				List<DateTime> l;
+				if (sig == null || !m_bySig.TryGetValue(sig, out l)) return null;
+				l.RemoveAll(t => t <= now - window || t > now);
+				if (l.Count == 0) { m_bySig.Remove(sig); return null; }
+				return l;
+			}
+
+			private void pruneAll(DateTime now, TimeSpan window)
+			{
+				var keys = new List<string>(m_bySig.Keys);
+				foreach (string k in keys) prune(k, now, window);
+			}
+		}
+
+		/// <summary>Review B2: the stream of a legacy tick-request callback, from its state (stateBase + stream, set before
+		/// BeginLoadData); -1 for anything else (an earlier pass's request, a chunk id, a non-int state).</summary>
+		public static int LegacyStream(object state, int stateBase, int streams)
+		{
+			if (!(state is int) || stateBase <= 0) return -1;
+			int s = (int)state - stateBase;
+			return s >= 0 && s < streams && s < 3 ? s : -1;
+		}
+
+		/// <summary>Review B2: a McBidAsk level callback belongs to the current request: its state is the current request id (set
+		/// before BeginLoadData; 0 = none) and, once the result is known, it is that result.</summary>
+		public static bool IsCurrentRequest(object state, int currentId, object result, object currentResult)
+		{
+			if (currentId <= 0 || !(state is int) || (int)state != currentId) return false;
+			return currentResult == null || ReferenceEquals(result, currentResult);
+		}
 
 		/// <summary>Recalc spec §4.1: decides the one recalculation after the McBidAsk history completes. No MultiCharts types. The guard
 		/// counts recalcs per cache signature and survives passes; the missed-bar counters are per pass (BeginPass).</summary>
@@ -681,6 +750,7 @@ namespace PowerLanguage.Function
 					case RecalcDecision.SkipGuard: return "guard";
 					case RecalcDecision.SkipAutoTrading: return "autoTrading";
 					case RecalcDecision.SkipDisabled: return "disabled";
+					case RecalcDecision.SkipProcessGuard: return "processGuard";
 					default: return d.ToString();
 				}
 			}
@@ -719,6 +789,8 @@ namespace PowerLanguage.Function
 			public bool Released;
 			public long Ticks, LateDropped;
 			public DateTime IssuedAt;
+			/// <summary>Last callback for this chunk (caller-set); the timeout counts from max(IssuedAt, LastActivity).</summary>
+			public DateTime LastActivity;
 			public object Payload;
 			public string SkipReason;
 			public bool Finished { get { return State == ChunkState.Done || State == ChunkState.Failed || State == ChunkState.Skipped; } }
@@ -821,6 +893,21 @@ namespace PowerLanguage.Function
 						Attempt = 1, Rt = c.Rt && k == SplitOnFail - 1 }));
 				}
 				return "split" + SplitOnFail;
+			}
+
+			/// <summary>Review S3: in-flight chunks with no activity (IssuedAt, LastActivity) for timeout or longer. The caller fails them
+			/// with Complete(c, false, ...) (a first failure splits). timeout &lt;= 0: none.</summary>
+			public List<TickChunk> TimedOut(DateTime now, TimeSpan timeout)
+			{
+				var r = new List<TickChunk>();
+				if (timeout <= TimeSpan.Zero) return r;
+				foreach (var c in live())
+				{
+					if (c.State != ChunkState.InFlight) continue;
+					DateTime seen = c.LastActivity > c.IssuedAt ? c.LastActivity : c.IssuedAt;
+					if (now - seen >= timeout) r.Add(c);
+				}
+				return r;
 			}
 
 			/// <summary>Done, unreleased chunks whose earlier chunks (same stream) are all finished, in time order; marked Released.</summary>

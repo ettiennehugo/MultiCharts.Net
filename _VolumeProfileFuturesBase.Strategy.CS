@@ -615,6 +615,14 @@ namespace PowerLanguage.Strategy
 		private readonly _OrderFlow.McLevelCache m_mcCache = new _OrderFlow.McLevelCache();   // under m_flowLock
 		private readonly _OrderFlow.McRecalcGate m_mcGate = new _OrderFlow.McRecalcGate();     // under m_flowLock
 		private string m_mcSig;   // this pass's request signature (null: no McBidAsk request this pass)
+		// Review B1: process-wide loop guard keyed by the request signature (a new strategy object starts with a fresh m_mcGate).
+		// Lock order: m_flowLock, then s_mcRecalcGuardLock (which takes no other lock).
+		private static readonly object s_mcRecalcGuardLock = new object();
+		private static readonly _OrderFlow.McRecalcLoopGuard s_mcRecalcGuard = new _OrderFlow.McRecalcLoopGuard();
+		private volatile bool m_mcRecalcTriggered;    // a recalc was decided this pass (Recalculate() called or about to be)
+		private int m_mcReqId, m_mcReqSeq;             // under m_flowLock: the current McBidAsk request's state id (0 = none) and the id source
+		private int m_flowStateBase;                   // under m_flowLock: legacy tick requests use states m_flowStateBase + stream (0 = none)
+		private bool m_chunkLive;                      // the chunk plan subscribes RT (live chart)
 		private bool m_mcCacheHit, m_mcCacheStoredLogged, m_idleArmed, m_idleTimeoutLogged, m_idleDoneLogged;
 		private volatile bool m_mcRecalcDecided;      // once per pass (the callback fallback may set it)
 		private volatile bool m_autoTradingSnap;      // Environment.IsAutoTradingMode, read on the calc thread for the callback fallback
@@ -633,17 +641,38 @@ namespace PowerLanguage.Strategy
 		/// <summary>VPF-5: the engine (null when OrderFlowEnabled is false). Lock-free reads are safe from CalcBar.</summary>
 		protected _OrderFlow.FlowEngine Flow { get { return m_flow; } }
 
+		/// <summary>Review nit: true while this pass may still be thrown away by ExecControl.Recalculate() (McBidAsk history not yet
+		/// decided and a recalc still allowed, or a recalc already triggered). Derived strategies can skip order logic meanwhile.
+		/// Calc thread.</summary>
+		protected bool RecalcPending
+		{
+			get
+			{
+				if (m_mcRecalcTriggered) return true;
+				lock (m_flowLock)
+				{
+					if (m_mcSig == null || m_mcRecalcDecided || !FlowCfg.McRecalcOnLoad || m_autoTradingSnap) return false;
+					if (m_mcGate.CountFor(m_mcSig) >= FlowCfg.McRecalcMax) return false;
+					lock (s_mcRecalcGuardLock)
+						return s_mcRecalcGuard.CountFor(m_mcSig, DateTime.UtcNow, mcGuardWindow()) < FlowCfg.McRecalcMax;
+				}
+			}
+		}
+
+		private TimeSpan mcGuardWindow() { return TimeSpan.FromSeconds(Math.Max(1, FlowCfg.McRecalcGuardWindowSec)); }
+
 		private void startOrderFlow()
 		{
 			stopOrderFlowLoads();
 			// Recalc spec §4.2: new pass. m_mcCache and the gate's recalc count are deliberately NOT reset here or in StopCalc.
 			lock (m_flowLock) m_mcGate.BeginPass();
-			m_mcSig = null; m_mcCacheHit = m_mcCacheStoredLogged = m_mcRecalcDecided = false;
+			m_mcSig = null; m_mcCacheHit = m_mcCacheStoredLogged = m_mcRecalcDecided = m_mcRecalcTriggered = false;
 			m_idleArmed = m_idleTimeoutLogged = m_idleDoneLogged = false;
 			lock (m_flowLock)
 			{
 				if (m_chunks != null) m_chunkIdSeed = m_chunks.NextId + 1000;
 				m_chunks = null; m_chunkLoads = null; m_chunkRtBuf = null; m_lastClosedEt = DateTime.MinValue;
+				m_mcReqId = 0; m_mcResult = null; m_flowStateBase = 0;
 			}
 			m_waitGx = DateTime.MinValue; m_chunkSummaryLogged = false;
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
@@ -672,12 +701,30 @@ namespace PowerLanguage.Strategy
 			base.StopCalc();
 		}
 
+		// Review S4: copy the list under the lock, end the requests outside it (a callback may be waiting on m_flowLock) and queue
+		// any failure (StartCalc calls this: no trace there; the queue is drained on the calc thread).
 		private void stopOrderFlowLoads()
 		{
+			List<IDataLoaderResult> loads;
 			lock (m_flowLock)
 			{
-				foreach (IDataLoaderResult r in m_flowLoads) { try { DataLoader.EndLoadData(r); } catch { } }
+				if (m_flowLoads.Count == 0) return;
+				loads = new List<IDataLoaderResult>(m_flowLoads);
 				m_flowLoads.Clear();
+				m_chunkLoads = null;
+			}
+			endLoads(loads, "stop");
+		}
+
+		// Calc thread, outside m_flowLock.
+		private void endLoads(List<IDataLoaderResult> loads, string when)
+		{
+			if (loads == null) return;
+			foreach (IDataLoaderResult r in loads)
+			{
+				if (r == null) continue;
+				try { DataLoader.EndLoadData(r); }
+				catch (Exception ex) { enqueueFlowMsg(ETraceLevel.Journal, $"OF loader endLoadData exception({ex.GetType().FullName}) message({ex.Message}) when({when})"); }
 			}
 		}
 
@@ -700,15 +747,22 @@ namespace PowerLanguage.Strategy
 			var fields = FlowCfg.QuotesExpected
 				? new[] { RequestQuoteField.Trade, RequestQuoteField.Bid, RequestQuoteField.Ask } : new[] { RequestQuoteField.Trade };
 			if (FlowCfg.TickChunkByDay && planTickChunks(firstBar, lastBar, to, fields)) pumpTickChunks();
-			else for (int i = 0; i < fields.Length; i++)
+			else
 			{
-				InstrumentDataRequest req = Bars.Request;
-				req.Resolution = new Resolution(EResolution.Tick, 1);
-				req.QuoteField = fields[i];
-				setRequestWindow(ref req, from, to);
-				req.Subscribe2RT = true;
-				IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, i);
-				lock (m_flowLock) m_flowLoads.Add(r);
+				// Review B2: pass-unique states (taken from the chunk id space, so no chunk or earlier-pass callback matches),
+				// set before BeginLoadData so even a first batch delivered before it returns is accepted.
+				int stateBase;
+				lock (m_flowLock) { stateBase = m_flowStateBase = m_chunkIdSeed; m_chunkIdSeed += 1000; }
+				for (int i = 0; i < fields.Length; i++)
+				{
+					InstrumentDataRequest req = Bars.Request;
+					req.Resolution = new Resolution(EResolution.Tick, 1);
+					req.QuoteField = fields[i];
+					setRequestWindow(ref req, from, to);
+					req.Subscribe2RT = true;
+					IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, stateBase + i);
+					lock (m_flowLock) m_flowLoads.Add(r);
+				}
 			}
 			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off)
 			{
@@ -742,7 +796,7 @@ namespace PowerLanguage.Strategy
 			Resolution cr = Bars.Request.Resolution;
 			string sig = $"{Bars.Info.Name}|{Bars.Info.DataFeed}|{cr.Type}|{cr.Size}|{McBidAskChartType}|{FlowCfg.McBidAsk}|{firstBar:yyyy-MM-dd HH:mm:ss}";
 			m_mcSig = sig;
-			bool live = Environment.IsRealTimeCalc || lastBar >= DateTime.Now.AddDays(-1);
+			bool live = chartIsLive(lastBar);
 			string miss; int sets; long levels; DateTime cFirst, cLast; int pass, recalcs;
 			lock (m_flowLock)
 			{
@@ -752,6 +806,7 @@ namespace PowerLanguage.Strategy
 					m_mcCache.ReplayInto(m_flow);
 					m_mcLoaded = m_mcCache.Sets; m_mcFirst = m_mcCache.First; m_mcLast = m_mcCache.Last;
 					m_mcHistoryDone = true;
+					m_mcResult = null; m_mcReqId = 0;   // review B2b: no request of this pass yet; earlier callbacks are stale
 				}
 				else
 				{
@@ -776,6 +831,9 @@ namespace PowerLanguage.Strategy
 			if (live) startMcLevelLoader(tailFrom, DateTime.Now.AddDays(1), "tail");
 		}
 
+		// Calc thread: a live chart (real-time calc, or the last bar within a day of now) subscribes RT.
+		private bool chartIsLive(DateTime lastBar) { return Environment.IsRealTimeCalc || lastBar >= DateTime.Now.AddDays(-1); }
+
 		// Spec S1 ingestion: one more request, a copy of Bars.Request with ChartType McBidAskChartType (FootPrint). PROBES P-BA2..P-BA4 open;
 		// Data2 / RTData2 / BarPriceLevels / PriceLevel are read through the typed API.
 		private void startMcLevelLoader(DateTime from, DateTime to, string kind)
@@ -796,9 +854,16 @@ namespace PowerLanguage.Strategy
 			setRequestWindow(ref req, from, to);   // Recalc spec §4.5: last chart bar + 1 day (tail requests on a live chart: now + 1 day)
 			req.Subscribe2RT = true;
 			m_mcStarted = true;
-			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, 3);
-			m_mcResult = r;   // kept alive here and in m_flowLoads until EndLoadData
-			lock (m_flowLock) m_flowLoads.Add(r);
+			int id;
+			// Review B2b: the request id is set before BeginLoadData (a callback may arrive before it returns); onMcLevels drops
+			// any callback whose state is not this id or whose result is not m_mcResult.
+			lock (m_flowLock) { id = m_mcReqId = ++m_mcReqSeq; m_mcResult = null; }
+			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, id);
+			lock (m_flowLock)
+			{
+				if (m_mcReqId == id) m_mcResult = r;   // kept alive here and in m_flowLoads until EndLoadData
+				m_flowLoads.Add(r);
+			}
 			// Recalc spec §7.1: log what was built (the CreateFootPrint arguments are typed locals). API dump (P-RC9): after
 			// CreateFootPrint the resolution reads ChartType=Regular, DeltaType=None, HaveDelta=True, so Regular is expected.
 			string builder = footPrint
@@ -814,7 +879,13 @@ namespace PowerLanguage.Strategy
 		{
 			bool covers = m_mcCache.HistoryDone && m_mcGate.MissedBeforeDone > 0 && m_mcCache.Sets > 0
 				&& m_mcCache.First <= m_mcGate.MissedLast && m_mcCache.Last >= m_mcGate.MissedFirst;
-			return m_mcGate.Decide(m_mcHistoryDone, covers, m_autoTradingSnap, FlowCfg.McRecalcOnLoad, FlowCfg.McRecalcMax, m_mcSig);
+			_OrderFlow.RecalcDecision d = m_mcGate.Decide(m_mcHistoryDone, covers, m_autoTradingSnap, FlowCfg.McRecalcOnLoad, FlowCfg.McRecalcMax, m_mcSig);
+			// Review B1: the process-wide guard (recorded here: both callers act on Recalc immediately)
+			if (d == _OrderFlow.RecalcDecision.Recalc)
+				lock (s_mcRecalcGuardLock)
+					if (!s_mcRecalcGuard.TryAcquire(m_mcSig, DateTime.UtcNow, FlowCfg.McRecalcMax, mcGuardWindow())) d = _OrderFlow.RecalcDecision.SkipProcessGuard;
+			if (d == _OrderFlow.RecalcDecision.Recalc) m_mcRecalcTriggered = true;
+			return d;
 		}
 
 		// Caller holds m_flowLock. Reads no MC member.
@@ -851,7 +922,9 @@ namespace PowerLanguage.Strategy
 			}
 			if (line == null)
 			{
-				if (d != _OrderFlow.RecalcDecision.Wait)
+				if (d == _OrderFlow.RecalcDecision.SkipProcessGuard)
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) max({FlowCfg.McRecalcMax}) windowSec({FlowCfg.McRecalcGuardWindowSec}) sig({m_mcSig})");
+				else if (d != _OrderFlow.RecalcDecision.Wait)
 					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)})");
 				return false;
 			}
@@ -895,12 +968,13 @@ namespace PowerLanguage.Strategy
 			for (int i = 0; i < streams.Length; i++) streams[i] = i;
 			m_chunkFields = fields;
 			m_chunkRtTo = rtTo;
+			m_chunkLive = chartIsLive(lastBar);   // review S2: only a live chart's RT chunk subscribes
 			lock (m_flowLock)
 				m_chunks = new _OrderFlow.TickChunkScheduler(days, streams, FlowCfg.TickChunkMaxInFlightDays, FlowCfg.TickChunkSplitOnFail, m_chunkIdSeed);
 			bool skipLate = FlowCfg.TickChunkLate == _OrderFlow.ETickChunkLate.Skip && FlowCfg.TickChunkWaitMs <= 0;
 			engineSink(ETraceLevel.Journal)?.Invoke($"OF tick chunk plan days({days.Count}) first({days[0].GlobexDate:yyyy-MM-dd}) last({days[days.Count - 1].GlobexDate:yyyy-MM-dd}) " +
 				$"streams({streams.Length}) maxInFlightDays({m_chunks.MaxInFlightDays}) splitOnFail({m_chunks.SplitOnFail}) late({(skipLate ? "Skip" : "Load")}) " +
-				$"waitMs({FlowCfg.TickChunkWaitMs}) boundaryEt({FlowCfg.TickChunkBoundaryEt:hh\\:mm}) closedDays({closed.Count})");
+				$"waitMs({FlowCfg.TickChunkWaitMs}) timeoutSec({FlowCfg.TickChunkTimeoutSec}) boundaryEt({FlowCfg.TickChunkBoundaryEt:hh\\:mm}) closedDays({closed.Count}) live({m_chunkLive})");
 			if (traceOn(ETraceLevel.Info))
 				foreach (DateTime d in closed) trace(ETraceLevel.Info, $"OF tick chunk skipped day({d:yyyy-MM-dd}) reason(closedDay)");
 			return true;
@@ -913,16 +987,33 @@ namespace PowerLanguage.Strategy
 			var skipped = new List<_OrderFlow.TickChunk>();
 			List<_OrderFlow.TickChunk> issue;
 			bool skipLate = FlowCfg.TickChunkLate == _OrderFlow.ETickChunkLate.Skip && FlowCfg.TickChunkWaitMs <= 0;   // a wait loads late days
+			List<IDataLoaderResult> toEnd = null;
+			List<string> timeoutLines = null;
 			lock (m_flowLock)
 			{
+				// Review S3: a chunk silent for TickChunkTimeoutSec is failed (a first failure splits; sub-chunks then log attempt(2)).
+				if (FlowCfg.TickChunkTimeoutSec > 0)
+				{
+					DateTime now = DateTime.Now;
+					foreach (_OrderFlow.TickChunk c in m_chunks.TimedOut(now, TimeSpan.FromSeconds(FlowCfg.TickChunkTimeoutSec)))
+					{
+						string outcome = m_chunks.Complete(c, false, 0, null);
+						(timeoutLines ?? (timeoutLines = new List<string>())).Add($"OF tick chunk timeout day({c.Day:yyyy-MM-dd}) stream({c.Stream}) sub({c.Sub}) attempt({c.Attempt}) id({c.Id}) " +
+							$"sec({(now - c.IssuedAt).TotalSeconds:0}) timeoutSec({FlowCfg.TickChunkTimeoutSec}) next({outcome})");
+					}
+					if (timeoutLines != null) releaseChunks();
+				}
+				// Review S4: finished requests are removed under the lock and ended outside it. The RT chunk's request stays open
+				// only while it is Done on a live chart (its subscription feeds RT ticks); a failed or replaced RT chunk is ended.
 				if (m_chunkLoads != null)
 				{
 					List<int> ended = null;
 					foreach (KeyValuePair<int, IDataLoaderResult> kv in m_chunkLoads)
 					{
 						_OrderFlow.TickChunk c = m_chunks.Find(kv.Key);
-						if (c == null || !c.Finished || c.Rt) continue;
-						try { DataLoader.EndLoadData(kv.Value); } catch { }
+						if (c == null || !c.Finished) continue;
+						if (c.Rt && !c.Replaced && c.State == _OrderFlow.ChunkState.Done && m_chunkLive) continue;
+						(toEnd ?? (toEnd = new List<IDataLoaderResult>())).Add(kv.Value);
 						m_flowLoads.Remove(kv.Value);
 						(ended ?? (ended = new List<int>())).Add(kv.Key);
 					}
@@ -936,6 +1027,8 @@ namespace PowerLanguage.Strategy
 					c.IssuedAt = DateTime.Now;
 				}
 			}
+			endLoads(toEnd, "chunk");
+			if (timeoutLines != null) foreach (string l in timeoutLines) enqueueFlowMsg(ETraceLevel.Journal, l);
 			bool info = traceOn(ETraceLevel.Info);
 			if (info)
 				foreach (_OrderFlow.TickChunk c in skipped)
@@ -946,9 +1039,9 @@ namespace PowerLanguage.Strategy
 				req.Resolution = new Resolution(EResolution.Tick, 1);
 				req.QuoteField = m_chunkFields[c.Stream];
 				setRequestWindow(ref req, c.ReqFrom, c.ReqTo);
-				req.Subscribe2RT = c.Rt;
+				req.Subscribe2RT = c.Rt && m_chunkLive;   // review S2: a historical chart never subscribes
 				if (info) trace(ETraceLevel.Info, $"OF tick chunk start day({c.Day:yyyy-MM-dd}) stream({c.Stream}) sub({c.Sub}) attempt({c.Attempt}) id({c.Id}) rt({c.Rt}) " +
-					$"et({c.FromEt:yyyy-MM-dd HH:mm}..{c.ToEt:yyyy-MM-dd HH:mm}) {requestWindowText(req)}");
+					$"subscribe2RT({req.Subscribe2RT}) et({c.FromEt:yyyy-MM-dd HH:mm}..{c.ToEt:yyyy-MM-dd HH:mm}) {requestWindowText(req)}");
 				IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, c.Id);   // state: the chunk id (boxed int)
 				lock (m_flowLock)
 				{
@@ -1070,6 +1163,12 @@ namespace PowerLanguage.Strategy
 					}
 					catch (Exception ex) { mcDiag("entryex:" + ex.GetType().Name, $"OF McBidAsk diag entry exception({ex.GetType().FullName}) message({ex.Message})"); }
 					if (m_flow == null || result == null) return;
+					// Review B2b: a callback of an earlier request (previous pass, or before a cache hit) waiting on m_flowLock is dropped.
+					if (!_OrderFlow.IsCurrentRequest(result.State, m_mcReqId, result, m_mcResult))
+					{
+						mcDiag("stale", $"OF McBidAsk diag stale callback dropped event({result.Event}) state({result.State}) current({m_mcReqId})");
+						return;
+					}
 					bool completed = false;
 					try
 					{
@@ -1102,13 +1201,21 @@ namespace PowerLanguage.Strategy
 						m_mcCache.HistoryDone = true;   // Recalc spec §4.2: the cache now holds the request's complete history
 						// Recalc spec §4.3 step 6 fallback (McRecalcFromCallback, off): PROBE P-RC2/P-RC3. Lines are queued; the
 						// stored/triggered lines are written by the next calc-thread drain.
-						if (FlowCfg.McRecalcFromCallback && m_mcSig != null && !m_mcRecalcDecided
-							&& mcRecalcDecision() == _OrderFlow.RecalcDecision.Recalc)
+						if (FlowCfg.McRecalcFromCallback && m_mcSig != null && !m_mcRecalcDecided)
 						{
-							m_mcRecalcDecided = true;
-							enqueueFlowMsg(ETraceLevel.Journal, mcTriggeredLine("callback"));
-							m_mcGate.NoteRecalc(m_mcSig);
-							recalcNow = true;
+							_OrderFlow.RecalcDecision d = mcRecalcDecision();
+							if (d == _OrderFlow.RecalcDecision.Recalc)
+							{
+								m_mcRecalcDecided = true;
+								enqueueFlowMsg(ETraceLevel.Journal, mcTriggeredLine("callback"));
+								m_mcGate.NoteRecalc(m_mcSig);
+								recalcNow = true;
+							}
+							else if (d == _OrderFlow.RecalcDecision.SkipProcessGuard)
+							{
+								m_mcRecalcDecided = true;
+								enqueueFlowMsg(ETraceLevel.Journal, $"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) from(callback) sig({m_mcSig})");
+							}
 						}
 					}
 				}
@@ -1172,11 +1279,13 @@ namespace PowerLanguage.Strategy
 		{
 			try
 			{
-				int stream = result.State is int ? (int)result.State : 0;
 				lock (m_flowLock)
 				{
 					if (m_flow == null) return;
-					if (m_chunks != null) { onChunkData(stream, result); return; }
+					if (m_chunks != null) { if (result.State is int) onChunkData((int)result.State, result); return; }
+					// Review B2a: only this pass's legacy requests (a chunk or earlier-pass callback finds no stream)
+					int stream = _OrderFlow.LegacyStream(result.State, m_flowStateBase, m_flowHistoryDone.Length);
+					if (stream < 0) return;
 					if (result.Event == DataLoadedEvent.History)
 					{
 						if (result.Data != null) foreach (Bar b in result.Data) flowTick(stream, b);
@@ -1198,6 +1307,7 @@ namespace PowerLanguage.Strategy
 		{
 			_OrderFlow.TickChunk c = m_chunks.Find(id);
 			if (c == null || c.Replaced) return;   // an earlier pass, or a chunk replaced by its sub-windows
+			c.LastActivity = DateTime.Now;          // review S3: the timeout counts silence
 			if (result.Event == DataLoadedEvent.History)
 			{
 				if (c.State != _OrderFlow.ChunkState.InFlight) return;
@@ -1225,11 +1335,13 @@ namespace PowerLanguage.Strategy
 				}
 				if (!result.IsCompleted) return;
 				m_chunks.Complete(c, true, buf.Count, buf);
-				enqueueFlowMsg(ETraceLevel.Info, $"OF tick chunk done day({c.Day:yyyy-MM-dd}) stream({c.Stream}) sub({c.Sub}) ticks({buf.Count}) lateDropped({c.LateDropped}) " +
+				// Review S3: a weekday chunk with no tick at all is journaled (Info otherwise)
+				bool empty = buf.Count == 0 && c.LateDropped == 0 && c.Day.DayOfWeek != DayOfWeek.Saturday && c.Day.DayOfWeek != DayOfWeek.Sunday;
+				enqueueFlowMsg(empty ? ETraceLevel.Journal : ETraceLevel.Info, $"OF tick chunk done day({c.Day:yyyy-MM-dd}) stream({c.Stream}) sub({c.Sub}) ticks({buf.Count}) lateDropped({c.LateDropped}) " +
 					$"sec({(DateTime.Now - c.IssuedAt).TotalSeconds:0.0})");
 				releaseChunks();
 			}
-			else if (result.Event == DataLoadedEvent.RTNewBar && result.RTData.HasValue && c.Rt)
+			else if (result.Event == DataLoadedEvent.RTNewBar && result.RTData.HasValue && c.Rt && c.State != _OrderFlow.ChunkState.Failed)
 			{
 				m_flowHistoryDone[c.Stream] = true;
 				if (c.Released) { flowTick(c.Stream, result.RTData.Value); return; }
@@ -1313,7 +1425,7 @@ namespace PowerLanguage.Strategy
 				DateTime reset = FlowCfg.ResetMode == _OrderFlow.ResetMode.Rth ? (IsRthValueBarEt(et) ? gx : gx.AddTicks(1)) : gx;
 				_OrderFlow.FootprintBar closedFp = m_flow.CloseBar(new _OrderFlow.BarInput
 				{
-					BarNumber = bar, CloseTime = Bars.Time[0], OpenTime = barOpenTime(), SessionKey = gx, ResetKey = reset, Regime = regime,
+					BarNumber = bar, CloseTime = Bars.Time[0], OpenTime = barOpenTime(), TimeBased = timeBasedResolution(), SessionKey = gx, ResetKey = reset, Regime = regime,
 					High = Bars.High[0], Low = Bars.Low[0], Close = Bars.Close[0], Volume = Bars.Volume[0], UpTicks = Bars.UpTicks[0], DownTicks = Bars.DownTicks[0]
 				});
 				mcJournal(closedFp);
@@ -1321,11 +1433,21 @@ namespace PowerLanguage.Strategy
 		}
 
 		// Spec §7.3: the bar's open = the previous bar's close stamp; the first bar: close − duration (minute bars), else no bound.
+		// Review nit: only time-based charts (timeBasedResolution) get the OpenTime cut; others get no bound.
 		private DateTime barOpenTime()
 		{
+			if (!timeBasedResolution()) return DateTime.MinValue;
 			if (Bars.CurrentBar > 1) return Bars.Time[1];
 			Resolution r = Bars.Request.Resolution;
 			return r.Type == EResolution.Minute ? Bars.Time[0] - r.Duration() : DateTime.MinValue;
+		}
+
+		// Regular chart type with a Minute or Day resolution. Only these EResolution members are confirmed in this codebase (Tick,
+		// Minute, Day); Second/Hour/Week/... are not, so those charts conservatively get no OpenTime cut (previous-close cut only).
+		private bool timeBasedResolution()
+		{
+			Resolution r = Bars.Request.Resolution;
+			return r.ChartType == ChartType.Regular && (r.Type == EResolution.Minute || r.Type == EResolution.Day);
 		}
 
 		// Tick-chunk spec §5.4 (TickChunkWaitMs > 0): at the first bar of each planned Globex day, wait (bounded) for that day's
