@@ -22,6 +22,40 @@ static class Program
 		for (int k = b; k < src.Length; k++) { if (src[k] == '{') d++; else if (src[k] == '}' && --d == 0) return src.Substring(b, k - b + 1); }
 		return null;
 	}
+	// Typed-enum lint (Ettienne's rule, 2026-11-01): MultiCharts enums and API members are never coded as strings - no ToString()
+	// compares or switches, no name strings for enum members, no Enum.Parse/TryParse of a non-repo enum, no reflection by member
+	// name. One comment-stripped source line in, the ids of the rules it breaks out. ownEnums/ownTypes = enums/classes/structs
+	// declared in this repo (parsing the repo's own config enums and reflecting over its own types is fine).
+	const string McNames = "Tick|Minute|Second|Hour|Day|Week|Month|Quarter|Year|Volume|Range|Renko|Kagi|Regular|Future|Futures|Stock|Forex|Crypto|Option|Index|Cash|Fund|Bond|Spread";
+	static List<string> TypedEnumLint(string line, HashSet<string> ownEnums, HashSet<string> ownTypes)
+	{
+		var r = new List<string>();
+		Func<string, bool> has = p => System.Text.RegularExpressions.Regex.IsMatch(line, p);
+		if (has(@"\.ToString\(\)\s*(==|!=)") || has(@"(==|!=)\s*[\w\.\[\]]+\.ToString\(\)")) r.Add("tostring-compare");
+		if (has(@"switch\s*\([^)]*\.ToString\(\)\s*\)")) r.Add("tostring-switch");
+		if (has(@"\.ToString\(\)\s*\.(Equals|StartsWith|EndsWith|Contains|IndexOf)\s*\(") || has(@"(?<!\w)Equals\([^;]*\.ToString\(\)")) r.Add("tostring-equals");
+		if (has(@"\.(Category|ChartType|Type)\.ToString\(\)")) r.Add("mc-enum-tostring");
+		if (has(@"(==|!=)\s*""(" + McNames + @")""") || has(@"""(" + McNames + @")""\s*(==|!=)") || has(@"case\s+""(" + McNames + @")""\s*:")
+			|| has(@"\(\s*""(FOREX|CRYPTO|CURRENCY|FUTURE|FUTURES|STOCK)""\s*\)")) r.Add("mc-member-name-string");
+		if (has(@"GetType\(\)\.Name\s*(==|!=)") || has(@"\.Name\s*(==|!=)\s*""\w*Attribute""")) r.Add("type-name-compare");
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(line, @"Enum\.(Try)?Parse\b"))
+		{
+			// the parsed enum: Parse(typeof(T)..), Parse<T>/TryParse<T>, or TryParse(.., out v) checked by Enum.IsDefined(typeof(T), v) on the line
+			var t = System.Text.RegularExpressions.Regex.Match(line.Substring(m.Index), @"^Enum\.(?:Try)?Parse\s*(?:<\s*([\w\.]+)\s*>|\(\s*typeof\(\s*([\w\.]+)\s*\))");
+			string ty = t.Success ? (t.Groups[1].Success ? t.Groups[1].Value : t.Groups[2].Value) : null;
+			if (ty == null) { var d = System.Text.RegularExpressions.Regex.Match(line, @"Enum\.IsDefined\(\s*typeof\(\s*([\w\.]+)\s*\)"); if (d.Success) ty = d.Groups[1].Value; }
+			if (ty == null || !ownEnums.Contains(ty.Substring(ty.LastIndexOf('.') + 1))) r.Add("enum-parse(" + (ty ?? "?") + ")");
+		}
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(line, @"\.(GetProperty|GetField|GetMethod|GetMember|GetEvent|GetProperties|GetFields|InvokeMember)\s*\("))
+		{
+			// reflection over the repo's own type (typeof(Own).GetField(..)) is fine; anything else reads MultiCharts members by name
+			var o = System.Text.RegularExpressions.Regex.Match(line.Substring(0, m.Index), @"typeof\(\s*(\w+)\s*\)\s*$");
+			bool own = o.Success && ownTypes.Contains(o.Groups[1].Value);
+			bool typedSweep = (m.Groups[1].Value == "GetProperties" || m.Groups[1].Value == "GetFields");   // no member name: not by-name
+			if (!own && !typedSweep) r.Add("reflection-by-name(" + m.Groups[1].Value + ")");
+		}
+		return r;
+	}
 	static DateTime Ms(int ms) { return T0.AddMilliseconds(ms); }
 
 	static OF.BarInput Bar(int n, DateTime close, Regime r = Regime.TickStream, double vol = 0, double up = 0, double down = 0, DateTime? session = null, double hi = 0, double lo = 0, double cl = 0)
@@ -669,14 +703,18 @@ static class Program
 			{
 				string t = ln.Trim();
 				if (t.StartsWith("//") || !(t.Contains("Bars.") || t.Contains("Output"))) continue;
-				if (!(t.StartsWith("if (onCalc)") || t == "m_logger = LogFileSingleton.GetInstance(onCalc ? Output : null);")) trGuarded = false;
+				if (!(t.StartsWith("if (onCalc)") || t == "m_logger = LogFileSingleton.GetInstance(onCalc ? Output : null);" || t.StartsWith("try { Output.WriteLine($\"{GetType().Name} {Bars.Info.Name}: trace log "))) trGuarded = false;
 			}
-			Check(trGuarded && tr.Contains("bool onCalc = onCalcThread();") && tr.Contains("else m_logger.WriteTrace(null, traceLevel, m_lastCalcBarTime, m_traceZone ?? \"?\", this.GetType().Name, m_traceSymbol ?? \"\", RunId, message);"),
+			// the path line is the one Bars/Output line not starting with "if (onCalc)": it must sit in the onCalc && !m_tracePathShown block
+			string trPath = MethodBody(tr.Substring(Math.Max(0, tr.IndexOf("if (onCalc && !m_tracePathShown)"))), "if (onCalc && !m_tracePathShown)") ?? "";
+			int trLog = MethodBody(tr.Substring(Math.Max(0, tr.IndexOf("if (m_logger == null)"))), "if (m_logger == null)")?.IndexOf("Output.WriteLine") ?? 0;
+			trGuarded = trGuarded && trPath.Contains("try { Output.WriteLine($\"{GetType().Name} {Bars.Info.Name}: trace log ") && tr.Split(new[] { ": trace log " }, StringSplitOptions.None).Length == 2;
+			Check(trGuarded && tr.Contains("bool onCalc = onCalcThread();") && tr.Contains("else m_logger.WriteTrace(null, traceLevel, LastCalcBarTime, m_traceZone ?? \"?\", this.GetType().Name, m_traceSymbol ?? \"\", RunId, message);"),
 				"SC1 trace(): every Bars/Output read is behind onCalc; off the calc thread it stamps the cached bar time and passes no Output");
 			string note = MethodBody(cs, "protected void noteCalcThread()") ?? "";
 			string ct = MethodBody(cs, "private bool onCalcThread()") ?? "";
 			string csBar = MethodBody(cs, "protected override void CalcBar()") ?? "";
-			Check(note.Contains("m_calcThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;") && note.Contains("m_lastCalcBarTime = Bars.Time[0];")
+			Check(note.Contains("m_calcThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;") && note.Contains("System.Threading.Volatile.Write(ref m_lastCalcBarTicks, Bars.Time[0].Ticks);")
 				&& ct.Contains("m_calcThreadId != 0 && System.Threading.Thread.CurrentThread.ManagedThreadId == m_calcThreadId") && csBar.TrimStart('{').TrimStart().StartsWith("noteCalcThread();"),
 				"SC2 CalcBar caches the calc thread id and bar time first; unknown thread (0) counts as off the calc thread");
 			string wt = MethodBody(cs, "public void WriteTrace(IOutput output,") ?? "";
@@ -687,6 +725,22 @@ static class Program
 			string ev = MethodBody(vp, "protected override void OnRecalcLastBarAfterEvent()") ?? "";
 			Check(vpBar.IndexOf("noteCalcThread();") >= 0 && vpBar.IndexOf("noteCalcThread();") < vpBar.IndexOf("drainFlowQueue();")
 				&& ev.IndexOf("noteCalcThread();") >= 0 && ev.IndexOf("noteCalcThread();") < ev.IndexOf("drainFlowQueue();"), "SC4 VP caches the calc thread before draining (CalcBar, OnRecalcLastBarAfterEvent)");
+			// #79 nits (typed-enums follow-up): the deferred per-instance path line, a volatile thread id, the bar time as long ticks
+			// through Volatile.Write/Read, and the id/ticks reset per pass.
+			int pathFlag = trPath.IndexOf("m_tracePathShown = true;"), pathOut = trPath.IndexOf("Output.WriteLine(");
+			Check(trLog == -1 && pathFlag > 0 && pathOut > pathFlag, "SC7 'trace log <path>' is printed on the first ON-thread trace (flag set first), not when the logger is created");
+			string csStart = MethodBody(cs, "protected override void StartCalc()") ?? "";
+			string csStop = MethodBody(cs, "protected override void StopCalc()") ?? "";
+			string[] stopStmts = System.Text.RegularExpressions.Regex.Replace(csStop, @"//[^\n]*", "").Trim('{', '}', ' ', '\t', '\r', '\n').Split(';').Select(x => x.Trim()).Where(x => x.Length > 0 && !x.StartsWith("//")).ToArray();
+			Check(cs.Contains("private volatile int m_calcThreadId;") && cs.Contains("private long m_lastCalcBarTicks;") && !cs.Contains("m_lastCalcBarTime")
+				&& cs.Contains("protected DateTime LastCalcBarTime { get { return new DateTime(System.Threading.Volatile.Read(ref m_lastCalcBarTicks)); } }"),
+				"SC8 m_calcThreadId volatile; cached bar time = long ticks read with Volatile.Read");
+			Check(csStart.Contains("m_calcThreadId = 0;") && csStart.Contains("System.Threading.Volatile.Write(ref m_lastCalcBarTicks, 0L);")
+				&& stopStmts.Length >= 2 && stopStmts[stopStmts.Length - 2] == "base.StopCalc()" && stopStmts[stopStmts.Length - 1].StartsWith("m_calcThreadId = 0"),
+				"SC9 StartCalc resets the thread id and bar ticks; StopCalc resets the id last, after base.StopCalc() (no catch around base.*)");
+			// SC5 is a NON-TRANSITIVE static lint: it scans only the text of the method bodies listed in stopPath for banned substrings.
+			// It does not follow calls, so every helper reachable from StopCalc must be listed here by hand (a new helper that reads
+			// Bars under another name, or a call into an unlisted method, is NOT caught), and a banned word in a string literal fails it.
 			string[] stopBanned = { "Bars.", "Bars[", "Output", "trace(", "BarsOfData", "Environment.", "ToEastern", "clock()", "tickSize()", "StatusLine", "noteCalcThread" };
 			string[][] stopPath = {
 				new[] { "vp", "protected override void StopCalc()" }, new[] { "vp", "private void drainFlowQueue()" }, new[] { "vp", "private string mcStopLine(" },
@@ -726,6 +780,86 @@ static class Program
 			var bw = Bar(2, Ms(200)); bw.OpenTime = Ms(180); bw.TimeBased = false;
 			var gw2 = ec.CloseBar(bw);
 			Check(gw2.BacklogTrades == 1 && Near(gw2.Buy + gw2.Sell, 3), "ER7 calendar (non-time) bar: OpenTime does not cut, previous-close cut does");
+			// ---- TE: typed MultiCharts enums and members (Ettienne's rule, 2026-11-01; typed-enums follow-up to #79) ----
+			{
+				string root = System.IO.Path.GetFullPath(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../.."));
+				var studies = System.IO.Directory.GetFiles(root, "*.CS").Where(f => System.Text.RegularExpressions.Regex.IsMatch(System.IO.Path.GetFileName(f), @"\.(Strategy|Function|Indicator|Signal)\.CS$"))
+					.OrderBy(f => f, StringComparer.Ordinal).ToList();
+				var ownEnums = new HashSet<string>(); var ownTypes = new HashSet<string>();
+				var texts = new Dictionary<string, string>();
+				foreach (string f in studies)
+				{
+					string s = System.IO.File.ReadAllText(f); texts[System.IO.Path.GetFileName(f)] = s;
+					s = System.Text.RegularExpressions.Regex.Replace(s, @"//[^\n]*", "");   // declarations only, not comments
+					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\benum\s+(\w+)")) ownEnums.Add(m.Groups[1].Value);
+					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\b(?:class|struct)\s+(\w+)")) ownTypes.Add(m.Groups[1].Value);
+				}
+				string[] mcEnums = { "EResolution", "ESymbolCategory", "ChartType", "DataRequestType", "RequestQuoteField", "EOrderAction", "InputAttribute", "Bar", "Resolution" };
+				Check(studies.Count > 50 && ownEnums.Contains("EEventKind") && ownEnums.Contains("EEventTier") && ownEnums.Contains("EEventFlags") && ownEnums.Contains("EPortProfile") && ownEnums.Contains("EPortSizing")
+					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
+					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");
+				// Exemptions, each listed in the PR. _InstrProbe is the probe/dump study: it prints enum names and reads members by
+				// reflection on purpose (no trading decision). autoTradingDay's category test waits for _McApiDump3 (Forex/Crypto
+				// member names are documented, not confirmed on Ettienne's install).
+				var exemptFiles = new HashSet<string> { "_InstrProbe.Strategy.CS" };
+				string[] exemptLines = {
+					"_CustomSignal.Strategy.CS|if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, Bars.Info.Category.ToString());",
+					"_CustomSignal.Strategy.CS|if (c.Contains(\"FOREX\") || (c.Contains(\"CURRENCY\") && !c.Contains(\"CRYPTO\"))) return ToZone(barTime, \"Eastern Standard Time\").AddHours(7).Date;",
+					"_CustomSignal.Strategy.CS|if (c.Contains(\"CRYPTO\")) return ToZone(barTime, \"UTC\").Date;" };
+				var used = new HashSet<string>();
+				var hits = new List<string>();
+				foreach (var kv in texts)
+				{
+					if (exemptFiles.Contains(kv.Key)) continue;
+					string[] lines = kv.Value.Split('\n');
+					for (int i = 0; i < lines.Length; i++)
+					{
+						string code = System.Text.RegularExpressions.Regex.Replace(lines[i], @"//.*$", "").Trim();
+						if (code.Length == 0) continue;
+						var rules = TypedEnumLint(code, ownEnums, ownTypes);
+						if (rules.Count == 0) continue;
+						string ek = kv.Key + "|" + code;
+						if (exemptLines.Contains(ek)) { used.Add(ek); continue; }
+						hits.Add(kv.Key + ":" + (i + 1) + " " + string.Join(",", rules));
+					}
+				}
+				Check(hits.Count == 0, "TE1 no MultiCharts enum/member coded as a string in strategy/function/indicator sources [" + string.Join(" | ", hits) + "]");
+				Check(used.Count == exemptLines.Length, "TE2 every lint exemption still matches a source line (no stale exemptions): " + used.Count + "/" + exemptLines.Length);
+				// the lint catches the patterns this PR removed (and lets the repo's own enums/types through)
+				string[] bad = {
+					"&& Bars.Info.Resolution.Type.ToString() != \"Day\" && Bars.Info.Category.ToString() == \"Future\")", "switch (r.Type.ToString())",
+					"oneTick = src.Info.Resolution.Type.ToString() == \"Tick\";", "if (a.GetType().Name == \"InputAttribute\") return true;",
+					"cache = (System.Reflection.MemberInfo)o.GetType().GetProperty(n) ?? o.GetType().GetField(n);", "var c = (ESymbolCategory)Enum.Parse(typeof(ESymbolCategory), s);",
+					"Enum.TryParse<EResolution>(s, out r);", "switch (resolutionType ?? \"\") { case \"Day\": return false; }", "if (c.Contains(\"FOREX\")) return x;",
+					"bool f = string.Equals(cat, Bars.Info.Category.ToString());", "if (type == \"Second\" && size <= 0)", "x = b.GetType().InvokeMember(\"Close\", f, null, b, null);", "if (\"Future\".Equals(Bars.Info.Category.ToString())) return;" };
+				var missed = bad.Where(b => TypedEnumLint(b, ownEnums, ownTypes).Count == 0).ToList();
+				Check(missed.Count == 0, "TE3 lint flags MC-enum ToString compares/switches, member-name strings, Enum.Parse of MC enums and reflection by name [" + string.Join(" | ", missed) + "]");
+				string[] good = {
+					"economicEvent.volatility = (EEventVolatility)Enum.Parse(typeof(EEventVolatility), line.volatility);",
+					"EEventTier t; if (!Enum.TryParse(c[4], false, out t) || !Enum.IsDefined(typeof(EEventTier), t)) return false;",
+					"var prop = typeof(Entry).GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);",
+					"if (Bars.Info.Category == ESymbolCategory.Future && r.Type != EResolution.Day) return;", "sameAsLastCall({ReferenceEquals(o, m_lastRef).ToString()})", "trace(ETraceLevel.Info, $\"resolution({info.Resolution.Type} {info.Resolution.Size})\");" };
+				var flagged = good.Where(gs => TypedEnumLint(gs, ownEnums, ownTypes).Count != 0).ToList();
+				Check(ownTypes.Contains("Entry") && flagged.Count == 0, "TE4 lint passes the repo's own enum parses, own-type reflection and typed compares [" + string.Join(" | ", flagged) + "]");
+
+				// the typed replacements themselves
+				string tb2 = MethodBody(cs, "private static TimeSpan twoBars(Resolution r)") ?? "";
+				Check(tb2.Contains("switch (r.Type)") && tb2.Contains("case EResolution.Second: unit = TimeSpan.FromSeconds(1); break;") && tb2.Contains("case EResolution.Minute: unit = TimeSpan.FromMinutes(1); break;")
+					&& tb2.Contains("case EResolution.Hour: unit = TimeSpan.FromHours(1); break;") && tb2.Contains("case EResolution.Day: unit = TimeSpan.FromDays(1); break;")
+					&& tb2.Contains("case EResolution.Week: unit = TimeSpan.FromDays(7); break;") && tb2.Contains("default: return TimeSpan.Zero;")
+					&& tb2.Contains("return _OrderFlow.ExactBarLength(_OrderFlow.ExactBarLength(unit, r.Size), 2);") && !tb2.Contains("ToString"), "TE5 XMKT twoBars: typed EResolution switch, 2 x Size x unit via ExactBarLength");
+				Check(OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromMinutes(1), 5), 2) == TimeSpan.FromMinutes(10) && OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromDays(7), 1), 2) == TimeSpan.FromDays(14)
+					&& OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromDays(1), long.MaxValue), 2) == TimeSpan.Zero, "TE6 twoBars arithmetic: 5 m -> 10 m, 1 week -> 14 d, overflow -> Zero (staleness off)");
+				string eq2 = MethodBody(cs, "private static void enqueueTick(_TickStream t, Bar b)") ?? "";
+				Check(eq2.Contains("t.Enqueue(b.Time, b.Close, (double)b.TotalVolume);") && !cs.Contains("tickBarMember") && !cs.Contains("System.Reflection.MemberInfo"), "TE7 M-TICK enqueueTick reads the typed Bar fields; tickBarMember reflection removed");
+				string ip = MethodBody(cs, "private static bool isInputProperty(System.Reflection.PropertyInfo p)") ?? "";
+				Check(ip.Contains("return Attribute.IsDefined(p, typeof(InputAttribute), true);") && !ip.Contains(".Name"), "TE8 RUN-line inputs: typed InputAttribute (inherit = true), not a type-name compare");
+				Check(cs.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && Bars.Info.Category == ESymbolCategory.Future)")
+					&& cs.Contains("if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category == ESymbolCategory.Future) {") && !cs.Contains("Category.ToString() ==") && !cs.Contains("Type.ToString()"),
+					"TE9 _CustomSignal roll checks use ESymbolCategory.Future / EResolution.Day");
+				string vpb = texts["_VolumeProfileBase.Strategy.CS"];
+				Check(vpb.Contains("oneTick = src != null && src.Info.Resolution.Type == EResolution.Tick && src.Info.Resolution.Size == 1;"), "TE10 _VolumeProfileBase own-mode 1-tick test uses EResolution.Tick");
+			}
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

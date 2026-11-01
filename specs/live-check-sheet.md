@@ -275,6 +275,8 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 
 **If it fails.** Replace the string test with the real enum member (`Bars.Info.Category == ESymbolCategory.<X>`) in CS l.1278 and in `autoTradingDay`, then rebuild.
 
+**Result (typed-enums follow-up to #79).** Passed: the RUN lines of Ettienne's @ES runs (tests/RollTests/evroll-mode2-run-2026-10-30*.csv) print `category(Future)`. The roll warning and the Globex-key gate now test `Bars.Info.Category == ESymbolCategory.Future`. Still open: `autoTradingDay` tests the category text for `FOREX`/`CURRENCY`/`CRYPTO`; it stays string-based until a names dump confirms the `Forex` and `Crypto` members on this install.
+
 ---
 
 # Check 10: M-PORT PR-C session/weekly throttles (#72), before #72 is marked ready

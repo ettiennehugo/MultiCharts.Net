@@ -368,32 +368,39 @@ namespace PowerLanguage.Strategy
 				if (m_logger == null)
 				{
 					m_logger = LogFileSingleton.GetInstance(onCalc ? Output : null);
+				}
+				if (onCalc && !m_tracePathShown)
+				{
 					// The singleton is process-wide, so its "Log file created" line is printed once per MultiCharts process, into the
-					// Output of whichever signal traced first. Tell THIS signal's Output where its lines go, once per instance.
-					if (onCalc) try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
+					// Output of whichever signal traced first. Tell THIS signal's Output where its lines go, once per instance, on the
+					// first on-thread trace (a flag, not m_logger == null: a first trace off the calc thread must not use it up).
+					m_tracePathShown = true;
+					try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
 				}
 				if (onCalc) m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
-				else m_logger.WriteTrace(null, traceLevel, m_lastCalcBarTime, m_traceZone ?? "?", this.GetType().Name, m_traceSymbol ?? "", RunId, message);
+				else m_logger.WriteTrace(null, traceLevel, LastCalcBarTime, m_traceZone ?? "?", this.GetType().Name, m_traceSymbol ?? "", RunId, message);
 			}
 		}
 
 		// Calc-thread snapshot for trace() off the calc thread (StopCalc on the UI thread). Set by CalcBar (and by derived calc-thread
-		// entry points before they trace, e.g. OnRecalcLastBarAfterEvent).
-		private int m_calcThreadId;   // managed id of the thread that last ran CalcBar; 0 = none yet
-		private DateTime m_lastCalcBarTime = DateTime.MinValue;
+		// entry points before they trace, e.g. OnRecalcLastBarAfterEvent). Written on the calc thread, read on the UI thread (StopCalc): volatile id; the bar time as long ticks via Volatile.Write/Read
+		// (a DateTime field is not atomic on 32-bit). Both are reset in StartCalc; the id also at the end of StopCalc.
+		private volatile int m_calcThreadId;   // managed id of the thread that last ran CalcBar; 0 = none yet
+		private long m_lastCalcBarTicks;       // DateTime.MinValue.Ticks (0) = none yet
 		private string m_traceSymbol, m_traceZone;
+		private bool m_tracePathShown;         // 'trace log <path>' printed to this instance's Output (once per instance)
 
 		/// <summary>Calc thread only: records the calc thread and the current bar time, symbol and zone used by trace() when it is
 		/// called from another thread (StopCalc runs on the UI thread).</summary>
 		protected void noteCalcThread()
 		{
 			m_calcThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
-			m_lastCalcBarTime = Bars.Time[0];
+			System.Threading.Volatile.Write(ref m_lastCalcBarTicks, Bars.Time[0].Ticks);
 			if (m_traceSymbol == null) { m_traceSymbol = Bars.Info.Name; m_traceZone = barZoneLabel(); }
 		}
 
 		/// <summary>Last bar time seen on the calc thread (MinValue before the first CalcBar).</summary>
-		protected DateTime LastCalcBarTime { get { return m_lastCalcBarTime; } }
+		protected DateTime LastCalcBarTime { get { return new DateTime(System.Threading.Volatile.Read(ref m_lastCalcBarTicks)); } }
 
 		private bool onCalcThread()
 		{
@@ -1012,7 +1019,7 @@ namespace PowerLanguage.Strategy
 			// offset is ~0 (the spread stays in history and in ATR). Futures hosts must key days by the Globex trading day
 			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _Test6 do). Warned once below.
 			if (roll && m_daily.Days > 0 && !m_rollKeyWarned && tradingDayKey(t.Date.AddHours(1)) == tradingDayKey(t.Date.AddHours(20))
-				&& Bars.Info.Resolution.Type.ToString() != "Day" && Bars.Info.Category.ToString() == "Future")
+				&& Bars.Info.Resolution.Type != EResolution.Day && Bars.Info.Category == ESymbolCategory.Future)
 			{
 				m_rollKeyWarned = true;
 				engineSink(ETraceLevel.Warning)?.Invoke("DAILY roll offset on a calendar-keyed intraday futures chart: if the vendor splices at the 18:00 ET Globex open the offset is ~0; key days by the Globex trading day (_CmeSessionClock.GlobexTradingDayEt)");
@@ -1206,20 +1213,23 @@ namespace PowerLanguage.Strategy
 			return null;
 		}
 
-		/// <summary>2 x the bar size of a time-based resolution; zero (staleness off) for tick/volume-based bars.</summary>
+		/// <summary>2 x the bar size of a time-based resolution; zero (staleness off) for tick/volume-based bars. Typed switch on
+		/// EResolution (members confirmed by Ettienne's EResolution dump, 2026-11-01); Size x unit via _OrderFlow.ExactBarLength
+		/// (zero = staleness off on overflow). Week keeps its nominal 7 d unit (a staleness bound only); Month/Quarter/Year and every
+		/// non-time member stay off, as before.</summary>
 		private static TimeSpan twoBars(Resolution r)
 		{
-			double s;
-			switch (r.Type.ToString())
+			TimeSpan unit;
+			switch (r.Type)
 			{
-				case "Second": s = r.Size; break;
-				case "Minute": s = r.Size * 60.0; break;
-				case "Hour": s = r.Size * 3600.0; break;
-				case "Day": s = r.Size * 86400.0; break;
-				case "Week": s = r.Size * 7 * 86400.0; break;
+				case EResolution.Second: unit = TimeSpan.FromSeconds(1); break;
+				case EResolution.Minute: unit = TimeSpan.FromMinutes(1); break;
+				case EResolution.Hour: unit = TimeSpan.FromHours(1); break;
+				case EResolution.Day: unit = TimeSpan.FromDays(1); break;
+				case EResolution.Week: unit = TimeSpan.FromDays(7); break;
 				default: return TimeSpan.Zero;
 			}
-			return TimeSpan.FromSeconds(2 * s);
+			return _OrderFlow.ExactBarLength(_OrderFlow.ExactBarLength(unit, r.Size), 2);
 		}
 
 		private void startXmkt()
@@ -1316,25 +1326,11 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Bar members are not named in the Programming Guide: read by reflection like VPF-5's flowTick (verify in the editor).
-		private System.Reflection.MemberInfo m_tickBarTime, m_tickBarClose, m_tickBarSize;
-		private void enqueueTick(_TickStream t, Bar b)
+		// Typed Bar fields (Ettienne's _McApiDump: Bar is a struct with fields Time, Close, float TotalVolume; the same members
+		// _VolumeProfileFuturesBase.flowTick reads on main). TotalVolume was also the first name the old reflection lookup tried.
+		private static void enqueueTick(_TickStream t, Bar b)
 		{
-			object o = b;
-			t.Enqueue((DateTime)tickBarMember(o, ref m_tickBarTime, "Time"), Convert.ToDouble(tickBarMember(o, ref m_tickBarClose, "Close")),
-				Convert.ToDouble(tickBarMember(o, ref m_tickBarSize, "TotalVolume", "Volume", "Ticks")));
-		}
-		private static object tickBarMember(object o, ref System.Reflection.MemberInfo cache, params string[] names)
-		{
-			if (cache == null)
-				foreach (string n in names)
-				{
-					cache = (System.Reflection.MemberInfo)o.GetType().GetProperty(n) ?? o.GetType().GetField(n);
-					if (cache != null) break;
-				}
-			if (cache is System.Reflection.PropertyInfo) return ((System.Reflection.PropertyInfo)cache).GetValue(o, null);
-			if (cache is System.Reflection.FieldInfo) return ((System.Reflection.FieldInfo)cache).GetValue(o);
-			throw new InvalidOperationException("M-TICK: Bar has none of " + string.Join("/", names));
+			t.Enqueue(b.Time, b.Close, (double)b.TotalVolume);   // Bar.TotalVolume is float: explicit widening to double
 		}
 
 		private void stepTick()
@@ -1799,13 +1795,28 @@ namespace PowerLanguage.Strategy
 				if (IsExist(ds) && _MtfMath.SymbolRoot(BarsOfData(ds).Info.Name) == root) m_rollPending[ds] = new _RollPending();   // a different root never inherits (S4.3)
 		}
 
+		/// <summary>PR #51 N3 (typed): false for the daily-and-longer resolutions Day/Week/Month/Quarter/Year, true otherwise
+		/// (members confirmed by Ettienne's EResolution dump, 2026-11-01).</summary>
+		protected static bool isIntradayResolution(EResolution t)
+		{
+			switch (t)
+			{
+				case EResolution.Day:
+				case EResolution.Week:
+				case EResolution.Month:
+				case EResolution.Quarter:
+				case EResolution.Year: return false;
+				default: return true;
+			}
+		}
+
 		/// <summary>S4: run the Data1 detector on this closed bar (idempotent per bar); arms the Data n pending flags on a roll.</summary>
 		protected void stepRollDetector()
 		{
 			if (RollDetection == ERollDetection.Off)
 			{
-				// S4.4 / probe P-R1: the futures category name is unverified; ToString() keeps this compile-safe and silent if wrong
-				if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category.ToString() == "Future") { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w("RollDetection is Off on a futures symbol: rolls are not detected (AVWAP / PRICEACTION / roll-window flags never fire)"); } }
+				// S4.4 / probe P-R1: typed ESymbolCategory.Future (the RUN line on Ettienne's @ES runs prints category(Future))
+				if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category == ESymbolCategory.Future) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w("RollDetection is Off on a futures symbol: rolls are not detected (AVWAP / PRICEACTION / roll-window flags never fire)"); } }
 				return;
 			}
 			if (Bars.Status != EBarState.Close) return;
@@ -1817,11 +1828,12 @@ namespace PowerLanguage.Strategy
 				// fix-i: on a futures chart Series is re-keyed by the Globex trading day (no warning); other categories still warn.
 				m_rollWarned = true;
 				DateTime d0 = Bars.Time[0].Date;
-				string res = Bars.Info.Resolution.Type.ToString();
+				EResolution res = Bars.Info.Resolution.Type;
+				bool intraday = isIntradayResolution(res);
 				bool calendarKeyed = tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20));
-				m_rollGlobexKey = m_rollDet.series && calendarKeyed && _RollDetector.IsIntraday(res)
-					&& Bars.Info.Category.ToString() == "Future";
-				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, res, calendarKeyed && !m_rollGlobexKey);
+				m_rollGlobexKey = m_rollDet.series && calendarKeyed && intraday
+					&& Bars.Info.Category == ESymbolCategory.Future;
+				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, intraday, res.ToString(), calendarKeyed && !m_rollGlobexKey);
 				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
 			}
 			int bar = Bars.FullSymbolData.Current;
@@ -1994,6 +2006,7 @@ namespace PowerLanguage.Strategy
 			m_levelStudy = null;
 			m_portOn = false;
 			base.StopCalc();
+			m_calcThreadId = 0;   // set again by the next pass's first CalcBar; until then trace lines are stamped off-thread
 		}
 
 		protected override void Create()
@@ -2011,6 +2024,7 @@ namespace PowerLanguage.Strategy
 			m_journal = null;
 			m_eventFile = null;   // CS-8
 			m_logger = null;
+			m_tracePathShown = false;
 			base.Destroy();
 		}
 
@@ -2041,6 +2055,8 @@ namespace PowerLanguage.Strategy
 			m_runLogged = false;
 			m_runEndLogged = false;
 			m_traceSymbol = m_traceZone = null;   // re-read on the first CalcBar (chart settings may have changed)
+			m_calcThreadId = 0;                   // set by the first CalcBar of this pass (noteCalcThread)
+			System.Threading.Volatile.Write(ref m_lastCalcBarTicks, 0L);   // MinValue until the first CalcBar
 			m_tick = 0;   // tickSize() re-resolved on first use
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
@@ -2170,7 +2186,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// CS-3: RUN line - run id, build tag, strategy type, symbol, resolution, first calculated bar and every [Input] value
-		/// (reflection over public instance properties carrying an attribute named InputAttribute, sorted by name).
+		/// (reflection over public instance properties carrying the typed [Input] attribute, InputAttribute, sorted by name).
 		/// </summary>
 		private const string EVENT_JOURNAL_COLS = "evtDayTier,evtMinSince";   // M-EVENT CS-1 extra columns (enabled only)
 
@@ -2203,13 +2219,12 @@ namespace PowerLanguage.Strategy
 			return sb.ToString();
 		}
 
-		// Matched by name so the check does not depend on the attribute's namespace; Attribute.GetCustomAttributes honours
-		// inherit for properties (PropertyInfo.GetCustomAttributes ignores it), so overridden inputs are still found.
+		// Typed: InputAttribute is the class behind [Input] (this file uses [Input]; the RUN line's inputs[...] on Ettienne's runs
+		// showed the old name match found it). Attribute.IsDefined honours inherit for properties (PropertyInfo.IsDefined ignores
+		// it), so overridden inputs are still found.
 		private static bool isInputProperty(System.Reflection.PropertyInfo p)
 		{
-			foreach (Attribute a in Attribute.GetCustomAttributes(p, true))
-				if (a.GetType().Name == "InputAttribute") return true;
-			return false;
+			return Attribute.IsDefined(p, typeof(InputAttribute), true);
 		}
 
 		/// <summary>
