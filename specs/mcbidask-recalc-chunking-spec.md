@@ -2,7 +2,7 @@
 
 **Repo:** ettiennehugo/MultiCharts.Net. **Base:** `origin/main` 33a51bf (merge of PR #76). All line numbers refer to that commit.
 **Scope:** two fixes in one new PR, kept apart from every other branch (see the coder brief). PriceAction is not touched.
-**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) need the probe in §8 before the defaults are final.
+**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) were open. The `_McApiDump2` output answered P-RC5, P-RC6, P-RC8 and P-RC9 (§8). Five points (P-RC1, P-RC2, P-RC3, P-RC4, P-RC7) still need the `_McRecalcProbe` CSV before the defaults are final.
 
 ---
 
@@ -32,7 +32,7 @@
 | `Bars.FullSymbolData` indexes "from the current bar, leftwards with positive indices, and rightwards with negative ones", and `.Count` is the total bar count. The last chart bar is therefore `Time[Current - Count]`. | PG §4.1.2 (l.931–945) |
 | Footprint levels need `Resolution.CreateFootPrint(EResolution, size, CumulativeDeltaChartType, FootPrintChartType, bool)`. Without it, `Data2` stays null. | Forum t=52737 (in code since #74); Data2 delivered 61837 bars in run B |
 
-Anything not in this table is unverified and is listed in §8.
+Anything not in this table is unverified and is listed in §8. Of the §8 points, the API dump answered P-RC5, P-RC6, P-RC8 and P-RC9. P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7 stay open until the probe runs.
 
 ## 3. Code map (origin/main 33a51bf)
 
@@ -137,7 +137,7 @@ OF McBidAsk idle poll armed ms(1000)   /   OF McBidAsk idle poll timeout sec(900
 
 ### 4.5 Request window clamp (applies to Fix 1 and Fix 2)
 - Replace `To = DateTime.Now.AddDays(1)` (663, 689) with `lastBarTime.AddDays(1)`, where `lastBarTime` is as in §4.3.
-- Set the range through `req.Range = DataRequest.CreateFromTo(from, to)` (typed, as in `_CheckData` 184), and also set `From`/`To` to the same values until P-RC5 says which field wins.
+- Set the range through `req.Range = DataRequest.CreateFromTo(from, to)` (typed, as in `_CheckData` 184), and also set `From`/`To` to the same values. P-RC5 (dump) confirmed these members: `Range` is a `DataRequest` field and `From`/`To` are properties. Setting both is harmless, so do it whichever one MC reads.
 - On run B this cuts the McBidAsk load from 61837 to about 20k bars (14 Globex days × ~1380).
 
 ## 5. Fix 2: daily, session-aware tick chunks
@@ -146,7 +146,7 @@ OF McBidAsk idle poll armed ms(1000)   /   OF McBidAsk idle poll timeout sec(900
 - `static List<DayChunk> PlanGlobexDays(DateTime firstGx, DateTime lastGx, Func<DateTime, bool> closedDay, TimeSpan boundaryEt)` returns one `DayChunk { DateTime GlobexDate, FromEt, ToEt }` per Globex date that is not closed.
 - Each window is `[GlobexDate−1 day + boundaryEt, GlobexDate + boundaryEt)`, with `boundaryEt = 17:00` (CME daily halt start, `_CmeSessionClock.DefaultHaltStart`), so no tick straddles two chunks. Monday's chunk starts Sunday 17:00 ET.
 - `firstGx`/`lastGx` come from `clock().GlobexDate(firstBarTime / lastBarTime)`, and `closedDay` from `clock().IsGlobexClosedDay`.
-- **Time zone.** The windows are built in ET and converted to the request zone with a new `public DateTime FromEastern(DateTime et)` on `_CmeSessionClock` (the inverse of `ToEastern` at 142; DST-aware; ambiguous → standard). The request keeps `Bars.Request`'s `TimeZone` (Exchange on 9a: CME, Central), so tick times and bar times share one zone. Confirm `TimeZone` is copied in P-RC6.
+- **Time zone.** The windows are built in ET and converted to the request zone with a new `public DateTime FromEastern(DateTime et)` on `_CmeSessionClock` (the inverse of `ToEastern` at 142; DST-aware; ambiguous → standard). The request keeps `Bars.Request`'s `TimeZone` (Exchange on 9a: CME, Central), so tick times and bar times share one zone. P-RC6 (dump): `InstrumentDataRequest` has a `RequestTimeZone TimeZone` field (`Local`, `GMT`, `Exchange`), so the copy from `Bars.Request` carries it. Log it typed in the request line.
 - **`TickChunkScheduler`** (pure). Its state per (day, stream): `Pending → InFlight → Done | Failed | Skipped`.
   - `Next(DateTime calcPosition)` yields up to `MaxInFlightDays` days (all streams of a day together).
   - `Complete(day, stream, ok, count)` records the outcome.
@@ -207,7 +207,7 @@ Journal  OF tick chunk summary done(x) failed(y) skipped(z) ticks(n) lateDropped
 - The request does work: run B returned `data2Bars(61837) levels(479517)`. So `CreateFootPrint` carries the footprint mode in other `Resolution` members (the stubs hint at a delta-type member), and `ChartType` stays `Regular`.
 - The line is misleading, and so is `chartType(FootPrint)` in the `loaded` line (822), because that one prints the config value rather than the request.
 - **Fix:** log `builder(CreateFootPrint delta(ASK_TRADE_BID_TRADE) footprint(BID_ASK_VOL) pct(False)) resChartType(Regular)` from the typed enum values passed in. Once the dump (§8) names the footprint members, log them typed as well.
-- No behaviour change. Also confirm the `res.Size` type that is passed through (P-BA open item from the PR #74 review).
+- No behaviour change. P-RC8 (dump) answered this: after `CreateFootPrint`, `ChartType = Regular`, `DeltaType = None` and `HaveDelta = True`, and `Size` is `UInt32`. `Regular` is therefore expected. The footprint mode shows in `HaveDelta`, so log `haveDelta(..)` typed next to `resChartType(..)`.
 
 ### 7.2 `To = Now+1d` (663, 689)
 This loads 6 weeks of data past the chart end, and it is a direct contributor to the array overflow. Fixed by §4.5.
@@ -242,11 +242,11 @@ The files are saved as `/workspace/specs/_McRecalcProbe.Strategy.CS` (signal) an
 | P-RC2 | Does `OnRecalcLastBarAfterEvent` fire on a **signal** on a non-real-time chart after the last bar? | probe: the `OnRecalcLastBarAfterEvent` line |
 | P-RC3 | Its thread vs CalcBar (`tid`), and are `Bars` readable in it? | probe: `tid(..)`, `Bars.Time[0]` line |
 | P-RC4 | May `Recalculate()` be called from that event, and how does it unwind (exception type)? | probe: `Recalculate threw ...` / `returned` |
-| P-RC5 | `DataRequest` members (`CreateFromTo`, `To`, `ToAlwaysIsNow`, `Count`); which wins, `Range` or `From`/`To`? | dump + probe's `callback ... first(..)` (should be ≈ last−2 days) |
-| P-RC6 | `InstrumentDataRequest.TimeZone` exists and is copied by `Bars.Request`; `FullSymbolData.Time[Current−Count]` = last bar | probe first-bar line; dump |
+| P-RC5 | `DataRequest` members (`CreateFromTo`, `To`, `ToAlwaysIsNow`, `Count`); which wins, `Range` or `From`/`To`? | **Answered (dump):** `DataRequest` is a struct with `CreateFromTo`/`CreateDaysBack`/`CreateBarsBack` and the fields `RequestType`, `Count`, `From`, `To`, `ToAlwaysIsNow`. `InstrumentDataRequest` has `From`/`To` properties and a field `DataRequest Range`. Set both (§5.2). The request line's logged window shows which one MC used. |
+| P-RC6 | `InstrumentDataRequest.TimeZone` exists and is copied by `Bars.Request`; `FullSymbolData.Time[Current−Count]` = last bar | **Answered (dump):** `InstrumentDataRequest` has a field `RequestTimeZone TimeZone` (`Local`, `GMT`, `Exchange`). It is a struct field, so `Bars.Request` copies it. The run's logged first/last bar line checks the last-bar index. |
 | P-RC7 | Do callbacks arrive while CalcBar sleeps (bounded wait)? | probe: `wait in CalcBar ended loadDone(True)` |
-| P-RC8 | `Resolution` members after `CreateFootPrint` (why `ChartType` = Regular) and the `Size` type | dump: `Resolution.<prop>: chart=.. createFootPrint=..` |
-| P-RC9 | `ICalculationControl` members and the virtual hooks on the SignalObject base chain | dump |
+| P-RC8 | `Resolution` members after `CreateFootPrint` (why `ChartType` = Regular) and the `Size` type | **Answered (dump):** after `CreateFootPrint`, `ChartType = Regular`, `DeltaType = None`, `HaveDelta = True`; `Size` is `UInt32`. `Regular` is expected (§7.1). |
+| P-RC9 | `ICalculationControl` members and the virtual hooks on the SignalObject base chain | **Answered (dump):** `ICalculationControl` has `Abort()`, `Recalculate()` and `RecalcLastBarAfter(TimeSpan)`. `CStudyAbstract` has `virtual OnRecalcLastBarAfterEvent()`. |
 
 Decision table: if P-RC2 or P-RC3 fails, set `McRecalcFromCallback = true` as the default and enable the direct-write log path. If P-RC7 fails, remove `TickChunkWaitMs`. If P-RC5 shows that `From`/`To` win, keep setting both (harmless).
 
