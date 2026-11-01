@@ -572,20 +572,24 @@ static class Program
 			string vp = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
 			string dec = MethodBody(vp, "private _OrderFlow.RecalcDecision mcRecalcDecision(") ?? "";
 			Check(vp.Contains("private static readonly _OrderFlow.McRecalcLoopGuard s_mcRecalcGuard") && vp.Contains("private static readonly object s_mcRecalcGuardLock")
-				&& dec.Contains("lock (s_mcRecalcGuardLock)") && dec.Contains("s_mcRecalcGuard.TryAcquire(") && dec.Contains("m_mcGate.Decide("), "LG7 strategy: static guard under a static lock, checked with the instance gate in mcRecalcDecision (bar/idle and callback)");
+				&& dec.Contains("lock (s_mcRecalcGuardLock)") && dec.Contains("s_mcRecalcGuard.TryAcquire(m_mcGuardKey, DateTime.UtcNow, FlowCfg.McRecalcGuardMaxPerKey, mcGuardWindow())") && dec.Contains("m_mcGate.Decide("), "LG7 strategy: static guard under a static lock, checked with the instance gate in mcRecalcDecision (bar/idle and callback)");
 
 			// B2: stale callbacks
 			Check(OF.LegacyStream(1001, 1000, 3) == 1 && OF.LegacyStream(1000, 1000, 3) == 0 && OF.LegacyStream(1002, 1000, 3) == 2, "SC1 this pass's legacy states map to streams 0..2");
 			Check(OF.LegacyStream(1003, 1000, 3) == -1 && OF.LegacyStream(1002, 1000, 1) == -1 && OF.LegacyStream(5000, 1000, 3) == -1 && OF.LegacyStream(999, 1000, 3) == -1, "SC2 out of range (chunk ids, earlier passes, unrequested streams) rejected");
 			Check(OF.LegacyStream(1000, 0, 3) == -1 && OF.LegacyStream("x", 1000, 3) == -1 && OF.LegacyStream(null, 1000, 3) == -1, "SC3 no legacy request this pass / non-int state rejected");
 			object r1 = new object(), r2 = new object();
-			Check(OF.IsCurrentRequest(5, 5, r1, null) && OF.IsCurrentRequest(5, 5, r1, r1) && !OF.IsCurrentRequest(5, 5, r1, r2) && !OF.IsCurrentRequest(4, 5, r1, null) && !OF.IsCurrentRequest(5, 0, r1, null) && !OF.IsCurrentRequest("5", 5, r1, null),
-				"SC4 McBidAsk callback accepted only for the current request id and result");
+			Check(OF.IsCurrentRequest(5, 5) && !OF.IsCurrentRequest(4, 5) && !OF.IsCurrentRequest(5, 0) && !OF.IsCurrentRequest(0, 0) && !OF.IsCurrentRequest("5", 5) && !OF.IsCurrentRequest(null, 5),
+				"SC4 McBidAsk callback accepted on the current request id alone");
+			Check(OF.SameResult(r1, null) && OF.SameResult(r1, r1) && !OF.SameResult(r1, r2), "SC4b SameResult (diagnostic only)");
 			string ofd = MethodBody(vp, "private void onFlowData(") ?? "", mcl = MethodBody(vp, "private void onMcLevels(") ?? "", rep = MethodBody(vp, "private void mcStartOrReplay(") ?? "";
 			int ls = ofd.IndexOf("LegacyStream("), ft = ofd.IndexOf("flowTick(");
 			Check(ls > 0 && ft > ls && ofd.Contains("if (stream < 0) return;"), "SC5 onFlowData: legacy branch rejects stale states before any tick");
 			int ic = mcl.IndexOf("IsCurrentRequest("), ms = mcl.IndexOf("mcSet(");
 			Check(ic > 0 && ms > ic, "SC6 onMcLevels: stale callbacks dropped before any level set");
+			int sr = mcl.IndexOf("if (!_OrderFlow.SameResult(result, m_mcResult))");
+			string afterSr = sr < 0 ? "" : string.Join("\n", mcl.Substring(sr).Split('\n').Skip(1).Take(2));
+			Check(sr > ic && ms > sr && afterSr.Contains("mcDiag(\"resultMismatch\"") && !afterSr.Contains("return"), "SC8 a different result object with the current id is logged once (resultMismatch) and accepted");
 			Check(rep.Contains("m_mcResult = null; m_mcReqId = 0;") && rep.IndexOf("m_mcReqId = 0;") < rep.IndexOf("startMcLevelLoader(tailFrom"), "SC7 cache hit clears the current request before the tail request");
 
 			// S1: empty completed cache is a miss
@@ -631,6 +635,30 @@ static class Program
 			Check(gn2.BacklogTrades == 1 && Near(gn2.Buy + gn2.Sell, 3), "BL5 non-time-based bar: the previous-close cut still applies");
 			Check(vp.Contains("TimeBased = timeBasedResolution()") && (MethodBody(vp, "private DateTime barOpenTime(") ?? "").Contains("if (!timeBasedResolution()) return DateTime.MinValue;"), "BL6 strategy sets TimeBased; no OpenTime off time-based charts");
 			Check(vp.Contains("protected bool RecalcPending"), "RP1 RecalcPending exposed to derived strategies");
+
+			// ---- PR #79 review 2 (Analyst, c92c65f) ----
+			// item 1: guard key = strategy type + signature; a few recalcs per key per window
+			Check(OF.GuardKey("Ns.A", "s") == "Ns.A|s" && OF.GuardKey("Ns.A", "s") != OF.GuardKey("Ns.B", "s") && OF.GuardKey("Ns.A", null) == null, "GK1 guard key: strategy type + signature; null without a signature");
+			var cfg2 = new OF.FlowConfig();
+			Check(cfg2.McRecalcGuardMaxPerKey == 3 && cfg2.McRecalcMax == 1 && cfg2.McRecalcGuardWindowSec == 600, "GK2 defaults: 3 per key per 600 s, instance gate 1");
+			var g3 = new OF.McRecalcLoopGuard(); string key = OF.GuardKey("Ns.A", "ES|feed|Minute|5|sig");
+			Check(g3.TryAcquire(key, T0, cfg2.McRecalcGuardMaxPerKey, w) && g3.TryAcquire(key, T0.AddSeconds(5), cfg2.McRecalcGuardMaxPerKey, w), "GK3 two identical charts (same key) each get their recalc within the window");
+			Check(g3.TryAcquire(key, T0.AddSeconds(10), 3, w) && !g3.TryAcquire(key, T0.AddSeconds(15), 3, w) && g3.TryAcquire(OF.GuardKey("Ns.B", "ES|feed|Minute|5|sig"), T0.AddSeconds(15), 3, w),
+				"GK4 a loop on one key stops after 3 recalcs per window; another strategy type is separate");
+			Check(rep.Contains("m_mcGuardKey = _OrderFlow.GuardKey(GetType().FullName, sig);") && !vp.Contains("s_mcRecalcGuard.TryAcquire(m_mcSig") && !vp.Contains("s_mcRecalcGuard.CountFor(m_mcSig"), "GK5 strategy keys the static guard by GuardKey (also RecalcPending)");
+			// item 3: window 0 does not disable the guard
+			string gw = MethodBody(vp, "private TimeSpan mcGuardWindow(") ?? vp.Substring(Math.Max(0, vp.IndexOf("private TimeSpan mcGuardWindow(")));
+			string fcs = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_OrderFlow.Function.CS"));
+			int fw = fcs.IndexOf("public int McRecalcGuardWindowSec");
+			Check(gw.Contains("Math.Max(1, FlowCfg.McRecalcGuardWindowSec)") && fw > 0 && fcs.Substring(Math.Max(0, fw - 500), 500).Contains("does NOT disable the guard"), "WG1 McRecalcGuardWindowSec <= 0 clamps to 1 s, documented on the field");
+			var g4 = new OF.McRecalcLoopGuard();
+			Check(g4.TryAcquire("k", T0, 1, TimeSpan.FromSeconds(1)) && !g4.TryAcquire("k", T0.AddMilliseconds(500), 1, TimeSpan.FromSeconds(1)) && g4.TryAcquire("k", T0.AddSeconds(1), 1, TimeSpan.FromSeconds(1)), "WG2 1 s window still guards within the second");
+			// item 2: chunk timeout clock is UTC
+			string ocd = MethodBody(vp, "private void onChunkData(") ?? "";
+			Check(pump.Contains("DateTime now = DateTime.UtcNow;") && pump.Contains("c.IssuedAt = DateTime.UtcNow;") && !pump.Contains("DateTime.Now") && ocd.Contains("c.LastActivity = DateTime.UtcNow;") && !ocd.Contains("DateTime.Now"),
+				"TO8 chunk IssuedAt/LastActivity/timeout use DateTime.UtcNow");
+			// item 4: early return clears m_chunkLoads
+			Check(stop.Contains("if (m_flowLoads.Count == 0) { m_chunkLoads = null; return; }"), "ST1 stopOrderFlowLoads early return clears m_chunkLoads");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

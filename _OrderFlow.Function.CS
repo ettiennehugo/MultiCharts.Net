@@ -98,9 +98,16 @@ namespace PowerLanguage.Function
 			/// <summary>Fallback (spec §4.3 step 6), off: call ExecControl.Recalculate() from the DataLoader callback when the history
 			/// completes. PROBE P-RC2/P-RC3 decide whether this becomes the default.</summary>
 			public bool McRecalcFromCallback = false;
-			/// <summary>Process-wide loop guard (review B1): at most McRecalcMax recalcs per request signature within this many seconds,
-			/// across strategy objects (PROBE P-RC1: MC may build a new object on Recalculate, which resets the instance gate).</summary>
+			/// <summary>Process-wide loop guard (review B1): at most McRecalcGuardMaxPerKey recalcs per guard key (strategy type +
+			/// request signature) within this many seconds, across strategy objects (PROBE P-RC1: MC may build a new object on
+			/// Recalculate, which resets the instance gate). 0 or less does NOT disable the guard: the window is clamped to at least
+			/// 1 second (Math.Max(1, ...) in mcGuardWindow). To turn recalc-on-load off use McRecalcOnLoad = false.</summary>
 			public int McRecalcGuardWindowSec = 600;
+			/// <summary>Review 2 item 1: recalcs allowed per guard key within McRecalcGuardWindowSec, process-wide. No per-chart member
+			/// is confirmed in the typed API, so two identical charts (same strategy type, symbol, feed, resolution, first bar) share a
+			/// key; 3 lets each of them recalc once (the instance gate still allows McRecalcMax per object) while a P-RC1 loop stops
+			/// after 3 recalcs per window. 0 or less blocks every recalc.</summary>
+			public int McRecalcGuardMaxPerKey = 3;
 			/// <summary>Tick-chunk spec §5: one DataLoader request per Globex day and stream. false = the legacy single request (A/B only).</summary>
 			public bool TickChunkByDay = true;
 			/// <summary>Days requested at the same time (1..4; all streams of a day together).</summary>
@@ -691,12 +698,26 @@ namespace PowerLanguage.Function
 			return s >= 0 && s < streams && s < 3 ? s : -1;
 		}
 
-		/// <summary>Review B2: a McBidAsk level callback belongs to the current request: its state is the current request id (set
-		/// before BeginLoadData; 0 = none) and, once the result is known, it is that result.</summary>
-		public static bool IsCurrentRequest(object state, int currentId, object result, object currentResult)
+		/// <summary>Review B2 (revised): a McBidAsk level callback belongs to the current request when its state is the current
+		/// request id (set before BeginLoadData; 0 = none). The result object is NOT compared here (see SameResult).</summary>
+		public static bool IsCurrentRequest(object state, int currentId)
 		{
-			if (currentId <= 0 || !(state is int) || (int)state != currentId) return false;
+			return currentId > 0 && state is int && (int)state == currentId;
+		}
+
+		/// <summary>Review 2 deviation 1: whether the callback's result is the stored BeginLoadData result (true while none is
+		/// stored yet). Diagnostic only: it is not verified that MC passes the same object to every callback (revisit after the
+		/// probe), so a mismatch is logged, never rejected.</summary>
+		public static bool SameResult(object result, object currentResult)
+		{
 			return currentResult == null || ReferenceEquals(result, currentResult);
+		}
+
+		/// <summary>Review 2 item 1: the process-wide guard key: the strategy's type name and the request signature (no per-chart
+		/// member is confirmed in the typed API). null when there is no signature.</summary>
+		public static string GuardKey(string strategyType, string sig)
+		{
+			return sig == null ? null : (strategyType ?? "") + "|" + sig;
 		}
 
 		/// <summary>Recalc spec §4.1: decides the one recalculation after the McBidAsk history completes. No MultiCharts types. The guard

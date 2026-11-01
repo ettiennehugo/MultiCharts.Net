@@ -615,6 +615,7 @@ namespace PowerLanguage.Strategy
 		private readonly _OrderFlow.McLevelCache m_mcCache = new _OrderFlow.McLevelCache();   // under m_flowLock
 		private readonly _OrderFlow.McRecalcGate m_mcGate = new _OrderFlow.McRecalcGate();     // under m_flowLock
 		private string m_mcSig;   // this pass's request signature (null: no McBidAsk request this pass)
+		private string m_mcGuardKey;   // review 2 item 1: process-wide guard key (strategy type + m_mcSig)
 		// Review B1: process-wide loop guard keyed by the request signature (a new strategy object starts with a fresh m_mcGate).
 		// Lock order: m_flowLock, then s_mcRecalcGuardLock (which takes no other lock).
 		private static readonly object s_mcRecalcGuardLock = new object();
@@ -654,11 +655,12 @@ namespace PowerLanguage.Strategy
 					if (m_mcSig == null || m_mcRecalcDecided || !FlowCfg.McRecalcOnLoad || m_autoTradingSnap) return false;
 					if (m_mcGate.CountFor(m_mcSig) >= FlowCfg.McRecalcMax) return false;
 					lock (s_mcRecalcGuardLock)
-						return s_mcRecalcGuard.CountFor(m_mcSig, DateTime.UtcNow, mcGuardWindow()) < FlowCfg.McRecalcMax;
+						return s_mcRecalcGuard.CountFor(m_mcGuardKey, DateTime.UtcNow, mcGuardWindow()) < FlowCfg.McRecalcGuardMaxPerKey;
 				}
 			}
 		}
 
+		// McRecalcGuardWindowSec <= 0 does not disable the guard: the window is at least 1 second (documented on the field).
 		private TimeSpan mcGuardWindow() { return TimeSpan.FromSeconds(Math.Max(1, FlowCfg.McRecalcGuardWindowSec)); }
 
 		private void startOrderFlow()
@@ -666,7 +668,7 @@ namespace PowerLanguage.Strategy
 			stopOrderFlowLoads();
 			// Recalc spec §4.2: new pass. m_mcCache and the gate's recalc count are deliberately NOT reset here or in StopCalc.
 			lock (m_flowLock) m_mcGate.BeginPass();
-			m_mcSig = null; m_mcCacheHit = m_mcCacheStoredLogged = m_mcRecalcDecided = m_mcRecalcTriggered = false;
+			m_mcSig = m_mcGuardKey = null; m_mcCacheHit = m_mcCacheStoredLogged = m_mcRecalcDecided = m_mcRecalcTriggered = false;
 			m_idleArmed = m_idleTimeoutLogged = m_idleDoneLogged = false;
 			lock (m_flowLock)
 			{
@@ -708,7 +710,7 @@ namespace PowerLanguage.Strategy
 			List<IDataLoaderResult> loads;
 			lock (m_flowLock)
 			{
-				if (m_flowLoads.Count == 0) return;
+				if (m_flowLoads.Count == 0) { m_chunkLoads = null; return; }   // review 2 item 4
 				loads = new List<IDataLoaderResult>(m_flowLoads);
 				m_flowLoads.Clear();
 				m_chunkLoads = null;
@@ -796,6 +798,7 @@ namespace PowerLanguage.Strategy
 			Resolution cr = Bars.Request.Resolution;
 			string sig = $"{Bars.Info.Name}|{Bars.Info.DataFeed}|{cr.Type}|{cr.Size}|{McBidAskChartType}|{FlowCfg.McBidAsk}|{firstBar:yyyy-MM-dd HH:mm:ss}";
 			m_mcSig = sig;
+			m_mcGuardKey = _OrderFlow.GuardKey(GetType().FullName, sig);
 			bool live = chartIsLive(lastBar);
 			string miss; int sets; long levels; DateTime cFirst, cLast; int pass, recalcs;
 			lock (m_flowLock)
@@ -856,7 +859,7 @@ namespace PowerLanguage.Strategy
 			m_mcStarted = true;
 			int id;
 			// Review B2b: the request id is set before BeginLoadData (a callback may arrive before it returns); onMcLevels drops
-			// any callback whose state is not this id or whose result is not m_mcResult.
+			// any callback whose state is not this id (a different result object is only logged: review 2 deviation 1).
 			lock (m_flowLock) { id = m_mcReqId = ++m_mcReqSeq; m_mcResult = null; }
 			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, id);
 			lock (m_flowLock)
@@ -883,7 +886,7 @@ namespace PowerLanguage.Strategy
 			// Review B1: the process-wide guard (recorded here: both callers act on Recalc immediately)
 			if (d == _OrderFlow.RecalcDecision.Recalc)
 				lock (s_mcRecalcGuardLock)
-					if (!s_mcRecalcGuard.TryAcquire(m_mcSig, DateTime.UtcNow, FlowCfg.McRecalcMax, mcGuardWindow())) d = _OrderFlow.RecalcDecision.SkipProcessGuard;
+					if (!s_mcRecalcGuard.TryAcquire(m_mcGuardKey, DateTime.UtcNow, FlowCfg.McRecalcGuardMaxPerKey, mcGuardWindow())) d = _OrderFlow.RecalcDecision.SkipProcessGuard;
 			if (d == _OrderFlow.RecalcDecision.Recalc) m_mcRecalcTriggered = true;
 			return d;
 		}
@@ -923,7 +926,7 @@ namespace PowerLanguage.Strategy
 			if (line == null)
 			{
 				if (d == _OrderFlow.RecalcDecision.SkipProcessGuard)
-					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) max({FlowCfg.McRecalcMax}) windowSec({FlowCfg.McRecalcGuardWindowSec}) sig({m_mcSig})");
+					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) maxPerKey({FlowCfg.McRecalcGuardMaxPerKey}) windowSec({FlowCfg.McRecalcGuardWindowSec}) key({m_mcGuardKey})");
 				else if (d != _OrderFlow.RecalcDecision.Wait)
 					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)})");
 				return false;
@@ -994,7 +997,7 @@ namespace PowerLanguage.Strategy
 				// Review S3: a chunk silent for TickChunkTimeoutSec is failed (a first failure splits; sub-chunks then log attempt(2)).
 				if (FlowCfg.TickChunkTimeoutSec > 0)
 				{
-					DateTime now = DateTime.Now;
+					DateTime now = DateTime.UtcNow;   // review 2 item 2: IssuedAt/LastActivity are UTC (no DST jump)
 					foreach (_OrderFlow.TickChunk c in m_chunks.TimedOut(now, TimeSpan.FromSeconds(FlowCfg.TickChunkTimeoutSec)))
 					{
 						string outcome = m_chunks.Complete(c, false, 0, null);
@@ -1024,7 +1027,7 @@ namespace PowerLanguage.Strategy
 				{
 					c.ReqFrom = clock().FromEastern(c.FromEt);
 					c.ReqTo = c.Rt ? (m_chunkRtTo > clock().FromEastern(c.ToEt) ? m_chunkRtTo : clock().FromEastern(c.ToEt)) : clock().FromEastern(c.ToEt);
-					c.IssuedAt = DateTime.Now;
+					c.IssuedAt = DateTime.UtcNow;
 				}
 			}
 			endLoads(toEnd, "chunk");
@@ -1164,11 +1167,15 @@ namespace PowerLanguage.Strategy
 					catch (Exception ex) { mcDiag("entryex:" + ex.GetType().Name, $"OF McBidAsk diag entry exception({ex.GetType().FullName}) message({ex.Message})"); }
 					if (m_flow == null || result == null) return;
 					// Review B2b: a callback of an earlier request (previous pass, or before a cache hit) waiting on m_flowLock is dropped.
-					if (!_OrderFlow.IsCurrentRequest(result.State, m_mcReqId, result, m_mcResult))
+					if (!_OrderFlow.IsCurrentRequest(result.State, m_mcReqId))
 					{
 						mcDiag("stale", $"OF McBidAsk diag stale callback dropped event({result.Event}) state({result.State}) current({m_mcReqId})");
 						return;
 					}
+					// Review 2 deviation 1: accepted on the state id alone; a different result object is logged once, not rejected
+					// (not verified that MC passes the BeginLoadData object to every callback; revisit after the probe).
+					if (!_OrderFlow.SameResult(result, m_mcResult))
+						mcDiag("resultMismatch", $"OF McBidAsk diag result object differs from BeginLoadData result, accepted event({result.Event}) state({result.State})");
 					bool completed = false;
 					try
 					{
@@ -1214,7 +1221,7 @@ namespace PowerLanguage.Strategy
 							else if (d == _OrderFlow.RecalcDecision.SkipProcessGuard)
 							{
 								m_mcRecalcDecided = true;
-								enqueueFlowMsg(ETraceLevel.Journal, $"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) from(callback) sig({m_mcSig})");
+								enqueueFlowMsg(ETraceLevel.Journal, $"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) from(callback) maxPerKey({FlowCfg.McRecalcGuardMaxPerKey}) key({m_mcGuardKey})");
 							}
 						}
 					}
@@ -1307,7 +1314,7 @@ namespace PowerLanguage.Strategy
 		{
 			_OrderFlow.TickChunk c = m_chunks.Find(id);
 			if (c == null || c.Replaced) return;   // an earlier pass, or a chunk replaced by its sub-windows
-			c.LastActivity = DateTime.Now;          // review S3: the timeout counts silence
+			c.LastActivity = DateTime.UtcNow;       // review S3: the timeout counts silence (UTC, review 2 item 2)
 			if (result.Event == DataLoadedEvent.History)
 			{
 				if (c.State != _OrderFlow.ChunkState.InFlight) return;
@@ -1338,7 +1345,7 @@ namespace PowerLanguage.Strategy
 				// Review S3: a weekday chunk with no tick at all is journaled (Info otherwise)
 				bool empty = buf.Count == 0 && c.LateDropped == 0 && c.Day.DayOfWeek != DayOfWeek.Saturday && c.Day.DayOfWeek != DayOfWeek.Sunday;
 				enqueueFlowMsg(empty ? ETraceLevel.Journal : ETraceLevel.Info, $"OF tick chunk done day({c.Day:yyyy-MM-dd}) stream({c.Stream}) sub({c.Sub}) ticks({buf.Count}) lateDropped({c.LateDropped}) " +
-					$"sec({(DateTime.Now - c.IssuedAt).TotalSeconds:0.0})");
+					$"sec({(DateTime.UtcNow - c.IssuedAt).TotalSeconds:0.0})");
 				releaseChunks();
 			}
 			else if (result.Event == DataLoadedEvent.RTNewBar && result.RTData.HasValue && c.Rt && c.State != _OrderFlow.ChunkState.Failed)
