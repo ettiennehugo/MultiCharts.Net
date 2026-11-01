@@ -838,7 +838,7 @@ namespace PowerLanguage.Strategy
 			requireDataStream("DevProfileDataStream", DevProfileDataStream);
 			IInstrument src = barsOf(DevProfileDataStream);
 			bool oneTick = false;
-			try { oneTick = src != null && src.Info.Resolution.Type.ToString() == "Tick" && src.Info.Resolution.Size == 1; } catch { }
+			try { oneTick = src != null && src.Info.Resolution.Type == EResolution.Tick && src.Info.Resolution.Size == 1; } catch { }
 			m_ownMode = (int)DevProfileSourceMode;
 			if (DevProfileSourceMode == EDevProfileSourceMode.Auto) m_ownMode = oneTick ? 1 : 2;
 			m_ownApproximate = !(m_ownMode == 1 && oneTick);

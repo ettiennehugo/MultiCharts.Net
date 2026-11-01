@@ -80,23 +80,17 @@ namespace PowerLanguage.Function
 			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
 		}
 
-		/// <summary>PR #51 N3: true for an intraday resolution (EResolution.ToString(); Day/Week/Month/Quarter/Year are not).</summary>
-		public static bool IsIntraday(string resolutionType)
-		{
-			switch (resolutionType ?? "") { case "Day": case "Week": case "Month": case "Quarter": case "Year": return false; }
-			return true;
-		}
-
 		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
 		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
 		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
-		/// resolutionType = EResolution.ToString(); calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
-		public static string SeriesKeyWarning(bool series, string resolutionType, bool calendarKeyed)
+		/// intraday = the caller's typed EResolution test (_CustomSignal.isIntradayResolution; no enum names as strings here);
+		/// resolutionLabel is display text only; calendarKeyed = tradingDayKey is the bar's calendar date.</summary>
+		public static string SeriesKeyWarning(bool series, bool intraday, string resolutionLabel, bool calendarKeyed)
 		{
 			// fix-i: _CustomSignal keys Series by the Globex trading day on futures charts itself and passes calendarKeyed = false
 			if (!series || !calendarKeyed) return null;
-			if (!IsIntraday(resolutionType)) return null;
-			return "RollDetection Series on an intraday chart (" + resolutionType + ") keyed by calendar date: Series only tests the first bar after midnight "
+			if (!intraday) return null;
+			return "RollDetection Series on an intraday chart (" + resolutionLabel + ") keyed by calendar date: Series only tests the first bar after midnight "
 				+ "and misses the Globex-open roll gap; use RollDetection = Table (RollDates) or key days by the Globex trading day "
 				+ "(override tradingDayKey with _CmeSessionClock.GlobexTradingDayEt: ET >= 18:00 belongs to the next date)";
 		}
