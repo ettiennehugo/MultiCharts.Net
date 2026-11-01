@@ -42,8 +42,9 @@ static class Program
 		if (has(@"(==|!=)\s*""(" + McNames + @")""") || has(@"""(" + McNames + @")""\s*(==|!=)") || has(@"case\s+""(" + McNames + @")""\s*:")
 			|| has(@"\(\s*""(FOREX|CRYPTO|CURRENCY|FUTURE|FUTURES|STOCK)""\s*\)")) r.Add("mc-member-name-string");
 		// any casing of a whole MC member name handed to a string compare: x.Equals("future"), Contains("FOREX"),
-		// string.Compare(a, "Tick", true), StartsWith("renko"), "Day".Equals(x)
-		if (has(@"(?i)(?<!\w)(Equals|Contains|Compare|StartsWith|EndsWith)\s*\([^;]*?""(" + McNames + @")""")
+		// string.Compare(a, "Tick", true), StartsWith("renko"), "Day".Equals(x). The name must sit inside the call's own argument
+		// list (one level of nested parens allowed, e.g. Compare(a.Trim(), "Tick")): `if (s.Contains(k)) label = "Tick";` is not a compare.
+		if (has(@"(?i)(?<!\w)(Equals|Contains|Compare|StartsWith|EndsWith)\s*\((?:[^;()]|\([^;()]*\))*?""(" + McNames + @")""")
 			|| has(@"(?i)""(" + McNames + @")""\s*\.\s*(Equals|Contains|CompareTo|StartsWith|EndsWith)\s*\(")) r.Add("mc-name-string-compare");
 		// enum reflection over a non-repo enum: Enum.GetName/IsDefined/ToObject(typeof(EResolution), ..)
 		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(line, @"Enum\.(GetName|IsDefined|ToObject)\s*\(\s*typeof\(\s*([\w\.]+)\s*\)"))
@@ -863,6 +864,7 @@ static class Program
 					new[] { "if (s.StartsWith(\"renko\")) brick = true;", "mc-name-string-compare" },
 					new[] { "if (s.EndsWith(\"PointAndFigure\")) pf = true;", "mc-name-string-compare" },
 					new[] { "if (\"CumDelta\".Equals(ct)) cd = true;", "mc-name-string-compare" },
+					new[] { "if (string.Compare(a.Trim(), \"Tick\", true) == 0) t = true;", "mc-name-string-compare" },
 					new[] { "if (type == \"OrigPoints\" || type == \"LineBreak\") return;", "mc-member-name-string" },
 					new[] { "string n = Enum.GetName(typeof(EResolution), r);", "enum-reflect(GetName EResolution)" },
 					new[] { "if (Enum.IsDefined(typeof(ESymbolCategory), \"Forex\")) fx = true;", "enum-reflect(IsDefined ESymbolCategory)" },
@@ -873,9 +875,10 @@ static class Program
 				Check(probeMiss.Count == 0, "TE11 new rules fire with their own id (case-insensitive name compares, Enum.GetName/IsDefined/ToObject of MC enums, Type.GetType by name) [" + string.Join(" | ", probeMiss) + "]");
 				string[] good2 = {
 					"string n = Enum.GetName(typeof(EEventTier), t);", "var k = (EEventKind)Enum.ToObject(typeof(EEventKind), 2);",
-					"if (s.Equals(\"Daily\", StringComparison.OrdinalIgnoreCase)) d = true;", "if (row.Contains(\"TickRule\")) tr = true;", "Type t = o.GetType();" };
+					"if (s.Equals(\"Daily\", StringComparison.OrdinalIgnoreCase)) d = true;", "if (row.Contains(\"TickRule\")) tr = true;", "Type t = o.GetType();",
+					"if (s.Contains(k)) label = \"Tick\";", "if (a.Equals(b.Trim())) kind = \"Day\";" };
 				var flagged2 = good2.Where(gs => TypedEnumLint(gs, ownEnums, ownTypes).Count != 0).ToList();
-				Check(flagged2.Count == 0, "TE12 new rules pass repo-own enum reflection, non-MC words and o.GetType() [" + string.Join(" | ", flagged2) + "]");
+				Check(flagged2.Count == 0, "TE12 new rules pass repo-own enum reflection, non-MC words, o.GetType() and an MC name after the call's closing paren [" + string.Join(" | ", flagged2) + "]");
 				Check(ownTypes.Contains("Entry") && flagged.Count == 0, "TE4 lint passes the repo's own enum parses, own-type reflection and typed compares [" + string.Join(" | ", flagged) + "]");
 
 				// the typed replacements themselves
