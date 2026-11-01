@@ -15,6 +15,13 @@ static class Program
 	static bool Near(double a, double b) { return Math.Abs(a - b) < 1e-9; }
 	const double TICK = 0.25;
 	static readonly DateTime T0 = new DateTime(2024, 3, 13, 10, 0, 0);
+	static string MethodBody(string src, string sig)
+	{
+		int i = src.IndexOf(sig); if (i < 0) return null;
+		int b = src.IndexOf('{', i), d = 0;
+		for (int k = b; k < src.Length; k++) { if (src[k] == '{') d++; else if (src[k] == '}' && --d == 0) return src.Substring(b, k - b + 1); }
+		return null;
+	}
 	static DateTime Ms(int ms) { return T0.AddMilliseconds(ms); }
 
 	static OF.BarInput Bar(int n, DateTime close, Regime r = Regime.TickStream, double vol = 0, double up = 0, double down = 0, DateTime? session = null, double hi = 0, double lo = 0, double cl = 0)
@@ -347,6 +354,48 @@ static class Program
 			en.AddTrade(Ms(10), 100, 1); en.CloseBar(Bar(1, Ms(20)));
 			en.CloseBar(new OF.BarInput { BarNumber = 2, CloseTime = Ms(40), SessionKey = T0.Date, ResetKey = T0.Date, Regime = Regime.IogHistoryNoMagnifier });
 			Check(en.Closed(0).Quality == Q.Unknown, "J3 no journal sink: downgrade handled silently");
+		}
+
+		// ---- T1 DataLoader thread safety: callbacks run off the calc thread (MC "Bars. Calculation thread only.") ----
+		{
+			int calcThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
+			int offThreadSinkCalls = 0;
+			// stub calc-thread-only sink: throws (like MC Bars/Output) when called from another thread
+			Action<string> calcOnly = s => { if (System.Threading.Thread.CurrentThread.ManagedThreadId != calcThread) { offThreadSinkCalls++; throw new InvalidOperationException("Bars. Calculation thread only."); } };
+			var cfg = new OF.FlowConfig { QuotesExpected = true, McBidAsk = OF.EMcBidAsk.Prefer, MaxBars = 10 };
+			var ef = new OF.FlowEngine(TICK, cfg) { journal = calcOnly, warnOnce = calcOnly };
+			Exception loaderEx = null;
+			var loader = new System.Threading.Thread(() =>   // fake DataLoader: History callback on its own thread
+			{
+				try
+				{
+					for (int i = 0; i < 30; i++)
+					{
+						ef.AddMcLevels(Ms(1000 * (i + 1)), new[] { 100.00 }, new[] { 1.0 }, new[] { 1.0 });
+						ef.AddQuote(Ms(1000 * i + 100), true, 100.00); ef.AddQuote(Ms(1000 * i + 100), false, 100.25);
+						ef.AddTrade(Ms(1000 * i + 200), 100.25, 2);
+					}
+				}
+				catch (Exception ex) { loaderEx = ex; }
+			});
+			loader.Start(); loader.Join();
+			Check(loaderEx == null && offThreadSinkCalls == 0, "T1 fake loader thread: AddMcLevels/AddQuote/AddTrade never call a calc-thread sink");
+			Exception calcEx = null;
+			try { for (int i = 0; i < 30; i++) ef.CloseBar(Bar(i + 1, Ms(1000 * (i + 1)), vol: 2)); } catch (Exception ex) { calcEx = ex; }
+			Check(calcEx == null && ef.DroppedBars > 0, "T1 sinks fire only from CloseBar on the calc thread (MaxBars warning reached)");
+
+			// source guard: the strategy's DataLoader callbacks and their helpers must not reference calc-thread-only members
+			string src = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string[] offThread = { "onFlowData", "onMcLevels", "flowTick", "mcSet", "mcDiag", "enqueueFlowMsg" };
+			string[] banned = { "Bars.", "Bars[", "Output", "trace(", "engineSink", "Environment.", "ToEastern", "clock()", "tickSize()", "BarsOfData", "StatusLine" };
+			foreach (string m in offThread)
+			{
+				string body = MethodBody(src, "private void " + m + "(");
+				Check(body != null, "T1 source guard found " + m);
+				if (body == null) continue;
+				string hit = banned.FirstOrDefault(b => body.Contains(b));
+				Check(hit == null, "T1 " + m + " (DataLoader thread) uses no calc-thread member, found " + hit);
+			}
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
