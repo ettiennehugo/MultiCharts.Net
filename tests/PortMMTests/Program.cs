@@ -227,6 +227,55 @@ static class Program
 				"T-P21 closer widened stop: structural used (R$w NaN, no skip even at a large qty)");
 		}
 
+		// T-P23 (rev 2.7, PR-E; Ettienne 2026-11-01): roundLots never overrides the maxQty / notional caps; on a conflict the capped qty
+		// is kept and a Warning names roundLots, the cap that won, both quantities and the symbol. Without a binding cap rounding is unchanged.
+		{
+			int rounded; bool conflict;
+			Check(_PortLots.Floor(99) == 99 && _PortLots.Floor(100) == 100 && _PortLots.Floor(250) == 200 && _PortLots.Floor(1) == 1 && _PortLots.Floor(0) == 0,
+				"T-P23 Floor: odd lot below 100 kept, else floor to 100s, never 0 for qty > 0");
+			Check(_PortLots.CapWon(300, 300, 300) == null && _PortLots.CapWon(300, 250, 250) == _PortLots.CapMaxQty && _PortLots.CapWon(300, 250, 180) == _PortLots.CapNotional
+				&& _PortLots.CapWon(300, 300, 180) == _PortLots.CapNotional && _PortLots.CapWon(300, 250, 260) == _PortLots.CapMaxQty, "T-P23 CapWon: none / maxQty / notional (notional wins when it lowers the maxQty result)");
+			Check(_PortLots.Apply(250, true, _PortLots.CapMaxQty, out rounded, out conflict) == 250 && rounded == 200 && conflict, "T-P23 maxQty 250 + roundLots: 250 kept (not 200), conflict");
+			Check(_PortLots.Apply(333, true, _PortLots.CapNotional, out rounded, out conflict) == 333 && rounded == 300 && conflict, "T-P23 notional cap 333 + roundLots: 333 kept (not 300), conflict");
+			Check(_PortLots.Apply(300, true, _PortLots.CapMaxQty, out rounded, out conflict) == 300 && rounded == 300 && !conflict, "T-P23 capped qty already a round lot: no conflict, no warning");
+			Check(_PortLots.Apply(80, true, _PortLots.CapNotional, out rounded, out conflict) == 80 && !conflict, "T-P23 capped odd lot < 100: kept, no conflict");
+			Check(_PortLots.Apply(250, true, null, out rounded, out conflict) == 200 && rounded == 200 && !conflict, "T-P23 no binding cap: roundLots floors as before (250 -> 200), no warning");
+			Check(_PortLots.Apply(250, false, _PortLots.CapMaxQty, out rounded, out conflict) == 250 && !conflict && _PortLots.Apply(250, false, null, out rounded, out conflict) == 250 && !conflict,
+				"T-P23 roundLots off: qty unchanged, never a conflict");
+			int[] riskQtys = { 1, 99, 100, 101, 199, 250, 999, 1000, 12345 }; bool neverAbove = true, neverBelowCap = true;
+			foreach (int rq in riskQtys) foreach (int mq in new[] { 0, 50, 150, 250, 1000 }) foreach (int nc in new[] { -1, 120, 333 })
+			{
+				int afterMax = mq > 0 && rq > mq ? mq : rq, afterNot = nc >= 0 ? Math.Min(afterMax, nc) : afterMax;
+				if (afterNot <= 0) continue;
+				string cw = _PortLots.CapWon(rq, afterMax, afterNot);
+				int f = _PortLots.Apply(afterNot, true, cw, out rounded, out conflict);
+				if (f > afterNot) neverAbove = false;
+				if (cw != null && f != afterNot) neverBelowCap = false;
+			}
+			Check(neverAbove && neverBelowCap, "T-P23 sweep: final qty never above the capped qty, and equals it whenever a cap bound");
+			Check(_PortLots.ConflictWarning("@ES", _PortLots.CapMaxQty, 250, 200) == "sizeForRisk - roundLots ignored on @ES: maxQty qty(250) kept, roundLots would give qty(200)"
+				&& _PortLots.ConflictWarning("MSFT", _PortLots.CapNotional, 333, 300) == "sizeForRisk - roundLots ignored on MSFT: notional cap qty(333) kept, roundLots would give qty(300)",
+				"T-P23 warning text names roundLots, the cap, both quantities and the symbol");
+		}
+
+		// T-P24 (rev 2.7, PR-E; Ettienne 2026-11-01): portfolioArm makes the widened stop active, so pm.riskOpen is the widened risk right after the fill.
+		{
+			double bpv = 50;
+			Check(Near(_PortArm.ActiveStop(5000, 4998, 4996.5, bpv), 4996.5), "T-P24 long: valid widened stop is the active stop");
+			Check(Near(_PortArm.ActiveStop(5000, 5002, 5003.5, bpv), 5003.5), "T-P24 short: valid widened stop is the active stop");
+			Check(Near(_PortArm.ActiveStop(5000, 4998, double.NaN, bpv), 4998) && Near(_PortArm.ActiveStop(5000, 4998, 4999, bpv), 4998) && Near(_PortArm.ActiveStop(5000, 4998, double.NegativeInfinity, bpv), 4998),
+				"T-P24 no / closer / infinite widened stop: structural stop stays active");
+			Check(Near(_PortArm.ActiveStop(5000, 4998, 4998, bpv), 4998), "T-P24 widened == structural: same stop");
+			double fillLong = _PortArm.RiskOpen(5, 5000, 5000, _PortArm.ActiveStop(5000, 4998, 4996.5, bpv), bpv);
+			Check(Near(fillLong, 5 * 175), $"T-P24 long fill at entry: riskOpen = 5 x 175 (widened), not 5 x 100 ({fillLong})");
+			double fillShort = _PortArm.RiskOpen(-5, 5000, 5000, _PortArm.ActiveStop(5000, 5002, 5003.5, bpv), bpv);
+			Check(Near(fillShort, 5 * 175), $"T-P24 short fill at entry: riskOpen = 5 x 175 ({fillShort})");
+			Check(Near(_PortArm.RiskOpen(5, 5000, 5000, _PortArm.ActiveStop(5000, 4998, double.NaN, bpv), bpv), 500), "T-P24 no widened stop: riskOpen on the structural stop (unchanged)");
+			Check(_PortArm.RiskOpen(0, 5000, 5000, 4996.5, bpv) == 0 && _PortArm.RiskOpen(5, 5000, 5000, double.NaN, bpv) == 0 && _PortArm.RiskOpen(5, 5000, 5010, 5001, bpv) == 0
+				&& _PortArm.RiskOpen(5, 5000, 4990, 4996.5, bpv) == 0 && _PortArm.RiskOpen(5, 5000, 5000, 4996.5, 0) == 0, "T-P24 riskOpen 0: flat, no stop, stop beyond breakeven, price through the stop, bad BPV");
+			Check(Near(_PortArm.RiskOpen(5, 5000, 5000, 5000 - 3.5, bpv), _PortArm.RiskNew(100, _PortArm.RDollarW(5000, 4998, 4996.5, bpv), 5)), "T-P24 riskOpen at the fill = pm.riskNew armed (R$w x qtyCode)");
+		}
+
 		// Total open-risk cap (spec §5.4 item 0, TotalRiskCapPct [Input]) and the Info-level skip journal (spec §5.6).
 		{
 			string w;

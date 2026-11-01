@@ -1578,7 +1578,8 @@ namespace PowerLanguage.Strategy
 		/// M-PORT: declare the pending entry of this bar (call next to the entry Send; sizeForRisk calls it for Data1 automatically).
 		/// side +1/-1, qtyCode = contracts the code would trade (sized on the structural stop). No-op outside Portfolio Trader.
 		/// widenedStop (rev 2, optional) = the stop the order carries after a cost floor; publishes pm.R$w (NaN when not given,
-		/// not finite or closer than stop). pm.R$ stays the structural $/contract.
+		/// not finite or closer than stop). pm.R$ stays the structural $/contract. rev 2.7 (PR-E): a valid widenedStop is also the
+		/// active stop (pm.riskOpen right after the fill); otherwise the structural stop is.
 		/// </summary>
 		protected void portfolioArm(int side, double entry, double stop, int qtyCode, double widenedStop = double.NaN)
 		{
@@ -1587,13 +1588,13 @@ namespace PowerLanguage.Strategy
 			double bpv = Bars.Info.BigPointValue;
 			double rd = Math.Abs(entry - stop) * bpv;
 			if (!(rd > 0) || double.IsNaN(rd) || double.IsInfinity(rd)) return;
-			m_portRDollar = rd; m_portStop = stop; m_portArmBar = Bars.CurrentBar;
+			m_portRDollar = rd; m_portStop = _PortArm.ActiveStop(entry, stop, widenedStop, bpv); m_portArmBar = Bars.CurrentBar;
 			_PortArm.Write((k, v) => MyPortfolioData[k] = v, rd, _PortArm.RDollarW(entry, stop, widenedStop, bpv), qtyCode);
 			MyPortfolioData[_PortKeys.Side] = side > 0 ? 1 : -1;
 			if (StrategyInfo.MarketPosition == 0) MyPortfolioData[_PortKeys.State] = (int)EPortState.Armed;
 		}
 
-		/// <summary>M-PORT: the active protective stop of the open position (for pm.riskOpen). Defaults to the armed stop.</summary>
+		/// <summary>M-PORT: the active protective stop of the open position (for pm.riskOpen). Defaults to the armed active stop (the widened stop when portfolioArm got a valid one, else the structural stop; rev 2.7); call it to trail or move to breakeven.</summary>
 		protected void portfolioStop(double stop) { if (m_portOn) m_portStop = stop; }
 
 		private void portfolioBar()
@@ -1627,11 +1628,7 @@ namespace PowerLanguage.Strategy
 			EPortState st = PortfolioHalted ? EPortState.Halted : pos > 0 ? EPortState.Long : pos < 0 ? EPortState.Short : EPortState.Flat;
 			double riskOpen = 0, openR = double.NaN;
 			if (pos != 0 && !double.IsNaN(m_portStop) && bpv > 0)
-			{
-				double avg = StrategyInfo.AvgEntryPrice, px = Bars.Close[0];
-				bool beyondBe = pos > 0 ? m_portStop >= avg : m_portStop <= avg;
-				riskOpen = beyondBe ? 0 : Math.Max(0, (pos > 0 ? px - m_portStop : m_portStop - px)) * bpv * Math.Abs(pos);
-			}
+				riskOpen = _PortArm.RiskOpen(pos, StrategyInfo.AvgEntryPrice, Bars.Close[0], m_portStop, bpv);
 			if (pos != 0 && m_portRDollar > 0) openR = open / (m_portRDollar * Math.Abs(pos));
 			pd[_PortKeys.Eq] = this.InitialCapital + pnl;
 			pd[_PortKeys.Pnl] = pnl;
@@ -2799,7 +2796,8 @@ namespace PowerLanguage.Strategy
 		/// CS-4 limits for sizeForRisk. All optional (0 / false = no limit).
 		/// maxQty: hard cap. maxNotionalFraction: qty x unitNotional <= equityAvailable(maxNotionalFraction).
 		/// unitNotional: $ per unit for the notional cap; 0 = full contract value entry x BigPointValue (D1: ES by full
-		/// contract value; a stock is its price). minStopTicks: refuse stops closer than this. roundLots: floor to 100s.
+		/// contract value; a stock is its price). minStopTicks: refuse stops closer than this. roundLots: floor to 100s, except that it
+		/// never overrides a binding maxQty / notional cap (the capped qty is kept and a Warning is traced; M-PORT rev 2.7).
 		/// </summary>
 		public struct SizingLimits
 		{
@@ -2823,6 +2821,8 @@ namespace PowerLanguage.Strategy
 		/// With default(SizingLimits) it equals stopLossBasedPositionSize(bars, entry, stop, riskFraction).
 		/// widenedStop (M-PORT rev 2, optional): the cost-floored stop the order will carry. Size stays on the structural stop; when this
 		/// call does not arm (chart run or Data2) and qty x |entry - widenedStop| x BPV > 1% of equity, returns 0 (never a smaller qty).
+		/// When it arms (portfolio Data1), a valid widenedStop is the active stop for pm.riskOpen (M-PORT rev 2.7).
+		/// roundLots never overrides a binding maxQty / notional cap: the capped qty is kept and a Warning is traced (M-PORT rev 2.7).
 		/// </summary>
 		protected int sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits, double widenedStop = double.NaN)
 		{
@@ -2845,14 +2845,21 @@ namespace PowerLanguage.Strategy
 			}
 			int qty = stopLossBasedPositionSize(bars, entry, stop, riskFraction, false);
 			if (qty <= 0) { trace(ETraceLevel.Info, "sizeForRisk - 0: risk sizing returned 0 (zero equity or zero risk)"); return 0; }
+			int riskQty = qty;
 			if (limits.maxQty > 0 && qty > limits.maxQty) { trace(ETraceLevel.Debug, $"sizeForRisk - qty({qty}) capped to maxQty({limits.maxQty})"); qty = limits.maxQty; }
+			int maxQtyCapped = qty;
 			if (limits.maxNotionalFraction > 0)
 			{
 				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * bpv;
 				qty = capByNotional(qty, unit, limits.maxNotionalFraction);
 				if (qty <= 0) { trace(ETraceLevel.Info, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
 			}
-			qty = applyRoundLots(qty, limits.roundLots);
+			// rev 2.7 (PR-E): roundLots never overrides the maxQty / notional caps; on a conflict the capped qty is kept and a Warning names both
+			int rounded; bool lotConflict;
+			string capWon = _PortLots.CapWon(riskQty, maxQtyCapped, qty);
+			int capped = qty;
+			qty = _PortLots.Apply(capped, limits.roundLots, capWon, out rounded, out lotConflict);
+			if (lotConflict) trace(ETraceLevel.Warning, _PortLots.ConflictWarning(bars.Info.Name, capWon, capped, rounded));
 			bool willArm = m_portOn && bars == Bars;
 			if (qty > 0 && !willArm && !double.IsNaN(widenedStop))
 			{
@@ -2924,8 +2931,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected static int applyRoundLots(int qty, bool useRoundLots)
 		{
-			if (!useRoundLots || qty < 100) return qty;
-			return (qty / 100) * 100;
+			return useRoundLots ? _PortLots.Floor(qty) : qty;
 		}
 
 		/// <summary>

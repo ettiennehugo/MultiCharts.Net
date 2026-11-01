@@ -427,6 +427,21 @@ namespace PowerLanguage.Function
 			return true;
 		}
 
+		/// <summary>rev 2.7 (PR-E, Ettienne 2026-11-01: "arming should use the widened stop"): the stop portfolioArm makes active
+		/// (pm.riskOpen once filled) = widenedStop when it is valid (RDollarW finite), else the structural stop.</summary>
+		public static double ActiveStop(double entry, double stop, double widenedStop, double bpv)
+		{
+			return double.IsNaN(RDollarW(entry, stop, widenedStop, bpv)) ? stop : widenedStop;
+		}
+
+		/// <summary>pm.riskOpen = |price - active stop| x BPV x |pos|; 0 when flat, with no stop, or when the stop is at/beyond breakeven; never negative.</summary>
+		public static double RiskOpen(int pos, double avgEntry, double price, double activeStop, double bpv)
+		{
+			if (pos == 0 || double.IsNaN(activeStop) || !(bpv > 0)) return 0;
+			bool beyondBe = pos > 0 ? activeStop >= avgEntry : activeStop <= avgEntry;
+			return beyondBe ? 0 : Math.Max(0, (pos > 0 ? price - activeStop : activeStop - price)) * bpv * Math.Abs((double)pos);
+		}
+
 		/// <summary>pm.riskNew = Rw x qtyCode, Rw = R$ when R$w is NaN.</summary>
 		public static double RiskNew(double rDollar, double rDollarW, int qtyCode)
 		{
@@ -457,6 +472,42 @@ namespace PowerLanguage.Function
 
 		/// <summary>startPortfolio initialisation of pm.R$w.</summary>
 		public static void Init(Action<string, object> set) { set(_PortKeys.RDollarW, double.NaN); }
+	}
+
+	/// <summary>CS-4 round lots under the hard caps (M-PORT rev 2.7, PR-E; Ettienne 2026-11-01: "roundLots should not override the maxQty
+	/// and notional caps - log a warning and keep the maxQty and notional caps if this happens"). Pure C# so tests/PortMMTests runs it.</summary>
+	public static class _PortLots
+	{
+		public const int LotSize = 100;
+		public const string CapMaxQty = "maxQty";
+		public const string CapNotional = "notional cap";
+
+		/// <summary>Round-lot policy: floor to a multiple of 100 when qty >= 100; below 100 keep the odd lot (never 0 for qty > 0).</summary>
+		public static int Floor(int qty) { return qty < LotSize ? qty : (qty / LotSize) * LotSize; }
+
+		/// <summary>The hard cap that set the final qty: the notional cap when it lowered the maxQty result, else maxQty when it lowered
+		/// the risk qty, else null (no cap bound).</summary>
+		public static string CapWon(int riskQty, int afterMaxQty, int afterNotional)
+		{
+			if (afterNotional < afterMaxQty) return CapNotional;
+			if (afterMaxQty < riskQty) return CapMaxQty;
+			return null;
+		}
+
+		/// <summary>Final qty. roundLots off: qty. No cap bound: Floor(qty) (unchanged CS-4 rounding). A cap bound: the capped qty is kept,
+		/// roundLots never replaces it; conflict = true when roundLots would have given a different qty (rounded).</summary>
+		public static int Apply(int qty, bool roundLots, string capWon, out int rounded, out bool conflict)
+		{
+			rounded = roundLots ? Floor(qty) : qty;
+			conflict = capWon != null && rounded != qty;
+			return capWon != null ? qty : rounded;
+		}
+
+		/// <summary>The Warning traced by sizeForRisk on a conflict.</summary>
+		public static string ConflictWarning(string symbol, string capWon, int capped, int rounded)
+		{
+			return $"sizeForRisk - roundLots ignored on {symbol}: {capWon} qty({capped}) kept, roundLots would give qty({rounded})";
+		}
 	}
 
 	/// <summary>M-PORT total open-risk cap (spec §5.4 item 0): the TotalRiskCapPct [Input] and the widened-risk check.</summary>
