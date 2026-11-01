@@ -291,13 +291,13 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 6. Runs:
    - **Run 1, checks a and b:** `mm.json` = `{ "sizing": "RiskParity", "weeklyHalveR": -1, "weeklyObserveR": -2 }`, no `signal.json`. (Smaller thresholds so the weekly states trigger within days; a run with the defaults −3/−6 is optional.)
    - **Run 2, check c:** `mm.json` = `{ "sizing": "CodeSize", "weeklyHalveR": -1, "weeklyObserveR": -2 }`. To also reach ddSteps stage 1 quickly, add `"ddSteps": [ { "dd": 0.002, "mult": 0.5 }, { "dd": 0.004, "mult": 0.25 }, { "dd": 0.5, "mult": 0.0 } ]`.
-   - **Run 3, check d:** `signal.json` = `{ "mode": "reverse" }`, `mm.json` as in run 1. While in a position held ≥ 2 bars, a bar against it sends the opposite entry (`THR … REVERSE long->short`). Note: the MM does not re-allow entries for a strategy that is in position, so if `REVERSE` lines appear but the position never flips sign, record that (the MM blocks direct reversals in PT) instead of a pass/fail on (d).
+   - **Run 3, check d:** `signal.json` = `{ "mode": "reverse" }`, `mm.json` as in run 1. While in a position held ≥ 2 bars, a bar against it sends the opposite entry (`THR … REVERSE long->short`). Expect `PORT Info: reversal _TestPortThrottle#<i> long->short allowed …` (or short->long) in the journal and the position to flip sign (the MM allows reversals since spec rev 2.5); a closed trade is recorded at the flip. If instead a `PORT Info: skip … in position` line appears, (d) fails.
    - Change a file, then recalculate the portfolio. Optional `signal.json` keys: `stopTicks` (default 4), `holdBars` (default 6).
 
 - (a) **Session stop:** after 2 losing closes (R < −0.05) on one strategy, `PORT session stop` and then Info `skip … session stop` appear for **that strategy only**. The other strategy keeps entering. Entries resume on its next `pm.day`, and CL's new day does not clear ES's stop.
 - (b) **Weekly halve and observe:** at week R ≤ −3, `PORT weekly halve` appears and EntryContracts is about half. At ≤ −6, `PORT weekly observe` and `skip … weekly observe` (PORT observe) appear. The **Sunday-evening ETH session does not reset early**: the state clears only at the first session of the next ISO week.
 - (c) **CodeSize skip:** in the CodeSize run, with ddSteps stage 1 (0.5) or a weekly halve, entries log `skip … throttle under CodeSize` and no order is sent.
-- (d) **Reversal:** a long→short flip records a closed trade (R counted toward 4a/4b/kill; the session-stop count increases).
+- (d) **Reversal:** the opposite entry while in position is allowed (`PORT Info: reversal <id>#<i> long->short allowed …`, spec §5.4 4c, rev 2.5) unless session stop / weekly observe / another gate skips it (Info skip line). The long→short flip records a closed trade (R counted toward 4a/4b/kill; the session-stop count increases). A same-direction add while in position stays refused.
 - **Pass:** a–d as described. **Fail:** any missing journal line, a skip on the wrong strategy, or an early reset.
 
 ---

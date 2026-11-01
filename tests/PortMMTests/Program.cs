@@ -418,6 +418,47 @@ static class Program
 			tm8.Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Flat, 0) });
 			cum[0] = 20000000 - 8400000; var w8 = PR(tm8, D0.AddDays(1));
 			Check(!w8.allowEntries && w8.reason == "throttle under CodeSize", "T-P13: CodeSize + ddSteps 0.5 -> skip");
+			// T-P22 reversal entries (rev 2.5): opposite entry while in position is allowed through every other gate
+			Func<int, EPortState, int, int, double, string, PortStratView> RV = (ri, rs, rpos, rside, rOpen, rcl) => { var x = V(ri, rs, side: rside, pos: rpos, riskOpen: rOpen, cl: rcl); x.day = D0; return x; };
+			{
+				var rj = new List<string>(); var rm = MM(null, rj);
+				var rd = rm.Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 1000, "") });
+				Check(rd[0].allowEntries && rd[0].allowShort && !rd[0].allowLong && rd[0].entryContracts == 10 && rd[0].reason == "allowed", "T-P22: long +2 with pending short -> reversal allowed (short only, RiskParity size)");
+				Check(rj.Any(x => x.StartsWith("PORT Info: reversal S0#0 long->short allowed") && x.Contains("released $1000.00")), "T-P22: reversal allowed journalled at Info with released risk");
+				var rs2 = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Short, -3, 1, 0, "") });
+				Check(rs2[0].allowEntries && rs2[0].allowLong && !rs2[0].allowShort, "T-P22: short -> long reversal allowed");
+				var add = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, 1, 1000, "") });
+				Check(!add[0].allowEntries && (add[0].reason == "Long" || add[0].reason == "in position"), "T-P22: same-direction add while long still refused (state Long / in position, not an entry attempt)");
+				var add2 = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Armed, 2, 1, 1000, "") });
+				Check(!add2[0].allowEntries && add2[0].reason == "in position", "T-P22: same-direction add (state Armed, long) -> in position");
+				var noSide = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, 0, 1000, "") });
+				Check(!noSide[0].allowEntries && noSide[0].reason == "Long", "T-P22: in position without a pending side -> in position");
+				// maxPositions: a reversal does not add a position
+				var mp = MM(c => c.maxPositions = 1).Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 0, "") , RV(1, EPortState.Armed, 0, 1, 0, "") });
+				Check(mp[0].allowEntries && !mp[1].allowEntries && mp[1].reason == "maxPositions", "T-P22: maxPositions 1, one open: the reversal passes, a new flat entry is denied");
+				// caps: closing leg released (heat 4% of 1e6 = 40000; open risk 38000, new leg 10 x 500 = 5000)
+				var hc = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 38000, "") });
+				Check(hc[0].allowEntries, "T-P22: heat counts new leg only after releasing the closing leg (38000 - 38000 + 5000 <= 40000)");
+				var hj = new List<string>();
+				var hc2 = MM(null, hj).Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 1000, "EQ"), RV(1, EPortState.Long, 1, 1, 37000, "EQ2") });
+				Check(!hc2[0].allowEntries && hc2[0].reason == "heat cap" && hj.Any(x => x.StartsWith("PORT Info: skip S0#0 heat cap") && x.Contains("released $1000.00") && x.Contains("risk $5000.00")), "T-P22: other open risk still counts: 37000 + 5000 > 40000 -> heat cap skip at Info with risk and released $");
+				var cc = MM().Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 18000, "EQ") });
+				Check(cc[0].allowEntries, "T-P22: cluster cap releases the closing leg (18000 - 18000 + 5000 <= 20000)");
+				var tc = MM(c => c.totalRiskCap = 0.03).Decide(D0, 1000000, true, new List<PortStratView> { RV(0, EPortState.Long, 2, -1, 28000, "") });
+				Check(tc[0].allowEntries, "T-P22: total cap releases the closing leg (28000 - 28000 + 5000 <= 30000)");
+				// session stop / weekly observe still block a reversal
+				cum[0] = 0; var sm = MM(); TR(sm, D0, -1); TR(sm, D0, -1);
+				var rsv = TV(0, D0, EPortState.Long, 10); rsv.side = -1;
+				var sd = sm.Decide(D0, 100000000, true, new List<PortStratView> { rsv })[0];
+				Check(!sd.allowEntries && sd.reason == "session stop", "T-P22: reversal blocked by session stop");
+				cum[0] = 0; var om = MM(); TR(om, D0, -6);
+				var osv = TV(0, D0.AddDays(1), EPortState.Short, -10); osv.side = 1;
+				var od = om.Decide(D0.AddDays(1), 100000000, true, new List<PortStratView> { osv })[0];
+				Check(!od.allowEntries && od.reason == "weekly observe", "T-P22: reversal blocked by weekly observe");
+				cum[0] = 0; var cm = MM(c => c.sizing = EPortSizing.CodeSize); TR(cm, D0, -3);
+				var csv = TV(0, D0.AddDays(1), EPortState.Long, 10); csv.side = -1;
+				Check(cm.Decide(D0.AddDays(1), 100000000, true, new List<PortStratView> { csv })[0].reason == "throttle under CodeSize", "T-P22: reversal under CodeSize + weekly halve -> throttle skip");
+			}
 			var w9 = MM(c => c.sizing = EPortSizing.CodeSize).Decide(D0, 100000000, true, new List<PortStratView> { TV(0, D0, EPortState.Armed, 0) })[0];
 			Check(w9.allowEntries && w9.entryContracts == -1, "T-P13: CodeSize at mult 1 -> allowed with code qty");
 			// validation + JSON
