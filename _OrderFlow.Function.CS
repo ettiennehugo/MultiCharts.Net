@@ -96,17 +96,18 @@ namespace PowerLanguage.Function
 			/// <summary>Stop the idle poll after this many seconds.</summary>
 			public int McIdleTimeoutSec = 900;
 			/// <summary>Fallback (spec §4.3 step 6), off: call ExecControl.Recalculate() from the DataLoader callback when the history
-			/// completes. PROBE P-RC2/P-RC3 decide whether this becomes the default.</summary>
+			/// completes. Stays off: the probe (2026-11-01) showed OnRecalcLastBarAfterEvent fires on a historical chart, on the calc
+			/// thread (P-RC2/P-RC3), so the event path is the primary one.</summary>
 			public bool McRecalcFromCallback = false;
 			/// <summary>Process-wide loop guard (review B1): at most McRecalcGuardMaxPerKey recalcs per guard key (strategy type +
-			/// request signature) within this many seconds, across strategy objects (PROBE P-RC1: MC may build a new object on
-			/// Recalculate, which resets the instance gate). 0 or less does NOT disable the guard: the window is clamped to at least
+			/// request signature) within this many seconds, across strategy objects. A backstop: the probe (P-RC1) showed MC keeps the
+			/// same object and its fields across Recalculate, so the instance gate normally decides. 0 or less does NOT disable the guard: the window is clamped to at least
 			/// 1 second (Math.Max(1, ...) in mcGuardWindow). To turn recalc-on-load off use McRecalcOnLoad = false.</summary>
 			public int McRecalcGuardWindowSec = 600;
 			/// <summary>Review 2 item 1: recalcs allowed per guard key within McRecalcGuardWindowSec, process-wide. No per-chart member
 			/// is confirmed in the typed API, so two identical charts (same strategy type, symbol, feed, resolution, first bar) share a
-			/// key; 3 lets each of them recalc once (the instance gate still allows McRecalcMax per object) while a P-RC1 loop stops
-			/// after 3 recalcs per window. 0 or less blocks every recalc.</summary>
+			/// key; 3 lets each of them recalc once (the instance gate still allows McRecalcMax per object) while a loop (e.g. a host
+			/// that rebuilds the object) stops after 3 recalcs per window. 0 or less blocks every recalc.</summary>
 			public int McRecalcGuardMaxPerKey = 3;
 			/// <summary>Tick-chunk spec §5: one DataLoader request per Globex day and stream. false = the legacy single request (A/B only).</summary>
 			public bool TickChunkByDay = true;
@@ -116,7 +117,7 @@ namespace PowerLanguage.Function
 			public int TickChunkSplitOnFail = 4;
 			public ETickChunkLate TickChunkLate = ETickChunkLate.Skip;
 			/// <summary>Bounded wait (ms) at the first bar of each Globex day for that day's chunks; 0 = off. With a wait, late days are
-			/// loaded (not skipped). PROBE P-RC7: DataLoader callbacks arrive while the calc thread sleeps.</summary>
+			/// loaded (not skipped). DataLoader callbacks arrive on their own thread while CalcBar sleeps (probe P-RC7).</summary>
 			public int TickChunkWaitMs = 0;
 			/// <summary>Chunk boundary, US Eastern (CME daily halt start), so no tick straddles two chunks.</summary>
 			public TimeSpan TickChunkBoundaryEt = new TimeSpan(17, 0, 0);

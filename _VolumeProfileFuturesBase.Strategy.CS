@@ -137,13 +137,14 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
+			noteCalcThread();       // StopCalc runs on the UI thread: trace() there stamps this cached bar time (see _CustomSignal)
 			drainFlowQueue();       // DataLoader-thread messages -> journal on the calc thread
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
 			stepRollDetector();     // VPF-4 (detector in _CustomSignal since S4; idempotent per bar)
 			updateOrderFlow();      // VPF-5 (no-op when OrderFlowEnabled = false)
 			if (m_flow == null) return;
-			if (mcRecalcCheck("bar")) return;   // Recalc spec §4.3: ExecControl.Recalculate() was the last statement (PROBE P-RC4)
+			if (mcRecalcCheck("bar")) return;   // Recalc spec §4.3: ExecControl.Recalculate() was the last statement (it unwinds: P-RC4)
 			flowIdleArm();                       // Recalc spec §4.3 step 5
 		}
 
@@ -611,7 +612,7 @@ namespace PowerLanguage.Strategy
 		private bool m_mcHistoryDone, m_mcLoadedLogged;
 		private DateTime m_mcSession = DateTime.MinValue; private int m_mcSessBars, m_mcSessAgree, m_mcSessCover, m_mcSessCmp; private bool m_mcSessFellLogged;
 		// Recalc spec §4.2: the McBidAsk cache and the recalc gate outlive StartCalc/StopCalc and so ExecControl.Recalculate();
-		// only a signature change clears the cache. PROBE P-RC1: MC keeps this instance (and its fields) across Recalculate().
+		// only a signature change clears the cache. Probe P-RC1: MC keeps this instance (and its fields) across Recalculate().
 		private readonly _OrderFlow.McLevelCache m_mcCache = new _OrderFlow.McLevelCache();   // under m_flowLock
 		private readonly _OrderFlow.McRecalcGate m_mcGate = new _OrderFlow.McRecalcGate();     // under m_flowLock
 		private string m_mcSig;   // this pass's request signature (null: no McBidAsk request this pass)
@@ -687,6 +688,8 @@ namespace PowerLanguage.Strategy
 			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg) { journal = queueSink(ETraceLevel.Journal), warnOnce = queueSink(ETraceLevel.Warning) };
 		}
 
+		// Probe: StopCalc runs on the UI thread, not the calc thread. Nothing here reads Bars/Output; the drained lines go through
+		// trace(), which off the calc thread stamps the cached last bar time (_CustomSignal.noteCalcThread).
 		protected override void StopCalc()
 		{
 			if (m_mcStarted)
@@ -899,7 +902,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		// Recalc spec §4.3 steps 3-4. Calc thread only (end of CalcBar, OnRecalcLastBarAfterEvent). Returns true when
-		// ExecControl.Recalculate() was called and returned (PROBE P-RC4: it is expected to unwind instead).
+		// ExecControl.Recalculate() was called and returned. Probe P-RC4: it does not return; MC unwinds with _ELAPI_exception_Wrap_
+		// (StopCalc, then StartCalc of the next pass), which must propagate: no try/catch on this path.
 		private bool mcRecalcCheck(string from)
 		{
 			if (m_mcSig == null) return false;
@@ -1073,11 +1077,13 @@ namespace PowerLanguage.Strategy
 			engineSink(ETraceLevel.Journal)?.Invoke($"OF tick chunk summary days({days}) done({done}) failed({failed}) skipped({skipped}) pending({pending}) ticks({ticks}) lateDropped({late}) backlogDropped({backlog})");
 		}
 
-		// Recalc spec §4.3: MC calls this on the calc thread after ExecControl.RecalcLastBarAfter (forum t=43339: it does not
-		// recalculate by itself). PROBE P-RC2 (fires while history loads), P-RC3 (trace/Output usable here), P-RC4 (Recalculate here).
+		// Recalc spec §4.3: MC calls this after ExecControl.RecalcLastBarAfter (forum t=43339: it does not recalculate by itself).
+		// Probe (historical chart, no RT, no auto-trading): it fires ~1 s after RecalcLastBarAfter(1 s) (P-RC2), on the calc thread
+		// with Bars.Time[0] readable (P-RC3); Recalculate() here unwinds with _ELAPI_exception_Wrap_ (P-RC4).
 		protected override void OnRecalcLastBarAfterEvent()
 		{
 			base.OnRecalcLastBarAfterEvent();
+			noteCalcThread();
 			if (m_flow == null || !m_idleArmed) return;
 			m_autoTradingSnap = Environment.IsAutoTradingMode;
 			drainFlowQueue();
@@ -1206,7 +1212,7 @@ namespace PowerLanguage.Strategy
 					{
 						m_mcHistoryDone = true;
 						m_mcCache.HistoryDone = true;   // Recalc spec §4.2: the cache now holds the request's complete history
-						// Recalc spec §4.3 step 6 fallback (McRecalcFromCallback, off): PROBE P-RC2/P-RC3. Lines are queued; the
+						// Recalc spec §4.3 step 6 fallback (McRecalcFromCallback, off; not needed per P-RC2/P-RC3). Lines are queued; the
 						// stored/triggered lines are written by the next calc-thread drain.
 						if (FlowCfg.McRecalcFromCallback && m_mcSig != null && !m_mcRecalcDecided)
 						{
@@ -1458,7 +1464,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		// Tick-chunk spec §5.4 (TickChunkWaitMs > 0): at the first bar of each planned Globex day, wait (bounded) for that day's
-		// chunks. Calc thread, outside m_flowLock. PROBE P-RC7: callbacks are delivered while the calc thread sleeps.
+		// chunks. Calc thread, outside m_flowLock. Probe P-RC7: callbacks are delivered (DataLoader thread) while the calc thread sleeps.
 		private void tickChunkWait()
 		{
 			DateTime et = ToEastern(Bars.Time[0]);

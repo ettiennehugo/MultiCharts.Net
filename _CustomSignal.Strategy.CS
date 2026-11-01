@@ -80,13 +80,13 @@ namespace PowerLanguage.Strategy
 					Directory.CreateDirectory(dir);                       // no-op when it exists
 					m_logFilePath = Path.Combine(dir, logFilename);
 					File.AppendAllText(m_logFilePath, "", s_utf8NoBom);  // prove we can write here
-					m_output.WriteLine($"Log file created {m_logFilePath}");
+					if (m_output != null) m_output.WriteLine($"Log file created {m_logFilePath}");   // null: created off the calc thread
 				}
 				catch (Exception ex)
 				{
 					//fallback to temp directory if AppData is not accessible
 					m_logFilePath = Path.Combine(Path.GetTempPath(), logFilename);
-					m_output.WriteLine($"Fallback log file created {m_logFilePath} - Exception: {ex.Message}");
+					if (m_output != null) m_output.WriteLine($"Fallback log file created {m_logFilePath} - Exception: {ex.Message}");
 				}
 			}
 
@@ -126,7 +126,8 @@ namespace PowerLanguage.Strategy
 					}
 					catch (Exception ex)
 					{
-						try { (output ?? m_output).WriteLine($"Error writing to log file {m_logFilePath}: {ex.Message}"); } catch { }
+						// output null = called off the calc thread: no Output (not even the singleton's) is touched there
+						if (output != null) try { output.WriteLine($"Error writing to log file {m_logFilePath}: {ex.Message}"); } catch { }
 					}
 				}
 			}
@@ -361,15 +362,42 @@ namespace PowerLanguage.Strategy
 		{
 			if (TraceLevel >= traceLevel)
 			{
+				// StopCalc runs on the UI thread (probe 2026-11-01), where Bars/Output are calc-thread only: off the calc thread the
+				// line is stamped with the values cached by noteCalcThread() and Output is not touched.
+				bool onCalc = onCalcThread();
 				if (m_logger == null)
 				{
-					m_logger = LogFileSingleton.GetInstance(Output);
+					m_logger = LogFileSingleton.GetInstance(onCalc ? Output : null);
 					// The singleton is process-wide, so its "Log file created" line is printed once per MultiCharts process, into the
 					// Output of whichever signal traced first. Tell THIS signal's Output where its lines go, once per instance.
-					try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
+					if (onCalc) try { Output.WriteLine($"{GetType().Name} {Bars.Info.Name}: trace log {m_logger.FilePath}"); } catch { }
 				}
-				m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
+				if (onCalc) m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
+				else m_logger.WriteTrace(null, traceLevel, m_lastCalcBarTime, m_traceZone ?? "?", this.GetType().Name, m_traceSymbol ?? "", RunId, message);
 			}
+		}
+
+		// Calc-thread snapshot for trace() off the calc thread (StopCalc on the UI thread). Set by CalcBar (and by derived calc-thread
+		// entry points before they trace, e.g. OnRecalcLastBarAfterEvent).
+		private int m_calcThreadId;   // managed id of the thread that last ran CalcBar; 0 = none yet
+		private DateTime m_lastCalcBarTime = DateTime.MinValue;
+		private string m_traceSymbol, m_traceZone;
+
+		/// <summary>Calc thread only: records the calc thread and the current bar time, symbol and zone used by trace() when it is
+		/// called from another thread (StopCalc runs on the UI thread).</summary>
+		protected void noteCalcThread()
+		{
+			m_calcThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+			m_lastCalcBarTime = Bars.Time[0];
+			if (m_traceSymbol == null) { m_traceSymbol = Bars.Info.Name; m_traceZone = barZoneLabel(); }
+		}
+
+		/// <summary>Last bar time seen on the calc thread (MinValue before the first CalcBar).</summary>
+		protected DateTime LastCalcBarTime { get { return m_lastCalcBarTime; } }
+
+		private bool onCalcThread()
+		{
+			return m_calcThreadId != 0 && System.Threading.Thread.CurrentThread.ManagedThreadId == m_calcThreadId;
 		}
 
 		// ---- Missing-functionality engines (spec missing-functionality-specs.md rev 4, §0.1). ----
@@ -2014,6 +2042,7 @@ namespace PowerLanguage.Strategy
 			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3
 			m_runLogged = false;
 			m_runEndLogged = false;
+			m_traceSymbol = m_traceZone = null;   // re-read on the first CalcBar (chart settings may have changed)
 			m_tick = 0;   // tickSize() re-resolved on first use
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
@@ -2043,6 +2072,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override void CalcBar()
 		{
+			noteCalcThread();   // cached for trace() off the calc thread (StopCalc runs on the UI thread)
 			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
 			if (!m_runLogged)
 			{

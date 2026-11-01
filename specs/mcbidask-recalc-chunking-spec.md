@@ -2,7 +2,7 @@
 
 **Repo:** ettiennehugo/MultiCharts.Net. **Base:** `origin/main` 33a51bf (merge of PR #76). All line numbers refer to that commit.
 **Scope:** two fixes in one new PR, kept apart from every other branch (see the coder brief). PriceAction is not touched.
-**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) were open. The `_McApiDump2` output answered P-RC5, P-RC6, P-RC8 and P-RC9 (§8). Five points (P-RC1, P-RC2, P-RC3, P-RC4, P-RC7) still need the `_McRecalcProbe` CSV before the defaults are final.
+**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) were open. The `_McApiDump2` output answered P-RC5, P-RC6, P-RC8 and P-RC9, and the `_McRecalcProbe` run (2026-11-01, historical @ES 1-min, `realTime(False)`, `autoTrading(False)`) answered P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7 (§8). All nine passed, so the defaults stand (event-driven recalc primary, `McRecalcFromCallback = false`). P-RC-EResolution (time-based resolutions beyond Minute/Day) stays open until Ettienne's `EResolution` dump.
 
 ---
 
@@ -25,14 +25,18 @@
 | `ExecControl.Recalculate()` restarts the study from `StartCalc` and then runs `CalcBar` over all bars. Statements after it in the same method do not run, so it unwinds the stack. Calling it unconditionally loops forever, so it needs a persistent guard. | PG VolumeProfile section, txt l.3616/3700 (`this.ExecControl.Recalculate()` from the `EChanged` handler); MC wiki *RecalcLastBarAfter / Recalculate*; forum (recalc guard via persistent vars) |
 | `StartCalc` "can be called repeatedly during the object's life cycle". `Create` runs once. The object instance is reused, so **plain C# fields survive a Recalculate** unless `StartCalc`/`StopCalc` reset them. | PG §4.1.2; MC wiki *How Indicators and Signals are Calculated* |
 | MC uses internal exceptions for its own control flow (MaxBarsBack restart). Foreign exceptions must not be caught. | MC wiki (same page) |
-| `ExecControl.RecalcLastBarAfter(TimeSpan)` makes MC call `protected override void OnRecalcLastBarAfterEvent()` after the timeout, **even when no ticks arrive**. It does not recalculate by itself. | MC wiki; forum t=43339 (confirmed on indicators; untested on signals, so see P-RC2). The repo already calls it from a signal: `_CustomSignal.Strategy.CS` 2068. |
-| DataLoader callbacks run on a separate thread. `Bars`, `Output`, `trace()` and `engineSink` belong to the calc thread only. | PG §4.7.4; repo comment 712–713 |
+| `ExecControl.RecalcLastBarAfter(TimeSpan)` makes MC call `protected override void OnRecalcLastBarAfterEvent()` after the timeout, **even when no ticks arrive**. It does not recalculate by itself. | MC wiki; forum t=43339 (indicators). Probe P-RC2: also fires on a **signal** on a historical (non-RT) chart, about 1.0 s after `RecalcLastBarAfter(1 s)` was armed at the last bar; forum t=49867 ("does not run when backtesting") does not apply to chart backtesting. The repo already calls it from a signal: `_CustomSignal.Strategy.CS` 2068. |
+| DataLoader callbacks run on a separate thread. `Bars`, `Output`, `trace()` and `engineSink` belong to the calc thread only. | PG §4.7.4; repo comment 712–713; probe P-RC7: a callback (tid 61) arrived while `CalcBar` (tid 60) slept in a wait loop (done in 52 ms) |
+| The same study object (and its instance fields) is kept across `Recalculate()`. | Probe P-RC1: `obj(719710)` on both passes; `instRecalcs=1` carried into pass 2 |
+| `OnRecalcLastBarAfterEvent` runs on the calc thread, and `Bars.Time[0]` is readable in it. | Probe P-RC3: tid 60, the same as `CalcBar` |
+| `Recalculate()` called from `OnRecalcLastBarAfterEvent` does not return: it throws `ManagedStudies.details._ELAPI_exception_Wrap_`, MC's unwind, and `StopCalc` then `StartCalc` (pass 2) follow at once. It must propagate (last statement, never caught); code after `base.CalcBar()` in a derived strategy does not run on that path. | Probe P-RC4 |
+| `StopCalc` runs on the UI thread (tid 1), **not** the calc thread. Nothing reached from `StopCalc` may read `Bars`, `Output` or other calc-thread-only API; trace lines there are stamped with the bar time cached on the calc thread. | Probe (2026-11-01), StopCalc line |
 | `InstrumentDataRequest`: `Resolution`, `QuoteField`, `From`/`To` (the PG calls these "outdated, better to use Range"), `DataRequest Range`, `RequestTimeZone TimeZone` (Local/Exchange/GMT), `Subscribe2RT`. `Bars.Request` returns a copy of the chart's request (same feed, session and time zone). | PG §4.7.4 (l.2979–3045, 3083–3131) |
 | `DataRequest.CreateFromTo(DateTime, DateTime)` is typed and static. | Already used in `_CheckData.Strategy.CS` 184 |
 | `Bars.FullSymbolData` indexes "from the current bar, leftwards with positive indices, and rightwards with negative ones", and `.Count` is the total bar count. The last chart bar is therefore `Time[Current - Count]`. | PG §4.1.2 (l.931–945) |
 | Footprint levels need `Resolution.CreateFootPrint(EResolution, size, CumulativeDeltaChartType, FootPrintChartType, bool)`. Without it, `Data2` stays null. | Forum t=52737 (in code since #74); Data2 delivered 61837 bars in run B |
 
-Anything not in this table is unverified and is listed in §8. Of the §8 points, the API dump answered P-RC5, P-RC6, P-RC8 and P-RC9. P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7 stay open until the probe runs.
+Anything not in this table is unverified and is listed in §8. Of the §8 points, the API dump answered P-RC5, P-RC6, P-RC8 and P-RC9, and the probe answered P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7.
 
 ## 3. Code map (origin/main 33a51bf)
 
@@ -119,7 +123,7 @@ Anything not in this table is unverified and is listed in §8. Of the §8 points
      }
      ```
    - `drainFlowQueue` stamps lines through `trace()` with `Bars.Time[0]`. This is legal only if the event runs in calc context (P-RC3).
-6. **Fallback if P-RC2/P-RC3 fail** (the event does not fire on a historical signal, or `Bars` is not accessible in it). Add `FlowCfg.McRecalcFromCallback = false`. When it is `true`, the history-completed branch of `onMcLevels` calls `ExecControl.Recalculate()` directly once, guarded by the gate. The precedent is the PG VolumeProfile `EChanged` handler (txt l.3616) and the repo's `_VolumeProfileStatistics.Indicator.CS` 357.
+6. **Fallback if P-RC2/P-RC3 fail** (they passed, so this stays off by default) (the event does not fire on a historical signal, or `Bars` is not accessible in it). Add `FlowCfg.McRecalcFromCallback = false`. When it is `true`, the history-completed branch of `onMcLevels` calls `ExecControl.Recalculate()` directly once, guarded by the gate. The precedent is the PG VolumeProfile `EChanged` handler (txt l.3616) and the repo's `_VolumeProfileStatistics.Indicator.CS` 357.
    - The queued lines then get a direct-write path: snapshot `Bars.Time[0]`, the zone label and `RunId` in each `CalcBar` into volatile fields, and add a protected `_CustomSignal.traceAt(ETraceLevel, DateTime stamp, string msg)` (the logger is private, at 62) that callbacks call with the snapshot. That is still one `File.AppendAllText` per line. Mark these lines with `async(1)`.
    - Ship this path disabled. The probe decides the default.
 
@@ -195,7 +199,8 @@ Journal  OF tick chunk summary done(x) failed(y) skipped(z) ticks(n) lateDropped
 | `TickChunkBoundaryEt` | `17:00` | chunk boundary (ET) |
 
 ## 6. Threading rules (all from §2)
-1. MC calls (`ExecControl.*`, `DataLoader.BeginLoadData/EndLoadData`, `Bars`, `trace`, `engineSink`) run only in `CalcBar`, `StartCalc` (no trace there), `StopCalc` and `OnRecalcLastBarAfterEvent` (P-RC3). The only exceptions are `McRecalcFromCallback` and the existing `EndLoadData` paths.
+1. MC calls (`ExecControl.*`, `DataLoader.BeginLoadData/EndLoadData`, `Bars`, `trace`, `engineSink`) run only in `CalcBar`, `StartCalc` (no trace there), `StopCalc` and `OnRecalcLastBarAfterEvent` (P-RC3: calc thread). The only exceptions are `McRecalcFromCallback` and the existing `EndLoadData` paths.
+   - `StopCalc` runs on the UI thread (probe). It ends loads (`EndLoadData`) and drains the queue, but reads no `Bars`/`Output`: `_CustomSignal.trace()` checks the thread and, off the calc thread, stamps the bar time, symbol and zone cached by `noteCalcThread()` (called first in `CalcBar` and `OnRecalcLastBarAfterEvent`) and writes no `Output`.
 2. Callbacks touch only `m_flow`, `m_mcCache` and scheduler state under `m_flowLock`, plus the queue under `m_flowQueueLock`.
 3. `Recalculate()` is the last statement on its path and is never wrapped in a catch-all.
 4. Don't catch exceptions around `base.*` calls (MC's MaxBarsBack restart).
@@ -230,7 +235,7 @@ This loads 6 weeks of data past the chart end, and it is a direct contributor to
 - `startOrderFlow` (618) resets `m_mcResult`/counters while a callback of the previous pass may still be running. This is harmless once the cache is the source of truth, but keep the callback's `m_flow == null` check (763).
 - The stubs (`McStubs.cs` 36–37, 57) need `ICalculationControl.Recalculate()`, `DataRequest.CreateFromTo`, `InstrumentDataRequest.TimeZone` and `IFullSymbolData.Count` for `tools/sem` compile checks.
 
-## 8. Open API points: the user runs two one-off files
+## 8. API points: the two one-off files (P-RC1..P-RC9 answered)
 
 The files are saved as `/workspace/specs/_McRecalcProbe.Strategy.CS` (signal) and `/workspace/specs/_McApiDump2.Indicator.CS` (indicator). Import both into the PowerLanguage .NET Editor and compile.
 - Put `_McApiDump2` on any @ES chart and copy the Output window.
@@ -238,17 +243,20 @@ The files are saved as `/workspace/specs/_McRecalcProbe.Strategy.CS` (signal) an
 
 | ID | Question | Answered by |
 |---|---|---|
-| P-RC1 | Same object instance (`obj`) and instance fields kept across `Recalculate`? | probe: `obj(..)` and `instRecalcs` on pass 2 |
-| P-RC2 | Does `OnRecalcLastBarAfterEvent` fire on a **signal** on a non-real-time chart after the last bar? | probe: the `OnRecalcLastBarAfterEvent` line |
-| P-RC3 | Its thread vs CalcBar (`tid`), and are `Bars` readable in it? | probe: `tid(..)`, `Bars.Time[0]` line |
-| P-RC4 | May `Recalculate()` be called from that event, and how does it unwind (exception type)? | probe: `Recalculate threw ...` / `returned` |
+| P-RC1 | Same object instance (`obj`) and instance fields kept across `Recalculate`? | **Answered (probe):** yes. `obj(719710)` on both passes; `instRecalcs=1` carried into pass 2. The instance cache and gate are valid; the static guard stays as a backstop. |
+| P-RC2 | Does `OnRecalcLastBarAfterEvent` fire on a **signal** on a non-real-time chart after the last bar? | **Answered (probe):** yes, about 1.0 s after `RecalcLastBarAfter(1 s)` was armed at the last bar (historical chart, `realTime(False)`, `autoTrading(False)`). Forum t=49867 does not apply to chart backtesting. |
+| P-RC3 | Its thread vs CalcBar (`tid`), and are `Bars` readable in it? | **Answered (probe):** the calc thread (tid 60, same as `CalcBar`); `Bars.Time[0]` is readable. |
+| P-RC4 | May `Recalculate()` be called from that event, and how does it unwind (exception type)? | **Answered (probe):** it throws `ManagedStudies.details._ELAPI_exception_Wrap_` (MC's unwind); `StopCalc` and then `StartCalc` of pass 2 follow at once. It must propagate: last statement, never caught. Derived code after `base.CalcBar()` does not run on that path; `RecalcPending` stays for it. |
 | P-RC5 | `DataRequest` members (`CreateFromTo`, `To`, `ToAlwaysIsNow`, `Count`); which wins, `Range` or `From`/`To`? | **Answered (dump):** `DataRequest` is a struct with `CreateFromTo`/`CreateDaysBack`/`CreateBarsBack` and the fields `RequestType`, `Count`, `From`, `To`, `ToAlwaysIsNow`. `InstrumentDataRequest` has `From`/`To` properties and a field `DataRequest Range`. Set both (§5.2). The request line's logged window shows which one MC used. |
 | P-RC6 | `InstrumentDataRequest.TimeZone` exists and is copied by `Bars.Request`; `FullSymbolData.Time[Current−Count]` = last bar | **Answered (dump):** `InstrumentDataRequest` has a field `RequestTimeZone TimeZone` (`Local`, `GMT`, `Exchange`). It is a struct field, so `Bars.Request` copies it. The run's logged first/last bar line checks the last-bar index. |
-| P-RC7 | Do callbacks arrive while CalcBar sleeps (bounded wait)? | probe: `wait in CalcBar ended loadDone(True)` |
+| P-RC7 | Do callbacks arrive while CalcBar sleeps (bounded wait)? | **Answered (probe):** yes. A DataLoader callback (tid 61) arrived while `CalcBar` slept in the wait loop (done in 52 ms). `TickChunkWaitMs` stays. |
 | P-RC8 | `Resolution` members after `CreateFootPrint` (why `ChartType` = Regular) and the `Size` type | **Answered (dump):** after `CreateFootPrint`, `ChartType = Regular`, `DeltaType = None`, `HaveDelta = True`; `Size` is `UInt32`. `Regular` is expected (§7.1). |
 | P-RC9 | `ICalculationControl` members and the virtual hooks on the SignalObject base chain | **Answered (dump):** `ICalculationControl` has `Abort()`, `Recalculate()` and `RecalcLastBarAfter(TimeSpan)`. `CStudyAbstract` has `virtual OnRecalcLastBarAfterEvent()`. |
 
 Decision table: if P-RC2 or P-RC3 fails, set `McRecalcFromCallback = true` as the default and enable the direct-write log path. If P-RC7 fails, remove `TickChunkWaitMs`. If P-RC5 shows that `From`/`To` win, keep setting both (harmless).
+**Outcome:** P-RC2, P-RC3 and P-RC7 passed, so `McRecalcFromCallback` stays `false` and `TickChunkWaitMs` stays. The probe also showed that `StopCalc` runs on the UI thread (tid 1); see §6 rule 1.
+
+Still open: **P-RC-EResolution** (which `EResolution` members besides `Minute`/`Day` exist in the typed API, to widen the time-based rule for the `OpenTime` backlog cut). Pending Ettienne's `EResolution` dump; until then only Regular Minute/Day count as time-based.
 
 Probe source (the dump is in the file):
 ```csharp

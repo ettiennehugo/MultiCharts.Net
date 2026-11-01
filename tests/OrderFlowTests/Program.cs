@@ -659,6 +659,47 @@ static class Program
 				"TO8 chunk IssuedAt/LastActivity/timeout use DateTime.UtcNow");
 			// item 4: early return clears m_chunkLoads
 			Check(stop.Contains("if (m_flowLoads.Count == 0) { m_chunkLoads = null; return; }"), "ST1 stopOrderFlowLoads early return clears m_chunkLoads");
+
+			// Probe 2026-11-01: StopCalc runs on the UI thread. Nothing on the StopCalc path reads Bars/Output; trace() off the calc
+			// thread stamps the bar time cached on the calc thread.
+			string cs = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_CustomSignal.Strategy.CS"));
+			string tr = MethodBody(cs, "public void trace(ETraceLevel traceLevel, string message)") ?? "";
+			bool trGuarded = tr.Length > 0;
+			foreach (string ln in tr.Split('\n'))
+			{
+				string t = ln.Trim();
+				if (t.StartsWith("//") || !(t.Contains("Bars.") || t.Contains("Output"))) continue;
+				if (!(t.StartsWith("if (onCalc)") || t == "m_logger = LogFileSingleton.GetInstance(onCalc ? Output : null);")) trGuarded = false;
+			}
+			Check(trGuarded && tr.Contains("bool onCalc = onCalcThread();") && tr.Contains("else m_logger.WriteTrace(null, traceLevel, m_lastCalcBarTime, m_traceZone ?? \"?\", this.GetType().Name, m_traceSymbol ?? \"\", RunId, message);"),
+				"SC1 trace(): every Bars/Output read is behind onCalc; off the calc thread it stamps the cached bar time and passes no Output");
+			string note = MethodBody(cs, "protected void noteCalcThread()") ?? "";
+			string ct = MethodBody(cs, "private bool onCalcThread()") ?? "";
+			string csBar = MethodBody(cs, "protected override void CalcBar()") ?? "";
+			Check(note.Contains("m_calcThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;") && note.Contains("m_lastCalcBarTime = Bars.Time[0];")
+				&& ct.Contains("m_calcThreadId != 0 && System.Threading.Thread.CurrentThread.ManagedThreadId == m_calcThreadId") && csBar.TrimStart('{').TrimStart().StartsWith("noteCalcThread();"),
+				"SC2 CalcBar caches the calc thread id and bar time first; unknown thread (0) counts as off the calc thread");
+			string wt = MethodBody(cs, "public void WriteTrace(IOutput output,") ?? "";
+			string ctor = MethodBody(cs, "private LogFileSingleton(IOutput output)") ?? "";
+			Check(wt.Contains("if (output != null) try { output.WriteLine(") && !wt.Contains("m_output") && ctor.Contains("if (m_output != null) m_output.WriteLine($\"Log file created")
+				&& ctor.Contains("if (m_output != null) m_output.WriteLine($\"Fallback log file"), "SC3 log singleton: null Output (off the calc thread) is never written, not even the singleton's");
+			string vpBar = MethodBody(vp, "protected override void CalcBar()") ?? "";
+			string ev = MethodBody(vp, "protected override void OnRecalcLastBarAfterEvent()") ?? "";
+			Check(vpBar.IndexOf("noteCalcThread();") >= 0 && vpBar.IndexOf("noteCalcThread();") < vpBar.IndexOf("drainFlowQueue();")
+				&& ev.IndexOf("noteCalcThread();") >= 0 && ev.IndexOf("noteCalcThread();") < ev.IndexOf("drainFlowQueue();"), "SC4 VP caches the calc thread before draining (CalcBar, OnRecalcLastBarAfterEvent)");
+			string[] stopBanned = { "Bars.", "Bars[", "Output", "trace(", "BarsOfData", "Environment.", "ToEastern", "clock()", "tickSize()", "StatusLine", "noteCalcThread" };
+			string[][] stopPath = {
+				new[] { "vp", "protected override void StopCalc()" }, new[] { "vp", "private void drainFlowQueue()" }, new[] { "vp", "private string mcStopLine(" },
+				new[] { "vp", "private void tickChunkSummary()" }, new[] { "vp", "private void stopOrderFlowLoads(" }, new[] { "vp", "private void endLoads(" },
+				new[] { "cs", "protected override void StopCalc()" }, new[] { "cs", "private void stopEngines()" }, new[] { "cs", "private void stopTick()" } };
+			foreach (string[] m in stopPath)
+			{
+				string body = MethodBody(m[0] == "vp" ? vp : cs, m[1]);
+				string hit = null;
+				if (body != null) foreach (string b in stopBanned) if (body.Contains(b)) { hit = b; break; }
+				Check(body != null && hit == null, "SC5 StopCalc path " + m[0] + " " + m[1] + " touches no calc-thread-only API" + (hit == null ? "" : " (" + hit + ")"));
+			}
+			Check(!vp.Contains("PROBE P-RC") && !fcs.Contains("PROBE P-RC"), "SC6 PROBE P-RC markers resolved");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
