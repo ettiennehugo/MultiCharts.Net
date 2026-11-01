@@ -42,7 +42,8 @@ namespace PowerLanguage.Function
 		public enum Side { Unknown = 0, Buy = 1, Sell = -1 }
 		/// <summary>Cumulative delta reset: Globex session open or the first RTH bar (caller supplies the keys).</summary>
 		public enum ResetMode { Session = 0, Rth = 1 }
-		/// <summary>Chart Build Volume On setting (Format Instruments). Not readable from code (unverified), so the caller states it.</summary>
+		/// <summary>Chart Build Volume On setting (Format Instrument > Settings), mapped from the typed Bars.Info.BVO (MC enum BuildVolumeOn:
+		/// Volume (249) = TradeVolume, TickCount (324) = TickCount, anything else = Unknown; _McApiDump4 on @ES, 2026-11-01).</summary>
 		public enum VolumeBasis { Unknown = 0, TradeVolume = 1, TickCount = 2 }
 		/// <summary>Per-bar data regime, set by the caller.</summary>
 		public enum Regime
@@ -78,7 +79,7 @@ namespace PowerLanguage.Function
 			/// <summary>false (default): a session mixing Quote and TickRule bars reports the worst of them (session to date, no lookahead).</summary>
 			public bool AllowMixed = false;
 			public bool QuotesExpected = true;        // Bid/Ask tick streams are being fed
-			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume; TickCount: McBidAsk Unavailable reason(volumeBasis), Info once
+			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // set each StartCalc from the typed Bars.Info.BVO (VPFB); BarUpDown needs TradeVolume; TickCount: McBidAsk Unavailable reason(volumeBasis), Info once
 			public bool ExcludeExtremesTickRule = true;   // TickRule footprints are wrong at the bar high/low
 			public int MaxBars = 5000;                     // closed bars kept (at least 10); older bars are dropped and CumDelta reports Truncated
 			/// <summary>Spec S1: MC Volume Delta levels. Off (default): never requested. Prefer: a matching level set becomes the
@@ -467,8 +468,18 @@ namespace PowerLanguage.Function
 
 			/// <summary>Info (once per engine) when McBidAsk is on and FlowCfg.BuildVolumeOn = TickCount. Tick Count is a valid setting on
 			/// non-futures charts (Ettienne 2026-11-01): no Warning about the setting, only the McBidAsk tier is Unavailable. Futures +
-			/// Tick Count is meant to throw at StartCalc, held until a typed Build Volume On member is confirmed (_McApiDump4).</summary>
+			/// Tick Count never gets here: _VolumeProfileBase.StartCalc logs FlowEngine.VolumeBasisError and throws.</summary>
 			public const string VolumeBasisInfo = "OF McBidAsk Unavailable reason(volumeBasis): Build Volume On = Tick Count; footprint is contracts, bar total is tick count";
+
+			/// <summary>The StartCalc error for a futures chart built on Tick Count (Ettienne 2026-11-01), or null when the chart may run.
+			/// isFuture is the typed Bars.Info.Category == ESymbolCategory.Future; basis is the typed Bars.Info.BVO mapped by
+			/// _VolumeProfileBase.volumeBasisOf. Non-futures on Tick Count and an Unknown basis pass (null).</summary>
+			public static string VolumeBasisError(bool isFuture, VolumeBasis basis, string symbol)
+			{
+				if (!isFuture || basis != VolumeBasis.TickCount) return null;
+				return "Futures chart " + symbol + ": Build Volume On must be Trade Volume (Format Instrument > Settings), but the chart is set to Tick Count. "
+					+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.";
+			}
 
 			/// <summary>T7 gate: Trade Volume basis and Up + Down == Volume (the bar total, Bars.Ticks[0]) on this bar. Unchanged-price
 			/// volume that MC does not book as up or down makes Up + Down differ from the total, and the bar does not qualify.</summary>

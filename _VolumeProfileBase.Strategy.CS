@@ -1421,6 +1421,21 @@ namespace PowerLanguage.Strategy
 			base.Destroy();
 		}
 
+		/// <summary>The chart's Build Volume On, read each StartCalc from the typed Bars.Info.BVO.</summary>
+		protected _OrderFlow.VolumeBasis ChartVolumeBasis { get; private set; } = _OrderFlow.VolumeBasis.Unknown;
+
+		/// <summary>Typed map of MC's BuildVolumeOn (Format Instrument > Settings > Build Volume On; _McApiDump4 on @ES 2026-11-01:
+		/// Trade Volume = BuildVolumeOn.Volume (249), Tick Count = BuildVolumeOn.TickCount (324)). Any other value is Unknown.</summary>
+		protected static _OrderFlow.VolumeBasis volumeBasisOf(BuildVolumeOn bvo)
+		{
+			switch (bvo)
+			{
+				case BuildVolumeOn.Volume: return _OrderFlow.VolumeBasis.TradeVolume;
+				case BuildVolumeOn.TickCount: return _OrderFlow.VolumeBasis.TickCount;
+				default: return _OrderFlow.VolumeBasis.Unknown;
+			}
+		}
+
 		protected override void StartCalc()
 		{
 			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
@@ -1428,6 +1443,18 @@ namespace PowerLanguage.Strategy
 			m_confluenceAtrWarned = false;
 			if (VpConfluenceRules.NeedsAtr20d(UsesConfluenceZones, ConfluenceSplitAtrFraction, ConfluenceDataStream1, ConfluenceDataStream2, ConfluenceDataStream3)) NeedsDaily = true;
 			base.StartCalc();
+			// Build Volume On (Ettienne 2026-11-01): a futures chart on Tick Count is refused here, in the narrowest base shared by the
+			// volume profiles, the VWAP engines (_VpVwapEngine) and order flow (VPFB derives from this class); _CustomSignal also hosts
+			// studies that read no volume. Typed members only: Bars.Info.BVO and Bars.Info.Category. Non-futures on Tick Count run
+			// (order flow notes McBidAsk Unavailable reason(volumeBasis) once at Info). trace() at StartCalc is off the calc thread
+			// (one File.AppendAllText per line), so the Error line is on disk before the throw.
+			ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);
+			string volumeBasisError = _OrderFlow.FlowEngine.VolumeBasisError(Bars.Info.Category == ESymbolCategory.Future, ChartVolumeBasis, Bars.Info.Name);
+			if (volumeBasisError != null)
+			{
+				trace(ETraceLevel.Error, volumeBasisError);
+				throw new InvalidOperationException(volumeBasisError);
+			}
 			validateInputs();
 			m_hookRetried = false; m_zeroVolumeWarned = false; m_zeroVolumeBars = 0; m_vpDiagSummaryDone = false;
 			unhookStreams();

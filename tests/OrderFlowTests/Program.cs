@@ -30,7 +30,7 @@ static class Program
 	// and ESymbolCategory names (Future, Stock confirmed on Ettienne's install; the rest documented or plausible spellings)
 	const string McNames = "Tick|Minute|Second|Hour|Day|Week|Month|Quarter|Year|Volume|Contract|Points|Point|PointOriginal|OrigPoints|Change|Range|"
 		+ "Renko|Kagi|PointAndFigure|LineBreak|HeikinAshi|FootPrint|CumDelta|CumulativeDelta|Regular|"
-		+ "Future|Futures|Stock|Forex|Crypto|Currency|Option|Index|Cash|Fund|MutualFund|Money|Bond|Spread";
+		+ "Future|Futures|Stock|Forex|Crypto|Currency|Option|Index|Cash|Fund|MutualFund|Money|Bond|Spread|TickCount";
 	static List<string> TypedEnumLint(string line, HashSet<string> ownEnums, HashSet<string> ownTypes)
 	{
 		var r = new List<string>();
@@ -661,7 +661,7 @@ static class Program
 			Check(o1.Source == Src.Unavailable && o1.McMiss == null && wo.Count == 0, "VB6 TickCount with McBidAsk Off: Unavailable as before, no reason, no note");
 			var eu = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer }) { warnOnce = w => wo.Add(w) };
 			eu.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
-			Check(eu.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4)).Source == Src.McBidAsk && wo.Count == 0, "VB7 Unknown basis (not detectable): existing behaviour, MC set compared");
+			Check(eu.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4)).Source == Src.McBidAsk && wo.Count == 0, "VB7 Unknown basis (unmapped BVO value): existing behaviour, MC set compared");
 			// BarUpDownQualifies against the Ticks total
 			Check(OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 16, 7, 6)
 				&& !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.Unknown, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TickCount, 13, 7, 6),
@@ -688,6 +688,27 @@ static class Program
 			Check(vf.Contains("double barTicks = Bars.Ticks[0], barUp = Bars.UpTicks[0], barDown = Bars.DownTicks[0];") && vf.Contains("Volume = barTicks, UpTicks = barUp, DownTicks = barDown")
 				&& !vf.Contains("Volume = Bars.Volume[0], UpTicks") && vf.Contains("infoOnce = queueSink(ETraceLevel.Info)"), "VB8 strategy feeds Bars.Ticks[0] as the bar total; the volumeBasis note is Info");
 			Check(vb.Contains("Bars.Status == EBarState.Close && Bars.Ticks[0] == 0") && !vb.Contains("Bars.Volume[0] == 0"), "VB9 zero-volume check reads Bars.Ticks[0]");
+			// Build Volume On from the typed Bars.Info.BVO (_McApiDump4: Volume (249) / TickCount (324)); futures + Tick Count throws at StartCalc
+			string vbErr = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "@ES");
+			Check(vbErr == "Futures chart @ES: Build Volume On must be Trade Volume (Format Instrument > Settings), but the chart is set to Tick Count. "
+				+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.", "VB10 futures + Tick Count: the StartCalc error [" + vbErr + "]");
+			string vsc = MethodBody(vb, "protected override void StartCalc()") ?? "";
+			int iBase = vsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iMap = vsc.IndexOf("ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);", StringComparison.Ordinal),
+				iErr = vsc.IndexOf("string volumeBasisError = _OrderFlow.FlowEngine.VolumeBasisError(Bars.Info.Category == ESymbolCategory.Future, ChartVolumeBasis, Bars.Info.Name);", StringComparison.Ordinal),
+				iLog = vsc.IndexOf("trace(ETraceLevel.Error, volumeBasisError);", StringComparison.Ordinal), iThrow = vsc.IndexOf("throw new InvalidOperationException(volumeBasisError);", StringComparison.Ordinal),
+				iVal = vsc.IndexOf("validateInputs();", StringComparison.Ordinal);
+			Check(iBase >= 0 && iMap > iBase && iErr > iMap && iLog > iErr && iThrow > iLog && iVal > iThrow && !vsc.Contains("catch"),
+				"VB11 _VolumeProfileBase.StartCalc: typed BVO + ESymbolCategory.Future, Error logged, then InvalidOperationException, before validateInputs");
+			Check(OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "@ES") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.Unknown, "@ES") == null,
+				"VB12 futures + Trade Volume passes; futures + Unknown keeps the old behaviour (no throw)");
+			Check(OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TickCount, "AAPL") == null && OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TradeVolume, "AAPL") == null,
+				"VB13 stock + Tick Count: no exception (the Info-once note is VB5)");
+			string vbo = MethodBody(vb, "protected static _OrderFlow.VolumeBasis volumeBasisOf(BuildVolumeOn bvo)") ?? "";
+			Check(vbo.Contains("switch (bvo)") && vbo.Contains("case BuildVolumeOn.Volume: return _OrderFlow.VolumeBasis.TradeVolume;") && vbo.Contains("case BuildVolumeOn.TickCount: return _OrderFlow.VolumeBasis.TickCount;")
+				&& vbo.Contains("default: return _OrderFlow.VolumeBasis.Unknown;") && !vbo.Contains("ToString") && !vbo.Contains("Enum.") && !vbo.Contains("\"") && !vbo.Contains("249") && !vbo.Contains("324") && !vbo.Contains("(int)"),
+				"VB14 typed BuildVolumeOn map: Volume -> TradeVolume, TickCount -> TickCount, else Unknown (typed members only: no strings, int literals or Enum.*)");
+			int iCfg = vf.IndexOf("FlowCfg.BuildVolumeOn = ChartVolumeBasis;", StringComparison.Ordinal), iNew = vf.IndexOf("m_flow = new _OrderFlow.FlowEngine(", StringComparison.Ordinal);
+			Check(iCfg >= 0 && iNew > iCfg, "VB15 VPFB sets FlowCfg.BuildVolumeOn from the chart before the engine is built");
 			int lk = vf.IndexOf("string srcLine = null, volDiagLine = null;"), tr = vf.IndexOf("if (volDiagLine != null) trace(ETraceLevel.Info, volDiagLine);"), sl = tr < 0 ? -1 : vf.IndexOf("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);", tr, StringComparison.Ordinal);
 			string mid = lk >= 0 && tr > lk ? vf.Substring(lk, tr - lk) : "";
 			Check(lk >= 0 && tr > lk && sl > tr && mid.Contains("lock (m_flowLock)") && mid.Contains("volDiagLine = _OrderFlow.McVolDiag.Line(") && mid.Contains("srcLine = m_srcTally.Add(")
@@ -973,7 +994,7 @@ static class Program
 					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\benum\s+(\w+)")) ownEnums.Add(m.Groups[1].Value);
 					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\b(?:class|struct)\s+(\w+)")) ownTypes.Add(m.Groups[1].Value);
 				}
-				string[] mcEnums = { "EResolution", "ESymbolCategory", "ChartType", "DataRequestType", "RequestQuoteField", "EOrderAction", "InputAttribute", "Bar", "Resolution" };
+				string[] mcEnums = { "EResolution", "ESymbolCategory", "BuildVolumeOn", "ChartType", "DataRequestType", "RequestQuoteField", "EOrderAction", "InputAttribute", "Bar", "Resolution" };
 				Check(studies.Count > 50 && ownEnums.Contains("EEventKind") && ownEnums.Contains("EEventTier") && ownEnums.Contains("EEventFlags") && ownEnums.Contains("EPortProfile") && ownEnums.Contains("EPortSizing")
 					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
 					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");

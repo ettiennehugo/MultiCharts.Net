@@ -591,9 +591,10 @@ namespace PowerLanguage.Strategy
 		/// IOG history without a 1-tick Bar Magnifier is Unavailable. See _OrderFlow.Function.CS.
 		/// </summary>
 		protected bool OrderFlowEnabled { get; set; } = false;
-		/// <summary>VPF-5: MaxQuoteAgeMs (1000), ResetMode (Session|Rth), AllowMixed (false), BuildVolumeOn (Unknown: set TradeVolume
-		/// after checking the chart; no typed MC member exposes Build Volume On, so it is never detected; TickCount makes McBidAsk
-		/// Unavailable reason(volumeBasis) with a one-time Info line; the futures throw is held until _McApiDump4 confirms a typed member), QuotesExpected (true), ExcludeExtremesTickRule (true).</summary>
+		/// <summary>VPF-5: MaxQuoteAgeMs (1000), ResetMode (Session|Rth), AllowMixed (false), BuildVolumeOn (set every StartCalc from
+		/// the typed Bars.Info.BVO: Volume = TradeVolume, TickCount = TickCount, else Unknown; futures + Tick Count throws in
+		/// _VolumeProfileBase.StartCalc; non-futures TickCount makes McBidAsk Unavailable reason(volumeBasis) with a one-time Info
+		/// line), QuotesExpected (true), ExcludeExtremesTickRule (true).</summary>
 		protected _OrderFlow.FlowConfig FlowCfg { get; } = new _OrderFlow.FlowConfig();
 		protected EFlowTickSource FlowTickSource { get; set; } = EFlowTickSource.DataLoader;
 		/// <summary>VPF-5: the chart runs IOG with Bar Magnifier = 1 tick (cannot be read from code; stated by the strategy). Default false.</summary>
@@ -690,6 +691,7 @@ namespace PowerLanguage.Strategy
 			for (int i = 0; i < m_flowHistoryDone.Length; i++) m_flowHistoryDone[i] = false;
 			if (!OrderFlowEnabled) return;
 			if (FlowTickSource != EFlowTickSource.DataLoader) FlowCfg.QuotesExpected = false;
+			FlowCfg.BuildVolumeOn = ChartVolumeBasis;   // typed Bars.Info.BVO, read by _VolumeProfileBase.StartCalc (futures + Tick Count threw there)
 			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg) { journal = queueSink(ETraceLevel.Journal), warnOnce = queueSink(ETraceLevel.Warning), infoOnce = queueSink(ETraceLevel.Info) };
 		}
 
