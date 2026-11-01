@@ -284,7 +284,7 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 - (a) **Session stop:** after 2 losing closes (R < −0.05) on one strategy, `PORT session stop` and then Info `skip … session stop` appear for **that strategy only**. The other strategy keeps entering. Entries resume on its next `pm.day`, and CL's new day does not clear ES's stop.
 - (b) **Weekly halve and observe:** at week R ≤ −3, `PORT weekly halve` appears and EntryContracts is about half. At ≤ −6, `PORT weekly observe` and `skip … weekly observe` (PORT observe) appear. The **Sunday-evening ETH session does not reset early**: the state clears only at the first session of the next ISO week.
 - (c) **CodeSize skip:** in the CodeSize run, with ddSteps stage 1 (0.5) or a weekly halve, entries log `skip … throttle under CodeSize` and no order is sent.
-- (d) **Reversal:** a long→short flip records a closed trade (R counted toward 4a/4b/kill; the session-stop count increases).
+- (d) **Reversal:** the opposite entry while in position is allowed (`PORT Info: reversal <id>#<i> long->short allowed …`, spec §5.4 4c, rev 2.5) unless session stop / weekly observe / another gate skips it (Info skip line). The long→short flip records a closed trade (R counted toward 4a/4b/kill; the session-stop count increases). A same-direction add while in position stays refused.
 - **Pass:** a–d as described. **Fail:** any missing journal line, a skip on the wrong strategy, or an early reset.
 
 ---

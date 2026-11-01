@@ -568,6 +568,12 @@ namespace PowerLanguage.Function
 		}
 
 
+		/// <summary>rev 2.5: a pending entry opposite to the strategy's current position (pm.side = -sign(position)) is a reversal.</summary>
+		private static bool isReversal(PortStratView s)
+		{
+			return s.position != 0 && (s.side == 1 || s.side == -1) && s.side != Math.Sign(s.position);
+		}
+
 		/// <summary>Deny one entry attempt and journal it at Info once per (strategy, reason); re-logged when the reason changes or the skip clears.</summary>
 		private void skip(PortDecision di, PortStratView s, string reason, string detail)
 		{
@@ -635,8 +641,9 @@ namespace PowerLanguage.Function
 				if (why == null && s.stale) why = "stale";
 				if (why == null && (!currencyOk || !s.currencyOk)) why = "currency not USD";
 				if (why == null && (s.paused || tracker(s.index).killed)) why = "paused/killed";
-				if (why == null && s.state != EPortState.Armed) why = s.state.ToString();
-				if (why == null && s.position != 0) why = "in position";
+				bool rev = isReversal(s);   // rev 2.5: opposite entry while in position = reversal (close + open), not "in position"
+				if (why == null && s.state != EPortState.Armed && !rev) why = s.state.ToString();
+				if (why == null && s.position != 0 && !rev) why = "in position";   // same-direction add stays refused
 				if (why == null && (s.side != 1 && s.side != -1)) why = "no side";
 				if (why == null && !(s.rDollar > 0)) why = "no R$";   // CodeSize too: unmeasurable risk cannot pass heat/cluster/total caps
 				if (why != null)
@@ -682,7 +689,9 @@ namespace PowerLanguage.Function
 					continue;
 				}
 				double m = mult * sm;   // approved throttles only (ddSteps x weekly halve); caps below never resize
-				if (open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
+				bool rv = isReversal(s);
+				double rel = rv && s.riskOpen > 0 ? s.riskOpen : 0;   // reversal: the closing leg's open risk is released
+				if (!rv && open >= config.maxPositions) { skip(d[i], s, "maxPositions", $"open({open}) >= maxPositions({config.maxPositions}) total ${total:0.00} cap ${capDollar:0.00}"); continue; }
 				if (config.sizing == EPortSizing.CodeSize && m < 1)
 				{   // T-P13: EntryContracts -1 cannot be scaled
 					skip(d[i], s, "throttle under CodeSize", $"mult {m:0.###} (dd {mult:0.###} x {(tw ?? "none")} {sm:0.###}) qtyCode {s.qtyCode} risk ${rw1 * Math.Max(0, s.qtyCode):0.00} budget ${tradeCap:0.00}");
@@ -703,13 +712,16 @@ namespace PowerLanguage.Function
 				int c = m_clusterId[i];
 				double r = nq * rw1;   // WIDENED risk for every check (spec §5.2)
 				if (r > tradeCap + 1e-9) { skip(d[i], s, "per-trade budget", $"widened risk ${r:0.00} (n {nq} x Rw {rw1:0.00}) > budget ${tradeCap:0.00} ({config.maxTradeRisk:P2} of book)"); continue; }
-				if (heat + r > heatCapD + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} (n {nq}) heat ${heat:0.00} room ${Math.Max(0, heatCapD - heat):0.00} cap ${heatCapD:0.00}"); continue; }
-				if (clHeat[c] + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${clHeat[c]:0.00} room ${Math.Max(0, clusterCapD - clHeat[c]):0.00} cap ${clusterCapD:0.00}"); continue; }
-				if (_PortRiskCap.Breaks(total, r, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${r:0.00} total ${total:0.00} cap ${capDollar:0.00}"); continue; }
-				heat += r; clHeat[c] += r; total += r;
+				double hb = heat - rel, cb = clHeat[c] - rel, tb = total - rel;   // reversal: caps see the book without the closing leg
+				string relTxt = rv ? $" released ${rel:0.00}" : "";
+				if (hb + r > heatCapD + 1e-9) { skip(d[i], s, "heat cap", $"risk ${r:0.00} (n {nq}) heat ${hb:0.00}{relTxt} room ${Math.Max(0, heatCapD - hb):0.00} cap ${heatCapD:0.00}"); continue; }
+				if (cb + r > clusterCapD + 1e-9) { skip(d[i], s, "cluster cap", $"risk ${r:0.00} (n {nq}) cluster ${cb:0.00}{relTxt} room ${Math.Max(0, clusterCapD - cb):0.00} cap ${clusterCapD:0.00}"); continue; }
+				if (_PortRiskCap.Breaks(tb, r, capDollar)) { skip(d[i], s, "total risk cap", $"risk ${r:0.00} total ${tb:0.00}{relTxt} cap ${capDollar:0.00}"); continue; }
+				heat = hb + r; clHeat[c] = cb + r; total = tb + r;
+				if (rv) journal?.Invoke($"PORT Info: reversal {s.id}#{s.index} {(s.position > 0 ? "long->short" : "short->long")} allowed: pos {s.position} n {nq} risk ${r:0.00} released ${rel:0.00} heat ${heat:0.00} cap ${heatCapD:0.00} total ${total:0.00} cap ${capDollar:0.00}");
 				if (config.fillCheckEvals > 0) notePending(s, nq, r);
 				d[i].allowEntries = true; d[i].allowLong = s.side > 0; d[i].allowShort = s.side < 0; d[i].entryContracts = q; d[i].reason = "allowed";
-				open++;
+				if (!rv) open++;   // a reversal replaces its position, it does not add one
 			}
 			Heat = book > 0 ? heat / book : double.NaN;
 			foreach (int k in new List<int>(m_skipLogged.Keys)) if (!m_skippedNow.Contains(k)) m_skipLogged.Remove(k);   // cleared -> re-log next time
