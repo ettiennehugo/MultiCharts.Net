@@ -277,13 +277,13 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 
 ---
 
-# Check 10: M-PORT PR-C session/weekly throttles (#72), before #72 is marked ready
+# Check 10: M-PORT PR-C session/weekly throttles (#72, merged)
 
 Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys differ), under **RiskParity**, plus one repeat with `"sizing": "CodeSize"`. Read the MM journal (`PORT …` lines).
 
-**Setup (test signal `_TestPortThrottle`, branch `test/port-throttle-signal`, throw-away).**
+**Setup (test signal `_TestPortThrottle`, on main since #75).**
 
-1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
+1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS`, `_CustomSignal.Strategy.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there; `_TestPortThrottle` derives from `_CustomSignal`), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
 2. Create the folder `%USERPROFILE%\Documents\_TestPortThrottle\`. It holds two optional files: `signal.json` (signal mode) and `mm.json` (MM overrides, same keys as `samples/PortMmConfig.example.json`). A missing file means defaults.
 3. Portfolio Trader: one portfolio, two strategies, each with **only** `_TestPortThrottle`: index 0 = `@ES` 5 min, index 1 = `@CL` 5 min (dxFeed), a few weeks of data including at least one Sunday-evening session. Strategy Properties size 1; Exposure / Max % capital at risk 100% / 100%.
 4. Portfolio Settings → Money management signal → `_TestPortThrottleMM`.
@@ -302,7 +302,7 @@ Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys
 
 ---
 
-# Check 11: M-PORT PR-D risk profiles and advisory (#73), before #73 is marked ready
+# Check 11: M-PORT PR-D risk profiles and advisory (#73, merged)
 
 Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twice: once with `_PortfolioRiskManager` as the MM signal and once with `_PortfolioRiskManager_ScaledBook`, with no JSON file. Read the MM output (`PORT …` lines).
 
@@ -310,6 +310,49 @@ Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twic
 - (b) **Advisory:** exactly **one** `PORT advisory: uncorr=… uncorr03=… [ids] …` line per book day, and it says `not eligible` unless both counts are ≥ 3. With less than `rhoMinDays` of history it notes `ρ unknown`. The profile never changes during the run.
 - (c) **Optional fallback:** point `ConfigPath` at a file with `"maxTradeRisk": 0.02`. The RUN line then shows `config=fallback` and the signal's own profile values.
 - **Pass:** a–b (and c if run). **Fail:** wrong profile values, missing or repeated advisory lines, or `config=fallback` without a bad file.
+
+---
+
+# Check 12: M-PORT PR-E widened-stop arming, roundLots Warning, config=fallback (#78)
+
+Check what PR-E #78 changed: arming uses the widened stop, roundLots never overrides a cap, and a `ConfigPath` with a missing file falls back. #78 is merged (81f82b5); run it on that build or later.
+
+**Test code needed (not in the repo; write it first, like the L1–L7 signals).**
+
+- **`_TestPortE` signal** (derives from `_CustomSignal`, `@ES` 5 min):
+    - On each closed bar while flat, it goes long: entry = `Close`, structural stop = `Close` − 4 ticks, widened stop = `Close` − 6 ticks.
+    - It sizes with `sizeForRisk(Bars, entry, stop, riskFraction, limits, widenedStop)` and sends `buy next bar market` for that qty.
+    - It prints `PE ARM entry=` + entry + ` riskNew=` + `MyPortfolioData[_PortKeys.RiskNew]` right after `sizeForRisk`, and keeps that entry for the FILL line.
+    - On the first closed bar in position, it prints `PE FILL close=` + `Close` + ` qty=` + `Math.Abs(StrategyInfo.MarketPosition)` (the filled qty) + ` riskOpen=` + `MyPortfolioData[_PortKeys.RiskOpen]` (read after `base.CalcBar()`).
+    - Exit after 3 bars.
+    - Inputs come from the code: `riskFraction` = 0.005, `limits` = `default(SizingLimits)` for (a); `riskFraction` = 0.1, `limits` = `{ maxQty = 150, roundLots = true }` and widened stop = `double.NaN` for (b). Without a widened stop, the off-PT 1% budget skip does not apply.
+- **`_TestPortEMM` MM signal** (derives from `_PortfolioRiskManager`): `protected override string ConfigPath { get { return @"C:\nonexistent\m-port.json"; } }`.
+- Import order: `_PortMM.Function.CS` → `_CustomSignal.Strategy.CS` → `_PortfolioRiskManager.Strategy.CS`, then the two test files.
+
+**Runs and what to check**
+
+- **(a) riskOpen at the fill uses the widened stop.**
+    - Setup: Portfolio Trader, one strategy (`_TestPortE` on `@ES` 5 min, the (a) inputs), MM signal `_PortfolioRiskManager`.
+    - Take `entry` from the `PE ARM` line and `Close_fill`, `fillQty` and `riskOpen` from the `PE FILL` line (ES: tick 0.25, $50 per point).
+    - **Pass:** `riskOpen` = (`Close_fill` − (`entry` − 6 ticks)) × 50 × `fillQty`, i.e. measured to the widened stop. Example: entry 5000.00, `Close_fill` 5001.00, `fillQty` 10 ⇒ (5001.00 − 4998.50) × 50 × 10 = 1 250.
+    - **Fail:** `riskOpen` = (`Close_fill` − (`entry` − 4 ticks)) × 50 × `fillQty`, the structural-stop version (pre-PR-E behaviour; (5001.00 − 4999.00) × 50 × 10 = 1 000 in the example).
+    - Cross-check: when `Close_fill` = `entry`, `riskOpen` = `fillQty` × 6 × $12.50 (10 contracts ⇒ 750). Do not compare it with `riskNew` from ARM: that is the widened R$ × the strategy's ARM qty, and the MM's qty (starter default `sizing = RiskParity`, `_PortMM` L80) usually differs from it.
+    - The 6-tick stop is a synthetic widened stop, chosen so the widened risk stays under the 1% budget (0.5% × 6/4 = 0.75%). It is not the 14-tick cost floor: widening 4 → 14 ticks gives 1.75% and the entry is denied.
+    - If `Close_fill` ≤ `entry` − 6 ticks (or the fill price itself is at or below the widened stop), `riskOpen` is 0 (`_PortArm.RiskOpen` floors at 0). That run proves nothing, so rerun it.
+- **(b) roundLots Warning.**
+    - Setup: a chart (no PT needed) with `_TestPortE` and the (b) inputs, `TraceLevel` ≤ Warning. Choose the capital so the uncapped size is above 150: with 100 000 and a 4-tick ES stop, 0.1 gives about 200.
+    - Expect in the CS-1 log: `sizeForRisk - roundLots ignored on {symbol}: maxQty qty(150) kept, roundLots would give qty(100)`, where {symbol} is `Bars.Info.Name`.
+    - It must appear **once** for the run, even though the call repeats on every flat bar (deduped per instance per cap/capped/rounded). The traded qty stays 150.
+    - **Fail:** the line repeats for the same values, the qty drops to 100, or there is no Warning.
+- **(c) config=fallback with a missing file.**
+    - Setup: as (a), but with MM signal `_TestPortEMM`.
+    - Expect these MM output lines:
+        - `PORT Warning: PortMmConfig: file not found 'C:\nonexistent\m-port.json'`
+        - `PORT Warning: PortMmConfig: 'C:\nonexistent\m-port.json' not loaded, using code Config (config=fallback)`
+    - The `PORT RUN` line shows `config=fallback` with the Starter values (`heatCap(0.015) clusterCap(0.0075) maxPositions(2)`).
+    - The PT **Status** column ends in ` config=fallback`.
+    - **Fail:** any of these missing, or a different profile.
+- **Pass:** a–c as described.
 
 ---
 
@@ -337,6 +380,7 @@ Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twic
 | 9b | P-R1 futures category text | | | | | CS l.1278 |
 | 10 | PR-C throttles: session stop, halve/observe (no Sunday reset), CodeSize skip, reversal | | | | | M-PORT §5.4 4a/4b, T-P13 |
 | 11 | PR-D profiles: RUN line signal / config=ok / profile, one PORT advisory per day | | | | | M-PORT §5.1/§5.1a |
+| 12 | PR-E #78: riskOpen at the fill on the widened stop, roundLots Warning once, config=fallback on a missing file | | | | | M-PORT §3, §5.1, §5.4 skip logging, T-P24/T-P26/T-P27 |
 
 # Items not pinned down by documentation
 
@@ -344,4 +388,4 @@ Portfolio Trader replay over at least 3 sessions with **ES + CL + GC**, run twic
 - **The rev 2.7 §E text** (`reviews/analyst-base-class-spec.md`) is not in the workspace. The §E labels come from MFS and CAT.
 - **UI paths not verified on the MC wiki:** QuoteManager Edit Symbol / data export, the chart data-range control, Insert → Instrument for Data2, the IOG checkbox location, the `ESymbolCategory` object browser, the PowerLanguage .NET Editor output. These are marked "confirm in your MC version".
 - **The exact Dec-2026 CME roll date** and the day dxFeed's `@ES` switches. Confirm on cmegroup.com.
-- **Test signals for L1–L7** are not in the repo and must be written first.
+- **Test signals for L1–L7 and Check 12** are not in the repo and must be written first.

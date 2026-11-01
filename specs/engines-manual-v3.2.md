@@ -4,6 +4,8 @@ subtitle: For _CustomSignal strategies on dxFeed @ES (Portfolio Trader, IBKR exe
 source: origin/main @ a1deed6 (cost settings per merged PR #30; base text from 629da0d, PRs #18–#29)
 ---
 
+**NON-CANONICAL MIRROR — may be stale.** The maintained manual is `docs/engines-manual.md` (v4.2 adds the M-PORT risk-manager guide: §4.16, §5.23, App H). Kept for reference only.
+
 # MultiCharts .NET Engines — User Manual (v3.2)
 
 *Source: `origin/main` at commit `629da0d`, which includes merged PRs #18–#29 (EV-4.6b is PRs #28/#29). Member names and signatures were checked against that tree by script (see `engines-manual-v2-verification.md`). Anything I could not confirm from the code is marked **VERIFY**. No section of this manual reports or implies trading results.*
