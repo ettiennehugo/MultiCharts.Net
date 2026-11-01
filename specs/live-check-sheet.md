@@ -277,6 +277,31 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 
 ---
 
+# Check 10: M-PORT PR-C session/weekly throttles (#72), before #72 is marked ready
+
+Portfolio Trader replay with two strategies, **ES + CL** (so their `pm.day` keys differ), under **RiskParity**, plus one repeat with `"sizing": "CodeSize"`. Read the MM journal (`PORT …` lines).
+
+**Setup (test signal `_TestPortThrottle`, branch `test/port-throttle-signal`, throw-away).**
+
+1. Import into the PowerLanguage .NET Editor, in this order, and compile: `_PortMM.Function.CS` and `_PortfolioRiskManager.Strategy.CS` (if not already there), then `_TestPortThrottle.Strategy.CS`, then `_TestPortThrottleMM.Strategy.CS`.
+2. Create the folder `%USERPROFILE%\Documents\_TestPortThrottle\`. It holds two optional files: `signal.json` (signal mode) and `mm.json` (MM overrides, same keys as `samples/PortMmConfig.example.json`). A missing file means defaults.
+3. Portfolio Trader: one portfolio, two strategies, each with **only** `_TestPortThrottle`: index 0 = `@ES` 5 min, index 1 = `@CL` 5 min (dxFeed), a few weeks of data including at least one Sunday-evening session. Strategy Properties size 1; Exposure / Max % capital at risk 100% / 100%.
+4. Portfolio Settings → Money management signal → `_TestPortThrottleMM`.
+5. The signal trades every closed 5-min bar while flat, in the direction of that bar (doji = no trade), with a 4-tick stop and a time exit after 6 bars, and arms every entry through `sizeForRisk` (`pm.R$`, `pm.day` published). Its Output lines start `THR #<symbol>` (`START` shows the mode and the settings file used).
+6. Runs:
+   - **Run 1, checks a and b:** `mm.json` = `{ "sizing": "RiskParity", "weeklyHalveR": -1, "weeklyObserveR": -2 }`, no `signal.json`. (Smaller thresholds so the weekly states trigger within days; a run with the defaults −3/−6 is optional.)
+   - **Run 2, check c:** `mm.json` = `{ "sizing": "CodeSize", "weeklyHalveR": -1, "weeklyObserveR": -2 }`. To also reach ddSteps stage 1 quickly, add `"ddSteps": [ { "dd": 0.002, "mult": 0.5 }, { "dd": 0.004, "mult": 0.25 }, { "dd": 0.5, "mult": 0.0 } ]`.
+   - **Run 3, check d:** `signal.json` = `{ "mode": "reverse" }`, `mm.json` as in run 1. While in a position held ≥ 2 bars, a bar against it sends the opposite entry (`THR … REVERSE long->short`). Expect `PORT Info: reversal _TestPortThrottle#<i> long->short allowed …` (or short->long) in the journal and the position to flip sign (the MM allows reversals since spec rev 2.5); a closed trade is recorded at the flip. If instead a `PORT Info: skip … in position` line appears, (d) fails.
+   - Change a file, then recalculate the portfolio. Optional `signal.json` keys: `stopTicks` (default 4), `holdBars` (default 6).
+
+- (a) **Session stop:** after 2 losing closes (R < −0.05) on one strategy, `PORT session stop` and then Info `skip … session stop` appear for **that strategy only**. The other strategy keeps entering. Entries resume on its next `pm.day`, and CL's new day does not clear ES's stop.
+- (b) **Weekly halve and observe:** at week R ≤ −3, `PORT weekly halve` appears and EntryContracts is about half. At ≤ −6, `PORT weekly observe` and `skip … weekly observe` (PORT observe) appear. The **Sunday-evening ETH session does not reset early**: the state clears only at the first session of the next ISO week.
+- (c) **CodeSize skip:** in the CodeSize run, with ddSteps stage 1 (0.5) or a weekly halve, entries log `skip … throttle under CodeSize` and no order is sent.
+- (d) **Reversal:** the opposite entry while in position is allowed (`PORT Info: reversal <id>#<i> long->short allowed …`, spec §5.4 4c, rev 2.5) unless session stop / weekly observe / another gate skips it (Info skip line). The long→short flip records a closed trade (R counted toward 4a/4b/kill; the session-stop count increases). A same-direction add while in position stays refused.
+- **Pass:** a–d as described. **Fail:** any missing journal line, a skip on the wrong strategy, or an early reset.
+
+---
+
 # Results table (fill in)
 
 | # | Check | Date / time (ET) | Key measurement | Pass / Fail / Info | Action taken | Spec to update |
@@ -299,6 +324,7 @@ The check **fails** only if A also yields 0 bars. In that case also look at P-BA
 | 7-L9 / 8 | IBKR paper roll + roll detector | | | | | M-PORT §7, MFS §0.3 |
 | 9a | P-BA4 chart mode | | | | | P3S S1 |
 | 9b | P-R1 futures category text | | | | | CS l.1278 |
+| 10 | PR-C throttles: session stop, halve/observe (no Sunday reset), CodeSize skip, reversal | | | | | M-PORT §5.4 4a/4b, T-P13 |
 
 # Items not pinned down by documentation
 

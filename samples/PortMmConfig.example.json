@@ -59,6 +59,11 @@
   "_minContracts": "below this size after scaling the entry is denied, integer >= 1",
   "minContracts": 1,
   "fillCheckEvals": 3,
+  "stratDailyLosses": 2,
+  "scratchR": 0.05,
+  "weeklyHalveR": -3,
+  "weeklyHalveMult": 0.5,
+  "weeklyObserveR": -6,
 
   "_idmCap": "VolTarget: cap on the diversification multiplier, [1, 10]",
   "idmCap": 2.5
