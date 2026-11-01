@@ -700,6 +700,32 @@ static class Program
 				Check(body != null && hit == null, "SC5 StopCalc path " + m[0] + " " + m[1] + " touches no calc-thread-only API" + (hit == null ? "" : " (" + hit + ")"));
 			}
 			Check(!vp.Contains("PROBE P-RC") && !fcs.Contains("PROBE P-RC"), "SC6 PROBE P-RC markers resolved");
+
+			// P-RC-EResolution (Ettienne's EResolution dump 2026-11-01; Analyst ruling): exact = Second/Minute/Hour/Day, Size x unit;
+			// Week/Month/Quarter/Year calendar-aligned -> non-time fallback (logged once); everything else non-time.
+			Check(OF.ExactBarLength(TimeSpan.FromSeconds(1), 15) == TimeSpan.FromSeconds(15) && OF.ExactBarLength(TimeSpan.FromMinutes(1), 5) == TimeSpan.FromMinutes(5)
+				&& OF.ExactBarLength(TimeSpan.FromHours(1), 4) == TimeSpan.FromHours(4) && OF.ExactBarLength(TimeSpan.FromDays(1), 1) == TimeSpan.FromDays(1), "ER1 exact bar length = Size x unit (15 s, 5 m, 4 h, 1 d)");
+			Check(OF.ExactBarLength(TimeSpan.FromHours(1), 0) == TimeSpan.Zero && OF.ExactBarLength(TimeSpan.Zero, 5) == TimeSpan.Zero && OF.ExactBarLength(TimeSpan.FromDays(1), long.MaxValue) == TimeSpan.Zero,
+				"ER2 size 0, unit 0 and overflow give no bound (Zero)");
+			string rk = MethodBody(vp, "private _OrderFlow.ResolutionKind resolutionKind(") ?? "";
+			Check(rk.Contains("case EResolution.Second: unit = TimeSpan.FromSeconds(1); return _OrderFlow.ResolutionKind.Exact;") && rk.Contains("case EResolution.Minute: unit = TimeSpan.FromMinutes(1); return _OrderFlow.ResolutionKind.Exact;")
+				&& rk.Contains("case EResolution.Hour: unit = TimeSpan.FromHours(1); return _OrderFlow.ResolutionKind.Exact;") && rk.Contains("case EResolution.Day: unit = TimeSpan.FromDays(1); return _OrderFlow.ResolutionKind.Exact;")
+				&& rk.Contains("r.ChartType != ChartType.Regular) return _OrderFlow.ResolutionKind.NonTime;"), "ER3 Regular Second/Minute/Hour/Day map to Exact with 1 s/1 m/1 h/1 d units");
+			int wk = rk.IndexOf("case EResolution.Week:"), cal = rk.IndexOf("return _OrderFlow.ResolutionKind.Calendar;");
+			Check(wk > 0 && cal > wk && rk.Substring(wk, cal - wk).Contains("case EResolution.Month:") && rk.Substring(wk, cal - wk).Contains("case EResolution.Quarter:") && rk.Substring(wk, cal - wk).Contains("case EResolution.Year:")
+				&& rk.Contains("default: return _OrderFlow.ResolutionKind.NonTime;"), "ER4 Week/Month/Quarter/Year -> Calendar; every other member -> NonTime");
+			string tb = MethodBody(vp, "private bool timeBasedResolution()") ?? "";
+			string bo = MethodBody(vp, "private DateTime barOpenTime()") ?? "";
+			Check(tb.Contains("return k == _OrderFlow.ResolutionKind.Exact;") && tb.Contains("k == _OrderFlow.ResolutionKind.Calendar && !m_calendarResLogged") && tb.Contains("engineSink(ETraceLevel.Info)")
+				&& tb.IndexOf("m_calendarResLogged = true;") < tb.IndexOf("engineSink("), "ER5 calendar resolutions fall back to non-time (no OpenTime cut), logged once at Info");
+			Check(!rk.Contains("Duration()") && !tb.Contains("Duration()") && !bo.Contains("Duration()") && bo.Contains("OF.ExactBarLength".Replace("OF.", "_OrderFlow.") + "(unit, r.Size)")
+				&& !vp.Contains("Enum.Parse") && !rk.Contains("(int)"), "ER6 typed switch: no Duration(), Enum.Parse or numeric casts; first-bar open = close - Size x unit");
+			var ec = Engine(false);   // a Week/Month bar: TimeBased false -> OpenTime ignored, previous-close cut only
+			ec.CloseBar(Bar(1, Ms(100), Regime.BarsOnly, vol: 1, up: 1));
+			ec.AddTrade(Ms(100), 100.00, 2); ec.AddTrade(Ms(150), 100.25, 3);
+			var bw = Bar(2, Ms(200)); bw.OpenTime = Ms(180); bw.TimeBased = false;
+			var gw2 = ec.CloseBar(bw);
+			Check(gw2.BacklogTrades == 1 && Near(gw2.Buy + gw2.Sell, 3), "ER7 calendar (non-time) bar: OpenTime does not cut, previous-close cut does");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

@@ -2,7 +2,7 @@
 
 **Repo:** ettiennehugo/MultiCharts.Net. **Base:** `origin/main` 33a51bf (merge of PR #76). All line numbers refer to that commit.
 **Scope:** two fixes in one new PR, kept apart from every other branch (see the coder brief). PriceAction is not touched.
-**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) were open. The `_McApiDump2` output answered P-RC5, P-RC6, P-RC8 and P-RC9, and the `_McRecalcProbe` run (2026-11-01, historical @ES 1-min, `realTime(False)`, `autoTrading(False)`) answered P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7 (§8). All nine passed, so the defaults stand (event-driven recalc primary, `McRecalcFromCallback = false`). P-RC-EResolution (time-based resolutions beyond Minute/Day) stays open until Ettienne's `EResolution` dump.
+**Author:** Grok Bot (spec only, no code). **Status:** draft for Ettienne. Nine API points (P-RC1..P-RC9) were open. The `_McApiDump2` output answered P-RC5, P-RC6, P-RC8 and P-RC9, and the `_McRecalcProbe` run (2026-11-01, historical @ES 1-min, `realTime(False)`, `autoTrading(False)`) answered P-RC1, P-RC2, P-RC3, P-RC4 and P-RC7 (§8). All nine passed, so the defaults stand (event-driven recalc primary, `McRecalcFromCallback = false`). P-RC-EResolution is answered by Ettienne's `EResolution` dump (2026-11-01 15:56): the exact time-based set is Second/Minute/Hour/Day (§7.3).
 
 ---
 
@@ -221,6 +221,7 @@ This loads 6 weeks of data past the chart end, and it is a direct contributor to
 - `CloseBar` pops **every** queued trade with `Time <= CloseTime`. When history arrives after bars have already closed as `BarsOnly`, the first `TickStream` bar absorbs all the earlier ticks into one giant footprint. With `McBidAsk = Prefer`, that bar's MC set then fails the volume check (`volMismatch`, 251), and the garbage footprint stays tagged Quote/High.
 - The first bar also absorbs the extra day of ticks from `from = first − 1 day` (654).
 - **Fix (MC-free):** the engine remembers `m_lastClose`, the previous `CloseBar`'s CloseTime. Trades with `Time <= m_lastClose` are popped and **not added**; count them in a new `fp.BacklogDropped` / `BacklogTrades` counter. The first bar uses `CloseTime − bar duration`, passed as a new `BarInput.OpenTime`.
+- **Which charts get the `OpenTime` cut (P-RC-EResolution, answered).** Only **exact time-based** Regular charts: a typed `switch` on `EResolution` maps `Second`, `Minute`, `Hour` and `Day` to a unit of 1 s / 1 m / 1 h / 1 d, and the bar length is `Size × unit` (`_OrderFlow.ExactBarLength`). `Week`, `Month`, `Quarter` and `Year` are calendar-aligned, so they are **not** cut by length; they stay on the non-time path (previous-close cut only), logged once at Info (`OF tick backlog calendar resolution type() size() -> no OpenTime cut`). Every other member (Tick, Volume, Points, Change, OrigPoints, PointAndFigure, Kagi, LineBreak, Renko, HeikinAshi, FootPrint, CumDelta, Unknown, all Custom*) and every non-Regular chart type stays non-time, as before. `Duration()` is not used for the decision. Source: Ettienne's `EResolution` dump (his MC install, 2026-11-01 15:56): Unknown=0, Tick=1, Minute=2, Hour=3, Day=4, Week=5, Month=6, Year=7, Volume=8, Second=9, Quarter=10, Points=11, Change=12, OrigPoints=13, PointAndFigure=14, Kagi=15, LineBreak=16, Renko=17, HeikinAshi=18, FootPrint=19, CumDelta=20, Custom*=1001..1013; `new Resolution(e, 1).Duration()` is non-zero only for Second 1 s, Minute 1 m, Hour 1 h, Day 1 d, Week 7 d, Month 30 d, Quarter 91 d, Year 365 d (0 for all others, Custom* included); the chart check Regular/Minute/Size 1 gave 00:01:00. (This replaces the interim Minute/Day-only rule.)
 - The quote queues already only advance state (287–291), so nothing changes there.
 
 ### 7.4 MaxBars 5000 (80, 353–359)
@@ -256,7 +257,7 @@ The files are saved as `/workspace/specs/_McRecalcProbe.Strategy.CS` (signal) an
 Decision table: if P-RC2 or P-RC3 fails, set `McRecalcFromCallback = true` as the default and enable the direct-write log path. If P-RC7 fails, remove `TickChunkWaitMs`. If P-RC5 shows that `From`/`To` win, keep setting both (harmless).
 **Outcome:** P-RC2, P-RC3 and P-RC7 passed, so `McRecalcFromCallback` stays `false` and `TickChunkWaitMs` stays. The probe also showed that `StopCalc` runs on the UI thread (tid 1); see §6 rule 1.
 
-Still open: **P-RC-EResolution** (which `EResolution` members besides `Minute`/`Day` exist in the typed API, to widen the time-based rule for the `OpenTime` backlog cut). Pending Ettienne's `EResolution` dump; until then only Regular Minute/Day count as time-based.
+**P-RC-EResolution: answered** by Ettienne's `EResolution` dump (2026-11-01 15:56). Exact time-based = Regular `Second`/`Minute`/`Hour`/`Day` (bar length `Size × unit`); `Week`/`Month`/`Quarter`/`Year` are calendar-aligned and stay on the non-time fallback (logged once at Info); all other members are non-time. Details in §7.3.
 
 Probe source (the dump is in the file):
 ```csharp

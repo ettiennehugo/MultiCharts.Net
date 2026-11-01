@@ -1445,23 +1445,55 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Spec §7.3: the bar's open = the previous bar's close stamp; the first bar: close − duration (minute bars), else no bound.
-		// Review nit: only time-based charts (timeBasedResolution) get the OpenTime cut; others get no bound.
+		// Spec §7.3: the bar's open = the previous bar's close stamp; the first bar: close − Size x unit, else no bound.
+		// Only exact time-based charts (timeBasedResolution) get the OpenTime cut; others get no bound.
 		private DateTime barOpenTime()
 		{
 			if (!timeBasedResolution()) return DateTime.MinValue;
 			if (Bars.CurrentBar > 1) return Bars.Time[1];
 			Resolution r = Bars.Request.Resolution;
-			return r.Type == EResolution.Minute ? Bars.Time[0] - r.Duration() : DateTime.MinValue;
+			TimeSpan unit;
+			if (resolutionKind(r, out unit) != _OrderFlow.ResolutionKind.Exact) return DateTime.MinValue;
+			TimeSpan len = _OrderFlow.ExactBarLength(unit, r.Size);
+			DateTime close = Bars.Time[0];
+			return len > TimeSpan.Zero && close - DateTime.MinValue > len ? close - len : DateTime.MinValue;
 		}
 
-		// Regular chart type with a Minute or Day resolution. Only these EResolution members are confirmed in this codebase (Tick,
-		// Minute, Day); Second/Hour/Week/... are not, so those charts conservatively get no OpenTime cut (previous-close cut only).
+		// P-RC-EResolution (Ettienne's EResolution dump, 2026-11-01). Typed switch, no Duration(): Duration() is non-zero only for
+		// Second/Minute/Hour/Day/Week/Month/Quarter/Year, and Week..Year are calendar-aligned (7d/30d/91d/365d are nominal).
+		private _OrderFlow.ResolutionKind resolutionKind(Resolution r, out TimeSpan unit)
+		{
+			unit = TimeSpan.Zero;
+			if (r == null || r.ChartType != ChartType.Regular) return _OrderFlow.ResolutionKind.NonTime;
+			switch (r.Type)
+			{
+				case EResolution.Second: unit = TimeSpan.FromSeconds(1); return _OrderFlow.ResolutionKind.Exact;
+				case EResolution.Minute: unit = TimeSpan.FromMinutes(1); return _OrderFlow.ResolutionKind.Exact;
+				case EResolution.Hour: unit = TimeSpan.FromHours(1); return _OrderFlow.ResolutionKind.Exact;
+				case EResolution.Day: unit = TimeSpan.FromDays(1); return _OrderFlow.ResolutionKind.Exact;
+				case EResolution.Week:
+				case EResolution.Month:
+				case EResolution.Quarter:
+				case EResolution.Year: return _OrderFlow.ResolutionKind.Calendar;
+				default: return _OrderFlow.ResolutionKind.NonTime;   // Tick, Volume, Points, Change, Renko, Kagi, PnF, ..., Custom*
+			}
+		}
+
+		// Exact time-based (Regular Second/Minute/Hour/Day). Calendar resolutions (Week/Month/Quarter/Year) take the non-time
+		// path (previous-close cut only), logged once per object at Info.
 		private bool timeBasedResolution()
 		{
 			Resolution r = Bars.Request.Resolution;
-			return r.ChartType == ChartType.Regular && (r.Type == EResolution.Minute || r.Type == EResolution.Day);
+			TimeSpan unit;
+			_OrderFlow.ResolutionKind k = resolutionKind(r, out unit);
+			if (k == _OrderFlow.ResolutionKind.Calendar && !m_calendarResLogged)
+			{
+				m_calendarResLogged = true;
+				engineSink(ETraceLevel.Info)?.Invoke($"OF tick backlog calendar resolution type({r.Type}) size({r.Size}) -> no OpenTime cut (previous-close cut only)");
+			}
+			return k == _OrderFlow.ResolutionKind.Exact;
 		}
+		private bool m_calendarResLogged;
 
 		// Tick-chunk spec §5.4 (TickChunkWaitMs > 0): at the first bar of each planned Globex day, wait (bounded) for that day's
 		// chunks. Calc thread, outside m_flowLock. Probe P-RC7: callbacks are delivered (DataLoader thread) while the calc thread sleeps.

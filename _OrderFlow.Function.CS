@@ -138,7 +138,8 @@ namespace PowerLanguage.Function
 			/// the previous CloseBar's CloseTime are backlog and not added; with TimeBased, also those at or before OpenTime.
 			/// Default (MinValue) = no bound.</summary>
 			public DateTime OpenTime;
-			/// <summary>The chart resolution is time-based (the OpenTime cut applies). Tick/volume/range bars: false (bars can share a stamp).</summary>
+			/// <summary>The chart resolution is exact time-based (Second/Minute/Hour/Day: the OpenTime cut applies). Week/Month/Quarter/
+			/// Year (calendar-aligned) and tick/volume/range/custom bars: false (previous-close cut only).</summary>
 			public bool TimeBased;
 		}
 
@@ -719,6 +720,20 @@ namespace PowerLanguage.Function
 		public static string GuardKey(string strategyType, string sig)
 		{
 			return sig == null ? null : (strategyType ?? "") + "|" + sig;
+		}
+
+		/// <summary>P-RC-EResolution (Ettienne's EResolution dump, 2026-11-01): how a Regular chart's resolution is treated for the
+		/// OpenTime backlog cut. Exact = Second/Minute/Hour/Day (bar length = Size x unit); Calendar = Week/Month/Quarter/Year
+		/// (calendar-aligned: no fixed length, so no OpenTime cut); NonTime = everything else (tick, volume, range, Custom*, ...).</summary>
+		public enum ResolutionKind { NonTime, Exact, Calendar }
+
+		/// <summary>Exact time-based bar length = size x unit. TimeSpan.Zero when unit or size is not positive or the product
+		/// would overflow (the caller then applies no OpenTime bound).</summary>
+		public static TimeSpan ExactBarLength(TimeSpan unit, long size)
+		{
+			if (unit <= TimeSpan.Zero || size <= 0) return TimeSpan.Zero;
+			if (size > TimeSpan.MaxValue.Ticks / unit.Ticks) return TimeSpan.Zero;
+			return TimeSpan.FromTicks(unit.Ticks * size);
 		}
 
 		/// <summary>Recalc spec §4.1: decides the one recalculation after the McBidAsk history completes. No MultiCharts types. The guard
