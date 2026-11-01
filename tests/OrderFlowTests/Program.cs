@@ -26,7 +26,11 @@ static class Program
 	// compares or switches, no name strings for enum members, no Enum.Parse/TryParse of a non-repo enum, no reflection by member
 	// name. One comment-stripped source line in, the ids of the rules it breaks out. ownEnums/ownTypes = enums/classes/structs
 	// declared in this repo (parsing the repo's own config enums and reflecting over its own types is fine).
-	const string McNames = "Tick|Minute|Second|Hour|Day|Week|Month|Quarter|Year|Volume|Range|Renko|Kagi|Regular|Future|Futures|Stock|Forex|Crypto|Option|Index|Cash|Fund|Bond|Spread";
+	// EResolution / ChartType member names (Points, Change, OrigPoints, PointAndFigure, LineBreak, HeikinAshi, FootPrint, CumDelta, ...)
+	// and ESymbolCategory names (Future, Stock confirmed on Ettienne's install; the rest documented or plausible spellings)
+	const string McNames = "Tick|Minute|Second|Hour|Day|Week|Month|Quarter|Year|Volume|Contract|Points|Point|PointOriginal|OrigPoints|Change|Range|"
+		+ "Renko|Kagi|PointAndFigure|LineBreak|HeikinAshi|FootPrint|CumDelta|CumulativeDelta|Regular|"
+		+ "Future|Futures|Stock|Forex|Crypto|Currency|Option|Index|Cash|Fund|MutualFund|Money|Bond|Spread";
 	static List<string> TypedEnumLint(string line, HashSet<string> ownEnums, HashSet<string> ownTypes)
 	{
 		var r = new List<string>();
@@ -37,6 +41,17 @@ static class Program
 		if (has(@"\.(Category|ChartType|Type)\.ToString\(\)")) r.Add("mc-enum-tostring");
 		if (has(@"(==|!=)\s*""(" + McNames + @")""") || has(@"""(" + McNames + @")""\s*(==|!=)") || has(@"case\s+""(" + McNames + @")""\s*:")
 			|| has(@"\(\s*""(FOREX|CRYPTO|CURRENCY|FUTURE|FUTURES|STOCK)""\s*\)")) r.Add("mc-member-name-string");
+		// any casing of a whole MC member name handed to a string compare: x.Equals("future"), Contains("FOREX"),
+		// string.Compare(a, "Tick", true), StartsWith("renko"), "Day".Equals(x)
+		if (has(@"(?i)(?<!\w)(Equals|Contains|Compare|StartsWith|EndsWith)\s*\([^;]*?""(" + McNames + @")""")
+			|| has(@"(?i)""(" + McNames + @")""\s*\.\s*(Equals|Contains|CompareTo|StartsWith|EndsWith)\s*\(")) r.Add("mc-name-string-compare");
+		// enum reflection over a non-repo enum: Enum.GetName/IsDefined/ToObject(typeof(EResolution), ..)
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(line, @"Enum\.(GetName|IsDefined|ToObject)\s*\(\s*typeof\(\s*([\w\.]+)\s*\)"))
+		{
+			string ty = m.Groups[2].Value;
+			if (!ownEnums.Contains(ty.Substring(ty.LastIndexOf('.') + 1))) r.Add("enum-reflect(" + m.Groups[1].Value + " " + ty + ")");
+		}
+		if (has(@"(?<!\w)Type\.GetType\s*\(\s*@?""")) r.Add("type-by-name");
 		if (has(@"GetType\(\)\.Name\s*(==|!=)") || has(@"\.Name\s*(==|!=)\s*""\w*Attribute""")) r.Add("type-name-compare");
 		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(line, @"Enum\.(Try)?Parse\b"))
 		{
@@ -840,6 +855,27 @@ static class Program
 					"var prop = typeof(Entry).GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);",
 					"if (Bars.Info.Category == ESymbolCategory.Future && r.Type != EResolution.Day) return;", "sameAsLastCall({ReferenceEquals(o, m_lastRef).ToString()})", "trace(ETraceLevel.Info, $\"resolution({info.Resolution.Type} {info.Resolution.Size})\");" };
 				var flagged = good.Where(gs => TypedEnumLint(gs, ownEnums, ownTypes).Count != 0).ToList();
+				// TE11: one probe per rule added in the #80 review (rule id must be the one reported)
+				var probes = new[] {
+					new[] { "if (Bars.Info.Category.ToString().Equals(\"future\", StringComparison.OrdinalIgnoreCase)) return;", "mc-name-string-compare" },
+					new[] { "if (cat.Contains(\"Forex\")) return x;", "mc-name-string-compare" },
+					new[] { "if (string.Compare(t, \"HEIKINASHI\", true) == 0) ha = true;", "mc-name-string-compare" },
+					new[] { "if (s.StartsWith(\"renko\")) brick = true;", "mc-name-string-compare" },
+					new[] { "if (s.EndsWith(\"PointAndFigure\")) pf = true;", "mc-name-string-compare" },
+					new[] { "if (\"CumDelta\".Equals(ct)) cd = true;", "mc-name-string-compare" },
+					new[] { "if (type == \"OrigPoints\" || type == \"LineBreak\") return;", "mc-member-name-string" },
+					new[] { "string n = Enum.GetName(typeof(EResolution), r);", "enum-reflect(GetName EResolution)" },
+					new[] { "if (Enum.IsDefined(typeof(ESymbolCategory), \"Forex\")) fx = true;", "enum-reflect(IsDefined ESymbolCategory)" },
+					new[] { "var c = (ChartType)Enum.ToObject(typeof(ChartType), 3);", "enum-reflect(ToObject ChartType)" },
+					new[] { "var t = Type.GetType(\"PowerLanguage.EResolution, PowerLanguage\");", "type-by-name" },
+					new[] { "var t = System.Type.GetType(@\"PowerLanguage.InputAttribute\");", "type-by-name" } };
+				var probeMiss = probes.Where(pr => !TypedEnumLint(pr[0], ownEnums, ownTypes).Contains(pr[1])).Select(pr => pr[1] + ": " + pr[0]).ToList();
+				Check(probeMiss.Count == 0, "TE11 new rules fire with their own id (case-insensitive name compares, Enum.GetName/IsDefined/ToObject of MC enums, Type.GetType by name) [" + string.Join(" | ", probeMiss) + "]");
+				string[] good2 = {
+					"string n = Enum.GetName(typeof(EEventTier), t);", "var k = (EEventKind)Enum.ToObject(typeof(EEventKind), 2);",
+					"if (s.Equals(\"Daily\", StringComparison.OrdinalIgnoreCase)) d = true;", "if (row.Contains(\"TickRule\")) tr = true;", "Type t = o.GetType();" };
+				var flagged2 = good2.Where(gs => TypedEnumLint(gs, ownEnums, ownTypes).Count != 0).ToList();
+				Check(flagged2.Count == 0, "TE12 new rules pass repo-own enum reflection, non-MC words and o.GetType() [" + string.Join(" | ", flagged2) + "]");
 				Check(ownTypes.Contains("Entry") && flagged.Count == 0, "TE4 lint passes the repo's own enum parses, own-type reflection and typed compares [" + string.Join(" | ", flagged) + "]");
 
 				// the typed replacements themselves

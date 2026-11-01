@@ -30,6 +30,9 @@ namespace PowerLanguage.Function
 
 	public enum EGate0Entry { None = 0, Market = 1, Limit = 2 }
 
+	/// <summary>Educator review G2: the Data1 bar units Gate 0 accepts; every other EResolution member maps to Other.</summary>
+	public enum EGate0BarUnit { Other = 0, Tick = 1, Second = 2, Minute = 3 }
+
 	/// <summary>Educator review G2: Data1 resolution guard for _TestGate0. The engine re-aggregates Data1 into 1m/5m/15m/30m
 	/// buckets by bar close time, so a Data1 bar must never span more than one minute or straddle a minute boundary.
 	/// Accepted: Tick size 1 (each bar is one trade); Second with a size that divides 60 (1,2,3,4,5,6,10,12,15,20,30,60);
@@ -39,9 +42,6 @@ namespace PowerLanguage.Function
 	/// quiet markets, so the guard cannot prove they stay within one minute. Arguments (typed, no enum names as strings):
 	/// regular = Resolution.ChartType == ChartType.Regular, unit = Resolution.Type mapped by the caller's typed switch
 	/// (_TestGate0.gate0Unit), Resolution.Size, and a display label ("{Type} {ChartType}"). Returns null if accepted, else the reason.</summary>
-	/// <summary>Educator review G2: the Data1 bar units Gate 0 accepts; every other EResolution member maps to Other.</summary>
-	public enum EGate0BarUnit { Other = 0, Tick = 1, Second = 2, Minute = 3 }
-
 	public static class Gate0Data1
 	{
 		public static string Check(bool regular, EGate0BarUnit unit, long size, string label)
