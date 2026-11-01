@@ -638,6 +638,7 @@ namespace PowerLanguage.Strategy
 		private int m_chunkIdSeed = 1000;                                // ids >= 1000, increasing across passes: stale callbacks find no chunk
 		private DateTime m_lastClosedEt = DateTime.MinValue;             // under m_flowLock: ET close of the last closed bar
 		private DateTime m_waitGx = DateTime.MinValue;
+		private _OrderFlow.SessionSourceTally m_srcTally;                // under m_flowLock (lazy, per pass): wait-mode per-session source counts
 		private bool m_chunkSummaryLogged;
 
 		/// <summary>VPF-5: the engine (null when OrderFlowEnabled is false). Lock-free reads are safe from CalcBar.</summary>
@@ -676,6 +677,7 @@ namespace PowerLanguage.Strategy
 				if (m_chunks != null) m_chunkIdSeed = m_chunks.NextId + 1000;
 				m_chunks = null; m_chunkLoads = null; m_chunkRtBuf = null; m_lastClosedEt = DateTime.MinValue;
 				m_mcReqId = 0; m_mcResult = null; m_flowStateBase = 0;
+				m_srcTally = null;
 			}
 			m_waitGx = DateTime.MinValue; m_chunkSummaryLogged = false;
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
@@ -701,6 +703,8 @@ namespace PowerLanguage.Strategy
 			}
 			drainFlowQueue();
 			tickChunkSummary();
+			string srcLine; lock (m_flowLock) srcLine = m_srcTally != null ? m_srcTally.Flush() : null;
+			if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);   // the open (last) session of the pass
 			stopOrderFlowLoads();
 			drainFlowQueue();
 			base.StopCalc();
@@ -803,11 +807,11 @@ namespace PowerLanguage.Strategy
 			m_mcSig = sig;
 			m_mcGuardKey = _OrderFlow.GuardKey(GetType().FullName, sig);
 			bool live = chartIsLive(lastBar);
-			string miss; int sets; long levels; DateTime cFirst, cLast; int pass, recalcs;
+			_OrderFlow.McCacheMiss miss; int sets; long levels; DateTime cFirst, cLast; int pass, recalcs; bool forgot = false;
 			lock (m_flowLock)
 			{
-				miss = m_mcCache.MissReason(sig, firstBar, lastBar);
-				if (miss == null)
+				miss = m_mcCache.Miss(sig, firstBar, lastBar);
+				if (miss == _OrderFlow.McCacheMiss.None)
 				{
 					m_mcCache.ReplayInto(m_flow);
 					m_mcLoaded = m_mcCache.Sets; m_mcFirst = m_mcCache.First; m_mcLast = m_mcCache.Last;
@@ -816,15 +820,18 @@ namespace PowerLanguage.Strategy
 				}
 				else
 				{
+					// Gate-ABA (Live Check 9a rerun): a different request (A -> B -> A) is fresh data, so the per-object recalc history
+					// is dropped; a real loop returns with the same signature and never gets here (process guard = backstop).
+					if (miss == _OrderFlow.McCacheMiss.Signature && m_mcGate.RecalcSignature != null) { m_mcGate.Forget(); forgot = true; }
 					m_mcCache.Clear();
 					m_mcCache.Signature = sig; m_mcCache.RequestFrom = from; m_mcCache.RequestTo = to;
 				}
 				sets = m_mcCache.Sets; levels = m_mcCache.Levels; cFirst = m_mcCache.First; cLast = m_mcCache.Last;
 				pass = m_mcGate.Pass; recalcs = m_mcGate.CountFor(sig);
 			}
-			if (miss != null)
+			if (miss != _OrderFlow.McCacheMiss.None)
 			{
-				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk cache miss reason({miss}) sig({sig})");
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk cache miss reason({_OrderFlow.McLevelCache.MissName(miss)}) sig({sig})" + (forgot ? " recalcGate(reset)" : ""));
 				startMcLevelLoader(from, to, "full");
 				return;
 			}
@@ -908,7 +915,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (m_mcSig == null) return false;
 			bool done; _OrderFlow.RecalcDecision d = _OrderFlow.RecalcDecision.Wait;
-			int sets = 0; long levels = 0; DateTime cFirst = DateTime.MinValue, cLast = DateTime.MinValue; string line = null;
+			int sets = 0; long levels = 0; DateTime cFirst = DateTime.MinValue, cLast = DateTime.MinValue; string line = null, skipLine = null;
 			lock (m_flowLock)
 			{
 				done = m_mcHistoryDone;
@@ -918,6 +925,7 @@ namespace PowerLanguage.Strategy
 					d = mcRecalcDecision();
 					m_mcRecalcDecided = true;
 					if (d == _OrderFlow.RecalcDecision.Recalc) { line = mcTriggeredLine(from); m_mcGate.NoteRecalc(m_mcSig); }
+					else if (d != _OrderFlow.RecalcDecision.Wait && d != _OrderFlow.RecalcDecision.SkipProcessGuard) skipLine = m_mcGate.SkipLine(d, m_mcSig, FlowCfg.McRecalcMax);
 				}
 			}
 			if (!done) return false;
@@ -931,8 +939,8 @@ namespace PowerLanguage.Strategy
 			{
 				if (d == _OrderFlow.RecalcDecision.SkipProcessGuard)
 					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)}) maxPerKey({FlowCfg.McRecalcGuardMaxPerKey}) windowSec({FlowCfg.McRecalcGuardWindowSec}) key({m_mcGuardKey})");
-				else if (d != _OrderFlow.RecalcDecision.Wait)
-					engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk recalc skipped reason({_OrderFlow.McRecalcGate.SkipReason(d)})");
+				else if (skipLine != null)
+					engineSink(ETraceLevel.Journal)?.Invoke(skipLine);   // reason + recalcCount(n/McRecalcMax) recalcSig(..)
 				return false;
 			}
 			engineSink(ETraceLevel.Journal)?.Invoke(line);
@@ -1442,6 +1450,12 @@ namespace PowerLanguage.Strategy
 					High = Bars.High[0], Low = Bars.Low[0], Close = Bars.Close[0], Volume = Bars.Volume[0], UpTicks = Bars.UpTicks[0], DownTicks = Bars.DownTicks[0]
 				});
 				mcJournal(closedFp);
+				if (closedFp != null && m_chunks != null && FlowCfg.TickChunkWaitMs > 0)
+				{
+					if (m_srcTally == null) m_srcTally = new _OrderFlow.SessionSourceTally();
+					string srcLine = m_srcTally.Add(closedFp.SessionKey, closedFp.Source);   // the finished session's line, once
+					if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);
+				}
 			}
 		}
 

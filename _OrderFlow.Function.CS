@@ -633,16 +633,37 @@ namespace PowerLanguage.Function
 			/// <summary>History completed for a requested window that contains [from, to].</summary>
 			public bool Covers(DateTime from, DateTime to) { return HistoryDone && RequestFrom <= from && RequestTo >= to; }
 
-			/// <summary>Miss reason for the journal (empty | signature | incomplete | coverage), or null on a hit.</summary>
-			public string MissReason(string sig, DateTime from, DateTime to)
+			/// <summary>Why the cache cannot serve sig over [from, to] (McCacheMiss.None = hit). A cache that holds ANOTHER request's
+			/// signature is a Signature miss even when it holds no level set (gate-ABA: A -> B with no levels -> A must still reset the gate).</summary>
+			public McCacheMiss Miss(string sig, DateTime from, DateTime to)
 			{
-				if (Sets == 0 && (Signature == null || HistoryDone)) return "empty";   // a completed request with no level set is not a hit
-				if (Signature != sig) return "signature";
-				if (!HistoryDone) return "incomplete";
-				if (!Covers(from, to)) return "coverage";
-				return null;
+				if (Signature != null && Signature != sig) return McCacheMiss.Signature;
+				if (Sets == 0 && (Signature == null || HistoryDone)) return McCacheMiss.Empty;   // a completed request with no level set is not a hit
+				if (Signature != sig) return McCacheMiss.Signature;
+				if (!HistoryDone) return McCacheMiss.Incomplete;
+				if (!Covers(from, to)) return McCacheMiss.Coverage;
+				return McCacheMiss.None;
+			}
+
+			/// <summary>Miss reason for the journal (empty | signature | incomplete | coverage), or null on a hit.</summary>
+			public string MissReason(string sig, DateTime from, DateTime to) { return MissName(Miss(sig, from, to)); }
+
+			/// <summary>Journal text of a miss (null for None).</summary>
+			public static string MissName(McCacheMiss m)
+			{
+				switch (m)
+				{
+					case McCacheMiss.Empty: return "empty";
+					case McCacheMiss.Signature: return "signature";
+					case McCacheMiss.Incomplete: return "incomplete";
+					case McCacheMiss.Coverage: return "coverage";
+					default: return null;
+				}
 			}
 		}
+
+		/// <summary>Recalc spec §4.2: why McLevelCache.Miss refused a replay (None = hit).</summary>
+		public enum McCacheMiss { None = 0, Empty = 1, Signature = 2, Incomplete = 3, Coverage = 4 }
 
 		/// <summary>Recalc spec §4.1: outcome of McRecalcGate.Decide.</summary>
 		public enum RecalcDecision { Wait = 0, Recalc = 1, SkipNoMissed = 2, SkipGuard = 3, SkipAutoTrading = 4, SkipDisabled = 5, SkipProcessGuard = 6 }
@@ -771,6 +792,19 @@ namespace PowerLanguage.Function
 				return RecalcDecision.Recalc;
 			}
 
+			/// <summary>Gate-ABA fix: the McBidAsk cache missed on SIGNATURE (a different request), so this object's recalc history no longer
+			/// describes the data: drop it (RecalcSignature = null, RecalcCount = 0). A real recalc loop always comes back with the SAME
+			/// signature (a cache hit or an incomplete/coverage miss), so it never reaches this; the process-wide McRecalcLoopGuard
+			/// (McRecalcGuardMaxPerKey per McRecalcGuardWindowSec per key) stays the backstop. Missed-bar counters and Pass are kept.</summary>
+			public void Forget() { RecalcSignature = null; RecalcCount = 0; }
+
+			/// <summary>Journal line of a skip decision (not the process guard): reason, this object's recalcs for sig against max, and
+			/// the signature the count belongs to ("none" after Forget or before any recalc), so guard (a previous recalc) and max = 0 differ.</summary>
+			public string SkipLine(RecalcDecision d, string sig, int max)
+			{
+				return "OF McBidAsk recalc skipped reason(" + SkipReason(d) + ") recalcCount(" + CountFor(sig) + "/" + max + ") recalcSig(" + (RecalcSignature ?? "none") + ")";
+			}
+
 			/// <summary>Record a recalc for sig (call immediately before ExecControl.Recalculate()).</summary>
 			public void NoteRecalc(string sig)
 			{
@@ -792,6 +826,50 @@ namespace PowerLanguage.Function
 				}
 			}
 		}
+		/// <summary>Tick-chunk wait mode (TickChunkWaitMs > 0): per-session count of the closed bars' flow source, so a session that
+		/// stays all-Quote (or all-TickRule, or falls to BarUpDown) leaves one line in the trace. Add returns the finished session's line
+		/// when the session key changes; Flush returns the open session's line (end of pass). Each session is reported at most once per
+		/// tally (deduped: a session key seen again later, e.g. a bar replayed after a flush, is not reported twice). Not thread-safe.</summary>
+		public sealed class SessionSourceTally
+		{
+			private DateTime m_session = DateTime.MinValue;
+			private int m_bars, m_aggressor, m_mc, m_quote, m_tickRule, m_barUpDown, m_unavailable;
+			private HashSet<DateTime> m_reported;   // lazy
+
+			/// <summary>Count one closed bar of session `session`; returns the previous session's line when the session changed, else null.</summary>
+			public string Add(DateTime session, FlowSource source)
+			{
+				string line = null;
+				if (session != m_session) { line = Flush(); m_session = session; }
+				m_bars++;
+				switch (source)
+				{
+					case FlowSource.Aggressor: m_aggressor++; break;
+					case FlowSource.McBidAsk: m_mc++; break;
+					case FlowSource.Quote: m_quote++; break;
+					case FlowSource.TickRule: m_tickRule++; break;
+					case FlowSource.BarUpDown: m_barUpDown++; break;
+					default: m_unavailable++; break;
+				}
+				return line;
+			}
+
+			/// <summary>The open session's line (null when it has no bars or was already reported); the counters restart.</summary>
+			public string Flush()
+			{
+				string line = null;
+				if (m_bars > 0)
+				{
+					if (m_reported == null) m_reported = new HashSet<DateTime>();
+					if (m_reported.Add(m_session))
+						line = "OF tick source session(" + m_session.ToString("yyyy-MM-dd") + ") bars(" + m_bars + ") quote(" + m_quote + ") tickRule(" + m_tickRule
+							+ ") mcBidAsk(" + m_mc + ") aggressor(" + m_aggressor + ") barUpDown(" + m_barUpDown + ") unavailable(" + m_unavailable + ")";
+				}
+				m_bars = m_aggressor = m_mc = m_quote = m_tickRule = m_barUpDown = m_unavailable = 0;
+				return line;
+			}
+		}
+
 		/// <summary>Tick-chunk spec §5.1: one Globex day's tick window, US Eastern: [GlobexDate − 1 day + boundary, GlobexDate + boundary).</summary>
 		public struct DayChunk { public DateTime GlobexDate, FromEt, ToEt; }
 

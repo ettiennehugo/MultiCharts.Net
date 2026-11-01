@@ -483,6 +483,95 @@ static class Program
 				&& OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipAutoTrading) == "autoTrading" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipDisabled) == "disabled", "RG10 skip reasons");
 		}
 
+		// ---- Gate-ABA (Live Check 9a rerun, Ettienne 2026-11-01): A -> B -> A must allow a recalc for the fresh A download ----
+		{
+			// mirrors mcStartOrReplay (cache miss -> Forget on a signature miss) and mcRecalcCheck (Decide, process guard, NoteRecalc)
+			var cache = new OF.McLevelCache(); var gate = new OF.McRecalcGate(); var pg = new OF.McRecalcLoopGuard();
+			var win = TimeSpan.FromSeconds(600); DateTime now = T0; int maxPerKey = 3;
+			Func<string, int, bool, OF.RecalcDecision> pass = (sig, levelSets, missed) =>
+			{
+				gate.BeginPass();
+				OF.McCacheMiss miss = cache.Miss(sig, Ms(0), Ms(60000));
+				if (miss != OF.McCacheMiss.None)
+				{
+					if (miss == OF.McCacheMiss.Signature && gate.RecalcSignature != null) gate.Forget();
+					cache.Clear(); cache.Signature = sig; cache.RequestFrom = Ms(0); cache.RequestTo = Ms(60000);
+					if (missed) gate.NoteMissed(Ms(1000));
+					for (int i = 0; i < levelSets; i++) cache.Add(Ms(1000 * (i + 1)), new[] { 100.0 }, new[] { 1.0 }, new[] { 1.0 });
+					cache.HistoryDone = true;
+				}
+				var d = gate.Decide(true, gate.MissedBeforeDone > 0 && cache.Sets > 0, false, true, 1, sig);
+				if (d == OF.RecalcDecision.Recalc && !pg.TryAcquire(OF.GuardKey("Ns.S", sig), now, maxPerKey, win)) d = OF.RecalcDecision.SkipProcessGuard;
+				if (d == OF.RecalcDecision.Recalc) gate.NoteRecalc(sig);
+				now = now.AddSeconds(10);
+				return d;
+			};
+			Check(pass("A", 3, true) == OF.RecalcDecision.Recalc && gate.RecalcSignature == "A" && gate.RecalcCount == 1, "AB1 A: first download with missed bars -> Recalc");
+			Check(pass("A", 3, true) == OF.RecalcDecision.SkipNoMissed, "AB1 A after Recalculate: cache hit, nothing missed -> no recalc");
+			Check(pass("B", 3, false) == OF.RecalcDecision.SkipNoMissed && gate.RecalcSignature == null && gate.RecalcCount == 0, "AB2 B (no missed bars): signature miss forgets A's recalc");
+			Check(cache.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Signature, "AB3 back to A: the cache holds B -> signature miss");
+			Check(pass("A", 3, true) == OF.RecalcDecision.Recalc && gate.RecalcSignature == "A" && gate.RecalcCount == 1, "AB3 A -> B -> A: the fresh A download may recalc again");
+			// B with no level set (completed, Sets 0) still counts as a different request
+			Check(pass("B", 0, false) == OF.RecalcDecision.SkipNoMissed && gate.RecalcSignature == null && cache.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Signature,
+				"AB4 B with no level set: A is still a signature miss (not empty) and the gate was reset");
+			// same signature: a fresh pass with missed bars that is not a signature miss is refused at McRecalcMax
+			var g5 = new OF.McRecalcGate(); g5.BeginPass(); g5.NoteMissed(Ms(1000));
+			Check(g5.Decide(true, true, false, true, 1, "A") == OF.RecalcDecision.Recalc, "AB5 setup: first recalc for A");
+			g5.NoteRecalc("A"); g5.BeginPass(); g5.NoteMissed(Ms(1000));
+			var c5 = new OF.McLevelCache { Signature = "A" }; c5.RequestFrom = Ms(0); c5.RequestTo = Ms(60000);
+			Check(c5.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Incomplete && g5.Decide(true, true, false, true, 1, "A") == OF.RecalcDecision.SkipGuard && g5.CountFor("A") == 1,
+				"AB5 same signature again (incomplete, not a signature miss -> no Forget) is refused at McRecalcMax = 1");
+			Check(g5.Decide(true, true, false, true, 2, "A") == OF.RecalcDecision.Recalc, "AB5 McRecalcMax = 2 allows the second");
+			// process guard: alternating A/B (each a signature miss -> Forget) still trips the static guard at 3 per key per window
+			int recalcs = 0;
+			for (int k = 0; k < 6; k++) if (pass(k % 2 == 0 ? "C" : "D", 3, true) == OF.RecalcDecision.Recalc) recalcs++;
+			Check(recalcs == 6, "AB6 alternating C/D (6 switches in 60 s): the per-object gate is reset on each signature miss");
+			Check(pass("C", 3, true) == OF.RecalcDecision.SkipProcessGuard && gate.RecalcSignature == null && pg.CountFor(OF.GuardKey("Ns.S", "C"), now, win) == 3,
+				"AB7 the 4th recalc of C within 600 s is refused by the process guard (McRecalcGuardMaxPerKey 3)");
+			Check(pass("D", 3, true) == OF.RecalcDecision.SkipProcessGuard, "AB7 and of D");
+			now = now.AddSeconds(600);
+			Check(pass("C", 3, true) == OF.RecalcDecision.Recalc, "AB7 allowed again after McRecalcGuardWindowSec");
+			// skip line format
+			var g8 = new OF.McRecalcGate();
+			Check(g8.SkipLine(OF.RecalcDecision.SkipGuard, "A", 0) == "OF McBidAsk recalc skipped reason(guard) recalcCount(0/0) recalcSig(none)", "AB8 skip line, McRecalcMax = 0: count 0/0, no previous recalc");
+			g8.NoteRecalc("A");
+			Check(g8.SkipLine(OF.RecalcDecision.SkipGuard, "A", 1) == "OF McBidAsk recalc skipped reason(guard) recalcCount(1/1) recalcSig(A)", "AB8 skip line, after a recalc: 1/1 and its signature");
+			Check(g8.SkipLine(OF.RecalcDecision.SkipNoMissed, "B", 1) == "OF McBidAsk recalc skipped reason(noMissedBars) recalcCount(0/1) recalcSig(A)", "AB8 skip line, other signature: count 0, the gate's signature");
+			g8.Forget();
+			Check(g8.RecalcSignature == null && g8.RecalcCount == 0 && g8.CountFor("A") == 0 && g8.Pass == 0, "AB9 Forget clears the signature and count only");
+			Check(OF.McLevelCache.MissName(OF.McCacheMiss.None) == null && OF.McLevelCache.MissName(OF.McCacheMiss.Signature) == "signature" && OF.McLevelCache.MissName(OF.McCacheMiss.Empty) == "empty"
+				&& OF.McLevelCache.MissName(OF.McCacheMiss.Incomplete) == "incomplete" && OF.McLevelCache.MissName(OF.McCacheMiss.Coverage) == "coverage", "AB10 miss journal names");
+			// strategy wiring (source)
+			string vpa = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string sr = MethodBody(vpa, "private void mcStartOrReplay(") ?? "";
+			Check(sr.Contains("miss = m_mcCache.Miss(sig, firstBar, lastBar);") && sr.Contains("if (miss == _OrderFlow.McCacheMiss.Signature && m_mcGate.RecalcSignature != null) { m_mcGate.Forget(); forgot = true; }")
+				&& sr.IndexOf("m_mcGate.Forget()") < sr.IndexOf("m_mcCache.Clear();") && !sr.Contains("MissReason") && !sr.Contains("\"signature\""), "AB11 mcStartOrReplay: typed signature miss resets the gate (under m_flowLock, before Clear)");
+			string rc = MethodBody(vpa, "private bool mcRecalcCheck(") ?? "";
+			Check(rc.Contains("skipLine = m_mcGate.SkipLine(d, m_mcSig, FlowCfg.McRecalcMax);") && rc.Contains("engineSink(ETraceLevel.Journal)?.Invoke(skipLine);")
+				&& rc.IndexOf("skipLine = m_mcGate.SkipLine") < rc.IndexOf("if (!done) return false;"), "AB12 mcRecalcCheck: the skip line is built under m_flowLock with recalcCount/recalcSig");
+		}
+
+		// ---- Wait mode per-session source summary (gate-ABA PR item 3) ----
+		{
+			var t = new OF.SessionSourceTally(); DateTime sa = new DateTime(2026, 10, 27), sb = sa.AddDays(1);
+			Check(t.Add(sa, OF.FlowSource.Quote) == null && t.Add(sa, OF.FlowSource.Quote) == null && t.Add(sa, OF.FlowSource.TickRule) == null, "SS1 same session: no line");
+			string l1 = t.Add(sb, OF.FlowSource.Quote);
+			Check(l1 == "OF tick source session(2026-10-27) bars(3) quote(2) tickRule(1) mcBidAsk(0) aggressor(0) barUpDown(0) unavailable(0)", "SS2 session change: the finished session's line [" + l1 + "]");
+			t.Add(sb, OF.FlowSource.Quote);
+			string l2 = t.Flush();
+			Check(l2 == "OF tick source session(2026-10-28) bars(2) quote(2) tickRule(0) mcBidAsk(0) aggressor(0) barUpDown(0) unavailable(0)", "SS3 Flush: the open session, an all-Quote session is visible (tickRule(0)) [" + l2 + "]");
+			Check(t.Flush() == null, "SS4 Flush twice: nothing more");
+			t.Add(sb, OF.FlowSource.BarUpDown);
+			Check(t.Flush() == null, "SS5 deduped: a session already reported is not reported again");
+			var t2 = new OF.SessionSourceTally();
+			t2.Add(sa, OF.FlowSource.McBidAsk); t2.Add(sa, OF.FlowSource.BarUpDown); t2.Add(sa, OF.FlowSource.Unavailable); t2.Add(sa, OF.FlowSource.Aggressor);
+			Check(t2.Flush() == "OF tick source session(2026-10-27) bars(4) quote(0) tickRule(0) mcBidAsk(1) aggressor(1) barUpDown(1) unavailable(1)", "SS6 every source counted");
+			string vps = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			Check(vps.Contains("if (closedFp != null && m_chunks != null && FlowCfg.TickChunkWaitMs > 0)") && vps.Contains("string srcLine = m_srcTally.Add(closedFp.SessionKey, closedFp.Source);")
+				&& vps.Contains("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);") && vps.Contains("lock (m_flowLock) srcLine = m_srcTally != null ? m_srcTally.Flush() : null;")
+				&& vps.Contains("m_srcTally = null;"), "SS7 strategy: wait mode only, Info, per pass (reset in StartCalc), open session flushed in StopCalc");
+		}
+
 		// ---- Tick-chunk spec §7.3: CloseBar backlog ----
 		{
 			var eb1 = Engine(false);
