@@ -8,8 +8,8 @@ namespace PowerLanguage.Strategy
 	/// <summary>
 	/// M-PORT money-management signal for Portfolio Trader (specs/m-port-spec.md §5). Apply it as the portfolio's Money Management
 	/// signal. Each calculation it denies entries for every strategy, then re-allows and sizes the chosen ones (EntryContracts is
-	/// always set explicitly: RiskParity size, or -1 = code size), applies the 4% heat cap, 2% per correlation cluster, drawdown
-	/// throttles 5/10/15%, a daily loss stop (-2% deny, -3% flatten) and per-strategy kill switches (ForceClosePosition, then
+	/// always set explicitly: RiskParity size, or -1 = code size), applies the Starter profile (1.5% heat, 0.75% per occupied correlation
+	/// cluster, 2 positions, drawdown throttles 3/6/10%; _PortfolioRiskManager_ScaledBook: 4% / 2% / 6 / 5/10/15%), a daily loss stop (-2% deny, -3% flatten) and per-strategy kill switches (ForceClosePosition, then
 	/// Paused once flat). It never blocks exits. Logic lives in _PortMM (_PortMM.Function.CS, unit-tested off-MC).
 	/// One [Input] (Ettienne, 2026-10-31): TotalRiskCapPct = outer ceiling on the combined widened open risk of all strategies,
 	/// % of book, (0, 100], default 10. Everything else: subclass and override Config.
@@ -26,8 +26,11 @@ namespace PowerLanguage.Strategy
 
 		public _PortfolioRiskManager(object _ctx) : base(_ctx) { TotalRiskCapPct = _PortRiskCap.DefaultPct; }
 
-		/// <summary>Effective configuration (code defaults). Override in a subclass for another profile.</summary>
-		protected virtual PortMmConfig Config { get { return new PortMmConfig(); } }
+		/// <summary>Risk profile (spec §5.1a). Starter here; _PortfolioRiskManager_ScaledBook overrides. Switching is manual only.</summary>
+		protected virtual EPortProfile Profile { get { return EPortProfile.Starter; } }
+
+		/// <summary>Effective configuration (code defaults of Profile). Override in a subclass to change fields.</summary>
+		protected virtual PortMmConfig Config { get { return PortMmConfig.ForProfile(Profile); } }
 
 		/// <summary>
 		/// Optional JSON file that overrides Config field by field (spec §5.1; example samples/PortMmConfig.example.json).
@@ -38,15 +41,16 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
-			PortMmConfig defaults = Config;
-			string err = defaults.Validate();
-			if (err != null) { Output.WriteLine($"PORT Warning: code Config invalid ({err}), using built-in defaults"); defaults = new PortMmConfig(); }
 			var warnings = new List<string>(); var info = new List<string>();
+			EPortProfile prof = Profile;
+			PortMmConfig code = null;
+			try { code = Config; } catch (Exception ex) { warnings.Add($"PortMmConfig: Config failed ({ex.Message})"); }
 			string path = null;
 			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.Message}), using code defaults"); }
-			PortMmConfig cfg = defaults;
-			try { cfg = PortMmConfigLoader.LoadFile(path, defaults, warnings, info); }
-			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using code defaults"); cfg = defaults; }
+			PortMmConfig cfg; bool fb;
+			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, warnings, info, out fb); }
+			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using ForProfile({prof})"); cfg = PortMmConfig.ForProfile(prof); fb = true; }
+			m_fallback = fb;
 			foreach (string w in warnings) Output.WriteLine("PORT Warning: " + w);
 			foreach (string i in info) Output.WriteLine("PORT Info: " + i);
 			string capWarn;
@@ -56,6 +60,8 @@ namespace PowerLanguage.Strategy
 			m_mm.journal = s => Output.WriteLine(s);
 			m_runLogged = m_currencyLogged = false; m_logged.Clear();
 		}
+
+		private bool m_fallback;
 
 		protected override void StopCalc() { m_mm = null; }
 
@@ -80,7 +86,7 @@ namespace PowerLanguage.Strategy
 			if (!m_runLogged)
 			{
 				m_runLogged = true;
-				Output.WriteLine($"PORT RUN strategies({n}) initialCapital({initialCapital}) currency({PortfolioCurrency}) {m_mm.config}");
+				Output.WriteLine($"PORT RUN strategies({n}) initialCapital({initialCapital}) currency({PortfolioCurrency}) signal({GetType().Name}) config={(m_fallback ? "fallback" : "ok")} {m_mm.config}");
 			}
 
 			PortDecision[] d = m_mm.Decide(day, double.IsNaN(initialCapital) ? 0 : initialCapital, usd, views);
@@ -89,6 +95,9 @@ namespace PowerLanguage.Strategy
 			CommonPortfolioData[_PortKeys.Heat] = m_mm.Heat;
 			CommonPortfolioData[_PortKeys.Dd] = m_mm.Drawdown;
 			CommonPortfolioData[_PortKeys.Rho] = m_mm.Rho;
+			CommonPortfolioData[_PortKeys.Profile] = m_mm.config.profile.ToString();
+			CommonPortfolioData[_PortKeys.Uncorr] = m_mm.Uncorr;
+			CommonPortfolioData[_PortKeys.Uncorr03] = m_mm.Uncorr03;
 
 			for (int i = 0; i < n; i++)
 			{
