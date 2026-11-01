@@ -610,6 +610,35 @@ static class Program
 			rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, null, w, inf, out fb);
 			Check(fb && rc.profile == EPortProfile.ScaledBook, "T-P17: null Config -> ForProfile(Profile)");
 
+			// T-P25 (rev 2.7, PR-E; Analyst Q1/Q3/Q9): config=fallback in Status, scratchR [0, 1), loader messages
+			Check(_PortMM.StatusLine(EPortState.Armed, "2", 1, 0, "", false) == "Armed n=2 mult=1.00 cl=0 ", "T-P25 Q1: Status format unchanged without fallback");
+			Check(_PortMM.StatusLine(EPortState.Armed, "-", 0.5, 1, "heat cap", true).EndsWith("cl=1 heat cap config=fallback")
+				&& _PortMM.StatusLine(EPortState.Armed, "2", 1, 0, "", true).EndsWith("cl=0 config=fallback"), "T-P25 Q1: ' config=fallback' appended, no double space");
+			var fbm = MP(EPortProfile.Starter); fbm.configFallback = true;
+			var fbd = fbm.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, st: EPortState.Halted, cl: "CL") });
+			Check(fbd.All(x => x.status.EndsWith(" config=fallback") && !x.status.Contains("  ")), "T-P25 Q1: every Status carries config=fallback when the MM fell back");
+			var okd = MP(EPortProfile.Starter).Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES") });
+			Check(okd.All(x => !x.status.Contains("config=fallback")), "T-P25 Q1: no suffix without a fallback");
+			w.Clear(); var sc0 = PortMmConfigLoader.Parse("{\"scratchR\": 0}", st, w);
+			Check(Near(sc0.scratchR, 0) && w.Count == 0, "T-P25 Q3: scratchR 0 accepted (no scratch band)");
+			w.Clear(); var sc1 = PortMmConfigLoader.Parse("{\"scratchR\": 1}", st, w);
+			Check(Near(sc1.scratchR, st.scratchR) && w.Count == 1 && w[0].Contains("bad value for 'scratchR'") && w[0].Contains("[0, 1)"), "T-P25 Q3: scratchR 1 rejected, default kept, message says [0, 1)");
+			w.Clear(); var sc9 = PortMmConfigLoader.Parse("{\"scratchR\": 0.999}", st, w);
+			Check(Near(sc9.scratchR, 0.999) && w.Count == 0, "T-P25 Q3: scratchR 0.999 accepted");
+			w.Clear(); var scn = PortMmConfigLoader.Parse("{\"scratchR\": -0.01}", st, w);
+			Check(Near(scn.scratchR, st.scratchR) && w.Count == 1, "T-P25 Q3: scratchR < 0 rejected");
+			w.Clear(); PortMmConfigLoader.Parse("{ not json", st, w); PortMmConfigLoader.Parse("[1]", st, w); PortMmConfigLoader.Parse("{\"clusterCap\": 0.02}", st, w);
+			Check(w.Count == 3 && w[0].StartsWith("PortMmConfig: json rejected (not valid JSON: ") && w[0].EndsWith(")") && w[1] == "PortMmConfig: json rejected (not a JSON object)"
+				&& w[2].StartsWith("PortMmConfig: json rejected (") && w[2].EndsWith(")") && !w.Any(x => x.Contains("using")), "T-P25 Q9: Parse messages end at 'rejected (...)', no 'using ...'");
+			string tf3 = System.IO.Path.GetTempFileName(); System.IO.File.WriteAllText(tf3, "{\"clusterCap\": 0.02}"); w.Clear();
+			rc = PortMmConfigLoader.Resolve(st, EPortProfile.Starter, tf3, w, inf, out fb); System.IO.File.Delete(tf3);
+			Check(fb && w.Count == 2 && w[0].EndsWith(")") && !w[0].Contains("using") && w[1] == $"PortMmConfig: '{tf3}' rejected, using ForProfile(Starter) (config=fallback)", "T-P25 Q9: Resolve logs the limits it uses for a rejected file");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, null, w, inf, out fb);
+			Check(fb && w.Count == 1 && w[0].Contains("using ForProfile(ScaledBook)"), "T-P25 Q9: invalid code Config names ForProfile(P)");
+			var nj = new List<string>(); var stl = V(0, cl: "ES"); stl.stale = true;
+			MP(EPortProfile.Starter, null, nj).Decide(D0, 1000000, true, new List<PortStratView> { stl });
+			Check(nj.Any(x => x.Contains("skip") && x.Contains("stale") && x.Contains("heat $0.00 heat cap $15000.00 total cap $100000.00")), "T-P25 nit: pre-filter detail keeps heat, heat cap and total cap apart (" + string.Join(" | ", nj) + ")");
+
 			// T-P8 / T-P9 / T-P15 advisory counts
 			var aj = new List<string>(); var am = MP(EPortProfile.Starter, null, aj);
 			am.Decide(D0, 1000000, true, new List<PortStratView> { V(0, cl: "ES"), V(1, cl: "CL"), V(2, cl: "GC") });

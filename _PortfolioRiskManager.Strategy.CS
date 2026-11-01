@@ -9,8 +9,9 @@ namespace PowerLanguage.Strategy
 	/// M-PORT money-management signal for Portfolio Trader (specs/m-port-spec.md §5). Apply it as the portfolio's Money Management
 	/// signal. Each calculation it denies entries for every strategy, then re-allows and sizes the chosen ones (EntryContracts is
 	/// always set explicitly: RiskParity size, or -1 = code size), applies the Starter profile (1.5% heat, 0.75% per occupied correlation
-	/// cluster, 2 positions, drawdown throttles 3/6/10%; _PortfolioRiskManager_ScaledBook: 4% / 2% / 6 / 5/10/15%), a daily loss stop (-2% deny, -3% flatten) and per-strategy kill switches (ForceClosePosition, then
-	/// Paused once flat). It never blocks exits. Logic lives in _PortMM (_PortMM.Function.CS, unit-tested off-MC).
+	/// cluster, 2 positions, drawdown throttles 3/6/10%; _PortfolioRiskManager_ScaledBook: 4% / 2% / 6 / 5/10/15%), a daily loss stop (-2% deny, -3% flatten), per-strategy session and weekly throttles (stratDailyLosses losses in a session
+	/// = session stop; weekly closed-trade R <= weeklyHalveR (-3) halves size, <= weeklyObserveR (-6) = observe only) and per-strategy
+	/// kill switches (ForceClosePosition, then Paused once flat). It never blocks exits. Logic lives in _PortMM (_PortMM.Function.CS, unit-tested off-MC).
 	/// One [Input] (Ettienne, 2026-10-31): TotalRiskCapPct = outer ceiling on the combined widened open risk of all strategies,
 	/// % of book, (0, 100], default 10. Everything else: subclass and override Config.
 	/// </summary>
@@ -34,8 +35,9 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Optional JSON file that overrides Config field by field (spec §5.1; example samples/PortMmConfig.example.json).
-		/// Null/empty (default) = Config as is. Override in a subclass. A missing/unreadable file or bad values log a Warning
-		/// and fall back to the defaults; the signal never throws because of the file.
+		/// Null/empty (default) = Config as is. Override in a subclass. A bad field value logs a Warning and keeps that field's
+		/// default; a rejected file logs a Warning and uses ForProfile(Profile) (config=fallback); a missing/unreadable file logs
+		/// a Warning and uses the code Config. The signal never throws because of the file.
 		/// </summary>
 		protected virtual string ConfigPath { get { return null; } }
 
@@ -46,7 +48,7 @@ namespace PowerLanguage.Strategy
 			PortMmConfig code = null;
 			try { code = Config; } catch (Exception ex) { warnings.Add($"PortMmConfig: Config failed ({ex.Message})"); }
 			string path = null;
-			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.Message}), using code defaults"); }
+			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.GetType().Name}: {ex.Message}), using code Config"); }
 			PortMmConfig cfg; bool fb;
 			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, warnings, info, out fb); }
 			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using ForProfile({prof})"); cfg = PortMmConfig.ForProfile(prof); fb = true; }
@@ -56,7 +58,7 @@ namespace PowerLanguage.Strategy
 			string capWarn;
 			cfg = cfg.Copy(); cfg.totalRiskCap = _PortRiskCap.Fraction(TotalRiskCapPct, out capWarn);
 			if (capWarn != null) Output.WriteLine("PORT Warning: " + capWarn);
-			m_mm = new _PortMM { config = cfg };
+			m_mm = new _PortMM { config = cfg, configFallback = fb };
 			m_mm.journal = s => Output.WriteLine(s);
 			m_runLogged = m_currencyLogged = false; m_logged.Clear();
 		}
