@@ -699,7 +699,8 @@ static class Program
 			string rtf = MethodBody(vb, "private void refuseTickCountFutures()") ?? "";
 			int iErr = rtf.IndexOf("string error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(Bars.Info.Category), ChartVolumeBasis, \"Data1 \" + Bars.Info.Name);", StringComparison.Ordinal),
 				iLog = rtf.IndexOf("traceAlways(ETraceLevel.Error, Bars.Info.Name, error);", StringComparison.Ordinal), iThrow = rtf.IndexOf("throw new InvalidOperationException(error);", StringComparison.Ordinal);
-			Check(iMap >= 0 && iRef > iMap && iBase > iRef && iVal > iBase && iErr >= 0 && iLog > iErr && iThrow > iLog && !vsc.Contains("catch") && !rtf.Contains("catch")
+			int iRun = vsc.IndexOf("issueRunId();", StringComparison.Ordinal);
+			Check(iRun >= 0 && iMap > iRun && iRef > iMap && iBase > iRef && iVal > iBase && iErr >= 0 && iLog > iErr && iThrow > iLog && !vsc.Contains("catch") && !rtf.Contains("catch")
 				&& vsc.IndexOf("volumeBasisError", StringComparison.Ordinal) < 0,
 				"VB11 _VolumeProfileBase.StartCalc: typed BVO map + refuseTickCountFutures BEFORE base.StartCalc (no engine, level study or portfolio row starts); Error logged, then InvalidOperationException");
 			Check(OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "@ES") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.Unknown, "@ES") == null,
@@ -745,6 +746,13 @@ static class Program
 				&& vfs.Contains("foreach (int s in RangeProfiles.streams) fed.Add(s);") && vfs.Contains("if (WeeklyProfiles.enabled) fed.Add(WeeklyProfiles.dataStream);")
 				&& vfs.Contains("foreach (int s in DvpConfig.streams) fed.Add(s);") && vfs.Contains("fed.RemoveWhere(s => s < 2 || s > max);"),
 				"VB20 volumeFedStreams: VWAP 1..3, AVWAP, own profile, visible MC profiles, RangeProfiles, WeeklyProfiles, DVP; Data2..MaxDataStream only");
+			// VB22 the run id is made before the BVO check (issueRunId) and _CustomSignal.StartCalc keeps it: one id per StartCalc
+			string csc = MethodBody(cs16, "protected override void StartCalc()") ?? "";
+			string iri = MethodBody(cs16, "protected void issueRunId()") ?? "";
+			int iKeep = csc.IndexOf("if (!m_runIdIssued) m_runId = Guid.NewGuid().ToString(\"N\").Substring(0, 8);", StringComparison.Ordinal), iClr = csc.IndexOf("m_runIdIssued = false;", StringComparison.Ordinal);
+			Check(iKeep >= 0 && iClr > iKeep && iri.Contains("m_runId = Guid.NewGuid().ToString(\"N\").Substring(0, 8);") && iri.Contains("m_runIdIssued = true;")
+				&& System.Text.RegularExpressions.Regex.Matches(csc, @"m_runId\s*=").Count == 1 && System.Text.RegularExpressions.Regex.Matches(cs16, @"m_runIdIssued\s*=\s*true").Count == 1,
+				"VB22 issueRunId before the BVO check; _CustomSignal.StartCalc keeps that id (one id per StartCalc) and clears the flag");
 			// order flow reads Data1 only: VPFB never reads another stream's bars
 			Check(!vf.Contains("BarsOfData(") && !vf.Contains("barsOf("), "VB21 order flow (VPFB) reads Data1 only, so Data2..N are checked only for profiles / VWAP");
 			int lk = vf.IndexOf("string srcLine = null, volDiagLine = null;"), tr = vf.IndexOf("if (volDiagLine != null) trace(ETraceLevel.Info, volDiagLine);"), sl = tr < 0 ? -1 : vf.IndexOf("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);", tr, StringComparison.Ordinal);

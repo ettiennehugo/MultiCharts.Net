@@ -1500,6 +1500,8 @@ namespace PowerLanguage.Strategy
 		{
 			// Build Volume On (Ettienne 2026-11-01): first, before base.StartCalc, so a refused chart starts no engine, level study or
 			// portfolio row (Bars.Info is readable at StartCalc). VPFB.startOrderFlow copies ChartVolumeBasis into FlowCfg later.
+			// issueRunId: the Error line carries this run's id; _CustomSignal.StartCalc keeps it.
+			issueRunId();
 			ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);
 			refuseTickCountFutures();
 			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
