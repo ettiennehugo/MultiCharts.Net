@@ -109,14 +109,15 @@ static class Program
 		Check(p.Fire(9, new DateTime(2025, 6, 13, 9, 30, 0)), "S4 pending: same-timestamp close fires");
 
 		// educator review R1: Series on an intraday calendar-keyed chart warns; daily bars, Globex keys and Table do not
-		Check(_RollDetector.SeriesKeyWarning(true, "Minute", true) != null, "R1 warn: Series + Minute + calendar key");
-		Check(_RollDetector.SeriesKeyWarning(true, "Tick", true) != null, "R1 warn: Series + Tick + calendar key");
-		Check(_RollDetector.SeriesKeyWarning(true, "Second", true) != null, "R1 warn: Series + Second + calendar key");
-		Check(_RollDetector.SeriesKeyWarning(true, "Day", true) == null, "R1 no warn: daily bars");
-		Check(_RollDetector.SeriesKeyWarning(true, "Week", true) == null, "R1 no warn: weekly bars");
-		Check(_RollDetector.SeriesKeyWarning(true, "Minute", false) == null, "R1 no warn: Globex key");
-		Check(_RollDetector.SeriesKeyWarning(false, "Minute", true) == null, "R1 no warn: Table only");
-		Check((_RollDetector.SeriesKeyWarning(true, "Minute", true) ?? "").Contains("Table"), "R1 warning points to Table");
+		// typed-enums follow-up: the caller decides intraday from EResolution (_CustomSignal.isIntradayResolution); the label is display only
+		Check(_RollDetector.SeriesKeyWarning(true, true, "Minute", true) != null, "R1 warn: Series + intraday (Minute) + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, true, "Tick", true) != null, "R1 warn: Series + intraday (Tick) + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, true, "Second", true) != null, "R1 warn: Series + intraday (Second) + calendar key");
+		Check(_RollDetector.SeriesKeyWarning(true, false, "Day", true) == null, "R1 no warn: daily bars (not intraday)");
+		Check(_RollDetector.SeriesKeyWarning(true, false, "Minute", true) == null, "R1 no warn: the intraday flag decides, not the label");
+		Check(_RollDetector.SeriesKeyWarning(true, true, "Minute", false) == null, "R1 no warn: Globex key");
+		Check(_RollDetector.SeriesKeyWarning(false, true, "Minute", true) == null, "R1 no warn: Table only");
+		Check((_RollDetector.SeriesKeyWarning(true, true, "Minute", true) ?? "").Contains("Table") && (_RollDetector.SeriesKeyWarning(true, true, "Tick", true) ?? "").Contains("(Tick)"), "R1 warning points to Table and names the resolution label");
 		// PR #46 review (M1): fail if _Test6 stops running Table mode on Globex days (no suite compiles _Test6/_CustomSignal, so a
 		// source check). Needs _Test6.Strategy.CS on disk (searched upwards from the test directory).
 		{
@@ -137,14 +138,19 @@ static class Program
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			var assigns = Regex.Matches(src, @"\bm_rollGlobexKey\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => Regex.Replace(m.Groups[1].Value, @"\s+", " ").Trim()).ToList();
 			Check(path != null && assigns.Count == 2 && assigns.Contains("false")
-				&& assigns.Contains("m_rollDet.series && calendarKeyed && _RollDetector.IsIntraday(res) && Bars.Info.Category.ToString() == \"Future\""),
+				&& assigns.Contains("m_rollDet.series && calendarKeyed && intraday && Bars.Info.Category == ESymbolCategory.Future"),
 				"_CustomSignal Globex key = series && calendarKeyed && intraday && Future (reset false only) [" + string.Join(" | ", assigns) + "]");
 			Check(Regex.IsMatch(src, @"DateTime\s+day\s*=\s*m_rollGlobexKey\s*\?\s*_CmeSessionClock\.GlobexTradingDayEt\("), "_CustomSignal detector day = GlobexTradingDayEt when keyed");
-			Check(Regex.IsMatch(src, @"SeriesKeyWarning\(m_rollDet\.series,\s*res,\s*calendarKeyed\s*&&\s*!m_rollGlobexKey\)"), "_CustomSignal warns only when calendar-keyed and not Globex-keyed");
+			Check(Regex.IsMatch(src, @"SeriesKeyWarning\(m_rollDet\.series,\s*intraday,\s*res\.ToString\(\),\s*calendarKeyed\s*&&\s*!m_rollGlobexKey\)")
+				&& Regex.IsMatch(src, @"EResolution\s+res\s*=\s*Bars\.Info\.Resolution\.Type;\s*bool\s+intraday\s*=\s*isIntradayResolution\(res\);"), "_CustomSignal warns only when calendar-keyed and not Globex-keyed (typed intraday)");
+			// typed-enums follow-up: intraday = every EResolution member except Day/Week/Month/Quarter/Year (typed switch, no names)
+			int ii = src.IndexOf("protected static bool isIntradayResolution(EResolution t)");
+			string ib = ii < 0 ? "" : src.Substring(ii, Math.Max(0, src.IndexOf("default: return true;", ii) - ii) + "default: return true;".Length);
+			Check(Regex.IsMatch(ib, @"switch\s*\(t\)\s*\{\s*case EResolution\.Day:\s*case EResolution\.Week:\s*case EResolution\.Month:\s*case EResolution\.Quarter:\s*case EResolution\.Year:\s*return false;\s*default: return true;$"),
+				"_CustomSignal.isIntradayResolution: typed switch, Day/Week/Month/Quarter/Year -> false, everything else intraday");
 			// Analyst 1 N1: the splice line is journaled at ETraceLevel.Journal (kills Journal -> Info)
 			Check(Regex.IsMatch(src, @"if\s*\(\s*traceOn\(ETraceLevel\.Journal\)\s*\)\s*trace\(ETraceLevel\.Journal,\s*\$""VPF-4 roll splice detected"), "_CustomSignal roll splice line at ETraceLevel.Journal");
 		}
-		Check(_RollDetector.IsIntraday("Minute") && _RollDetector.IsIntraday("Tick") && !_RollDetector.IsIntraday("Day") && !_RollDetector.IsIntraday("Week"), "IsIntraday: Minute/Tick yes, Day/Week no");
 		// diagnostics: gap / prior close / open of the Series bar
 		{
 			var d = new _RollDetector { series = true };

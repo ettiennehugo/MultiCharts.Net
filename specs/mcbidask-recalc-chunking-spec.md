@@ -239,7 +239,7 @@ This loads 6 weeks of data past the chart end, and it is a direct contributor to
 - Trivial wording fix allowed in this PR: "…; CumDelta is Truncated only if a reset period exceeds the cap".
 
 ### 7.5 Smaller items
-- **Separate PR, not this one.** `_CustomSignal.Strategy.CS` 1292–1310 (`M-TICK enqueueTick`/`tickBarMember`) reads `Bar` members **by reflection with member-name strings** ("Time", "Close", "TotalVolume"). That breaks the hard rule. Use the typed `b.Time`, `b.Close`, `(double)b.TotalVolume`, as `flowTick` 869–875 already does.
+- **Separate PR, not this one (done in the typed-enums follow-up to #79: `enqueueTick` now reads `b.Time`, `b.Close`, `(double)b.TotalVolume`; `tickBarMember` removed).** `_CustomSignal.Strategy.CS` 1292–1310 (`M-TICK enqueueTick`/`tickBarMember`) reads `Bar` members **by reflection with member-name strings** ("Time", "Close", "TotalVolume"). That breaks the hard rule. Use the typed `b.Time`, `b.Close`, `(double)b.TotalVolume`, as `flowTick` 869–875 already does.
 - **FYI.** `_VolumeProfileStatistics.Indicator.CS` 357 wraps `Recalculate()` in `catch { }`, which may swallow MC's unwind (§2).
 - `startOrderFlow` (618) resets `m_mcResult`/counters while a callback of the previous pass may still be running. This is harmless once the cache is the source of truth, but keep the callback's `m_flow == null` check (763).
 - The stubs (`McStubs.cs` 36–37, 57) need `ICalculationControl.Recalculate()`, `DataRequest.CreateFromTo`, `InstrumentDataRequest.TimeZone` and `IFullSymbolData.Count` for `tools/sem` compile checks.

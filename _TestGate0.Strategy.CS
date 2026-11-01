@@ -215,12 +215,25 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "G0SXt", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		/// <summary>Educator review G2: typed EResolution -> Gate 0 bar unit (members confirmed by Ettienne's EResolution dump).</summary>
+		private static EGate0BarUnit gate0Unit(EResolution t)
+		{
+			switch (t)
+			{
+				case EResolution.Tick: return EGate0BarUnit.Tick;
+				case EResolution.Second: return EGate0BarUnit.Second;
+				case EResolution.Minute: return EGate0BarUnit.Minute;
+				default: return EGate0BarUnit.Other;
+			}
+		}
+
 		protected override void StartCalc()
 		{
 			base.StartCalc();
 			if (Mode == EGate0Mode.Strategy)
 				throw new ArgumentException("_TestGate0: Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary");
-			string resErr = Gate0Data1.Check(Bars.Info.Resolution.ChartType.ToString(), Bars.Info.Resolution.Type.ToString(), (long)Bars.Info.Resolution.Size);   // educator review G2
+			Resolution res = Bars.Info.Resolution;
+			string resErr = Gate0Data1.Check(res.ChartType == ChartType.Regular, gate0Unit(res.Type), (long)res.Size, res.Type + " " + res.ChartType);   // educator review G2 (typed)
 			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
 			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal), warn = engineSink(ETraceLevel.Warning), debug = engineSink(ETraceLevel.Debug) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();

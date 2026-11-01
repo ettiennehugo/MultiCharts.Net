@@ -9,6 +9,12 @@ static class Program
 	static int s_fail, s_pass;
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
 	static bool Near(double a, double b, double eps = 1e-9) { return Math.Abs(a - b) < eps; }
+	// test fixtures only: (chart type, resolution, size) names -> the typed Gate0Data1.Check arguments
+	static string G0(string chartType, string type, long size)
+	{
+		EGate0BarUnit u = type == "Tick" ? EGate0BarUnit.Tick : type == "Second" ? EGate0BarUnit.Second : type == "Minute" ? EGate0BarUnit.Minute : EGate0BarUnit.Other;
+		return Gate0Data1.Check(chartType == "Regular", u, size, type + " " + chartType);
+	}
 
 	static LevelEvent Ev(DateTime day, bool touched, double asym)
 	{ return new LevelEvent { day = day, type = "T", key = "k", touched = touched, asymmetry = asym }; }
@@ -81,17 +87,18 @@ static class Program
 		Check(_ProfileStats.ProfileMixture(uni.ToArray(), uw.ToArray(), 4, 7UL, EGmmNeff.Bars, 200, 0.01).K == 1, "GMM BIC picks K=1 on one Gaussian (_Gmm core)");
 
 		// ---- buckets ----
-		// educator review G2: Data1 resolution guard
-		Check(Gate0Data1.Check("Regular", "Tick", 1) == null && Gate0Data1.Check("Regular", "Minute", 1) == null && Gate0Data1.Check("Regular", "Second", 1) == null && Gate0Data1.Check("Regular", "Second", 15) == null && Gate0Data1.Check("Regular", "Second", 60) == null, "Data1 guard accepts 1-tick, 1-minute, 1/15/60-second bars");
-		Check(Gate0Data1.Check("Regular", "Minute", 5) != null && Gate0Data1.Check("Regular", "Minute", 0) != null && Gate0Data1.Check("Regular", "Hour", 1) != null && Gate0Data1.Check("Regular", "Day", 1) != null, "Data1 guard rejects bars longer than 1 minute");
-		Check(Gate0Data1.Check("Regular", "Tick", 100) != null && Gate0Data1.Check("Regular", "Contract", 500) != null && Gate0Data1.Check("Regular", "Point", 4) != null && Gate0Data1.Check("Regular", "PointOriginal", 4) != null && Gate0Data1.Check("Regular", "Change", 2) != null && Gate0Data1.Check("Regular", "Second", 7) != null && Gate0Data1.Check("Regular", "Second", 90) != null, "Data1 guard rejects multi-tick, volume, range and misaligned second bars");
-		Check(Gate0Data1.Check("Regular", "Minute", 5).Contains("5 Minute"), "Data1 guard message names the resolution");
-		Check(Gate0Data1.Check("Regular", "Tick", 2) != null, "Data1 guard rejects (Regular, Tick, 2)");
-		Check(Gate0Data1.Check("Regular", "Minute", 2) != null, "Data1 guard rejects (Regular, Minute, 2)");
-		{ string m0 = Gate0Data1.Check("Regular", "Second", 0); Check(m0 != null && m0.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, 0) with the positive-seconds message"); }
-		{ string mn = Gate0Data1.Check("Regular", "Second", -60); Check(mn != null && mn.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, -60) with the positive-seconds message"); }
-		Check(Gate0Data1.Check("Regular", "Second", 30) == null, "Data1 guard accepts (Regular, Second, 30)");
-		Check(Gate0Data1.Check("Renko", "Minute", 1) != null && Gate0Data1.Check("Kagi", "Tick", 1) != null, "Data1 guard rejects non-Regular chart types");
+		// educator review G2: Data1 resolution guard. Gate0Data1.Check is typed (regular flag + EGate0BarUnit); G0 maps the test
+		// fixture names onto it the way _TestGate0.gate0Unit maps EResolution members (Hour/Day/Contract/... -> Other).
+		Check(G0("Regular", "Tick", 1) == null && G0("Regular", "Minute", 1) == null && G0("Regular", "Second", 1) == null && G0("Regular", "Second", 15) == null && G0("Regular", "Second", 60) == null, "Data1 guard accepts 1-tick, 1-minute, 1/15/60-second bars");
+		Check(G0("Regular", "Minute", 5) != null && G0("Regular", "Minute", 0) != null && G0("Regular", "Hour", 1) != null && G0("Regular", "Day", 1) != null, "Data1 guard rejects bars longer than 1 minute");
+		Check(G0("Regular", "Tick", 100) != null && G0("Regular", "Contract", 500) != null && G0("Regular", "Point", 4) != null && G0("Regular", "PointOriginal", 4) != null && G0("Regular", "Change", 2) != null && G0("Regular", "Second", 7) != null && G0("Regular", "Second", 90) != null, "Data1 guard rejects multi-tick, volume, range and misaligned second bars");
+		Check(G0("Regular", "Minute", 5).Contains("5 Minute"), "Data1 guard message names the resolution");
+		Check(G0("Regular", "Tick", 2) != null, "Data1 guard rejects (Regular, Tick, 2)");
+		Check(G0("Regular", "Minute", 2) != null, "Data1 guard rejects (Regular, Minute, 2)");
+		{ string m0 = G0("Regular", "Second", 0); Check(m0 != null && m0.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, 0) with the positive-seconds message"); }
+		{ string mn = G0("Regular", "Second", -60); Check(mn != null && mn.Contains("positive number of seconds"), "Data1 guard rejects (Regular, Second, -60) with the positive-seconds message"); }
+		Check(G0("Regular", "Second", 30) == null, "Data1 guard accepts (Regular, Second, 30)");
+		Check(G0("Renko", "Minute", 1) != null && G0("Kagi", "Tick", 1) != null, "Data1 guard rejects non-Regular chart types");
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 31, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "5m bucket end");
 		Check(Gate0Bucket.EndOf(new DateTime(2024, 3, 11, 9, 35, 0), 5) == new DateTime(2024, 3, 11, 9, 35, 0), "end-stamped bar on a boundary stays in its bucket");
 
@@ -536,6 +543,15 @@ static class Program
 		while (dir != null && !System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"))) dir = dir.Parent;
 		string tg0 = dir == null ? "" : System.IO.File.ReadAllText(System.IO.Path.Combine(dir.FullName, "_TestGate0.Strategy.CS"));
 		int sc0 = tg0.IndexOf("protected override void StopCalc()", StringComparison.Ordinal);
+		{
+			// typed-enums follow-up: _TestGate0 maps the typed EResolution/ChartType members (no ToString() names into the guard)
+			int gu = tg0.IndexOf("private static EGate0BarUnit gate0Unit(EResolution t)", StringComparison.Ordinal);
+			string gb = gu < 0 ? "" : tg0.Substring(gu, Math.Max(0, tg0.IndexOf("default: return EGate0BarUnit.Other;", gu, StringComparison.Ordinal) - gu));
+			Check(gb.Contains("case EResolution.Tick: return EGate0BarUnit.Tick;") && gb.Contains("case EResolution.Second: return EGate0BarUnit.Second;") && gb.Contains("case EResolution.Minute: return EGate0BarUnit.Minute;")
+				&& tg0.Contains("Gate0Data1.Check(res.ChartType == ChartType.Regular, gate0Unit(res.Type), (long)res.Size, res.Type + \" \" + res.ChartType);") && !tg0.Contains(".ToString(), "),
+				"_TestGate0 passes typed ChartType.Regular / EResolution -> EGate0BarUnit to Gate0Data1.Check");
+			Check(G0("Regular", "Second", 7).StartsWith("Data1 is 7 Second Regular bars;") && G0("Renko", "Minute", 1).StartsWith("Data1 is 1 Minute Renko bars;"), "Data1 guard message keeps the 'size Type ChartType' label");
+		}
 		Check(sc0 > 0 && tg0.IndexOf("if (!m_done && m_g0 != null && Mode == EGate0Mode.Canary) m_g0.FinishCanary(true);", sc0, StringComparison.Ordinal) > sc0
 			&& tg0.IndexOf("FinishCanary(true)", sc0, StringComparison.Ordinal) < tg0.IndexOf("m_g0 = null", sc0, StringComparison.Ordinal), "_TestGate0.StopCalc calls FinishCanary(true) before releasing the engine");
 
