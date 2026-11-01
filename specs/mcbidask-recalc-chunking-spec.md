@@ -145,6 +145,18 @@ OF McBidAsk idle poll armed ms(1000)   /   OF McBidAsk idle poll timeout sec(900
 `recalcCount`/`recalcSig` are read under `m_flowLock` with the decision: `reason(guard) recalcCount(1/1) recalcSig(<sig>)` is a previous recalc of this signature, `recalcCount(0/0) recalcSig(none)` is `McRecalcMax = 0`.
 `Pass` counts the `StartCalc` calls in the object's lifetime (a field that is never reset). The existing `RUN id(..)` line gets a new id per pass (CS-3, 2014), which is expected.
 
+### 4.4a Bar total and Build Volume On (Live Check 9a volMismatch, Ettienne 2026-11-01)
+- Evidence: after the cache pass every session logged `OF tier McBidAsk->Unavailable reason(volMismatch)` with `mcCover` ≈ 0.
+- Cause: the bar total fed to `CloseBar` (and compared in `applyMc` against ask + bid) was `Bars.Volume[0]`. On intraday charts (tick, volume, time ≤ 24 h) MC's `Volume` is the **up** volume only; the total is `Bars.Ticks[0]` (MC wiki / PG §4.2: Volume, Ticks, UpTicks, DownTicks). The strategy now passes `Volume = Bars.Ticks[0]`, `UpTicks = Bars.UpTicks[0]`, `DownTicks = Bars.DownTicks[0]`; `_VolumeProfileBase`'s zero-volume check reads `Bars.Ticks[0]` too. VWAP/VP volume math is unchanged (a separate PR, after the diag confirms it).
+- BarUpDown gate: `Up + Down == Ticks` on Trade Volume. Unchanged-price volume that MC does not book as up/down makes the bar not qualify (test BU2).
+- Build Volume On: no typed MC member is confirmed (stubs, PG, wiki; `IInstrumentSettings` has none, IP-1.4). `FlowCfg.BuildVolumeOn` stays `Unknown` (existing behaviour) unless a derived strategy sets it. `_McApiDump4.Indicator.CS` (box only, not in the PR) dumps `Bars.Info`, `Bars.Info.Resolution`, `Bars.Request`, `Bars.Request.Resolution`, `ASymbolInfo2` and every volume-named enum, to be run once with Trade Volume and once with Tick Count.
+- `FlowCfg.BuildVolumeOn = TickCount` (any category): McBidAsk is never compared; the tier is Unavailable `reason(volumeBasis)` (not `volMismatch`), logged once at **Info**: `OF McBidAsk Unavailable reason(volumeBasis): Build Volume On = Tick Count; footprint is contracts, bar total is tick count`. Tick Count is valid on non-futures charts: no Warning, no exception, the bar total is used as is.
+- **Held until the dump confirms a typed member:** futures (`Bars.Info.Category == ESymbolCategory.Future`) + Tick Count logs an Error (per-line `File.AppendAllText`) and throws in `_VolumeProfileBase.StartCalc`: `Futures chart <symbol>: Build Volume On must be Trade Volume (Format Instrument > Settings); Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.` `_VolumeProfileBase` is the narrowest common base: volume profiles and VWAP (`_VpVwapEngine`) live there and order flow is in its subclass `_VolumeProfileFuturesBase`; `_CustomSignal` would also hit non-volume strategies.
+- Diag (Info, calc thread, built under `m_flowLock` and written after it via `trace()`): the first 10 closed bars and the first 10 `volMismatch` bars of each pass, counted apart:
+```
+OF McBidAsk diag vol bar(n) t(yyyy-MM-dd HH:mm:ss) volume(Bars.Volume[0]) ticks(Bars.Ticks[0]) up(Bars.UpTicks[0]) down(Bars.DownTicks[0]) prevTicks(Bars.Ticks[1]|NaN) mcAsk(..) mcBid(..) mcSum(..) miss(missing|volMismatch|volumeBasis|none)
+```
+
 ### 4.5 Request window clamp (applies to Fix 1 and Fix 2)
 - Replace `To = DateTime.Now.AddDays(1)` (663, 689) with `lastBarTime.AddDays(1)`, where `lastBarTime` is as in §4.3.
 - Set the range through `req.Range = DataRequest.CreateFromTo(from, to)` (typed, as in `_CheckData` 184), and also set `From`/`To` to the same values. P-RC5 (dump) confirmed these members: `Range` is a `DataRequest` field and `From`/`To` are properties. Setting both is harmless, so do it whichever one MC reads.
@@ -296,6 +308,7 @@ protected override void OnRecalcLastBarAfterEvent() {
   - `SkipNoMissed` when no misses; `Recalc` once; `SkipGuard` on the second call with the same signature.
   - `SkipAutoTrading`; `SkipDisabled`.
   - Gate reset (AB1–AB12): A → B → A allows a recalc for the fresh A (also when B completed with no level set); a same-signature repeat is still `SkipGuard` at `McRecalcMax`; an A ↔ B alternation still trips the process guard at 3 per key per 600 s; the skip-line format; `Forget` keeps `Pass`; strategy wiring (source checks).
+- Bar total / volume basis (VB1–VB9, BU1–BU3, DG1–DG6): Ticks total matches ask + bid; the old up-volume feed is a `volMismatch`; McAsk/McBid kept; TickCount → `reason(volumeBasis)` with one Info line, no Warning, no exception; Trade Volume passes; Up + Down vs Ticks (unchanged volume → Unavailable); an all-down bar is not empty; the diag picker limits and line format; strategy wiring (source checks).
 - `SessionSourceTally` (SS1–SS7): one line per finished session, the open session on `Flush`, deduped, every source counted; strategy wiring (wait mode only, Info, StopCalc flush).
 - `PlanGlobexDays`: Sep 1–18 2026 gives 14 Globex days (Sep 7 Labor Day trades with an early halt; the log has `session(2026-09-07) bars(1139)`). Monday starts Sunday 17:00 ET. Windows are contiguous and non-overlapping.
 - `TickChunkScheduler`:
@@ -308,13 +321,15 @@ protected override void OnRecalcLastBarAfterEvent() {
 `tests/SessionClockTests`: `FromEastern(ToEastern(t)) == t` across both DST changes for Exchange/Central and Local zones.
 
 **Live acceptance (Ettienne runs, Analyst checks the log):**
-- **A1, Fix 1 (9a rerun, @ES 1-min, Aug 31 → Sep 18, McBidAsk = Prefer)**:
+- **A1, Fix 1 (9a rerun, @ES 1-min, Aug 31 → Sep 18, McBidAsk = Prefer; Format Instrument > Settings > Build Volume On = Trade Volume)**:
   - exactly one `OF McBidAsk diag request` line in pass 1;
   - one `cache stored`;
   - exactly one `recalc triggered`;
   - a second `RUN id(..)` followed by `cache hit ... request(none)` and `recalc pass using cache`;
   - **no** further `diag request` line and no second `recalc triggered`;
   - `OF T9 session(..) mcCover(> 0)` for every session inside the loaded window, expected ≈ 100% except `volMismatch` bars;
+  - no `OF tier McBidAsk->Unavailable reason(volMismatch)` on a full session; the `OF McBidAsk diag vol` lines show `ticks(..)` ≈ `mcSum(..)` and `volume(..)` ≈ `up(..)` (up volume only). If `mcSum` still differs from `ticks`, send the lines before the VWAP/VP volume-basis PR;
+  - on Tick Count instead: `OF McBidAsk Unavailable reason(volumeBasis)` once at Info only if the strategy states `FlowCfg.BuildVolumeOn = TickCount` (not detected yet; run `_McApiDump4` with each setting and send both outputs);
   - the `diag stop` / chunk summary lines appear **without** removing the study (idle drain).
 - **A2, Fix 2 (same chart, Sep 1–18)**:
   - no `Array dimensions exceeded` anywhere;
@@ -327,4 +342,4 @@ protected override void OnRecalcLastBarAfterEvent() {
   - no bar with a backlog footprint (`BacklogDropped` journaled only if > 0).
 - **A4, regression**: with `McBidAsk = Off`, `TickChunkByDay = false`, the run behaves like 33a51bf, except for the clamp and the backlog fix.
 - **A5, loop guard**: in a `McRecalcMax = 1` run, press Recalculate manually after A1. The result must be `cache hit`, no request, and no recalc.
-- **A6, A → B → A** (Live Check 9a rerun): load A (recalc), switch the chart to B, then back to A. The A line must be `cache miss reason(signature) .. recalcGate(reset)` followed by `recalc triggered`, not `recalc skipped reason(guard)`.
+- **A6, A → B → A** (Live Check 9a rerun): load A (recalc), switch the chart to B, then back to A. The A line must be `cache miss reason(signature) .. recalcGate(reset)` followed by `recalc triggered`, not `recalc skipped reason(guard)`. With Trade Volume, A's sessions after the recalc show `mcCover` ≈ 100% (no `reason(volMismatch)` tier line), and each pass logs its own first 10 `diag vol` lines.

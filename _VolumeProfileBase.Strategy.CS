@@ -2584,7 +2584,8 @@ namespace PowerLanguage.Strategy
 					trace(IsProfileStreamConnected(1) ? ETraceLevel.Info : ETraceLevel.Warning, $"VP hook retry on first calc bar: Data1 connected({IsProfileStreamConnected(1)})");
 				}
 			}
-			if (Bars.Status == EBarState.Close && Bars.Volume[0] == 0)
+			// Bars.Ticks = the bar total; intraday Bars.Volume is the up volume only, so an all-down bar read as "zero volume"
+			if (Bars.Status == EBarState.Close && Bars.Ticks[0] == 0)
 			{
 				m_zeroVolumeBars++;
 				if (!m_zeroVolumeWarned)

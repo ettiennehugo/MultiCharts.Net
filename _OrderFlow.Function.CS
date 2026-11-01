@@ -78,7 +78,7 @@ namespace PowerLanguage.Function
 			/// <summary>false (default): a session mixing Quote and TickRule bars reports the worst of them (session to date, no lookahead).</summary>
 			public bool AllowMixed = false;
 			public bool QuotesExpected = true;        // Bid/Ask tick streams are being fed
-			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume
+			public VolumeBasis BuildVolumeOn = VolumeBasis.Unknown;   // BarUpDown needs TradeVolume; TickCount: McBidAsk Unavailable reason(volumeBasis), Info once
 			public bool ExcludeExtremesTickRule = true;   // TickRule footprints are wrong at the bar high/low
 			public int MaxBars = 5000;                     // closed bars kept (at least 10); older bars are dropped and CumDelta reports Truncated
 			/// <summary>Spec S1: MC Volume Delta levels. Off (default): never requested. Prefer: a matching level set becomes the
@@ -133,6 +133,9 @@ namespace PowerLanguage.Function
 			public DateTime SessionKey;      // e.g. Globex date
 			public DateTime ResetKey;        // CumDelta resets when this changes (Session or RTH key, caller's choice)
 			public Regime Regime;
+			/// <summary>Volume = the bar's TOTAL (the caller passes Bars.Ticks[0]: on intraday charts Bars.Volume is the up volume only);
+			/// UpTicks/DownTicks = Bars.UpTicks[0]/Bars.DownTicks[0]. All three are contracts under Build Volume On = Trade Volume and
+			/// tick counts under Tick Count.</summary>
 			public double High, Low, Close, Volume, UpTicks, DownTicks;
 			/// <summary>Spec §7.3: the bar's open (previous bar's time; first bar: CloseTime − bar duration). Trades at or before
 			/// the previous CloseBar's CloseTime are backlog and not added; with TimeBased, also those at or before OpenTime.
@@ -169,6 +172,7 @@ namespace PowerLanguage.Function
 			public double Buy, Sell, Volume;
 			public int Trades, StaleQuoteTrades;
 			public double McDelta = double.NaN;                 // S1: MC level-set delta (ask - bid) when matched (Prefer or CrossCheckOnly)
+			public double McAsk = double.NaN, McBid = double.NaN;   // diag: ask/bid sums of the level set stamped at this bar (also on volMismatch)
 			public double ChainDelta = double.NaN;              // S1: delta of the Quote/TickRule/BarUpDown chain before an MC set replaced it (T9 cross-check)
 			public string McMiss;                               // S1: null, "missing" or "volMismatch" when McBidAsk is on and no set was used
 			public bool FirstAfterConnect;                      // first built bar: ticks before the feed started are missing
@@ -257,6 +261,7 @@ namespace PowerLanguage.Function
 			// spec §7.3: CloseTime of the previous CloseBar; trades at or before it are backlog
 			private DateTime m_lastClose = DateTime.MinValue;
 			private bool m_backlogLogged;
+			private bool m_volumeBasisNoted;
 			/// <summary>Spec §7.3: backlog trades dropped so far (all bars).</summary>
 			public long BacklogDropped;
 			private DateTime m_qSession = DateTime.MinValue;
@@ -266,6 +271,7 @@ namespace PowerLanguage.Function
 			public Action<string> journal;
 			/// <summary>Warning sink (null = off): one line the first time the MaxBars cap drops a bar.</summary>
 			public Action<string> warnOnce;
+			public Action<string> infoOnce;   // Info-level one-time notes (calc-thread queue in the strategy)
 			/// <summary>Closed bars dropped by the MaxBars cap so far.</summary>
 			public int DroppedBars { get { return m_dropped; } }
 			/// <summary>The bar cap actually applied: max(10, Cfg.MaxBars).</summary>
@@ -300,7 +306,8 @@ namespace PowerLanguage.Function
 				if (set == null) { fp.McMiss = "missing"; McMissing++; return; }
 				double ask = 0, bid = 0;
 				for (int i = 0; i < set[0].Length; i++) { ask += set[1][i]; bid += set[2][i]; }
-				double vol = b.Volume;
+				fp.McAsk = ask; fp.McBid = bid;
+				double vol = b.Volume;   // the bar total (Bars.Ticks[0]); Bars.Volume (up volume intraday) made every mixed bar a volMismatch
 				if (!(vol > 0) || Math.Abs(ask + bid - vol) / vol > Cfg.mcVolTolerance) { fp.McMiss = "volMismatch"; McVolMismatch++; return; }
 				fp.McDelta = ask - bid;
 				if (Cfg.McBidAsk != EMcBidAsk.Prefer) return;
@@ -391,7 +398,14 @@ namespace PowerLanguage.Function
 				}
 
 				if (b.Regime == Regime.IogHistoryNoMagnifier || Cfg.BuildVolumeOn == VolumeBasis.TickCount)
+				{
 					clearToUnavailable(fp);
+					if (Cfg.BuildVolumeOn == VolumeBasis.TickCount && Cfg.McBidAsk != EMcBidAsk.Off)
+					{
+						fp.McMiss = "volumeBasis";   // the level sets are contracts, the bar total is a tick count: never compared
+						if (!m_volumeBasisNoted && infoOnce != null) { m_volumeBasisNoted = true; infoOnce(VolumeBasisInfo); }
+					}
+				}
 				else if (tickRegime && fp.Trades > 0)
 				{
 					fp.Source = quotes && fp.StaleQuoteTrades == 0 ? FlowSource.Quote : FlowSource.TickRule;
@@ -451,7 +465,13 @@ namespace PowerLanguage.Function
 				fp.Source = FlowSource.Unavailable; fp.Quality = FlowQuality.Unknown;
 			}
 
-			/// <summary>T7 gate: Trade Volume basis and Up + Down == Volume on this bar.</summary>
+			/// <summary>Info (once per engine) when McBidAsk is on and FlowCfg.BuildVolumeOn = TickCount. Tick Count is a valid setting on
+			/// non-futures charts (Ettienne 2026-11-01): no Warning about the setting, only the McBidAsk tier is Unavailable. Futures +
+			/// Tick Count is meant to throw at StartCalc, held until a typed Build Volume On member is confirmed (_McApiDump4).</summary>
+			public const string VolumeBasisInfo = "OF McBidAsk Unavailable reason(volumeBasis): Build Volume On = Tick Count; footprint is contracts, bar total is tick count";
+
+			/// <summary>T7 gate: Trade Volume basis and Up + Down == Volume (the bar total, Bars.Ticks[0]) on this bar. Unchanged-price
+			/// volume that MC does not book as up or down makes Up + Down differ from the total, and the bar does not qualify.</summary>
 			public static bool BarUpDownQualifies(VolumeBasis basis, double volume, double up, double down)
 			{
 				if (basis != VolumeBasis.TradeVolume || volume <= 0 || up < 0 || down < 0) return false;
@@ -639,7 +659,7 @@ namespace PowerLanguage.Function
 			{
 				if (Signature != null && Signature != sig) return McCacheMiss.Signature;
 				if (Sets == 0 && (Signature == null || HistoryDone)) return McCacheMiss.Empty;   // a completed request with no level set is not a hit
-				if (Signature != sig) return McCacheMiss.Signature;
+				if (Signature == null) return McCacheMiss.Signature;   // level sets never stamped with a request signature (was the 2nd Signature != sig, now only reachable here)
 				if (!HistoryDone) return McCacheMiss.Incomplete;
 				if (!Covers(from, to)) return McCacheMiss.Coverage;
 				return McCacheMiss.None;
@@ -826,6 +846,30 @@ namespace PowerLanguage.Function
 				}
 			}
 		}
+		/// <summary>volMismatch diag: picks the first Max closed bars and the first Max volMismatch bars of a pass (counted apart).</summary>
+		public sealed class McVolDiag
+		{
+			public int Max = 10;
+			public int Closed, Mismatch;
+			/// <summary>Count one closed bar; true when its diag line is logged.</summary>
+			public bool Take(string mcMiss)
+			{
+				bool first = Closed < Max; Closed++;
+				bool mm = mcMiss == "volMismatch" && Mismatch < Max;
+				if (mm) Mismatch++;
+				return first || mm;
+			}
+			/// <summary>OF McBidAsk diag vol bar(n) t(..) volume(Bars.Volume[0]) ticks(Bars.Ticks[0]) up(..) down(..) prevTicks(Bars.Ticks[1])
+			/// mcAsk(..) mcBid(..) mcSum(..) miss(..|none). NaN = not available (no level set / first bar).</summary>
+			public static string Line(int bar, DateTime t, double volume, double ticks, double up, double down, double prevTicks, double mcAsk, double mcBid, string miss)
+			{
+				var ci = System.Globalization.CultureInfo.InvariantCulture;
+				return "OF McBidAsk diag vol bar(" + bar + ") t(" + t.ToString("yyyy-MM-dd HH:mm:ss", ci) + ") volume(" + volume.ToString("R", ci) + ") ticks(" + ticks.ToString("R", ci)
+					+ ") up(" + up.ToString("R", ci) + ") down(" + down.ToString("R", ci) + ") prevTicks(" + prevTicks.ToString("R", ci) + ") mcAsk(" + mcAsk.ToString("R", ci)
+					+ ") mcBid(" + mcBid.ToString("R", ci) + ") mcSum(" + (mcAsk + mcBid).ToString("R", ci) + ") miss(" + (miss ?? "none") + ")";
+			}
+		}
+
 		/// <summary>Tick-chunk wait mode (TickChunkWaitMs > 0): per-session count of the closed bars' flow source, so a session that
 		/// stays all-Quote (or all-TickRule, or falls to BarUpDown) leaves one line in the trace. Add returns the finished session's line
 		/// when the session key changes; Flush returns the open session's line (end of pass). Each session is reported at most once per

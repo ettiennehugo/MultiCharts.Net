@@ -617,9 +617,83 @@ static class Program
 			t2.Add(sa, OF.FlowSource.McBidAsk); t2.Add(sa, OF.FlowSource.BarUpDown); t2.Add(sa, OF.FlowSource.Unavailable); t2.Add(sa, OF.FlowSource.Aggressor);
 			Check(t2.Flush() == "OF tick source session(2026-10-27) bars(4) quote(0) tickRule(0) mcBidAsk(1) aggressor(1) barUpDown(1) unavailable(1)", "SS6 every source counted");
 			string vps = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
-			Check(vps.Contains("if (closedFp != null && m_chunks != null && FlowCfg.TickChunkWaitMs > 0)") && vps.Contains("string srcLine = m_srcTally.Add(closedFp.SessionKey, closedFp.Source);")
+			Check(vps.Contains("if (closedFp != null && m_chunks != null && FlowCfg.TickChunkWaitMs > 0)") && vps.Contains("srcLine = m_srcTally.Add(closedFp.SessionKey, closedFp.Source);")
 				&& vps.Contains("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);") && vps.Contains("lock (m_flowLock) srcLine = m_srcTally != null ? m_srcTally.Flush() : null;")
 				&& vps.Contains("m_srcTally = null;"), "SS7 strategy: wait mode only, Info, per pass (reset in StartCalc), open session flushed in StopCalc");
+		}
+
+		// ---- volMismatch fix (Live Check 9a, Ettienne 2026-11-01): bar total = Bars.Ticks, Build Volume On, diag line ----
+		{
+			var cfg = new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, AllowMixed = true };
+			var ev = new OF.FlowEngine(TICK, cfg);
+			// bar: up 5, down 4, unchanged 3 -> Bars.Ticks 12, intraday Bars.Volume 5 (up only); MC set ask 7 + bid 5 = 12
+			ev.AddMcLevels(Ms(1000), new[] { 100.00, 100.25 }, new[] { 3.0, 4.0 }, new[] { 5.0, 0.0 });
+			var v1 = ev.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(v1.Source == Src.McBidAsk && v1.McMiss == null && Near(v1.McAsk, 7) && Near(v1.McBid, 5) && ev.McVolMismatch == 0, "VB1 total = Ticks (12) matches ask+bid 12 -> McBidAsk");
+			ev.AddMcLevels(Ms(2000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			var v2 = ev.CloseBar(Bar(2, Ms(2000), Regime.BarsOnly, vol: 5, up: 5, down: 4));
+			Check(v2.Source == Src.Unavailable && v2.McMiss == "volMismatch" && ev.McVolMismatch == 1 && Near(v2.McAsk, 7) && Near(v2.McBid, 5) && double.IsNaN(v2.McDelta),
+				"VB2 the old feed (up volume 5 vs 12) is a volMismatch; McAsk/McBid kept for the diag");
+			var v3 = ev.CloseBar(Bar(3, Ms(3000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(v3.McMiss == "missing" && double.IsNaN(v3.McAsk) && double.IsNaN(v3.McBid), "VB3 no set: McAsk/McBid NaN");
+			// non-futures Build Volume On = Tick Count (Ettienne 5:22 PM): no exception, no Warning; McBidAsk never compared, reason volumeBasis, Info once
+			var warns = new List<string>(); var infos = new List<string>(); bool vbThrew = false;
+			var evk = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, BuildVolumeOn = OF.VolumeBasis.TickCount }) { warnOnce = w => warns.Add(w), infoOnce = w => infos.Add(w) };
+			OF.FootprintBar k1 = null, k2 = null;
+			try {
+			evk.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			k1 = evk.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			evk.AddMcLevels(Ms(2000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			k2 = evk.CloseBar(Bar(2, Ms(2000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			} catch (Exception) { vbThrew = true; }
+			Check(!vbThrew && k1 != null && k1.Source == Src.Unavailable && k1.McMiss == "volumeBasis" && k2.McMiss == "volumeBasis" && evk.McVolMismatch == 0 && evk.McUsed == 0 && double.IsNaN(k1.McDelta),
+				"VB4 TickCount: Unavailable reason(volumeBasis), not volMismatch");
+			Check(warns.Count == 0 && infos.Count == 1 && infos[0] == OF.FlowEngine.VolumeBasisInfo && infos[0].StartsWith("OF McBidAsk Unavailable reason(volumeBasis)"),
+				"VB5 TickCount: no exception, no Warning, the volumeBasis line once at Info (" + warns.Count + "/" + infos.Count + ")");
+			var tvInfo = new List<string>();
+			var etv = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, BuildVolumeOn = OF.VolumeBasis.TradeVolume }) { warnOnce = w => tvInfo.Add(w), infoOnce = w => tvInfo.Add(w) };
+			etv.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			var tv1 = etv.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(tv1.Source == OF.FlowSource.McBidAsk && tv1.McMiss == null && tvInfo.Count == 0, "VB5b Trade Volume passes: McBidAsk, no note");
+			var wo = new List<string>();
+			var eo = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, BuildVolumeOn = OF.VolumeBasis.TickCount }) { warnOnce = w => wo.Add(w), infoOnce = w => wo.Add(w) };
+			var o1 = eo.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(o1.Source == Src.Unavailable && o1.McMiss == null && wo.Count == 0, "VB6 TickCount with McBidAsk Off: Unavailable as before, no reason, no note");
+			var eu = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer }) { warnOnce = w => wo.Add(w) };
+			eu.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			Check(eu.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4)).Source == Src.McBidAsk && wo.Count == 0, "VB7 Unknown basis (not detectable): existing behaviour, MC set compared");
+			// BarUpDownQualifies against the Ticks total
+			Check(OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 16, 7, 6)
+				&& !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.Unknown, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TickCount, 13, 7, 6),
+				"BU1 up + down == Ticks qualifies; unchanged volume (7 + 6 != 16) does not; TradeVolume only");
+			var evb = Engine(false, OF.VolumeBasis.TradeVolume);
+			evb.CloseBar(Bar(1, Ms(100), Regime.BarsOnly, vol: 16, up: 7, down: 6));
+			Check(evb.BarDelta(0).Source == Src.Unavailable, "BU2 unchanged volume: up 7 + down 6 != Ticks 16 -> Unavailable");
+			var ed = Engine(true, OF.VolumeBasis.TradeVolume);   // all-down bar in a tick gap: Bars.Volume (up) is 0, Ticks is 8
+			ed.CloseBar(Bar(1, Ms(100), Regime.TickStream, vol: 8, up: 0, down: 8));
+			Check(ed.BarDelta(0).Source == Src.BarUpDown && Near(ed.BarDelta(0).Value, -8), "BU3 all-down bar with total 8 is not an empty bar: BarUpDown delta -8");
+			// diag picker: first 10 closed bars + first 10 volMismatch bars, counted apart
+			var dg = new OF.McVolDiag(); int taken = 0; var takenAt = new List<int>();
+			for (int i = 0; i < 30; i++) if (dg.Take(i < 10 ? null : "volMismatch")) { taken++; takenAt.Add(i); }
+			Check(taken == 20 && takenAt[9] == 9 && takenAt[10] == 10 && takenAt[19] == 19, "DG1 10 closed + 10 volMismatch bars, nothing after (" + taken + ")");
+			var dg2 = new OF.McVolDiag(); int t2 = 0;
+			for (int i = 0; i < 30; i++) if (dg2.Take(i < 3 || i >= 20 ? "volMismatch" : (i % 2 == 0 ? "missing" : null))) t2++;
+			Check(t2 == 17 && dg2.Mismatch == 10 && dg2.Closed == 30, "DG2 early mismatches count in both; other misses only as closed bars (" + t2 + ")");
+			string dl = OF.McVolDiag.Line(42, new DateTime(2026, 10, 27, 9, 31, 0), 5, 12, 5, 4, 10, 7, 5, "volMismatch");
+			Check(dl == "OF McBidAsk diag vol bar(42) t(2026-10-27 09:31:00) volume(5) ticks(12) up(5) down(4) prevTicks(10) mcAsk(7) mcBid(5) mcSum(12) miss(volMismatch)", "DG3 line format [" + dl + "]");
+			string dn = OF.McVolDiag.Line(1, new DateTime(2026, 10, 27, 9, 31, 0), 5, 12.5, 5, 4, double.NaN, double.NaN, double.NaN, null);
+			Check(dn == "OF McBidAsk diag vol bar(1) t(2026-10-27 09:31:00) volume(5) ticks(12.5) up(5) down(4) prevTicks(NaN) mcAsk(NaN) mcBid(NaN) mcSum(NaN) miss(none)", "DG4 NaN / no miss [" + dn + "]");
+			string vf = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string vb = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileBase.Strategy.CS"));
+			Check(vf.Contains("double barTicks = Bars.Ticks[0], barUp = Bars.UpTicks[0], barDown = Bars.DownTicks[0];") && vf.Contains("Volume = barTicks, UpTicks = barUp, DownTicks = barDown")
+				&& !vf.Contains("Volume = Bars.Volume[0], UpTicks") && vf.Contains("infoOnce = queueSink(ETraceLevel.Info)"), "VB8 strategy feeds Bars.Ticks[0] as the bar total; the volumeBasis note is Info");
+			Check(vb.Contains("Bars.Status == EBarState.Close && Bars.Ticks[0] == 0") && !vb.Contains("Bars.Volume[0] == 0"), "VB9 zero-volume check reads Bars.Ticks[0]");
+			int lk = vf.IndexOf("string srcLine = null, volDiagLine = null;"), tr = vf.IndexOf("if (volDiagLine != null) trace(ETraceLevel.Info, volDiagLine);"), sl = tr < 0 ? -1 : vf.IndexOf("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);", tr, StringComparison.Ordinal);
+			string mid = lk >= 0 && tr > lk ? vf.Substring(lk, tr - lk) : "";
+			Check(lk >= 0 && tr > lk && sl > tr && mid.Contains("lock (m_flowLock)") && mid.Contains("volDiagLine = _OrderFlow.McVolDiag.Line(") && mid.Contains("srcLine = m_srcTally.Add(")
+				&& !mid.Contains("trace(") && !mid.Contains("Invoke(srcLine)"), "DG5 diag + tally lines built under m_flowLock, logged after it on the calc thread");
+			Check(vf.Contains("m_volDiag = null;") && (MethodBody(vf, "private void onFlowData(") ?? "x").IndexOf("m_volDiag") < 0 && (MethodBody(vf, "private void onFlowData(") ?? "trace(").IndexOf("trace(") < 0,
+				"DG6 diag counters reset per pass; the DataLoader callback never touches the diag or trace");
 		}
 
 		// ---- Tick-chunk spec §7.3: CloseBar backlog ----
