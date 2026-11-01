@@ -685,20 +685,23 @@ static class Program
 			Check(dn == "OF McBidAsk diag vol bar(1) t(2026-10-27 09:31:00) volume(5) ticks(12.5) up(5) down(4) prevTicks(NaN) mcAsk(NaN) mcBid(NaN) mcSum(NaN) miss(none)", "DG4 NaN / no miss [" + dn + "]");
 			string vf = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
 			string vb = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileBase.Strategy.CS"));
+			string cs16 = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_CustomSignal.Strategy.CS"));
 			Check(vf.Contains("double barTicks = Bars.Ticks[0], barUp = Bars.UpTicks[0], barDown = Bars.DownTicks[0];") && vf.Contains("Volume = barTicks, UpTicks = barUp, DownTicks = barDown")
 				&& !vf.Contains("Volume = Bars.Volume[0], UpTicks") && vf.Contains("infoOnce = queueSink(ETraceLevel.Info)"), "VB8 strategy feeds Bars.Ticks[0] as the bar total; the volumeBasis note is Info");
 			Check(vb.Contains("Bars.Status == EBarState.Close && Bars.Ticks[0] == 0") && !vb.Contains("Bars.Volume[0] == 0"), "VB9 zero-volume check reads Bars.Ticks[0]");
 			// Build Volume On from the typed Bars.Info.BVO (_McApiDump4: Volume (249) / TickCount (324)); futures + Tick Count throws at StartCalc
-			string vbErr = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "@ES");
-			Check(vbErr == "Futures chart @ES: Build Volume On must be Trade Volume (Format Instrument > Settings), but the chart is set to Tick Count. "
-				+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.", "VB10 futures + Tick Count: the StartCalc error [" + vbErr + "]");
+			string vbErr = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "Data1 @ES");
+			Check(vbErr == "Futures data stream Data1 @ES: Build Volume On must be Trade Volume (Format Instrument > Settings), but it is set to Tick Count. "
+				+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.", "VB10 futures + Tick Count: the StartCalc error names the stream [" + vbErr + "]");
 			string vsc = MethodBody(vb, "protected override void StartCalc()") ?? "";
-			int iBase = vsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iMap = vsc.IndexOf("ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);", StringComparison.Ordinal),
-				iErr = vsc.IndexOf("string volumeBasisError = _OrderFlow.FlowEngine.VolumeBasisError(Bars.Info.Category == ESymbolCategory.Future, ChartVolumeBasis, Bars.Info.Name);", StringComparison.Ordinal),
-				iLog = vsc.IndexOf("trace(ETraceLevel.Error, volumeBasisError);", StringComparison.Ordinal), iThrow = vsc.IndexOf("throw new InvalidOperationException(volumeBasisError);", StringComparison.Ordinal),
-				iVal = vsc.IndexOf("validateInputs();", StringComparison.Ordinal);
-			Check(iBase >= 0 && iMap > iBase && iErr > iMap && iLog > iErr && iThrow > iLog && iVal > iThrow && !vsc.Contains("catch"),
-				"VB11 _VolumeProfileBase.StartCalc: typed BVO + ESymbolCategory.Future, Error logged, then InvalidOperationException, before validateInputs");
+			int iMap = vsc.IndexOf("ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);", StringComparison.Ordinal), iRef = vsc.IndexOf("refuseTickCountFutures();", StringComparison.Ordinal),
+				iBase = vsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iVal = vsc.IndexOf("validateInputs();", StringComparison.Ordinal);
+			string rtf = MethodBody(vb, "private void refuseTickCountFutures()") ?? "";
+			int iErr = rtf.IndexOf("string error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(Bars.Info.Category), ChartVolumeBasis, \"Data1 \" + Bars.Info.Name);", StringComparison.Ordinal),
+				iLog = rtf.IndexOf("traceAlways(ETraceLevel.Error, Bars.Info.Name, error);", StringComparison.Ordinal), iThrow = rtf.IndexOf("throw new InvalidOperationException(error);", StringComparison.Ordinal);
+			Check(iMap >= 0 && iRef > iMap && iBase > iRef && iVal > iBase && iErr >= 0 && iLog > iErr && iThrow > iLog && !vsc.Contains("catch") && !rtf.Contains("catch")
+				&& vsc.IndexOf("volumeBasisError", StringComparison.Ordinal) < 0,
+				"VB11 _VolumeProfileBase.StartCalc: typed BVO map + refuseTickCountFutures BEFORE base.StartCalc (no engine, level study or portfolio row starts); Error logged, then InvalidOperationException");
 			Check(OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "@ES") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.Unknown, "@ES") == null,
 				"VB12 futures + Trade Volume passes; futures + Unknown keeps the old behaviour (no throw)");
 			Check(OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TickCount, "AAPL") == null && OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TradeVolume, "AAPL") == null,
@@ -708,7 +711,42 @@ static class Program
 				&& vbo.Contains("default: return _OrderFlow.VolumeBasis.Unknown;") && !vbo.Contains("ToString") && !vbo.Contains("Enum.") && !vbo.Contains("\"") && !vbo.Contains("249") && !vbo.Contains("324") && !vbo.Contains("(int)"),
 				"VB14 typed BuildVolumeOn map: Volume -> TradeVolume, TickCount -> TickCount, else Unknown (typed members only: no strings, int literals or Enum.*)");
 			int iCfg = vf.IndexOf("FlowCfg.BuildVolumeOn = ChartVolumeBasis;", StringComparison.Ordinal), iNew = vf.IndexOf("m_flow = new _OrderFlow.FlowEngine(", StringComparison.Ordinal);
-			Check(iCfg >= 0 && iNew > iCfg, "VB15 VPFB sets FlowCfg.BuildVolumeOn from the chart before the engine is built");
+			string vfsc = MethodBody(vf, "protected override void StartCalc()") ?? "";
+			int iFb = vfsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iFo = vfsc.IndexOf("startOrderFlow();", StringComparison.Ordinal);
+			Check(iCfg >= 0 && iNew > iCfg && iFb >= 0 && iFo > iFb, "VB15 VPFB: base.StartCalc (sets ChartVolumeBasis, refuses futures + Tick Count) runs before startOrderFlow, which sets FlowCfg.BuildVolumeOn before the engine is built");
+			// VB16 BLOCKER fix: the Error line does not depend on TraceLevel (default None). LogFileSingleton is MC-bound (_CustomSignal), so
+			// this is a source check: traceAlways has no TraceLevel / traceOn gate and writes straight through LogFileSingleton.WriteTrace,
+			// whose body filters nothing by level.
+			string ta = MethodBody(cs16, "protected void traceAlways(ETraceLevel traceLevel, string symbol, string message)") ?? "";
+			string wt16 = MethodBody(cs16, "public void WriteTrace(IOutput output,") ?? "";
+			Check(ta.Contains("if (m_logger == null) m_logger = LogFileSingleton.GetInstance(null);") && ta.Contains("m_logger.WriteTrace(null, traceLevel, LastCalcBarTime,")
+				&& !ta.Contains("TraceLevel") && !ta.Contains("traceOn") && !ta.Contains("Output") && !ta.Contains("Bars.Time")
+				&& wt16.Contains("File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, s_utf8NoBom);") && !wt16.Contains("TraceLevel") && !wt16.Contains("level <") && !wt16.Contains("level >")
+				&& !rtf.Contains("trace(ETraceLevel") && !rtf.Contains("traceOn("),
+				"VB16 the Build Volume On Error is written at TraceLevel None: traceAlways has no level gate, one File.AppendAllText, no Output / Bars.Time");
+			// VB17 FutureRolover is futures (typed)
+			string ifc = MethodBody(vb, "protected static bool isFuturesCategory(ESymbolCategory category)") ?? "";
+			Check(ifc.Contains("return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;") && !ifc.Contains("ToString") && !ifc.Contains("Enum.") && !ifc.Contains("\"") && !ifc.Contains("(int)"),
+				"VB17 isFuturesCategory: ESymbolCategory.Future or ESymbolCategory.FutureRolover, typed members only");
+			// VB18 Data2..N: typed BarsOfData(n).Info.BVO / Category, stream named in the message, first offender throws
+			Check(rtf.Contains("foreach (int stream in volumeFedStreams())") && rtf.Contains("var info = BarsOfData(stream).Info;")
+				&& rtf.Contains("error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(info.Category), volumeBasisOf(info.BVO), \"Data\" + stream + \" \" + info.Name);")
+				&& rtf.Contains("if (error != null) break;") && !rtf.Contains("ToString") && !rtf.Contains("Enum.") && !rtf.Contains("(int)"),
+				"VB18 Data2..N feeding a profile / VWAP: typed BarsOfData(n).Info.BVO + Category, message names the stream");
+			string d2 = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "Data2 @ES");
+			Check(d2 != null && d2.StartsWith("Futures data stream Data2 @ES: Build Volume On must be Trade Volume", StringComparison.Ordinal)
+				&& OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TickCount, "Data2 $SPX.X") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "Data2 @ES") == null,
+				"VB19 Data2 futures + Tick Count refused and named; Data2 non-futures + Tick Count and futures + Trade Volume pass");
+			// VB20 which streams feed a profile / VWAP (from the code: VWAP slots, AVWAP, own profile, hooked MC profiles, range / weekly / DVP)
+			string vfs = MethodBody(vb, "private SortedSet<int> volumeFedStreams()") ?? "";
+			Check(vfs.Contains("if (Vwap1Type != EVwapType.Disabled) fed.Add(Vwap1DataStream);") && vfs.Contains("if (Vwap2Type != EVwapType.Disabled) fed.Add(Vwap2DataStream);")
+				&& vfs.Contains("if (Vwap3Type != EVwapType.Disabled) fed.Add(Vwap3DataStream);") && vfs.Contains("if (AvwapEvents != EAvwapAnchor.None) fed.Add(AvwapLimits.dataStream);")
+				&& vfs.Contains("if (ownEngineOn()) fed.Add(DevProfileDataStream);") && vfs.Contains("IProfilesCollection pack = getPack(s);") && vfs.Contains("if (pack != null && pack.Visible) fed.Add(s);")
+				&& vfs.Contains("foreach (int s in RangeProfiles.streams) fed.Add(s);") && vfs.Contains("if (WeeklyProfiles.enabled) fed.Add(WeeklyProfiles.dataStream);")
+				&& vfs.Contains("foreach (int s in DvpConfig.streams) fed.Add(s);") && vfs.Contains("fed.RemoveWhere(s => s < 2 || s > max);"),
+				"VB20 volumeFedStreams: VWAP 1..3, AVWAP, own profile, visible MC profiles, RangeProfiles, WeeklyProfiles, DVP; Data2..MaxDataStream only");
+			// order flow reads Data1 only: VPFB never reads another stream's bars
+			Check(!vf.Contains("BarsOfData(") && !vf.Contains("barsOf("), "VB21 order flow (VPFB) reads Data1 only, so Data2..N are checked only for profiles / VWAP");
 			int lk = vf.IndexOf("string srcLine = null, volDiagLine = null;"), tr = vf.IndexOf("if (volDiagLine != null) trace(ETraceLevel.Info, volDiagLine);"), sl = tr < 0 ? -1 : vf.IndexOf("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);", tr, StringComparison.Ordinal);
 			string mid = lk >= 0 && tr > lk ? vf.Substring(lk, tr - lk) : "";
 			Check(lk >= 0 && tr > lk && sl > tr && mid.Contains("lock (m_flowLock)") && mid.Contains("volDiagLine = _OrderFlow.McVolDiag.Line(") && mid.Contains("srcLine = m_srcTally.Add(")

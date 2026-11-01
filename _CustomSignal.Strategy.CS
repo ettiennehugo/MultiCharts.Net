@@ -382,6 +382,19 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>
+		/// Writes one line to the trace CSV whatever TraceLevel is (TraceLevel defaults to None, where trace() writes nothing). For a line
+		/// that must be on disk before the study refuses to start, e.g. the Build Volume On Error in _VolumeProfileBase.StartCalc. Output is
+		/// not touched (may run off the calc thread); one File.AppendAllText per line (LogFileSingleton.WriteTrace). symbol = the caller's
+		/// Bars.Info.Name (readable at StartCalc, where the cached m_traceSymbol is not set yet); the time is the last calc bar seen
+		/// (MinValue before the first CalcBar of this instance).
+		/// </summary>
+		protected void traceAlways(ETraceLevel traceLevel, string symbol, string message)
+		{
+			if (m_logger == null) m_logger = LogFileSingleton.GetInstance(null);
+			m_logger.WriteTrace(null, traceLevel, LastCalcBarTime, m_traceZone ?? barZoneLabel(), this.GetType().Name, symbol ?? m_traceSymbol ?? "", RunId, message);
+		}
+
 		// Calc-thread snapshot for trace() off the calc thread (StopCalc on the UI thread). Set by CalcBar (and by derived calc-thread
 		// entry points before they trace, e.g. OnRecalcLastBarAfterEvent). Written on the calc thread, read on the UI thread (StopCalc): volatile id; the bar time as long ticks via Volatile.Write/Read
 		// (a DateTime field is not atomic on 32-bit). Both are reset in StartCalc; the id also at the end of StopCalc.

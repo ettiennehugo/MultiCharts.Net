@@ -468,16 +468,18 @@ namespace PowerLanguage.Function
 
 			/// <summary>Info (once per engine) when McBidAsk is on and FlowCfg.BuildVolumeOn = TickCount. Tick Count is a valid setting on
 			/// non-futures charts (Ettienne 2026-11-01): no Warning about the setting, only the McBidAsk tier is Unavailable. Futures +
-			/// Tick Count never gets here: _VolumeProfileBase.StartCalc logs FlowEngine.VolumeBasisError and throws.</summary>
+			/// Tick Count never gets here: _VolumeProfileBase.StartCalc logs FlowEngine.VolumeBasisError (whatever TraceLevel) and throws.</summary>
 			public const string VolumeBasisInfo = "OF McBidAsk Unavailable reason(volumeBasis): Build Volume On = Tick Count; footprint is contracts, bar total is tick count";
 
-			/// <summary>The StartCalc error for a futures chart built on Tick Count (Ettienne 2026-11-01), or null when the chart may run.
-			/// isFuture is the typed Bars.Info.Category == ESymbolCategory.Future; basis is the typed Bars.Info.BVO mapped by
-			/// _VolumeProfileBase.volumeBasisOf. Non-futures on Tick Count and an Unknown basis pass (null).</summary>
-			public static string VolumeBasisError(bool isFuture, VolumeBasis basis, string symbol)
+			/// <summary>The StartCalc error for a futures data stream built on Tick Count (Ettienne 2026-11-01), or null when it may run.
+			/// isFuture is the typed Category == ESymbolCategory.Future or ESymbolCategory.FutureRolover of that stream; basis is its typed
+			/// Info.BVO mapped by _VolumeProfileBase.volumeBasisOf; stream names it, e.g. "Data2 @ES". Checked for Data1 and for every
+			/// Data2..N that feeds a profile or a VWAP (_VolumeProfileBase.volumeFedStreams). Non-futures on Tick Count and an Unknown
+			/// basis pass (null).</summary>
+			public static string VolumeBasisError(bool isFuture, VolumeBasis basis, string stream)
 			{
 				if (!isFuture || basis != VolumeBasis.TickCount) return null;
-				return "Futures chart " + symbol + ": Build Volume On must be Trade Volume (Format Instrument > Settings), but the chart is set to Tick Count. "
+				return "Futures data stream " + stream + ": Build Volume On must be Trade Volume (Format Instrument > Settings), but it is set to Tick Count. "
 					+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.";
 			}
 
