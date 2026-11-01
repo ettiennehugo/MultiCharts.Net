@@ -137,6 +137,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
+			drainFlowQueue();       // DataLoader-thread messages -> journal on the calc thread
 			base.CalcBar();
 			updateSessionStats();   // VPF-2
 			stepRollDetector();     // VPF-4 (detector in _CustomSignal since S4; idempotent per bar)
@@ -614,18 +615,26 @@ namespace PowerLanguage.Strategy
 		{
 			stopOrderFlowLoads();
 			m_flow = null; m_flowLoaderStarted = false; m_flowLogged = false;
-			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false; m_mcDiagLogged = null; m_mcHistBatches = m_mcHistNullBatches = m_mcHistBars = 0; m_mcHistLevels = 0;
+			m_mcLoaded = 0; m_mcFirst = DateTime.MaxValue; m_mcLast = DateTime.MinValue; m_mcHistoryDone = m_mcLoadedLogged = false; m_mcDiagLogged = null; m_mcCallbacks = 0; m_mcResult = null; m_mcStarted = false; m_mcHistBatches = m_mcHistNullBatches = m_mcHistBars = 0; m_mcHistLevels = 0;
 			m_mcSession = DateTime.MinValue; m_mcSessBars = m_mcSessAgree = m_mcSessCover = m_mcSessCmp = 0; m_mcSessFellLogged = false;
 			m_flowClosedBar = -1; m_flowIogBar = -1; m_flowIogLastVol = 0;
 			for (int i = 0; i < m_flowHistoryDone.Length; i++) m_flowHistoryDone[i] = false;
 			if (!OrderFlowEnabled) return;
 			if (FlowTickSource != EFlowTickSource.DataLoader) FlowCfg.QuotesExpected = false;
-			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg) { journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+			m_flow = new _OrderFlow.FlowEngine(tickSize(), FlowCfg) { journal = queueSink(ETraceLevel.Journal), warnOnce = queueSink(ETraceLevel.Warning) };
 		}
 
 		protected override void StopCalc()
 		{
+			if (m_mcStarted)
+			{
+				IDataLoaderResult mr = m_mcResult;
+				// PG §4.7.4: IsCompleted is the only documented status member of IDataLoaderResult.
+				drainFlowQueue();
+				engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag stop callbacks({System.Threading.Interlocked.CompareExchange(ref m_mcCallbacks, 0, 0)}) result({(mr == null ? "null" : "set")}) pending({(mr != null && !mr.IsCompleted ? 1 : 0)}) historyDone({m_mcHistoryDone})");
+			}
 			stopOrderFlowLoads();
+			drainFlowQueue();
 			base.StopCalc();
 		}
 
@@ -656,7 +665,11 @@ namespace PowerLanguage.Strategy
 				IDataLoaderResult r = DataLoader.BeginLoadData(req, onFlowData, i);
 				lock (m_flowLock) m_flowLoads.Add(r);
 			}
-			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off) startMcLevelLoader(from);
+			if (FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off)
+			{
+				try { startMcLevelLoader(from); }
+				catch (Exception ex) { engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag start exception({ex.GetType().FullName}) message({ex.Message})"); }
+			}
 		}
 
 		// Spec S1 ingestion: one more request, a copy of Bars.Request with ChartType McBidAskChartType (FootPrint). PROBES P-BA2..P-BA4 open;
@@ -675,56 +688,109 @@ namespace PowerLanguage.Strategy
 			req.From = from;
 			req.To = DateTime.Now.AddDays(1);
 			req.Subscribe2RT = true;
+			m_mcStarted = true;
 			IDataLoaderResult r = DataLoader.BeginLoadData(req, onMcLevels, 3);
+			m_mcResult = r;   // kept alive here and in m_flowLoads until EndLoadData
 			lock (m_flowLock) m_flowLoads.Add(r);
+			// IsCompleted is the only documented status member (PG §4.7.4); no error/status field is documented, so none is logged.
+			engineSink(ETraceLevel.Journal)?.Invoke($"OF McBidAsk diag request resType({res.Type}) resSize({res.Size}) chartType({res.ChartType}) from({req.From:yyyy-MM-dd HH:mm}) to({req.To:yyyy-MM-dd HH:mm}) " +
+				$"subscribe2RT({req.Subscribe2RT}) quoteField({req.QuoteField}) beginLoadData({(r == null ? "null" : "result")}) isCompleted({(r == null ? "n/a" : r.IsCompleted.ToString())})");
 		}
 
 		private int m_mcHistBatches, m_mcHistNullBatches, m_mcHistBars; private long m_mcHistLevels;   // cumulative history diagnostics
+		private int m_mcCallbacks; private volatile IDataLoaderResult m_mcResult; private bool m_mcStarted;   // loader diagnostics
 		private HashSet<string> m_mcDiagLogged;   // lazy: McBidAsk diagnostics already journaled (each once per run)
 
-		// Journal one diagnostic line once per key. Called under m_flowLock (DataLoader thread).
+		// Queue one diagnostic line once per key (any thread, under m_flowLock). Drained to the journal on the calc thread.
 		private void mcDiag(string key, string line)
 		{
 			if (m_mcDiagLogged == null) m_mcDiagLogged = new HashSet<string>();
 			if (!m_mcDiagLogged.Add(key)) return;
-			engineSink(ETraceLevel.Journal)?.Invoke(line);
+			enqueueFlowMsg(ETraceLevel.Journal, line);
+		}
+
+		// DataLoader callbacks run on another thread (PG §4.7.4) and must not touch Bars, Output, trace() or engineSink
+		// (MC: "Unaccessible property(method): Bars. Calculation thread only."). They queue plain strings; the calc thread drains.
+		private readonly object m_flowQueueLock = new object();
+		private List<KeyValuePair<ETraceLevel, string>> m_flowQueue = new List<KeyValuePair<ETraceLevel, string>>();
+
+		private void enqueueFlowMsg(ETraceLevel level, string msg)
+		{
+			lock (m_flowQueueLock) m_flowQueue.Add(new KeyValuePair<ETraceLevel, string>(level, msg));
+		}
+
+		// Thread-safe sink for engine delegates: the level filter is evaluated here (calc thread); the returned delegate only queues.
+		private Action<string> queueSink(ETraceLevel level)
+		{
+			if (!traceOn(level)) return null;
+			return s => enqueueFlowMsg(level, s);
+		}
+
+		// Calc thread only (CalcBar start, StopCalc).
+		private void drainFlowQueue()
+		{
+			List<KeyValuePair<ETraceLevel, string>> q;
+			lock (m_flowQueueLock)
+			{
+				if (m_flowQueue.Count == 0) return;
+				q = m_flowQueue; m_flowQueue = new List<KeyValuePair<ETraceLevel, string>>();
+			}
+			foreach (KeyValuePair<ETraceLevel, string> m in q) engineSink(m.Key)?.Invoke(m.Value);
 		}
 
 		// Typed PG §4.7.4 API: IDataLoaderResult.Data2 (BarPriceLevels[]) / RTData2 (BarPriceLevels?); BarPriceLevels.Levels
 		// (PriceLevel[]) and .Time; PriceLevel.Price / UpVolume / DownVolume (MC forum t=52737). No string lookups.
 		private void onMcLevels(IDataLoaderResult result)
 		{
-			lock (m_flowLock)
+			try
 			{
-				if (m_flow == null) return;
-				bool completed = false;
-				try
+				System.Threading.Interlocked.Increment(ref m_mcCallbacks);
+				lock (m_flowLock)
 				{
-					completed = result.IsCompleted;
-					mcDiag("event:" + result.Event + ":" + completed, $"OF McBidAsk diag event({result.Event}) isCompleted({completed})");
-					if (result.Event == DataLoadedEvent.History)
+					// Entry diagnostic before any null/m_flow check: typed members only (Event, IsCompleted, Data2, RTData2; PG §4.7.4 + API dump).
+					// No error/status field is documented on IDataLoaderResult, so none is logged.
+					try
 					{
-						BarPriceLevels[] data = result.Data2;
-						if (data == null) m_mcHistNullBatches++;
-						else foreach (BarPriceLevels bpl in data) { m_mcHistBars++; m_mcHistLevels += bpl.Levels == null ? 0 : bpl.Levels.Length; mcSet(bpl); }
-						m_mcHistBatches++;
-						// Cumulative over all history batches, logged once at completion.
-						if (completed) mcDiag("hist:done", $"OF McBidAsk diag history done batches({m_mcHistBatches}) nullData2Batches({m_mcHistNullBatches}) data2Bars({m_mcHistBars}) levels({m_mcHistLevels})");
+						if (result == null) mcDiag("entry:null", "OF McBidAsk diag entry result(null)");
+						else
+						{
+							BarPriceLevels[] d2 = result.Data2; BarPriceLevels? rt2 = result.RTData2;
+							mcDiag("entry:" + result.Event + ":" + result.IsCompleted + ":" + (d2 == null) + ":" + rt2.HasValue,
+								$"OF McBidAsk diag entry event({result.Event}) isCompleted({result.IsCompleted}) data2({(d2 == null ? "null" : d2.Length.ToString())}) rtData2HasValue({rt2.HasValue}) flow({(m_flow == null ? "null" : "set")})");
+						}
 					}
-					else if (result.Event == DataLoadedEvent.RTNewBar)
+					catch (Exception ex) { mcDiag("entryex:" + ex.GetType().Name, $"OF McBidAsk diag entry exception({ex.GetType().FullName}) message({ex.Message})"); }
+					if (m_flow == null || result == null) return;
+					bool completed = false;
+					try
 					{
-						BarPriceLevels? rt = result.RTData2;
-						mcDiag("rt:" + rt.HasValue, $"OF McBidAsk diag rt rtData2({(rt.HasValue ? "bar levels(" + (rt.Value.Levels == null ? 0 : rt.Value.Levels.Length) + ")" : "none")})");
-						if (rt.HasValue) mcSet(rt.Value);
+						completed = result.IsCompleted;
+						mcDiag("event:" + result.Event + ":" + completed, $"OF McBidAsk diag event({result.Event}) isCompleted({completed})");
+						if (result.Event == DataLoadedEvent.History)
+						{
+							BarPriceLevels[] data = result.Data2;
+							if (data == null) m_mcHistNullBatches++;
+							else foreach (BarPriceLevels bpl in data) { m_mcHistBars++; m_mcHistLevels += bpl.Levels == null ? 0 : bpl.Levels.Length; mcSet(bpl); }
+							m_mcHistBatches++;
+							// Cumulative over all history batches, logged once at completion.
+							if (completed) mcDiag("hist:done", $"OF McBidAsk diag history done batches({m_mcHistBatches}) nullData2Batches({m_mcHistNullBatches}) data2Bars({m_mcHistBars}) levels({m_mcHistLevels})");
+						}
+						else if (result.Event == DataLoadedEvent.RTNewBar)
+						{
+							BarPriceLevels? rt = result.RTData2;
+							mcDiag("rt:" + rt.HasValue, $"OF McBidAsk diag rt rtData2({(rt.HasValue ? "bar levels(" + (rt.Value.Levels == null ? 0 : rt.Value.Levels.Length) + ")" : "none")})");
+							if (rt.HasValue) mcSet(rt.Value);
+						}
 					}
+					catch (Exception ex)
+					{
+						mcDiag("ex:" + ex.GetType().Name, $"OF McBidAsk diag exception({ex.GetType().FullName}) message({ex.Message})");
+					}
+					// History completion stands even when parsing failed: the loaded line then reports bars(0).
+					if (completed && result.Event == DataLoadedEvent.History) m_mcHistoryDone = true;
 				}
-				catch (Exception ex)
-				{
-					mcDiag("ex:" + ex.GetType().Name, $"OF McBidAsk diag exception({ex.GetType().FullName}) message({ex.Message})");
-				}
-				// History completion stands even when parsing failed: the loaded line then reports bars(0).
-				if (completed && result.Event == DataLoadedEvent.History) m_mcHistoryDone = true;
 			}
+			catch (Exception ex) { enqueueFlowMsg(ETraceLevel.Journal, $"OF McBidAsk callback exception({ex.GetType().FullName}) message({ex.Message})"); }
 		}
 
 		private void mcSet(BarPriceLevels bpl)
@@ -777,21 +843,25 @@ namespace PowerLanguage.Strategy
 		// DataLoader callback: another thread (PG §4.7.4).
 		private void onFlowData(IDataLoaderResult result)
 		{
-			int stream = result.State is int ? (int)result.State : 0;
-			lock (m_flowLock)
+			try
 			{
-				if (m_flow == null) return;
-				if (result.Event == DataLoadedEvent.History)
+				int stream = result.State is int ? (int)result.State : 0;
+				lock (m_flowLock)
 				{
-					if (result.Data != null) foreach (Bar b in result.Data) flowTick(stream, b);
-					if (result.IsCompleted) m_flowHistoryDone[stream] = true;
-				}
-				else if (result.Event == DataLoadedEvent.RTNewBar && result.RTData.HasValue)
-				{
-					m_flowHistoryDone[stream] = true;
-					flowTick(stream, result.RTData.Value);
+					if (m_flow == null) return;
+					if (result.Event == DataLoadedEvent.History)
+					{
+						if (result.Data != null) foreach (Bar b in result.Data) flowTick(stream, b);
+						if (result.IsCompleted) m_flowHistoryDone[stream] = true;
+					}
+					else if (result.Event == DataLoadedEvent.RTNewBar && result.RTData.HasValue)
+					{
+						m_flowHistoryDone[stream] = true;
+						flowTick(stream, result.RTData.Value);
+					}
 				}
 			}
+			catch (Exception ex) { enqueueFlowMsg(ETraceLevel.Journal, $"OF tick loader callback exception({ex.GetType().FullName}) message({ex.Message})"); }
 		}
 
 		// Typed PowerLanguage Bar members (no reflection), confirmed by the API dump of the MC install:
@@ -813,6 +883,8 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"VPF-5 order flow (APPROXIMATED aggressor side, Rev 2.5 chain) tickSource({FlowTickSource}) quotes({FlowCfg.QuotesExpected}) " +
 					$"iog({Environment.IOGEnabled}) magnifier1Tick({IogMagnifierOneTick}) buildVolumeOn({FlowCfg.BuildVolumeOn}) maxQuoteAgeMs({FlowCfg.MaxQuoteAgeMs})");
 			}
+			if (!m_flowLoaderStarted && FlowCfg.McBidAsk != _OrderFlow.EMcBidAsk.Off)
+				lock (m_flowLock) mcDiag("gate", $"OF McBidAsk diag gate tickSource({FlowTickSource}) mcBidAsk({FlowCfg.McBidAsk}) startsLoader({FlowTickSource == EFlowTickSource.DataLoader})");
 			if (FlowTickSource == EFlowTickSource.DataLoader && !m_flowLoaderStarted) startFlowLoader();
 
 			bool realTime = Environment.IsRealTimeCalc;
