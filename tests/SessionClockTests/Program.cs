@@ -112,6 +112,33 @@ static class Program
 		Check(pt.ToEastern(T(2024, 3, 10, 2, 30)) == T(2024, 3, 10, 6, 30), "Pacific spring-forward gap moves +1h (03:30 PDT = 06:30 EDT)");
 		Check(pt.EasternOf(T(2024, 11, 3, 1, 30)) == T(2024, 11, 3, 4, 30), "Pacific fall-back ambiguous 01:30 resolves as standard (PST)");
 
+		// --- FromEastern (tick-chunk spec §5.1): inverse of ToEastern across both DST changes ---
+		{
+			var zones = new[] { new KeyValuePair<string, TimeZoneInfo>("Chicago", central), new KeyValuePair<string, TimeZoneInfo>("Local", null), new KeyValuePair<string, TimeZoneInfo>("Eastern", eastern) };
+			foreach (var z in zones)
+			{
+				var zc = new _CmeSessionClock(z.Value);
+				TimeZoneInfo src = z.Value ?? TimeZoneInfo.Local;
+				int n = 0, bad = 0;
+				foreach (var day in new[] { T(2026, 3, 7, 0, 0), T(2026, 10, 31, 0, 0), T(2024, 3, 9, 0, 0), T(2024, 11, 2, 0, 0) })
+					for (DateTime t = day; t < day.AddDays(3); t = t.AddMinutes(15))
+					{
+						if (src.IsInvalidTime(t)) continue;                          // bar-zone gap: no such bar time
+						DateTime et = zc.ToEastern(t);
+						if (zc.Eastern.IsAmbiguousTime(et) && !ReferenceEquals(src, eastern)) continue;   // ET wall time cannot name the instant
+						n++;
+						if (zc.FromEastern(et) != t && bad++ < 3) Console.WriteLine("FAIL FromEastern " + z.Key + " " + t.ToString("yyyy-MM-dd HH:mm") + " et " + et.ToString("HH:mm") + " -> " + zc.FromEastern(et).ToString("yyyy-MM-dd HH:mm"));
+					}
+				Check(bad == 0 && n > 500, "FromEastern(ToEastern(t)) == t, zone " + z.Key + " over " + n + " times (" + bad + " mismatches)");
+			}
+			var ch = new _CmeSessionClock(central);
+			Check(ch.FromEastern(T(2026, 9, 6, 17, 0)) == T(2026, 9, 6, 16, 0), "FromEastern Sunday 17:00 ET = 16:00 CT (chunk boundary)");
+			Check(ch.FromEastern(T(2026, 1, 5, 17, 0)) == T(2026, 1, 5, 16, 0), "FromEastern winter 17:00 ET = 16:00 CT");
+			Check(c.FromEastern(T(2026, 3, 8, 2, 30)) == T(2026, 3, 8, 2, 30), "FromEastern: Eastern bar zone is identity");
+			Check(ch.FromEastern(T(2026, 3, 8, 2, 30)) == T(2026, 3, 8, 1, 30), "FromEastern: ET gap 02:30 moves +1h (03:30 EDT = 01:30 CST)");
+			Check(ch.FromEastern(T(2026, 11, 1, 1, 30)) == T(2026, 11, 1, 1, 30), "FromEastern: ambiguous ET 01:30 resolves as EST (06:30 UTC = 01:30 CDT)");
+		}
+
 		// --- cache ---
 		var cc = new _CmeSessionClock(central);
 		DateTime bt = T(2024, 3, 13, 8, 30);
