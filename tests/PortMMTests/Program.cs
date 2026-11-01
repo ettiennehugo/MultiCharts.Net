@@ -635,6 +635,22 @@ static class Program
 			Check(fb && w.Count == 2 && w[0].EndsWith(")") && !w[0].Contains("using") && w[1] == $"PortMmConfig: '{tf3}' rejected, using ForProfile(Starter) (config=fallback)", "T-P25 Q9: Resolve logs the limits it uses for a rejected file");
 			w.Clear(); rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, null, w, inf, out fb);
 			Check(fb && w.Count == 1 && w[0].Contains("using ForProfile(ScaledBook)"), "T-P25 Q9: invalid code Config names ForProfile(P)");
+			// T-P26 (rev 2.7, PR-E; Analyst Q9 ruling, approved by Ettienne 2026-11-01): ConfigPath set but the file is missing /
+			// unreadable, or ConfigPath throws => config=fallback + Warning, code Config used
+			var cust = PortMmConfig.ForProfile(EPortProfile.Starter); cust.maxPositions = 1; w.Clear();
+			rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, "/nonexistent/m-port.json", w, inf, out fb);
+			Check(fb && rc.maxPositions == 1 && w.Count == 2 && w[0] == "PortMmConfig: file not found '/nonexistent/m-port.json'"
+				&& w[1] == "PortMmConfig: '/nonexistent/m-port.json' not loaded, using code Config (config=fallback)", "T-P26: missing file -> code Config, config=fallback, Warning");
+			string tdir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "portmm-dir-" + Guid.NewGuid().ToString("N")); System.IO.Directory.CreateDirectory(tdir); w.Clear();
+			rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, tdir, w, inf, out fb);
+			bool rjd, unr; var w2 = new List<string>(); PortMmConfigLoader.LoadFile(tdir, cust, w2, inf, out rjd, out unr); System.IO.Directory.Delete(tdir);
+			Check(fb && rc.maxPositions == 1 && w.Any(x => x.EndsWith("using code Config (config=fallback)")) && unr && !rjd, "T-P26: unreadable path (a directory) -> code Config, config=fallback");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, true, w, inf, out fb);
+			Check(fb && rc.maxPositions == 1 && w.Count == 1 && w[0] == "PortMmConfig: ConfigPath failed, using code Config (config=fallback)", "T-P26: ConfigPath threw -> code Config, config=fallback, Warning");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(null, EPortProfile.ScaledBook, "/nonexistent/m-port.json", w, inf, out fb);
+			Check(fb && rc.profile == EPortProfile.ScaledBook && w.Last().EndsWith("using ForProfile(ScaledBook) (config=fallback)"), "T-P26: invalid code Config + missing file -> ForProfile(P)");
+			w.Clear(); rc = PortMmConfigLoader.Resolve(cust, EPortProfile.Starter, null, false, w, inf, out fb);
+			Check(!fb && rc.maxPositions == 1 && w.Count == 0, "T-P26: no ConfigPath -> code Config, no fallback, silent");
 			var nj = new List<string>(); var stl = V(0, cl: "ES"); stl.stale = true;
 			MP(EPortProfile.Starter, null, nj).Decide(D0, 1000000, true, new List<PortStratView> { stl });
 			Check(nj.Any(x => x.Contains("skip") && x.Contains("stale") && x.Contains("heat $0.00 heat cap $15000.00 total cap $100000.00")), "T-P25 nit: pre-filter detail keeps heat, heat cap and total cap apart (" + string.Join(" | ", nj) + ")");

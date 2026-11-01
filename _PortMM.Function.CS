@@ -300,17 +300,25 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Spec §5.1a resolution: the subclass Config (invalid ⇒ ForProfile(profile)), then the JSON file (rejected ⇒
-		/// ForProfile(profile)). Never another profile. fallback = true when either was rejected (RUN line "config=fallback").</summary>
+		/// ForProfile(profile)); a set ConfigPath whose file is missing or unreadable ⇒ the code Config (rev 2.7, Analyst ruling approved
+		/// by Ettienne 2026-11-01). Never another profile. fallback = true in all three cases (RUN line / Status "config=fallback").</summary>
 		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, List<string> warnings, List<string> info, out bool fallback)
+		{ return Resolve(code, profile, path, false, warnings, info, out fallback); }
+
+		/// <summary>As Resolve; pathFailed = the ConfigPath property threw (the caller logged why): treated like an unreadable file,
+		/// i.e. the code Config with fallback = true and a Warning naming the limits used.</summary>
+		public static PortMmConfig Resolve(PortMmConfig code, EPortProfile profile, string path, bool pathFailed, List<string> warnings, List<string> info, out bool fallback)
 		{
 			fallback = false;
 			string err = code == null ? "null" : code.Validate();
 			if (err != null) { warnings.Add($"PortMmConfig: code Config invalid ({err}), using ForProfile({profile})"); code = PortMmConfig.ForProfile(profile); fallback = true; }
+			string used = fallback ? $"ForProfile({profile})" : "code Config";
+			if (pathFailed) { warnings.Add($"PortMmConfig: ConfigPath failed, using {used} (config=fallback)"); fallback = true; return code; }
 			if (string.IsNullOrWhiteSpace(path)) return code;
 			bool rejected, unreadable;
 			PortMmConfig c = LoadFile(path, code, warnings, info, out rejected, out unreadable);
 			if (rejected) { warnings.Add($"PortMmConfig: '{path}' rejected, using ForProfile({profile}) (config=fallback)"); c = PortMmConfig.ForProfile(profile); fallback = true; }
-			else if (unreadable) warnings.Add($"PortMmConfig: '{path}' not loaded, using {(fallback ? $"ForProfile({profile})" : "code Config")}");
+			else if (unreadable) { warnings.Add($"PortMmConfig: '{path}' not loaded, using {used} (config=fallback)"); fallback = true; }
 			return c;
 		}
 

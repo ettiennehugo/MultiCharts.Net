@@ -36,8 +36,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>
 		/// Optional JSON file that overrides Config field by field (spec §5.1; example samples/PortMmConfig.example.json).
 		/// Null/empty (default) = Config as is. Override in a subclass. A bad field value logs a Warning and keeps that field's
-		/// default; a rejected file logs a Warning and uses ForProfile(Profile) (config=fallback); a missing/unreadable file logs
-		/// a Warning and uses the code Config. The signal never throws because of the file.
+		/// default; a rejected file logs a Warning and uses ForProfile(Profile) (config=fallback); a missing/unreadable file, or a
+		/// ConfigPath that throws, logs a Warning and uses the code Config (config=fallback; rev 2.7). The signal never throws because of the file.
 		/// </summary>
 		protected virtual string ConfigPath { get { return null; } }
 
@@ -47,10 +47,10 @@ namespace PowerLanguage.Strategy
 			EPortProfile prof = Profile;
 			PortMmConfig code = null;
 			try { code = Config; } catch (Exception ex) { warnings.Add($"PortMmConfig: Config failed ({ex.Message})"); }
-			string path = null;
-			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.GetType().Name}: {ex.Message}), using code Config"); }
+			string path = null; bool pathFailed = false;
+			try { path = ConfigPath; } catch (Exception ex) { warnings.Add($"PortMmConfig: ConfigPath failed ({ex.GetType().Name}: {ex.Message})"); pathFailed = true; }
 			PortMmConfig cfg; bool fb;
-			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, warnings, info, out fb); }
+			try { cfg = PortMmConfigLoader.Resolve(code, prof, path, pathFailed, warnings, info, out fb); }
 			catch (Exception ex) { warnings.Add($"PortMmConfig: load failed ({ex.GetType().Name}: {ex.Message}), using ForProfile({prof})"); cfg = PortMmConfig.ForProfile(prof); fb = true; }
 			m_fallback = fb;
 			foreach (string w in warnings) Output.WriteLine("PORT Warning: " + w);
