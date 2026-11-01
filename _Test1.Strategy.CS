@@ -5,7 +5,7 @@ using PowerLanguage.Function;
 using ATCenterProxy.interop;
 
 namespace PowerLanguage.Strategy {
-    public class _Test1 : SignalObject {
+    public class _Test1 : _VolumeProfileFuturesBase {
         //constants
 
         
@@ -16,23 +16,30 @@ namespace PowerLanguage.Strategy {
 
 
         //attribute
-        private IOrderMarket m_le;
 
+        
         //interface methods
-        public _Test1(object _ctx):base(_ctx){}
+        public _Test1(object _ctx):base(_ctx){
+            OrderFlowEnabled = true;
+            FlowCfg.McBidAsk = _OrderFlow.EMcBidAsk.Prefer; 
+            MinNodeTicks = 3;
+            McBidAskChartType = ChartType.FootPrint;
+        }
 
         protected override void Create() {
             // create variable objects, function objects, order objects etc.
-            m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, EOrderAction.Buy));
+            base.Create();
         }
 
         protected override void StartCalc() {
-            // assign inputs 
+            // assign inputs
+            base.StartCalc();
+         
         }
 
         protected override void CalcBar(){
             // strategy logic 
-            m_le.Send();
+            base.CalcBar();
         }
 
         //methods
