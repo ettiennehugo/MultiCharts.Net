@@ -386,7 +386,7 @@ static class Program
 
 			// source guard: the strategy's DataLoader callbacks and their helpers must not reference calc-thread-only members
 			string src = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
-			string[] offThread = { "onFlowData", "onMcLevels", "flowTick", "mcSet", "mcDiag", "enqueueFlowMsg" };
+			string[] offThread = { "onFlowData", "onMcLevels", "flowTick", "mcSet", "mcDiag", "enqueueFlowMsg", "onChunkData", "releaseChunks" };   // + tick-chunk spec §5.2 callback helpers
 			string[] banned = { "Bars.", "Bars[", "Output", "trace(", "engineSink", "Environment.", "ToEastern", "clock()", "tickSize()", "BarsOfData", "StatusLine" };
 			foreach (string m in offThread)
 			{
@@ -481,6 +481,78 @@ static class Program
 			Check(g.RecalcSignature == "t" && g.RecalcCount == 1, "RG9 NoteRecalc restarts the count on a new signature");
 			Check(OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipNoMissed) == "noMissedBars" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipGuard) == "guard"
 				&& OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipAutoTrading) == "autoTrading" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipDisabled) == "disabled", "RG10 skip reasons");
+		}
+
+		// ---- Tick-chunk spec §7.3: CloseBar backlog ----
+		{
+			var eb1 = Engine(false);
+			eb1.CloseBar(Bar(1, Ms(100), Regime.BarsOnly, vol: 1, up: 1));
+			eb1.CloseBar(Bar(2, Ms(200), Regime.BarsOnly, vol: 1, up: 1));
+			eb1.CloseBar(Bar(3, Ms(300), Regime.BarsOnly, vol: 1, up: 1));
+			eb1.AddTrade(Ms(50), 100.00, 2); eb1.AddTrade(Ms(150), 100.25, 3); eb1.AddTrade(Ms(300), 100.50, 4);   // late: bars 1-3
+			eb1.AddTrade(Ms(350), 100.75, 5);                                                                      // bar 4
+			var f4 = eb1.CloseBar(Bar(4, Ms(400)));
+			Check(f4.BacklogTrades == 3 && eb1.BacklogDropped == 3 && Near(f4.Buy + f4.Sell, 5), "BL1 trades of closed BarsOnly bars are backlog, not added to bar 4");
+			var eb2 = Engine(false);
+			var bi = Bar(1, Ms(200)); bi.OpenTime = Ms(100);
+			eb2.AddTrade(Ms(50), 100.00, 2); eb2.AddTrade(Ms(150), 100.25, 3);
+			var g1 = eb2.CloseBar(bi);
+			Check(g1.BacklogTrades == 1 && Near(g1.Buy + g1.Sell, 3), "BL2 first bar: trades at or before OpenTime are backlog");
+			var eb3 = Engine(false);
+			eb3.AddTrade(Ms(50), 100.00, 2); var g3 = eb3.CloseBar(Bar(1, Ms(100)));
+			eb3.AddTrade(Ms(150), 100.25, 3); var g4 = eb3.CloseBar(Bar(2, Ms(200)));
+			Check(g3.BacklogTrades == 0 && g4.BacklogTrades == 0 && eb3.BacklogDropped == 0, "BL3 in-order trades are never backlog");
+		}
+
+		// ---- Tick-chunk spec §5.1: Globex day plan ----
+		{
+			var b17 = new TimeSpan(17, 0, 0);
+			var pd = OF.PlanGlobexDays(new DateTime(2026, 9, 1), new DateTime(2026, 9, 18), null, b17);
+			Check(pd.Count == 14, "TC1 Sep 1-18 2026: 14 weekdays");
+			bool contiguous = true;
+			for (int i = 1; i < pd.Count; i++)
+				if (pd[i].GlobexDate.DayOfWeek != DayOfWeek.Monday && pd[i].FromEt != pd[i - 1].ToEt) contiguous = false;
+			var mon = pd.First(d => d.GlobexDate == new DateTime(2026, 9, 14));
+			Check(contiguous && mon.FromEt == new DateTime(2026, 9, 13, 17, 0, 0) && mon.ToEt == new DateTime(2026, 9, 14, 17, 0, 0), "TC2 contiguous within a week; Monday starts Sunday 17:00 ET");
+			var closed = new List<DateTime>();
+			var pl = OF.PlanGlobexDays(new DateTime(2026, 9, 1), new DateTime(2026, 9, 18), d => d == new DateTime(2026, 9, 7), b17, closed);
+			Check(pl.Count == 13 && closed.Count == 1 && closed[0] == new DateTime(2026, 9, 7) && pl.All(d => d.GlobexDate.DayOfWeek != DayOfWeek.Saturday && d.GlobexDate.DayOfWeek != DayOfWeek.Sunday), "TC3 closed day and weekends skipped, closed day reported");
+		}
+
+		// ---- Tick-chunk spec §5.1: scheduler ----
+		{
+			var b17 = new TimeSpan(17, 0, 0);
+			var days = OF.PlanGlobexDays(new DateTime(2026, 9, 1), new DateTime(2026, 9, 3), null, b17);
+			var st = new[] { 0, 1 };
+			var s1 = new OF.TickChunkScheduler(days, st, 1, 4, 1000);
+			var n1 = s1.Next(DateTime.MinValue, true, null);
+			Check(n1.Count == 2 && n1.All(c => c.DayIndex == 0 && c.State == OF.ChunkState.InFlight) && s1.Next(DateTime.MinValue, true, null).Count == 0, "TS1 MaxInFlight 1: one day (both streams) at a time");
+			Check(s1.Find(1000) != null && s1.Find(1000).Stream == 0 && s1.NextId == 1006 && s1.Pending() == 6, "TS2 unique ids from the seed, all pending");
+			Check(s1.Complete(n1[0], true, 10, null) == "done" && s1.ReleasableInOrder().Count == 1 && !s1.ReadyAt(days[0].FromEt.AddHours(5)), "TS3 one stream done: released, bar not ready");
+			s1.Complete(n1[1], true, 7, null);
+			Check(s1.ReleasableInOrder().Count == 1 && s1.ReadyAt(days[0].FromEt.AddHours(5)) && s1.ReadyAt(days[0].ToEt) && !s1.ReadyAt(days[1].FromEt.AddHours(1)), "TS4 day ready on both streams; next day not");
+			var n2 = s1.Next(DateTime.MinValue, true, null);
+			Check(n2.Count == 2 && n2.All(c => c.DayIndex == 1), "TS5 next day issued");
+			var c0 = n2.First(c => c.Stream == 0);
+			Check(s1.Complete(c0, false, 0, null) == "split4", "TS6 first failure splits into 4");
+			var n3 = s1.Next(DateTime.MinValue, true, null);
+			Check(n3.Count == 4 && n3.All(c => c.Sub > 0 && c.Stream == 0 && c.Attempt == 2) && n3[0].FromEt == days[1].FromEt && n3[3].ToEt == days[1].ToEt && n3[1].FromEt == n3[0].ToEt, "TS7 sub-windows issued while the day is in flight, contiguous");
+			Check(s1.Complete(n3[1], false, 0, null) == "giveUp", "TS8 a failed sub-window gives up");
+			foreach (var c in n3) if (c != n3[1]) s1.Complete(c, true, 1, null);
+			s1.Complete(n2.First(c => c.Stream == 1), true, 1, null);
+			var rel = s1.ReleasableInOrder();
+			Check(rel.Count == 4 && !s1.ReadyAt(n3[1].ToEt) && s1.ReadyAt(n3[2].ToEt), "TS9 released in order past the failed sub; its bars not ready, later ones are");
+			var s3 = new OF.TickChunkScheduler(days, st, 3, 4, 2000);
+			Check(s3.Next(DateTime.MinValue, true, null).Count == 6, "TS10 MaxInFlight 3: all three days");
+			var s4 = new OF.TickChunkScheduler(days, st, 1, 4, 3000);
+			var sk = new List<OF.TickChunk>();
+			var n4 = s4.Next(days[1].ToEt.AddHours(1), true, sk);
+			Check(sk.Count == 4 && sk.All(c => c.State == OF.ChunkState.Skipped && c.SkipReason == "late") && n4.Count == 2 && n4.All(c => c.DayIndex == 2 && c.Rt), "TS11 late days skipped, the last (RT) day never");
+			var s5 = new OF.TickChunkScheduler(days, st, 1, 4, 4000);
+			Check(s5.Next(days[2].ToEt.AddHours(1), false, null).Count == 2 && s5.All().Count(c => c.Rt) == 2 && !s5.All().First().Rt, "TS12 Load mode requests late days; only the last day is RT");
+			foreach (var c in n4) s4.Complete(c, true, 1, null);
+			s4.ReleasableInOrder();
+			Check(s4.ReadyAt(days[2].ToEt.AddHours(30)) && !s4.ReadyAt(days[0].ToEt) && s4.Pending() == 0, "TS13 RT chunk covers bars after its window; skipped days not ready; nothing pending");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

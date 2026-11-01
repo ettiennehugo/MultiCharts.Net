@@ -151,6 +151,20 @@ namespace PowerLanguage.Function
 			return TimeZoneInfo.ConvertTime(t, src, m_est);
 		}
 
+		/// <summary>
+		/// Tick-chunk spec §5.1: the inverse of ToEastern. A US Eastern wall time converted to BarTimeZone (DST-aware); identity when
+		/// the bar zone is Eastern. An Eastern spring-forward gap time moves forward 1h; an ambiguous Eastern fall-back time resolves
+		/// as standard time. Returns Kind = Unspecified.
+		/// </summary>
+		public DateTime FromEastern(DateTime et)
+		{
+			DateTime t = DateTime.SpecifyKind(et, DateTimeKind.Unspecified);
+			if (m_barIsEastern) return t;
+			if (m_est.IsInvalidTime(t)) t = t.AddHours(1);
+			TimeZoneInfo dst = m_barTz ?? TimeZoneInfo.Local;
+			return DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(t, m_est, dst), DateTimeKind.Unspecified);
+		}
+
 		// ---- bar-time API (cached per bar time) ----
 		/// <summary>US Eastern time of a bar time (cached).</summary>
 		public DateTime EasternOf(DateTime barTime) { ensureBarCache(barTime); return m_cacheEt; }

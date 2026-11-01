@@ -32,6 +32,9 @@ namespace PowerLanguage.Function
 		public enum FlowSource { Aggressor = 0, McBidAsk = 1, Quote = 2, TickRule = 3, BarUpDown = 4, Unavailable = 5 }
 		/// <summary>Spec S1: MultiCharts' own Ask/Bid-traded split (Volume Delta levels). Off until probes P-BA1..4 pass.</summary>
 		public enum EMcBidAsk { Off = 0, Prefer = 1, CrossCheckOnly = 2 }
+		/// <summary>Tick-chunk spec §5.2: a day whose window ends before the last closed bar: Skip = not requested (its ticks could no
+		/// longer be used), Load = requested anyway.</summary>
+		public enum ETickChunkLate { Skip = 0, Load = 1 }
 		/// <summary>Method tag of the McBidAsk tier: quote-classified by MC, NOT aggressor.</summary>
 		public const string McBidAskMethod = "McBidAsk(quote-classified, not aggressor; MC rule: inside-spread trade -> last recorded side, UM p35/p159)";
 		/// <summary>Quality tag (lower = better). A combined value takes the worst (highest) tag of its parts.</summary>
@@ -95,6 +98,18 @@ namespace PowerLanguage.Function
 			/// <summary>Fallback (spec §4.3 step 6), off: call ExecControl.Recalculate() from the DataLoader callback when the history
 			/// completes. PROBE P-RC2/P-RC3 decide whether this becomes the default.</summary>
 			public bool McRecalcFromCallback = false;
+			/// <summary>Tick-chunk spec §5: one DataLoader request per Globex day and stream. false = the legacy single request (A/B only).</summary>
+			public bool TickChunkByDay = true;
+			/// <summary>Days requested at the same time (1..4; all streams of a day together).</summary>
+			public int TickChunkMaxInFlightDays = 1;
+			/// <summary>A failed day is re-requested once as this many equal sub-windows; 0 = no retry.</summary>
+			public int TickChunkSplitOnFail = 4;
+			public ETickChunkLate TickChunkLate = ETickChunkLate.Skip;
+			/// <summary>Bounded wait (ms) at the first bar of each Globex day for that day's chunks; 0 = off. With a wait, late days are
+			/// loaded (not skipped). PROBE P-RC7: DataLoader callbacks arrive while the calc thread sleeps.</summary>
+			public int TickChunkWaitMs = 0;
+			/// <summary>Chunk boundary, US Eastern (CME daily halt start), so no tick straddles two chunks.</summary>
+			public TimeSpan TickChunkBoundaryEt = new TimeSpan(17, 0, 0);
 		}
 
 		/// <summary>Data the caller has for the bar being closed (Data1 values).</summary>
@@ -106,6 +121,9 @@ namespace PowerLanguage.Function
 			public DateTime ResetKey;        // CumDelta resets when this changes (Session or RTH key, caller's choice)
 			public Regime Regime;
 			public double High, Low, Close, Volume, UpTicks, DownTicks;
+			/// <summary>Spec §7.3: the bar's open (previous bar's time; first bar: CloseTime − bar duration). Trades at or before
+			/// max(OpenTime, previous CloseBar's CloseTime) are backlog and not added. Default (MinValue) = no bound.</summary>
+			public DateTime OpenTime;
 		}
 
 		public struct Imbalance
@@ -137,6 +155,7 @@ namespace PowerLanguage.Function
 			public double ChainDelta = double.NaN;              // S1: delta of the Quote/TickRule/BarUpDown chain before an MC set replaced it (T9 cross-check)
 			public string McMiss;                               // S1: null, "missing" or "volMismatch" when McBidAsk is on and no set was used
 			public bool FirstAfterConnect;                      // first built bar: ticks before the feed started are missing
+			public int BacklogTrades;                           // spec §7.3: trades stamped before this bar's open, popped and not added
 			public double TradeHigh = double.NaN, TradeLow = double.NaN, BarHigh, BarLow, BarClose;
 			internal readonly SortedDictionary<long, double[]> Ladder = new SortedDictionary<long, double[]>();   // row -> {bid, ask}
 			public double Tick;
@@ -218,6 +237,11 @@ namespace PowerLanguage.Function
 			private int m_dropped;
 			private DateTime m_droppedResetKey;
 			// first quality downgrade per session (journal)
+			// spec §7.3: CloseTime of the previous CloseBar; trades at or before it are backlog
+			private DateTime m_lastClose = DateTime.MinValue;
+			private bool m_backlogLogged;
+			/// <summary>Spec §7.3: backlog trades dropped so far (all bars).</summary>
+			public long BacklogDropped;
 			private DateTime m_qSession = DateTime.MinValue;
 			private FlowQuality m_qWorst = FlowQuality.Exact;
 			private bool m_qStarted, m_qLogged;
@@ -310,9 +334,17 @@ namespace PowerLanguage.Function
 				bool tickRegime = b.Regime == Regime.TickStream || b.Regime == Regime.IogRealTime || b.Regime == Regime.IogMagnifierOneTick;
 				bool quotes = b.Regime == Regime.TickStream && Cfg.QuotesExpected;
 				// always consume this bar's events, whatever the regime, so later bars never see them
+				DateTime backlogCut = b.OpenTime > m_lastClose ? b.OpenTime : m_lastClose;
 				while (m_trades.HasNext(b.CloseTime))
 				{
 					Ev t = m_trades.Pop();
+					if (t.Time <= backlogCut)
+					{
+						// spec §7.3: delivered after its bar closed (e.g. as BarsOnly) - not this bar's trade. Only the tick rule's last price moves.
+						fp.BacklogTrades++;
+						m_rule.Classify(t.Price);
+						continue;
+					}
 					Side s;
 					if (quotes)
 					{
@@ -330,6 +362,16 @@ namespace PowerLanguage.Function
 					else if (tickRegime) { m_rule.Observe(t.Price, s); }
 				}
 				if (quotes) applyQuotes(b.CloseTime);
+				if (b.CloseTime > m_lastClose) m_lastClose = b.CloseTime;
+				if (fp.BacklogTrades > 0)
+				{
+					BacklogDropped += fp.BacklogTrades;
+					if (!m_backlogLogged && journal != null)
+					{
+						m_backlogLogged = true;
+						journal("OF tick backlog dropped bar(" + b.BarNumber + ") trades(" + fp.BacklogTrades + ") before(" + backlogCut.ToString("yyyy-MM-dd HH:mm:ss") + ") (once; total in BacklogDropped)");
+					}
+				}
 
 				if (b.Regime == Regime.IogHistoryNoMagnifier || Cfg.BuildVolumeOn == VolumeBasis.TickCount)
 					clearToUnavailable(fp);
@@ -367,7 +409,7 @@ namespace PowerLanguage.Function
 					m_droppedResetKey = m_bars[0].ResetKey;
 					m_inputs.Remove(m_bars[0].BarNumber); m_bars.RemoveAt(0);
 					if (m_dropped++ == 0 && warnOnce != null)
-						warnOnce("OF MaxBars cap " + BarCap + " hit at bar " + fp.BarNumber + ": oldest footprints dropped; CumDelta of a reset period longer than the cap is Truncated");
+						warnOnce("OF MaxBars cap " + BarCap + " hit at bar " + fp.BarNumber + ": oldest footprints dropped; CumDelta is Truncated only if a reset period exceeds the cap");
 				}
 				return fp;
 			}
@@ -640,6 +682,194 @@ namespace PowerLanguage.Function
 					case RecalcDecision.SkipAutoTrading: return "autoTrading";
 					case RecalcDecision.SkipDisabled: return "disabled";
 					default: return d.ToString();
+				}
+			}
+		}
+		/// <summary>Tick-chunk spec §5.1: one Globex day's tick window, US Eastern: [GlobexDate − 1 day + boundary, GlobexDate + boundary).</summary>
+		public struct DayChunk { public DateTime GlobexDate, FromEt, ToEt; }
+
+		/// <summary>Tick-chunk spec §5.1: one chunk per Globex date in [firstGx, lastGx] that is not Saturday, Sunday or closed.
+		/// Monday's chunk starts Sunday at the boundary. closedOut (optional) receives the closed weekdays.</summary>
+		public static List<DayChunk> PlanGlobexDays(DateTime firstGx, DateTime lastGx, Func<DateTime, bool> closedDay, TimeSpan boundaryEt, List<DateTime> closedOut = null)
+		{
+			var days = new List<DayChunk>();
+			for (DateTime d = firstGx.Date; d <= lastGx.Date; d = d.AddDays(1))
+			{
+				if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+				if (closedDay != null && closedDay(d)) { if (closedOut != null) closedOut.Add(d); continue; }
+				days.Add(new DayChunk { GlobexDate = d, FromEt = d.AddDays(-1) + boundaryEt, ToEt = d + boundaryEt });
+			}
+			return days;
+		}
+
+		public enum ChunkState { Pending = 0, InFlight = 1, Done = 2, Failed = 3, Skipped = 4 }
+
+		/// <summary>Tick-chunk spec §5.1: one request (day, stream, sub-window). ReqFrom/ReqTo are the window in the request (bar) zone,
+		/// set by the caller on the calc thread. Payload is the caller's tick buffer until the chunk is released.</summary>
+		public sealed class TickChunk
+		{
+			public int Id, DayIndex, Stream, Sub, Attempt;
+			public DateTime Day, FromEt, ToEt, ReqFrom, ReqTo;
+			public ChunkState State;
+			/// <summary>Subscribe2RT: the last sub-window of the last day; it also covers every bar after ToEt.</summary>
+			public bool Rt;
+			/// <summary>Failed and replaced by its sub-windows.</summary>
+			public bool Replaced;
+			/// <summary>Its ticks were handed to the engine (or there were none to hand).</summary>
+			public bool Released;
+			public long Ticks, LateDropped;
+			public DateTime IssuedAt;
+			public object Payload;
+			public string SkipReason;
+			public bool Finished { get { return State == ChunkState.Done || State == ChunkState.Failed || State == ChunkState.Skipped; } }
+		}
+
+		/// <summary>Tick-chunk spec §5.1 (pure, no MultiCharts types): Pending → InFlight → Done | Failed | Skipped per (day, stream).
+		/// Not thread-safe: the caller locks.</summary>
+		public sealed class TickChunkScheduler
+		{
+			private readonly List<TickChunk>[] m_byStream;       // per stream, in time order (sub-windows in place of a replaced chunk)
+			private readonly Dictionary<int, TickChunk> m_byId = new Dictionary<int, TickChunk>();
+			public readonly int[] Streams;
+			public readonly int Days, MaxInFlightDays, SplitOnFail;
+			public readonly DateTime FirstDay, LastDay;
+			/// <summary>Next id to hand out (ids are unique across schedulers when the caller seeds with the previous NextId).</summary>
+			public int NextId;
+
+			public TickChunkScheduler(List<DayChunk> days, int[] streams, int maxInFlightDays, int splitOnFail, int firstId)
+			{
+				Streams = streams;
+				Days = days.Count;
+				MaxInFlightDays = Math.Max(1, Math.Min(4, maxInFlightDays));
+				SplitOnFail = Math.Max(0, splitOnFail);
+				NextId = firstId;
+				if (days.Count > 0) { FirstDay = days[0].GlobexDate; LastDay = days[days.Count - 1].GlobexDate; }
+				m_byStream = new List<TickChunk>[streams.Length];
+				for (int si = 0; si < streams.Length; si++)
+				{
+					m_byStream[si] = new List<TickChunk>(days.Count);
+					for (int di = 0; di < days.Count; di++)
+						m_byStream[si].Add(add(new TickChunk { DayIndex = di, Day = days[di].GlobexDate, Stream = streams[si], FromEt = days[di].FromEt, ToEt = days[di].ToEt, Rt = di == days.Count - 1 }));
+				}
+			}
+
+			private TickChunk add(TickChunk c) { c.Id = NextId++; m_byId[c.Id] = c; return c; }
+
+			public TickChunk Find(int id) { TickChunk c; return m_byId.TryGetValue(id, out c) ? c : null; }
+
+			/// <summary>All chunks (replaced ones included), stream by stream in time order.</summary>
+			public IEnumerable<TickChunk> All() { foreach (var l in m_byStream) foreach (var c in l) yield return c; }
+
+			private IEnumerable<TickChunk> live() { foreach (var l in m_byStream) foreach (var c in l) if (!c.Replaced) yield return c; }
+
+			/// <summary>Chunks to request now (marked InFlight, Attempt counted): the earliest days with pending chunks, up to
+			/// MaxInFlightDays days in flight. With skipLate, a pending chunk of a day other than the last whose window ends at or before
+			/// calcPositionEt is marked Skipped(late) and returned in skipped.</summary>
+			public List<TickChunk> Next(DateTime calcPositionEt, bool skipLate, List<TickChunk> skipped)
+			{
+				var issue = new List<TickChunk>();
+				List<TickChunk>[] pendingByDay = null;   // lazy: nothing pending → no allocation
+				var inFlight = new HashSet<int>();
+				foreach (var c in live())
+				{
+					if (c.State == ChunkState.InFlight) inFlight.Add(c.DayIndex);
+					else if (c.State == ChunkState.Pending)
+					{
+						if (pendingByDay == null) pendingByDay = new List<TickChunk>[Days];
+						if (pendingByDay[c.DayIndex] == null) pendingByDay[c.DayIndex] = new List<TickChunk>();
+						pendingByDay[c.DayIndex].Add(c);
+					}
+				}
+				if (pendingByDay == null) return issue;
+				for (int di = 0; di < Days; di++)
+				{
+					if (pendingByDay[di] == null) continue;
+					bool any = false;
+					foreach (var c in pendingByDay[di])
+					{
+						if (skipLate && !c.Rt && c.DayIndex != Days - 1 && c.ToEt <= calcPositionEt)
+						{
+							c.State = ChunkState.Skipped; c.SkipReason = "late"; c.Released = true;
+							if (skipped != null) skipped.Add(c);
+							continue;
+						}
+						if (!inFlight.Contains(di) && inFlight.Count >= MaxInFlightDays) break;   // a day already in flight may still get its (sub-)chunks
+						c.State = ChunkState.InFlight; c.Attempt++;
+						issue.Add(c); any = true;
+					}
+					if (any) inFlight.Add(di);
+				}
+				return issue;
+			}
+
+			/// <summary>Record the outcome of an in-flight chunk. A first failure with SplitOnFail > 0 replaces it with SplitOnFail equal
+			/// sub-windows (Pending; returns "split" + N); otherwise it stays Failed ("giveUp"). ok returns "done".</summary>
+			public string Complete(TickChunk c, bool ok, long ticks, object payload)
+			{
+				if (c == null || c.State != ChunkState.InFlight) return null;
+				if (ok) { c.State = ChunkState.Done; c.Ticks = ticks; c.Payload = payload; return "done"; }
+				c.State = ChunkState.Failed; c.Payload = null; c.Released = true;
+				if (SplitOnFail <= 0 || c.Attempt > 1 || c.Sub != 0) return "giveUp";
+				c.Replaced = true;
+				var list = m_byStream[Array.IndexOf(Streams, c.Stream)];
+				int at = list.IndexOf(c);
+				long span = (c.ToEt - c.FromEt).Ticks / SplitOnFail;
+				for (int k = 0; k < SplitOnFail; k++)
+				{
+					DateTime f = c.FromEt.AddTicks(span * k), t = k == SplitOnFail - 1 ? c.ToEt : c.FromEt.AddTicks(span * (k + 1));
+					list.Insert(at + 1 + k, add(new TickChunk { DayIndex = c.DayIndex, Day = c.Day, Stream = c.Stream, Sub = k + 1, FromEt = f, ToEt = t,
+						Attempt = 1, Rt = c.Rt && k == SplitOnFail - 1 }));
+				}
+				return "split" + SplitOnFail;
+			}
+
+			/// <summary>Done, unreleased chunks whose earlier chunks (same stream) are all finished, in time order; marked Released.</summary>
+			public List<TickChunk> ReleasableInOrder()
+			{
+				var r = new List<TickChunk>();
+				foreach (var l in m_byStream)
+					foreach (var c in l)
+					{
+						if (c.Replaced) continue;
+						if (!c.Finished) break;
+						if (c.State == ChunkState.Done && !c.Released) { c.Released = true; r.Add(c); }
+					}
+				return r;
+			}
+
+			/// <summary>The bar closing at closeEt (US Eastern) can use the tick tier: for every stream, the chunk covering it
+			/// (FromEt &lt; closeEt &lt;= ToEt; the RT chunk also covers everything after) is Done and released.</summary>
+			public bool ReadyAt(DateTime closeEt)
+			{
+				foreach (var l in m_byStream)
+				{
+					TickChunk cover = null;
+					foreach (var c in l)
+					{
+						if (c.Replaced) continue;
+						if (c.FromEt >= closeEt) break;
+						if (closeEt <= c.ToEt || c.Rt) { cover = c; break; }
+					}
+					if (cover == null || cover.State != ChunkState.Done || !cover.Released) return false;
+				}
+				return m_byStream.Length > 0;
+			}
+
+			/// <summary>Chunks not finished, or finished Done but not yet released.</summary>
+			public int Pending()
+			{
+				int n = 0;
+				foreach (var c in live()) if (!c.Finished || (c.State == ChunkState.Done && !c.Released)) n++;
+				return n;
+			}
+
+			public void Summary(out int done, out int failed, out int skipped, out long ticks, out long lateDropped)
+			{
+				done = failed = skipped = 0; ticks = lateDropped = 0;
+				foreach (var c in live())
+				{
+					if (c.State == ChunkState.Done) done++; else if (c.State == ChunkState.Failed) failed++; else if (c.State == ChunkState.Skipped) skipped++;
+					ticks += c.Ticks; lateDropped += c.LateDropped;
 				}
 			}
 		}
