@@ -668,7 +668,7 @@ namespace PowerLanguage.Strategy
 			// MC forum t=52737 (MC support): Data2 stays null unless the FootPrint resolution is built with CreateFootPrint
 			// (delta + footprint modes). Other chart types: set the enum directly.
 			if (McBidAskChartType == ChartType.FootPrint)
-				res = Resolution.CreateFootPrint(res.Type, (int)res.Size, CumulativeDeltaChartType.ASK_TRADE_BID_TRADE, FootPrintChartType.BID_ASK_VOL, false);
+				res = Resolution.CreateFootPrint(res.Type, res.Size, CumulativeDeltaChartType.ASK_TRADE_BID_TRADE, FootPrintChartType.BID_ASK_VOL, false);
 			else
 				res.ChartType = McBidAskChartType;
 			req.Resolution = res;
@@ -736,9 +736,9 @@ namespace PowerLanguage.Strategy
 			for (int k = 0; k < levels.Length; k++)
 			{
 				// CumulativeDeltaChartType.ASK_TRADE_BID_TRADE: Up = Ask traded, Down = Bid traded (P-BA2, unverified mapping)
-				px[k] = (double)levels[k].Price;
-				ask[k] = (double)levels[k].UpVolume;
-				bid[k] = (double)levels[k].DownVolume;
+				px[k] = levels[k].Price;
+				ask[k] = levels[k].UpVolume;
+				bid[k] = levels[k].DownVolume;
 			}
 			m_flow.AddMcLevels(t, px, ask, bid);
 			m_mcLoaded++;
@@ -794,13 +794,13 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Typed PowerLanguage Bar members (no reflection): Close = PG v1.1 §4.7.4 DataLoader example (m_EURAUD[index].Close);
-		// TotalVolume = MC forum t=13113 (tick.TotalVolume over DataLoader Bar[]); Time = unconfirmed (no doc/forum sample found).
+		// Typed PowerLanguage Bar members (no reflection), confirmed by the API dump of the MC install:
+		// struct Bar { DateTime Time; double Open/High/Low/Close; float UpVolume/DownVolume/UnchangedVolume/TotalVolume; ... }.
 		private void flowTick(int stream, Bar b)
 		{
 			DateTime t = b.Time;
-			double close = (double)b.Close;
-			if (stream == 0) m_flow.AddTrade(t, close, (double)b.TotalVolume);
+			double close = b.Close;
+			if (stream == 0) m_flow.AddTrade(t, close, (double)b.TotalVolume);   // Bar.TotalVolume is float: explicit widening to double
 			else m_flow.AddQuote(t, stream == 1, close);
 		}
 
