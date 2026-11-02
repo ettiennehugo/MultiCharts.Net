@@ -24,6 +24,8 @@ namespace PowerLanguage.Strategy
 	//   _CustomSignal.Strategy.CS   (PR-D9a: dvpFeed / dvpFinish hooks)
 	//   _DvpEngineTest.Strategy.CS  (this file)
 	//   then File → Compile all (_VolumeProfileBase / _VolumeProfileFuturesBase read DvpConfig and must be rebuilt).
+	//   Or build via PLStudies.csproj: both new files are listed there (<Compile Include> next to _DvpEngine / _TestGate0), and
+	//   tests/RepoLintTests fails when a root _*.Function/Strategy/Indicator.CS is missing from it.
 	//
 	// MULTICHARTS RUN STEPS (exact)
 	//   1. New chart: symbol @ES (CME E-mini S&P 500 continuous, dxFeed, NOT back-adjusted), Data1 = 15 Minute, chart type Regular.
@@ -33,41 +35,49 @@ namespace PowerLanguage.Strategy
 	//      (later data is harmless: it is withheld from DVP, see HOLDOUT).
 	//   2. Insert → Instrument: @ES again as Data2 = 60 Minute, same session template, same time zone, same From date 2016-01-01,
 	//      and again Format Instrument → Settings → Build Volume On = Trade Volume for Data2.
-	//   3. Insert this strategy. Format Signals → _DvpEngineTest → Inputs: TraceLevel = Journal (the only input; inherited).
+	//   3. Insert this strategy. Format Signals → _DvpEngineTest → Inputs: set TraceLevel = Journal; leave every other input at its
+	//      default (_VolumeProfileBase adds about 30 inherited inputs; this strategy adds none).
 	//      Properties: Maximum number of bars study will reference = User defined, 50 (NOT Auto-detect: an auto-detect restart
 	//      recalculates from the first bar, and a different value moves the first calculated bar, i.e. the start of the degree path,
-	//      Q21). The setup line prints it (maxBarsBack, ExecInfo.MaxBarsBack) and flags any other value. Bar Magnifier off (no orders).
+	//      Q21). With 50, Data2's (60 Minute) MaxBarsBack skip makes the first calculated bar about Tue 2016-01-05 evening ET, inside
+	//      the setup check's chart-start window. The setup line prints it (maxBarsBack, ExecInfo.MaxBarsBack) and flags any other
+	//      value (Warning in the log AND in the Output window). Bar Magnifier off (no orders).
 	//      Nothing else to set: RollDetection = Table (EventRules.RollDate, 2015-2025, ES quarterly rolls only: the setup line warns
 	//      when the Data1 root is not ES) and every DvpConfig field are set in code.
-	//   4. Let it calculate to the last bar (it writes the report on Bars.LastBarOnChart; if it is stopped early nothing is reported).
+	//   4. Let it calculate to the last bar (it writes the report on Bars.LastBarOnChart; if it is stopped early nothing is reported);
+	//      expect a few minutes. Don't open the CSV in Excel or an editor while it runs (a lock drops lines).
 	//      The log is %LOCALAPPDATA%\MCSignalLogs\MCSignal<yyyyMMdd-HHmmss>-<pid>.csv (one file per MultiCharts process; the Output
 	//      window prints "Log file created <path>"). Lines of this run carry its run id (the RUN line).
-	//      Expected run time and log size (measured off-MultiCharts, see "RUN TIME AND LOG SIZE" below): DVP engine about 9 s
-	//      at Journal, log about 238 MB / 262k lines (almost all DVP FIT lines); MultiCharts' own bar processing comes on top.
+	//      Expected run time and log size (measured off-MultiCharts, see "RUN TIME AND LOG SIZE" below): DVP engine + DVP RAIL step
+	//      about 13 s at Journal, log about 338 MB / 466k lines (about 262k DVP FIT + about 204k DVP RAIL lines; the RAIL count depends
+	//      on the price path and was measured on synthetic bars); MultiCharts' own bar processing comes on top.
 	//   5. Timing (DV-13.4, journal off): set TraceLevel = Info, recalculate (Ctrl+R), note the "DVP D9A timing" line (dvp(on)).
 	//      Then in this file set BaselineDvpOff = true, compile, recalculate at TraceLevel = Info and note the dvp(off) timing line.
 	//      Set BaselineDvpOff back to false afterwards. slowdown = elapsedMs(on) / elapsedMs(off) - 1 (budget <= 0.15, PROBE).
 	//      These timing runs have DVP on Data1 AND Data2, while the DV-13.4 budget is stated for Data1 only, so the measured slowdown
 	//      is conservative (an upper bound for the Data1-only case).
-	//   SEND BACK (grep the log for the run id of step 4, plus the two timing lines of step 5):
-	//     RUN, "DVP CREATED", "DVP D9A setup", every "DVP DEGREE" line (warming / sel / change), "DVP RUN", every "DVP CAL" line,
-	//     every "DVP D9A" line (month + summary per stream), the two "DVP D9A timing" lines, and any Warning / Error line.
-	//     The DVP FIT lines (about 262k at refitEvery 1, Data1 + Data2) are NOT needed in full; the summary's drift{} carries the endpointDrift
-	//     distribution. Keep the file in case a FIT-level question comes up.
+	//   SEND BACK: after the run (and the two timing runs of step 5, which go to the same process-wide log), in Windows PowerShell,
+	//     with <file> = the log's name from step 4 (MCSignal<yyyyMMdd-HHmmss>-<pid>), run:
+	//     Select-String -Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs\<file>.csv') -Pattern '^(Warning|Error),|,"?RUN(-END)? id\(|,"?DVP (CREATED|DEGREE|RUN|CAL|D9A|RAIL|A2) ' -CaseSensitive -Encoding UTF8 | ForEach-Object Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'dvp_d9a_extract.csv') -Encoding utf8
+	//     send dvp_d9a_extract.csv; keep the full CSV
 	//
 	// RUN TIME AND LOG SIZE (PR-D9a review item f; how the header figures were obtained)
 	//   Measured on a Linux build box (8-vCPU Intel Xeon, .NET 8 Release, 2026-11-01) with tests/Dvp/D9aBench.cs
 	//   (DVP_BENCH=1 dotnet run -c Release --project tests/Dvp): the real engine with this run's DvpConfig (SelfCalibrate PROBE,
-	//   refitEvery 1, journalFits on, streams Data1 + Data2) on a synthetic 15m Globex-like series of 210,000 bars (Data1, about
-	//   2016-2024 of @ES 15m) and 52,000 bars (Data2, about 2016-2024 of 60m), five runs each:
-	//     journal off                                     180-184 ms
-	//     journal on, lines counted only                  7.5-7.7 s   (261,653 lines: 261,522 DVP FIT, 93 DVP DEGREE)
-	//     journal on, CSV line + File.AppendAllText each  8.7-9.0 s   (file 237,591,032 bytes = about 238 MB, about 908 bytes per line)
-	//   So at Journal the fits behind the FIT lines (one per closed bar per stream) and their formatting dominate; the per-line append
-	//   added about 1.0-1.5 s on Linux. NOT measured: MultiCharts' own bar processing, the inherited _VolumeProfileFuturesBase work,
-	//   .NET Framework on Windows instead of .NET 8, and Windows per-call file open/append/close cost (NTFS, antivirus), which adds
-	//   about 262k x (cost per call). The line count is from the series size, so it holds for the real run within the bar count
-	//   (the FIT count is about Data1 + Data2 closed bars, not 200k); the bytes use the real line layout with an 8-character run id.
+	//   refitEvery 1, journalFits on, journalRails on = default, streams Data1 + Data2) on a synthetic 15m Globex-like series of 210,000
+	//   bars (Data1, about 2016-2024 of @ES 15m) and 52,000 bars (Data2, about 2016-2024 of 60m). Three to six runs each:
+	//     journal off                                               180-211 ms
+	//     journal on, FIT/DEGREE only, lines counted                7.5-7.7 s   (261,653 lines: 261,522 DVP FIT, 93 DVP DEGREE; 237.6 MB)
+	//     journal on, FIT/DEGREE only, File.AppendAllText each      8.7-9.0 s
+	//     journal on + DVP RAIL step, lines counted                 9.6-9.7 s   (465,617 lines: + 203,964 DVP RAIL; 337,804,196 bytes)
+	//     journal on + DVP RAIL step, File.AppendAllText each       12.5-12.7 s (file 337,804,196 bytes = about 338 MB, about 725 bytes/line)
+	//   The DVP RAIL step copies _CustomSignal.dvpRailStep (t-1 snapshot, rails, confluence, DvpRailJournal.Step, every closed bar of
+	//   both streams, because journalRails defaults to true and the Journal sink is on) but WITHOUT the PA lattice (confluence gets null,
+	//   as in ConfluenceTests), so the real confluence work is larger. RAIL lines are one per rail interaction after its 40-bar clock,
+	//   so their count depends on the price path: 204k is from synthetic bars, not from @ES. NOT measured: MultiCharts' own bar
+	//   processing, the inherited _VolumeProfileFuturesBase and PA work, .NET Framework on Windows instead of .NET 8, and the Windows
+	//   per-call file open/append/close cost (NTFS, antivirus), which adds about 466k x (cost per call). The bytes use the real line
+	//   layout with an 8-character run id. The FIT count is about Data1 + Data2 closed bars.
 	//
 	// WHAT THE REPORT GIVES (per stream; "DVP D9A summary"): share of post-warm-up months whose online d equals the pooled d* and that
 	//   year's d*, switches, flip-backs within 3 rechecks, margin-blocked rechecks, rechecks kept by a NaN score (counted apart), warm-up end, the distribution of the score gaps
@@ -180,10 +190,11 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		/// <summary>One setup line on the first bar: resolutions (typed Resolution members), first bar, chart-start and data-stream checks.</summary>
+		/// <summary>One setup line on the first bar: resolutions (typed Resolution members), first bar, chart-start and data-stream checks.
+		/// The checks run at every TraceLevel (Info timing runs included); the setup line is written at Info, the Warnings at Warning, and
+		/// each Warning is also printed to the MultiCharts Output window (Output.WriteLine), whatever TraceLevel is.</summary>
 		void logSetup()
 		{
-			if (!journalOn()) return;
 			Resolution r1 = Bars.Info.Resolution;
 			bool d1ok = r1.Type == EResolution.Minute && r1.Size == 15 && r1.ChartType == ChartType.Regular;
 			string d2 = "missing"; bool d2ok = false;
@@ -198,17 +209,30 @@ namespace PowerLanguage.Strategy
 			bool mbbOk = mbb == RunMaxBarsBack;
 			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
 			bool rootOk = root == "ES";                           // the RollDate table (EventRules.RollDate) is ES-only
-			bool startOk = first >= new DateTime(2016, 1, 1) && first < new DateTime(2016, 1, 8);   // the first @ES bar of 2016 (Sun 2016-01-03 18:00 ET)
-			trace(ETraceLevel.Journal, "DVP D9A setup runId(" + RunId + ") data1(" + r1.ChartType + " " + r1.Type + " " + r1.Size + " " + Bars.Info.Name + ") data2(" + d2
+			// first = the first CALCULATED bar, not the first loaded one: the first @ES bar of 2016 is Sun 2016-01-03 18:00 ET, but with
+			// Max bars back = RunMaxBarsBack (50) Data2's skip (50 bars of 60 Minute, 23 per Globex day) puts the first calculated bar at
+			// about Tue 2016-01-05 evening ET. Changing RunMaxBarsBack requires changing this startOk window and the header's Q21 /
+			// Max bars back note (step 3) to match.
+			bool startOk = first >= new DateTime(2016, 1, 1) && first < new DateTime(2016, 1, 8);
+			if (traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "DVP D9A setup runId(" + RunId + ") data1(" + r1.ChartType + " " + r1.Type + " " + r1.Size + " " + Bars.Info.Name + ") data2(" + d2
 				+ ") firstBarEt(" + first.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + ") deviation(data1=" + (d1ok ? 0 : 1)
 				+ " data2=" + (d2ok ? 0 : 1) + " chartStart=" + (startOk ? 0 : 1) + " maxBarsBack=" + (mbbOk ? 0 : 1) + " root=" + (rootOk ? 0 : 1) + ") maxBarsBack(" + mbb
 				+ ") root(" + root + ") roll(" + RollDetection + " " + RollDates.Count + " dates " + RollFromYear + "-" + RollToYear
 				+ ") holdoutFrom(" + DvpConst.HoldoutFrom.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") dvp(" + (DvpConfig.enabled ? "on" : "off") + ")");
 			if (!d1ok || !d2ok || !startOk || !mbbOk)
-				trace(ETraceLevel.Warning, "DVP D9A setup deviation: expected @ES Regular 15 Minute Data1, Regular 60 Minute Data2, chart start 2016-01-01, Max bars back "
-					+ RunMaxBarsBack + " (see the header of _DvpEngineTest)");
+				setupWarning("DVP D9A setup deviation: expected @ES Regular 15 Minute Data1, Regular 60 Minute Data2, chart start 2016-01-01, Max bars back "
+					+ RunMaxBarsBack + " (got data1=" + (d1ok ? 0 : 1) + " data2=" + (d2ok ? 0 : 1) + " chartStart=" + (startOk ? 0 : 1) + " maxBarsBack=" + mbb
+					+ "; see the header of _DvpEngineTest)");
 			if (!rootOk)
-				trace(ETraceLevel.Warning, "DVP D9A setup: symbol root " + root + " is not ES; RollDetection = Table uses EventRules.RollDate, which is the ES quarterly roll table only");
+				setupWarning("DVP D9A setup: symbol root " + root + " is not ES; RollDetection = Table uses EventRules.RollDate, which is the ES quarterly roll table only");
+		}
+
+		/// <summary>A setup Warning: to the log (TraceLevel >= Warning) and always to the MultiCharts Output window.</summary>
+		void setupWarning(string msg)
+		{
+			trace(ETraceLevel.Warning, msg);
+			try { Output.WriteLine("Warning: " + msg); } catch { }
 		}
 	}
 }

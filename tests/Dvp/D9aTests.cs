@@ -202,6 +202,45 @@ static partial class Program
 			&& code.Contains("_MtfMath.SymbolRoot(Bars.Info.Name)") && code.Contains("root == \"ES\"") && host.Contains("Data1 AND Data2") && !host.Contains("@@"),
 			"D9a host: no [Input], no Enum.Parse / reflection / StreamWriter / orders; holdout by ET time and Globex day; typed resolutions and ExecInfo.MaxBarsBack; refit bar checked before Snapshot; ES-root warning; run steps (Trade Volume x2, Max bars back 50, run time) in the header");
 		string rsrc = File.ReadAllText(Path.Combine(Root(), "_DvpDegreeReport.Function.CS"));
+		// (9) SEND BACK extract: the PowerShell Select-String pattern copied verbatim in the header, applied (same .NET Regex engine,
+		// case-sensitive) to lines in LogFileSingleton's exact layout built from the real engine / report / host messages.
+		Match pm = Regex.Match(host, @"-Pattern '(.*?)' -CaseSensitive -Encoding UTF8 \| ForEach-Object Line \| Out-File");
+		var ex = new Regex(pm.Success ? pm.Groups[1].Value : "^$");
+		Func<string, string, string> csv = (lvl, msg) => lvl + ",2020-06-15 10:30:00 Exchange,_DvpEngineTest,@ES,3f9c2a1b,"
+			+ (msg.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0 ? "\"" + msg.Replace("\"", "\"\"") + "\"" : msg);
+		var jr = new List<string>(); var wr = new List<string>();
+		var cr = SCfg(); cr.streams = new[] { 1 }; cr.journalFits = true; cr.journalRails = true;
+		var er = new _DvpEngine(cr, "t9ax", "ES", 0.25, true, false, jr.Add, wr.Add);
+		var rr = new _BarRing(DvpStream.RingNeed(cr)); var repx = new DvpDegreeReport(1);
+		foreach (RingBar b in CalSeries(420, 93, new[] { 700 }, null, new DateTime(2023, 3, 1, 18, 0, 0)))
+		{
+			rr.Add(b); er.OnBar(1, rr, false); repx.Observe(er.Stream(1));
+			DvpStream sx = er.Stream(1); DvpSnapshot x = er.Snapshot(1, rr, 1); DvpRails rl = x != null ? er.RailsOf(1, rr, 1) : null;
+			DvpConfluence cfx = rl != null && rr.Count > 1 ? er.ConfluenceOf(1, x, rl, null, rr[1].c) : null;
+			sx.RailJournal.Step(sx, rr, x, rl, cfx, false, sx.SessionHalfDay, jr.Add, er.RunId);
+		}
+		er.Finish(); repx.Lines(jr.Add, er.RunId, er.Stream(1));
+		string[] want = { "DVP CREATED ", "DVP DEGREE ", "DVP RUN ", "DVP CAL ", "DVP D9A ", "DVP RAIL " };
+		bool allKinds = want.All(p => jr.Any(l => l.StartsWith(p, StringComparison.Ordinal)));
+		bool kept = jr.Where(l => want.Any(p => l.StartsWith(p, StringComparison.Ordinal))).All(l => ex.IsMatch(csv("Journal", l)));
+		bool fitOut = jr.Where(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal)).All(l => !ex.IsMatch(csv("Journal", l))) && jr.Any(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal));
+		bool hostKept = new[] { "RUN id(1a2b3c4d) build(x) strategy(_DvpEngineTest) symbol(@ES) inputs[TraceLevel=Journal; X=1,2]", "RUN-END id(1a2b3c4d) lastBar(2024-12-31 16:45:00)",
+			"DVP D9A setup runId(1a2b3c4d) data1(Regular Minute 15 @ES)", "DVP D9A timing runId(1a2b3c4d) dvp(on)" }.All(m => ex.IsMatch(csv("Info", m)))
+			&& ex.IsMatch(csv("Warning", "anything, quoted")) && ex.IsMatch(csv("Error", "x")) && !ex.IsMatch(csv("Info", "DVP skip degChange stream(Data1)"))
+			&& !ex.IsMatch(csv("Journal", "DVP FIT runId(1a2b3c4d)")) && !ex.IsMatch(csv("Info", "DVP RUNNER x"));
+		bool a233 = ex.IsMatch(csv("Journal", DvpA233.Line("1a2b3c4d", new DateTime(2020, 6, 15), false, 1, 2, 0, 0)));
+		Check(pm.Success && allKinds && kept && fitOut && hostKept && !a233
+			&& host.Contains("Don't open the CSV in Excel or an editor while it runs (a lock drops lines)") && host.Contains("expect a few minutes")
+			&& host.Contains("send dvp_d9a_extract.csv; keep the full CSV") && host.Contains("set TraceLevel = Journal; leave every other input at its"),
+			"D9a SEND BACK: the verbatim extract pattern keeps DVP CREATED/DEGREE/RUN/CAL/D9A/RAIL, RUN/RUN-END, setup/timing, Warning/Error lines (quoted or not) and drops DVP FIT; "
+			+ "it does NOT match the \"DVP A2-33\" prefix (alternative 'A2 ' needs a space after A2; no A2-33 lines in this run: LevelStudy is off)");
+		// (10) setup check at every TraceLevel, line at Info, Warnings also to the Output window
+		int ls = code.IndexOf("void logSetup()"), le = code.IndexOf("void setupWarning(");
+		string setup = ls >= 0 && le > ls ? code.Substring(ls, le - ls) : "";
+		Check(setup.Length > 0 && !setup.Contains("journalOn()") && setup.Contains("trace(ETraceLevel.Info, \"DVP D9A setup") && !setup.Contains("trace(ETraceLevel.Warning")
+			&& Regex.Matches(setup, "setupWarning\\(").Count == 2 && code.Contains("trace(ETraceLevel.Warning, msg);") && code.Contains("Output.WriteLine(\"Warning: \" + msg)")
+			&& host.Contains("Changing RunMaxBarsBack requires changing this startOk window") && host.Contains("about Tue 2016-01-05 evening"),
+			"D9a host setup check: runs at every TraceLevel (setup line at Info), both Warnings to the log and the Output window; first-calculated-bar note (RunMaxBarsBack <-> startOk / Q21)");
 		Check(!rsrc.Contains("DvpConfig.") && !rsrc.Contains(".Canon(") && !rsrc.Contains("Enum.Parse") && rsrc.Contains("namespace PowerLanguage.Function"),
 			"D9a report source: MC-free, no DvpConfig write or Canon() use (report-only)");
 	}
