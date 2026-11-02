@@ -225,15 +225,15 @@ static partial class Program
 		for (int d = 0; d <= 3; d++) { ok &= Rel(f.Bic[d], n * Math.Log(f.Sse[d] / n) + (d + 2) * Math.Log(n), 1e-14, 1); if (f.Bic[d] < f.Bic[argmin]) argmin = d; }
 		Check(ok, "T7 BIC_d = n ln(SSE_d/n) + (d+2) ln n");
 		Check(argmin == 3, "T7 test series has BIC argmin 3 (" + argmin + ")");
-		foreach (EDvpDegMode mode in new[] { EDvpDegMode.Fixed1, EDvpDegMode.Calibrate, EDvpDegMode.DevCoverageFrozen })
+		// rev 6: Fixed1 -> 1, Calibrate -> 1 (every d fitted), SelfCalibrate -> the calibrated d (here 2); none reads BIC
+		foreach (EDvpDegMode mode in new[] { EDvpDegMode.Fixed1, EDvpDegMode.Calibrate, EDvpDegMode.SelfCalibrate })
 		{
-			bool latch = true; int d1, d2; bool cal, warn;
-			DvpDegree.Select(mode, n, 3, mode == EDvpDegMode.DevCoverageFrozen, 2, ref latch, out d1, out cal, out warn);
+			int d1 = mode == EDvpDegMode.SelfCalibrate ? 2 : 1; bool cal = mode == EDvpDegMode.Calibrate;
+			f.Fit(y, null, n, 3, false);
 			f.Choose(d1, cal); int before = f.Deg;
 			for (int d = 0; d <= 3; d++) f.Bic[d] = d == 0 ? double.NegativeInfinity : 1e300;   // scramble BIC
-			DvpDegree.Select(mode, n, 3, mode == EDvpDegMode.DevCoverageFrozen, 2, ref latch, out d2, out cal, out warn);
-			f.Choose(d2, cal);
-			Check(d1 != argmin && before == f.Deg && d1 == d2, "T7 " + mode + ": chosen d " + d1 + " is independent of BIC");
+			f.Choose(d1, cal);
+			Check(d1 != argmin && before == f.Deg && f.Deg == d1, "T7 " + mode + ": chosen d " + d1 + " is independent of BIC");
 		}
 		string core = CoreSource();
 		int jf = core.IndexOf("public static string FitLine(", StringComparison.Ordinal), je = core.IndexOf("static void kv(", StringComparison.Ordinal);
@@ -249,23 +249,14 @@ static partial class Program
 		var f = new DvpFit(240); var y = Series(240, 50, 1, new[] { 0.0, 1, 2, 3 });
 		Check(!f.Fit(y, null, 11, 3, false) && !f.Valid, "T8 n < 12 gives no fit");
 		Check(f.Fit(y, null, 12, 3, false) && f.DTop == 1, "T8 n = 12 fits up to dCap 1");
-		bool latch = false, cal, warn; int d;
-		Check(DvpDegree.Select(EDvpDegMode.Fixed1, 240, 3, false, 0, ref latch, out d, out cal, out warn) && d == 1 && !cal && !warn && !latch, "T8 Fixed1 -> d = 1");
-		var table = new[] { new DvpFrozenDegree.Entry("ES", 1, 240, 2), new DvpFrozenDegree.Entry("NQ", 1, 240, 3) };
-		int ds; bool has = DvpFrozenDegree.TryGet(table, "ES", 1, 240, out ds);
-		Check(has && ds == 2 && !DvpFrozenDegree.TryGet(table, "ES", 2, 240, out ds) && !DvpFrozenDegree.TryGet(table, "es", 1, 240, out ds), "T8 frozen table lookup by (root, stream, winLen)");
-		DvpFrozenDegree.TryGet(table, "ES", 1, 240, out ds);
-		Check(DvpDegree.Select(EDvpDegMode.DevCoverageFrozen, 240, 3, true, ds, ref latch, out d, out cal, out warn) && d == 2 && !cal && !warn, "T8 DevCoverageFrozen with an entry -> d*");
-		Check(DvpDegree.Select(EDvpDegMode.DevCoverageFrozen, 16, 3, true, 3, ref latch, out d, out cal, out warn) && d == 2, "T8 DevCoverageFrozen -> min(d*, dCap)");
-		Check(!DvpFrozenDegree.TryGet("ES", 1, 240, out ds) && DvpFrozenDegree.Table.Length == 0, "T8 shipped DvpFrozenDegree table is empty");
-		latch = false;
-		bool w1, w2, c1, c2; int a1, a2;
-		DvpDegree.Select(EDvpDegMode.DevCoverageFrozen, 240, 3, false, 0, ref latch, out a1, out c1, out w1);
-		DvpDegree.Select(EDvpDegMode.DevCoverageFrozen, 240, 3, false, 0, ref latch, out a2, out c2, out w2);
-		Check(a1 == 1 && a2 == 1 && c1 && c2 && w1 && !w2, "T8 DevCoverageFrozen without an entry -> Calibrate (d = 1) with one Warning");
-		latch = false;
-		Check(DvpDegree.Select(EDvpDegMode.Calibrate, 240, 3, false, 0, ref latch, out d, out cal, out warn) && d == 1 && cal && !warn, "T8 Calibrate -> every d fitted, reported d = 1, no warning");
-		Check(!DvpDegree.Select(EDvpDegMode.Calibrate, 11, 3, false, 0, ref latch, out d, out cal, out warn), "T8 Select: n < 12 -> no fit");
+		// rev 6 DV-2.2: no per-symbol degree table; SelfCalibrate is the default and its degree comes from DvpSelfCalib (DV-T30..T38)
+		Check(new DvpConfig().degMode == EDvpDegMode.SelfCalibrate && (int)EDvpDegMode.SelfCalibrate == 0, "T8 SelfCalibrate is the default (ordinal 0)");
+		Check(typeof(DvpConfig).Assembly.GetType("PowerLanguage.Function.DvpFrozenDegree") == null && !CoreSource().Contains("DevCoverageFrozen")
+			&& !CoreSource().Contains("class DvpFrozenDegree"), "T8 DvpFrozenDegree and DevCoverageFrozen are removed");
+		f.Fit(y, null, 16, 3, false); f.Choose(3, false);
+		Check(f.Deg == 2, "T8 a calibrated d above dCap is clamped to dCap (n = 16 -> 2)");
+		f.Fit(y, null, 240, 3, false); f.Choose(1, true);
+		Check(f.Deg == 1 && f.Calibrating, "T8 Calibrate -> every d fitted, reported d = 1");
 		// Calibrate: all degrees available side by side; degree-1 shadow equals a separate d = 1 fit
 		f.Fit(y, null, 240, 3, false); f.Choose(3, false);
 		var g = new DvpFit(240); g.FitRaw(y, null, 240, 1, false);
@@ -334,20 +325,41 @@ static partial class Program
 			new KeyValuePair<string, Action<DvpConfig>>("streams duplicate", x => x.streams = new[] { 1, 2, 1 }),
 		};
 		foreach (var kv in bad) { var x = new DvpConfig(); kv.Value(x); var e = x.Validate(); Check(e != null && e.Count >= 1, "T23 Validate rejects " + kv.Key); }
-		var okc = new DvpConfig { winLen = 30, degMax = 1, vaPct = 50, manRows = 8, streams = new[] { 1, 2, 3 }, fibRanges = 4, projBars = 500 };
+		var okc = new DvpConfig { winLen = 30, degMax = 1, degMode = EDvpDegMode.Fixed1, vaPct = 50, manRows = 8, streams = new[] { 1, 2, 3 }, fibRanges = 4, projBars = 500 };
 		Check(okc.Validate() == null, "T23 range edges are accepted");
+		var e1 = new DvpConfig { degMax = 1 }.Validate();
+		Check(e1 != null && e1.Contains("DVP: SelfCalibrate needs degMax \u2265 2; use Fixed1") && new DvpConfig { degMax = 1, degMode = EDvpDegMode.Calibrate }.Validate() == null,
+			"T23 rev 6 DV-3.10.10: SelfCalibrate with degMax = 1 is rejected with the spec text");
+		var calBad = new List<KeyValuePair<string, Action<DvpConfig>>>
+		{
+			new KeyValuePair<string, Action<DvpConfig>>("calibLen 19", x => x.calibLen = 19), new KeyValuePair<string, Action<DvpConfig>>("calibLen 2001", x => x.calibLen = 2001),
+			new KeyValuePair<string, Action<DvpConfig>>("calibMinScored 0", x => x.calibMinScored = 0), new KeyValuePair<string, Action<DvpConfig>>("calibMinScored > calibLen", x => { x.calibLen = 50; x.calibMinScored = 51; }),
+			new KeyValuePair<string, Action<DvpConfig>>("calibMarginAbs -0.01", x => x.calibMarginAbs = -0.01), new KeyValuePair<string, Action<DvpConfig>>("calibMarginAbs NaN", x => x.calibMarginAbs = double.NaN),
+			new KeyValuePair<string, Action<DvpConfig>>("calibMarginRel 1.01", x => x.calibMarginRel = 1.01), new KeyValuePair<string, Action<DvpConfig>>("calibMarginRel NaN", x => x.calibMarginRel = double.NaN),
+			new KeyValuePair<string, Action<DvpConfig>>("calibStep 0", x => x.calibStep = 0), new KeyValuePair<string, Action<DvpConfig>>("calibStep 501", x => x.calibStep = 501),
+		};
+		foreach (EDvpDegMode m in new[] { EDvpDegMode.SelfCalibrate, EDvpDegMode.Fixed1, EDvpDegMode.Calibrate })
+			foreach (var kv in calBad) { var x = new DvpConfig { degMode = m }; kv.Value(x); var e = x.Validate(); Check(e != null && e.Count >= 1, "T23 DV-2.1 Validate rejects " + kv.Key + " under " + m); }
+		var calEdge = new DvpConfig { calibLen = 20, calibMinScored = 20, calibMarginAbs = 0, calibMarginRel = 1, calibStep = 1 };
+		var calEdge2 = new DvpConfig { calibLen = 2000, calibMinScored = 1, calibMarginAbs = 1, calibMarginRel = 0, calibStep = 500 };
+		Check(calEdge.Validate() == null && calEdge2.Validate() == null, "T23 calib range edges are accepted");
+		var dc = new DvpConfig();
+		Check(dc.calibLen == 250 && dc.calibMinScored == 60 && dc.calibMarginAbs == 0.01 && dc.calibMarginRel == 0.02 && dc.calibStep == dc.projBars,
+			"T23 Q17/Q19 defaults: calibLen 250, calibMinScored 60, margins 0.01 / 0.02, calibStep = projBars (60)");
 
 		string k1 = new DvpConfig().Canon(), k2 = new DvpConfig().Canon();
 		Check(k1 == k2 && k1 == c.Canon(), "T23 Canon is stable");
 		Check(k1.Contains("confMode=FamilyCount") && k1.Contains("minFamilies=3") && k1.Contains("reportWeights=VA:1,POC:0.77") && k1.Contains("rowFloor=1tick")
 			&& k1.Contains("rollAdjust=None") && k1.Contains("minBars=12") && k1.Contains("ATR_LEN=20") && k1.Contains("HOLD_BARS=40"), "T23 Canon includes the DV-1.10 constants");
-		Check(k1.EndsWith(";frozen=[]}"), "T23 Canon includes the (empty) DvpFrozenDegree table");
-		Check(DvpFrozenDegree.Canon(new[] { new DvpFrozenDegree.Entry("ES", 1, 240, 2), new DvpFrozenDegree.Entry("NQ", 2, 120, 1) }) == "[ES:1:240=2,NQ:2:120=1]", "T23 frozen table canon format");
+		Check(!k1.Contains("frozen") && k1.Contains("CALIB_K=2") && k1.Contains("CALIB_RECHECK=month")
+			&& k1.Contains("degMode=SelfCalibrate") && k1.Contains(";calibLen=250;calibMinScored=60;calibMarginAbs=0.01;calibMarginRel=0.02;calibStep=60"),
+			"T23 rev 6 DV-2.2: Canon hashes the calib fields, CALIB_K, CALIB_RECHECK; no frozen table");
 		var muts = new List<Action<DvpConfig>> { x => x.enabled = true, x => x.streams = new[] { 1, 2 }, x => x.src = EDvpSrc.Close, x => x.winLen = 120, x => x.degMode = EDvpDegMode.Fixed1,
 			x => x.degMax = 2, x => x.weightVol = true, x => x.minR2 = 0.3, x => x.manRows = 32, x => x.manSpan = 2.5, x => x.vaPct = 68, x => x.nodeProm = 0.11, x => x.maxNodes = 2,
 			x => x.sigmaList = new[] { 1.0, 2 }, x => x.projBars = 40, x => x.coneMode = EDvpConeMode.Confidence, x => x.coneMult = 1.5, x => x.useFib = false, x => x.fibRanges = 2,
 			x => x.fibPivot = 10, x => x.fibLookMult = 6, x => x.fibAnchor = EDvpFibAnchor.ExtremeInLookback, x => x.fibMerge = 0.3, x => x.fibNear = 10, x => x.confTol = 0.25,
-			x => x.splitFlow = true, x => x.refitEvery = 2, x => x.journalFits = false, x => x.journalRails = false };
+			x => x.splitFlow = true, x => x.refitEvery = 2, x => x.journalFits = false, x => x.journalRails = false,
+			x => x.degMode = EDvpDegMode.Calibrate, x => x.calibLen = 100, x => x.calibMinScored = 30, x => x.calibMarginAbs = 0.02, x => x.calibMarginRel = 0.05, x => x.calibStep = 30 };
 		var seen = new HashSet<string> { k1 }; bool distinct = true;
 		foreach (var m in muts) { var x = new DvpConfig(); m(x); distinct &= seen.Add(x.Canon()); }
 		Check(distinct, "T23 every field changes Canon (" + muts.Count + " fields)");
@@ -590,6 +602,7 @@ static partial class Program
 		D5Tests();
 		D6Tests();
 		D7Tests();
+		D9Tests();
 		OverflowTests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;

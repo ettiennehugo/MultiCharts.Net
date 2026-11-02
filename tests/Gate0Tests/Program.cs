@@ -428,7 +428,7 @@ static class Program
 		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02Minutes = 0 }.Configure() != null
 			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02StopPadAtr = -0.1 }.Configure() != null, "KD02 parameters out of range rejected (minutes < 1, pad < 0; stop k comes from the Variant decode)");
 		var cfg = new Gate0Engine { kd02StopK = 2.5 }.Kd02Config();
-		Check(cfg.enabled && cfg.journalFits && !cfg.journalRails && cfg.degMode == EDvpDegMode.DevCoverageFrozen && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
+		Check(cfg.enabled && cfg.journalFits && !cfg.journalRails && cfg.degMode == EDvpDegMode.SelfCalibrate && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
 			&& new DvpConfig().sigmaList.Length + (Array.IndexOf(new DvpConfig().sigmaList, 2.5) < 0 ? 1 : 0) == cfg.sigmaList.Length, "KD02 config: the stop rail k is added to sigmaList (sorted, once)");
 
 		// simulated run: mean-reverting 1m prices, fills simulated from the intent (market entry next bar, stop/target/flatten exits)
@@ -512,7 +512,8 @@ static class Program
 		// end of run: the finish hook journals the KD02 summary, then DVP RUN, then the DVP CAL coverage lines; idempotent
 		int before = jl.Count;
 		Check(!jl.Any(l => l.StartsWith("DVP RUN") || l.StartsWith("DVP CAL") || l.StartsWith("G0-b KD02 KD02")), "KD02: no end-of-run lines before the finish hook");
-		Check(jl.Count(l => l.StartsWith("G0-b KD02 warning: DVP DEGREE: no frozen d*") && l.Contains("falls back to d = 1")) == 1, "KD02 unfrozen fallback (Calibrate, d = 1): exactly one DVP DEGREE warning");
+		Check(jl.Count(l => l.StartsWith("G0-b KD02 warning: DVP DEGREE warming stream(Data1)") && l.Contains(": d = 1, not tradeable until a monthly recheck with n >= ")) == 1
+			&& !jl.Any(l => l.Contains("no frozen d*")), "KD02 SelfCalibrate warm-up (rev 6, DV-3.10.4): exactly one DVP DEGREE warming warning");
 		Check(jl.Any(l => l.StartsWith("DVP FIT")), "KD02 journalFits on: DVP FIT lines journaled");
 		Check(!jl.Any(l => l.StartsWith("DVP RAIL")), "KD02 journalRails off: no DVP RAIL lines");
 		g.FinishCanary(); var tail = jl.Skip(before).ToList();

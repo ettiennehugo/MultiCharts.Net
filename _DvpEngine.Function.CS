@@ -8,14 +8,17 @@ namespace PowerLanguage.Function
 	// ============================================================================================
 	// M-DVP (specs/m-dvp-spec.md rev 3): detrended volume-profile engine after Keller B5 App E (buildTrend / evalTrend /
 	// evalLeverage / trendSE). PR-D1 = the fit core: DvpConfig (Validate/Canon), DvpFit (Forsythe recurrence, sigma,
-	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone) and the empty DvpFrozenDegree table. PR-D2 = DvpManifold
+	// SSE fallback, leverage, BIC, degree modes, degree-1 shadow, cone). PR-D9 (rev 6) = online degree self-calibration
+	// (DvpSelfCalib, DV-3.10; the frozen d* table is removed). PR-D2 = DvpManifold
 	// (rows, tick floor, VA, entropy/concentration, nodes) and DvpRails (rails, residual order, LevelRef/tags). Not wired into
 	// _CustomSignal yet (PR-D3). Everything between <dvp-core> markers is MC-free; tests/Dvp extracts it with awk (DV-0.3).
 	// ============================================================================================
 
 	// <dvp-core>
 	public enum EDvpSrc { HL2, Close }
-	public enum EDvpDegMode { DevCoverageFrozen, Fixed1, Calibrate }
+	/// <summary>DV-1.2 / DV-3.6 (rev 6): SelfCalibrate (ordinal 0, default) = online per-stream degree (DV-3.10); Fixed1 = d = 1;
+	/// Calibrate = every d fitted and journaled, reported d = 1 (offline study, DVP CAL).</summary>
+	public enum EDvpDegMode { SelfCalibrate, Fixed1, Calibrate }
 	public enum EDvpConeMode { Prediction, Confidence }
 	public enum EDvpFibAnchor { MostRecentPivot, ExtremeInLookback }
 
@@ -36,9 +39,13 @@ namespace PowerLanguage.Function
 		/// <summary>DV-9.3 Probe P2 gate (in Canon()). While false, HTF (ds &gt; 1) snapshots are computed and journaled but Tradeable(ds) is
 		/// false with one Warning per stream. Flipped in a one-line PR (PR-D10) once _MtfProbe P2 passes; P2 is not recorded as run.</summary>
 		public const bool P2_PASSED = false;
-		/// <summary>DV-3.6: first holdout day (Jan 2025 - Oct 2026). The Calibrate coverage journal never samples a window ending on or
-		/// after it and drops any forward horizon reaching it (counted), so the holdout is never read by the d* score.</summary>
+		/// <summary>DV-3.6 / DV-3.10.9: first holdout day (Jan 2025 - Oct 2026). Applies to Calibrate only: its coverage journal never
+		/// samples a window ending on or after it and drops any forward horizon reaching it (counted). SelfCalibrate ignores it.</summary>
 		public static readonly DateTime HoldoutFrom = new DateTime(2025, 1, 1);
+		/// <summary>DV-1.10 (rev 6): band multiple k for cov_in and cov_fwd (DV-3.6), in Canon().</summary>
+		public const double CalibK = 2;
+		/// <summary>DV-1.10 (rev 6): recheck cadence = calendar month of tradingDayKey (DV-3.10.5), in Canon().</summary>
+		public const string CalibRecheck = "month";
 	}
 
 	/// <summary>DV-0.2 / §2. Set in a derived strategy's ctor or Create(); no [Input]s.</summary>
@@ -48,7 +55,7 @@ namespace PowerLanguage.Function
 		public int[] streams = { 1 };
 		public EDvpSrc src = EDvpSrc.HL2;
 		public int winLen = 240;
-		public EDvpDegMode degMode = EDvpDegMode.DevCoverageFrozen;
+		public EDvpDegMode degMode = EDvpDegMode.SelfCalibrate;
 		public int degMax = 3;
 		public bool weightVol = false;
 		public double minR2 = 0.35;
@@ -73,6 +80,12 @@ namespace PowerLanguage.Function
 		public int refitEvery = 1;
 		public bool journalFits = true;
 		public bool journalRails = true;
+		// rev 6 DV-3.10 (SelfCalibrate; validated in every mode, DV-2.1). PROBE defaults (Q17 DECIDED, Ettienne Hugo, 2026-11-01).
+		public int calibLen = 250;            // rolling state: the last calibLen scored windows (DV-3.10.3)
+		public int calibMinScored = 60;       // scored windows needed before warm-up can end (DV-3.10.4)
+		public double calibMarginAbs = 0.01;  // switch margin, absolute (DV-3.10.6)
+		public double calibMarginRel = 0.02;  // switch margin, fraction of score(current d) (DV-3.10.6)
+		public int calibStep = 60;            // sample grid step in bars (DV-3.10.1, Q19); a field cannot default to projBars, so 60 = the projBars default
 
 		public double VaFraction { get { return vaPct / 100.0; } }
 
@@ -110,12 +123,20 @@ namespace PowerLanguage.Function
 			if (fibAnchor != EDvpFibAnchor.MostRecentPivot) e.Add("fibAnchor " + fibAnchor + " not supported (MostRecentPivot only, spec rev 5 §2)");
 			if (!(confTol > 0) || double.IsInfinity(confTol)) e.Add("confTol must be > 0 ATR");
 			if (refitEvery < 1) e.Add("refitEvery < 1");
+			// rev 6 (DV-2.1): calib fields are validated in every mode, so a bad value never hides behind Fixed1
+			if (!In(calibLen, 20, 2000)) e.Add("calibLen " + calibLen + " not in 20..2000");
+			if (!In(calibMinScored, 1, calibLen)) e.Add("calibMinScored " + calibMinScored + " not in 1..calibLen");
+			if (!In(calibMarginAbs, 0, 1)) e.Add("calibMarginAbs not in 0..1");
+			if (!In(calibMarginRel, 0, 1)) e.Add("calibMarginRel not in 0..1");
+			if (!In(calibStep, 1, 500)) e.Add("calibStep " + calibStep + " not in 1..500");
+			if (degMode == EDvpDegMode.SelfCalibrate && degMax == 1) e.Add("DVP: SelfCalibrate needs degMax \u2265 2; use Fixed1");
 			return e.Count == 0 ? null : e;
 		}
 
 		static string R(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
 
-		/// <summary>DV-0.2: every field and DV-1.10 constant in a fixed order, plus the DvpFrozenDegree table (DV-2.2). Feeds configHash.</summary>
+		/// <summary>DV-0.2: every field and DV-1.10 constant in a fixed order (rev 6: the calib fields, CALIB_K and CALIB_RECHECK; the
+		/// frozen-table entry is removed, DV-2.2). Feeds configHash.</summary>
 		public string Canon()
 		{
 			var sb = new StringBuilder(512);
@@ -132,44 +153,14 @@ namespace PowerLanguage.Function
 			sb.Append(";fibLookMult=").Append(fibLookMult).Append(";fibAnchor=").Append(fibAnchor).Append(";fibMerge=").Append(R(fibMerge));
 			sb.Append(";fibNear=").Append(R(fibNear)).Append(";confTol=").Append(R(confTol)).Append(";splitFlow=").Append(splitFlow ? 1 : 0);
 			sb.Append(";refitEvery=").Append(refitEvery).Append(";journalFits=").Append(journalFits ? 1 : 0).Append(";journalRails=").Append(journalRails ? 1 : 0);
+			sb.Append(";calibLen=").Append(calibLen).Append(";calibMinScored=").Append(calibMinScored).Append(";calibMarginAbs=").Append(R(calibMarginAbs))
+				.Append(";calibMarginRel=").Append(R(calibMarginRel)).Append(";calibStep=").Append(calibStep);
 			sb.Append(";const{confMode=").Append(DvpConst.ConfMode).Append(";minFamilies=").Append(DvpConst.MinFamilies);
 			sb.Append(";reportWeights=VA:").Append(R(DvpConst.ReportWeightVa)).Append(",POC:").Append(R(DvpConst.ReportWeightPoc));
 			sb.Append(";rowFloor=").Append(DvpConst.RowFloorTicks).Append("tick;rollAdjust=").Append(DvpConst.RollAdjust);
-			sb.Append(";minBars=").Append(DvpConst.MinBars).Append(";ATR_LEN=").Append(DvpConst.AtrLen).Append(";HOLD_BARS=").Append(DvpConst.HoldBars).Append(";P2_PASSED=").Append(DvpConst.P2_PASSED ? 1 : 0).Append('}');   // DV-9.3
-			sb.Append(";frozen=").Append(DvpFrozenDegree.Canon(DvpFrozenDegree.Table)).Append('}');
+			sb.Append(";minBars=").Append(DvpConst.MinBars).Append(";ATR_LEN=").Append(DvpConst.AtrLen).Append(";HOLD_BARS=").Append(DvpConst.HoldBars).Append(";P2_PASSED=").Append(DvpConst.P2_PASSED ? 1 : 0);   // DV-9.3
+			sb.Append(";CALIB_K=").Append(R(DvpConst.CalibK)).Append(";CALIB_RECHECK=").Append(DvpConst.CalibRecheck).Append("}}");
 			return sb.ToString();
-		}
-	}
-
-	/// <summary>DV-2.2: frozen degree d* per (symbol root, stream, winLen), set by KD-08's dev-only coverage-match study. Empty until then.</summary>
-	public static class DvpFrozenDegree
-	{
-		public struct Entry
-		{
-			public string root; public int stream, winLen, degree;
-			public Entry(string root, int stream, int winLen, int degree) { this.root = root; this.stream = stream; this.winLen = winLen; this.degree = degree; }
-		}
-
-		public static readonly Entry[] Table = new Entry[0];
-
-		public static bool TryGet(string root, int stream, int winLen, out int degree) { return TryGet(Table, root, stream, winLen, out degree); }
-
-		public static bool TryGet(Entry[] table, string root, int stream, int winLen, out int degree)
-		{
-			for (int i = 0; i < table.Length; i++)
-				if (table[i].stream == stream && table[i].winLen == winLen && string.Equals(table[i].root, root, StringComparison.Ordinal)) { degree = table[i].degree; return true; }
-			degree = 0; return false;
-		}
-
-		public static string Canon(Entry[] table)
-		{
-			var sb = new StringBuilder("[");
-			for (int i = 0; i < table.Length; i++)
-			{
-				if (i > 0) sb.Append(',');
-				sb.Append(table[i].root).Append(':').Append(table[i].stream).Append(':').Append(table[i].winLen).Append('=').Append(table[i].degree);
-			}
-			return sb.Append(']').ToString();
 		}
 	}
 
@@ -181,23 +172,6 @@ namespace PowerLanguage.Function
 		{
 			if (n < DvpConst.MinBars) return 0;
 			return Math.Min(Math.Min(degMax, DvpConst.MaxDegree), Math.Max(1, n / 8));
-		}
-
-		/// <summary>
-		/// Reported degree for a mode. DevCoverageFrozen without a table entry falls back to Calibrate (reported d = 1);
-		/// <paramref name="warn"/> is true exactly once per <paramref name="warnedLatch"/> (journal "DVP DEGREE not frozen", Warning).
-		/// Returns false when n &lt; minBars (no fit).
-		/// </summary>
-		public static bool Select(EDvpDegMode mode, int n, int degMax, bool hasFrozen, int dStar, ref bool warnedLatch, out int d, out bool calibrate, out bool warn)
-		{
-			warn = false; calibrate = false; d = 0;
-			int cap = Cap(n, degMax);
-			if (cap == 0) return false;
-			if (mode == EDvpDegMode.DevCoverageFrozen && hasFrozen) { d = Math.Max(1, Math.Min(dStar, cap)); return true; }
-			if (mode == EDvpDegMode.DevCoverageFrozen && !warnedLatch) { warnedLatch = true; warn = true; }
-			if (mode != EDvpDegMode.Fixed1) calibrate = true;   // Calibrate, or the DevCoverageFrozen fallback: every d <= dCap is fitted
-			d = 1;
-			return true;
 		}
 	}
 
@@ -776,7 +750,7 @@ namespace PowerLanguage.Function
 	// PR-D3 (DV-0.1, DV-3.7/3.8, DV-7, DV-10, DV-11): per-stream state and the host-facing engine. MC-free: the host feeds
 	// each closed bar's RingBar (already added to the stream's _BarRing) and queries lazily. Every buffer is allocated in the
 	// DvpStream constructor, which runs only inside the _DvpEngine constructor (the host creates the engine in StartCalc
-	// when DvpConfig.enabled, never at load). Nothing here is static except the frozen-degree table.
+	// when DvpConfig.enabled, never at load). Nothing here is static (rev 6 removed the frozen-degree table).
 	// ---------------------------------------------------------------------------------------------------------------
 
 	/// <summary>DV-10 snapshot: the as-of t-1 fit for bar t (window ends at endBar). Reused per stream; valid until the next closed bar.</summary>
@@ -785,6 +759,8 @@ namespace PowerLanguage.Function
 		public int ds, endBar, anchorBar, sinceRefit, n, deg, dCap, manRowsEff;
 		public DateTime tPrev, t0;
 		public bool valid, crossesRoll, lowR2, refitBar, calibrating, manValid, diagnosticOnly;
+		/// <summary>rev 6 DV-3.10.4 / DV-11.1: the stream was warming for this window; the first refit after a degree switch.</summary>
+		public bool warming, degChanged;
 		public double atr, sigma, sigmaAtr, r2, dw, skew, yhatEnd, slopeEnd, slope1, slope1SigmaPerBar, endpointDrift, uT, yhatT,
 			pocZ, vaLoZ, vaHiZ, entropy, concentration, concentrationOcc, tailVol, inSampleCov2, rthShare;
 
@@ -792,7 +768,7 @@ namespace PowerLanguage.Function
 		{
 			this.ds = ds; this.endBar = endBar; this.tPrev = tPrev; t0 = default(DateTime);
 			anchorBar = int.MinValue; sinceRefit = 0; n = 0; deg = -1; dCap = 0; manRowsEff = 0;
-			valid = crossesRoll = lowR2 = refitBar = calibrating = manValid = diagnosticOnly = false;
+			valid = crossesRoll = lowR2 = refitBar = calibrating = manValid = diagnosticOnly = warming = degChanged = false;
 			atr = sigma = sigmaAtr = r2 = dw = skew = yhatEnd = slopeEnd = slope1 = slope1SigmaPerBar = endpointDrift = uT = yhatT = double.NaN;
 			pocZ = vaLoZ = vaHiZ = entropy = concentration = concentrationOcc = tailVol = inSampleCov2 = rthShare = double.NaN;
 		}
@@ -804,7 +780,7 @@ namespace PowerLanguage.Function
 		public readonly double[] A = new double[DvpFit.MaxDeg + 1], B = new double[DvpFit.MaxDeg + 1], N = new double[DvpFit.MaxDeg + 1], C = new double[DvpFit.MaxDeg + 1];
 		public double yBar, sigma; public int n, deg;
 		public long startPos; public int seen, hits, hitsFlat;
-		// PR-D8 Calibrate (DV-3.6): per-degree copies for d = 1..top, allocated only by the DvpCalib constructor
+		// DV-3.6 / DV-3.10 scorer: per-degree copies for d = 1..top, allocated only by the DvpCalib constructor
 		public readonly double[] SigK, CovInK; public readonly int[] HitsK, HitsFlatK;
 		public int top, year;
 		public DvpCoef() { }
@@ -821,12 +797,12 @@ namespace PowerLanguage.Function
 			this.startPos = startPos; seen = hits = hitsFlat = 0;
 		}
 
-		/// <summary>Calibrate copy: every valid degree (the recurrence is nested, so one coefficient set evaluates any d &lt;= top).</summary>
+		/// <summary>Scorer copy (Calibrate and SelfCalibrate): every valid degree (the recurrence is nested, so one coefficient set evaluates any d &lt;= top).</summary>
 		internal void FromAll(DvpFit f, long startPos, int year)
 		{
 			yBar = f.YBar; n = f.n; top = f.MaxValidDeg; deg = top; sigma = f.SigmaD; this.year = year;
 			for (int k = 0; k <= top; k++) { A[k] = f.A[k]; B[k] = f.B[k]; N[k] = f.N[k]; C[k] = f.C[k]; }
-			for (int k = 1; k <= top; k++) { SigK[k] = f.Sigma[k]; CovInK[k] = f.CovIn(k, 2); HitsK[k] = HitsFlatK[k] = 0; }
+			for (int k = 1; k <= top; k++) { SigK[k] = f.Sigma[k]; CovInK[k] = f.CovIn(k, DvpConst.CalibK); HitsK[k] = HitsFlatK[k] = 0; }
 			this.startPos = startPos; seen = hits = hitsFlat = 0;
 		}
 
@@ -848,12 +824,14 @@ namespace PowerLanguage.Function
 	}
 
 	/// <summary>
-	/// PR-D8 DV-3.6 Calibrate coverage journal (journal side, KD-08's diagnostic run): created lazily by a stream the first time a
-	/// journaled refit is calibrating (degMode = Calibrate, or the DevCoverageFrozen fallback while d* is unset). It samples one window
-	/// every projBars stream bars, copies every degree d = 1..MaxValidDeg, and after H = projBars closed bars adds per-degree cov_in
-	/// (k = 2), cov_fwd (k = 2, sqrt(1 + h(u)) band) and the flat band (report-only) to a per-calendar-year bucket, so the dev
-	/// folds (catalogue 2.0.1, VERIFY) can be pooled offline from the DVP CAL lines. A horizon crossing a roll splice is dropped
-	/// (rollDropped); windows ending on/after DvpConst.HoldoutFrom are not sampled and horizons reaching it are dropped (holdout).
+	/// DV-3.6 / DV-3.10 shared coverage-match scorer on the fixed sample grid (rev 6). The stream samples the window ending at every
+	/// grid position pos (pos mod calibStep = 0, full window in the ring, no roll inside it; else GridSkip), fits it once to dCap
+	/// and calls Sample; every closed bar then calls Track (DV-3.10.2): each pending entry takes the bar for every d, and the entry
+	/// sampled at s is scored on bar s + H (H = projBars), never earlier. A roll bar in s+1..s+H drops it whole (rollDropped), a
+	/// non-finite source drops every pending entry (badDropped). A scored window goes to the per-calendar-year buckets (the DVP CAL
+	/// lines, when KeepYears) and, under SelfCalibrate, to the DvpSelfCalib rolling ring. Calibrate (Holdout = true) never samples a
+	/// window ending on or after DvpConst.HoldoutFrom and drops a horizon reaching it (holdoutSkipped); SelfCalibrate ignores it
+	/// (DV-3.10.9). The pending queue is a fixed array of floor(H / calibStep) + 2 entries, allocated here (DV-13.3).
 	/// </summary>
 	public sealed class DvpCalib
 	{
@@ -865,37 +843,58 @@ namespace PowerLanguage.Function
 			public double Score(int d) { return n[d] > 0 ? Math.Abs(covFwd[d] / n[d] - covIn[d] / n[d]) : double.NaN; }
 		}
 
-		public readonly int H;
+		public readonly int H, Step;
+		/// <summary>Calibrate: HOLDOUT_FROM applies (DV-3.10.9). SelfCalibrate: false.</summary>
+		public readonly bool Holdout;
+		/// <summary>Scored windows also go to Years (the DVP CAL lines). SelfCalibrate sets it only while a journal sink exists.</summary>
+		public bool KeepYears;
+		/// <summary>SelfCalibrate's rolling ring (null under Calibrate).</summary>
+		public readonly DvpSelfCalib Self;
 		readonly DvpCoef[] m_q;
 		int m_count;
-		long m_next = long.MinValue;
 		public readonly SortedDictionary<int, Bucket> Years = new SortedDictionary<int, Bucket>();
 		public long Sampled { get; private set; }
+		public long Scored { get; private set; }
 		public long RollDropped { get; private set; }
+		public long BadDropped { get; private set; }
+		public long GridSkipped { get; private set; }
 		public long HoldoutSkipped { get; private set; }
+		public int Pending { get { return m_count; } }
+		public int QueueCapacity { get { return m_q.Length; } }
 
-		public DvpCalib(int projBars)
+		/// <summary>Calibrate-mode scorer with the default grid (calibStep = projBars).</summary>
+		public DvpCalib(int projBars) : this(projBars, projBars, true, true, null) { }
+
+		public DvpCalib(int projBars, int calibStep, bool holdout, bool keepYears, DvpSelfCalib self)
 		{
-			H = Math.Max(1, projBars);
-			m_q = new DvpCoef[2];   // one sample every H bars, each tracked for H bars: at most 2 overlap at a boundary
+			H = Math.Max(1, projBars); Step = Math.Max(1, calibStep); Holdout = holdout; KeepYears = keepYears; Self = self;
+			m_q = new DvpCoef[H / Step + 2];   // DV-3.10.1: at most floor(H / calibStep) + 2 horizons overlap
 			for (int i = 0; i < m_q.Length; i++) m_q[i] = new DvpCoef(true);
 		}
 
-		/// <summary>Offer the refit at stream position pos (window ending tPrev). Samples when pos has reached the next sample position.</summary>
-		public void Offer(DvpFit f, long pos, DateTime tPrev)
+		/// <summary>DV-3.10.1: pos is a grid position (pos mod calibStep = 0). Fixed: never shifted by a skip, a query or refitEvery.</summary>
+		public bool IsGrid(long pos) { return pos >= 0 && pos % Step == 0; }
+
+		/// <summary>A grid position whose window is not in the ring, crosses a roll or does not fit (gridSkipped).</summary>
+		public void GridSkip() { GridSkipped++; }
+
+		/// <summary>DV-3.10.1: queue the window ending at grid position pos (bar time = time), f fitted to dCap.</summary>
+		public void Sample(DvpFit f, long pos, DateTime time)
 		{
-			if (pos < m_next) return;
-			if (tPrev >= DvpConst.HoldoutFrom) { HoldoutSkipped++; m_next = pos + H; return; }
-			if (m_count >= m_q.Length) return;
-			m_q[m_count++].FromAll(f, pos, tPrev.Year);
-			Sampled++; m_next = pos + H;
+			if (Holdout && time >= DvpConst.HoldoutFrom) { HoldoutSkipped++; return; }
+			if (m_count >= m_q.Length) return;   // unreachable: the queue holds every overlapping horizon
+			m_q[m_count++].FromAll(f, pos, time.Year);
+			Sampled++;
 		}
 
-		/// <summary>One closed stream bar (y = the fit source) at position pos. rollSplice drops every open horizon.</summary>
+		/// <summary>DV-3.10.2: one closed stream bar (y = the fit source) at position pos. rollSplice drops every open horizon.</summary>
 		public void Track(double y, long pos, DateTime time, bool rollSplice)
 		{
+			if (m_count == 0) return;
 			if (rollSplice) { RollDropped += m_count; m_count = 0; return; }
-			if (time >= DvpConst.HoldoutFrom) { HoldoutSkipped += m_count; m_count = 0; return; }
+			if (double.IsNaN(y) || double.IsInfinity(y)) { BadDropped += m_count; m_count = 0; return; }
+			if (Holdout && time >= DvpConst.HoldoutFrom) { HoldoutSkipped += m_count; m_count = 0; return; }
+			const double k2 = DvpConst.CalibK;
 			int w = 0;
 			for (int i = 0; i < m_count; i++)
 			{
@@ -905,15 +904,20 @@ namespace PowerLanguage.Function
 				for (int k = 1; k <= q.top; k++)
 				{
 					double lev, e = Math.Abs(y - q.Eval(u, k, out lev));
-					if (e <= 2 * q.SigK[k] * Math.Sqrt(1 + lev)) q.HitsK[k]++;
-					if (e <= 2 * q.SigK[k]) q.HitsFlatK[k]++;
+					if (e <= k2 * q.SigK[k] * Math.Sqrt(1 + lev)) q.HitsK[k]++;
+					if (e <= k2 * q.SigK[k]) q.HitsFlatK[k]++;
 				}
 				q.seen++;
 				if (q.seen >= H)
 				{
-					Bucket b;
-					if (!Years.TryGetValue(q.year, out b)) { b = new Bucket(); Years.Add(q.year, b); }
-					for (int k = 1; k <= q.top; k++) { b.covIn[k] += q.CovInK[k]; b.covFwd[k] += (double)q.HitsK[k] / H; b.covFwdFlat[k] += (double)q.HitsFlatK[k] / H; b.n[k]++; }
+					Scored++;
+					if (KeepYears)
+					{
+						Bucket b;
+						if (!Years.TryGetValue(q.year, out b)) { b = new Bucket(); Years.Add(q.year, b); }   // once per calendar year (journal side)
+						for (int k = 1; k <= q.top; k++) { b.covIn[k] += q.CovInK[k]; b.covFwd[k] += (double)q.HitsK[k] / H; b.covFwdFlat[k] += (double)q.HitsFlatK[k] / H; b.n[k]++; }
+					}
+					if (Self != null) Self.Add(q, H);
 				}
 				else { m_q[i] = m_q[w]; m_q[w] = q; w++; }
 			}
@@ -937,6 +941,7 @@ namespace PowerLanguage.Function
 		}
 
 		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
+		static string I(long x) { return x.ToString(CultureInfo.InvariantCulture); }
 
 		/// <summary>DVP CAL lines: one per (year, d) and per pooled d, then a summary line with dStar.</summary>
 		public void Lines(Action<string> journal, string runId, int ds)
@@ -945,9 +950,9 @@ namespace PowerLanguage.Function
 			foreach (var kv in Years) bucketLines(journal, head + " year(" + kv.Key.ToString(CultureInfo.InvariantCulture) + ")", kv.Value);
 			Bucket p = Pooled();
 			bucketLines(journal, head + " year(all)", p);
-			journal(head + " summary H(" + H.ToString(CultureInfo.InvariantCulture) + ") sampled(" + Sampled.ToString(CultureInfo.InvariantCulture)
-				+ ") rollDropped(" + RollDropped.ToString(CultureInfo.InvariantCulture) + ") holdoutSkipped(" + HoldoutSkipped.ToString(CultureInfo.InvariantCulture)
-				+ ") dStar(" + DStar(p).ToString(CultureInfo.InvariantCulture) + ")");
+			journal(head + " summary H(" + I(H) + ") step(" + I(Step) + ") sampled(" + I(Sampled) + ") rollDropped(" + I(RollDropped)
+				+ ") badDropped(" + I(BadDropped) + ") gridSkipped(" + I(GridSkipped) + ") holdoutSkipped(" + I(HoldoutSkipped)
+				+ ") dStar(" + I(DStar(p)) + ")");
 		}
 
 		static void bucketLines(Action<string> journal, string head, Bucket b)
@@ -960,6 +965,158 @@ namespace PowerLanguage.Function
 					+ ") covFwd(" + F(b.covFwd[k] / n) + ") covFwdFlat(" + F(b.covFwdFlat[k] / n) + ") score(" + F(b.Score(k)) + ")");
 			}
 		}
+	}
+
+	/// <summary>
+	/// DV-3.10 online degree self-calibration (degMode = SelfCalibrate), one per (stream, winLen). MC-free and allocation-free per
+	/// bar: every array is sized in the constructor (the stream's, i.e. Configure(), DV-13.3).
+	/// Rolling state (DV-3.10.3): a fixed-count ring of the last calibLen scored windows holding cov_in(d) and cov_fwd(d) for
+	/// d = 1..dCap; score(d) = |mean cov_fwd(d) - mean cov_in(d)| summed afresh oldest to newest at each recheck.
+	/// Warm-up (DV-3.10.4): d = 1 and Warming until the first recheck with n &gt;= calibMinScored.
+	/// Recheck (DV-3.10.5): the first closed bar whose tradingDayKey year-month differs from the previous closed bar's; never the
+	/// stream's first bar. Selection (DV-3.10.6): candidate b = argmin with a strict &lt; scanning upward (ties to the lower d); switch
+	/// c -&gt; b only if score(c) - score(b) &gt;= max(calibMarginAbs, calibMarginRel * score(c)).
+	/// Degree history (DV-3.10.7): one byte per position (d | 0x80 while warming), written after the recheck step of bar pos, so a
+	/// lazily recomputed fit of a window ending at b reads the degree that was in effect after bar b.
+	/// </summary>
+	public sealed class DvpSelfCalib
+	{
+		const int S = DvpFit.MaxDeg + 1;
+		const byte WarmBit = 0x80;
+		public readonly int Len, MinScored, DCap;
+		public readonly double MarginAbs, MarginRel;
+		readonly double[] m_in, m_fwd;
+		readonly byte[] m_top;
+		int m_head, m_n;
+		readonly byte[] m_hist;
+		long m_histPos = -1;
+		bool m_any; int m_prevYm;
+		/// <summary>Scores of the last recheck, d = 1..DCap (index 0 and d &gt; DCap stay NaN).</summary>
+		public readonly double[] Scores = new double[S];
+
+		public int Current { get; private set; }
+		public bool Warming { get; private set; }
+		public long WarmEndPos { get; private set; }
+		public DateTime WarmEnd { get; private set; }
+		public long Rechecks { get; private set; }
+		public long Changes { get; private set; }
+		public long Added { get; private set; }
+		/// <summary>The last recheck: degree before it, candidate, and whether d changed.</summary>
+		public int LastFrom { get; private set; }
+		public int LastCandidate { get; private set; }
+		public bool LastChanged { get; private set; }
+		public int HistoryCapacity { get { return m_hist.Length; } }
+
+		public DvpSelfCalib(int calibLen, int calibMinScored, double marginAbs, double marginRel, int dCap, int historyCapacity)
+		{
+			Len = Math.Max(1, calibLen); MinScored = Math.Max(1, calibMinScored); MarginAbs = marginAbs; MarginRel = marginRel;
+			DCap = Math.Max(1, Math.Min(dCap, DvpFit.MaxDeg));
+			m_in = new double[Len * S]; m_fwd = new double[Len * S]; m_top = new byte[Len];
+			m_hist = new byte[Math.Max(1, historyCapacity)];
+			Current = 1; Warming = true; WarmEndPos = -1; LastFrom = 1; LastCandidate = 1;
+			for (int k = 0; k < S; k++) Scores[k] = double.NaN;
+		}
+
+		/// <summary>n = scored windows in the ring (&lt;= calibLen).</summary>
+		public int Count { get { return m_n; } }
+
+		/// <summary>DV-3.10.3: add one scored window (its per-degree cov_in and cov_fwd = hits / H); the oldest leaves when full.</summary>
+		public void Add(DvpCoef q, int H)
+		{
+			int b = m_head, top = Math.Min(q.top, DCap), o = b * S;
+			for (int k = 0; k < S; k++) { m_in[o + k] = double.NaN; m_fwd[o + k] = double.NaN; }
+			for (int k = 1; k <= top; k++) { m_in[o + k] = q.CovInK[k]; m_fwd[o + k] = (double)q.HitsK[k] / H; }
+			m_top[b] = (byte)(top < 0 ? 0 : top);
+			m_head = m_head + 1 == Len ? 0 : m_head + 1;
+			if (m_n < Len) m_n++;
+			Added++;
+		}
+
+		/// <summary>score(d) over the ring, summed afresh oldest to newest (no running-sum drift); NaN when no window has d.</summary>
+		public double Score(int d)
+		{
+			if (d < 1 || d > DCap) return double.NaN;
+			double si = 0, sf = 0; int c = 0;
+			int i = m_head - m_n; if (i < 0) i += Len;
+			for (int j = 0; j < m_n; j++)
+			{
+				if (m_top[i] >= d) { si += m_in[i * S + d]; sf += m_fwd[i * S + d]; c++; }
+				i = i + 1 == Len ? 0 : i + 1;
+			}
+			return c > 0 ? Math.Abs(sf / c - si / c) : double.NaN;
+		}
+
+		/// <summary>Mean cov_in / cov_fwd of d over the ring (DV-T38 parity); NaN when empty.</summary>
+		public void Means(int d, out double covIn, out double covFwd)
+		{
+			double si = 0, sf = 0; int c = 0;
+			int i = m_head - m_n; if (i < 0) i += Len;
+			for (int j = 0; j < m_n; j++)
+			{
+				if (d >= 1 && d <= DCap && m_top[i] >= d) { si += m_in[i * S + d]; sf += m_fwd[i * S + d]; c++; }
+				i = i + 1 == Len ? 0 : i + 1;
+			}
+			covIn = c > 0 ? si / c : double.NaN; covFwd = c > 0 ? sf / c : double.NaN;
+		}
+
+		/// <summary>DV-3.10.6 candidate: argmin over d = 1..dCap, strict &lt; scanning upward (ties to the lower d). NaN scores are never
+		/// chosen; 0 when every score is NaN.</summary>
+		public static int Candidate(double[] scores, int dCap)
+		{
+			int best = 0; double bs = 0;
+			for (int d = 1; d <= dCap; d++)
+			{
+				double x = scores[d];
+				if (double.IsNaN(x)) continue;
+				if (best == 0 || x < bs) { best = d; bs = x; }
+			}
+			return best;
+		}
+
+		/// <summary>DV-3.10.6 hysteresis: switch c -&gt; b only if b != c and score(c) - score(b) &gt;= max(abs, rel * score(c)). A NaN score keeps c.</summary>
+		public static bool ShouldSwitch(int c, int b, double[] scores, double marginAbs, double marginRel)
+		{
+			if (b < 1 || b == c) return false;
+			double sc = scores[c], sb = scores[b];
+			if (double.IsNaN(sc) || double.IsNaN(sb)) return false;
+			return sc - sb >= Math.Max(marginAbs, marginRel * sc);
+		}
+
+		/// <summary>
+		/// Steps (2) of DV-3.10.5 for closed bar pos (after the scorer's Track): a recheck when tradingDay's year-month differs from
+		/// the previous bar's (never on the first bar), then the degree history entry of pos. Returns true on a recheck.
+		/// </summary>
+		public bool Step(DateTime tradingDay, long pos, DateTime barTime)
+		{
+			int ym = tradingDay.Year * 12 + tradingDay.Month - 1;
+			bool re = m_any && ym != m_prevYm;
+			m_any = true; m_prevYm = ym;
+			LastChanged = false;
+			if (re)
+			{
+				Rechecks++;
+				LastFrom = Current;
+				for (int d = 1; d < S; d++) Scores[d] = Score(d);
+				int b = Candidate(Scores, DCap);
+				LastCandidate = b;
+				if (m_n >= MinScored)
+				{
+					if (ShouldSwitch(Current, b, Scores, MarginAbs, MarginRel)) { Current = b; Changes++; LastChanged = true; }
+					if (Warming) { Warming = false; WarmEndPos = pos; WarmEnd = barTime; }
+				}
+			}
+			m_hist[(int)(pos % m_hist.Length)] = (byte)(Current | (Warming ? WarmBit : 0));
+			m_histPos = pos;
+			return re;
+		}
+
+		bool HasHistory(long pos) { return pos >= 0 && pos <= m_histPos && m_histPos - pos < m_hist.Length; }
+
+		/// <summary>Degree in effect after bar pos (DV-3.10.7), or -1 when pos is not in the history.</summary>
+		public int DegreeAt(long pos) { return HasHistory(pos) ? m_hist[(int)(pos % m_hist.Length)] & 0x7F : -1; }
+
+		/// <summary>Warming after bar pos; true when pos is not in the history (conservative).</summary>
+		public bool WarmingAt(long pos) { return !HasHistory(pos) || (m_hist[(int)(pos % m_hist.Length)] & WarmBit) != 0; }
 	}
 
 	/// <summary>
@@ -993,10 +1150,14 @@ namespace PowerLanguage.Function
 		int m_fwdCount;
 		long m_pos = -1, m_roll1 = long.MinValue, m_roll0 = long.MinValue;
 		int m_lastBar = int.MinValue;
-		bool m_degWarned;
+		// rev 6 DV-3.10: online degree self-calibration (SelfCalibrate: scorer, ring and fit built here; Calibrate: scorer lazy, journal side)
+		readonly DvpSelfCalib m_self;
+		DvpFit m_calFit;
 
-		/// <summary>Warning sink (DVP DEGREE fallback); null = silent.</summary>
+		/// <summary>Warning sink (DVP DEGREE warming, DV-3.10.4); null = silent.</summary>
 		public Action<string> warnOnce;
+		/// <summary>Info sink (DVP DEGREE change, DV-3.10.7); null = silent (no string is formatted).</summary>
+		public Action<string> info;
 
 		// sessions (DV-7.7): tradingDayKey changes on this stream's bars
 		public DateTime SessionDay { get; private set; }
@@ -1009,7 +1170,8 @@ namespace PowerLanguage.Function
 		public long BarsSeen { get { return m_pos + 1; } }
 		public long Eligible { get; private set; }     // windows after warm-up (DV-7.4)
 		public long Skipped { get; private set; }      // of which crossing a roll
-		public long FitsComputed { get; private set; } // window fits actually run (laziness counter, DV-T22)
+		public long FitsComputed { get; private set; } // snapshot window fits actually run (laziness counter, DV-T22)
+		public long CalibFits { get; private set; }    // calibrator grid fits (DV-T22 rev 6: one per sampled grid window)
 		public long FitLines { get; private set; }
 		public long SkipLines { get; private set; }
 		double m_covInSum, m_covFwdSum, m_covFwdFlatSum; long m_covInN, m_covFwdN;
@@ -1031,6 +1193,13 @@ namespace PowerLanguage.Function
 			m_prevFit = new DvpFit(m_n);
 			m_fwd = new DvpCoef[m_H / m_r + 2];
 			for (int i = 0; i < m_fwd.Length; i++) m_fwd[i] = new DvpCoef();
+			if (cfg.degMode == EDvpDegMode.SelfCalibrate)   // DV-0.1 / DV-13.3: the calibrator runs on every bar, so it is built here
+			{
+				m_self = new DvpSelfCalib(cfg.calibLen, cfg.calibMinScored, cfg.calibMarginAbs, cfg.calibMarginRel,
+					DvpDegree.Cap(m_n, cfg.degMax), RingNeed(cfg) + m_r + 2);
+				Calib = new DvpCalib(m_H, cfg.calibStep, false, false, m_self);
+				m_calFit = new DvpFit(m_n);
+			}
 			if (cfg.useFib)
 			{
 				Lattice = new DvpLattice(cfg.fibRanges); Pivots = new DvpPivots[cfg.fibRanges];
@@ -1092,12 +1261,88 @@ namespace PowerLanguage.Function
 				Eligible++;
 				if (RollDetect && crossesByPos(aPos)) Skipped++;
 			}
+			calibStep(ring, b, journal);   // rev 6 DV-3.10.5: (1) track/score, (2) recheck + degree history, (3) grid sample
 			if (journal != null)
 			{
 				trackForward(b);
 				if (Config.journalFits && Mod(b.bar, m_r) == 0) journalFit(ring, journal, runId, configHash);
 			}
 			return true;
+		}
+
+		/// <summary>
+		/// DV-3.10 per-bar calibration step, in the order of DV-3.10.5: (1) every pending horizon takes this bar (scoring the one that
+		/// completes), (2) a recheck on the first bar of a new tradingDay month, then the degree history entry for this position, so a
+		/// fit of the window ending here uses the degree after (2); (3) the grid sample of the window ending here. Under Calibrate the
+		/// scorer exists only while a journal sink is on (DVP CAL, journal side); Fixed1 has none.
+		/// </summary>
+		void calibStep(_BarRing ring, RingBar b, Action<string> journal)
+		{
+			DvpConfig c = Config;
+			if (m_self == null)
+			{
+				if (c.degMode != EDvpDegMode.Calibrate || journal == null) return;
+				if (Calib == null) { Calib = new DvpCalib(m_H, c.calibStep, true, true, null); m_calFit = new DvpFit(m_n); }   // lazy (journal side)
+			}
+			else
+			{
+				Calib.KeepYears = journal != null;   // the per-year DVP CAL buckets exist only for a journal
+				if (m_pos == 0 && warnOnce != null) warnOnce(WarmingLine());
+			}
+			Calib.Track(Src(b), m_pos, b.time, b.rollBar && RollDetect);   // (1)
+			if (m_self != null && m_self.Step(b.tradingDay, m_pos, b.time))   // (2)
+			{
+				if (journal != null) journal(SelLine());
+				if (m_self.LastChanged && info != null) info(ChangeLine());
+			}
+			if (!Calib.IsGrid(m_pos) || m_pos - m_n + 1 < 0) return;   // (3) the fixed grid; positions before the first full window are not samples
+			if (ring.Count < m_n || (RollDetect && crossesInRing(ring, 0, m_n))) { Calib.GridSkip(); return; }
+			if (!loadAndFit(m_calFit, ring, 0, false)) { Calib.GridSkip(); return; }
+			CalibFits++;
+			Calib.Sample(m_calFit, m_pos, b.time);
+		}
+
+		/// <summary>The self-calibrator (SelfCalibrate only, else null).</summary>
+		public DvpSelfCalib Self { get { return m_self; } }
+
+		/// <summary>DV-3.10.7: degree in effect after stream position pos (1 under Fixed1 and Calibrate; -1 when pos is not in the history).</summary>
+		public int DegreeAt(long pos) { return m_self == null ? 1 : m_self.DegreeAt(pos); }
+
+		/// <summary>DV-3.10.4: warming after stream position pos (always false outside SelfCalibrate).</summary>
+		public bool WarmingAt(long pos) { return m_self != null && m_self.WarmingAt(pos); }
+
+		/// <summary>Degree in effect after the newest closed bar (DV-3.10.7).</summary>
+		public int CurrentDegree { get { return m_self == null ? 1 : m_self.Current; } }
+
+		/// <summary>Warming after the newest closed bar (DV-3.10.4); Tradeable is false while true.</summary>
+		public bool Warming { get { return m_self != null && m_self.Warming; } }
+
+		string head(string kind)
+		{
+			return "DVP DEGREE " + kind + " stream(Data" + I(Ds) + ") winLen(" + I(m_n) + ")";
+		}
+
+		/// <summary>DV-3.10.4 one Warning on the stream's first bar.</summary>
+		public string WarmingLine()
+		{
+			return head("warming") + " minScored(" + I(Config.calibMinScored) + "): d = 1, not tradeable until a monthly recheck with n >= "
+				+ I(Config.calibMinScored);
+		}
+
+		/// <summary>DV-3.10.7 journal line of every recheck: scores for d = 1..dCap (R, NaN when the ring has no window for d).</summary>
+		public string SelLine()
+		{
+			var sb = new StringBuilder(160);
+			sb.Append(head("sel")).Append(" from(").Append(I(m_self.LastFrom)).Append(") to(").Append(I(m_self.Current)).Append(") scores[");
+			for (int d = 1; d <= m_self.DCap; d++) { if (d > 1) sb.Append(','); sb.Append(F(m_self.Scores[d])); }
+			sb.Append("] n(").Append(I(m_self.Count)).Append(')');
+			return sb.ToString();
+		}
+
+		/// <summary>DV-3.10.7 Info line when d changes.</summary>
+		public string ChangeLine()
+		{
+			return head("change") + " from(" + I(m_self.LastFrom) + ") to(" + I(m_self.Current) + ") n(" + I(m_self.Count) + ")";
 		}
 
 		bool crossesByPos(long aPos)
@@ -1173,13 +1418,14 @@ namespace PowerLanguage.Function
 			long aPos = ePos - off;
 			snap.sinceRefit = off; snap.refitBar = off == 0;
 			snap.atr = m_pos - ePos < m_K && ePos >= 0 ? m_atrHist[(int)(ePos % m_K)] : double.NaN;
+			snap.warming = WarmingAt(aPos);   // DV-3.10.4: the degree state of the window ending at the anchor
 			if (aPos - m_n + 1 < 0 || ring.Count < aAgo + m_n) return;   // warm-up: no fit (DV-7.1 "fits resume after n bars")
 			snap.anchorBar = ring[aAgo].bar; snap.t0 = ring[aAgo + m_n - 1].time;
 			if (RollDetect && crossesInRing(ring, aAgo, m_n)) { snap.crossesRoll = true; return; }   // skipped: no rails
 			if (s.fitAnchor != snap.anchorBar)
 			{
 				s.fitAnchor = snap.anchorBar;
-				s.fitOk = fitWindow(s.fit, ring, aAgo, true);
+				s.fitOk = fitWindow(s.fit, ring, aAgo, true, aPos);
 				s.rthShare = m_rthShare;
 				if (s.fitOk)
 				{
@@ -1191,6 +1437,7 @@ namespace PowerLanguage.Function
 			DvpFit f = s.fit; DvpManifold man = s.man;
 			int d = f.Deg;
 			snap.valid = true; snap.n = f.n; snap.deg = d; snap.dCap = f.DTop; snap.calibrating = f.Calibrating;
+			snap.degChanged = off == 0 && aPos - m_r >= 0 && DegreeAt(aPos) != DegreeAt(aPos - m_r);   // DV-11.1: the first refit after a switch
 			snap.sigma = f.SigmaD; snap.sigmaAtr = snap.sigma / snap.atr; snap.r2 = f.R2[d]; snap.lowR2 = !(snap.r2 >= c.minR2);
 			snap.dw = s.dw; snap.skew = s.skew; snap.rthShare = s.rthShare;
 			snap.yhatEnd = f.Yhat(1, d); snap.slopeEnd = f.SlopeEnd(d); snap.slope1 = f.SlopeEnd(1);
@@ -1209,8 +1456,23 @@ namespace PowerLanguage.Function
 
 		double m_rthShare;
 
-		/// <summary>Loads the n-bar window ending at anchorAgo (oldest first) and fits it with the DV-3.6 degree rule. No allocation.</summary>
-		bool fitWindow(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll)
+		/// <summary>
+		/// Fits the n-bar window ending at anchorAgo (stream position aPos) with the DV-3.6 degree rule: SelfCalibrate uses the degree
+		/// in effect after bar aPos (DV-3.10.7; no fit when it is not in the history), Calibrate reports d = 1 with every d fitted,
+		/// Fixed1 d = 1. aPos &lt; 0 = no degree needed (the drift's previous window, evaluated at the current degree). No allocation.
+		/// </summary>
+		bool fitWindow(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll, long aPos)
+		{
+			FitsComputed++;
+			if (!loadAndFit(fit, ring, anchorAgo, loadAll)) return false;
+			int d = 1;
+			if (m_self != null && aPos >= 0) { d = m_self.DegreeAt(aPos); if (d < 1) return false; }
+			fit.Choose(d, Config.degMode == EDvpDegMode.Calibrate);
+			return true;
+		}
+
+		/// <summary>Loads the n-bar window ending at anchorAgo (oldest first) and fits every degree up to dCap. No allocation.</summary>
+		bool loadAndFit(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll)
 		{
 			DvpConfig c = Config;
 			int n = m_n;
@@ -1227,16 +1489,7 @@ namespace PowerLanguage.Function
 				}
 			}
 			if (loadAll) m_rthShare = RthKnown && vol > 0 ? rth / vol : double.NaN;   // DV-7.7: NaN on the generic base
-			FitsComputed++;
-			if (!fit.Fit(m_y, m_v, n, c.degMax, c.weightVol)) return false;
-			int dStar, d; bool calib, warn;
-			bool hasFrozen = DvpFrozenDegree.TryGet(Root, Ds, n, out dStar);
-			DvpDegree.Select(c.degMode, n, c.degMax, hasFrozen, dStar, ref m_degWarned, out d, out calib, out warn);
-			if (warn && warnOnce != null)
-				warnOnce("DVP DEGREE: no frozen d* for root(" + Root + ") stream(Data" + Ds.ToString(CultureInfo.InvariantCulture) + ") winLen("
-					+ n.ToString(CultureInfo.InvariantCulture) + "); DevCoverageFrozen falls back to d = 1");
-			fit.Choose(d, calib);
-			return true;
+			return fit.Fit(m_y, m_v, n, c.degMax, c.weightVol);
 		}
 
 		/// <summary>
@@ -1254,9 +1507,11 @@ namespace PowerLanguage.Function
 			Slot o = s == m_s0 ? m_s1 : m_s0;
 			DvpFit prev;
 			if (o.fitAnchor == pBar) { if (!o.fitOk) return double.NaN; prev = o.fit; }
-			else { if (!fitWindow(m_prevFit, ring, pAgo, false)) return double.NaN; prev = m_prevFit; }
+			else { if (!fitWindow(m_prevFit, ring, pAgo, false, -1)) return double.NaN; prev = m_prevFit; }
 			DvpFit f = s.fit;
-			double now = f.Yhat(f.U(m_n - 1 - m_r), f.Deg), was = prev.Yhat(1, prev.Deg);
+			// rev 6 DV-3.8: both fits at the current degree f.Deg (Yhat clamps to the previous fit's valid degrees), so a degree switch
+			// never shows up as drift
+			double now = f.Yhat(f.U(m_n - 1 - m_r), f.Deg), was = prev.Yhat(1, f.Deg);
 			return (now - was) / s.snap.atr;
 		}
 
@@ -1264,12 +1519,12 @@ namespace PowerLanguage.Function
 
 		/// <summary>cov_fwd horizons dropped because they crossed a roll (journal-side; DVP RUN fwdDropped).</summary>
 		public long FwdDropped { get; private set; }
-		/// <summary>PR-D8: the Calibrate coverage journal (null until a journaled refit is calibrating).</summary>
+		/// <summary>DV-3.6 / DV-3.10 grid scorer: built in the constructor under SelfCalibrate; under Calibrate created on the first
+		/// journaled bar (null with no journal); null under Fixed1.</summary>
 		public DvpCalib Calib { get; private set; }
 
 		void trackForward(RingBar b)
 		{
-			if (Calib != null) Calib.Track(Src(b), m_pos, b.time, b.rollBar && RollDetect);
 			if (b.rollBar && RollDetect) { FwdDropped += m_fwdCount; m_fwdCount = 0; return; }   // a forward horizon across a splice is dropped (counted)
 			double y = Src(b);
 			int w = 0;
@@ -1298,11 +1553,6 @@ namespace PowerLanguage.Function
 			FitLines++;
 			m_covInSum += f.CovIn(f.Deg, 2); m_covInN++;
 			if (m_fwdCount < m_fwd.Length) m_fwd[m_fwdCount++].From(f, m_pos);
-			if (s.calibrating)
-			{
-				if (Calib == null) Calib = new DvpCalib(m_H);   // lazy (DV-13.3 journal side)
-				Calib.Offer(f, m_pos, s.tPrev);
-			}
 		}
 
 		static string F(double x) { return x.ToString("R", CultureInfo.InvariantCulture); }
@@ -1325,7 +1575,8 @@ namespace PowerLanguage.Function
 			kv(sb, "pocZ", s.pocZ); kv(sb, "vaLoZ", s.vaLoZ); kv(sb, "vaHiZ", s.vaHiZ); kv(sb, "entropy", s.entropy);
 			kv(sb, "concentration", s.concentration); kv(sb, "concentrationOcc", s.concentrationOcc); kv(sb, "tailVol", s.tailVol);
 			kv(sb, "inSampleCov2", s.inSampleCov2);
-			sb.Append(" lowR2(").Append(ok ? (s.lowR2 ? "1" : "0") : "NaN").Append(") coef{");
+			sb.Append(" lowR2(").Append(ok ? (s.lowR2 ? "1" : "0") : "NaN").Append(") warming(").Append(ok ? (s.warming ? "1" : "0") : "NaN")
+				.Append(") degChanged(").Append(ok ? (s.degChanged ? "1" : "0") : "NaN").Append(") coef{");
 			if (ok)
 			{
 				int d = f.Deg;
@@ -1344,7 +1595,7 @@ namespace PowerLanguage.Function
 				sb.Append(" r2");
 				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.R2[k]));
 				sb.Append(" covIn2");
-				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.CovIn(k, 2)));
+				for (int k = 1; k <= f.MaxValidDeg; k++) sb.Append(k == 1 ? "=" : ";").Append(F(f.CovIn(k, DvpConst.CalibK)));
 				sb.Append(')');
 			}
 			return sb.ToString();
@@ -1358,7 +1609,17 @@ namespace PowerLanguage.Function
 			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + I(FitLines) + ") skips(" + I(SkipLines)
 				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
 				+ ") diagnosticOnly(" + (DiagnosticOnly ? "1" : "0") + ") meanCovIn(" + F(MeanCovIn) + ") meanCovFwd(" + F(MeanCovFwd)
-				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")";
+				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")"
+				+ CalibRun();
+		}
+
+		/// <summary>DV-11.3 rev 6: the SelfCalibrate counters on DVP RUN (empty under Fixed1 and Calibrate).</summary>
+		public string CalibRun()
+		{
+			if (m_self == null) return "";
+			return " calib{scored=" + I(Calib.Scored) + ",rollDropped=" + I(Calib.RollDropped) + ",badDropped=" + I(Calib.BadDropped) + ",gridSkipped="
+				+ I(Calib.GridSkipped) + ",rechecks=" + I(m_self.Rechecks) + ",changes=" + I(m_self.Changes) + ",warmEnd="
+				+ (m_self.Warming ? "NaN" : m_self.WarmEnd.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)) + ",dFinal=" + I(m_self.Current) + "}";
 		}
 	}
 
@@ -1375,6 +1636,8 @@ namespace PowerLanguage.Function
 		readonly int[] m_ds;
 		readonly bool[] m_p2Warned;   // DV-9.3: one Warning per HTF stream
 		public Action<string> journal, warnOnce;
+		/// <summary>rev 6 DV-3.10.7: Info sink for DVP DEGREE change; null = silent (no string formatted).</summary>
+		public Action<string> info;
 		bool m_finished;
 
 		public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce, string paLabels = null)
@@ -1391,8 +1654,9 @@ namespace PowerLanguage.Function
 		public int StreamCount { get { return m_streams.Length; } }
 
 		/// <summary>DV-9.3 / DV-10 Tradeable(ds): false for a stream not in `streams`; Data1 true; ds &gt; 1 only when P2_PASSED. While P2 has
-		/// not passed, the first call per HTF stream logs the Warning "DVP Data{ds} used before Probe P2". (DV-7.4: diagnosticOnly is a
-		/// run-level verdict and never gates live bars, so it is not consulted here.)</summary>
+		/// not passed, the first call per HTF stream logs the Warning "DVP Data{ds} used before Probe P2". Then (rev 6 DV-3.10.4) false
+		/// while the stream is warming, judged after its newest closed bar. (DV-7.4: diagnosticOnly is a run-level verdict and never
+		/// gates live bars, so it is not consulted here.)</summary>
 		public bool Tradeable(int ds)
 		{
 			int i = Array.IndexOf(m_ds, ds);
@@ -1400,10 +1664,17 @@ namespace PowerLanguage.Function
 			// Gates only P2 (Analyst 2 ruling on PR #41): no timeframe is hard-coded (240m diagnostic-only is a consumer rule, DV-7.5).
 			// TODO(DV-7.0 rollMode PR, M-INSTR): diagnosticOnly is a run-level verdict (DV-7.4) and must NEVER gate Tradeable(); the
 			// rollMode PR reports diagnosticOnly in the DVP RUN line only (under rollMode None the stream stays tradeable, DV-7.0).
-			if (ds <= 1 || DvpConst.P2_PASSED) return true;
-			if (!m_p2Warned[i]) { m_p2Warned[i] = true; if (warnOnce != null) warnOnce("DVP Data" + ds.ToString(CultureInfo.InvariantCulture) + " used before Probe P2"); }
-			return false;
+			if (ds > 1 && !DvpConst.P2_PASSED)
+			{
+				if (!m_p2Warned[i]) { m_p2Warned[i] = true; if (warnOnce != null) warnOnce("DVP Data" + ds.ToString(CultureInfo.InvariantCulture) + " used before Probe P2"); }
+				return false;
+			}
+			return !m_streams[i].Warming;   // rev 6 DV-3.10.4
 		}
+
+		/// <summary>rev 6 DV-3.10.7: the degree in effect for stream ds after its newest closed bar (1 outside SelfCalibrate); 0 when
+		/// ds is not a stream.</summary>
+		public int Degree(int ds) { DvpStream s = Stream(ds); return s == null ? 0 : s.CurrentDegree; }
 		public DvpStream Stream(int ds) { for (int i = 0; i < m_ds.Length; i++) if (m_ds[i] == ds) return m_streams[i]; return null; }
 
 		public static ulong Fnv1a64(string s)
@@ -1422,12 +1693,10 @@ namespace PowerLanguage.Function
 			for (int i = 0; i < m_ds.Length; i++)
 			{
 				if (i > 0) sb.Append(',');
-				int dStar, d; bool calib, warn, latch = true;
-				bool has = DvpFrozenDegree.TryGet(root ?? "", m_ds[i], Config.winLen, out dStar);
-				DvpDegree.Select(Config.degMode, Config.winLen, Config.degMax, has, dStar, ref latch, out d, out calib, out warn);
-				bool unfrozen = Config.degMode == EDvpDegMode.DevCoverageFrozen && !has;
-				sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)).Append('=').Append(d.ToString(CultureInfo.InvariantCulture));
-				if (calib || unfrozen) sb.Append('(').Append(calib ? "calibrate" : "").Append(calib && unfrozen ? "," : "").Append(unfrozen ? "unfrozen" : "").Append(')');
+				// rev 6 DV-11.3: every stream starts at d = 1; SelfCalibrate starts warming, Calibrate fits every d and reports 1
+				sb.Append("Data").Append(m_ds[i].ToString(CultureInfo.InvariantCulture)).Append("=1");
+				if (Config.degMode == EDvpDegMode.SelfCalibrate) sb.Append("(warming)");
+				else if (Config.degMode == EDvpDegMode.Calibrate) sb.Append("(calibrate)");
 			}
 			sb.Append(") pa(").Append(string.IsNullOrEmpty(paLabels) ? "none" : paLabels).Append(") rollDetect(").Append(RollDetect ? "On" : "Off").Append(") p2(").Append(DvpConst.P2_PASSED ? "passed" : "notRun").Append(") canon(").Append(Config.Canon()).Append(')');
 			return sb.ToString();
@@ -1437,7 +1706,9 @@ namespace PowerLanguage.Function
 		public bool OnBar(int ds, _BarRing ring, bool halfDay)
 		{
 			DvpStream s = Stream(ds);
-			return s != null && s.OnBar(ring, halfDay, journal, RunId, ConfigHash);
+			if (s == null) return false;
+			s.info = info;
+			return s.OnBar(ring, halfDay, journal, RunId, ConfigHash);
 		}
 
 		/// <summary>DV-10 Snapshot for bar t; endAgo = 1 when ring[0] is the current closed bar, 0 intrabar. Null if no fit or skipped.</summary>
@@ -1495,7 +1766,7 @@ namespace PowerLanguage.Function
 			if (journal == null) return;
 			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].RailJournal != null) m_streams[i].RailJournal.Finish(m_ds[i], journal, RunId); }   // DV-11.2 unfinished trackers
 			for (int i = 0; i < m_streams.Length; i++) journal(m_streams[i].RunLine(RunId));
-			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].Calib != null) m_streams[i].Calib.Lines(journal, RunId, m_ds[i]); }   // PR-D8 DV-3.6
+			for (int i = 0; i < m_streams.Length; i++) { if (m_streams[i].Calib != null) m_streams[i].Calib.Lines(journal, RunId, m_ds[i]); }   // DV-3.6 / DV-11.3 rev 6 (Calibrate and SelfCalibrate)
 		}
 	}
 
@@ -1840,16 +2111,7 @@ namespace PowerLanguage.Function
 
 		/// <summary>DV-8.3: since the most recent trigger in the history (k &gt;= 1), some later close came back inside its own rail by
 		/// more than Delta*ATR. False when there is no trigger in the history.</summary>
-		public static bool BackInside(double[] c, double[] p, double[] a, int len, int dir)
-		{
-			for (int k = 1; k < len - 1; k++)
-			{
-				if (!Triggered(c, p, a, len, k, dir)) continue;
-				for (int j = 0; j < k; j++) if (Ok(c, p, a, len, j) && dir * (c[j] - p[j]) < -Delta * a[j]) return true;
-				return false;
-			}
-			return false;
-		}
+		public static bool BackInside(double[] c, double[] p, double[] a, int len, int dir) { return BackInside(c, p, a, null, len, dir); }
 
 		/// <summary>
 		/// DV-8.3 Accepted, true on the bar the run completes. countTrigger = true: the trigger plus N further closes (N + 1 bars,
@@ -1858,9 +2120,37 @@ namespace PowerLanguage.Function
 		/// </summary>
 		public static bool Accepted(double[] c, double[] p, double[] a, int len, int dir, int N, bool countTrigger, double deltaAtr)
 		{
+			return Accepted(c, p, a, null, len, dir, N, countTrigger, deltaAtr);
+		}
+
+		// ---- rev 6 DV-8.2: degree-change suppression. g[k] = bar k's own snapshot has a different degree from bar k+1's (the
+		// t-1 snapshot); a trigger on such a bar is suppressed. Runs already in progress (trigger on an earlier bar) continue.
+		// g = null = no suppression (the overloads above).
+
+		/// <summary>DV-8.2 rev 6: true when bar k is a degree-change bar (its trigger is suppressed).</summary>
+		public static bool DegChange(bool[] g, int k) { return g != null && k >= 0 && k < g.Length && g[k]; }
+
+		public static bool Triggered(double[] c, double[] p, double[] a, bool[] g, int len, int k, int dir)
+		{
+			return !DegChange(g, k) && Triggered(c, p, a, len, k, dir);
+		}
+
+		public static bool BackInside(double[] c, double[] p, double[] a, bool[] g, int len, int dir)
+		{
+			for (int k = 1; k < len - 1; k++)
+			{
+				if (!Triggered(c, p, a, g, len, k, dir)) continue;
+				for (int j = 0; j < k; j++) if (Ok(c, p, a, len, j) && dir * (c[j] - p[j]) < -Delta * a[j]) return true;
+				return false;
+			}
+			return false;
+		}
+
+		public static bool Accepted(double[] c, double[] p, double[] a, bool[] g, int len, int dir, int N, bool countTrigger, double deltaAtr)
+		{
 			if (N < 1 || N > MaxN) throw new ArgumentOutOfRangeException("N", "DV-8.1: N must be 1.." + MaxN);
 			int m = countTrigger ? N + 1 : N;
-			if (!Triggered(c, p, a, len, m - 1, dir)) return false;
+			if (!Triggered(c, p, a, g, len, m - 1, dir)) return false;
 			for (int k = 0; k < m; k++) if (!Beyond(c, p, a, len, k, dir, deltaAtr)) return false;
 			return true;
 		}
@@ -1877,15 +2167,19 @@ namespace PowerLanguage.Function
 	{
 		public const int Depth = 8;
 		readonly DvpStream m_s;
-		readonly int[] m_key, m_count; readonly bool[] m_valid; readonly double[] m_atr, m_yhat, m_sigma; readonly DvpRail[][] m_items;
+		readonly int[] m_key, m_count, m_deg; readonly bool[] m_valid; readonly double[] m_atr, m_yhat, m_sigma; readonly DvpRail[][] m_items;
 		public readonly double[] C = new double[Depth], P = new double[Depth], A = new double[Depth];
+		/// <summary>rev 6 DV-8.2: D[k] = degree of bar k's own snapshot (-1 = no fit); G[k] = D[k] and D[k+1] known and different
+		/// (a degree-change bar, whose trigger is suppressed). Filled by Load.</summary>
+		public readonly int[] D = new int[Depth];
+		public readonly bool[] G = new bool[Depth];
 		public int Len;
 		public long Copied { get; private set; }   // entries copied (laziness counter)
 
 		public DvpRailHistory(DvpStream s, int maxRails)
 		{
 			m_s = s;
-			m_key = new int[Depth]; m_count = new int[Depth]; m_valid = new bool[Depth]; m_atr = new double[Depth]; m_yhat = new double[Depth]; m_sigma = new double[Depth];
+			m_key = new int[Depth]; m_count = new int[Depth]; m_deg = new int[Depth]; m_valid = new bool[Depth]; m_atr = new double[Depth]; m_yhat = new double[Depth]; m_sigma = new double[Depth];
 			m_items = new DvpRail[Depth][];
 			for (int i = 0; i < Depth; i++) { m_items[i] = new DvpRail[maxRails]; m_key[i] = int.MinValue; }
 		}
@@ -1906,6 +2200,7 @@ namespace PowerLanguage.Function
 			if (snap == null) return -1;
 			m_key[slot] = key; Copied++;
 			m_valid[slot] = snap.valid && rails != null; m_atr[slot] = snap.atr; m_count[slot] = 0;
+			m_deg[slot] = snap.valid ? snap.deg : -1;
 			m_yhat[slot] = m_sigma[slot] = double.NaN;
 			if (m_valid[slot])
 			{
@@ -1949,15 +2244,16 @@ namespace PowerLanguage.Function
 		public int Load(_BarRing ring, ELevelKind kind, double z)
 		{
 			Len = 0;
-			for (int k = 0; k < Depth; k++) { C[k] = P[k] = A[k] = double.NaN; }
+			for (int k = 0; k < Depth; k++) { C[k] = P[k] = A[k] = double.NaN; D[k] = -1; G[k] = false; }
 			if (ring == null || ring.Count == 0 || DvpConfluence.Family(kind) < 0 || kind == ELevelKind.DvpFib) return 0;
 			for (int k = Depth - 1; k >= 0; k--)   // oldest first, so the last copy is the newest (cache-friendly)
 			{
 				int slot = Entry(ring, k);
 				if (slot < 0) continue;
 				if (k + 1 > Len) Len = k + 1;
-				C[k] = ring[k].c; P[k] = PriceIn(slot, kind, z); A[k] = m_atr[slot];
+				C[k] = ring[k].c; P[k] = PriceIn(slot, kind, z); A[k] = m_atr[slot]; D[k] = m_deg[slot];
 			}
+			for (int k = 0; k + 1 < Depth; k++) G[k] = D[k] >= 0 && D[k + 1] >= 0 && D[k] != D[k + 1];
 			return Len;
 		}
 
@@ -2040,7 +2336,7 @@ namespace PowerLanguage.Function
 				{
 					int dr = m_track[i].dir;   // back inside its own rail by more than Delta*ATR, at any bar of the clock
 					if (!double.IsNaN(h.P[0]) && h.A[0] > 0 && dr * (h.C[0] - h.P[0]) < -DvpAccept.Delta * h.A[0]) m_track[i].back41 = true;
-					else if (m_track[i].elapsed == 2 && DvpAccept.Accepted(h.C, h.P, h.A, h.Len, m_track[i].dir, 2, true, 0)) m_track[i].accepted41 = true;   // on the event's own trigger only
+					else if (m_track[i].elapsed == 2 && DvpAccept.Accepted(h.C, h.P, h.A, h.G, h.Len, m_track[i].dir, 2, true, 0)) m_track[i].accepted41 = true;   // on the event's own trigger only
 				}
 				if (m_track[i].elapsed >= DvpConst.HoldBars)
 				{
@@ -2055,9 +2351,9 @@ namespace PowerLanguage.Function
 				if (h.Load(ring, r.kind, r.z) == 0) continue;
 				for (int dir = 1; dir >= -1; dir -= 2)
 				{
-					bool trig = DvpAccept.Triggered(h.C, h.P, h.A, h.Len, 0, dir);
-					bool a2 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 2, true, 0), a3 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 3, true, 0),
-						a5 = DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, 5, true, 0);
+					bool trig = DvpAccept.Triggered(h.C, h.P, h.A, h.G, h.Len, 0, dir);
+					bool a2 = DvpAccept.Accepted(h.C, h.P, h.A, h.G, h.Len, dir, 2, true, 0), a3 = DvpAccept.Accepted(h.C, h.P, h.A, h.G, h.Len, dir, 3, true, 0),
+						a5 = DvpAccept.Accepted(h.C, h.P, h.A, h.G, h.Len, dir, 5, true, 0);
 					if (!trig && !a2 && !a3 && !a5) continue;
 					DvpRailEvent e = new DvpRailEvent();
 					e.kind = r.kind; e.z = r.z; e.price = r.price; e.close = b.c; e.atr = snap.atr; e.dir = dir; e.trigger = trig;

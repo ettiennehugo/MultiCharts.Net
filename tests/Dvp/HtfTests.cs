@@ -100,9 +100,9 @@ static partial class Program
 		Check(host.Contains("return ring == null ? 0 : DvpHtf.EndAgo("), "DV-9.2 host: dvpEndAgo uses DvpHtf.EndAgo");
 
 		// P2 gate
-		Check(!DvpConst.P2_PASSED && a.e.Tradeable(1) && !a.e.Tradeable(2) && !a.e.Tradeable(2) && !a.e.Tradeable(3)
+		Check(!DvpConst.P2_PASSED && a.e.Tradeable(1) == !a.e.Stream(1).Warming && !a.e.Tradeable(2) && !a.e.Tradeable(2) && !a.e.Tradeable(3)
 			&& a.warn.Count(w => w == "DVP Data2 used before Probe P2") == 1, "DV-T21 Tradeable(2) false while P2_PASSED is false, one Warning (" + a.warn.Count(w => w.Contains("Probe P2")) + ")");
-		Check(HtfCfg().Canon().Contains(";P2_PASSED=0}") && CreatedP2(), "DV-9.3 / DV-11.3 P2 state in Canon() and DVP CREATED");
+		Check(HtfCfg().Canon().Contains(";P2_PASSED=0;") && CreatedP2(), "DV-9.3 / DV-11.3 P2 state in Canon() and DVP CREATED");
 
 		// HtfNextRailDistAtr core
 		var rails = new DvpRails(2); SetRails(rails, new[] { 100.0, 104.0, 110.0, double.NaN });

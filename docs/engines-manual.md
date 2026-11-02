@@ -5643,6 +5643,8 @@ namespace PowerLanguage.Strategy
 
 *Note (800bce7): the header above predates D5–D7; the confluence, acceptance, HTF and A2-33 hook APIs are now on main (§5.31). The example itself is unchanged and uses only the D3/D4 host API.*
 
+*Note (PR-D9, m-dvp-spec rev 6): the "PR-D9 (frozen d\*)" sentence in the header is superseded. There is no frozen d\* and no `DevCoverageFrozen`; the default `degMode = SelfCalibrate` chooses the degree online (DV-3.10), starts on d = 1 while warming (`Tradeable` false, one `DVP DEGREE warming` Warning) and re-selects only on the first bar of each `tradingDayKey` month.*
+
 **Pitfalls.**
 
 - Research tool: it sends no orders and only journals.
@@ -8464,7 +8466,7 @@ protected override void CalcBar()
 - **D6 (PR #41):** Data2/Data3 HTF streams of the same root, the Probe P2 gate (`dvpTradeable`), `dvpHtfAccepted` and `dvpHtfNextRailDistAtr`.
 - **D7 (PR #42):** the A2-33 hook. With `LevelStudyConfig.enabled` and DVP on, the first closed Data1 bar of each new `tradingDayKey` sends every G0-d level (`DvpPoc/Vah/Val/Hvn/Lvn/Sigma/Conf`) of `dvpRails(1)` and `dvpConfluence(1)` to `levelStudyAdd` (age 1, the rail's quality and tag). Roll-crossing and roll-window levels are skipped, and `DvpFib` is counted but not added. Each level is first evaluated on the next bar. At Journal level one `DVP A2-33 runId() tradingDayKey(yyyy-MM-dd) halfDay() rails() conf() rollSkipped() fibSkipped()` line per session joins the LevelStudy CSV by day.
 
-**Pending:** D8 the KD02 canary and Calibrate study; D9 the frozen d\* (`DvpFrozenDegree.Table` is empty, so `DevCoverageFrozen` falls back to Calibrate with reported d = 1 and one `DVP DEGREE not frozen` warning); `rollMode` (DV-7.0, waits for the instrument profile); Probe P2 itself (`DvpConst.P2_PASSED = false`, so HTF streams are not tradeable). The host still has no `NextRail(ds, …)` or `Cone(ds, …)` wrapper. The catalogue row still says "not yet coded".
+**Pending:** D8 the KD02 canary and Calibrate study; D9 online degree self-calibration (m-dvp-spec rev 6, DV-3.10; PR-D9 removes `DvpFrozenDegree` and `DevCoverageFrozen` and makes `SelfCalibrate` the default); `rollMode` (DV-7.0, waits for the instrument profile); Probe P2 itself (`DvpConst.P2_PASSED = false`, so HTF streams are not tradeable). The host still has no `NextRail(ds, …)` or `Cone(ds, …)` wrapper. The catalogue row still says "not yet coded".
 
 **Why it exists.** A profile fitted around a trend line (detrended) gives value rails that move with the trend instead of a flat VA.
 
@@ -8591,7 +8593,7 @@ protected override void CalcBar()
   - N must be 1..6 (`MaxN`), else `ArgumentOutOfRangeException`. There is no default convention (DV-8.3), so pass both explicitly. PS-25 uses N = 2, countTrigger = true, deltaAtr = 0. Per the spec, KD-06/KD-10 pass countTrigger = false.
   - It returns false for `DvpFib` and `DvpConf` levels, which have no rail history (DV-10.4).
 - **HTF acceptance.** `dvpHtfAccepted` is the same test on an HTF stream's closed bars: it needs ds ≥ 2 and N in 2..6, else it throws. `dvpHtfNextRailDistAtr(ds, dir)` is the distance from Data1's C(t−1) to the nearest HTF rail or lattice level strictly beyond it, in the HTF ATR. It returns NaN when there is no fit or no such rail.
-- **d\* is not frozen (D9).** With the default `DevCoverageFrozen`, the reported degree is 1 and `s.calibrating` is true. Do not read results by degree until PR-D9.
+- **Degree (PR-D9, rev 6).** There is no frozen d\* table. The default `degMode = SelfCalibrate` scores windows on a fixed grid (every `calibStep` bars, default projBars) by |mean cov_fwd − mean cov_in| over the last `calibLen` scored windows and re-selects d only on the first closed bar of each `tradingDayKey` month, with a hysteresis margin max(`calibMarginAbs`, `calibMarginRel` × score). Until a recheck sees `calibMinScored` windows the stream is on d = 1 and **warming**: `s.warming` is true, `dvpTradeable` is false, and one `DVP DEGREE warming` Warning is logged. On a degree-change bar (`s.degChanged`) `dvpTriggered` is suppressed (DV-8.2). The degree path depends on the chart's first bar; the standard chart start is 2016-01-01. `Fixed1` and `Calibrate` (the offline coverage study) remain.
 - **No trade verdict yet.** Since D7 the A2-33 study can score DVP level types (G0-d), but no DVP type has a verdict yet, and nothing gates trades on one. The rails, confluence and acceptance are research levels and primitives, not validated trade triggers. The A2-33 `halfDay` split needs Journal trace level (the `DVP A2-33` line is written only then). The `DVP RAIL` journal logs interactions to `logSignal` with `taken: false`.
 - **Disabled engine.** Calling `Dvp` while it is disabled returns null and logs one Warning; the host queries then return null, empty lists, NaN or false. The direct `DvpFit` API (fit core) is still public for offline sketches.
 - **`diagnosticOnly` never gates `Tradeable` (by design).** Rev 5.2 (DV-7.0, DV-7.4) makes `diagnosticOnly` a run-level verdict, reported in the `DVP RUN` line only; a stream stays tradeable under rollMode None. Do not expect `dvpTradeable` to turn false on it (`_DvpEngine` L1396).
