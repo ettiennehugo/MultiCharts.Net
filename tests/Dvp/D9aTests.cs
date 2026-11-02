@@ -220,10 +220,11 @@ static partial class Program
 			sx.RailJournal.Step(sx, rr, x, rl, cfx, false, sx.SessionHalfDay, jr.Add, er.RunId);
 		}
 		er.Finish(); repx.Lines(jr.Add, er.RunId, er.Stream(1));
-		string[] want = { "DVP CREATED ", "DVP DEGREE ", "DVP RUN ", "DVP CAL ", "DVP D9A ", "DVP RAIL " };
+		string[] want = { "DVP CREATED ", "DVP DEGREE ", "DVP RUN ", "DVP CAL ", "DVP D9A " };
 		bool allKinds = want.All(p => jr.Any(l => l.StartsWith(p, StringComparison.Ordinal)));
 		bool kept = jr.Where(l => want.Any(p => l.StartsWith(p, StringComparison.Ordinal))).All(l => ex.IsMatch(csv("Journal", l)));
-		bool fitOut = jr.Where(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal)).All(l => !ex.IsMatch(csv("Journal", l))) && jr.Any(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal));
+		bool fitOut = jr.Where(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal)).All(l => !ex.IsMatch(csv("Journal", l))) && jr.Any(l => l.StartsWith("DVP FIT ", StringComparison.Ordinal))
+			&& jr.Where(l => l.StartsWith("DVP RAIL ", StringComparison.Ordinal)).All(l => !ex.IsMatch(csv("Journal", l))) && jr.Any(l => l.StartsWith("DVP RAIL ", StringComparison.Ordinal));
 		bool hostKept = new[] { "RUN id(1a2b3c4d) build(x) strategy(_DvpEngineTest) symbol(@ES) inputs[TraceLevel=Journal; X=1,2]", "RUN-END id(1a2b3c4d) lastBar(2024-12-31 16:45:00)",
 			"DVP D9A setup runId(1a2b3c4d) data1(Regular Minute 15 @ES)", "DVP D9A timing runId(1a2b3c4d) dvp(on)" }.All(m => ex.IsMatch(csv("Info", m)))
 			&& ex.IsMatch(csv("Warning", "anything, quoted")) && ex.IsMatch(csv("Error", "x")) && !ex.IsMatch(csv("Info", "DVP skip degChange stream(Data1)"))
@@ -231,9 +232,9 @@ static partial class Program
 		bool a233 = ex.IsMatch(csv("Journal", DvpA233.Line("1a2b3c4d", new DateTime(2020, 6, 15), false, 1, 2, 0, 0)));
 		Check(pm.Success && allKinds && kept && fitOut && hostKept && !a233
 			&& host.Contains("Don't open the CSV in Excel or an editor while it runs (a lock drops lines)") && host.Contains("expect a few minutes")
-			&& host.Contains("send dvp_d9a_extract.csv; keep the full CSV") && host.Contains("set TraceLevel = Journal; leave every other input at its"),
-			"D9a SEND BACK: the verbatim extract pattern keeps DVP CREATED/DEGREE/RUN/CAL/D9A/RAIL, RUN/RUN-END, setup/timing, Warning/Error lines (quoted or not) and drops DVP FIT; "
-			+ "it does NOT match the \"DVP A2-33\" prefix (alternative 'A2 ' needs a space after A2; no A2-33 lines in this run: LevelStudy is off)");
+			&& host.Contains("send dvp_d9a_extract.csv; keep the full CSV") && host.Contains("the SEND BACK extract stays small (a few hundred lines") && host.Contains("set TraceLevel = Journal; leave every other input at its"),
+			"D9a SEND BACK: the verbatim extract pattern keeps DVP CREATED/DEGREE/RUN/CAL/D9A, RUN/RUN-END, setup/timing, Warning/Error lines (quoted or not) and drops DVP FIT, DVP RAIL "
+			+ "and DVP A2-33 (no A2-33 lines in this run: LevelStudy is off); the header says the extract stays small");
 		// (10) setup check at every TraceLevel, line at Info, Warnings also to the Output window
 		int ls = code.IndexOf("void logSetup()"), le = code.IndexOf("void setupWarning(");
 		string setup = ls >= 0 && le > ls ? code.Substring(ls, le - ls) : "";

@@ -51,6 +51,8 @@ namespace PowerLanguage.Strategy
 	//      Expected run time and log size (measured off-MultiCharts, see "RUN TIME AND LOG SIZE" below): DVP engine + DVP RAIL step
 	//      about 13 s at Journal, log about 338 MB / 466k lines (about 262k DVP FIT + about 204k DVP RAIL lines; the RAIL count depends
 	//      on the price path and was measured on synthetic bars); MultiCharts' own bar processing comes on top.
+	//      The full log is about 338 MB / 466k lines, but the SEND BACK extract stays small (a few hundred lines: DVP FIT and DVP RAIL
+	//      lines are not extracted).
 	//   5. Timing (DV-13.4, journal off): set TraceLevel = Info, recalculate (Ctrl+R), note the "DVP D9A timing" line (dvp(on)).
 	//      Then in this file set BaselineDvpOff = true, compile, recalculate at TraceLevel = Info and note the dvp(off) timing line.
 	//      Set BaselineDvpOff back to false afterwards. slowdown = elapsedMs(on) / elapsedMs(off) - 1 (budget <= 0.15, PROBE).
@@ -58,7 +60,7 @@ namespace PowerLanguage.Strategy
 	//      is conservative (an upper bound for the Data1-only case).
 	//   SEND BACK: after the run (and the two timing runs of step 5, which go to the same process-wide log), in Windows PowerShell,
 	//     with <file> = the log's name from step 4 (MCSignal<yyyyMMdd-HHmmss>-<pid>), run:
-	//     Select-String -Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs\<file>.csv') -Pattern '^(Warning|Error),|,"?RUN(-END)? id\(|,"?DVP (CREATED|DEGREE|RUN|CAL|D9A|RAIL|A2) ' -CaseSensitive -Encoding UTF8 | ForEach-Object Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'dvp_d9a_extract.csv') -Encoding utf8
+	//     Select-String -Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs\<file>.csv') -Pattern '^(Warning|Error),|,"?RUN(-END)? id\(|,"?DVP (CREATED|DEGREE|RUN|CAL|D9A) ' -CaseSensitive -Encoding UTF8 | ForEach-Object Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'dvp_d9a_extract.csv') -Encoding utf8
 	//     send dvp_d9a_extract.csv; keep the full CSV
 	//
 	// RUN TIME AND LOG SIZE (PR-D9a review item f; how the header figures were obtained)
