@@ -55,7 +55,7 @@ namespace PowerLanguage.Strategy
 	//      lines are not extracted).
 	//   5. Timing (DV-13.4, journal off): set TraceLevel = Info, recalculate (Ctrl+R), note the "DVP D9A timing" line (dvp(on)).
 	//      Then in this file set BaselineDvpOff = true, compile, recalculate at TraceLevel = Info and note the dvp(off) timing line.
-	//      Set BaselineDvpOff back to false afterwards. slowdown = elapsedMs(on) / elapsedMs(off) - 1 (budget <= 0.15, PROBE).
+	//      Set BaselineDvpOff back to false afterwards. slowdown = elapsedMs(on) / elapsedMs(off) - 1 (budget <= 1.00, DV-13.4 DECIDED rev 6.2).
 	//      These timing runs have DVP on Data1 AND Data2, while the DV-13.4 budget is stated for Data1 only, so the measured slowdown
 	//      is conservative (an upper bound for the Data1-only case).
 	//   SEND BACK: after the run (and the two timing runs of step 5, which go to the same process-wide log), in Windows PowerShell,

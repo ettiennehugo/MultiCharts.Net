@@ -242,6 +242,40 @@ static partial class Program
 			&& Regex.Matches(setup, "setupWarning\\(").Count == 2 && code.Contains("trace(ETraceLevel.Warning, msg);") && code.Contains("Output.WriteLine(\"Warning: \" + msg)")
 			&& host.Contains("Changing RunMaxBarsBack requires changing this startOk window") && host.Contains("about Tue 2016-01-05 evening"),
 			"D9a host setup check: runs at every TraceLevel (setup line at Info), both Warnings to the log and the Output window; first-calculated-bar note (RunMaxBarsBack <-> startOk / Q21)");
+		// (11) live D9a run cb660d6a reported skips(7887) skipped(7887) on BOTH streams: per-stream counters, equal because every roll
+		// bar makes exactly winLen-1 eligible windows cross it (crossesByPos: i in [1, n-1]) whatever the bar size, and both streams saw
+		// the same 33 rolls (33 x 239 = 7887). Two streams fed together (Data2 every 4th Data1 bar): same rolls -> equal Skipped, different
+		// Eligible; one roll fewer on Data2 -> Data2 drops by winLen-1 and Data1 is unchanged; the DVP RUN lines carry each stream's own.
+		{
+			DvpConfig ck = SCfg(1, true); ck.streams = new[] { 1, 2 }; int nw = ck.winLen;
+			Func<int[], long[]> runSk = r2 =>
+			{
+				var jk = new List<string>(); var wk = new List<string>();
+				var ek = new _DvpEngine(ck, "t9ak", "ES", 0.25, true, false, jk.Add, wk.Add);
+				var q1 = new _BarRing(DvpStream.RingNeed(ck)); var q2 = new _BarRing(DvpStream.RingNeed(ck));
+				RingBar[] a1 = CalSeries(420, 95, new[] { 700, 2100 }, null, new DateTime(2023, 3, 1, 18, 0, 0));
+				RingBar[] a2 = CalSeries(420, 96, r2, null, new DateTime(2023, 3, 1, 18, 0, 0));
+				int kk = 0;
+				for (int i = 0; i < a1.Length; i++)
+				{
+					q1.Add(a1[i]); ek.OnBar(1, q1, false);
+					if ((i & 3) == 3 && kk < a2.Length) { q2.Add(a2[kk++]); ek.OnBar(2, q2, false); }
+				}
+				ek.Finish();
+				DvpStream k1 = ek.Stream(1), k2 = ek.Stream(2);
+				Func<int, string> runOf = dsx => jk.FirstOrDefault(l => l.StartsWith("DVP RUN ", StringComparison.Ordinal) && l.Contains(" stream(Data" + dsx + ") ")) ?? "";
+				bool lineOwn = runOf(1).Contains(" skipped(" + k1.Skipped + ") ") && runOf(2).Contains(" skipped(" + k2.Skipped + ") ")
+					&& runOf(1).Contains(" eligible(" + k1.Eligible + ") ") && runOf(2).Contains(" eligible(" + k2.Eligible + ") ");
+				return new[] { k1.Skipped, k2.Skipped, k1.Eligible, k2.Eligible, k1.BarsSeen, k2.BarsSeen, lineOwn ? 1L : 0L, k1.SkipLines, k2.SkipLines };
+			};
+			long[] same2 = runSk(new[] { 150, 400 }), one2 = runSk(new[] { 150 });
+			Check(same2[0] == 2 * (nw - 1) && same2[1] == 2 * (nw - 1) && same2[2] != same2[3] && same2[2] == same2[4] - (nw - 1) && same2[3] == same2[5] - (nw - 1)
+				&& one2[0] == same2[0] && one2[1] == nw - 1 && one2[2] == same2[2] && same2[6] == 1 && one2[6] == 1
+				&& same2[7] == same2[0] && same2[8] == same2[1],
+				"D9a skip counters are per stream: Skipped = rolls x (winLen-1) on each stream independent of bar size (equal for equal rolls, "
+				+ same2[0] + "/" + same2[1] + " with eligible " + same2[2] + "/" + same2[3] + "; Data2 one roll fewer -> " + one2[0] + "/" + one2[1]
+				+ "), eligible = bars - (winLen-1), DVP RUN reads each stream's own counters");
+		}
 		Check(!rsrc.Contains("DvpConfig.") && !rsrc.Contains(".Canon(") && !rsrc.Contains("Enum.Parse") && rsrc.Contains("namespace PowerLanguage.Function"),
 			"D9a report source: MC-free, no DvpConfig write or Canon() use (report-only)");
 	}
