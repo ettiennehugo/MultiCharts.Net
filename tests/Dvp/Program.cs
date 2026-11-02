@@ -595,6 +595,7 @@ static partial class Program
 
 	static int Main()
 	{
+		if (Environment.GetEnvironmentVariable("DVP_BENCH") == "1") { D9aBench(); return 0; }   // PR-D9a (f) timing basis, not a test
 		T1(); T2(); T3(); T4(); T5(); T6(); T7(); T8(); T20(); T23(); ZeroAlloc();
 		T9a(); T9(); T10(); T11(); T12(); T13(); ZeroAllocD2();
 		D3Tests();
@@ -603,6 +604,7 @@ static partial class Program
 		D6Tests();
 		D7Tests();
 		D9Tests();
+		D9aTests();
 		OverflowTests();
 		Console.WriteLine($"Dvp: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;

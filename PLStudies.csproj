@@ -541,6 +541,7 @@
     <Compile Include="_Gmm.Function.CS" />
     <Compile Include="_EventCalendar.Function.CS" />
     <Compile Include="_DvpEngine.Function.CS" />
+    <Compile Include="_DvpDegreeReport.Function.CS" />
     <Compile Include="_RegimeEngine.Function.CS" />
     <Compile Include="_RegimeGate.Function.CS" />
     <Compile Include="_FvgDetector.Function.CS" />
@@ -563,6 +564,7 @@
     <Compile Include="_Test9.Strategy.CS" />
     <Compile Include="_Test10.Strategy.CS" />
     <Compile Include="_TestGate0.Strategy.CS" />
+    <Compile Include="_DvpEngineTest.Strategy.CS" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
