@@ -18,9 +18,9 @@ namespace PowerLanguage.Strategy
 	//   (DvpConst.HoldoutFrom), so no 2025+ bar ever reaches a DVP stream even when the chart loads more data (counted in withheld()).
 	//
 	// HELPER FILES TO IMPORT (PowerLanguage .NET Editor → File → Import, in this order, then compile all)
+	//   _EventCalendar.Function.CS  (EventRules.RollDate for RollDetection = Table; on main, skip if already imported)
 	//   _DvpEngine.Function.CS      (PR-D9 head; the DVP engine)
 	//   _DvpDegreeReport.Function.CS (new: the report-only online-vs-offline comparison)
-	//   _EventCalendar.Function.CS  (EventRules.RollDate for RollDetection = Table; already on main)
 	//   _CustomSignal.Strategy.CS   (PR-D9a: dvpFeed / dvpFinish hooks)
 	//   _DvpEngineTest.Strategy.CS  (this file)
 	//   then File → Compile all (_VolumeProfileBase / _VolumeProfileFuturesBase read DvpConfig and must be rebuilt).
