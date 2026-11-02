@@ -1421,8 +1421,89 @@ namespace PowerLanguage.Strategy
 			base.Destroy();
 		}
 
+		/// <summary>The chart's Build Volume On, read each StartCalc from the typed Bars.Info.BVO.</summary>
+		protected _OrderFlow.VolumeBasis ChartVolumeBasis { get; private set; } = _OrderFlow.VolumeBasis.Unknown;
+
+		/// <summary>Typed map of MC's BuildVolumeOn (Format Instrument > Settings > Build Volume On; _McApiDump4 on @ES 2026-11-01:
+		/// Trade Volume = BuildVolumeOn.Volume (249), Tick Count = BuildVolumeOn.TickCount (324)). Any other value is Unknown.</summary>
+		protected static _OrderFlow.VolumeBasis volumeBasisOf(BuildVolumeOn bvo)
+		{
+			switch (bvo)
+			{
+				case BuildVolumeOn.Volume: return _OrderFlow.VolumeBasis.TradeVolume;
+				case BuildVolumeOn.TickCount: return _OrderFlow.VolumeBasis.TickCount;
+				default: return _OrderFlow.VolumeBasis.Unknown;
+			}
+		}
+
+		/// <summary>Futures = ESymbolCategory.Future or ESymbolCategory.FutureRolover (typed; _McApiDump3 lists FutureRolover = 18).</summary>
+		protected static bool isFuturesCategory(ESymbolCategory category)
+		{
+			return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;
+		}
+
+		/// <summary>
+		/// Build Volume On (Ettienne 2026-11-01): refuses a futures Data1 on Tick Count, and a futures Data2..N on Tick Count that feeds a
+		/// profile or a VWAP (volumeFedStreams; order flow reads Data1 only). This is the narrowest base shared by the volume profiles,
+		/// the VWAP engines and order flow (VPFB derives from this class); _CustomSignal also hosts studies that read no volume. Typed
+		/// members only: Info.BVO and Info.Category of Bars / BarsOfData(n). The Error line is written whatever TraceLevel is
+		/// (traceAlways: one File.AppendAllText) before the InvalidOperationException. Non-futures on Tick Count run (order flow notes
+		/// McBidAsk Unavailable reason(volumeBasis) once at Info).
+		/// </summary>
+		private void refuseTickCountFutures()
+		{
+			string error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(Bars.Info.Category), ChartVolumeBasis, "Data1 " + Bars.Info.Name);
+			if (error == null)
+			{
+				foreach (int stream in volumeFedStreams())
+				{
+					var info = BarsOfData(stream).Info;
+					error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(info.Category), volumeBasisOf(info.BVO), "Data" + stream + " " + info.Name);
+					if (error != null) break;
+				}
+			}
+			if (error == null) return;
+			traceAlways(ETraceLevel.Error, Bars.Info.Name, error);
+			throw new InvalidOperationException(error);
+		}
+
+		/// <summary>
+		/// Data streams 2..MaxDataStream whose bar volume feeds a profile or a VWAP in this base or _CustomSignal: the enabled VWAP slots
+		/// (Vwap1..3DataStream), the anchored VWAP (AvwapLimits.dataStream when AvwapEvents is not None), the own developing profile
+		/// (DevProfileDataStream when ownEngineOn), a visible MultiCharts volume profile (what hookStreams hooks; the confluence slots
+		/// read those and the VWAP slots), RangeProfiles.streams, WeeklyProfiles.dataStream and DvpConfig.streams when enabled. Order flow
+		/// and the BarLadders HTF windows read Data1 volume only. Out-of-range numbers are skipped here (validateInputs and the engine
+		/// starts reject them later).
+		/// </summary>
+		private SortedSet<int> volumeFedStreams()
+		{
+			var fed = new SortedSet<int>();
+			int max = MaxDataStream;
+			if (Vwap1Type != EVwapType.Disabled) fed.Add(Vwap1DataStream);
+			if (Vwap2Type != EVwapType.Disabled) fed.Add(Vwap2DataStream);
+			if (Vwap3Type != EVwapType.Disabled) fed.Add(Vwap3DataStream);
+			if (AvwapEvents != EAvwapAnchor.None) fed.Add(AvwapLimits.dataStream);
+			if (ownEngineOn()) fed.Add(DevProfileDataStream);
+			for (int s = 2; s <= max; ++s)
+			{
+				IProfilesCollection pack = getPack(s);
+				if (pack != null && pack.Visible) fed.Add(s);
+			}
+			if (RangeProfiles.enabled && RangeProfiles.streams != null) foreach (int s in RangeProfiles.streams) fed.Add(s);
+			if (WeeklyProfiles.enabled) fed.Add(WeeklyProfiles.dataStream);
+			if (DvpConfig.enabled && DvpConfig.streams != null) foreach (int s in DvpConfig.streams) fed.Add(s);
+			fed.RemoveWhere(s => s < 2 || s > max);
+			return fed;
+		}
+
 		protected override void StartCalc()
 		{
+			// Build Volume On (Ettienne 2026-11-01): first, before base.StartCalc, so a refused chart starts no engine, level study or
+			// portfolio row (Bars.Info is readable at StartCalc). VPFB.startOrderFlow copies ChartVolumeBasis into FlowCfg later.
+			// issueRunId: the Error line carries this run's id; _CustomSignal.StartCalc keeps it.
+			issueRunId();
+			ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);
+			refuseTickCountFutures();
 			// PR #47 review: Atr20d reaches the confluence split only through M-DAILY, so enable it (lazily) when the split uses ATR
 			// and a confluence slot is on. Hosts that already set NeedsDaily are unaffected.
 			m_confluenceAtrWarned = false;
@@ -2584,7 +2665,8 @@ namespace PowerLanguage.Strategy
 					trace(IsProfileStreamConnected(1) ? ETraceLevel.Info : ETraceLevel.Warning, $"VP hook retry on first calc bar: Data1 connected({IsProfileStreamConnected(1)})");
 				}
 			}
-			if (Bars.Status == EBarState.Close && Bars.Volume[0] == 0)
+			// Bars.Ticks = the bar total; intraday Bars.Volume is the up volume only, so an all-down bar read as "zero volume"
+			if (Bars.Status == EBarState.Close && Bars.Ticks[0] == 0)
 			{
 				m_zeroVolumeBars++;
 				if (!m_zeroVolumeWarned)

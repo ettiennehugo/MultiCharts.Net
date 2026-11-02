@@ -30,7 +30,7 @@ static class Program
 	// and ESymbolCategory names (Future, Stock confirmed on Ettienne's install; the rest documented or plausible spellings)
 	const string McNames = "Tick|Minute|Second|Hour|Day|Week|Month|Quarter|Year|Volume|Contract|Points|Point|PointOriginal|OrigPoints|Change|Range|"
 		+ "Renko|Kagi|PointAndFigure|LineBreak|HeikinAshi|FootPrint|CumDelta|CumulativeDelta|Regular|"
-		+ "Future|Futures|Stock|Forex|Crypto|Currency|Option|Index|Cash|Fund|MutualFund|Money|Bond|Spread";
+		+ "Future|Futures|Stock|Forex|Crypto|Currency|Option|Index|Cash|Fund|MutualFund|Money|Bond|Spread|TickCount";
 	static List<string> TypedEnumLint(string line, HashSet<string> ownEnums, HashSet<string> ownTypes)
 	{
 		var r = new List<string>();
@@ -533,6 +533,236 @@ static class Program
 				&& OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipAutoTrading) == "autoTrading" && OF.McRecalcGate.SkipReason(OF.RecalcDecision.SkipDisabled) == "disabled", "RG10 skip reasons");
 		}
 
+		// ---- Gate-ABA (Live Check 9a rerun, Ettienne 2026-11-01): A -> B -> A must allow a recalc for the fresh A download ----
+		{
+			// mirrors mcStartOrReplay (cache miss -> Forget on a signature miss) and mcRecalcCheck (Decide, process guard, NoteRecalc)
+			var cache = new OF.McLevelCache(); var gate = new OF.McRecalcGate(); var pg = new OF.McRecalcLoopGuard();
+			var win = TimeSpan.FromSeconds(600); DateTime now = T0; int maxPerKey = 3;
+			Func<string, int, bool, OF.RecalcDecision> pass = (sig, levelSets, missed) =>
+			{
+				gate.BeginPass();
+				OF.McCacheMiss miss = cache.Miss(sig, Ms(0), Ms(60000));
+				if (miss != OF.McCacheMiss.None)
+				{
+					if (miss == OF.McCacheMiss.Signature && gate.RecalcSignature != null) gate.Forget();
+					cache.Clear(); cache.Signature = sig; cache.RequestFrom = Ms(0); cache.RequestTo = Ms(60000);
+					if (missed) gate.NoteMissed(Ms(1000));
+					for (int i = 0; i < levelSets; i++) cache.Add(Ms(1000 * (i + 1)), new[] { 100.0 }, new[] { 1.0 }, new[] { 1.0 });
+					cache.HistoryDone = true;
+				}
+				var d = gate.Decide(true, gate.MissedBeforeDone > 0 && cache.Sets > 0, false, true, 1, sig);
+				if (d == OF.RecalcDecision.Recalc && !pg.TryAcquire(OF.GuardKey("Ns.S", sig), now, maxPerKey, win)) d = OF.RecalcDecision.SkipProcessGuard;
+				if (d == OF.RecalcDecision.Recalc) gate.NoteRecalc(sig);
+				now = now.AddSeconds(10);
+				return d;
+			};
+			Check(pass("A", 3, true) == OF.RecalcDecision.Recalc && gate.RecalcSignature == "A" && gate.RecalcCount == 1, "AB1 A: first download with missed bars -> Recalc");
+			Check(pass("A", 3, true) == OF.RecalcDecision.SkipNoMissed, "AB1 A after Recalculate: cache hit, nothing missed -> no recalc");
+			Check(pass("B", 3, false) == OF.RecalcDecision.SkipNoMissed && gate.RecalcSignature == null && gate.RecalcCount == 0, "AB2 B (no missed bars): signature miss forgets A's recalc");
+			Check(cache.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Signature, "AB3 back to A: the cache holds B -> signature miss");
+			Check(pass("A", 3, true) == OF.RecalcDecision.Recalc && gate.RecalcSignature == "A" && gate.RecalcCount == 1, "AB3 A -> B -> A: the fresh A download may recalc again");
+			// B with no level set (completed, Sets 0) still counts as a different request
+			Check(pass("B", 0, false) == OF.RecalcDecision.SkipNoMissed && gate.RecalcSignature == null && cache.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Signature,
+				"AB4 B with no level set: A is still a signature miss (not empty) and the gate was reset");
+			// same signature: a fresh pass with missed bars that is not a signature miss is refused at McRecalcMax
+			var g5 = new OF.McRecalcGate(); g5.BeginPass(); g5.NoteMissed(Ms(1000));
+			Check(g5.Decide(true, true, false, true, 1, "A") == OF.RecalcDecision.Recalc, "AB5 setup: first recalc for A");
+			g5.NoteRecalc("A"); g5.BeginPass(); g5.NoteMissed(Ms(1000));
+			var c5 = new OF.McLevelCache { Signature = "A" }; c5.RequestFrom = Ms(0); c5.RequestTo = Ms(60000);
+			Check(c5.Miss("A", Ms(0), Ms(60000)) == OF.McCacheMiss.Incomplete && g5.Decide(true, true, false, true, 1, "A") == OF.RecalcDecision.SkipGuard && g5.CountFor("A") == 1,
+				"AB5 same signature again (incomplete, not a signature miss -> no Forget) is refused at McRecalcMax = 1");
+			Check(g5.Decide(true, true, false, true, 2, "A") == OF.RecalcDecision.Recalc, "AB5 McRecalcMax = 2 allows the second");
+			// process guard: alternating A/B (each a signature miss -> Forget) still trips the static guard at 3 per key per window
+			int recalcs = 0;
+			for (int k = 0; k < 6; k++) if (pass(k % 2 == 0 ? "C" : "D", 3, true) == OF.RecalcDecision.Recalc) recalcs++;
+			Check(recalcs == 6, "AB6 alternating C/D (6 switches in 60 s): the per-object gate is reset on each signature miss");
+			Check(pass("C", 3, true) == OF.RecalcDecision.SkipProcessGuard && gate.RecalcSignature == null && pg.CountFor(OF.GuardKey("Ns.S", "C"), now, win) == 3,
+				"AB7 the 4th recalc of C within 600 s is refused by the process guard (McRecalcGuardMaxPerKey 3)");
+			Check(pass("D", 3, true) == OF.RecalcDecision.SkipProcessGuard, "AB7 and of D");
+			now = now.AddSeconds(600);
+			Check(pass("C", 3, true) == OF.RecalcDecision.Recalc, "AB7 allowed again after McRecalcGuardWindowSec");
+			// skip line format
+			var g8 = new OF.McRecalcGate();
+			Check(g8.SkipLine(OF.RecalcDecision.SkipGuard, "A", 0) == "OF McBidAsk recalc skipped reason(guard) recalcCount(0/0) recalcSig(none)", "AB8 skip line, McRecalcMax = 0: count 0/0, no previous recalc");
+			g8.NoteRecalc("A");
+			Check(g8.SkipLine(OF.RecalcDecision.SkipGuard, "A", 1) == "OF McBidAsk recalc skipped reason(guard) recalcCount(1/1) recalcSig(A)", "AB8 skip line, after a recalc: 1/1 and its signature");
+			Check(g8.SkipLine(OF.RecalcDecision.SkipNoMissed, "B", 1) == "OF McBidAsk recalc skipped reason(noMissedBars) recalcCount(0/1) recalcSig(A)", "AB8 skip line, other signature: count 0, the gate's signature");
+			g8.Forget();
+			Check(g8.RecalcSignature == null && g8.RecalcCount == 0 && g8.CountFor("A") == 0 && g8.Pass == 0, "AB9 Forget clears the signature and count only");
+			Check(OF.McLevelCache.MissName(OF.McCacheMiss.None) == null && OF.McLevelCache.MissName(OF.McCacheMiss.Signature) == "signature" && OF.McLevelCache.MissName(OF.McCacheMiss.Empty) == "empty"
+				&& OF.McLevelCache.MissName(OF.McCacheMiss.Incomplete) == "incomplete" && OF.McLevelCache.MissName(OF.McCacheMiss.Coverage) == "coverage", "AB10 miss journal names");
+			// strategy wiring (source)
+			string vpa = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string sr = MethodBody(vpa, "private void mcStartOrReplay(") ?? "";
+			Check(sr.Contains("miss = m_mcCache.Miss(sig, firstBar, lastBar);") && sr.Contains("if (miss == _OrderFlow.McCacheMiss.Signature && m_mcGate.RecalcSignature != null) { m_mcGate.Forget(); forgot = true; }")
+				&& sr.IndexOf("m_mcGate.Forget()") < sr.IndexOf("m_mcCache.Clear();") && !sr.Contains("MissReason") && !sr.Contains("\"signature\""), "AB11 mcStartOrReplay: typed signature miss resets the gate (under m_flowLock, before Clear)");
+			string rc = MethodBody(vpa, "private bool mcRecalcCheck(") ?? "";
+			Check(rc.Contains("skipLine = m_mcGate.SkipLine(d, m_mcSig, FlowCfg.McRecalcMax);") && rc.Contains("engineSink(ETraceLevel.Journal)?.Invoke(skipLine);")
+				&& rc.IndexOf("skipLine = m_mcGate.SkipLine") < rc.IndexOf("if (!done) return false;"), "AB12 mcRecalcCheck: the skip line is built under m_flowLock with recalcCount/recalcSig");
+		}
+
+		// ---- Wait mode per-session source summary (gate-ABA PR item 3) ----
+		{
+			var t = new OF.SessionSourceTally(); DateTime sa = new DateTime(2026, 10, 27), sb = sa.AddDays(1);
+			Check(t.Add(sa, OF.FlowSource.Quote) == null && t.Add(sa, OF.FlowSource.Quote) == null && t.Add(sa, OF.FlowSource.TickRule) == null, "SS1 same session: no line");
+			string l1 = t.Add(sb, OF.FlowSource.Quote);
+			Check(l1 == "OF tick source session(2026-10-27) bars(3) quote(2) tickRule(1) mcBidAsk(0) aggressor(0) barUpDown(0) unavailable(0)", "SS2 session change: the finished session's line [" + l1 + "]");
+			t.Add(sb, OF.FlowSource.Quote);
+			string l2 = t.Flush();
+			Check(l2 == "OF tick source session(2026-10-28) bars(2) quote(2) tickRule(0) mcBidAsk(0) aggressor(0) barUpDown(0) unavailable(0)", "SS3 Flush: the open session, an all-Quote session is visible (tickRule(0)) [" + l2 + "]");
+			Check(t.Flush() == null, "SS4 Flush twice: nothing more");
+			t.Add(sb, OF.FlowSource.BarUpDown);
+			Check(t.Flush() == null, "SS5 deduped: a session already reported is not reported again");
+			var t2 = new OF.SessionSourceTally();
+			t2.Add(sa, OF.FlowSource.McBidAsk); t2.Add(sa, OF.FlowSource.BarUpDown); t2.Add(sa, OF.FlowSource.Unavailable); t2.Add(sa, OF.FlowSource.Aggressor);
+			Check(t2.Flush() == "OF tick source session(2026-10-27) bars(4) quote(0) tickRule(0) mcBidAsk(1) aggressor(1) barUpDown(1) unavailable(1)", "SS6 every source counted");
+			string vps = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			Check(vps.Contains("if (closedFp != null && m_chunks != null && FlowCfg.TickChunkWaitMs > 0)") && vps.Contains("srcLine = m_srcTally.Add(closedFp.SessionKey, closedFp.Source);")
+				&& vps.Contains("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);") && vps.Contains("lock (m_flowLock) srcLine = m_srcTally != null ? m_srcTally.Flush() : null;")
+				&& vps.Contains("m_srcTally = null;"), "SS7 strategy: wait mode only, Info, per pass (reset in StartCalc), open session flushed in StopCalc");
+		}
+
+		// ---- volMismatch fix (Live Check 9a, Ettienne 2026-11-01): bar total = Bars.Ticks, Build Volume On, diag line ----
+		{
+			var cfg = new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, AllowMixed = true };
+			var ev = new OF.FlowEngine(TICK, cfg);
+			// bar: up 5, down 4, unchanged 3 -> Bars.Ticks 12, intraday Bars.Volume 5 (up only); MC set ask 7 + bid 5 = 12
+			ev.AddMcLevels(Ms(1000), new[] { 100.00, 100.25 }, new[] { 3.0, 4.0 }, new[] { 5.0, 0.0 });
+			var v1 = ev.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(v1.Source == Src.McBidAsk && v1.McMiss == null && Near(v1.McAsk, 7) && Near(v1.McBid, 5) && ev.McVolMismatch == 0, "VB1 total = Ticks (12) matches ask+bid 12 -> McBidAsk");
+			ev.AddMcLevels(Ms(2000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			var v2 = ev.CloseBar(Bar(2, Ms(2000), Regime.BarsOnly, vol: 5, up: 5, down: 4));
+			Check(v2.Source == Src.Unavailable && v2.McMiss == "volMismatch" && ev.McVolMismatch == 1 && Near(v2.McAsk, 7) && Near(v2.McBid, 5) && double.IsNaN(v2.McDelta),
+				"VB2 the old feed (up volume 5 vs 12) is a volMismatch; McAsk/McBid kept for the diag");
+			var v3 = ev.CloseBar(Bar(3, Ms(3000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(v3.McMiss == "missing" && double.IsNaN(v3.McAsk) && double.IsNaN(v3.McBid), "VB3 no set: McAsk/McBid NaN");
+			// non-futures Build Volume On = Tick Count (Ettienne 5:22 PM): no exception, no Warning; McBidAsk never compared, reason volumeBasis, Info once
+			var warns = new List<string>(); var infos = new List<string>(); bool vbThrew = false;
+			var evk = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, BuildVolumeOn = OF.VolumeBasis.TickCount }) { warnOnce = w => warns.Add(w), infoOnce = w => infos.Add(w) };
+			OF.FootprintBar k1 = null, k2 = null;
+			try {
+			evk.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			k1 = evk.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			evk.AddMcLevels(Ms(2000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			k2 = evk.CloseBar(Bar(2, Ms(2000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			} catch (Exception) { vbThrew = true; }
+			Check(!vbThrew && k1 != null && k1.Source == Src.Unavailable && k1.McMiss == "volumeBasis" && k2.McMiss == "volumeBasis" && evk.McVolMismatch == 0 && evk.McUsed == 0 && double.IsNaN(k1.McDelta),
+				"VB4 TickCount: Unavailable reason(volumeBasis), not volMismatch");
+			Check(warns.Count == 0 && infos.Count == 1 && infos[0] == OF.FlowEngine.VolumeBasisInfo && infos[0].StartsWith("OF McBidAsk Unavailable reason(volumeBasis)"),
+				"VB5 TickCount: no exception, no Warning, the volumeBasis line once at Info (" + warns.Count + "/" + infos.Count + ")");
+			var tvInfo = new List<string>();
+			var etv = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer, BuildVolumeOn = OF.VolumeBasis.TradeVolume }) { warnOnce = w => tvInfo.Add(w), infoOnce = w => tvInfo.Add(w) };
+			etv.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			var tv1 = etv.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(tv1.Source == OF.FlowSource.McBidAsk && tv1.McMiss == null && tvInfo.Count == 0, "VB5b Trade Volume passes: McBidAsk, no note");
+			var wo = new List<string>();
+			var eo = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, BuildVolumeOn = OF.VolumeBasis.TickCount }) { warnOnce = w => wo.Add(w), infoOnce = w => wo.Add(w) };
+			var o1 = eo.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4));
+			Check(o1.Source == Src.Unavailable && o1.McMiss == null && wo.Count == 0, "VB6 TickCount with McBidAsk Off: Unavailable as before, no reason, no note");
+			var eu = new OF.FlowEngine(TICK, new OF.FlowConfig { QuotesExpected = false, McBidAsk = OF.EMcBidAsk.Prefer }) { warnOnce = w => wo.Add(w) };
+			eu.AddMcLevels(Ms(1000), new[] { 100.00 }, new[] { 7.0 }, new[] { 5.0 });
+			Check(eu.CloseBar(Bar(1, Ms(1000), Regime.BarsOnly, vol: 12, up: 5, down: 4)).Source == Src.McBidAsk && wo.Count == 0, "VB7 Unknown basis (unmapped BVO value): existing behaviour, MC set compared");
+			// BarUpDownQualifies against the Ticks total
+			Check(OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TradeVolume, 16, 7, 6)
+				&& !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.Unknown, 13, 7, 6) && !OF.FlowEngine.BarUpDownQualifies(OF.VolumeBasis.TickCount, 13, 7, 6),
+				"BU1 up + down == Ticks qualifies; unchanged volume (7 + 6 != 16) does not; TradeVolume only");
+			var evb = Engine(false, OF.VolumeBasis.TradeVolume);
+			evb.CloseBar(Bar(1, Ms(100), Regime.BarsOnly, vol: 16, up: 7, down: 6));
+			Check(evb.BarDelta(0).Source == Src.Unavailable, "BU2 unchanged volume: up 7 + down 6 != Ticks 16 -> Unavailable");
+			var ed = Engine(true, OF.VolumeBasis.TradeVolume);   // all-down bar in a tick gap: Bars.Volume (up) is 0, Ticks is 8
+			ed.CloseBar(Bar(1, Ms(100), Regime.TickStream, vol: 8, up: 0, down: 8));
+			Check(ed.BarDelta(0).Source == Src.BarUpDown && Near(ed.BarDelta(0).Value, -8), "BU3 all-down bar with total 8 is not an empty bar: BarUpDown delta -8");
+			// diag picker: first 10 closed bars + first 10 volMismatch bars, counted apart
+			var dg = new OF.McVolDiag(); int taken = 0; var takenAt = new List<int>();
+			for (int i = 0; i < 30; i++) if (dg.Take(i < 10 ? null : "volMismatch")) { taken++; takenAt.Add(i); }
+			Check(taken == 20 && takenAt[9] == 9 && takenAt[10] == 10 && takenAt[19] == 19, "DG1 10 closed + 10 volMismatch bars, nothing after (" + taken + ")");
+			var dg2 = new OF.McVolDiag(); int t2 = 0;
+			for (int i = 0; i < 30; i++) if (dg2.Take(i < 3 || i >= 20 ? "volMismatch" : (i % 2 == 0 ? "missing" : null))) t2++;
+			Check(t2 == 17 && dg2.Mismatch == 10 && dg2.Closed == 30, "DG2 early mismatches count in both; other misses only as closed bars (" + t2 + ")");
+			string dl = OF.McVolDiag.Line(42, new DateTime(2026, 10, 27, 9, 31, 0), 5, 12, 5, 4, 10, 7, 5, "volMismatch");
+			Check(dl == "OF McBidAsk diag vol bar(42) t(2026-10-27 09:31:00) volume(5) ticks(12) up(5) down(4) prevTicks(10) mcAsk(7) mcBid(5) mcSum(12) miss(volMismatch)", "DG3 line format [" + dl + "]");
+			string dn = OF.McVolDiag.Line(1, new DateTime(2026, 10, 27, 9, 31, 0), 5, 12.5, 5, 4, double.NaN, double.NaN, double.NaN, null);
+			Check(dn == "OF McBidAsk diag vol bar(1) t(2026-10-27 09:31:00) volume(5) ticks(12.5) up(5) down(4) prevTicks(NaN) mcAsk(NaN) mcBid(NaN) mcSum(NaN) miss(none)", "DG4 NaN / no miss [" + dn + "]");
+			string vf = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileFuturesBase.Strategy.CS"));
+			string vb = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileBase.Strategy.CS"));
+			string cs16 = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_CustomSignal.Strategy.CS"));
+			Check(vf.Contains("double barTicks = Bars.Ticks[0], barUp = Bars.UpTicks[0], barDown = Bars.DownTicks[0];") && vf.Contains("Volume = barTicks, UpTicks = barUp, DownTicks = barDown")
+				&& !vf.Contains("Volume = Bars.Volume[0], UpTicks") && vf.Contains("infoOnce = queueSink(ETraceLevel.Info)"), "VB8 strategy feeds Bars.Ticks[0] as the bar total; the volumeBasis note is Info");
+			Check(vb.Contains("Bars.Status == EBarState.Close && Bars.Ticks[0] == 0") && !vb.Contains("Bars.Volume[0] == 0"), "VB9 zero-volume check reads Bars.Ticks[0]");
+			// Build Volume On from the typed Bars.Info.BVO (_McApiDump4: Volume (249) / TickCount (324)); futures + Tick Count throws at StartCalc
+			string vbErr = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "Data1 @ES");
+			Check(vbErr == "Futures data stream Data1 @ES: Build Volume On must be Trade Volume (Format Instrument > Settings), but it is set to Tick Count. "
+				+ "Tick Count counts trades, not contracts, so volume profiles, VWAP and order flow would be wrong.", "VB10 futures + Tick Count: the StartCalc error names the stream [" + vbErr + "]");
+			string vsc = MethodBody(vb, "protected override void StartCalc()") ?? "";
+			int iMap = vsc.IndexOf("ChartVolumeBasis = volumeBasisOf(Bars.Info.BVO);", StringComparison.Ordinal), iRef = vsc.IndexOf("refuseTickCountFutures();", StringComparison.Ordinal),
+				iBase = vsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iVal = vsc.IndexOf("validateInputs();", StringComparison.Ordinal);
+			string rtf = MethodBody(vb, "private void refuseTickCountFutures()") ?? "";
+			int iErr = rtf.IndexOf("string error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(Bars.Info.Category), ChartVolumeBasis, \"Data1 \" + Bars.Info.Name);", StringComparison.Ordinal),
+				iLog = rtf.IndexOf("traceAlways(ETraceLevel.Error, Bars.Info.Name, error);", StringComparison.Ordinal), iThrow = rtf.IndexOf("throw new InvalidOperationException(error);", StringComparison.Ordinal);
+			int iRun = vsc.IndexOf("issueRunId();", StringComparison.Ordinal);
+			Check(iRun >= 0 && iMap > iRun && iRef > iMap && iBase > iRef && iVal > iBase && iErr >= 0 && iLog > iErr && iThrow > iLog && !vsc.Contains("catch") && !rtf.Contains("catch")
+				&& vsc.IndexOf("volumeBasisError", StringComparison.Ordinal) < 0,
+				"VB11 _VolumeProfileBase.StartCalc: typed BVO map + refuseTickCountFutures BEFORE base.StartCalc (no engine, level study or portfolio row starts); Error logged, then InvalidOperationException");
+			Check(OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "@ES") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.Unknown, "@ES") == null,
+				"VB12 futures + Trade Volume passes; futures + Unknown keeps the old behaviour (no throw)");
+			Check(OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TickCount, "AAPL") == null && OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TradeVolume, "AAPL") == null,
+				"VB13 stock + Tick Count: no exception (the Info-once note is VB5)");
+			string vbo = MethodBody(vb, "protected static _OrderFlow.VolumeBasis volumeBasisOf(BuildVolumeOn bvo)") ?? "";
+			Check(vbo.Contains("switch (bvo)") && vbo.Contains("case BuildVolumeOn.Volume: return _OrderFlow.VolumeBasis.TradeVolume;") && vbo.Contains("case BuildVolumeOn.TickCount: return _OrderFlow.VolumeBasis.TickCount;")
+				&& vbo.Contains("default: return _OrderFlow.VolumeBasis.Unknown;") && !vbo.Contains("ToString") && !vbo.Contains("Enum.") && !vbo.Contains("\"") && !vbo.Contains("249") && !vbo.Contains("324") && !vbo.Contains("(int)"),
+				"VB14 typed BuildVolumeOn map: Volume -> TradeVolume, TickCount -> TickCount, else Unknown (typed members only: no strings, int literals or Enum.*)");
+			int iCfg = vf.IndexOf("FlowCfg.BuildVolumeOn = ChartVolumeBasis;", StringComparison.Ordinal), iNew = vf.IndexOf("m_flow = new _OrderFlow.FlowEngine(", StringComparison.Ordinal);
+			string vfsc = MethodBody(vf, "protected override void StartCalc()") ?? "";
+			int iFb = vfsc.IndexOf("base.StartCalc();", StringComparison.Ordinal), iFo = vfsc.IndexOf("startOrderFlow();", StringComparison.Ordinal);
+			Check(iCfg >= 0 && iNew > iCfg && iFb >= 0 && iFo > iFb, "VB15 VPFB: base.StartCalc (sets ChartVolumeBasis, refuses futures + Tick Count) runs before startOrderFlow, which sets FlowCfg.BuildVolumeOn before the engine is built");
+			// VB16 BLOCKER fix: the Error line does not depend on TraceLevel (default None). LogFileSingleton is MC-bound (_CustomSignal), so
+			// this is a source check: traceAlways has no TraceLevel / traceOn gate and writes straight through LogFileSingleton.WriteTrace,
+			// whose body filters nothing by level.
+			string ta = MethodBody(cs16, "protected void traceAlways(ETraceLevel traceLevel, string symbol, string message)") ?? "";
+			string wt16 = MethodBody(cs16, "public void WriteTrace(IOutput output,") ?? "";
+			Check(ta.Contains("if (m_logger == null) m_logger = LogFileSingleton.GetInstance(null);") && ta.Contains("m_logger.WriteTrace(null, traceLevel, LastCalcBarTime,")
+				&& !ta.Contains("TraceLevel") && !ta.Contains("traceOn") && !ta.Contains("Output") && !ta.Contains("Bars.Time")
+				&& wt16.Contains("File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, s_utf8NoBom);") && !wt16.Contains("TraceLevel") && !wt16.Contains("level <") && !wt16.Contains("level >")
+				&& !rtf.Contains("trace(ETraceLevel") && !rtf.Contains("traceOn("),
+				"VB16 the Build Volume On Error is written at TraceLevel None: traceAlways has no level gate, one File.AppendAllText, no Output / Bars.Time");
+			// VB17 FutureRolover is futures (typed)
+			string ifc = MethodBody(vb, "protected static bool isFuturesCategory(ESymbolCategory category)") ?? "";
+			Check(ifc.Contains("return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;") && !ifc.Contains("ToString") && !ifc.Contains("Enum.") && !ifc.Contains("\"") && !ifc.Contains("(int)"),
+				"VB17 isFuturesCategory: ESymbolCategory.Future or ESymbolCategory.FutureRolover, typed members only");
+			// VB18 Data2..N: typed BarsOfData(n).Info.BVO / Category, stream named in the message, first offender throws
+			Check(rtf.Contains("foreach (int stream in volumeFedStreams())") && rtf.Contains("var info = BarsOfData(stream).Info;")
+				&& rtf.Contains("error = _OrderFlow.FlowEngine.VolumeBasisError(isFuturesCategory(info.Category), volumeBasisOf(info.BVO), \"Data\" + stream + \" \" + info.Name);")
+				&& rtf.Contains("if (error != null) break;") && !rtf.Contains("ToString") && !rtf.Contains("Enum.") && !rtf.Contains("(int)"),
+				"VB18 Data2..N feeding a profile / VWAP: typed BarsOfData(n).Info.BVO + Category, message names the stream");
+			string d2 = OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TickCount, "Data2 @ES");
+			Check(d2 != null && d2.StartsWith("Futures data stream Data2 @ES: Build Volume On must be Trade Volume", StringComparison.Ordinal)
+				&& OF.FlowEngine.VolumeBasisError(false, OF.VolumeBasis.TickCount, "Data2 $SPX.X") == null && OF.FlowEngine.VolumeBasisError(true, OF.VolumeBasis.TradeVolume, "Data2 @ES") == null,
+				"VB19 Data2 futures + Tick Count refused and named; Data2 non-futures + Tick Count and futures + Trade Volume pass");
+			// VB20 which streams feed a profile / VWAP (from the code: VWAP slots, AVWAP, own profile, hooked MC profiles, range / weekly / DVP)
+			string vfs = MethodBody(vb, "private SortedSet<int> volumeFedStreams()") ?? "";
+			Check(vfs.Contains("if (Vwap1Type != EVwapType.Disabled) fed.Add(Vwap1DataStream);") && vfs.Contains("if (Vwap2Type != EVwapType.Disabled) fed.Add(Vwap2DataStream);")
+				&& vfs.Contains("if (Vwap3Type != EVwapType.Disabled) fed.Add(Vwap3DataStream);") && vfs.Contains("if (AvwapEvents != EAvwapAnchor.None) fed.Add(AvwapLimits.dataStream);")
+				&& vfs.Contains("if (ownEngineOn()) fed.Add(DevProfileDataStream);") && vfs.Contains("IProfilesCollection pack = getPack(s);") && vfs.Contains("if (pack != null && pack.Visible) fed.Add(s);")
+				&& vfs.Contains("foreach (int s in RangeProfiles.streams) fed.Add(s);") && vfs.Contains("if (WeeklyProfiles.enabled) fed.Add(WeeklyProfiles.dataStream);")
+				&& vfs.Contains("foreach (int s in DvpConfig.streams) fed.Add(s);") && vfs.Contains("fed.RemoveWhere(s => s < 2 || s > max);"),
+				"VB20 volumeFedStreams: VWAP 1..3, AVWAP, own profile, visible MC profiles, RangeProfiles, WeeklyProfiles, DVP; Data2..MaxDataStream only");
+			// VB22 the run id is made before the BVO check (issueRunId) and _CustomSignal.StartCalc keeps it: one id per StartCalc
+			string csc = MethodBody(cs16, "protected override void StartCalc()") ?? "";
+			string iri = MethodBody(cs16, "protected void issueRunId()") ?? "";
+			int iKeep = csc.IndexOf("if (!m_runIdIssued) m_runId = Guid.NewGuid().ToString(\"N\").Substring(0, 8);", StringComparison.Ordinal), iClr = csc.IndexOf("m_runIdIssued = false;", StringComparison.Ordinal);
+			Check(iKeep >= 0 && iClr > iKeep && iri.Contains("m_runId = Guid.NewGuid().ToString(\"N\").Substring(0, 8);") && iri.Contains("m_runIdIssued = true;")
+				&& System.Text.RegularExpressions.Regex.Matches(csc, @"m_runId\s*=").Count == 1 && System.Text.RegularExpressions.Regex.Matches(cs16, @"m_runIdIssued\s*=\s*true").Count == 1,
+				"VB22 issueRunId before the BVO check; _CustomSignal.StartCalc keeps that id (one id per StartCalc) and clears the flag");
+			// order flow reads Data1 only: VPFB never reads another stream's bars
+			Check(!vf.Contains("BarsOfData(") && !vf.Contains("barsOf("), "VB21 order flow (VPFB) reads Data1 only, so Data2..N are checked only for profiles / VWAP");
+			int lk = vf.IndexOf("string srcLine = null, volDiagLine = null;"), tr = vf.IndexOf("if (volDiagLine != null) trace(ETraceLevel.Info, volDiagLine);"), sl = tr < 0 ? -1 : vf.IndexOf("if (srcLine != null) engineSink(ETraceLevel.Info)?.Invoke(srcLine);", tr, StringComparison.Ordinal);
+			string mid = lk >= 0 && tr > lk ? vf.Substring(lk, tr - lk) : "";
+			Check(lk >= 0 && tr > lk && sl > tr && mid.Contains("lock (m_flowLock)") && mid.Contains("volDiagLine = _OrderFlow.McVolDiag.Line(") && mid.Contains("srcLine = m_srcTally.Add(")
+				&& !mid.Contains("trace(") && !mid.Contains("Invoke(srcLine)"), "DG5 diag + tally lines built under m_flowLock, logged after it on the calc thread");
+			Check(vf.Contains("m_volDiag = null;") && (MethodBody(vf, "private void onFlowData(") ?? "x").IndexOf("m_volDiag") < 0 && (MethodBody(vf, "private void onFlowData(") ?? "trace(").IndexOf("trace(") < 0,
+				"DG6 diag counters reset per pass; the DataLoader callback never touches the diag or trace");
+		}
+
 		// ---- Tick-chunk spec §7.3: CloseBar backlog ----
 		{
 			var eb1 = Engine(false);
@@ -810,7 +1040,7 @@ static class Program
 					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\benum\s+(\w+)")) ownEnums.Add(m.Groups[1].Value);
 					foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s, @"\b(?:class|struct)\s+(\w+)")) ownTypes.Add(m.Groups[1].Value);
 				}
-				string[] mcEnums = { "EResolution", "ESymbolCategory", "ChartType", "DataRequestType", "RequestQuoteField", "EOrderAction", "InputAttribute", "Bar", "Resolution" };
+				string[] mcEnums = { "EResolution", "ESymbolCategory", "BuildVolumeOn", "ChartType", "DataRequestType", "RequestQuoteField", "EOrderAction", "InputAttribute", "Bar", "Resolution" };
 				Check(studies.Count > 50 && ownEnums.Contains("EEventKind") && ownEnums.Contains("EEventTier") && ownEnums.Contains("EEventFlags") && ownEnums.Contains("EPortProfile") && ownEnums.Contains("EPortSizing")
 					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
 					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");

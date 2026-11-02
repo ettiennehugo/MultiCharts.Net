@@ -330,6 +330,7 @@ namespace PowerLanguage.Strategy
 		private LogFileSingleton m_logger;
 		private string m_runId;          // CS-3
 		private bool m_runLogged;        // CS-3: RUN line written for this run
+		private bool m_runIdIssued;      // issueRunId() made this StartCalc's id already; StartCalc keeps it and clears the flag
 		private bool m_runEndLogged;     // CS-3: RUN-END line written for this run
 		private double m_tick;           // tickSize() cache, reset in StartCalc (VPB-20, moved here by CS-1)
 		private TradeJournal m_journal;  // CS-1, created lazily when ETraceLevel.Journal is on
@@ -380,6 +381,30 @@ namespace PowerLanguage.Strategy
 				if (onCalc) m_logger.WriteTrace(Output, traceLevel, Bars.Time[0], barZoneLabel(), this.GetType().Name, this.Bars.Info.Name, RunId, message);
 				else m_logger.WriteTrace(null, traceLevel, LastCalcBarTime, m_traceZone ?? "?", this.GetType().Name, m_traceSymbol ?? "", RunId, message);
 			}
+		}
+
+		/// <summary>
+		/// Writes one line to the trace CSV whatever TraceLevel is (TraceLevel defaults to None, where trace() writes nothing). For a line
+		/// that must be on disk before the study refuses to start, e.g. the Build Volume On Error in _VolumeProfileBase.StartCalc. Output is
+		/// not touched (may run off the calc thread); one File.AppendAllText per line (LogFileSingleton.WriteTrace). symbol = the caller's
+		/// Bars.Info.Name (readable at StartCalc, where the cached m_traceSymbol is not set yet); the time is the last calc bar seen
+		/// (MinValue before the first CalcBar of this instance).
+		/// </summary>
+		protected void traceAlways(ETraceLevel traceLevel, string symbol, string message)
+		{
+			if (m_logger == null) m_logger = LogFileSingleton.GetInstance(null);
+			m_logger.WriteTrace(null, traceLevel, LastCalcBarTime, m_traceZone ?? barZoneLabel(), this.GetType().Name, symbol ?? m_traceSymbol ?? "", RunId, message);
+		}
+
+		/// <summary>
+		/// CS-3: makes this run's id before base.StartCalc(), for a line written there (e.g. the Build Volume On Error in
+		/// _VolumeProfileBase.StartCalc), so it does not carry the previous run's id. _CustomSignal.StartCalc then keeps this id instead
+		/// of making a second one (one id per StartCalc, as before). Without a call StartCalc makes the id as before.
+		/// </summary>
+		protected void issueRunId()
+		{
+			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);
+			m_runIdIssued = true;
 		}
 
 		// Calc-thread snapshot for trace() off the calc thread (StopCalc on the UI thread). Set by CalcBar (and by derived calc-thread
@@ -2051,7 +2076,8 @@ namespace PowerLanguage.Strategy
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
 			m_entryCacheSnapshot = 0;
-			m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3
+			if (!m_runIdIssued) m_runId = Guid.NewGuid().ToString("N").Substring(0, 8);   // CS-3 (kept when issueRunId() made it for this StartCalc)
+			m_runIdIssued = false;
 			m_runLogged = false;
 			m_runEndLogged = false;
 			m_traceSymbol = m_traceZone = null;   // re-read on the first CalcBar (chart settings may have changed)
