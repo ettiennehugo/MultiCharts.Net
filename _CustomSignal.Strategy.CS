@@ -584,17 +584,29 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>DV-8.2 Triggered: the newest closed bar closed beyond its own rail + 0.10 ATR and the bar before it did not (no delta).</summary>
-		protected bool dvpTriggered(int ds, LevelRef rl, int dir) { DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.Triggered(h.C, h.P, h.A, h.Len, 0, dir); }
+		/// rev 6 DV-8.2: false on a degree-change bar (its own snapshot's degree differs from the t-1 snapshot's); logs "skip degChange"
+		/// at Info when that suppresses a trigger.
+		protected bool dvpTriggered(int ds, LevelRef rl, int dir)
+		{
+			DvpRailHistory h = dvpHist(ds, rl);
+			if (h == null) return false;
+			if (DvpAccept.DegChange(h.G, 0) && DvpAccept.Triggered(h.C, h.P, h.A, h.Len, 0, dir))
+			{
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "DVP skip degChange stream(Data" + ds + ") deg(" + h.D[1] + "->" + h.D[0] + ") rail(" + rl.kind + ")");
+				return false;
+			}
+			return DvpAccept.Triggered(h.C, h.P, h.A, h.G, h.Len, 0, dir);
+		}
 		/// <summary>DV-8.3 RunBeyond: consecutive closed bars ending at the newest, each beyond its own rail + deltaAtr*ATR (max 8).</summary>
 		protected int dvpRunBeyond(int ds, LevelRef rl, int dir, double deltaAtr) { DvpRailHistory h = dvpHist(ds, rl); return h != null ? DvpAccept.RunBeyond(h.C, h.P, h.A, h.Len, dir, deltaAtr) : 0; }
 		/// <summary>DV-8.3 BackInside: a close back inside by more than 0.10 ATR since the most recent trigger in the 8-bar history.</summary>
-		protected bool dvpBackInside(int ds, LevelRef rl, int dir) { DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.BackInside(h.C, h.P, h.A, h.Len, dir); }
+		protected bool dvpBackInside(int ds, LevelRef rl, int dir) { DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.BackInside(h.C, h.P, h.A, h.G, h.Len, dir); }
 		/// <summary>DV-8.3 Accepted(N, countTrigger, deltaAtr), true on the completing bar; no default convention (PS-25: N = 2, true, 0).
 		/// Throws for N outside 1..6.</summary>
 		protected bool dvpAccepted(int ds, LevelRef rl, int dir, int N, bool countTrigger, double deltaAtr)
 		{
 			if (N < 1 || N > DvpAccept.MaxN) throw new ArgumentOutOfRangeException("N", "DV-8.1: N must be 1.." + DvpAccept.MaxN);
-			DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.Accepted(h.C, h.P, h.A, h.Len, dir, N, countTrigger, deltaAtr);
+			DvpRailHistory h = dvpHist(ds, rl); return h != null && DvpAccept.Accepted(h.C, h.P, h.A, h.G, h.Len, dir, N, countTrigger, deltaAtr);
 		}
 		/// <summary>RG-10 primitive: z of the close k closed bars back (k = 0 newest, &lt; 8) against that bar's own snapshot; NaN without a fit.</summary>
 		protected double dvpZClose(int ds, int k)
@@ -729,8 +741,8 @@ namespace PowerLanguage.Strategy
 			if (m_dvpRails != null) { m_dvpRails.Clear(); m_dvpRailPool.Clear(); m_dvpConf.Clear(); m_dvpConfPool.Clear(); }
 			if (!DvpConfig.enabled) return;
 			if (m_dvpRails == null) { m_dvpRails = new List<LevelRef>(); m_dvpRailPool = new List<LevelRef>(); m_dvpConf = new List<LevelRef>(); m_dvpConfPool = new List<LevelRef>(); }
-			List<string> errs = DvpConfig.Validate();
-			if (errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
+			List<string> errs = DvpConfig.Validate();   // null when valid
+			if (errs != null && errs.Count > 0) throw new ArgumentException("DvpConfig: " + string.Join("; ", errs));
 			foreach (int ds in DvpConfig.streams)   // PR-D6 (DV-9.1, DV-7.0): Data2/3 HTF streams, same root as Data1 only
 			{
 				requireDataStream("DvpConfig.streams", ds);
@@ -753,6 +765,7 @@ namespace PowerLanguage.Strategy
 			}
 			m_dvp = new _DvpEngine(DvpConfig, RunId, _MtfMath.SymbolRoot(Bars.Info.Name).ToUpperInvariant(), tickSize(),
 				RollDetection != ERollDetection.Off, rthKnown(), engineSink(ETraceLevel.Journal), engineSink(ETraceLevel.Warning), paLabels);
+			m_dvp.info = engineSink(ETraceLevel.Info);   // rev 6 DV-3.10.7: DVP DEGREE change
 		}
 
 		/// <summary>M-DVP closed-bar step, after stepVpHelpers filled the rings (O(1) per stream unless the journal is a consumer).</summary>

@@ -126,7 +126,8 @@ namespace PowerLanguage.Strategy
 	//                 (re-read every 15m bar), time stop 19 bars; common G0-b rules (RTH, flat 15:55, roll sessions out).
 	//                 A re-read POC that is not strictly beyond the entry is not applied (targetHeld). Development window
 	//                 only: the DVP stream is never fed on/after 2025-01-01.
-	//                 d* is not frozen yet (PR-D9): the fallback is Calibrate, traded d = 1, one "DVP DEGREE" Warning.
+	//                 Degree: online self-calibration (spec rev 6, SelfCalibrate): d = 1 and not tradeable while the stream is
+	//                 warming (bars counted as notTradeable), one "DVP DEGREE warming" Warning on the first DVP bar.
 	//                 Diagnostics (kd02-zero-entries): the G0-b canary line adds signals() rollSkips() rollDays() sessions() rthDays()
 	//                 liveDays() skips{...} (one bucket per DVP bar); Warning: zero DVP window volume, NaN POC/sigma rail on a valid fit;
 	//                 Debug: one "G0-b KD02 decision" line per signal decision.
@@ -134,14 +135,12 @@ namespace PowerLanguage.Strategy
 	//                 rate() timeStops() targetHeld()", then DVP RUN, then the DVP CAL coverage lines. If the run stops early
 	//                 (StopCalc before DevEnd / the last bar) the same lines are written there, the summary tagged " partial".
 	//                 VOLUME: a 2016-2024 15m run at Trace = Journal writes about 200k DVP FIT lines (one file append each, slow);
-	//                 for the PF verdict alone run below Journal (no DVP journal, no DvpCalib).
+	//                 for the PF verdict alone run below Journal (no DVP journal; the degree calibrator still runs).
 	//                 Accepted limitation (Ettienne Hugo, 2026-10-31): Gate0 has no session calendar, so the DVP stream gets
 	//                 halfDay = false. Gate0's RTH window (IsRthTime) is a fixed 09:30-16:00 ET, not calendar-aware; on a half
 	//                 day the session ends early only because the data stops at 13:00 ET.
-	//                 d* FREEZE (Ettienne Hugo, 2026-10-31): d* is NOT frozen from KD-02. It comes from a dedicated host run of
-	//                 _DvpEngineTest, degMode = Calibrate, journal on, @ES 15m over the 2016-2024 dev window; its pooled DVP CAL
-	//                 table (d* = argmin score, ties to the lower d) goes into DvpFrozenDegree in PR-D9. Until then KD-02 keeps
-	//                 the d = 1 fallback. Stop rounding away from the close and the skip when the target rounds onto the
+	//                 Degree (DECIDED, Ettienne Hugo, 2026-11-01, spec rev 6 Q16): no frozen d* table; each stream calibrates
+	//                 its degree online (monthly recheck, DVP DEGREE sel/change lines). Stop rounding away from the close and the skip when the target rounds onto the
 	//                 close: approved (Ettienne Hugo, 2026-10-31). These two rules apply ONLY to this Gate0 KD-02 canary; live
 	//                 strategies use the cost floor (stop = max(structural, 14 ticks), costFloorTicks) and the 1% per-trade
 	//                 risk budget (skip if q x widened stop x $50 > 0.01 x equity, never shrink q): engines-manual

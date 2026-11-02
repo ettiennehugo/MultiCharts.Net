@@ -251,6 +251,12 @@ static partial class Program
 		var rig = new Rig(Cfg(), true, false);
 		for (int i = 0; i < s.Length; i++) rig.Feed(s[i], hd[i]);
 		Check(rig.S.FitsComputed == 0 && rig.S.Eligible > 0, "DV-T22 enabled, no query, journal off: fit counter 0 (" + rig.S.FitsComputed + ")");
+		Check(rig.S.CalibFits == rig.S.Calib.Sampled && rig.S.CalibFits > 0, "DV-T22 rev 6: the calibration fit counter equals the sampled grid windows (" + rig.S.CalibFits + "), separate from the snapshot counter");
+		string core0 = CoreSource();
+		int cs0 = core0.IndexOf("void calibStep(", StringComparison.Ordinal), ce0 = core0.IndexOf("public DvpSelfCalib Self", StringComparison.Ordinal);
+		string cbody = cs0 > 0 && ce0 > cs0 ? core0.Substring(cs0, ce0 - cs0) : "";
+		Check(cbody.Length > 0 && !cbody.Contains("man") && !cbody.Contains("Rails") && !cbody.Contains("Lattice") && !cbody.Contains("Pivots") && cbody.Contains("loadAndFit(m_calFit"),
+			"DV-T22 rev 6: the calibration step builds no manifold, rail or lattice (fit only)");
 		string host = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
 		int sd = host.IndexOf("private void startDvp()", StringComparison.Ordinal);
 		string body = sd >= 0 ? host.Substring(sd, host.IndexOf("private void stepDvp()", sd, StringComparison.Ordinal) - sd) : "";
@@ -276,8 +282,8 @@ static partial class Program
 		int latNew = all.Sum(t => Count(t, "new DvpLattice(")), pivNew = all.Sum(t => Count(t, "new DvpPivots("));
 		string core = CoreSource();
 		var statics = core.Split('\n').Where(l => l.Contains(" static ") && l.Contains(" new ") && !l.TrimStart().StartsWith("//") && !l.Contains("static string") && !l.Contains("static readonly DateTime") && !l.Contains("static bool") && !l.Contains("static int") && !l.Contains("static void") && !l.Contains("static double") && !l.Contains("static ulong")).ToArray();
-		Check(engNew == 1 && manNew == 1 && strNew == 1 && latNew == 1 && pivNew == 1 && statics.Length == 1 && statics[0].Contains("Entry[] Table = new Entry[0]"),
-			"eager-allocation check: one new _DvpEngine (startDvp), one new DvpManifold (DvpStream slot), one new DvpStream (engine ctor), one new DvpLattice + DvpPivots (DvpStream ctor, useFib); no static buffers (" + engNew + "/" + manNew + "/" + strNew + "/" + latNew + "/" + pivNew + "/" + statics.Length + ")");
+		Check(engNew == 1 && manNew == 1 && strNew == 1 && latNew == 1 && pivNew == 1 && statics.Length == 0,
+			"eager-allocation check: one new _DvpEngine (startDvp), one new DvpManifold (DvpStream slot), one new DvpStream (engine ctor), one new DvpLattice + DvpPivots (DvpStream ctor, useFib); no static buffers, the frozen-degree table is gone (" + engNew + "/" + manNew + "/" + strNew + "/" + latNew + "/" + pivNew + "/" + statics.Length + ")");
 	}
 
 	// DV-13.1/13.2: no allocation per closed bar (journal off) and none per query after warm-up (snapshot + rails, no LevelRef publish).
@@ -339,25 +345,31 @@ static partial class Program
 	static void CalibTests()
 	{
 		bool[] hd; RingBar[] s = Series(2500, 25, new[] { 1200 }, null, out hd);
-		// lazy: Fixed1 never calibrates -> no DvpCalib, no CAL line
+		// lazy: Fixed1 never calibrates -> no DvpCalib, no CAL line, no calibration fits
 		var f1 = new Rig(new DvpConfig { enabled = true, winLen = 240, journalFits = true, splitFlow = false, degMode = EDvpDegMode.Fixed1 }, true, true);
 		for (int i = 0; i < s.Length; i++) f1.Feed(s[i], hd[i]);
 		f1.e.Finish();
 		Check(f1.S.Calib == null && !f1.journal.Any(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)), "DvpCalib lazy: Fixed1 allocates none and journals no DVP CAL");
-		// journal off: nothing journaled, so nothing calibrates either
-		var off = new Rig(Cfg(), true, false);
+		// Calibrate, journal off: nothing journaled, so nothing calibrates either; SelfCalibrate always has its calibrator (DV-0.1 exception)
+		Func<DvpConfig> calc = () => { var x = Cfg(); x.degMode = EDvpDegMode.Calibrate; return x; };
+		var off = new Rig(calc(), true, false);
 		for (int i = 0; i < s.Length; i++) off.Feed(s[i], hd[i]);
-		Check(off.S.Calib == null, "DvpCalib lazy: journal off allocates none");
-		// DevCoverageFrozen fallback (d* unset) calibrates: samples every H = projBars, drops the horizon across the roll
-		var rg = new Rig(Cfg(), true, true);
+		Check(off.S.Calib == null && off.S.CalibFits == 0, "DvpCalib lazy: Calibrate with journal off allocates none");
+		var soff = new Rig(Cfg(), true, false);
+		for (int i = 0; i < s.Length; i++) soff.Feed(s[i], hd[i]);
+		Check(soff.S.Calib != null && soff.S.Self != null && soff.S.Calib.Years.Count == 0 && soff.S.CalibFits == soff.S.Calib.Sampled && soff.S.Calib.Sampled > 0,
+			"DvpCalib SelfCalibrate journal off: the calibrator runs on its grid (" + soff.S.CalibFits + " fits), no per-year buckets");
+		// Calibrate: samples on the fixed grid (calibStep = H = projBars), drops the horizon across the roll
+		var rg = new Rig(calc(), true, true);
 		for (int i = 0; i < s.Length; i++) rg.Feed(s[i], hd[i]);
 		rg.e.Finish();
 		DvpCalib c = rg.S.Calib;
 		var cal = rg.journal.Where(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)).ToList();
-		Check(c != null && c.H == 60 && c.Sampled > 0 && c.RollDropped >= 1 && c.HoldoutSkipped == 0 && c.Years.Keys.All(y => y == 2024),
+		Check(c != null && c.H == 60 && c.Step == 60 && c.Sampled > 0 && c.RollDropped >= 1 && c.HoldoutSkipped == 0 && c.Years.Keys.All(y => y == 2024),
 			"DvpCalib: sampled " + (c == null ? "-" : c.Sampled + " rollDropped " + c.RollDropped + " H " + c.H));
 		string sum = cal.LastOrDefault() ?? "";
-		Check(cal.Count >= 3 && sum.StartsWith("DVP CAL runId(golden) stream(Data1) summary H(60) sampled(" + c.Sampled.ToString(CI) + ") rollDropped(" + c.RollDropped.ToString(CI) + ") holdoutSkipped(0) dStar(", StringComparison.Ordinal)
+		Check(cal.Count >= 3 && sum.StartsWith("DVP CAL runId(golden) stream(Data1) summary H(60) step(60) sampled(" + c.Sampled.ToString(CI) + ") rollDropped(" + c.RollDropped.ToString(CI)
+				+ ") badDropped(0) gridSkipped(" + c.GridSkipped.ToString(CI) + ") holdoutSkipped(0) dStar(", StringComparison.Ordinal)
 			&& cal.Any(l => l.Contains(" year(2024) d(1) windows(")) && cal.Any(l => l.Contains(" year(all) d(1) windows(") && l.Contains(" covIn(") && l.Contains(" covFwd(") && l.Contains(" covFwdFlat(") && l.Contains(" score(")),
 			"DvpCalib DVP CAL lines (per year, pooled, summary): " + sum);
 		var p = c.Pooled(); int ds = DvpCalib.DStar(p);
@@ -369,17 +381,20 @@ static partial class Program
 		var b = new DvpCalib.Bucket(); Check(DvpCalib.DStar(b) == 0, "DvpCalib DStar of an empty bucket = 0");
 		b.n[1] = b.n[2] = b.n[3] = 2; b.covIn[1] = b.covIn[2] = b.covIn[3] = 1.9; b.covFwd[1] = 1.5; b.covFwd[2] = 1.7; b.covFwd[3] = 1.7;
 		Check(DvpCalib.DStar(b) == 2, "DvpCalib DStar: lowest score, ties to the lower d (2 over 3)");
-		// holdout: a series entirely in 2025+ samples nothing; one straddling 2025-01-01 keeps only 2024 windows
+		// holdout (Calibrate only, DV-3.10.9): a series entirely in 2025+ samples nothing; one straddling 2025-01-01 keeps only 2024 windows
 		Func<int, RingBar[]> shift = days => s.Select(x => { var y = x; y.time = x.time.AddDays(days); y.tradingDay = x.tradingDay.AddDays(days); return y; }).ToArray();
-		var h1 = new Rig(Cfg(), true, true); var s1 = shift(366);
+		var h1 = new Rig(calc(), true, true); var s1 = shift(366);
 		for (int i = 0; i < s1.Length; i++) h1.Feed(s1[i], hd[i]);
 		Check(h1.S.Calib != null && h1.S.Calib.Sampled == 0 && h1.S.Calib.HoldoutSkipped > 0 && h1.S.Calib.Years.Count == 0, "DvpCalib holdout: nothing sampled on/after DvpConst.HoldoutFrom");
-		var h2 = new Rig(Cfg(), true, true); var s2 = shift(350);
+		var h2 = new Rig(calc(), true, true); var s2 = shift(350);
 		for (int i = 0; i < s2.Length; i++) h2.Feed(s2[i], hd[i]);
 		DvpCalib c2 = h2.S.Calib;
 		Check(c2 != null && c2.Sampled > 0 && c2.HoldoutSkipped > 0 && c2.Years.Keys.All(y => y < 2025), "DvpCalib holdout straddle: only pre-2025 windows, horizons reaching 2025 dropped (" + (c2 == null ? "-" : c2.Sampled + "/" + c2.HoldoutSkipped) + ")");
+		var h3 = new Rig(Cfg(), true, true);
+		for (int i = 0; i < s1.Length; i++) h3.Feed(s1[i], hd[i]);
+		Check(h3.S.Calib.Sampled > 0 && h3.S.Calib.HoldoutSkipped == 0 && h3.S.Calib.Scored > 0, "DV-3.10.9 SelfCalibrate ignores HOLDOUT_FROM (" + h3.S.Calib.Sampled + " sampled in 2025)");
 		// determinism: identical CAL lines on a second run
-		var rg2 = new Rig(Cfg(), true, true);
+		var rg2 = new Rig(calc(), true, true);
 		for (int i = 0; i < s.Length; i++) rg2.Feed(s[i], hd[i]);
 		rg2.e.Finish();
 		Check(rg2.journal.Where(l => l.StartsWith("DVP CAL", StringComparison.Ordinal)).SequenceEqual(cal), "DvpCalib deterministic CAL lines");
@@ -394,12 +409,12 @@ static partial class Program
 		rig.e.Finish();
 		string run = rig.journal.Last(l => l.StartsWith("DVP RUN", StringComparison.Ordinal));
 		DvpSnapshot x = rig.e.Snapshot(1, rig.ring, 0);
-		Check(rig.warn.Count(w => w == "DVP: RollDetection Off — roll skip disabled") == 1 && rig.warn.Count == 2,   // + the DevCoverageFrozen degree warning
+		Check(rig.warn.Count(w => w == "DVP: RollDetection Off — roll skip disabled") == 1 && rig.warn.Count == 2,   // + the DVP DEGREE warming Warning (SelfCalibrate, DV-3.10.4)
 			"DV-T27 one RollDetection-Off Warning (" + string.Join(" | ", rig.warn) + ")");
 		Check(run.Contains("skipShare(NaN)") && run.Contains("rollDetect(Off)") && run.Contains("diagnosticOnly(1)") && double.IsNaN(rig.S.SkipShare) && rig.S.DiagnosticOnly
 			&& x != null && x.diagnosticOnly && rig.S.Skipped == 0 && !rig.journal.Any(l => l.Contains("crossesRoll(1)")),
 			"DV-T27 diagnostic-only, skipShare NaN (not 0), no skip: " + run);
-		Check(rig.journal[0].Contains("rollDetect(Off)") && rig.journal[0].Contains("d(Data1=1(calibrate,unfrozen))"), "DV-11.3 DVP CREATED: " + rig.journal[0]);
+		Check(rig.journal[0].Contains("rollDetect(Off)") && rig.journal[0].Contains("d(Data1=1(warming))"), "DV-11.3 DVP CREATED: " + rig.journal[0]);
 	}
 
 	// DV-T28 / T29: Globex sessions crossing midnight are one session; a half-day is one session flagged halfDay and its bars stay in fit windows.
@@ -427,14 +442,15 @@ static partial class Program
 		Check(x != null && x.n == 240 && hEnd + 50 - 239 < hStart && x.sigma == f.SigmaD, "DV-T29 half-day bars stay in the fit window (n = 240, sigma bit-identical)");
 	}
 
-	// DV-R1: golden journal. 15m, 5,000 bars, two splices. The test regenerates the full series and every DVP FIT line
+	// DV-R1: golden journal. 15m, 10,000 bars (rev 6, PR-D9: long enough under the default SelfCalibrate config to leave warm-up
+	// and contain a later recheck), two splices. The test regenerates the full series and every DVP FIT and DVP DEGREE line
 	// deterministically and checks their SHA-256 against fixtures/golden.sha256; the committed fixtures/golden_fit_sample.txt
-	// (every 20th FIT line plus the lines on either side of each crossesRoll transition) must appear byte-identical, so a
-	// mismatch shows readable lines. RAIL lines arrive in PR-D5. DVP_WRITE_GOLDEN=1 rewrites the sample and the hashes;
+	// (every 20th FIT line, the lines on either side of each crossesRoll transition, and every DVP DEGREE line) must appear
+	// byte-identical, so a mismatch shows readable lines. DVP_WRITE_GOLDEN=1 rewrites the sample and the hashes;
 	// DVP_WRITE_FULL=<dir> also dumps the full series csv and FIT journal there for inspection (not committed).
 	static void R1()
 	{
-		bool[] hd; RingBar[] s = Series(5000, 2026, new[] { 1700, 3400 }, new[] { 12, 40 }, out hd);
+		bool[] hd; RingBar[] s = Series(10000, 2026, new[] { 1700, 3400 }, new[] { 12, 40 }, out hd);
 		string dir = Path.Combine(Root(), "tests", "Dvp", "fixtures");
 		string sampleP = Path.Combine(dir, "golden_fit_sample.txt"), hashP = Path.Combine(dir, "golden.sha256");
 		var sb = new StringBuilder("bar,time,tradingDay,o,h,l,c,v,up,down,rth,rollBar,halfDay\n");
@@ -447,8 +463,11 @@ static partial class Program
 				.Append(b.rth ? 1 : 0).Append(',').Append(b.rollBar ? 1 : 0).Append(',').Append(hd[i] ? 1 : 0).Append('\n');
 		}
 		string series = sb.ToString();
-		var fit = JournalRun(s, hd, Cfg()).Where(l => l.StartsWith("DVP FIT", StringComparison.Ordinal)).ToList();
-		string full = string.Join("\n", fit) + "\n";
+		List<string> all = JournalRun(s, hd, Cfg());
+		var fit = all.Where(l => l.StartsWith("DVP FIT", StringComparison.Ordinal)).ToList();
+		var deg = all.Where(l => l.StartsWith("DVP DEGREE", StringComparison.Ordinal)).ToList();
+		string run = all.FirstOrDefault(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) ?? "";
+		string full = string.Join("\n", fit) + "\n", degFull = string.Join("\n", deg) + "\n";
 		var sample = new StringBuilder();
 		for (int i = 0; i < fit.Count; i++)
 		{
@@ -456,7 +475,9 @@ static partial class Program
 			bool edge = (i > 0 && fit[i - 1].Contains("crossesRoll(1)") != cr) || (i + 1 < fit.Count && fit[i + 1].Contains("crossesRoll(1)") != cr);
 			if (i % 20 == 0 || edge || i == fit.Count - 1) sample.Append(i.ToString(CI)).Append('\t').Append(fit[i]).Append('\n');
 		}
-		string hashes = "series " + Sha256(series) + "\nfit " + Sha256(full) + "\nfitLines " + fit.Count.ToString(CI) + "\n";
+		for (int i = 0; i < deg.Count; i++) sample.Append("deg").Append(i.ToString(CI)).Append('\t').Append(deg[i]).Append('\n');
+		string hashes = "series " + Sha256(series) + "\nfit " + Sha256(full) + "\nfitLines " + fit.Count.ToString(CI) + "\ndegree " + Sha256(degFull)
+			+ "\ndegreeLines " + deg.Count.ToString(CI) + "\n";
 		if (Environment.GetEnvironmentVariable("DVP_WRITE_GOLDEN") == "1") { File.WriteAllText(sampleP, sample.ToString()); File.WriteAllText(hashP, hashes); Console.WriteLine("wrote golden sample + hashes"); }
 		string dump = Environment.GetEnvironmentVariable("DVP_WRITE_FULL");
 		if (!string.IsNullOrEmpty(dump)) { File.WriteAllText(Path.Combine(dump, "golden_series.csv"), series); File.WriteAllText(Path.Combine(dump, "golden_fit.txt"), full); }
@@ -467,8 +488,15 @@ static partial class Program
 			string[] want = File.ReadAllLines(sampleP), got = sample.ToString().TrimEnd('\n').Split('\n');
 			for (int i = 0; i < Math.Min(want.Length, got.Length); i++) if (want[i] != got[i]) { Console.WriteLine("  R1 first sample diff:\n   want " + want[i] + "\n   got  " + got[i]); break; }
 		}
-		Check(hashSame && sampleSame && fit.Count == 5000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * 239,
-			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines, full-run SHA-256 matches fixtures/golden.sha256 (" + hashSame + "), sample byte-identical (" + sampleSame + ")");
+		int warmIdx = run.IndexOf(",warmEnd=", StringComparison.Ordinal);
+		bool warmed = warmIdx > 0 && !run.Contains(",warmEnd=NaN,");
+		// rechecks after the one that ended warm-up: sel lines after the first whose n reached calibMinScored
+		int firstWarm = deg.FindIndex(l => l.StartsWith("DVP DEGREE sel", StringComparison.Ordinal) && int.Parse(l.Substring(l.LastIndexOf("n(", StringComparison.Ordinal) + 2).TrimEnd(')'), CI) >= Cfg().calibMinScored);
+		int later = firstWarm < 0 ? 0 : deg.Skip(firstWarm + 1).Count(l => l.StartsWith("DVP DEGREE sel", StringComparison.Ordinal));
+		Check(hashSame && sampleSame && fit.Count == 10000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * 239 && warmed && later >= 1
+			&& fit.Any(l => l.Contains("warming(0)")) && fit.Any(l => l.Contains("warming(1)")),
+			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines and " + deg.Count + " DVP DEGREE lines, full-run SHA-256 matches fixtures/golden.sha256 (" + hashSame
+			+ "), sample byte-identical (" + sampleSame + "), leaves warm-up (" + warmed + ") with " + later + " later recheck(s)");
 	}
 
 	static string Sha256(string text)

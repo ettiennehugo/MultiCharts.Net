@@ -1174,13 +1174,12 @@ namespace PowerLanguage.Function
 		internal _BarRing Kd02Ring { get { return m_kdRing; } }
 
 		/// <summary>The DVP config the KD-02 canary runs on: the DV-1 defaults with the stop rail k added to sigmaList when it is not
-		/// already there. degMode stays DevCoverageFrozen; until PR-D9 freezes d* that falls back to Calibrate (DV-2.2 / DV-3.6): every
-		/// d is fitted, the reported and traded degree is d = 1, and one "DVP DEGREE: no frozen d*" Warning is journaled. journalFits is
-		/// on (§16 item 10): the journaled refits feed DvpCalib, whose DVP CAL coverage lines (for KD-08 / the PR-D9 freeze) are
-		/// written by FinishCanary after DVP RUN. Without a journal sink nothing is journaled and no DvpCalib is created.
-		/// d* freeze (Ettienne Hugo, 2026-10-31): NOT from this canary. A dedicated _DvpEngineTest run with degMode = Calibrate,
-		/// journal on, @ES 15m over the 2016-2024 dev window produces the pooled DVP CAL table; PR-D9 writes its d* into
-		/// DvpFrozenDegree. Until then KD-02 keeps the d = 1 fallback. halfDay = false here is an accepted limitation (no calendar;
+		/// already there. degMode inherits the default SelfCalibrate (spec rev 6, DV-3.10): the degree is calibrated online per stream
+		/// from closed bars only; while the stream is warming (d = 1 until the first monthly recheck with calibMinScored scored windows)
+		/// Tradeable(1) is false, so those bars count as notTradeable and no KD-02 signal is taken; one "DVP DEGREE warming" Warning is
+		/// written on the stream's first bar. A bar whose snapshot degree differs from the t-1 snapshot's suppresses rail triggers
+		/// (DV-8.2). journalFits is on (§16 item 10); with a journal sink the DVP DEGREE sel lines and the DVP CAL coverage lines (for
+		/// KD-08) are written, the latter by FinishCanary after DVP RUN. halfDay = false here is an accepted limitation (no calendar;
 		/// IsRthTime is a fixed 09:30-16:00 ET window, so a half day ends early only because the data stops at 13:00 ET).
 		/// The KD-02 stop rounding away from the close and the skip when the target rounds onto the close apply ONLY to this Gate0
 		/// canary (fixed 1 contract); live strategies use the cost floor (stop = max(structural, 14 ticks), costFloorTicks) and the
