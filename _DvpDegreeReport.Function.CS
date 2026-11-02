@@ -32,7 +32,7 @@ namespace PowerLanguage.Function
 
 		/// <summary>Rechecks seen but not recorded (capacity full).</summary>
 		public long Overflow { get; private set; }
-		/// <summary>Closed bars the host withheld from the stream (dvpFeed false: on/after HOLDOUT_FROM), and the first one's time.</summary>
+		/// <summary>Closed bars the host withheld from the stream (dvpFeed false: on/after HOLDOUT_FROM; one per distinct bar time), and the first one's time.</summary>
 		public long Withheld { get; private set; }
 		public DateTime FirstWithheld { get; private set; }
 		public long DriftCount { get; private set; }
@@ -56,17 +56,22 @@ namespace PowerLanguage.Function
 			DvpSelfCalib c = s.Self;
 			if (c == null || c.Rechecks == m_seenRechecks) return true;
 			m_seenRechecks = c.Rechecks;
-			if (m_count >= m_ym.Length) { Overflow++; return true; }
-			int i = m_count++;
 			DateTime td = s.SessionDay;   // the recheck bar's tradingDayKey (DV-3.10.5): the month the new degree starts
-			m_ym[i] = td.Year * 12 + td.Month - 1;
-			m_from[i] = c.LastFrom; m_to[i] = c.Current; m_cand[i] = c.LastCandidate; m_n[i] = c.Count;
-			m_warm[i] = c.Warming; m_changed[i] = c.LastChanged; m_eligible[i] = c.Count >= c.MinScored;
 			double sf = c.LastFrom >= 1 && c.LastFrom < c.Scores.Length ? c.Scores[c.LastFrom] : double.NaN;
 			double sb = c.LastCandidate >= 1 && c.LastCandidate < c.Scores.Length ? c.Scores[c.LastCandidate] : double.NaN;
-			m_sFrom[i] = sf; m_sCand[i] = sb;
-			m_need[i] = double.IsNaN(sf) ? double.NaN : Math.Max(c.MarginAbs, c.MarginRel * sf);   // DV-3.10.6 switch threshold
+			Record(td.Year * 12 + td.Month - 1, c.LastFrom, c.Current, c.LastCandidate, c.Count, c.Warming, c.LastChanged, c.Count >= c.MinScored, sf, sb,
+				double.IsNaN(sf) ? double.NaN : Math.Max(c.MarginAbs, c.MarginRel * sf));   // DV-3.10.6 switch threshold
 			return true;
+		}
+
+		/// <summary>One recheck record (Observe's store; public for the tests). Past the capacity it is counted in Overflow only.</summary>
+		public void Record(int ym, int from, int to, int cand, int n, bool warming, bool changed, bool eligible, double sFrom, double sCand, double need)
+		{
+			if (m_count >= m_ym.Length) { Overflow++; return; }
+			int i = m_count++;
+			m_ym[i] = ym; m_from[i] = from; m_to[i] = to; m_cand[i] = cand; m_n[i] = n;
+			m_warm[i] = warming; m_changed[i] = changed; m_eligible[i] = eligible;
+			m_sFrom[i] = sFrom; m_sCand[i] = sCand; m_need[i] = need;
 		}
 
 		/// <summary>One refit snapshot's endpointDrift (ATR, DV-3.8); NaN / infinite values are ignored.</summary>
@@ -81,9 +86,12 @@ namespace PowerLanguage.Function
 		/// <summary>A closed bar dvpFeed withheld from the stream.</summary>
 		public void Withhold(DateTime barTime)
 		{
+			if (Withheld > 0 && barTime == m_lastWithheld) return;   // the same bar again (dvpFeed is asked once per chart calc): counted once
 			if (Withheld == 0) FirstWithheld = barTime;
+			m_lastWithheld = barTime;
 			Withheld++;
 		}
+		DateTime m_lastWithheld;
 
 		// ---- read-back (tests) ----
 		public int YearMonth(int i) { return m_ym[i]; }
@@ -98,14 +106,18 @@ namespace PowerLanguage.Function
 		/// <summary>score(from) - score(candidate) at the recheck (&gt;= 0; 0 when the candidate is the current d; NaN when a score is NaN).</summary>
 		public double Gap(int i) { return m_sFrom[i] - m_sCand[i]; }
 		public double Need(int i) { return m_need[i]; }
-		/// <summary>The switch rule applied, the candidate differs from the current d, and the margin kept d (DV-3.10.6).</summary>
-		public bool Blocked(int i) { return m_eligible[i] && m_cand[i] >= 1 && m_cand[i] != m_from[i] && !m_changed[i]; }
+		/// <summary>The switch rule applied, the candidate differs from the current d, the gap is finite and the margin kept d (DV-3.10.6).</summary>
+		public bool Blocked(int i) { return m_eligible[i] && m_cand[i] >= 1 && m_cand[i] != m_from[i] && !m_changed[i] && Finite(Gap(i)); }
+		/// <summary>The switch rule applied but the gap is NaN / infinite (a score of the current d or the candidate is not finite): d is kept
+		/// by the NaN rule (rev 6.1 ruling), not by the margin. Counted apart from Blocked.</summary>
+		public bool NanRecheck(int i) { return m_eligible[i] && !m_changed[i] && !Finite(Gap(i)); }
+		static bool Finite(double x) { return !double.IsNaN(x) && !double.IsInfinity(x); }
 		public long DriftBin(int b) { return m_driftBins[b]; }
 
 		/// <summary>Summary numbers (computed by Compute).</summary>
 		public sealed class Summary
 		{
-			public int pooledD, months, postWarm, matchPooled, yearMonths, matchYear, switches, blocked, flipBacks, warmMonths;
+			public int pooledD, months, postWarm, matchPooled, yearMonths, matchYear, switches, blocked, nanRechecks, flipBacks, warmMonths;
 			public int warmEndYm = -1;
 			public double[] gapAll = new double[0], gapCand = new double[0], relCand = new double[0];
 			public SortedDictionary<int, int> yearD = new SortedDictionary<int, int>();
@@ -139,6 +151,7 @@ namespace PowerLanguage.Function
 					lastSwitchFrom = m_from[i]; lastSwitchAt = i;
 				}
 				if (Blocked(i)) r.blocked++;
+				if (NanRecheck(i)) r.nanRechecks++;
 				double g = Gap(i);
 				if (m_eligible[i] && !double.IsNaN(g) && !double.IsInfinity(g))
 				{
@@ -187,7 +200,7 @@ namespace PowerLanguage.Function
 			{
 				int yd; bool hasY = r.yearD.TryGetValue(m_ym[i] / 12, out yd);
 				journal(head + " month" + tail + " ym(" + Ym(m_ym[i]) + ") from(" + I(m_from[i]) + ") to(" + I(m_to[i]) + ") cand(" + I(m_cand[i])
-					+ ") n(" + I(m_n[i]) + ") warming(" + (m_warm[i] ? 1 : 0) + ") changed(" + (m_changed[i] ? 1 : 0) + ") blocked(" + (Blocked(i) ? 1 : 0)
+					+ ") n(" + I(m_n[i]) + ") warming(" + (m_warm[i] ? 1 : 0) + ") changed(" + (m_changed[i] ? 1 : 0) + ") blocked(" + (Blocked(i) ? 1 : 0) + ") nan(" + (NanRecheck(i) ? 1 : 0)
 					+ ") sFrom(" + F(m_sFrom[i]) + ") sCand(" + F(m_sCand[i]) + ") gap(" + F(Gap(i)) + ") need(" + F(m_need[i])
 					+ ") pooledD(" + I(r.pooledD) + ") yearD(" + (hasY ? I(yd) : "NaN") + ")");
 			}
@@ -199,7 +212,7 @@ namespace PowerLanguage.Function
 				+ ") warmMonths(" + I(r.warmMonths) + ") warmEndYm(" + Ym(r.warmEndYm) + ") warmEnd(" + (c.Warming ? "NaN" : c.WarmEnd.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture))
 				+ ") postWarmMonths(" + I(r.postWarm) + ") pooledDStar(" + I(r.pooledD) + ") yearDStar{" + years + "} matchPooled(" + I(r.matchPooled) + "/" + I(r.postWarm)
 				+ " " + Share(r.matchPooled, r.postWarm) + ") matchYear(" + I(r.matchYear) + "/" + I(r.yearMonths) + " " + Share(r.matchYear, r.yearMonths)
-				+ ") switches(" + I(r.switches) + ") engineChanges(" + I(c.Changes) + ") flipBacks3(" + I(r.flipBacks) + ") blocked(" + I(r.blocked)
+				+ ") switches(" + I(r.switches) + ") engineChanges(" + I(c.Changes) + ") flipBacks3(" + I(r.flipBacks) + ") blocked(" + I(r.blocked) + ") nanRechecks(" + I(r.nanRechecks)
 				+ ") gapAll" + Dist(r.gapAll) + " gapCand" + Dist(r.gapCand) + " relGapCand" + Dist(r.relCand)
 				+ " dFinal(" + I(c.Current) + ") skipShare(" + F(s.SkipShare) + ") meanCovIn(" + F(s.MeanCovIn) + ") meanCovFwd(" + F(s.MeanCovFwd)
 				+ ") drift{n=" + I(DriftCount) + " meanAbs=" + F(DriftCount > 0 ? m_driftAbsSum / DriftCount : double.NaN) + " maxAbs=" + F(DriftCount > 0 ? m_driftAbsMax : double.NaN)

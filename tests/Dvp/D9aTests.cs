@@ -26,7 +26,7 @@ static partial class Program
 			DvpStream st = r.rig.S;
 			if (st.Self != null && st.Self.Rechecks != rc) { rc = st.Self.Rechecks; r.tdYm.Add(s[i].tradingDay.Year * 12 + s[i].tradingDay.Month - 1); }
 			if (!observe) continue;
-			if (r.rep.Observe(st) && drift)
+			if (r.rep.Observe(st) && drift && s[i].bar % Math.Max(1, c.refitEvery) == 0)   // the host's refit-bar check before Snapshot (item h)
 			{
 				DvpSnapshot snap = st.Snapshot(r.rig.ring, 0);
 				if (snap != null && snap.refitBar && snap.valid && !snap.crossesRoll) r.rep.ObserveDrift(snap.endpointDrift);
@@ -34,6 +34,36 @@ static partial class Program
 		}
 		if (journal) r.sel = r.rig.journal.Where(l => l.StartsWith("DVP DEGREE sel", StringComparison.Ordinal)).ToList();
 		return r;
+	}
+
+	// Two streams in one engine (Data1 = s1, Data2 = s2 every 4th Data1 bar), each with its own report. force = ask Snapshot on EVERY
+	// bar (no refit-bar check, also with journalFits off) to prove the read is side-effect free. Returns journal + warnings + DVP RUN/CAL.
+	static List<string> RunRep2(RingBar[] s1, RingBar[] s2, DvpConfig c, bool observe, bool force, out DvpDegreeReport[] reps)
+	{
+		var j = new List<string>(); var w = new List<string>();
+		var e = new _DvpEngine(c, "t9a2", "ES", 0.25, true, false, j.Add, w.Add);
+		var r1 = new _BarRing(DvpStream.RingNeed(c)); var r2 = new _BarRing(DvpStream.RingNeed(c));
+		reps = new[] { new DvpDegreeReport(1), new DvpDegreeReport(2) };
+		int k = 0;
+		for (int i = 0; i < s1.Length; i++)
+		{
+			r1.Add(s1[i]); e.OnBar(1, r1, false); obs(e, 1, r1, reps[0], observe, force);
+			if ((i & 3) == 3 && k < s2.Length) { r2.Add(s2[k++]); e.OnBar(2, r2, false); obs(e, 2, r2, reps[1], observe, force); }
+		}
+		e.Finish();
+		j.AddRange(w.Select(x => "WARN " + x));
+		return j;
+	}
+
+	static void obs(_DvpEngine e, int ds, _BarRing ring, DvpDegreeReport rep, bool observe, bool force)
+	{
+		if (!observe) return;
+		DvpStream st = e.Stream(ds);
+		if (!rep.Observe(st) && !force) return;
+		if (!force && ring[0].bar % Math.Max(1, e.Config.refitEvery) != 0) return;
+		DvpSnapshot snap = st.Snapshot(ring, 0);
+		if (snap != null && snap.refitBar && snap.valid && !snap.crossesRoll) rep.ObserveDrift(snap.endpointDrift);
+		if (force) e.Snapshot(ds, ring, 1);   // also the endAgo = 1 read a consumer would make intrabar
 	}
 
 	static double Pd(string x) { return double.Parse(x, CI); }
@@ -90,6 +120,18 @@ static partial class Program
 		r.rig.e.Finish(); plain.rig.e.Finish();
 		Check(r.rig.journal.SequenceEqual(plain.rig.journal) && r.rig.warn.SequenceEqual(plain.rig.warn) && r.rig.journal.Count > 1000,
 			"D9a report-only: the engine journal (" + r.rig.journal.Count + " lines incl. DVP RUN / CAL) is identical with and without the report");
+		// (4b) review item k: the same with refitEvery 4 (Snapshot on non-refit bars reads a past anchor) and with journalFits off (no FIT
+		// line, so no snapshot is otherwise computed), Snapshot forced on every bar, and a second stream (Data2) in the same engine
+		RingBar[] s2 = CalSeries(110, 92, new[] { 500 }, null, new DateTime(2023, 3, 1, 18, 0, 0));
+		foreach (var v in new[] { new { every = 4, fits = true }, new { every = 1, fits = false }, new { every = 4, fits = false } })
+		{
+			DvpConfig cv = SCfg(v.every, v.fits); cv.calibLen = 80; cv.calibMinScored = 50; cv.streams = new[] { 1, 2 };
+			DvpDegreeReport[] ra, rb;
+			List<string> withRep = RunRep2(s, s2, cv, true, true, out ra), noRep = RunRep2(s, s2, cv, false, false, out rb);
+			Check(withRep.SequenceEqual(noRep) && withRep.Count > 30 && withRep.Any(l => l.Contains("stream(Data2)")) && ra[0].Count > 0 && ra[1].Count > 0,
+				"D9a report-only (item k): refitEvery " + v.every + ", journalFits " + (v.fits ? "on" : "off") + ", Snapshot forced every bar, Data1 + Data2: the engine output ("
+				+ withRep.Count + " lines) is identical with and without the reports (" + ra[0].Count + "/" + ra[1].Count + " rechecks)");
+		}
 		Check(rep.DriftCount > 100 && Enumerable.Range(0, DvpDegreeReport.DriftEdges.Length + 1).Sum(b => rep.DriftBin(b)) == rep.DriftCount,
 			"D9a report: |endpointDrift| histogram over " + rep.DriftCount + " refit snapshots");
 
@@ -120,8 +162,21 @@ static partial class Program
 		var small = new DvpDegreeReport(1, 3); var rig1 = new Rig(c0, true, false);
 		foreach (RingBar b in s) { rig1.Feed(b, false); small.Observe(rig1.S); }
 		Check(small.Count == 3 && small.Overflow == rig1.S.Self.Rechecks - 3, "D9a report: rechecks past the capacity are counted in overflow, not recorded");
-		var w = new DvpDegreeReport(2); w.Withhold(new DateTime(2025, 1, 1, 18, 15, 0)); w.Withhold(new DateTime(2025, 1, 2, 9, 30, 0));
-		Check(w.Withheld == 2 && w.FirstWithheld == new DateTime(2025, 1, 1, 18, 15, 0), "D9a report: withheld bars counted with the first one's time");
+		var w = new DvpDegreeReport(2); w.Withhold(new DateTime(2025, 1, 1, 18, 15, 0)); w.Withhold(new DateTime(2025, 1, 1, 18, 15, 0));
+		w.Withhold(new DateTime(2025, 1, 2, 9, 30, 0)); w.Withhold(new DateTime(2025, 1, 2, 9, 30, 0)); w.Withhold(new DateTime(2025, 1, 2, 9, 30, 0));
+		Check(w.Withheld == 2 && w.FirstWithheld == new DateTime(2025, 1, 1, 18, 15, 0), "D9a report: withheld bars counted once per bar time (repeat calls deduped), with the first one's time");
+		// item j: an eligible recheck whose gap is NaN (a NaN score) is a NaN recheck, not a margin block
+		var nr = new DvpDegreeReport(1);
+		nr.Record(2023 * 12, 1, 1, 2, 60, false, false, true, 0.5, 0.4, 0.01);              // blocked by the margin
+		nr.Record(2023 * 12 + 1, 1, 1, 2, 60, false, false, true, double.NaN, 0.4, double.NaN);   // NaN score of the current d
+		nr.Record(2023 * 12 + 2, 1, 1, 0, 60, false, false, true, 0.5, double.NaN, 0.01);     // no finite candidate
+		nr.Record(2023 * 12 + 3, 1, 1, 2, 10, false, false, false, double.NaN, 0.4, double.NaN);  // not eligible: neither
+		nr.Record(2023 * 12 + 4, 1, 2, 2, 60, false, true, true, 0.5, 0.1, 0.01);             // a switch
+		DvpDegreeReport.Summary ns = nr.Compute(null);
+		var nl = new List<string>(); rep.Lines(nl.Add, "n", r.rig.S);
+		Check(nr.Blocked(0) && !nr.Blocked(1) && !nr.Blocked(2) && nr.NanRecheck(1) && nr.NanRecheck(2) && !nr.NanRecheck(0) && !nr.NanRecheck(3) && !nr.NanRecheck(4)
+			&& ns.blocked == 1 && ns.nanRechecks == 2 && ns.switches == 1 && nl[nl.Count - 1].Contains(") nanRechecks(" + sum.nanRechecks + ")") && nl[0].Contains(") nan(0) sFrom("),
+			"D9a report: NaN rechecks are counted apart from margin blocks (blocked 1, nanRechecks 2)");
 		DvpConfig cf = SCfg(); cf.degMode = EDvpDegMode.Fixed1; var rigF = new Rig(cf, true, true); foreach (RingBar b in s.Take(400)) rigF.Feed(b, false);
 		var lf = new List<string>(); new DvpDegreeReport(1).Lines(lf.Add, "f", rigF.S);
 		Check(lf.Count == 1 && lf[0] == "DVP D9A skipped runId(f) stream(Data1) reason(degMode Fixed1 is not SelfCalibrate)", "D9a report: a non-SelfCalibrate stream writes one skipped line");
@@ -140,8 +195,12 @@ static partial class Program
 			&& code.Contains("protected override bool dvpFeed(int ds, DateTime barTime)") && code.Contains("ToEastern(barTime) < DvpConst.HoldoutFrom && GlobexDate(barTime) < DvpConst.HoldoutFrom")
 			&& code.Contains("base.dvpFinish();") && code.Contains("DvpConfig.degMode = EDvpDegMode.SelfCalibrate;") && code.Contains("RollDetection = ERollDetection.Table;")
 			&& code.Contains("r1.Type == EResolution.Minute && r1.Size == 15") && code.Contains("r2.Type == EResolution.Minute && r2.Size == 60")
-			&& host.Contains("From 2016-01-01") && host.Contains(@"%LOCALAPPDATA%\MCSignalLogs\"),
-			"D9a host: no [Input], no Enum.Parse / reflection / StreamWriter / orders; holdout by ET time and Globex day; typed resolutions; run steps in the header");
+			&& host.Contains("From 2016-01-01") && host.Contains(@"%LOCALAPPDATA%\MCSignalLogs\")
+			&& Regex.Matches(host, "Build Volume On = Trade Volume").Count == 2 && host.Contains("Q21 DECIDED") && !host.Contains("Q6")
+			&& code.Contains("int mbb = ExecInfo.MaxBarsBack;") && code.Contains("const int RunMaxBarsBack = 50;") && host.Contains("User defined, 50")
+			&& code.Contains("ring[0].bar % every != 0) continue;") && code.IndexOf("ring[0].bar % every") < code.IndexOf("st.Snapshot(ring, 0)")
+			&& code.Contains("_MtfMath.SymbolRoot(Bars.Info.Name)") && code.Contains("root == \"ES\"") && host.Contains("Data1 AND Data2") && !host.Contains("@@"),
+			"D9a host: no [Input], no Enum.Parse / reflection / StreamWriter / orders; holdout by ET time and Globex day; typed resolutions and ExecInfo.MaxBarsBack; refit bar checked before Snapshot; ES-root warning; run steps (Trade Volume x2, Max bars back 50, run time) in the header");
 		string rsrc = File.ReadAllText(Path.Combine(Root(), "_DvpDegreeReport.Function.CS"));
 		Check(!rsrc.Contains("DvpConfig.") && !rsrc.Contains(".Canon(") && !rsrc.Contains("Enum.Parse") && rsrc.Contains("namespace PowerLanguage.Function"),
 			"D9a report source: MC-free, no DvpConfig write or Canon() use (report-only)");

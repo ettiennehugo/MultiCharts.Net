@@ -27,27 +27,50 @@ namespace PowerLanguage.Strategy
 	//
 	// MULTICHARTS RUN STEPS (exact)
 	//   1. New chart: symbol @ES (CME E-mini S&P 500 continuous, dxFeed, NOT back-adjusted), Data1 = 15 Minute, chart type Regular.
-	//      Format Instrument → Settings: session template "CME Globex" (18:00-17:00 ET); time zone Exchange (recommended).
-	//      Data Range: From 2016-01-01 (DECIDED, Ettienne Hugo, 2026-11-01: the degree path depends on the first bar) To 2024-12-31
+	//      Format Instrument → Settings: session template "CME Globex" (18:00-17:00 ET); time zone Exchange (recommended);
+	//      Build Volume On = Trade Volume (NOT Tick Count: the #81 host throws on a Tick Count futures stream).
+	//      Data Range: From 2016-01-01 (Q21 DECIDED, Ettienne Hugo, 2026-11-01: the degree path depends on the first bar) To 2024-12-31
 	//      (later data is harmless: it is withheld from DVP, see HOLDOUT).
-	//   2. Insert → Instrument: @ES again as Data2 = 60 Minute, same session template, same time zone, same From date 2016-01-01.
+	//   2. Insert → Instrument: @ES again as Data2 = 60 Minute, same session template, same time zone, same From date 2016-01-01,
+	//      and again Format Instrument → Settings → Build Volume On = Trade Volume for Data2.
 	//   3. Insert this strategy. Format Signals → _DvpEngineTest → Inputs: TraceLevel = Journal (the only input; inherited).
-	//      Properties: Max bars back = default; Bar Magnifier off (no orders). Nothing else to set: RollDetection = Table
-	//      (EventRules.RollDate, 2015-2025) and every DvpConfig field are set in code.
+	//      Properties: Maximum number of bars study will reference = User defined, 50 (NOT Auto-detect: an auto-detect restart
+	//      recalculates from the first bar, and a different value moves the first calculated bar, i.e. the start of the degree path,
+	//      Q21). The setup line prints it (maxBarsBack, ExecInfo.MaxBarsBack) and flags any other value. Bar Magnifier off (no orders).
+	//      Nothing else to set: RollDetection = Table (EventRules.RollDate, 2015-2025, ES quarterly rolls only: the setup line warns
+	//      when the Data1 root is not ES) and every DvpConfig field are set in code.
 	//   4. Let it calculate to the last bar (it writes the report on Bars.LastBarOnChart; if it is stopped early nothing is reported).
 	//      The log is %LOCALAPPDATA%\MCSignalLogs\MCSignal<yyyyMMdd-HHmmss>-<pid>.csv (one file per MultiCharts process; the Output
 	//      window prints "Log file created <path>"). Lines of this run carry its run id (the RUN line).
+	//      Expected run time and log size (measured off-MultiCharts, see "RUN TIME AND LOG SIZE" below): DVP engine about 9 s
+	//      at Journal, log about 238 MB / 262k lines (almost all DVP FIT lines); MultiCharts' own bar processing comes on top.
 	//   5. Timing (DV-13.4, journal off): set TraceLevel = Info, recalculate (Ctrl+R), note the "DVP D9A timing" line (dvp(on)).
 	//      Then in this file set BaselineDvpOff = true, compile, recalculate at TraceLevel = Info and note the dvp(off) timing line.
 	//      Set BaselineDvpOff back to false afterwards. slowdown = elapsedMs(on) / elapsedMs(off) - 1 (budget <= 0.15, PROBE).
+	//      These timing runs have DVP on Data1 AND Data2, while the DV-13.4 budget is stated for Data1 only, so the measured slowdown
+	//      is conservative (an upper bound for the Data1-only case).
 	//   SEND BACK (grep the log for the run id of step 4, plus the two timing lines of step 5):
 	//     RUN, "DVP CREATED", "DVP D9A setup", every "DVP DEGREE" line (warming / sel / change), "DVP RUN", every "DVP CAL" line,
 	//     every "DVP D9A" line (month + summary per stream), the two "DVP D9A timing" lines, and any Warning / Error line.
-	//     The DVP FIT lines (about 200k at refitEvery 1) are NOT needed in full; the summary's drift{} carries the endpointDrift
+	//     The DVP FIT lines (about 262k at refitEvery 1, Data1 + Data2) are NOT needed in full; the summary's drift{} carries the endpointDrift
 	//     distribution. Keep the file in case a FIT-level question comes up.
 	//
+	// RUN TIME AND LOG SIZE (PR-D9a review item f; how the header figures were obtained)
+	//   Measured on a Linux build box (8-vCPU Intel Xeon, .NET 8 Release, 2026-11-01) with tests/Dvp/D9aBench.cs
+	//   (DVP_BENCH=1 dotnet run -c Release --project tests/Dvp): the real engine with this run's DvpConfig (SelfCalibrate PROBE,
+	//   refitEvery 1, journalFits on, streams Data1 + Data2) on a synthetic 15m Globex-like series of 210,000 bars (Data1, about
+	//   2016-2024 of @ES 15m) and 52,000 bars (Data2, about 2016-2024 of 60m), five runs each:
+	//     journal off                                     180-184 ms
+	//     journal on, lines counted only                  7.5-7.7 s   (261,653 lines: 261,522 DVP FIT, 93 DVP DEGREE)
+	//     journal on, CSV line + File.AppendAllText each  8.7-9.0 s   (file 237,591,032 bytes = about 238 MB, about 908 bytes per line)
+	//   So at Journal the fits behind the FIT lines (one per closed bar per stream) and their formatting dominate; the per-line append
+	//   added about 1.0-1.5 s on Linux. NOT measured: MultiCharts' own bar processing, the inherited _VolumeProfileFuturesBase work,
+	//   .NET Framework on Windows instead of .NET 8, and Windows per-call file open/append/close cost (NTFS, antivirus), which adds
+	//   about 262k x (cost per call). The line count is from the series size, so it holds for the real run within the bar count
+	//   (the FIT count is about Data1 + Data2 closed bars, not 200k); the bytes use the real line layout with an 8-character run id.
+	//
 	// WHAT THE REPORT GIVES (per stream; "DVP D9A summary"): share of post-warm-up months whose online d equals the pooled d* and that
-	//   year's d*, switches, flip-backs within 3 rechecks, margin-blocked rechecks, warm-up end, the distribution of the score gaps
+	//   year's d*, switches, flip-backs within 3 rechecks, margin-blocked rechecks, rechecks kept by a NaN score (counted apart), warm-up end, the distribution of the score gaps
 	//   score(current) - score(candidate) at rechecks (all eligible rechecks; those with a different candidate; and relative to
 	//   score(current)), skipShare, mean cov_in / cov_fwd, |endpointDrift| distribution, the withheld-bar count and the PROBE values.
 	//   "DVP D9A month" lines give the path itself (one per monthly recheck). Whether the PROBE defaults look right (Q17) is read
@@ -58,6 +81,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>DV-13.4 baseline build only: true = the DVP engine is not created (timing run "dvp(off)"). Default false.</summary>
 		static readonly bool BaselineDvpOff = false;
 		static readonly int[] DvpStreams = { 1, 2 };
+		/// <summary>The run steps' fixed "Maximum number of bars study will reference" (User defined).</summary>
+		const int RunMaxBarsBack = 50;
 		const int RollFromYear = 2015, RollToYear = 2025;
 
 		DvpDegreeReport[] m_rep;
@@ -141,11 +166,16 @@ namespace PowerLanguage.Strategy
 			_DvpEngine e = Dvp;
 			if (e == null) return;
 			bool drift = journalOn() && DvpConfig.journalFits;   // only then the window-end snapshot is computed anyway (no extra fit)
+			int every = Math.Max(1, DvpConfig.refitEvery);       // = DvpStream's refit period (m_r)
 			for (int i = 0; i < m_rep.Length; i++)
 			{
 				DvpStream st = e.Stream(m_rep[i].Ds);
 				if (!m_rep[i].Observe(st) || !drift) continue;
-				DvpSnapshot s = st.Snapshot(Ring(m_rep[i].Ds), 0);
+				_BarRing ring = Ring(m_rep[i].Ds);
+				// refit bar first (review item h): the same test DvpStream.compute makes (Mod(bar, refitEvery) == 0 => snap.refitBar), so
+				// Snapshot is only asked on refit bars; DvpStream exposes no refit flag, hence the host-side check.
+				if (ring == null || ring.Count == 0 || ring[0].bar % every != 0) continue;
+				DvpSnapshot s = st.Snapshot(ring, 0);
 				if (s != null && s.refitBar && s.valid && !s.crossesRoll) m_rep[i].ObserveDrift(s.endpointDrift);
 			}
 		}
@@ -164,13 +194,21 @@ namespace PowerLanguage.Strategy
 				d2 = r2.ChartType + " " + r2.Type + " " + r2.Size + " " + BarsOfData(2).Info.Name;
 			}
 			DateTime first = ToEastern(Bars.Time[0]);
+			int mbb = ExecInfo.MaxBarsBack;                       // typed IExecInfo member (as in _MtfProbe / _VolumeProfileBase)
+			bool mbbOk = mbb == RunMaxBarsBack;
+			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
+			bool rootOk = root == "ES";                           // the RollDate table (EventRules.RollDate) is ES-only
 			bool startOk = first >= new DateTime(2016, 1, 1) && first < new DateTime(2016, 1, 8);   // the first @ES bar of 2016 (Sun 2016-01-03 18:00 ET)
 			trace(ETraceLevel.Journal, "DVP D9A setup runId(" + RunId + ") data1(" + r1.ChartType + " " + r1.Type + " " + r1.Size + " " + Bars.Info.Name + ") data2(" + d2
 				+ ") firstBarEt(" + first.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + ") deviation(data1=" + (d1ok ? 0 : 1)
-				+ " data2=" + (d2ok ? 0 : 1) + " chartStart=" + (startOk ? 0 : 1) + ") roll(" + RollDetection + " " + RollDates.Count + " dates " + RollFromYear + "-" + RollToYear
+				+ " data2=" + (d2ok ? 0 : 1) + " chartStart=" + (startOk ? 0 : 1) + " maxBarsBack=" + (mbbOk ? 0 : 1) + " root=" + (rootOk ? 0 : 1) + ") maxBarsBack(" + mbb
+				+ ") root(" + root + ") roll(" + RollDetection + " " + RollDates.Count + " dates " + RollFromYear + "-" + RollToYear
 				+ ") holdoutFrom(" + DvpConst.HoldoutFrom.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") dvp(" + (DvpConfig.enabled ? "on" : "off") + ")");
-			if (!d1ok || !d2ok || !startOk)
-				trace(ETraceLevel.Warning, "DVP D9A setup deviation: expected @ES Regular 15 Minute Data1, Regular 60 Minute Data2, chart start 2016-01-01 (see the header of _DvpEngineTest)");
+			if (!d1ok || !d2ok || !startOk || !mbbOk)
+				trace(ETraceLevel.Warning, "DVP D9A setup deviation: expected @ES Regular 15 Minute Data1, Regular 60 Minute Data2, chart start 2016-01-01, Max bars back "
+					+ RunMaxBarsBack + " (see the header of _DvpEngineTest)");
+			if (!rootOk)
+				trace(ETraceLevel.Warning, "DVP D9A setup: symbol root " + root + " is not ES; RollDetection = Table uses EventRules.RollDate, which is the ES quarterly roll table only");
 		}
 	}
 }
