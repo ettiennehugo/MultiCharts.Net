@@ -44,13 +44,13 @@
 //   Properties > Backtesting > Use Bar Magnifier (VERIFY). The "P2 start" line logs iog(True|False) to confirm the setting.
 //   Import order: _MtfMath.Function.CS, then _MtfProbe.Strategy.CS, then Compile.
 //
-// 4. EXTRACT (PowerShell, run right after each run and before starting the next; it takes the last "P2 start" in the newest
-//   log, then copies that run's lines: all non-call lines plus the call lines, R2 only 09:40-10:19 on 9 Jul).
-//   Per run set $n and $win:  R1 $n='R1';$win=''   R2 $n='R2';$win='2024-07-09 (09:[45]|10:[01])'   R3 $n='R3';$win=''   R4 $n='R4';$win=''
-//   $f=(Get-ChildItem "$env:LOCALAPPDATA\MCSignalLogs\MCSignal*.csv","$env:TEMP\MCSignal*.csv" -EA 0|Sort LastWriteTime|Select -Last 1).FullName
-//   $rid=(Select-String -Path $f -Pattern '^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),"?P2 start '|Select -Last 1).Matches[0].Groups[1].Value
-//   $p='^\w+,[^,]*,_MtfProbe,[^,]*,'+$rid+',(?!"?P2 call)|,'+$rid+',"?P2 call.*d1\['+$win
-//   Select-String -Path $f -Pattern $p | % Line | Set-Content "$env:USERPROFILE\Desktop\P2_$n.txt"
+// 4. EXTRACT (Windows PowerShell 5.1; paste the run's line as is, right after the run and before starting the next). Each line takes
+//   the newest MCSignal*.csv (MCSignalLogs, else %TEMP%), the runId of its last "P2 start", and writes that run's lines to the
+//   Desktop: every non-call line (RUN, P2 start, Warning/Error) plus the P2 call lines; R2 keeps only calls 09:40-10:19 on 9 Jul.
+//   R1  Get-ChildItem -LiteralPath (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs'), ([System.IO.Path]::GetTempPath()) -Filter 'MCSignal*.csv' -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime | Select-Object -Last 1 | ForEach-Object { Select-String -LiteralPath $_.FullName -Pattern '^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),"?P2 start ' -CaseSensitive -Encoding UTF8 | Select-Object -Last 1 } | ForEach-Object { Select-String -LiteralPath $_.Path -Pattern ('^\w+,[^,]*,_MtfProbe,[^,]*,' + $_.Matches[0].Groups[1].Value + ',(?!"?P2 call)|,' + $_.Matches[0].Groups[1].Value + ',"?P2 call.*d1\[') -CaseSensitive -Encoding UTF8 | ForEach-Object -MemberName Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'P2_R1.txt') -Encoding utf8 }
+//   R2  Get-ChildItem -LiteralPath (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs'), ([System.IO.Path]::GetTempPath()) -Filter 'MCSignal*.csv' -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime | Select-Object -Last 1 | ForEach-Object { Select-String -LiteralPath $_.FullName -Pattern '^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),"?P2 start ' -CaseSensitive -Encoding UTF8 | Select-Object -Last 1 } | ForEach-Object { Select-String -LiteralPath $_.Path -Pattern ('^\w+,[^,]*,_MtfProbe,[^,]*,' + $_.Matches[0].Groups[1].Value + ',(?!"?P2 call)|,' + $_.Matches[0].Groups[1].Value + ',"?P2 call.*d1\[2024-07-09 (09:[45]|10:[01])') -CaseSensitive -Encoding UTF8 | ForEach-Object -MemberName Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'P2_R2.txt') -Encoding utf8 }
+//   R3  Get-ChildItem -LiteralPath (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs'), ([System.IO.Path]::GetTempPath()) -Filter 'MCSignal*.csv' -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime | Select-Object -Last 1 | ForEach-Object { Select-String -LiteralPath $_.FullName -Pattern '^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),"?P2 start ' -CaseSensitive -Encoding UTF8 | Select-Object -Last 1 } | ForEach-Object { Select-String -LiteralPath $_.Path -Pattern ('^\w+,[^,]*,_MtfProbe,[^,]*,' + $_.Matches[0].Groups[1].Value + ',(?!"?P2 call)|,' + $_.Matches[0].Groups[1].Value + ',"?P2 call.*d1\[') -CaseSensitive -Encoding UTF8 | ForEach-Object -MemberName Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'P2_R3.txt') -Encoding utf8 }
+//   R4  Get-ChildItem -LiteralPath (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'MCSignalLogs'), ([System.IO.Path]::GetTempPath()) -Filter 'MCSignal*.csv' -ErrorAction SilentlyContinue | Sort-Object -Property LastWriteTime | Select-Object -Last 1 | ForEach-Object { Select-String -LiteralPath $_.FullName -Pattern '^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),"?P2 start ' -CaseSensitive -Encoding UTF8 | Select-Object -Last 1 } | ForEach-Object { Select-String -LiteralPath $_.Path -Pattern ('^\w+,[^,]*,_MtfProbe,[^,]*,' + $_.Matches[0].Groups[1].Value + ',(?!"?P2 call)|,' + $_.Matches[0].Groups[1].Value + ',"?P2 call.*d1\[') -CaseSensitive -Encoding UTF8 | ForEach-Object -MemberName Line | Out-File -FilePath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'P2_R4.txt') -Encoding utf8 }
 //   Result: Desktop\P2_R1.txt .. P2_R4.txt. Send those four files.
 //   Line format (tests/MtfTests pins it; numbers are culture-invariant, so the message is never quoted):
 //   Info,<time> <zone>,_MtfProbe,@ES,<runId>,P2 start iog(False) maxBarsBack(20) d1(@ES Minute 1) d2(@ES Minute 60) d2.Close[MaxBarsBack]=5590.5 d1cb(1201) d2cb(21)
@@ -76,7 +76,8 @@
 //       orders, so it shows the state of each calc, not that MC discards orders from earlier calcs.
 //   (e) R1 "P2 start": d2.Close[MaxBarsBack]= a number, d2cb >= 20, and d1cb far above 20 (the first calc waited for Data2) =
 //       MaxBarsBack applies per series. d2.Close[MaxBarsBack]=<SomeException> = it does not; HTF code then needs its own
-//       Data2 CurrentBar guard. R3's start line (history part) must agree.
+//       Data2 CurrentBar guard. Same reading: early calls with closedIdx(-1) closed[none] (the closed Data2 bar was not readable;
+//       the probe logs that instead of throwing). R3's start line (history part) must agree.
 // ============================================================================================
 using PowerLanguage.Function;
 using System;
@@ -114,10 +115,14 @@ namespace PowerLanguage.Strategy
 			}
 			m_same = d1.CurrentBar == m_lastD1Bar ? m_same + 1 : 1;
 			m_lastD1Bar = d1.CurrentBar;
-			int ci = HtfClosedIndex(2), mi = htfMapped(2);
+			int ci = HtfClosedIndex(2), mi = -1;
+			DateTime ct = DateTime.MinValue, mt = DateTime.MinValue;
+			double cc = 0;
+			try { ct = d2.Time[ci]; cc = d2.Close[ci]; } catch (Exception) { ci = -1; }
+			try { mi = htfMapped(2); if (mi >= 0) mt = d2.Time[mi]; } catch (Exception) { mi = -1; }
 			trace(ETraceLevel.Info, _MtfProbeLog.Call(m_calls, m_same, d1.Time[0], d1.Status.ToString(), d1.Close[0], d1.CurrentBar,
 				d2.Time[0], d2.Status.ToString(), d2.Open[0], d2.High[0], d2.Low[0], d2.Close[0], d2.Volume[0], d2.CurrentBar,
-				ci, d2.Time[ci], d2.Close[ci], mi, mi >= 0 ? d2.Time[mi] : DateTime.MinValue, Environment.IsRealTimeCalc, DateTime.Now));
+				ci, ct, cc, mi, mt, Environment.IsRealTimeCalc, DateTime.Now));
 		}
 	}
 }

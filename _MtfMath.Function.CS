@@ -47,7 +47,7 @@ namespace PowerLanguage.Function
 	public static class _MtfProbeLog
 	{
 		public const string ExtractRunIdPattern = @"^Info,[^,]*,_MtfProbe,[^,]*,([0-9a-f]{8}),""?P2 start ";
-		public const string CallPattern = @"P2 call\((\d+)\) same\((\d+)\) d1\[(\S+ \S+) (\w+) c=(\S+) cb=(\d+)\] d2\[(\S+ \S+) (\w+) o=(\S+) h=(\S+) l=(\S+) c=(\S+) v=(\S+) cb=(\d+)\] closedIdx\((-?\d+)\) closed\[(\S+ \S+) c=(\S+)\] mapped\((-?\d+) ?([^)]*)\) realTime\((True|False)(?: wall=([0-9:.]+))?\)";
+		public const string CallPattern = @"P2 call\((\d+)\) same\((\d+)\) d1\[(\S+ \S+) (\w+) c=(\S+) cb=(\d+)\] d2\[(\S+ \S+) (\w+) o=(\S+) h=(\S+) l=(\S+) c=(\S+) v=(\S+) cb=(\d+)\] closedIdx\((-?\d+)\) closed\[(?:(\S+ \S+) c=(\S+)|none)\] mapped\((-?\d+) ?([^)]*)\) realTime\((True|False)(?: wall=([0-9:.]+))?\)";
 		public const string StartPattern = @"P2 start iog\((True|False)\) maxBarsBack\((\d+)\) d1\(([^)]*)\) d2\(([^)]*)\) d2\.Close\[MaxBarsBack\]=(\S+) d1cb\((\d+)\) d2cb\((\d+)\)";
 
 		public static string Num(double v) { return v.ToString("R", CultureInfo.InvariantCulture); }
@@ -65,7 +65,7 @@ namespace PowerLanguage.Function
 			CultureInfo ic = CultureInfo.InvariantCulture;
 			return "P2 call(" + call.ToString(ic) + ") same(" + same.ToString(ic) + ") d1[" + Stamp(t1) + " " + st1 + " c=" + Num(c1) + " cb=" + cb1.ToString(ic) + "] d2[" +
 				Stamp(t2) + " " + st2 + " o=" + Num(o2) + " h=" + Num(h2) + " l=" + Num(l2) + " c=" + Num(c2) + " v=" + Num(v2) + " cb=" + cb2.ToString(ic) + "] closedIdx(" +
-				closedIdx.ToString(ic) + ") closed[" + Stamp(closedTime) + " c=" + Num(closedClose) + "] mapped(" + mapped.ToString(ic) + (mapped >= 0 ? " " + Stamp(mappedTime) : "") +
+				closedIdx.ToString(ic) + ") closed[" + (closedIdx >= 0 ? Stamp(closedTime) + " c=" + Num(closedClose) : "none") + "] mapped(" + mapped.ToString(ic) + (mapped >= 0 ? " " + Stamp(mappedTime) : "") +
 				") realTime(" + (realTime ? "True wall=" + wall.ToString("HH:mm:ss.fff", ic) : "False") + ")";
 		}
 	}
