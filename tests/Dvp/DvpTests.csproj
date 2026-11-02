@@ -21,6 +21,7 @@
     <Compile Include="..\..\_RollDetector.Function.CS" Link="Linked\_RollDetector.cs" />
     <Compile Include="..\..\_PriceActionEngine.Function.CS" Link="Linked\_PriceActionEngine.cs" />
     <Compile Include="..\PriceActionTests\McShim.cs" Link="Linked\McShim.cs" />
+    <Compile Include="..\..\_DvpDegreeReport.Function.CS" Link="Linked\_DvpDegreeReport.cs" />
   </ItemGroup>
   <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
   <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
