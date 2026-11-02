@@ -828,7 +828,7 @@ namespace PowerLanguage.Function
 	/// grid position pos (pos mod calibStep = 0, full window in the ring, no roll inside it; else GridSkip), fits it once to dCap
 	/// and calls Sample; every closed bar then calls Track (DV-3.10.2): each pending entry takes the bar for every d, and the entry
 	/// sampled at s is scored on bar s + H (H = projBars), never earlier. A roll bar in s+1..s+H drops it whole (rollDropped), a
-	/// non-finite source drops every pending entry (badDropped). A scored window goes to the per-calendar-year buckets (the DVP CAL
+	/// non-finite source drops every pending entry (badDropped). A scored window goes to the per-trading-day-year buckets (the DVP CAL
 	/// lines, when KeepYears) and, under SelfCalibrate, to the DvpSelfCalib rolling ring. Calibrate (Holdout = true) never samples a
 	/// window ending on or after DvpConst.HoldoutFrom and drops a horizon reaching it (holdoutSkipped); SelfCalibrate ignores it
 	/// (DV-3.10.9). The pending queue is a fixed array of floor(H / calibStep) + 2 entries, allocated here (DV-13.3).
@@ -878,12 +878,14 @@ namespace PowerLanguage.Function
 		/// <summary>A grid position whose window is not in the ring, crosses a roll or does not fit (gridSkipped).</summary>
 		public void GridSkip() { GridSkipped++; }
 
-		/// <summary>DV-3.10.1: queue the window ending at grid position pos (bar time = time), f fitted to dCap.</summary>
-		public void Sample(DvpFit f, long pos, DateTime time)
+		/// <summary>DV-3.10.1: queue the window ending at grid position pos (bar time = time, trading day = tradingDay), f fitted to dCap.
+		/// The DVP CAL year bucket is the window-end bar's trading-day year (analyst ruling on #82, 2026-11-01): a Globex window
+		/// ending on the evening of Dec 31 belongs to the next year's first trading day, so it lands in the next year.</summary>
+		public void Sample(DvpFit f, long pos, DateTime time, DateTime tradingDay)
 		{
 			if (Holdout && time >= DvpConst.HoldoutFrom) { HoldoutSkipped++; return; }
 			if (m_count >= m_q.Length) return;   // unreachable: the queue holds every overlapping horizon
-			m_q[m_count++].FromAll(f, pos, time.Year);
+			m_q[m_count++].FromAll(f, pos, tradingDay.Year);
 			Sampled++;
 		}
 
@@ -914,7 +916,7 @@ namespace PowerLanguage.Function
 					if (KeepYears)
 					{
 						Bucket b;
-						if (!Years.TryGetValue(q.year, out b)) { b = new Bucket(); Years.Add(q.year, b); }   // once per calendar year (journal side)
+						if (!Years.TryGetValue(q.year, out b)) { b = new Bucket(); Years.Add(q.year, b); }   // once per trading-day year (journal side)
 						for (int k = 1; k <= q.top; k++) { b.covIn[k] += q.CovInK[k]; b.covFwd[k] += (double)q.HitsK[k] / H; b.covFwdFlat[k] += (double)q.HitsFlatK[k] / H; b.n[k]++; }
 					}
 					if (Self != null) Self.Add(q, H);
@@ -1299,7 +1301,7 @@ namespace PowerLanguage.Function
 			if (ring.Count < m_n || (RollDetect && crossesInRing(ring, 0, m_n))) { Calib.GridSkip(); return; }
 			if (!loadAndFit(m_calFit, ring, 0, false)) { Calib.GridSkip(); return; }
 			CalibFits++;
-			Calib.Sample(m_calFit, m_pos, b.time);
+			Calib.Sample(m_calFit, m_pos, b.time, b.tradingDay);
 		}
 
 		/// <summary>The self-calibrator (SelfCalibrate only, else null).</summary>

@@ -454,5 +454,35 @@ static partial class Program
 		Check(switchBars.Count >= 1 && gBars == switchBars.Count && gWrong == 0, "DV-T38 rail history marks the bar after each switch as a degree-change bar (" + gBars + "/" + switchBars.Count + ")");
 	}
 
-	static void D9Tests() { T30(); T31(); T32(); T33(); T34(); T35(); T36(); T37(); T38(); }
+	// DV-T39 (analyst ruling on #82, 2026-11-01): the DVP CAL per-year buckets are keyed by the window-end bar's trading-day year,
+	// not its calendar year. A Globex window ending on the evening of Dec 31 (trading day = the next year's first session) lands in
+	// the next year; a window ending on the afternoon of Dec 31 stays in the old year. Calibrate's holdout still uses the bar time.
+	static void T39()
+	{
+		const int n = 40, H = 3;
+		var rng = new Random(39); var y = new double[n + 2 * H]; var v = new double[n];
+		for (int i = 0; i < y.Length; i++) y[i] = 4000 + 0.5 * i + 3 * Math.Sin(i / 4.0) + rng.NextDouble();
+		for (int i = 0; i < n; i++) v[i] = 1;
+		var f = new DvpFit(n); bool ok = f.Fit(y, v, n, 3, false);
+		DateTime evening = new DateTime(2024, 12, 31, 20, 30, 0), afternoon = new DateTime(2024, 12, 31, 13, 0, 0);
+		DateTime tdNext = new DateTime(2025, 1, 2), tdOld = new DateTime(2024, 12, 31);
+		Func<bool, DateTime, DateTime, DvpCalib> run = (holdout, t, td) =>
+		{
+			var cal = new DvpCalib(H, H, holdout, true, null);
+			cal.Sample(f, n - 1, t, td);
+			for (int h = 1; h <= H; h++) cal.Track(y[n - 1 + h], n - 1 + h, t.AddMinutes(15 * h), false);
+			return cal;
+		};
+		DvpCalib ev = run(false, evening, tdNext), af = run(false, afternoon, tdOld), evCal = run(true, evening, tdNext);
+		Check(ok && ev.Scored == 1 && ev.Years.Count == 1 && ev.Years.ContainsKey(2025) && ev.Years[2025].n[1] == 1,
+			"DV-T39 a window ending on the evening of Dec 31 (trading day 2025-01-02) lands in the 2025 DVP CAL bucket");
+		Check(af.Scored == 1 && af.Years.Count == 1 && af.Years.ContainsKey(2024), "DV-T39 a window ending on the afternoon of Dec 31 (trading day Dec 31) stays in 2024");
+		Check(evCal.Scored == 1 && evCal.HoldoutSkipped == 0 && evCal.Years.ContainsKey(2025),
+			"DV-T39 Calibrate: HOLDOUT_FROM still tests the bar time (Dec 31 20:30 ET is before 2025-01-01), the bucket is the trading-day year");
+		string src = File.ReadAllText(Path.Combine(Root(), "_DvpEngine.Function.CS"));
+		Check(src.Contains("Calib.Sample(m_calFit, m_pos, b.time, b.tradingDay);") && src.Contains("m_q[m_count++].FromAll(f, pos, tradingDay.Year);"),
+			"DV-T39 the stream passes the bar's trading day to DvpCalib.Sample");
+	}
+
+	static void D9Tests() { T30(); T31(); T32(); T33(); T34(); T35(); T36(); T37(); T38(); T39(); }
 }

@@ -5636,14 +5636,14 @@ namespace PowerLanguage.Strategy
 > (DvpConfig, dvpSnapshot, dvpZ, dvpRailPrice, dvpRails). The engine itself measures forward coverage: with journalFits = true it
 > writes one DVP FIT line per fit and, on the last historical bar, a DVP RUN line with meanCovIn / meanCovFwd / meanCovFwdFlat
 > (cov_fwd over projBars, roll-crossing horizons dropped and counted in fwdDropped). KD-08 still needs PR-D8 (Calibrate study) and
-> PR-D9 (frozen d*): until then DevCoverageFrozen falls back to Calibrate with reported degree 1 (one "DVP DEGREE not frozen" warning).
+> PR-D9 (rev 6, online self-calibration): degMode = SelfCalibrate (default) picks the degree online (DV-3.10); d = 1 while warming (one "DVP DEGREE warming" warning).
 > Every Step closed bars it journals the as-of t-1 snapshot, z of the close and the +-2 sigma rail prices. winLen 240 / projBars 60 /
 > degMax 3 are DvpConfig defaults, not tuned values; Step 12 is a journal-thinning choice, not a parameter of the measurement.
 > Chart: Data1 @ES 5m, dxFeed continuous UNADJUSTED. Features: M-DVP host API (+ F-ROLL via the snapshot's roll skip).
 
 *Note (800bce7): the header above predates D5–D7; the confluence, acceptance, HTF and A2-33 hook APIs are now on main (§5.31). The example itself is unchanged and uses only the D3/D4 host API.*
 
-*Note (PR-D9, m-dvp-spec rev 6): the "PR-D9 (frozen d\*)" sentence in the header is superseded. There is no frozen d\* and no `DevCoverageFrozen`; the default `degMode = SelfCalibrate` chooses the degree online (DV-3.10), starts on d = 1 while warming (`Tradeable` false, one `DVP DEGREE warming` Warning) and re-selects only on the first bar of each `tradingDayKey` month.*
+*Note (PR-D9, m-dvp-spec rev 6): the PR-D9 sentence in the header describes online self-calibration. There is no frozen d\* and no `DevCoverageFrozen`; the default `degMode = SelfCalibrate` chooses the degree online (DV-3.10), starts on d = 1 while warming (`Tradeable` false, one `DVP DEGREE warming` Warning) and re-selects only on the first bar of each `tradingDayKey` month.*
 
 **Pitfalls.**
 
@@ -5657,7 +5657,7 @@ namespace PowerLanguage.Strategy
 // (DvpConfig, dvpSnapshot, dvpZ, dvpRailPrice, dvpRails). The engine itself measures forward coverage: with journalFits = true it
 // writes one DVP FIT line per fit and, on the last historical bar, a DVP RUN line with meanCovIn / meanCovFwd / meanCovFwdFlat
 // (cov_fwd over projBars, roll-crossing horizons dropped and counted in fwdDropped). KD-08 still needs PR-D8 (Calibrate study) and
-// PR-D9 (frozen d*): until then DevCoverageFrozen falls back to Calibrate with reported degree 1 (one "DVP DEGREE not frozen" warning).
+// PR-D9 (rev 6, online self-calibration): degMode = SelfCalibrate (default) picks the degree online (DV-3.10); d = 1 while warming (one "DVP DEGREE warming" warning).
 // Every Step closed bars it journals the as-of t-1 snapshot, z of the close and the +-2 sigma rail prices. winLen 240 / projBars 60 /
 // degMax 3 are DvpConfig defaults, not tuned values; Step 12 is a journal-thinning choice, not a parameter of the measurement.
 // Chart: Data1 @ES 5m, dxFeed continuous UNADJUSTED. Features: M-DVP host API (+ F-ROLL via the snapshot's roll skip).
@@ -8593,12 +8593,12 @@ protected override void CalcBar()
   - N must be 1..6 (`MaxN`), else `ArgumentOutOfRangeException`. There is no default convention (DV-8.3), so pass both explicitly. PS-25 uses N = 2, countTrigger = true, deltaAtr = 0. Per the spec, KD-06/KD-10 pass countTrigger = false.
   - It returns false for `DvpFib` and `DvpConf` levels, which have no rail history (DV-10.4).
 - **HTF acceptance.** `dvpHtfAccepted` is the same test on an HTF stream's closed bars: it needs ds ≥ 2 and N in 2..6, else it throws. `dvpHtfNextRailDistAtr(ds, dir)` is the distance from Data1's C(t−1) to the nearest HTF rail or lattice level strictly beyond it, in the HTF ATR. It returns NaN when there is no fit or no such rail.
-- **Degree (PR-D9, rev 6).** There is no frozen d\* table. The default `degMode = SelfCalibrate` scores windows on a fixed grid (every `calibStep` bars, default projBars) by |mean cov_fwd − mean cov_in| over the last `calibLen` scored windows and re-selects d only on the first closed bar of each `tradingDayKey` month, with a hysteresis margin max(`calibMarginAbs`, `calibMarginRel` × score). Until a recheck sees `calibMinScored` windows the stream is on d = 1 and **warming**: `s.warming` is true, `dvpTradeable` is false, and one `DVP DEGREE warming` Warning is logged. On a degree-change bar (`s.degChanged`) `dvpTriggered` is suppressed (DV-8.2). The degree path depends on the chart's first bar; the standard chart start is 2016-01-01. `Fixed1` and `Calibrate` (the offline coverage study) remain.
+- **Degree (PR-D9, rev 6).** There is no frozen d\* table. The default `degMode = SelfCalibrate` scores windows on a fixed grid (every `calibStep` bars, default 60, the projBars default) by |mean cov_fwd − mean cov_in| over the last `calibLen` scored windows and re-selects d only on the first closed bar of each `tradingDayKey` month, with a hysteresis margin max(`calibMarginAbs`, `calibMarginRel` × score). Until a recheck sees `calibMinScored` windows the stream is on d = 1 and **warming**: `s.warming` is true, `dvpTradeable` is false, and one `DVP DEGREE warming` Warning is logged. On a degree-change bar (`s.degChanged`) `dvpTriggered` is suppressed (DV-8.2). The degree path depends on the chart's first bar; the standard chart start is 2016-01-01. `Fixed1` and `Calibrate` (the offline coverage study) remain.
 - **No trade verdict yet.** Since D7 the A2-33 study can score DVP level types (G0-d), but no DVP type has a verdict yet, and nothing gates trades on one. The rails, confluence and acceptance are research levels and primitives, not validated trade triggers. The A2-33 `halfDay` split needs Journal trace level (the `DVP A2-33` line is written only then). The `DVP RAIL` journal logs interactions to `logSignal` with `taken: false`.
 - **Disabled engine.** Calling `Dvp` while it is disabled returns null and logs one Warning; the host queries then return null, empty lists, NaN or false. The direct `DvpFit` API (fit core) is still public for offline sketches.
 - **`diagnosticOnly` never gates `Tradeable` (by design).** Rev 5.2 (DV-7.0, DV-7.4) makes `diagnosticOnly` a run-level verdict, reported in the `DVP RUN` line only; a stream stays tradeable under rollMode None. Do not expect `dvpTradeable` to turn false on it (`_DvpEngine` L1396).
 - **Still pending (m-dvp-spec rev 5.3; not on main a07257a).**
-  - D8 the KD02 canary and Calibrate study, and D9 the frozen d\*.
+  - D8 the KD02 canary and Calibrate study, and D9 online degree self-calibration (rev 6; no frozen d\*).
   - Probe P2 (which flips `P2_PASSED`) and `rollMode` (DV-7.0) are also pending. `rollMode` None waits for the instrument profile.
   - There is no winLen sweep, and no 240m stream for trading (DV-1.1, DV-7.5).
   - The DVP-hosted PA engines use `minBreakoutLayer = 0` (`_CustomSignal` L648), unlike the main engine's default 1 (§4.8).
@@ -11399,373 +11399,449 @@ Generated by script from every `.CS` file in the tree: public and protected memb
 
 #### _DvpEngine.Function.CS
 
+*Regenerated by script from the PR-D9 tree (`feat/dvp-d9-selfcalib`, m-dvp-spec rev 6: online degree self-calibration, `EDvpDegMode.SelfCalibrate` default, `DvpSelfCalib`, `calibStep`; `DvpFrozenDegree` and `DevCoverageFrozen` are gone). The other Appendix E blocks keep their shas.*
+
 ```csharp
 // --- (namespace)
-/* 17 */ public enum EDvpSrc { HL2, Close }
-/* 18 */ public enum EDvpDegMode { DevCoverageFrozen, Fixed1, Calibrate }
-/* 19 */ public enum EDvpConeMode { Prediction, Confidence }
-/* 20 */ public enum EDvpFibAnchor { MostRecentPivot, ExtremeInLookback }
-/* 23 */ public static class DvpConst
+/* 18 */ public enum EDvpSrc { HL2, Close }
+/* 21 */ public enum EDvpDegMode { SelfCalibrate, Fixed1, Calibrate }
+/* 22 */ public enum EDvpConeMode { Prediction, Confidence }
+/* 23 */ public enum EDvpFibAnchor { MostRecentPivot, ExtremeInLookback }
+/* 26 */ public static class DvpConst
 // --- DvpConst
-/* 25 */ public const string ConfMode = "FamilyCount";
-/* 26 */ public const int MinFamilies = 3;
-/* 27 */ public const double ReportWeightVa = 1.00, ReportWeightPoc = 0.77;
-/* 28 */ public const int RowFloorTicks = 1;
-/* 29 */ public const string RollAdjust = "None";
-/* 30 */ public const int MinBars = 12;
-/* 31 */ public const int AtrLen = 20;
-/* 32 */ public const int HoldBars = 40;
-/* 33 */ public const int MaxDegree = 3;
-/* 34 */ public const double SseEps = 1e-12;
-/* 35 */ public const double BreakdownRel = 1e-13;
-/* 38 */ public const bool P2_PASSED = false;
+/* 28 */ public const string ConfMode = "FamilyCount";
+/* 29 */ public const int MinFamilies = 3;
+/* 30 */ public const double ReportWeightVa = 1.00, ReportWeightPoc = 0.77;
+/* 31 */ public const int RowFloorTicks = 1;
+/* 32 */ public const string RollAdjust = "None";
+/* 33 */ public const int MinBars = 12;
+/* 34 */ public const int AtrLen = 20;
+/* 35 */ public const int HoldBars = 40;
+/* 36 */ public const int MaxDegree = 3;
+/* 37 */ public const double SseEps = 1e-12;
+/* 38 */ public const double BreakdownRel = 1e-13;
+/* 41 */ public const bool P2_PASSED = false;
+/* 44 */ public static readonly DateTime HoldoutFrom = new DateTime(2025, 1, 1);
+/* 46 */ public const double CalibK = 2;
+/* 48 */ public const string CalibRecheck = "month";
 // --- (namespace)
-/* 42 */ public sealed class DvpConfig
+/* 52 */ public sealed class DvpConfig
 // --- DvpConfig
-/* 44 */ public bool enabled = false;
-/* 45 */ public int[] streams = { 1 };
-/* 46 */ public EDvpSrc src = EDvpSrc.HL2;
-/* 47 */ public int winLen = 240;
-/* 48 */ public EDvpDegMode degMode = EDvpDegMode.DevCoverageFrozen;
-/* 49 */ public int degMax = 3;
-/* 50 */ public bool weightVol = false;
-/* 51 */ public double minR2 = 0.35;
-/* 52 */ public int manRows = 64;
-/* 53 */ public double manSpan = 3;
-/* 54 */ public double vaPct = 70;
-/* 55 */ public double nodeProm = 0.12;
-/* 56 */ public int maxNodes = 3;
-/* 57 */ public double[] sigmaList = { 1, 2, 3 };
-/* 58 */ public int projBars = 60;
-/* 59 */ public EDvpConeMode coneMode = EDvpConeMode.Prediction;
-/* 60 */ public double coneMult = 2;
-/* 61 */ public bool useFib = true;
-/* 62 */ public int fibRanges = 3;
-/* 63 */ public int fibPivot = 20;
-/* 64 */ public int fibLookMult = 8;
-/* 65 */ public EDvpFibAnchor fibAnchor = EDvpFibAnchor.MostRecentPivot;
-/* 66 */ public double fibMerge = 0.40;
-/* 67 */ public double fibNear = 14;
-/* 68 */ public double confTol = 0.30;
-/* 69 */ public bool splitFlow = false;
-/* 70 */ public int refitEvery = 1;
-/* 71 */ public bool journalFits = true;
-/* 72 */ public bool journalRails = true;
-/* 74 */ public double VaFraction { get; }
-/* 79 */ public List<string> Validate()
-/* 116 */ public string Canon()
+/* 54 */ public bool enabled = false;
+/* 55 */ public int[] streams = { 1 };
+/* 56 */ public EDvpSrc src = EDvpSrc.HL2;
+/* 57 */ public int winLen = 240;
+/* 58 */ public EDvpDegMode degMode = EDvpDegMode.SelfCalibrate;
+/* 59 */ public int degMax = 3;
+/* 60 */ public bool weightVol = false;
+/* 61 */ public double minR2 = 0.35;
+/* 62 */ public int manRows = 64;
+/* 63 */ public double manSpan = 3;
+/* 64 */ public double vaPct = 70;
+/* 65 */ public double nodeProm = 0.12;
+/* 66 */ public int maxNodes = 3;
+/* 67 */ public double[] sigmaList = { 1, 2, 3 };
+/* 68 */ public int projBars = 60;
+/* 69 */ public EDvpConeMode coneMode = EDvpConeMode.Prediction;
+/* 70 */ public double coneMult = 2;
+/* 71 */ public bool useFib = true;
+/* 72 */ public int fibRanges = 3;
+/* 73 */ public int fibPivot = 20;
+/* 74 */ public int fibLookMult = 8;
+/* 75 */ public EDvpFibAnchor fibAnchor = EDvpFibAnchor.MostRecentPivot;
+/* 76 */ public double fibMerge = 0.40;
+/* 77 */ public double fibNear = 14;
+/* 78 */ public double confTol = 0.30;
+/* 79 */ public bool splitFlow = false;
+/* 80 */ public int refitEvery = 1;
+/* 81 */ public bool journalFits = true;
+/* 82 */ public bool journalRails = true;
+/* 84 */ public int calibLen = 250;
+/* 85 */ public int calibMinScored = 60;
+/* 86 */ public double calibMarginAbs = 0.01;
+/* 87 */ public double calibMarginRel = 0.02;
+/* 88 */ public int calibStep = 60;
+/* 90 */ public double VaFraction { get; }
+/* 95 */ public List<string> Validate()
+/* 140 */ public string Canon()
 // --- (namespace)
-/* 142 */ public static class DvpFrozenDegree
-// --- DvpFrozenDegree
-/* 144 */ public struct Entry
-// --- DvpFrozenDegree.Entry
-/* 146 */ public string root; public int stream, winLen, degree;
-/* 147 */ public Entry(string root, int stream, int winLen, int degree)
-// --- DvpFrozenDegree
-/* 150 */ public static readonly Entry[] Table = new Entry[0];
-/* 152 */ public static bool TryGet(string root, int stream, int winLen, out int degree)
-/* 154 */ public static bool TryGet(Entry[] table, string root, int stream, int winLen, out int degree)
-/* 161 */ public static string Canon(Entry[] table)
-// --- (namespace)
-/* 174 */ public static class DvpDegree
+/* 168 */ public static class DvpDegree
 // --- DvpDegree
-/* 177 */ public static int Cap(int n, int degMax)
-/* 188 */ public static bool Select(EDvpDegMode mode, int n, int degMax, bool hasFrozen, int dStar, ref bool warnedLatch, out int d, out bool calibrate, out bool warn)
+/* 171 */ public static int Cap(int n, int degMax)
 // --- (namespace)
-/* 208 */ public sealed class DvpFit
+/* 185 */ public sealed class DvpFit
 // --- DvpFit
-/* 210 */ public const int MaxDeg = DvpConst.MaxDegree;
-/* 214 */ public readonly double[] A = new double[MaxDeg + 1], B = new double[MaxDeg + 1], N = new double[MaxDeg + 1], C = new double[MaxDeg + 1];
-/* 215 */ public readonly double[] Sse = new double[MaxDeg + 1], Sigma = new double[MaxDeg + 1], R2 = new double[MaxDeg + 1], Bic = new double[MaxDeg + 1];
-/* 217 */ public bool Valid { get; private set; }
-/* 218 */ public int n { get; private set; }
-/* 219 */ public int DTop { get; private set; }
-/* 220 */ public int MaxValidDeg { get; private set; }
-/* 221 */ public int Deg { get; private set; }
-/* 222 */ public bool Calibrating { get; private set; }
-/* 223 */ public double YBar { get; private set; }
-/* 224 */ public double Ctr { get; private set; }
-/* 225 */ public double Scl { get; private set; }
-/* 226 */ public double SumW { get; private set; }
-/* 227 */ public double Swy2 { get; private set; }
-/* 228 */ public bool UsedFallback { get; private set; }
-/* 229 */ public bool WeightsFellBack { get; private set; }
-/* 230 */ public int FallbackCount { get; private set; }
-/* 232 */ public DvpFit(int capacity)
-/* 240 */ public int Capacity { get; }
-/* 243 */ public bool Fit(double[] y, double[] v, int n, int degMax, bool weightVol)
-/* 251 */ public bool FitRaw(double[] y, double[] v, int n, int dTop, bool weightVol)
-/* 329 */ public void Choose(int d, bool calibrate)
-/* 338 */ public double U(double i)
-/* 340 */ public double UAhead(int h)
-/* 341 */ public double UT { get; }
-/* 344 */ public double Eval(double u, int d, out double lev, out double dYdu)
-/* 360 */ public double Yhat(double u, int d)
-/* 361 */ public double Yhat(double u)
-/* 362 */ public double Leverage(double u, int d)
-/* 363 */ public double Leverage(double u)
-/* 364 */ public double SigmaAt(int d)
-/* 365 */ public double SigmaD { get; }
-/* 368 */ public double SlopeEnd(int d)
-/* 371 */ public void Cone(int hAhead, double coneMult, EDvpConeMode mode, out double lo, out double hi)
-/* 380 */ public double Resid(int i, int d)
-/* 383 */ public double CovIn(int d, double k)
-/* 395 */ public double CovFwd(double[] yFwd, int H, int d, double k, bool withLeverage)
-/* 411 */ public void ResidualStats(int d, out double dw, out double skew)
+/* 187 */ public const int MaxDeg = DvpConst.MaxDegree;
+/* 191 */ public readonly double[] A = new double[MaxDeg + 1], B = new double[MaxDeg + 1], N = new double[MaxDeg + 1], C = new double[MaxDeg + 1];
+/* 192 */ public readonly double[] Sse = new double[MaxDeg + 1], Sigma = new double[MaxDeg + 1], R2 = new double[MaxDeg + 1], Bic = new double[MaxDeg + 1];
+/* 194 */ public bool Valid { get; private set; }
+/* 195 */ public int n { get; private set; }
+/* 196 */ public int DTop { get; private set; }
+/* 197 */ public int MaxValidDeg { get; private set; }
+/* 198 */ public int Deg { get; private set; }
+/* 199 */ public bool Calibrating { get; private set; }
+/* 200 */ public double YBar { get; private set; }
+/* 201 */ public double Ctr { get; private set; }
+/* 202 */ public double Scl { get; private set; }
+/* 203 */ public double SumW { get; private set; }
+/* 204 */ public double Swy2 { get; private set; }
+/* 205 */ public bool UsedFallback { get; private set; }
+/* 206 */ public bool WeightsFellBack { get; private set; }
+/* 207 */ public int FallbackCount { get; private set; }
+/* 209 */ public DvpFit(int capacity)
+/* 217 */ public int Capacity { get; }
+/* 220 */ public bool Fit(double[] y, double[] v, int n, int degMax, bool weightVol)
+/* 228 */ public bool FitRaw(double[] y, double[] v, int n, int dTop, bool weightVol)
+/* 306 */ public void Choose(int d, bool calibrate)
+/* 315 */ public double U(double i)
+/* 317 */ public double UAhead(int h)
+/* 318 */ public double UT { get; }
+/* 321 */ public double Eval(double u, int d, out double lev, out double dYdu)
+/* 337 */ public double Yhat(double u, int d)
+/* 338 */ public double Yhat(double u)
+/* 339 */ public double Leverage(double u, int d)
+/* 340 */ public double Leverage(double u)
+/* 341 */ public double SigmaAt(int d)
+/* 342 */ public double SigmaD { get; }
+/* 345 */ public double SlopeEnd(int d)
+/* 348 */ public void Cone(int hAhead, double coneMult, EDvpConeMode mode, out double lo, out double hi)
+/* 357 */ public double Resid(int i, int d)
+/* 360 */ public double CovIn(int d, double k)
+/* 372 */ public double CovFwd(double[] yFwd, int H, int d, double k, bool withLeverage)
+/* 388 */ public void ResidualStats(int d, out double dw, out double skew)
 // --- (namespace)
-/* 437 */ public struct DvpNode
+/* 414 */ public struct DvpNode
 // --- DvpNode
-/* 439 */ public int row; public double z, prom; public int side;
+/* 416 */ public int row; public double z, prom; public int side;
 // --- (namespace)
-/* 443 */ public struct DvpRail
+/* 420 */ public struct DvpRail
 // --- DvpRail
-/* 445 */ public ELevelKind kind; public double z, price;
+/* 422 */ public ELevelKind kind; public double z, price;
 // --- (namespace)
-/* 448 */ public sealed class DvpManifold
+/* 425 */ public sealed class DvpManifold
 // --- DvpManifold
-/* 457 */ public readonly DvpNode[] Hvn, Lvn;
-/* 458 */ public int HvnCount { get; private set; }
-/* 459 */ public int LvnCount { get; private set; }
-/* 461 */ public bool Valid { get; private set; }
-/* 462 */ public int RowsEff { get; private set; }
-/* 463 */ public double Span { get; private set; }
-/* 464 */ public double Wz { get; private set; }
-/* 465 */ public double Sigma { get; private set; }
-/* 466 */ public double TailVol { get; private set; }
-/* 467 */ public double TotalVol { get; private set; }
-/* 468 */ public double UpTail { get; private set; }
-/* 469 */ public double DownTail { get; private set; }
-/* 470 */ public int Poc { get; private set; }
-/* 471 */ public int VaLo { get; private set; }
-/* 472 */ public int VaHi { get; private set; }
-/* 473 */ public double PocZ { get; private set; }
-/* 474 */ public double VaLoZ { get; private set; }
-/* 475 */ public double VaHiZ { get; private set; }
-/* 476 */ public double Entropy { get; private set; }
-/* 477 */ public double Concentration { get; private set; }
-/* 478 */ public double ConcentrationOcc { get; private set; }
-/* 479 */ public double InSampleCov2 { get; private set; }
-/* 481 */ public DvpManifold(int manRows, bool splitFlow)
-/* 501 */ public int ManRows { get; }
-/* 503 */ public double[] Rows { get; }
-/* 504 */ public double[] UpRows { get; }
-/* 505 */ public double[] DownRows { get; }
-/* 507 */ public double RowZ(int r)
-/* 517 */ public static int RowsEffFor(int manRows, double span, double sigma, double tick)
-/* 533 */ public static double Deposit(double[] rows, int R, double span, double wz, double loZ, double hiZ, double v)
-/* 565 */ public bool Build(DvpFit fit, double[] high, double[] low, double[] vol, double[] up, double[] down, double manSpan, double tick, double vaFraction, double nodeProm, int maxNodes)
-/* 606 */ public static void Shape(double[] rows, int poc, out double concentration, out double concentrationOcc)
-/* 623 */ public void SelectNodes(double[] rows, int poc, double nodeProm, int maxNodes, double span)
+/* 434 */ public readonly DvpNode[] Hvn, Lvn;
+/* 435 */ public int HvnCount { get; private set; }
+/* 436 */ public int LvnCount { get; private set; }
+/* 438 */ public bool Valid { get; private set; }
+/* 439 */ public int RowsEff { get; private set; }
+/* 440 */ public double Span { get; private set; }
+/* 441 */ public double Wz { get; private set; }
+/* 442 */ public double Sigma { get; private set; }
+/* 443 */ public double TailVol { get; private set; }
+/* 444 */ public double TotalVol { get; private set; }
+/* 445 */ public double UpTail { get; private set; }
+/* 446 */ public double DownTail { get; private set; }
+/* 447 */ public int Poc { get; private set; }
+/* 448 */ public int VaLo { get; private set; }
+/* 449 */ public int VaHi { get; private set; }
+/* 450 */ public double PocZ { get; private set; }
+/* 451 */ public double VaLoZ { get; private set; }
+/* 452 */ public double VaHiZ { get; private set; }
+/* 453 */ public double Entropy { get; private set; }
+/* 454 */ public double Concentration { get; private set; }
+/* 455 */ public double ConcentrationOcc { get; private set; }
+/* 456 */ public double InSampleCov2 { get; private set; }
+/* 458 */ public DvpManifold(int manRows, bool splitFlow)
+/* 478 */ public int ManRows { get; }
+/* 480 */ public double[] Rows { get; }
+/* 481 */ public double[] UpRows { get; }
+/* 482 */ public double[] DownRows { get; }
+/* 484 */ public double RowZ(int r)
+/* 494 */ public static int RowsEffFor(int manRows, double span, double sigma, double tick)
+/* 510 */ public static double Deposit(double[] rows, int R, double span, double wz, double loZ, double hiZ, double v)
+/* 542 */ public bool Build(DvpFit fit, double[] high, double[] low, double[] vol, double[] up, double[] down, double manSpan, double tick, double vaFraction, double nodeProm, int maxNodes)
+/* 583 */ public static void Shape(double[] rows, int poc, out double concentration, out double concentrationOcc)
+/* 600 */ public void SelectNodes(double[] rows, int poc, double nodeProm, int maxNodes, double span)
 // --- (namespace)
-/* 680 */ public sealed class DvpRails
+/* 657 */ public sealed class DvpRails
 // --- DvpRails
-/* 682 */ public readonly DvpRail[] Items;
-/* 683 */ public int Count { get; private set; }
-/* 684 */ public double YhatT { get; private set; }
-/* 685 */ public double Sigma { get; private set; }
-/* 686 */ public int Deg { get; private set; }
-/* 688 */ public DvpRails(int maxSigmaRails)
-/* 690 */ public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList)
-/* 696 */ public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList, double uT)
-/* 725 */ public double Price(double z)
-/* 727 */ public double Z(double price)
-/* 730 */ public double RailPrice(ELevelKind kind, double z)
-/* 739 */ public int NextRail(double fromZ, int dir)
-/* 747 */ public static string Tag(int ds, DateTime tPrev, int deg, ELevelKind kind, double z)
-/* 758 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, bool isRollWindow)
+/* 659 */ public readonly DvpRail[] Items;
+/* 660 */ public int Count { get; private set; }
+/* 661 */ public double YhatT { get; private set; }
+/* 662 */ public double Sigma { get; private set; }
+/* 663 */ public int Deg { get; private set; }
+/* 665 */ public DvpRails(int maxSigmaRails)
+/* 667 */ public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList)
+/* 673 */ public bool Build(DvpFit fit, DvpManifold man, double[] sigmaList, double uT)
+/* 702 */ public double Price(double z)
+/* 704 */ public double Z(double price)
+/* 707 */ public double RailPrice(ELevelKind kind, double z)
+/* 716 */ public int NextRail(double fromZ, int dir)
+/* 724 */ public static string Tag(int ds, DateTime tPrev, int deg, ELevelKind kind, double z)
+/* 735 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, bool isRollWindow)
 // --- (namespace)
-/* 780 */ public sealed class DvpSnapshot
+/* 757 */ public sealed class DvpSnapshot
 // --- DvpSnapshot
-/* 782 */ public int ds, endBar, anchorBar, sinceRefit, n, deg, dCap, manRowsEff;
-/* 783 */ public DateTime tPrev, t0;
-/* 784 */ public bool valid, crossesRoll, lowR2, refitBar, calibrating, manValid, diagnosticOnly;
-/* 785 */ public double atr, sigma, sigmaAtr, r2, dw, skew, yhatEnd, slopeEnd, slope1, slope1SigmaPerBar, endpointDrift, uT, yhatT,
-/* 788 */ internal void Clear(int ds, int endBar, DateTime tPrev)
+/* 759 */ public int ds, endBar, anchorBar, sinceRefit, n, deg, dCap, manRowsEff;
+/* 760 */ public DateTime tPrev, t0;
+/* 761 */ public bool valid, crossesRoll, lowR2, refitBar, calibrating, manValid, diagnosticOnly;
+/* 763 */ public bool warming, degChanged;
+/* 764 */ public double atr, sigma, sigmaAtr, r2, dw, skew, yhatEnd, slopeEnd, slope1, slope1SigmaPerBar, endpointDrift, uT, yhatT,
+/* 767 */ internal void Clear(int ds, int endBar, DateTime tPrev)
 // --- (namespace)
-/* 799 */ public sealed class DvpCoef
+/* 778 */ public sealed class DvpCoef
 // --- DvpCoef
-/* 801 */ public readonly double[] A = new double[DvpFit.MaxDeg + 1], B = new double[DvpFit.MaxDeg + 1], N = new double[DvpFit.MaxDeg + 1], C = new double[DvpFit.MaxDeg + 1];
-/* 802 */ public double yBar, sigma; public int n, deg;
-/* 803 */ public long startPos; public int seen, hits, hitsFlat;
-/* 805 */ public void From(DvpFit f, long startPos)
-/* 813 */ public double Eval(double u, out double lev)
+/* 780 */ public readonly double[] A = new double[DvpFit.MaxDeg + 1], B = new double[DvpFit.MaxDeg + 1], N = new double[DvpFit.MaxDeg + 1], C = new double[DvpFit.MaxDeg + 1];
+/* 781 */ public double yBar, sigma; public int n, deg;
+/* 782 */ public long startPos; public int seen, hits, hitsFlat;
+/* 784 */ public readonly double[] SigK, CovInK; public readonly int[] HitsK, HitsFlatK;
+/* 785 */ public int top, year;
+/* 786 */ public DvpCoef()
+/* 787 */ internal DvpCoef(bool perDegree)
+/* 793 */ public void From(DvpFit f, long startPos)
+/* 801 */ internal void FromAll(DvpFit f, long startPos, int year)
+/* 810 */ public double Eval(double u, out double lev)
+/* 813 */ public double Eval(double u, int d, out double lev)
 // --- (namespace)
-/* 832 */ public sealed class DvpStream
-// --- DvpStream
-/* 834 */ sealed class Slot
-// --- DvpStream.Slot
-/* 836 */ public readonly DvpFit fit; public readonly DvpManifold man; public readonly DvpRails rails; public readonly DvpSnapshot snap = new DvpSnapshot();
-/* 837 */ public int key = int.MinValue, fitAnchor = int.MinValue;
-/* 838 */ public bool fitOk;
-/* 839 */ public double dw, skew, rthShare;
-/* 840 */ public Slot(DvpConfig c)
-// --- DvpStream
-/* 843 */ public readonly int Ds;
-/* 844 */ public readonly DvpConfig Config;
-/* 845 */ public readonly string Root;
-/* 846 */ public readonly bool RollDetect, RthKnown;
-/* 860 */ public Action<string> warnOnce;
-/* 863 */ public DateTime SessionDay { get; private set; }
-/* 864 */ public bool SessionHalfDay { get; private set; }
-/* 865 */ public bool NewSession { get; private set; }
-/* 866 */ public int Sessions { get; private set; }
-/* 867 */ public bool LastHalfDay { get; private set; }
-/* 870 */ public long BarsSeen { get; }
-/* 871 */ public long Eligible { get; private set; }
-/* 872 */ public long Skipped { get; private set; }
-/* 873 */ public long FitsComputed { get; private set; }
-/* 874 */ public long FitLines { get; private set; }
-/* 875 */ public long SkipLines { get; private set; }
-/* 878 */ public DvpStream(int ds, DvpConfig cfg, string root, double tick, bool rollDetect, bool rthKnown)
-/* 903 */ public readonly DvpLattice Lattice; public readonly DvpPivots[] Pivots;
-/* 905 */ public const int PivotCapacity = 128;
-/* 909 */ public DvpLattice LatticeFor(_BarRing ring, int endAgo)
-/* 919 */ public static int RingNeed(DvpConfig c)
-/* 921 */ public bool DiagnosticOnly { get; }
-/* 922 */ public double SkipShare { get; }
-/* 923 */ public double MeanCovIn { get; }
-/* 924 */ public double MeanCovFwd { get; }
-/* 925 */ public double MeanCovFwdFlat { get; }
-/* 926 */ public int FallbackCount { get; }
-/* 937 */ public bool OnBar(_BarRing ring, bool halfDay, Action<string> journal, string runId, string configHash)
-/* 977 */ public DvpSnapshot Snapshot(_BarRing ring, int endAgo)
-/* 989 */ public readonly DvpRailHistory History; public readonly DvpConfluence Confluence; public readonly DvpRailJournal RailJournal;
-/* 996 */ public DvpSnapshot HistSnapshot(_BarRing ring, int endAgo, out DvpRails rails)
-/* 1008 */ public DvpRails RailsFor(DvpSnapshot snap)
-/* 1016 */ public DvpFit FitFor(DvpSnapshot snap)
-/* 1127 */ public long FwdDropped { get; private set; }
-/* 1165 */ public static string FitLine(DvpSnapshot s, DvpFit f, string runId, string configHash)
+/* 836 */ public sealed class DvpCalib
+// --- DvpCalib
+/* 838 */ public sealed class Bucket
+// --- DvpCalib.Bucket
+/* 840 */ public readonly double[] covIn = new double[DvpFit.MaxDeg + 1], covFwd = new double[DvpFit.MaxDeg + 1], covFwdFlat = new double[DvpFit.MaxDeg + 1];
+/* 841 */ public readonly long[] n = new long[DvpFit.MaxDeg + 1];
+/* 842 */ public void Add(Bucket o)
+/* 843 */ public double Score(int d)
+// --- DvpCalib
+/* 846 */ public readonly int H, Step;
+/* 848 */ public readonly bool Holdout;
+/* 850 */ public bool KeepYears;
+/* 852 */ public readonly DvpSelfCalib Self;
+/* 855 */ public readonly SortedDictionary<int, Bucket> Years = new SortedDictionary<int, Bucket>();
+/* 856 */ public long Sampled { get; private set; }
+/* 857 */ public long Scored { get; private set; }
+/* 858 */ public long RollDropped { get; private set; }
+/* 859 */ public long BadDropped { get; private set; }
+/* 860 */ public long GridSkipped { get; private set; }
+/* 861 */ public long HoldoutSkipped { get; private set; }
+/* 862 */ public int Pending { get; }
+/* 863 */ public int QueueCapacity { get; }
+/* 866 */ public DvpCalib(int projBars)
+/* 868 */ public DvpCalib(int projBars, int calibStep, bool holdout, bool keepYears, DvpSelfCalib self)
+/* 876 */ public bool IsGrid(long pos)
+/* 879 */ public void GridSkip()
+/* 884 */ public void Sample(DvpFit f, long pos, DateTime time, DateTime tradingDay)
+/* 893 */ public void Track(double y, long pos, DateTime time, bool rollSplice)
+/* 930 */ public Bucket Pooled()
+/* 938 */ public static int DStar(Bucket b)
+/* 949 */ public void Lines(Action<string> journal, string runId, int ds)
 // --- (namespace)
-/* 1222 */ internal sealed class _DvpEngine
+/* 984 */ public sealed class DvpSelfCalib
+// --- DvpSelfCalib
+/* 988 */ public readonly int Len, MinScored, DCap;
+/* 989 */ public readonly double MarginAbs, MarginRel;
+/* 997 */ public readonly double[] Scores = new double[S];
+/* 999 */ public int Current { get; private set; }
+/* 1000 */ public bool Warming { get; private set; }
+/* 1001 */ public long WarmEndPos { get; private set; }
+/* 1002 */ public DateTime WarmEnd { get; private set; }
+/* 1003 */ public long Rechecks { get; private set; }
+/* 1004 */ public long Changes { get; private set; }
+/* 1005 */ public long Added { get; private set; }
+/* 1007 */ public int LastFrom { get; private set; }
+/* 1008 */ public int LastCandidate { get; private set; }
+/* 1009 */ public bool LastChanged { get; private set; }
+/* 1010 */ public int HistoryCapacity { get; }
+/* 1012 */ public DvpSelfCalib(int calibLen, int calibMinScored, double marginAbs, double marginRel, int dCap, int historyCapacity)
+/* 1023 */ public int Count { get; }
+/* 1026 */ public void Add(DvpCoef q, int H)
+/* 1038 */ public double Score(int d)
+/* 1052 */ public void Means(int d, out double covIn, out double covFwd)
+/* 1066 */ public static int Candidate(double[] scores, int dCap)
+/* 1079 */ public static bool ShouldSwitch(int c, int b, double[] scores, double marginAbs, double marginRel)
+/* 1091 */ public bool Step(DateTime tradingDay, long pos, DateTime barTime)
+/* 1118 */ public int DegreeAt(long pos)
+/* 1121 */ public bool WarmingAt(long pos)
+// --- (namespace)
+/* 1130 */ public sealed class DvpStream
+// --- DvpStream
+/* 1141 */ public readonly int Ds;
+/* 1142 */ public readonly DvpConfig Config;
+/* 1143 */ public readonly string Root;
+/* 1144 */ public readonly bool RollDetect, RthKnown;
+/* 1160 */ public Action<string> warnOnce;
+/* 1162 */ public Action<string> info;
+/* 1165 */ public DateTime SessionDay { get; private set; }
+/* 1166 */ public bool SessionHalfDay { get; private set; }
+/* 1167 */ public bool NewSession { get; private set; }
+/* 1168 */ public int Sessions { get; private set; }
+/* 1169 */ public bool LastHalfDay { get; private set; }
+/* 1172 */ public long BarsSeen { get; }
+/* 1173 */ public long Eligible { get; private set; }
+/* 1174 */ public long Skipped { get; private set; }
+/* 1175 */ public long FitsComputed { get; private set; }
+/* 1176 */ public long CalibFits { get; private set; }
+/* 1177 */ public long FitLines { get; private set; }
+/* 1178 */ public long SkipLines { get; private set; }
+/* 1181 */ public DvpStream(int ds, DvpConfig cfg, string root, double tick, bool rollDetect, bool rthKnown)
+/* 1213 */ public readonly DvpLattice Lattice; public readonly DvpPivots[] Pivots;
+/* 1215 */ public const int PivotCapacity = 128;
+/* 1219 */ public DvpLattice LatticeFor(_BarRing ring, int endAgo)
+/* 1229 */ public static int RingNeed(DvpConfig c)
+/* 1231 */ public bool DiagnosticOnly { get; }
+/* 1232 */ public double SkipShare { get; }
+/* 1233 */ public double MeanCovIn { get; }
+/* 1234 */ public double MeanCovFwd { get; }
+/* 1235 */ public double MeanCovFwdFlat { get; }
+/* 1236 */ public int FallbackCount { get; }
+/* 1247 */ public bool OnBar(_BarRing ring, bool halfDay, Action<string> journal, string runId, string configHash)
+/* 1308 */ public DvpSelfCalib Self { get; }
+/* 1311 */ public int DegreeAt(long pos)
+/* 1314 */ public bool WarmingAt(long pos)
+/* 1317 */ public int CurrentDegree { get; }
+/* 1320 */ public bool Warming { get; }
+/* 1328 */ public string WarmingLine()
+/* 1335 */ public string SelLine()
+/* 1345 */ public string ChangeLine()
+/* 1363 */ public DvpSnapshot Snapshot(_BarRing ring, int endAgo)
+/* 1375 */ public readonly DvpRailHistory History; public readonly DvpConfluence Confluence; public readonly DvpRailJournal RailJournal;
+/* 1382 */ public DvpSnapshot HistSnapshot(_BarRing ring, int endAgo, out DvpRails rails)
+/* 1394 */ public DvpRails RailsFor(DvpSnapshot snap)
+/* 1402 */ public DvpFit FitFor(DvpSnapshot snap)
+/* 1523 */ public long FwdDropped { get; private set; }
+/* 1526 */ public DvpCalib Calib { get; private set; }
+/* 1564 */ public static string FitLine(DvpSnapshot s, DvpFit f, string runId, string configHash)
+// --- (namespace)
+/* 1609 */ public string RunLine(string runId)
+/* 1619 */ public string CalibRun()
+/* 1632 */ internal sealed class _DvpEngine
 // --- _DvpEngine
-/* 1224 */ public readonly DvpConfig Config;
-/* 1225 */ public readonly string RunId, ConfigHash;
-/* 1226 */ public readonly bool RollDetect;
-/* 1230 */ public Action<string> journal, warnOnce;
-/* 1233 */ public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce, string paLabels = null)
-/* 1244 */ public int StreamCount { get; }
-/* 1249 */ public bool Tradeable(int ds)
-/* 1260 */ public DvpStream Stream(int ds)
-/* 1262 */ public static ulong Fnv1a64(string s)
-/* 1290 */ public bool OnBar(int ds, _BarRing ring, bool halfDay)
-/* 1297 */ public DvpSnapshot Snapshot(int ds, _BarRing ring, int endAgo)
-/* 1305 */ public DvpSnapshot SnapshotRaw(int ds, _BarRing ring, int endAgo)
-/* 1311 */ public DvpLattice LatticeOf(int ds, _BarRing ring, int endAgo)
-/* 1317 */ public DvpRails RailsOf(int ds, _BarRing ring, int endAgo)
-/* 1325 */ public DvpRailHistory HistoryOf(int ds, _BarRing ring, ELevelKind kind, double z)
-/* 1334 */ public DvpConfluence ConfluenceOf(int ds, DvpSnapshot snap, DvpRails rails, DvpLattice lat, double cPrev)
-/* 1344 */ public void Finish()
+/* 1634 */ public readonly DvpConfig Config;
+/* 1635 */ public readonly string RunId, ConfigHash;
+/* 1636 */ public readonly bool RollDetect;
+/* 1640 */ public Action<string> journal, warnOnce;
+/* 1642 */ public Action<string> info;
+/* 1645 */ public _DvpEngine(DvpConfig cfg, string runId, string root, double tick, bool rollDetect, bool rthKnown, Action<string> journal, Action<string> warnOnce, string paLabels = null)
+/* 1656 */ public int StreamCount { get; }
+/* 1662 */ public bool Tradeable(int ds)
+/* 1679 */ public int Degree(int ds)
+/* 1680 */ public DvpStream Stream(int ds)
+/* 1682 */ public static ulong Fnv1a64(string s)
+/* 1708 */ public bool OnBar(int ds, _BarRing ring, bool halfDay)
+/* 1717 */ public DvpSnapshot Snapshot(int ds, _BarRing ring, int endAgo)
+/* 1725 */ public DvpSnapshot SnapshotRaw(int ds, _BarRing ring, int endAgo)
+/* 1731 */ public DvpLattice LatticeOf(int ds, _BarRing ring, int endAgo)
+/* 1737 */ public DvpRails RailsOf(int ds, _BarRing ring, int endAgo)
+/* 1745 */ public DvpRailHistory HistoryOf(int ds, _BarRing ring, ELevelKind kind, double z)
+/* 1754 */ public DvpConfluence ConfluenceOf(int ds, DvpSnapshot snap, DvpRails rails, DvpLattice lat, double cPrev)
+/* 1764 */ public void Finish()
 // --- (namespace)
-/* 1361 */ public sealed class DvpPivots
+/* 1782 */ public sealed class DvpPivots
 // --- DvpPivots
-/* 1363 */ public readonly double[] Price; public readonly int[] ExtremeBar, ConfirmBar; public readonly bool[] IsHigh;
-/* 1364 */ public int Count;
-/* 1365 */ public DvpPivots(int capacity)
-/* 1366 */ public int Capacity { get; }
-/* 1367 */ public void Clear()
-/* 1368 */ public bool Add(bool isHigh, double price, int extremeBar, int confirmBar)
+/* 1784 */ public readonly double[] Price; public readonly int[] ExtremeBar, ConfirmBar; public readonly bool[] IsHigh;
+/* 1785 */ public int Count;
+/* 1786 */ public DvpPivots(int capacity)
+/* 1787 */ public int Capacity { get; }
+/* 1788 */ public void Clear()
+/* 1789 */ public bool Add(bool isHigh, double price, int extremeBar, int confirmBar)
 // --- (namespace)
-/* 1385 */ public sealed class DvpLattice
+/* 1806 */ public sealed class DvpLattice
 // --- DvpLattice
-/* 1388 */ public static double FibLevel(int i)
-/* 1399 */ public const int NFib = 24;
-/* 1401 */ public readonly int Ranges;
-/* 1402 */ public readonly double[] Price, F; public readonly int[] Range;
-/* 1403 */ public int Count;
-/* 1404 */ public readonly double[] AnchorA, AnchorB; public readonly int[] AnchorABar, AnchorBBar; public readonly bool[] RangeOk;
-/* 1407 */ public DvpLattice(int ranges)
-/* 1414 */ public static int Strength(DvpConfig c, int j)
-/* 1417 */ public static bool Anchor(DvpPivots p, int endBar, int look, out double a, out double b, out int aBar, out int bBar)
-/* 1441 */ public void Build(DvpConfig c, DvpPivots[] pivots, int endBar, double atr, double close)
-/* 1477 */ public static string Tag(int ds, DateTime tPrev, int deg, double f, int range)
-/* 1485 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, int deg, bool isRollWindow)
+/* 1809 */ public static double FibLevel(int i)
+/* 1820 */ public const int NFib = 24;
+/* 1822 */ public readonly int Ranges;
+/* 1823 */ public readonly double[] Price, F; public readonly int[] Range;
+/* 1824 */ public int Count;
+/* 1825 */ public readonly double[] AnchorA, AnchorB; public readonly int[] AnchorABar, AnchorBBar; public readonly bool[] RangeOk;
+/* 1828 */ public DvpLattice(int ranges)
+/* 1835 */ public static int Strength(DvpConfig c, int j)
+/* 1838 */ public static bool Anchor(DvpPivots p, int endBar, int look, out double a, out double b, out int aBar, out int bBar)
+/* 1862 */ public void Build(DvpConfig c, DvpPivots[] pivots, int endBar, double atr, double close)
+/* 1898 */ public static string Tag(int ds, DateTime tPrev, int deg, double f, int range)
+/* 1906 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, int deg, bool isRollWindow)
 // --- (namespace)
-/* 1513 */ public sealed class DvpConfluence
+/* 1934 */ public sealed class DvpConfluence
 // --- DvpConfluence
-/* 1515 */ public const int FamManifold = 0, FamSigma = 1, FamLattice = 2;
-/* 1516 */ public readonly double[] CandPrice; public readonly int[] CandFam, CandRange, CandCluster; public readonly ELevelKind[] CandKind;
-/* 1517 */ public int CandCount;
-/* 1519 */ public int RailCount { get; private set; }
-/* 1520 */ public readonly double[] ClusterPrice, ClusterScore077; public readonly int[] ClusterFamilies, ClusterRanges, ClusterSize, ClusterSeed;
-/* 1521 */ public int ClusterCount;
-/* 1522 */ public double Atr { get; private set; }
-/* 1523 */ public double Tol { get; private set; }
-/* 1526 */ public DvpConfluence(int capacity)
-/* 1535 */ public static int Family(ELevelKind k)
-/* 1543 */ public void Clear()
-/* 1546 */ public bool Add(ELevelKind kind, double price, int range)
-/* 1556 */ public void Load(DvpRails rails, DvpLattice lat)
-/* 1570 */ public void Cluster(double atr, double cPrev, double confTol)
-/* 1573 */ public void Cluster(double atr, double cPrev, double confTol, double wVa, double wPoc)
-/* 1612 */ public bool Qualifies(int cl)
-/* 1613 */ public int QualifyingCount { get; }
-/* 1616 */ public int CandFamilies(int i)
-/* 1617 */ public int CandRanges(int i)
-/* 1618 */ public double CandScore077(int i)
-/* 1622 */ public void FamiliesAt(double price, double tolAtr, out int families, out int nRanges)
-/* 1638 */ public static string Tag(int ds, DateTime tPrev, int deg, double z)
-/* 1642 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, DvpRails rails, bool isRollWindow)
+/* 1936 */ public const int FamManifold = 0, FamSigma = 1, FamLattice = 2;
+/* 1937 */ public readonly double[] CandPrice; public readonly int[] CandFam, CandRange, CandCluster; public readonly ELevelKind[] CandKind;
+/* 1938 */ public int CandCount;
+/* 1940 */ public int RailCount { get; private set; }
+/* 1941 */ public readonly double[] ClusterPrice, ClusterScore077; public readonly int[] ClusterFamilies, ClusterRanges, ClusterSize, ClusterSeed;
+/* 1942 */ public int ClusterCount;
+/* 1943 */ public double Atr { get; private set; }
+/* 1944 */ public double Tol { get; private set; }
+/* 1947 */ public DvpConfluence(int capacity)
+/* 1956 */ public static int Family(ELevelKind k)
+/* 1964 */ public void Clear()
+/* 1967 */ public bool Add(ELevelKind kind, double price, int range)
+/* 1977 */ public void Load(DvpRails rails, DvpLattice lat)
+/* 1991 */ public void Cluster(double atr, double cPrev, double confTol)
+/* 1994 */ public void Cluster(double atr, double cPrev, double confTol, double wVa, double wPoc)
+/* 2033 */ public bool Qualifies(int cl)
+/* 2034 */ public int QualifyingCount { get; }
+/* 2037 */ public int CandFamilies(int i)
+/* 2038 */ public int CandRanges(int i)
+/* 2039 */ public double CandScore077(int i)
+/* 2043 */ public void FamiliesAt(double price, double tolAtr, out int families, out int nRanges)
+/* 2059 */ public static string Tag(int ds, DateTime tPrev, int deg, double z)
+/* 2063 */ public void Publish(List<LevelRef> into, List<LevelRef> pool, int ds, DateTime tPrev, DateTime t0, DvpRails rails, bool isRollWindow)
 // --- (namespace)
-/* 1665 */ public static class DvpAccept
+/* 2086 */ public static class DvpAccept
 // --- DvpAccept
-/* 1667 */ public const double Delta = 0.10;
-/* 1668 */ public const int MaxN = 6;
-/* 1673 */ public static bool Beyond(double[] c, double[] p, double[] a, int len, int k, int dir, double deltaAtr)
-/* 1679 */ public static bool Triggered(double[] c, double[] p, double[] a, int len, int k, int dir)
-/* 1686 */ public static int RunBeyond(double[] c, double[] p, double[] a, int len, int dir, double deltaAtr)
-/* 1695 */ public static bool BackInside(double[] c, double[] p, double[] a, int len, int dir)
-/* 1711 */ public static bool Accepted(double[] c, double[] p, double[] a, int len, int dir, int N, bool countTrigger, double deltaAtr)
+/* 2088 */ public const double Delta = 0.10;
+/* 2089 */ public const int MaxN = 6;
+/* 2094 */ public static bool Beyond(double[] c, double[] p, double[] a, int len, int k, int dir, double deltaAtr)
+/* 2100 */ public static bool Triggered(double[] c, double[] p, double[] a, int len, int k, int dir)
+/* 2107 */ public static int RunBeyond(double[] c, double[] p, double[] a, int len, int dir, double deltaAtr)
+/* 2116 */ public static bool BackInside(double[] c, double[] p, double[] a, int len, int dir)
+/* 2123 */ public static bool Accepted(double[] c, double[] p, double[] a, int len, int dir, int N, bool countTrigger, double deltaAtr)
+/* 2133 */ public static bool DegChange(bool[] g, int k)
+/* 2135 */ public static bool Triggered(double[] c, double[] p, double[] a, bool[] g, int len, int k, int dir)
+/* 2140 */ public static bool BackInside(double[] c, double[] p, double[] a, bool[] g, int len, int dir)
+/* 2151 */ public static bool Accepted(double[] c, double[] p, double[] a, bool[] g, int len, int dir, int N, bool countTrigger, double deltaAtr)
 // --- (namespace)
-/* 1728 */ public sealed class DvpRailHistory
+/* 2168 */ public sealed class DvpRailHistory
 // --- DvpRailHistory
-/* 1730 */ public const int Depth = 8;
-/* 1733 */ public readonly double[] C = new double[Depth], P = new double[Depth], A = new double[Depth];
-/* 1734 */ public int Len;
-/* 1735 */ public long Copied { get; private set; }
-/* 1737 */ public DvpRailHistory(DvpStream s, int maxRails)
-/* 1745 */ public void Reset()
-/* 1750 */ public int Entry(_BarRing ring, int k)
-/* 1775 */ public const double NodeZTol = 0.25;
-/* 1776 */ public static int Match(DvpRail[] it, int n, ELevelKind kind, double z)
-/* 1793 */ public double PriceIn(int slot, ELevelKind kind, double z)
-/* 1801 */ public int Load(_BarRing ring, ELevelKind kind, double z)
-/* 1817 */ public double ZClose(_BarRing ring, int k)
+/* 2170 */ public const int Depth = 8;
+/* 2173 */ public readonly double[] C = new double[Depth], P = new double[Depth], A = new double[Depth];
+/* 2176 */ public readonly int[] D = new int[Depth];
+/* 2177 */ public readonly bool[] G = new bool[Depth];
+/* 2178 */ public int Len;
+/* 2179 */ public long Copied { get; private set; }
+/* 2181 */ public DvpRailHistory(DvpStream s, int maxRails)
+/* 2189 */ public void Reset()
+/* 2194 */ public int Entry(_BarRing ring, int k)
+/* 2220 */ public const double NodeZTol = 0.25;
+/* 2221 */ public static int Match(DvpRail[] it, int n, ELevelKind kind, double z)
+/* 2238 */ public double PriceIn(int slot, ELevelKind kind, double z)
+/* 2246 */ public int Load(_BarRing ring, ELevelKind kind, double z)
+/* 2263 */ public double ZClose(_BarRing ring, int k)
 // --- (namespace)
-/* 1825 */ public struct DvpRailEvent
+/* 2271 */ public struct DvpRailEvent
 // --- DvpRailEvent
-/* 1827 */ public ELevelKind kind; public double z, price, close, atr, distAtr, score077, sigmaAtr, mfe, mae;
-/* 1828 */ public int dir, families, nRanges, heldBars, deg, elapsed;
-/* 1829 */ public bool trigger, closedThrough, acc2, acc3, acc5, isRollWindow, halfDay, active, accepted41, back41;
-/* 1830 */ public DateTime time, tPrev;
+/* 2273 */ public ELevelKind kind; public double z, price, close, atr, distAtr, score077, sigmaAtr, mfe, mae;
+/* 2274 */ public int dir, families, nRanges, heldBars, deg, elapsed;
+/* 2275 */ public bool trigger, closedThrough, acc2, acc3, acc5, isRollWindow, halfDay, active, accepted41, back41;
+/* 2276 */ public DateTime time, tPrev;
 // --- (namespace)
-/* 1842 */ public sealed class DvpRailJournal
+/* 2288 */ public sealed class DvpRailJournal
 // --- DvpRailJournal
-/* 1844 */ public const int MaxTracked = 512;
-/* 1846 */ public readonly DvpRailEvent[] Events;
-/* 1847 */ public int EventCount;
-/* 1848 */ public long Written { get; private set; }
-/* 1849 */ public long Dropped { get; private set; }
-/* 1852 */ public DvpRailJournal(int maxRails)
-/* 1857 */ public static string Line(DvpRailEvent e, int ds, string runId, bool complete)
-/* 1876 */ public int Step(DvpStream s, _BarRing ring, DvpSnapshot snap, DvpRails rails, DvpConfluence conf, bool isRollWindow, bool halfDay, Action<string> journal, string runId)
-/* 1935 */ public void Finish(int ds, Action<string> journal, string runId)
+/* 2290 */ public const int MaxTracked = 512;
+/* 2292 */ public readonly DvpRailEvent[] Events;
+/* 2293 */ public int EventCount;
+/* 2294 */ public long Written { get; private set; }
+/* 2295 */ public long Dropped { get; private set; }
+/* 2298 */ public DvpRailJournal(int maxRails)
+/* 2303 */ public static string Line(DvpRailEvent e, int ds, string runId, bool complete)
+/* 2322 */ public int Step(DvpStream s, _BarRing ring, DvpSnapshot snap, DvpRails rails, DvpConfluence conf, bool isRollWindow, bool halfDay, Action<string> journal, string runId)
+/* 2381 */ public void Finish(int ds, Action<string> journal, string runId)
 // --- (namespace)
-/* 1947 */ public static class DvpA233
+/* 2393 */ public static class DvpA233
 // --- DvpA233
-/* 1950 */ public static string Line(string runId, DateTime day, bool halfDay, int rails, int conf, int rollSkipped, int fibSkipped)
-/* 1957 */ public static bool IsG0dType(ELevelKind k)
-/* 1966 */ public static int Sample(IReadOnlyList<LevelRef> src, Func<string, double, int, double, string, bool> add, ref int rollSkipped, ref int fibSkipped)
+/* 2396 */ public static string Line(string runId, DateTime day, bool halfDay, int rails, int conf, int rollSkipped, int fibSkipped)
+/* 2403 */ public static bool IsG0dType(ELevelKind k)
+/* 2412 */ public static int Sample(IReadOnlyList<LevelRef> src, Func<string, double, int, double, string, bool> add, ref int rollSkipped, ref int fibSkipped)
 // --- (namespace)
-/* 1983 */ public static class DvpHtf
+/* 2429 */ public static class DvpHtf
 // --- DvpHtf
-/* 1989 */ public static int EndAgo(bool barZeroClosed, int ringCount, int ringNewestBar, int currentBar)
-/* 1995 */ public static bool ShouldStep(bool barZeroClosed, int lastSteppedBar, int currentBar)
-/* 1999 */ public static string RootError(int ds, string data1Name, string data1Root, string dsName, string dsRoot)
-/* 2010 */ public static double NextRailDistAtr(DvpRails rails, DvpLattice lat, double c, int dir, double atr)
+/* 2435 */ public static int EndAgo(bool barZeroClosed, int ringCount, int ringNewestBar, int currentBar)
+/* 2441 */ public static bool ShouldStep(bool barZeroClosed, int lastSteppedBar, int currentBar)
+/* 2445 */ public static string RootError(int ds, string data1Name, string data1Root, string dsName, string dsRoot)
+/* 2456 */ public static double NextRailDistAtr(DvpRails rails, DvpLattice lat, double c, int dir, double atr)
 // --- (namespace)
-/* 2033 */ internal static class DvpPaBridge
+/* 2479 */ internal static class DvpPaBridge
 // --- DvpPaBridge
-/* 2035 */ public static void Fill(_PriceActionEngine pa, int barOffset, int endBar, DvpPivots into)
+/* 2481 */ public static void Fill(_PriceActionEngine pa, int barOffset, int endBar, DvpPivots into)
 ```
 
 #### _SignalJournal.Function.CS
