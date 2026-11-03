@@ -104,6 +104,11 @@ static partial class Program
 		Check(DvpConst.P2_PASSED && a.e.Tradeable(1) == !a.e.Stream(1).Warming && a.e.Tradeable(2) == !a.e.Stream(2).Warming && a.e.Tradeable(2) == a.e.Tradeable(2)
 			&& !a.e.Tradeable(3) && a.warn.Count(w => w.Contains("Probe P2")) == 0,
 			"DV-T21 Tradeable(2) follows warming once P2_PASSED, no Probe P2 Warning (" + a.warn.Count(w => w.Contains("Probe P2")) + ", warming " + a.e.Stream(2).Warming + ")");
+		// warmed case: under Fixed1 a stream never warms (DV-3.10.4), so the gate alone decides: Data2 tradeable, no Probe P2 Warning
+		DvpConfig fc = HtfCfg(); fc.degMode = EDvpDegMode.Fixed1; var fw = new List<string>();
+		var fe = new _DvpEngine(fc, "golden", "ES", 0.25, true, false, null, x => fw.Add(x));
+		Check(!fe.Stream(2).Warming && fe.Tradeable(2) && fe.Tradeable(1) && !fe.Tradeable(3) && fw.Count(w => w.Contains("Probe P2")) == 0,
+			"DV-T21 warmed Data2 (Fixed1, not warming) -> Tradeable(2) true once P2_PASSED, no Probe P2 Warning");
 		Check(HtfCfg().Canon().Contains(";P2_PASSED=1;") && CreatedP2(), "DV-9.3 / DV-11.3 P2 state in Canon() and DVP CREATED");
 
 		// HtfNextRailDistAtr core
