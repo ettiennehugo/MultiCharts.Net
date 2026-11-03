@@ -205,6 +205,28 @@ static class Program
 		Check(m2 != null && m2.StartsWith("sessions 2 vs 1 ", StringComparison.Ordinal), "different session count -> warning (" + m2 + ")");
 	}
 
+	// M-INSTR MI-T2 (subset, PR-M1a, F1; §4.3 without presets): digit-led roots, FX "/", "#" suffix, empty roots never match.
+	static void SymbolRoots()
+	{
+		Func<string, string> R = _MtfMath.SymbolRoot;
+		Check(R("@ES") == "ES" && R("ES") == "ES" && R("ESZ26") == "ES" && R("ESZ4") == "ES" && R("@ES#C") == "ES" && R(" @es#c ") == "ES", "MI-T2 ES: @ES, ES, ESZ26, ESZ4, @ES#C -> ES (unchanged)");
+		Check(R("@MES") == "MES" && R("MESH27") == "MES" && R("@MES#C") == "MES" && R("MES") != R("ES"), "MI-T2 MES: @MES, MESH27 -> MES, distinct from ES");
+		Check(R("@6E") == "6E" && R("6EZ26") == "6E" && R("6E") == "6E" && R("@6E#C") == "6E" && R("6EH7") == "6E", "MI-T2 digit-led: @6E, 6EZ26, 6E, @6E#C, 6EH7 -> 6E (was \"\")");
+		Check(R("6B") == "6B" && R("6BZ26") == "6B" && R("6B") != R("6E") && R("@6B") != R("@6E"), "MI-T2 6B != 6E (leading digits kept)");
+		Check(R("EUR/USD") == "EURUSD" && R("EUR/JPY") == "EURJPY" && R("EUR/USD") != R("EUR/JPY") && R("eur/usd") == "EURUSD" && R("EURUSD") == "EURUSD", "MI-T2 FX: EUR/USD vs EUR/JPY do not collide (was \"EUR\" for both)");
+		Check(R("@NQ#C") == "NQ" && R("@CL#F") == "CL" && R("GCQ26") == "GC" && R("ZNH27") == "ZN" && R("@MNQ") == "MNQ", "MI-T2 other futures with #suffix / outright");
+		Check(R("SPY") == "SPY" && R("AAPL") == "AAPL" && R("BTCUSD") == "BTCUSD" && R("Z4") == "Z4" && R("ESZ") == "ESZ", "MI-T2 cleaned name kept; month code stripped only with a non-empty remainder");
+		Check(R(null) == "" && R("") == "" && R("  ") == "" && R("@") == "" && R("#C") == "" && R("@#C") == "", "MI-T2 no root -> empty");
+		Check(_MtfMath.SameRoot("ES", "ES") && _MtfMath.SameRoot(R("@6E"), R("6EZ26")) && !_MtfMath.SameRoot(R("@6E"), R("@6B"))
+			&& !_MtfMath.SameRoot("", "") && !_MtfMath.SameRoot(null, null) && !_MtfMath.SameRoot("", "ES") && !_MtfMath.SameRoot("ES", "")
+			&& !_MtfMath.SameRoot(R("@"), R("#C")), "MI-T2 SameRoot: empty roots never match (F1)");
+		string host = File.ReadAllText(Path.Combine("..", "..", "_CustomSignal.Strategy.CS")).Replace("\r\n", "\n");
+		Check(host.Contains("if (!_MtfMath.SameRoot(_MtfMath.SymbolRoot(info.Name), root))")
+			&& host.Contains("if (IsExist(ds) && _MtfMath.SameRoot(_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name), root)) m_rollPending[ds] = new _RollPending();")
+			&& !host.Contains("_MtfMath.SymbolRoot(info.Name) != root") && !host.Contains("_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name) == root"),
+			"MI-T2 host: HtfStreams same-root check and roll inheritance use SameRoot (two empty roots never match)");
+	}
+
 	static void Main()
 	{
 		Check(_MtfMath.ClosedIndex(true, 0) == 0 && _MtfMath.ClosedIndex(false, 0) == 1 && _MtfMath.ClosedIndex(false, 3) == 4, "ClosedIndex: forming bar 0 is skipped");
@@ -218,6 +240,7 @@ static class Program
 		Check(_MtfMath.SymbolRoot("@ES") == "ES" && _MtfMath.SymbolRoot("@es#C") == "ES" && _MtfMath.SymbolRoot("ESZ24") == "ES" && _MtfMath.SymbolRoot("ESZ4") == "ES", "SymbolRoot continuous / outright");
 		Check(_MtfMath.SymbolRoot("@NQ") != _MtfMath.SymbolRoot("@ES") && _MtfMath.SymbolRoot("SPY") == "SPY" && _MtfMath.SymbolRoot("") == "", "SymbolRoot distinguishes markets, equities unchanged");
 		Check(_MtfMath.SymbolRoot("@MES") == "MES" && _MtfMath.SymbolRoot("MESH25") == "MES", "micro root kept");
+		SymbolRoots();
 		Check(_MtfMath.IsStale(t0.AddMinutes(-3), t0, TimeSpan.FromMinutes(2)) && !_MtfMath.IsStale(t0.AddMinutes(-2), t0, TimeSpan.FromMinutes(2)) && !_MtfMath.IsStale(t0.AddDays(-1), t0, TimeSpan.Zero), "IsStale; maxStale 0 disables");
 		ProbeLog();
 		ClosedRule();

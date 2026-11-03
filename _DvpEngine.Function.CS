@@ -2443,10 +2443,16 @@ namespace PowerLanguage.Function
 		public static bool ShouldStep(bool barZeroClosed, int lastSteppedBar, int currentBar) { return barZeroClosed && currentBar != lastSteppedBar; }
 
 		/// <summary>DV-7.0 / DV-T21: a Data2/3 stream must carry the Data1 root (roll inheritance via _RollPending is same-root only).
-		/// Returns the rejection text, or null when the roots match (case-insensitive).</summary>
+		/// Returns the rejection text, or null when the roots match (case-insensitive). M-INSTR F1 (PR-M1a, §4.3 rule 5): an empty
+		/// root on either side is an error, so two unresolved names ("" == "") never pass.</summary>
 		public static string RootError(int ds, string data1Name, string data1Root, string dsName, string dsRoot)
 		{
-			if (ds <= 1 || string.Equals(data1Root ?? "", dsRoot ?? "", StringComparison.OrdinalIgnoreCase)) return null;
+			if (ds <= 1) return null;
+			if (string.IsNullOrEmpty(data1Root) || string.IsNullOrEmpty(dsRoot))
+				return "DvpConfig.streams: Data" + ds.ToString(CultureInfo.InvariantCulture) + " is " + dsName + ", Data1 is " + data1Name
+					+ "; the symbol root of " + (string.IsNullOrEmpty(data1Root) ? "Data1" : "Data" + ds.ToString(CultureInfo.InvariantCulture))
+					+ " is empty (M-INSTR F1: an unresolved root never matches)";
+			if (string.Equals(data1Root, dsRoot, StringComparison.OrdinalIgnoreCase)) return null;
 			return "DvpConfig.streams: Data" + ds.ToString(CultureInfo.InvariantCulture) + " is " + dsName + ", Data1 is " + data1Name
 				+ "; a DVP HTF stream must carry the Data1 root (DV-7.0: a different root is rejected)";
 		}

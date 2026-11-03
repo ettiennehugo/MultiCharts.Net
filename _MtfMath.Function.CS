@@ -105,17 +105,35 @@ namespace PowerLanguage.Function
 			return -1;
 		}
 
-		/// <summary>§3 rule 6: symbol root used to check that HTF streams carry the Data1 instrument, e.g. "@ES" for "@ES" / "@ES#C" / "ESZ24".</summary>
+		/// <summary>
+		/// §3 rule 6 / M-INSTR §4.3 (PR-M1a, F1; no presets yet): the instrument root, used to check that HTF streams carry the Data1
+		/// instrument and to key roll inheritance. Returns the root WITHOUT the "@": "ES" for "@ES" / "@ES#C" / "ESZ24" / "ESZ4",
+		/// "MES" for "MESH27", "6E" for "@6E" / "6EZ26", "EURUSD" for "EUR/USD". Steps: trim; strip a leading "@"; strip a "#..."
+		/// continuous suffix; uppercase invariant; remove every "/" (spot FX; there is no category input, so it is unconditional:
+		/// futures and stock names carry no "/"); then the futures fallback strips a trailing month code + 1-2 digit year
+		/// ([FGHJKMNQUVXZ][0-9]{1,2}) only when the remainder is non-empty. Leading digits are kept ("6B" != "6E"). "" only for a
+		/// name with no root (null, blank, "@", "#C"); an empty root is an error and never matches (SameRoot, DvpHtf.RootError).
+		/// </summary>
 		public static string SymbolRoot(string name)
 		{
 			if (string.IsNullOrEmpty(name)) return "";
-			string s = name.Trim().ToUpperInvariant();
-			int start = s.StartsWith("@") ? 1 : 0, i = start;
-			while (i < s.Length && char.IsLetter(s[i])) i++;
-			string letters = s.Substring(start, i - start);
-			// outright futures (ESZ24, ESZ4): drop the month code when followed by digits
-			if (i < s.Length && char.IsDigit(s[i]) && letters.Length >= 2 && "FGHJKMNQUVXZ".IndexOf(letters[letters.Length - 1]) >= 0) letters = letters.Substring(0, letters.Length - 1);
-			return letters;
+			string s = name.Trim();
+			if (s.Length > 0 && s[0] == '@') s = s.Substring(1);
+			int hash = s.IndexOf('#');
+			if (hash >= 0) s = s.Substring(0, hash);
+			s = s.ToUpperInvariant().Replace("/", "");
+			int n = s.Length, d = 0;
+			while (d < 2 && d < n && s[n - 1 - d] >= '0' && s[n - 1 - d] <= '9') d++;
+			// outright futures (ESZ24, ESZ4, 6EZ26): drop month code + year when something is left before the month code
+			if (d > 0 && n - d - 1 > 0 && "FGHJKMNQUVXZ".IndexOf(s[n - d - 1]) >= 0) s = s.Substring(0, n - d - 1);
+			return s;
+		}
+
+		/// <summary>M-INSTR §4.3 rule 5 (F1): true only when both roots are non-empty and equal (ordinal; SymbolRoot output is upper
+		/// invariant). Two empty roots never match, so an unresolved name never passes a same-root check or inherits a roll.</summary>
+		public static bool SameRoot(string a, string b)
+		{
+			return !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) && string.Equals(a, b, StringComparison.Ordinal);
 		}
 
 		/// <summary>True when the stream is stale against the Data1 time: its last closed bar is older than maxStale.</summary>

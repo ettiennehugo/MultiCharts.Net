@@ -94,6 +94,16 @@ static partial class Program
 		// different root rejected; same root (any month, any case) accepted
 		Check(DvpHtf.RootError(2, "ESZ24", "ES", "ESZ24", "ES") == null && DvpHtf.RootError(3, "ESZ24", "ES", "@es", "es") == null
 			&& DvpHtf.RootError(2, "ESZ24", "ES", "NQZ24", "NQ") != null && DvpHtf.RootError(1, "ESZ24", "ES", "x", "NQ") == null, "DV-T21 different root on Data2/3 rejected");
+		// M-INSTR MI-T2 (subset, PR-M1a, F1): roots via _MtfMath.SymbolRoot; an empty root is an error, digit-led and FX roots resolve
+		Func<int, string, string, string> RE = (ds, n1, n2) => DvpHtf.RootError(ds, n1, _MtfMath.SymbolRoot(n1), n2, _MtfMath.SymbolRoot(n2));
+		Check(DvpHtf.RootError(2, "", "", "", "") != null && DvpHtf.RootError(2, "x", null, "y", null) != null && DvpHtf.RootError(2, "@ES", "ES", "#C", "") != null
+			&& DvpHtf.RootError(3, "@", "", "@ES", "ES") != null && DvpHtf.RootError(1, "", "", "", "") == null
+			&& DvpHtf.RootError(2, "", "", "", "").Contains("symbol root of Data1 is empty") && DvpHtf.RootError(2, "@ES", "ES", "#C", "").Contains("symbol root of Data2 is empty"),
+			"MI-T2 RootError: an empty root is an error (\"\" == \"\" no longer passes); Data1 is never checked");
+		Check(RE(2, "@ES", "ESZ26") == null && RE(2, "@ES#C", "ES") == null && RE(2, "@MES", "MESH27") == null && RE(2, "@MES", "@ES") != null
+			&& RE(2, "@6E", "6EZ26") == null && RE(3, "6EZ26", "@6E#C") == null && RE(2, "@6E", "@6B") != null && RE(2, "6B", "6E") != null
+			&& RE(2, "EUR/USD", "EUR/USD") == null && RE(2, "EUR/USD", "EUR/JPY") != null && RE(2, "@6E", "@") != null,
+			"MI-T2 RootError via SymbolRoot: ES/MES/6E months match, 6B vs 6E and EUR/USD vs EUR/JPY rejected");
 		string host = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
 		Check(host.Contains("string rerr = DvpHtf.RootError(ds,") && host.Contains("if (rerr != null) throw new ArgumentException(rerr);")
 			&& host.Contains("requireDataStream(\"DvpConfig.streams\", ds);") && !host.Contains("HTF streams arrive in PR-D6"), "DV-T21 host: startDvp hosts Data2/3 with the root check");

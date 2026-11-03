@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Off-MultiCharts unit tests for M-DVP (specs/m-dvp-spec.md §15). gen.sh extracts the MC-free <dvp-core> and <profile-math>
-       regions into Generated/ before building; _LevelRef/_ProfileStats (+ _Gmm, _Rng, _BarRing), _Gate0 (Gate0Atr, + _LevelStudy) and _RollDetector, _PriceActionEngine (+ PriceActionTests/McShim) are linked whole; <dvp-pa> (DvpPaBridge) is extracted too. Fixtures come from reference.py. Not part of PLStudies.csproj. -->
+       regions into Generated/ before building; _LevelRef/_ProfileStats (+ _Gmm, _Rng, _BarRing), _Gate0 (Gate0Atr, + _LevelStudy) and _RollDetector, _PriceActionEngine (+ PriceActionTests/McShim) and _MtfMath (SymbolRoot, M-INSTR MI-T2) are linked whole; <dvp-pa> (DvpPaBridge) is extracted too. Fixtures come from reference.py. Not part of PLStudies.csproj. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -22,6 +22,7 @@
     <Compile Include="..\..\_PriceActionEngine.Function.CS" Link="Linked\_PriceActionEngine.cs" />
     <Compile Include="..\PriceActionTests\McShim.cs" Link="Linked\McShim.cs" />
     <Compile Include="..\..\_DvpDegreeReport.Function.CS" Link="Linked\_DvpDegreeReport.cs" />
+    <Compile Include="..\..\_MtfMath.Function.CS" Link="Linked\_MtfMath.cs" />
   </ItemGroup>
   <!-- Extracts MC-free regions of the study files into Generated/ before each build (needs bash: Git Bash/WSL on Windows). -->
   <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
