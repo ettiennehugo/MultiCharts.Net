@@ -651,7 +651,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>DV-9.3 / DV-10 Tradeable(ds): false when the engine is off or ds is not a DVP stream; Data2/3 false (one Warning) until
-		/// DvpConst.P2_PASSED. MT-07 trades the 60m stream only; 240m is diagnostic (DV-7.5) by consumer rule.</summary>
+		/// DvpConst.P2_PASSED (true since PR-D10, Probe P2 passed 2026-11-02). MT-07 trades the 60m stream only; 240m is diagnostic (DV-7.5) by consumer rule.</summary>
 		protected bool dvpTradeable(int ds) { _DvpEngine e = Dvp; return e != null && e.Tradeable(ds); }
 
 		/// <summary>DV-9.4 HtfAccepted(ds, R, dir, N >= 2): DV-8.3 Accepted on stream ds's CLOSED bars as seen from the current Data1 bar

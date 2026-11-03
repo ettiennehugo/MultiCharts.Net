@@ -37,8 +37,10 @@ namespace PowerLanguage.Function
 		public const double SseEps = 1e-12;   // DV-3.4 relative assert
 		public const double BreakdownRel = 1e-13;   // N_k <= BreakdownRel * N_0 counts as N_k <= 0 (floating-point zero)
 		/// <summary>DV-9.3 Probe P2 gate (in Canon()). While false, HTF (ds &gt; 1) snapshots are computed and journaled but Tradeable(ds) is
-		/// false with one Warning per stream. Flipped in a one-line PR (PR-D10) once _MtfProbe P2 passes; P2 is not recorded as run.</summary>
-		public const bool P2_PASSED = false;
+		/// false with one Warning per stream. PR-D10 (2026-11-02): P2 passed with Realtime-History Matching on, @ES 1m + 60m, runs R1 8356ba60,
+		/// R2 05c8e4d9, R3 c003d107, R4 aa78186a, 63e2d28d: END stamps PASS, per-series MaxBarsBack PASS, closed HTF bar read via the P2
+		/// closed rule (missing-functionality-specs.md §3; the DVP ring steps on Close only, DvpHtf.EndAgo).</summary>
+		public const bool P2_PASSED = true;
 		/// <summary>DV-3.6 / DV-3.10.9: first holdout day (Jan 2025 - Oct 2026). Applies to Calibrate only: its coverage journal never
 		/// samples a window ending on or after it and drops any forward horizon reaching it (counted). SelfCalibrate ignores it.</summary>
 		public static readonly DateTime HoldoutFrom = new DateTime(2025, 1, 1);
