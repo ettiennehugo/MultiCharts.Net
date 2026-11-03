@@ -397,6 +397,17 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
+		/// M-INSTR §4.4.1 (N6): directory of the trace CSV this process actually writes (MCSignalLogs under LocalApplicationData, or
+		/// the %TEMP% fallback when that failed), for files that must sit next to it (e.g. _InstrDump). Same lazy pattern as
+		/// traceAlways(); no new path and no behaviour change (the singleton is the one trace() and traceAlways() use).
+		/// </summary>
+		protected string LogDirectory()
+		{
+			if (m_logger == null) m_logger = LogFileSingleton.GetInstance(null);
+			return Path.GetDirectoryName(m_logger.FilePath);
+		}
+
+		/// <summary>
 		/// CS-3: makes this run's id before base.StartCalc(), for a line written there (e.g. the Build Volume On Error in
 		/// _VolumeProfileBase.StartCalc), so it does not carry the previous run's id. _CustomSignal.StartCalc then keeps this id instead
 		/// of making a second one (one id per StartCalc, as before). Without a call StartCalc makes the id as before.
