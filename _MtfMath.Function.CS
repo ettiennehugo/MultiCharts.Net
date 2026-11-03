@@ -9,7 +9,8 @@
 //   - Live IOG on (R4), the Data1 bar whose end equals Data2's end (d1 19:30 Open/Inside): d2[0] is the FORMING 19:30 bar,
 //     Status Inside, c follows d1, v grows -> 1. At d1 19:30 Close, d2 is Close with final values -> 0.
 //   - Live IOG off (R3, two calls in the same ms): k=1 d1 Close / d2 Inside (values already final) -> 1; k=2 d1 None / d2 Close -> 0.
-//   - RHM off / live forming: d2[0] stamped after the Data1 time -> 1 (whatever its Status).
+//   - RHM off / live forming: d2[0] stamped after the Data1 time with Status None, Open or Inside -> 1. Status Close is closed
+//     whatever its Time (-> 0): MC only reports Close for a completed bar.
 //   MONOTONIC: over consecutive calls the mapped HTF bar time never goes back, EXCEPT the R3 k=1 call (d1 Close, d2 Inside at the
 //   shared end time), which may map one bar back for that one call. That is conservative: an older closed bar, never a forming one.
 //   The old rule (Status == Close ? 0 : 1) mapped one bar stale for 59 of every 60 minutes and was non-monotonic at the boundary.
@@ -58,11 +59,12 @@ namespace PowerLanguage.Function
 		/// <summary>
 		/// MC-1439 setup check: null when the two session templates are the same (same count, and each session's start/end day and time
 		/// equal, in order), else a short description of the first difference. With RHM on and different session ends, MC holds the
-		/// strategy until Data2 prints. A null list counts as unknown and returns null (the host logs that separately).
+		/// strategy until Data2 prints. Call SessionUnavailable first: a null or empty list cannot be compared, so this returns null for
+		/// it (no misleading mismatch) and the host logs "session check unavailable" from SessionUnavailable instead.
 		/// </summary>
 		public static string SessionMismatch(Session[] data1, Session[] other)
 		{
-			if (data1 == null || other == null) return null;
+			if (SessionUnavailable(data1, other) != null) return null;
 			if (data1.Length != other.Length)
 				return "sessions " + data1.Length.ToString(CultureInfo.InvariantCulture) + " vs " + other.Length.ToString(CultureInfo.InvariantCulture) + " (Data1 " + Join(data1) + "; other " + Join(other) + ")";
 			for (int i = 0; i < data1.Length; i++)
@@ -72,6 +74,17 @@ namespace PowerLanguage.Function
 					return "session " + i.ToString(CultureInfo.InvariantCulture) + ": Data1 " + a + " vs " + b;
 			}
 			return null;
+		}
+
+		/// <summary>MC-1439 setup check: null when both session lists can be compared, else why not ("Data1 Sessions null",
+		/// "Data2 Sessions empty", ...; Data1 is checked first). The host logs the Warning "session check unavailable" whenever this is
+		/// not null; two empty lists are unavailable, not equal.</summary>
+		public static string SessionUnavailable(Session[] data1, Session[] other, int otherDs = 2)
+		{
+			string w = data1 == null ? "Data1 Sessions null" : data1.Length == 0 ? "Data1 Sessions empty" : null;
+			string o = other == null ? "null" : other.Length == 0 ? "empty" : null;
+			if (o != null) o = "Data" + otherDs.ToString(CultureInfo.InvariantCulture) + " Sessions " + o;
+			return w != null && o != null ? w + ", " + o : w ?? o;
 		}
 
 		private static string Join(Session[] s)

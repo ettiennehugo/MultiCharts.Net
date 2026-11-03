@@ -6468,16 +6468,18 @@ protected override void CalcBar()
 
 | Member | Plain meaning |
 |---|---|
-| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds`: `ago` if bar 0 is closed, else `ago + 1`. Bar 0 is closed when its Status is Close, or its Status is None and its time is not after Data1's (Probe P2 closed rule). Open/Inside means the bar is still forming. |
+| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds`: `ago` if bar 0 is closed, else `ago + 1`. Bar 0 is closed when its Status is Close (whatever its time), or its Status is None and its time is not after Data1's (Probe P2 closed rule). Open/Inside, or None with a time after Data1's, means the bar is still forming. |
 | `HtfClosed(ds, ago = 0)` | Close of that bar. |
 | `HtfClosedBar(ds, ago, out time, out o, out h, out l, out c, out v)` | All fields of that bar. |
 | `htfMapped(ds, maxBack = 2)` | Index of the last closed bar of `ds` whose time is not after Data1's; −1 = none. |
 | `HtfForming(ds)` | Deliberate access to the still-forming bar (values change intrabar; journaled once). |
 | Statics `_MtfMath.BarZeroClosed`, `ClosedIndex`, `MapIndex`, `SymbolRoot`, `IsStale`, `SessionMismatch` | The same rules, MC-free, for tests. |
 
-**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`; at StartCalc, `MTF closed rule: ... requires Realtime-History Matching ON ...`. **Warning** at StartCalc: `MTF Data{n} session template differs from Data1: ...` when the two streams' `Sessions` differ (MC-1439: with RHM on and different session ends the strategy stalls until Data{n} prints), or `MTF Data{n} session check unavailable (...)` if `Sessions` cannot be read.
+**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`; at StartCalc, at **Info**: `MTF closed rule: ... requires Realtime-History Matching ON ...` (so it shows on Info-level probe runs). **Warnings** at StartCalc, per HTF stream: `MTF Data{n} session check unavailable (...)` when either stream's `Sessions` list is null or empty, or reading it throws (two empty lists are *unavailable*, not equal, and no mismatch is reported then); otherwise `MTF Data{n} session template differs from Data1: ...` when the lists differ in count or in any session's start/end day and time (MC-1439: with RHM on and different session ends the strategy stalls until Data{n} prints).
 
 **Setup.** Realtime-History Matching (RHM) must be **on**: Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching (MC wiki; on by default; **VERIFY** the tab in your MC version). MC .NET documents no member that reads RHM (Programming Guide v1.0 and v1.1), so the code cannot check it. Use the same session template on Data1 and every HTF stream.
+
+**Members not in the Programming Guide.** `EBarState.None` is not in the MC .NET Programming Guide (v1.0, v1.1); it is confirmed only empirically (the Probe P2 logs printed `None` for Data2's Status). `IInstrument.Sessions` / `SessionObject.StartDay`, `StartTime`, `EndDay`, `EndTime` are not in the Programming Guide either; they are confirmed by compiled repo code (`_CheckData`, `_QullamaggieBase`). **VERIFY:** whether `Sessions` is populated at StartCalc. If it is not, the Journal shows `session check unavailable` and the template must be checked by hand.
 
 **Mapping over calls.** Monotonic, with one exception: in live trading with IOG off, at a time where a Data1 and a Data2 bar both end, MC makes two calls. On the first (Data1 Close, Data2 Inside) the mapping may step back one bar for that one call. That is conservative: the bar is an older closed bar, never a forming one. Backtests make one call there.
 
