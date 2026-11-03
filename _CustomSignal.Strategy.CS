@@ -1802,7 +1802,7 @@ namespace PowerLanguage.Strategy
 			{
 				requireDataStream("HtfStreams", ds);
 				IInstrumentSettings info = BarsOfData(ds).Info;
-				if (_MtfMath.SymbolRoot(info.Name) != root)
+				if (!_MtfMath.SameRoot(_MtfMath.SymbolRoot(info.Name), root))   // M-INSTR F1: an empty root never matches
 					throw new ArgumentException($"HtfStreams: Data{ds} is {info.Name}, Data1 is {Bars.Info.Name}; an HTF stream must carry the Data1 instrument (use XmktLegs for other markets)");
 				checkHtfSessions(ds);
 			}
@@ -1896,7 +1896,7 @@ namespace PowerLanguage.Strategy
 			m_rollPending = new _RollPending[MaxDataStream + 1];
 			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
 			for (int ds = 2; ds <= MaxDataStream; ds++)
-				if (IsExist(ds) && _MtfMath.SymbolRoot(BarsOfData(ds).Info.Name) == root) m_rollPending[ds] = new _RollPending();   // a different root never inherits (S4.3)
+				if (IsExist(ds) && _MtfMath.SameRoot(_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name), root)) m_rollPending[ds] = new _RollPending();   // a different (or empty, M-INSTR F1) root never inherits (S4.3)
 		}
 
 		/// <summary>PR #51 N3 (typed): false for the daily-and-longer resolutions Day/Week/Month/Quarter/Year, true otherwise
