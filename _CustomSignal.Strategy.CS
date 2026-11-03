@@ -776,6 +776,7 @@ namespace PowerLanguage.Strategy
 				int ds = DvpConfig.streams[si];
 				IInstrument b = BarsOfData(ds);
 				if (b.Status != EBarState.Close) continue;
+				if (!dvpFeed(ds, b.Time[0])) continue;   // D9: a host may withhold a closed bar from the DVP stream (and its PA engines)
 				if (m_dvpPa != null)   // DV-5.1: DVP-owned pivot engines on closed bars; shared (hosted) ones are stepped by stepExtraPa
 					for (int j = 0; j < m_dvpPa[si].Length; j++)
 					{
@@ -789,6 +790,14 @@ namespace PowerLanguage.Strategy
 				m_dvp.OnBar(ds, r, todHalfDay(r[0].tradingDay));
 			}
 		}
+
+		/// <summary>PR-D9: true = feed this closed bar of stream ds (bar time in the chart zone) to the DVP stream and its DVP-owned PA
+		/// engines. Default: every closed bar. _DvpEngineTest overrides it so no bar on/after the 2025-01-01 holdout is ever fed. Not an [Input].</summary>
+		protected virtual bool dvpFeed(int ds, DateTime barTime) { return true; }
+
+		/// <summary>PR-D9: end-of-run DVP lines (DVP RUN, then the DVP CAL table; idempotent), called once at RUN-END. A host overrides it to
+		/// write its own summary first (_DvpEngineTest); call base.dvpFinish() to write the engine lines.</summary>
+		protected virtual void dvpFinish() { if (m_dvp != null) m_dvp.Finish(); }
 
 		/// <summary>Phase 3 S5: extra PRICEACTION instances (e.g. a Data2 swing structure), empty by default. Each entry needs enabled = true,
 		/// a dataStream and a non-empty unique role; label PA{ds}-{role}. Futures bases apply the Futures preset PER FIELD (ruling 1): each
@@ -2218,7 +2227,7 @@ namespace PowerLanguage.Strategy
 			{
 				m_runEndLogged = true;
 				finishLevelStudy();
-				if (m_dvp != null) m_dvp.Finish();   // DV-11.3 DVP RUN lines
+				dvpFinish();   // DV-11.3 DVP RUN lines (PR-D9: virtual, a host may write its summary first)
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"RUN-END id({RunId}) lastBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) realTime({Environment.IsRealTimeCalc})");
 			}
 		}
