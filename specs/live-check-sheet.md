@@ -144,8 +144,10 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 **What the probe does** (`_MtfProbe.Strategy.CS`). It places no orders and sets `HtfStreams = {2}`. At `TraceLevel ≥ Info` it writes:
 
-- **Once:** `P2 start iog(..) maxBarsBack(..) d1(name type size) d2(...) d2.Close[MaxBarsBack]=...`
-- **Every CalcBar:** `P2 call(n) d1[time status c= cb=] d2[time status c= cb=] closedIdx(i) closed[time c=] mapped(i time) realTime(..)`
+- **Once:** `P2 start iog(..) maxBarsBack(..) d1(name type size) d2(...) d2.Close[MaxBarsBack]=... d1cb(..) d2cb(..)`
+- **Every CalcBar:** `P2 call(n) same(k) d1[time status c= cb=] d2[time status o= h= l= c= v= cb=] closedIdx(i) closed[time c=] mapped(i time) realTime(..)`
+
+**Run sheet.** The header of `_MtfProbe.Strategy.CS` now holds the run sheet (4 runs: R1/R2 any time, R3/R4 live; Data2 = 60-min; data ranges, extracts and PASS rules for (a)-(e)). It supersedes steps 1-4 below.
 
 **Steps**
 
