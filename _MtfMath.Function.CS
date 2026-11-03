@@ -2,6 +2,20 @@
 // M-MTF — higher-timeframe access helpers (spec /workspace/specs/missing-functionality-specs.md rev 4 §3, §0.4).
 // HTF bars come from extra chart series (BarsOfData(n)); no internal bar building. This file holds the MC-free rules so they
 // are unit-tested (tests/MtfTests); _CustomSignal wraps them around BarsOfData (HtfClosed / HtfForming / htfMapped).
+//
+// CLOSED RULE (Probe P2, runs R1 8356ba60, R2 05c8e4d9, R3 c003d107, R4 aa78186a, live IOG-on 63e2d28d; @ES 1m + 60m, RHM on).
+//   HTF bar 0 is CLOSED iff Status == Close, or Status == None and its Time <= the Data1 bar's Time. Open/Inside = forming -> use index 1.
+//   - History (R1, R2) and live between marks: d2[0] is the last closed bar, OHLCV frozen, Status None, Time <= Data1 -> 0.
+//   - Live IOG on (R4), the Data1 bar whose end equals Data2's end (d1 19:30 Open/Inside): d2[0] is the FORMING 19:30 bar,
+//     Status Inside, c follows d1, v grows -> 1. At d1 19:30 Close, d2 is Close with final values -> 0.
+//   - Live IOG off (R3, two calls in the same ms): k=1 d1 Close / d2 Inside (values already final) -> 1; k=2 d1 None / d2 Close -> 0.
+//   - RHM off / live forming: d2[0] stamped after the Data1 time with Status None, Open or Inside -> 1. Status Close is closed
+//     whatever its Time (-> 0): MC only reports Close for a completed bar.
+//   MONOTONIC: over consecutive calls the mapped HTF bar time never goes back, EXCEPT the R3 k=1 call (d1 Close, d2 Inside at the
+//   shared end time), which may map one bar back for that one call. That is conservative: an older closed bar, never a forming one.
+//   The old rule (Status == Close ? 0 : 1) mapped one bar stale for 59 of every 60 minutes and was non-monotonic at the boundary.
+//   Realtime-History Matching (Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching) MUST be on;
+//   MC .NET exposes no member to read it (not in the Programming Guide v1.0/v1.1), so it is a setup step, not a check.
 // ============================================================================================
 using System;
 using System.Globalization;
@@ -13,6 +27,72 @@ namespace PowerLanguage.Function
 	{
 		/// <summary>Bars-ago index of the ago-th CLOSED bar: the stream's bar 0 is closed only when its Status is Close.</summary>
 		public static int ClosedIndex(bool barZeroClosed, int ago) { return barZeroClosed ? ago : ago + 1; }
+
+		/// <summary>
+		/// Probe P2 closed rule (header): HTF bar 0 is closed iff its Status is Close, or its Status is None (not updated on this calc:
+		/// the frozen last closed bar) and its Time is not after the Data1 time. Open/Inside is the forming bar. The host passes typed
+		/// EBarState compares (Status == EBarState.Close, Status == EBarState.None), so this file stays MC-free.
+		/// </summary>
+		public static bool BarZeroClosed(bool statusClose, bool statusNone, DateTime htfTime0, DateTime data1Time)
+		{
+			return statusClose || (statusNone && htfTime0 <= data1Time);
+		}
+
+		/// <summary>Bars-ago index of the ago-th CLOSED HTF bar under the Probe P2 rule (BarZeroClosed).</summary>
+		public static int ClosedIndex(bool statusClose, bool statusNone, DateTime htfTime0, DateTime data1Time, int ago)
+		{
+			return ClosedIndex(BarZeroClosed(statusClose, statusNone, htfTime0, data1Time), ago);
+		}
+
+		/// <summary>One weekly session of a session template (MC SessionObject: StartDay/StartTime/EndDay/EndTime), MC-free.</summary>
+		public struct Session
+		{
+			public DayOfWeek StartDay, EndDay;
+			public TimeSpan StartTime, EndTime;
+			public Session(DayOfWeek startDay, TimeSpan startTime, DayOfWeek endDay, TimeSpan endTime) { StartDay = startDay; StartTime = startTime; EndDay = endDay; EndTime = endTime; }
+			public override string ToString()
+			{
+				return StartDay.ToString().Substring(0, 3) + " " + StartTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture) + "-" + EndDay.ToString().Substring(0, 3) + " " + EndTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+			}
+		}
+
+		/// <summary>
+		/// MC-1439 setup check: null when the two session templates are the same (same count, and each session's start/end day and time
+		/// equal, in order), else a short description of the first difference. With RHM on and different session ends, MC holds the
+		/// strategy until Data2 prints. Call SessionUnavailable first: a null or empty list cannot be compared, so this returns null for
+		/// it (no misleading mismatch) and the host logs "session check unavailable" from SessionUnavailable instead.
+		/// </summary>
+		public static string SessionMismatch(Session[] data1, Session[] other)
+		{
+			if (SessionUnavailable(data1, other) != null) return null;
+			if (data1.Length != other.Length)
+				return "sessions " + data1.Length.ToString(CultureInfo.InvariantCulture) + " vs " + other.Length.ToString(CultureInfo.InvariantCulture) + " (Data1 " + Join(data1) + "; other " + Join(other) + ")";
+			for (int i = 0; i < data1.Length; i++)
+			{
+				Session a = data1[i], b = other[i];
+				if (a.StartDay != b.StartDay || a.StartTime != b.StartTime || a.EndDay != b.EndDay || a.EndTime != b.EndTime)
+					return "session " + i.ToString(CultureInfo.InvariantCulture) + ": Data1 " + a + " vs " + b;
+			}
+			return null;
+		}
+
+		/// <summary>MC-1439 setup check: null when both session lists can be compared, else why not ("Data1 Sessions null",
+		/// "Data2 Sessions empty", ...; Data1 is checked first). The host logs the Warning "session check unavailable" whenever this is
+		/// not null; two empty lists are unavailable, not equal.</summary>
+		public static string SessionUnavailable(Session[] data1, Session[] other, int otherDs = 2)
+		{
+			string w = data1 == null ? "Data1 Sessions null" : data1.Length == 0 ? "Data1 Sessions empty" : null;
+			string o = other == null ? "null" : other.Length == 0 ? "empty" : null;
+			if (o != null) o = "Data" + otherDs.ToString(CultureInfo.InvariantCulture) + " Sessions " + o;
+			return w != null && o != null ? w + ", " + o : w ?? o;
+		}
+
+		private static string Join(Session[] s)
+		{
+			var sb = new System.Text.StringBuilder();
+			for (int i = 0; i < s.Length; i++) { if (i > 0) sb.Append(' '); sb.Append(s[i].ToString()); }
+			return sb.ToString();
+		}
 
 		/// <summary>
 		/// §3 rule 3: the HTF context for a Data1 bar at t is the latest CLOSED HTF bar with Time &lt;= t. Starting at the closed index

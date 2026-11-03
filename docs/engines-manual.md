@@ -4510,7 +4510,7 @@ namespace PowerLanguage.Strategy
 **Pitfalls.**
 - **Assumptions (labelled):** ATR15 length 14; coverage 0.95; a fixed 2R target as a stand-in for "before the next cluster".
 - **Not coded:** DV-03's follow-through condition, the 5m HL entry arm and the near-HVN-edge level variant.
-- The box start is the open time of the oldest box bar. The profile is "after" that time, assuming bars are stamped at their end (Probe P2, **VERIFY**).
+- The box start is the open time of the oldest box bar. The profile is "after" that time, since bars are stamped at their end (Probe P2 (b) PASS, 2026-11-02).
 - A bar that touches the level without a fill (for example with MC's "fill only when price trades beyond the limit") spends the level.
 - **Coding choice (labelled):** a touch outside 09:45–15:30 spends the level (first touch only). The other reading would keep it for the next session's window.
 - Stop and target are sent from the bar after the fill (§1.7), so the fill bar has no working exit.
@@ -6468,16 +6468,22 @@ protected override void CalcBar()
 
 | Member | Plain meaning |
 |---|---|
-| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds` (0 if bar 0 has closed, else 1). |
+| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds`: `ago` if bar 0 is closed, else `ago + 1`. Bar 0 is closed when its Status is Close (whatever its time), or its Status is None and its time is not after Data1's (Probe P2 closed rule). Open/Inside, or None with a time after Data1's, means the bar is still forming. |
 | `HtfClosed(ds, ago = 0)` | Close of that bar. |
 | `HtfClosedBar(ds, ago, out time, out o, out h, out l, out c, out v)` | All fields of that bar. |
 | `htfMapped(ds, maxBack = 2)` | Index of the last closed bar of `ds` whose time is not after Data1's; −1 = none. |
 | `HtfForming(ds)` | Deliberate access to the still-forming bar (values change intrabar; journaled once). |
-| Statics `_MtfMath.ClosedIndex`, `MapIndex`, `SymbolRoot`, `IsStale` | The same rules, MC-free, for tests. |
+| Statics `_MtfMath.BarZeroClosed`, `ClosedIndex`, `MapIndex`, `SymbolRoot`, `IsStale`, `SessionMismatch` | The same rules, MC-free, for tests. |
 
-**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`.
+**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`; at StartCalc, at **Info**: `MTF closed rule: ... requires Realtime-History Matching ON ...` (so it shows on Info-level probe runs). **Warnings** at StartCalc, per HTF stream: `MTF Data{n} session check unavailable (...)` when either stream's `Sessions` list is null or empty, or reading it throws (two empty lists are *unavailable*, not equal, and no mismatch is reported then); otherwise `MTF Data{n} session template differs from Data1: ...` when the lists differ in count or in any session's start/end day and time (MC-1439: with RHM on and different session ends the strategy stalls until Data{n} prints).
 
-**VERIFY.** Whether MC stamps HTF bars with their end time ("Probe P2" in the code).
+**Setup.** Realtime-History Matching (RHM) must be **on**: Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching (MC wiki; on by default; **VERIFY** the tab in your MC version). MC .NET documents no member that reads RHM (Programming Guide v1.0 and v1.1), so the code cannot check it. Use the same session template on Data1 and every HTF stream.
+
+**Members not in the Programming Guide.** `EBarState.None` is not in the MC .NET Programming Guide (v1.0, v1.1); it is confirmed only empirically (the Probe P2 logs printed `None` for Data2's Status). `IInstrument.Sessions` / `SessionObject.StartDay`, `StartTime`, `EndDay`, `EndTime` are not in the Programming Guide either; they are confirmed by compiled repo code (`_CheckData`, `_QullamaggieBase`). **VERIFY:** whether `Sessions` is populated at StartCalc. If it is not, the Journal shows `session check unavailable` and the template must be checked by hand.
+
+**Mapping over calls.** Monotonic, with one exception: in live trading with IOG off, at a time where a Data1 and a Data2 bar both end, MC makes two calls. On the first (Data1 Close, Data2 Inside) the mapping may step back one bar for that one call. That is conservative: the bar is an older closed bar, never a forming one. Backtests make one call there.
+
+**Probe P2 (2026-11-02).** End stamps PASS and per-series MaxBarsBack PASS (runs R1 8356ba60, R2 05c8e4d9, R3 c003d107, R4 aa78186a, 63e2d28d). The full answers are in `specs/missing-functionality-specs.md` §3. The probe sends no orders, so it cannot show that MC discards orders from earlier calls (PG p54).
 
 **Tests.** `tests/MtfTests`.
 
@@ -8466,7 +8472,7 @@ protected override void CalcBar()
 - **D6 (PR #41):** Data2/Data3 HTF streams of the same root, the Probe P2 gate (`dvpTradeable`), `dvpHtfAccepted` and `dvpHtfNextRailDistAtr`.
 - **D7 (PR #42):** the A2-33 hook. With `LevelStudyConfig.enabled` and DVP on, the first closed Data1 bar of each new `tradingDayKey` sends every G0-d level (`DvpPoc/Vah/Val/Hvn/Lvn/Sigma/Conf`) of `dvpRails(1)` and `dvpConfluence(1)` to `levelStudyAdd` (age 1, the rail's quality and tag). Roll-crossing and roll-window levels are skipped, and `DvpFib` is counted but not added. Each level is first evaluated on the next bar. At Journal level one `DVP A2-33 runId() tradingDayKey(yyyy-MM-dd) halfDay() rails() conf() rollSkipped() fibSkipped()` line per session joins the LevelStudy CSV by day.
 
-**Pending:** D8 the KD02 canary and Calibrate study; D9 online degree self-calibration (m-dvp-spec rev 6, DV-3.10; PR-D9 removes `DvpFrozenDegree` and `DevCoverageFrozen` and makes `SelfCalibrate` the default); `rollMode` (DV-7.0, waits for the instrument profile); Probe P2 itself (`DvpConst.P2_PASSED = false`, so HTF streams are not tradeable). The host still has no `NextRail(ds, …)` or `Cone(ds, …)` wrapper. The catalogue row still says "not yet coded".
+**Pending:** D8 the KD02 canary and Calibrate study; D9 online degree self-calibration (m-dvp-spec rev 6, DV-3.10; PR-D9 removes `DvpFrozenDegree` and `DevCoverageFrozen` and makes `SelfCalibrate` the default); `rollMode` (DV-7.0, waits for the instrument profile); Probe P2 has passed (2026-11-02, PR-D10: `DvpConst.P2_PASSED = true`, so HTF streams are tradeable once warm). The host still has no `NextRail(ds, …)` or `Cone(ds, …)` wrapper. The catalogue row still says "not yet coded".
 
 **Why it exists.** A profile fitted around a trend line (detrended) gives value rails that move with the trend instead of a flat VA.
 
@@ -8525,7 +8531,7 @@ public sealed class DvpLattice   // _DvpEngine · _DvpEngine:1533
 public static int Strength(DvpConfig c, int j)   // DvpLattice · _DvpEngine:1562
 public static bool Anchor(DvpPivots p, int endBar, int look, out double a, out double b, out int aBar, out int bBar)   // DvpLattice · _DvpEngine:1565
 public void Build(DvpConfig c, DvpPivots[] pivots, int endBar, double atr, double close)   // DvpLattice · _DvpEngine:1589
-public const bool P2_PASSED = false;   // DvpConst · _DvpEngine:38
+public const bool P2_PASSED = true;   // DvpConst · _DvpEngine:43
 public bool Tradeable(int ds)   // _DvpEngine · _DvpEngine:1396
 public sealed class DvpConfluence   // _DvpEngine · _DvpEngine:1661
 public bool Qualifies(int cl)   // DvpConfluence · _DvpEngine:1760
@@ -8580,7 +8586,7 @@ protected override void CalcBar()
 **Pitfalls.**
 
 - **Streams.** `DvpConfig.streams` may list Data1 and the HTF streams Data2/Data3. Each must exist (`requireDataStream`) and carry the Data1 root, or `StartCalc` throws `ArgumentException` (`DvpHtf.RootError`, DV-7.0).
-- **HTF streams are not tradeable yet.** `dvpTradeable(ds)` is false for ds ≥ 2 (one `used before Probe P2` warning) until `DvpConst.P2_PASSED`, which is `false` on main. MT-07 trades the 60m stream only; 240m is diagnostic by consumer rule (DV-7.5). `Tradeable` does not hard-code a timeframe.
+- **HTF streams are tradeable once warm.** `dvpTradeable(ds)` for ds ≥ 2 was false (one `used before Probe P2` warning) until `DvpConst.P2_PASSED`; Probe P2 passed on 2026-11-02 and PR-D10 sets it `true` (runs R1 8356ba60, R2 05c8e4d9, R3 c003d107, R4 aa78186a, 63e2d28d). MT-07 trades the 60m stream only; 240m is diagnostic by consumer rule (DV-7.5). `Tradeable` does not hard-code a timeframe.
 - **When to set the config.** Set `DvpConfig` fields in `Create()`, or in `StartCalc()` before `base.StartCalc()`. `startDvp` validates once in `StartCalc` and throws `ArgumentException` on a bad config.
 - **`fibAnchor`.** `fibAnchor = ExtremeInLookback` is rejected: `Validate()` reports "fibAnchor … not supported (MostRecentPivot only, spec rev 5 §2)" (`_DvpEngine` L110, PR #39 prelude 334dc0b). Leave it at `MostRecentPivot`.
 - **When to query.** Query only after `base.CalcBar()`. The host picks the window end itself (`dvpEndAgo` → `DvpHtf.EndAgo`), so a snapshot on bar t is the fit as of t−1. On an HTF stream only closed HTF bars are read; a forming HTF bar never reaches a snapshot.
@@ -8599,7 +8605,7 @@ protected override void CalcBar()
 - **`diagnosticOnly` never gates `Tradeable` (by design).** Rev 5.2 (DV-7.0, DV-7.4) makes `diagnosticOnly` a run-level verdict, reported in the `DVP RUN` line only; a stream stays tradeable under rollMode None. Do not expect `dvpTradeable` to turn false on it (`_DvpEngine` L1396).
 - **Still pending (m-dvp-spec rev 5.3; not on main a07257a).**
   - D8 the KD02 canary and Calibrate study, and D9 online degree self-calibration (rev 6; no frozen d\*).
-  - Probe P2 (which flips `P2_PASSED`) and `rollMode` (DV-7.0) are also pending. `rollMode` None waits for the instrument profile.
+  - `rollMode` (DV-7.0) is also pending (Probe P2 passed; PR-D10 flipped `P2_PASSED`). `rollMode` None waits for the instrument profile.
   - There is no winLen sweep, and no 240m stream for trading (DV-1.1, DV-7.5).
   - The DVP-hosted PA engines use `minBreakoutLayer = 0` (`_CustomSignal` L648), unlike the main engine's default 1 (§4.8).
 
@@ -11420,7 +11426,7 @@ Generated by script from every `.CS` file in the tree: public and protected memb
 /* 36 */ public const int MaxDegree = 3;
 /* 37 */ public const double SseEps = 1e-12;
 /* 38 */ public const double BreakdownRel = 1e-13;
-/* 41 */ public const bool P2_PASSED = false;
+/* 43 */ public const bool P2_PASSED = true;
 /* 44 */ public static readonly DateTime HoldoutFrom = new DateTime(2025, 1, 1);
 /* 46 */ public const double CalibK = 2;
 /* 48 */ public const string CalibRecheck = "month";

@@ -651,7 +651,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>DV-9.3 / DV-10 Tradeable(ds): false when the engine is off or ds is not a DVP stream; Data2/3 false (one Warning) until
-		/// DvpConst.P2_PASSED. MT-07 trades the 60m stream only; 240m is diagnostic (DV-7.5) by consumer rule.</summary>
+		/// DvpConst.P2_PASSED (true since PR-D10, Probe P2 passed 2026-11-02). MT-07 trades the 60m stream only; 240m is diagnostic (DV-7.5) by consumer rule.</summary>
 		protected bool dvpTradeable(int ds) { _DvpEngine e = Dvp; return e != null && e.Tradeable(ds); }
 
 		/// <summary>DV-9.4 HtfAccepted(ds, R, dir, N >= 2): DV-8.3 Accepted on stream ds's CLOSED bars as seen from the current Data1 bar
@@ -1731,14 +1731,25 @@ namespace PowerLanguage.Strategy
 		private DateTime[] m_htfMappedSession;
 		private bool m_htfFormingWarned;
 
-		/// <summary>M-MTF rule 1: the bar of stream ds that is the ago-th CLOSED bar (bar 0 when it is closed, else bar 1), as a bars-ago index.</summary>
-		protected int HtfClosedIndex(int ds, int ago = 0) { return _MtfMath.ClosedIndex(BarsOfData(ds).Status == EBarState.Close, ago); }
+		/// <summary>M-MTF rule 1 (Probe P2 closed rule, _MtfMath header): bar 0 of an HTF stream is closed iff its Status is Close, or its
+		/// Status is None and its Time is not after the Data1 time; Open/Inside is forming. Typed EBarState compares only. Requires
+		/// Realtime-History Matching on (not readable from code).</summary>
+		private bool htfBarZeroClosed(IInstrument b)
+		{
+			EBarState st = b.Status;
+			return _MtfMath.BarZeroClosed(st == EBarState.Close, st == EBarState.None, b.Time[0], Bars.Time[0]);
+		}
+
+		/// <summary>M-MTF rule 1: the bar of stream ds that is the ago-th CLOSED bar (bar 0 when it is closed under the P2 rule, else bar 1),
+		/// as a bars-ago index. Monotonic over calls except the live IOG-off k=1 call at a shared end time (d1 Close, d2 Inside), which
+		/// may map one bar back for that call (conservative).</summary>
+		protected int HtfClosedIndex(int ds, int ago = 0) { return _MtfMath.ClosedIndex(htfBarZeroClosed(BarsOfData(ds)), ago); }
 		/// <summary>M-MTF: close of the ago-th closed bar of stream ds.</summary>
 		protected double HtfClosed(int ds, int ago = 0) { return BarsOfData(ds).Close[HtfClosedIndex(ds, ago)]; }
 		/// <summary>M-MTF: the ago-th closed bar of stream ds (time, OHLCV).</summary>
 		protected void HtfClosedBar(int ds, int ago, out DateTime time, out double open, out double high, out double low, out double close, out double volume)
 		{
-			IInstrument b = BarsOfData(ds); int i = _MtfMath.ClosedIndex(b.Status == EBarState.Close, ago);
+			IInstrument b = BarsOfData(ds); int i = _MtfMath.ClosedIndex(htfBarZeroClosed(b), ago);
 			time = b.Time[i]; open = b.Open[i]; high = b.High[i]; low = b.Low[i]; close = b.Close[i]; volume = b.Volume[i];
 		}
 
@@ -1756,7 +1767,7 @@ namespace PowerLanguage.Strategy
 		protected int htfMapped(int ds, int maxBack = 2)
 		{
 			IInstrument b = BarsOfData(ds); DateTime t = Bars.Time[0];
-			int i = _MtfMath.MapIndex(k => b.Time[k], _MtfMath.ClosedIndex(b.Status == EBarState.Close, 0), t, maxBack);
+			int i = _MtfMath.MapIndex(k => b.Time[k], _MtfMath.ClosedIndex(htfBarZeroClosed(b), 0), t, maxBack);
 			if (m_htfMappedSession != null && ds < m_htfMappedSession.Length && Bars.Status == EBarState.Close)
 			{
 				DateTime day = tradingDayKey(t);
@@ -1782,7 +1793,42 @@ namespace PowerLanguage.Strategy
 				IInstrumentSettings info = BarsOfData(ds).Info;
 				if (_MtfMath.SymbolRoot(info.Name) != root)
 					throw new ArgumentException($"HtfStreams: Data{ds} is {info.Name}, Data1 is {Bars.Info.Name}; an HTF stream must carry the Data1 instrument (use XmktLegs for other markets)");
+				checkHtfSessions(ds);
 			}
+			if (HtfStreams.Length > 0 && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "MTF closed rule: Close, or None with Time <= Data1 time (Probe P2); requires Realtime-History Matching ON (Format Signals > Properties > Backtesting), not readable from code");
+		}
+
+		/// <summary>M-MTF setup check (MC-1439): Warning when stream ds's session template differs from Data1's (count, or any session's
+		/// start/end day and time). With RHM on and different session ends the strategy stalls until Data2 prints. Typed
+		/// IInstrument.Sessions / SessionObject members only. Warning "session check unavailable" (and no mismatch report) when either
+		/// list is null or empty, or reading it throws (VERIFY: whether Sessions is populated at StartCalc).</summary>
+		private void checkHtfSessions(int ds)
+		{
+			string diff, why;
+			try
+			{
+				_MtfMath.Session[] s1 = mtfSessions(Bars), s2 = mtfSessions(BarsOfData(ds));
+				why = _MtfMath.SessionUnavailable(s1, s2, ds);
+				diff = why == null ? _MtfMath.SessionMismatch(s1, s2) : null;
+			}
+			catch (Exception e) { why = e.GetType().Name; diff = null; }
+			if (why != null)
+			{
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"MTF Data{ds} session check unavailable ({why}); confirm Data1 and Data{ds} use the same session template (MC-1439)");
+				return;
+			}
+			if (diff != null && traceOn(ETraceLevel.Warning))
+				trace(ETraceLevel.Warning, $"MTF Data{ds} session template differs from Data1: {diff}. With Realtime-History Matching on and different session ends the strategy stalls until Data{ds} prints (MC-1439); use the same template");
+		}
+
+		private static _MtfMath.Session[] mtfSessions(IInstrument b)
+		{
+			IROList<SessionObject> list = b.Sessions;
+			if (list == null) return null;
+			var r = new _MtfMath.Session[list.Count];
+			for (int i = 0; i < r.Length; i++) { SessionObject so = list[i]; r[i] = new _MtfMath.Session(so.StartDay, so.StartTime, so.EndDay, so.EndTime); }
+			return r;
 		}
 
 		// ---- Phase 3 S4: roll detection on any base (moved from _VolumeProfileFuturesBase VPF-4; off by default) ----

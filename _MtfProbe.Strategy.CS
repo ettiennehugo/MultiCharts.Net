@@ -40,6 +40,12 @@
 //   chart matches the VP strategies (v= in the log is Data2 Volume[0] as MC builds it).
 //   Max bars back: User specified 20 (R2: 5). Not Auto-detect: Auto-detect restarts the calc on the deep d2 read and hides (e).
 //   Inputs: TraceLevel = Info (the only input). Nothing else to set.
+//   Realtime-History Matching (RHM) MUST be ON (MC wiki: Format Signals > Signals tab > Properties > Backtesting > Realtime-History
+//   Matching checkbox; on by default; VERIFY the exact tab in your MC version). MC .NET has no member to read it, so the probe
+//   cannot log it: check it by hand. Data1 and Data2 must use the SAME session template; startMtf logs a Warning
+//   "MTF Data2 session template differs from Data1" when Bars.Sessions differ (MC-1439: with RHM on and different session ends
+//   the strategy stalls until Data2 prints), or "MTF Data2 session check unavailable" when either Sessions list is null or empty
+//   (VERIFY: whether Sessions is populated at StartCalc). The RHM-required line is logged at Info.
 //   IOG: Format Signals > Properties > Enable Intra-Bar Order Generation (VERIFY tab name). Bar Magnifier: Format Signals >
 //   Properties > Backtesting > Use Bar Magnifier (VERIFY). The "P2 start" line logs iog(True|False) to confirm the setting.
 //   Import order: _MtfMath.Function.CS, then _MtfProbe.Strategy.CS, then Compile.
@@ -56,6 +62,8 @@
 //   Info,<time> <zone>,_MtfProbe,@ES,<runId>,P2 start iog(False) maxBarsBack(20) d1(@ES Minute 1) d2(@ES Minute 60) d2.Close[MaxBarsBack]=5590.5 d1cb(1201) d2cb(21)
 //   Info,<time> <zone>,_MtfProbe,@ES,<runId>,P2 call(n) same(k) d1[2024-07-09 10:00:00 Close c=5600.25 cb=1440] d2[2024-07-09 10:00:00 Close o= h= l= c= v= cb=40]
 //     closedIdx(0) closed[2024-07-09 10:00:00 c=5600.25] mapped(0 2024-07-09 10:00:00) realTime(False)     (live: realTime(True wall=10:00:00.153))
+//   closedIdx = HtfClosedIndex(2) under the P2 closed rule: Close, or None with d2 Time <= d1 Time -> 0; Open/Inside, or d2 Time
+//   after d1 Time -> 1. P2 results (runs 8356ba60 05c8e4d9 c003d107 aa78186a 63e2d28d): missing-functionality-specs.md §3.
 //   same(k) = k-th call on the same Data1 bar (CurrentBar); d2 o/h/l/c/v = Data2 bar 0 as MC shows it on that call.
 //
 // 5. PASS (what Analyst reads). Times are chart times; "hh:00" is any 60-min boundary.

@@ -147,6 +147,8 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 - **Once:** `P2 start iog(..) maxBarsBack(..) d1(name type size) d2(...) d2.Close[MaxBarsBack]=... d1cb(..) d2cb(..)`
 - **Every CalcBar:** `P2 call(n) same(k) d1[time status c= cb=] d2[time status o= h= l= c= v= cb=] closedIdx(i) closed[time c=] mapped(i time) realTime(..)`
 
+**Prerequisite.** Realtime-History Matching (RHM) **on**: Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching (MC wiki; on by default; **VERIFY** the tab in your MC version). No MC .NET member reads it, so check it by hand. Data1 and Data2 on the **same** session template; a Journal Warning `MTF Data2 session template differs from Data1` means they are not (MC-1439).
+
 **Run sheet.** The header of `_MtfProbe.Strategy.CS` now holds the run sheet (4 runs: R1/R2 any time, R3/R4 live; Data2 = 60-min; data ranges, extracts and PASS rules for (a)-(e)). It supersedes steps 1-4 below.
 
 **Steps**
@@ -169,6 +171,8 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 | identical across modes | diff `closed[...]` / `mapped(...)` between runs a–e | identical mapping in backtest, playback and live |
 
 **Record.** The 6 answers above and the run files (name + run).
+
+**Result (2026-11-02, RHM on, @ES 1m + 60m).** Runs R1 `8356ba60`, R2 `05c8e4d9`, R3 `c003d107`, R4 `aa78186a`, live between marks `63e2d28d`. (a) On history and between marks `d2[0]` is the last closed bar (frozen, Status None); in live IOG on, during the Data1 bar ending with Data2, `d2[0]` is the forming bar (Status Inside, Time equal to Data1). (b) End stamps PASS. (c) History: one call with both Close; live IOG off: two calls (k=1 d1 Close / d2 Inside, k=2 d1 None / d2 Close), a backtest/live difference. (d) Holds as far as the probe shows; it sends no orders. (e) Per-series MaxBarsBack PASS. The old `closedIdx` rule (Close ? 0 : 1) was one bar stale for 59 of 60 minutes; it is replaced by the closed rule (Close, or None with Time <= Data1 time). Details: `missing-functionality-specs.md` §3.
 
 **Pass / fail.**
 
