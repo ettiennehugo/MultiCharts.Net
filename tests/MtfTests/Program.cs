@@ -205,6 +205,54 @@ static class Program
 		Check(m2 != null && m2.StartsWith("sessions 2 vs 1 ", StringComparison.Ordinal), "different session count -> warning (" + m2 + ")");
 	}
 
+	// main's SymbolRoot (6853398), frozen: the reference for the PR-M1a differential (letter-led names without "/" must not change).
+	static string MainSymbolRoot(string name)
+	{
+		if (string.IsNullOrEmpty(name)) return "";
+		string s = name.Trim().ToUpperInvariant();
+		int start = s.StartsWith("@") ? 1 : 0, i = start;
+		while (i < s.Length && char.IsLetter(s[i])) i++;
+		string letters = s.Substring(start, i - start);
+		if (i < s.Length && char.IsDigit(s[i]) && letters.Length >= 2 && "FGHJKMNQUVXZ".IndexOf(letters[letters.Length - 1]) >= 0) letters = letters.Substring(0, letters.Length - 1);
+		return letters;
+	}
+
+	// PR-M1a differential: every letter-led name (optionally after "@" and whitespace) without "/" resolves exactly as on main.
+	// A fixed root x suffix grid plus 200,000 deterministic LCG names over letters, digits, month codes and separators.
+	static void SymbolRootDifferential()
+	{
+		string[] roots = { "ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K", "CL", "MCL", "QM", "NG", "RB", "HO", "GC", "MGC", "SI", "SIL", "HG", "PL",
+			"ZN", "ZB", "ZF", "ZT", "UB", "TN", "ZC", "ZS", "ZW", "KE", "HE", "LE", "C", "S", "W", "Z", "F", "BTC", "MBT", "ETH", "SPY", "QQQ", "AAPL", "MSFT",
+			"BRK", "VX", "VXM", "FDAX", "FESX", "EURUSD", "BTCUSD", "XAUUSD", "ESZ", "ESH", "NQM", "CLF", "GCG", "KEN", "HEZ", "ZQ", "SR3", "Es", "nq", "mes" };
+		string[] suffixes = { "", "#C", "#F", "#", "Z4", "Z24", "Z2024", "H27", "M5", "U25", "F26", "Q2026", " 12-24", " 03-25", ".B", ".US", ":XCME", "Z24:XCME",
+			"-202412", "_Z24", " Z4", "1!", "2!", "Z", "ZZ4", "0", "00", "Z024", "X99", "N1#C", "V7.CME", "@", "Z@4" };
+		string[] prefixes = { "", "@", " ", " @", "@@" };
+		int n = 0, diff = 0; string first = null;
+		foreach (string p in prefixes) foreach (string r in roots) foreach (string x in suffixes)
+		{
+			string name = p + r + x; n++;
+			if (_MtfMath.SymbolRoot(name) != MainSymbolRoot(name)) { diff++; if (first == null) first = name; }
+		}
+		const string alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzFGHJKMNQUVXZFGHJKMNQUVXZ0123456789012345678901234567890123456789 #.-:_!@";
+		const string lead = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+		uint seed = 0x6221dc65u;
+		for (int k = 0; k < 200000; k++)
+		{
+			unchecked { seed = seed * 1664525u + 1013904223u; }
+			int len = 1 + (int)((seed >> 8) % 12u);
+			var sb = new System.Text.StringBuilder();
+			if (((seed >> 20) & 3u) == 0) sb.Append('@');
+			unchecked { seed = seed * 1664525u + 1013904223u; }
+			sb.Append(lead[(int)((seed >> 8) % (uint)lead.Length)]);
+			for (int j = 1; j < len; j++) { unchecked { seed = seed * 1664525u + 1013904223u; } sb.Append(alpha[(int)((seed >> 8) % (uint)alpha.Length)]); }
+			string name = sb.ToString(); n++;
+			if (_MtfMath.SymbolRoot(name) != MainSymbolRoot(name)) { diff++; if (first == null) first = name; }
+		}
+		Check(diff == 0, "MI-T2 differential: " + n.ToString(CultureInfo.InvariantCulture) + " letter-led names without '/' resolve as on main ("
+			+ diff.ToString(CultureInfo.InvariantCulture) + " differ" + (first == null ? "" : ", first '" + first + "'") + ")");
+		Console.WriteLine("SymbolRoot differential vs main: " + n.ToString(CultureInfo.InvariantCulture) + " names, " + diff.ToString(CultureInfo.InvariantCulture) + " differ");
+	}
+
 	// M-INSTR MI-T2 (subset, PR-M1a, F1; §4.3 without presets): digit-led roots, FX "/", "#" suffix, empty roots never match.
 	static void SymbolRoots()
 	{
@@ -215,7 +263,10 @@ static class Program
 		Check(R("6B") == "6B" && R("6BZ26") == "6B" && R("6B") != R("6E") && R("@6B") != R("@6E"), "MI-T2 6B != 6E (leading digits kept)");
 		Check(R("EUR/USD") == "EURUSD" && R("EUR/JPY") == "EURJPY" && R("EUR/USD") != R("EUR/JPY") && R("eur/usd") == "EURUSD" && R("EURUSD") == "EURUSD", "MI-T2 FX: EUR/USD vs EUR/JPY do not collide (was \"EUR\" for both)");
 		Check(R("@NQ#C") == "NQ" && R("@CL#F") == "CL" && R("GCQ26") == "GC" && R("ZNH27") == "ZN" && R("@MNQ") == "MNQ", "MI-T2 other futures with #suffix / outright");
-		Check(R("SPY") == "SPY" && R("AAPL") == "AAPL" && R("BTCUSD") == "BTCUSD" && R("Z4") == "Z4" && R("ESZ") == "ESZ", "MI-T2 cleaned name kept; month code stripped only with a non-empty remainder");
+		Check(R("SPY") == "SPY" && R("AAPL") == "AAPL" && R("BTCUSD") == "BTCUSD" && R("Z4") == "Z" && R("ESZ") == "ESZ" && R("BRK.B") == "BRK", "MI-T2 letter-led names as on main (Z4 -> Z, BRK.B -> BRK; class-aware handling is M2)");
+		Check(R("ESZ2024") == "ES" && R("CLZ2026") == "CL" && R("ESZ24:XCME") == "ES" && R("ES 12-24") == "ES" && R("MESZ26") == "MES" && R("@NQ") == "NQ"
+			&& R("6EZ2026") == "6E" && R("@6E 12-26") == "6E", "MI-T2 dated contracts: ESZ2024, CLZ2026, ESZ24:XCME, 'ES 12-24', MESZ26, @NQ");
+		SymbolRootDifferential();
 		Check(R(null) == "" && R("") == "" && R("  ") == "" && R("@") == "" && R("#C") == "" && R("@#C") == "", "MI-T2 no root -> empty");
 		Check(_MtfMath.SameRoot("ES", "ES") && _MtfMath.SameRoot(R("@6E"), R("6EZ26")) && !_MtfMath.SameRoot(R("@6E"), R("@6B"))
 			&& !_MtfMath.SameRoot("", "") && !_MtfMath.SameRoot(null, null) && !_MtfMath.SameRoot("", "ES") && !_MtfMath.SameRoot("ES", "")

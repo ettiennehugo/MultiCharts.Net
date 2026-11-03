@@ -107,12 +107,15 @@ namespace PowerLanguage.Function
 
 		/// <summary>
 		/// §3 rule 6 / M-INSTR §4.3 (PR-M1a, F1; no presets yet): the instrument root, used to check that HTF streams carry the Data1
-		/// instrument and to key roll inheritance. Returns the root WITHOUT the "@": "ES" for "@ES" / "@ES#C" / "ESZ24" / "ESZ4",
-		/// "MES" for "MESH27", "6E" for "@6E" / "6EZ26", "EURUSD" for "EUR/USD". Steps: trim; strip a leading "@"; strip a "#..."
-		/// continuous suffix; uppercase invariant; remove every "/" (spot FX; there is no category input, so it is unconditional:
-		/// futures and stock names carry no "/"); then the futures fallback strips a trailing month code + 1-2 digit year
-		/// ([FGHJKMNQUVXZ][0-9]{1,2}) only when the remainder is non-empty. Leading digits are kept ("6B" != "6E"). "" only for a
-		/// name with no root (null, blank, "@", "#C"); an empty root is an error and never matches (SameRoot, DvpHtf.RootError).
+		/// instrument and to key roll inheritance. Returns the root WITHOUT the "@": "ES" for "@ES" / "@ES#C" / "ESZ24" / "ESZ4" /
+		/// "ESZ2024" / "ES 12-24" / "ESZ24:XCME", "MES" for "MESZ26", "6E" for "@6E" / "6EZ26", "EURUSD" for "EUR/USD".
+		/// Steps: trim; strip a leading "@"; strip a "#..." continuous suffix; uppercase invariant; remove every "/" (spot FX; there is
+		/// no category input, so it is unconditional until the M2 resolver gates it to Spot FX); then take the leading digits plus the
+		/// letter run after them, and drop the run's last letter when it is a month code [FGHJKMNQUVXZ] followed by a digit and the run
+		/// has 2 or more letters. Leading digits are kept ("6B" != "6E"). For a letter-led name without "/" this is exactly main's
+		/// rule (leading letter run, month code dropped before a digit): "BRK.B" -> "BRK", "Z4" -> "Z" (class-aware handling is M2).
+		/// "" only for a name with no root (null, blank, "@", "#C"); an empty root is an error and never matches (SameRoot,
+		/// DvpHtf.RootError).
 		/// </summary>
 		public static string SymbolRoot(string name)
 		{
@@ -122,11 +125,13 @@ namespace PowerLanguage.Function
 			int hash = s.IndexOf('#');
 			if (hash >= 0) s = s.Substring(0, hash);
 			s = s.ToUpperInvariant().Replace("/", "");
-			int n = s.Length, d = 0;
-			while (d < 2 && d < n && s[n - 1 - d] >= '0' && s[n - 1 - d] <= '9') d++;
-			// outright futures (ESZ24, ESZ4, 6EZ26): drop month code + year when something is left before the month code
-			if (d > 0 && n - d - 1 > 0 && "FGHJKMNQUVXZ".IndexOf(s[n - d - 1]) >= 0) s = s.Substring(0, n - d - 1);
-			return s;
+			int digits = 0;
+			while (digits < s.Length && char.IsDigit(s[digits])) digits++;
+			int i = digits;
+			while (i < s.Length && char.IsLetter(s[i])) i++;
+			// outright futures (ESZ24, ESZ4, ESZ2024, 6EZ26): drop the month code when a digit follows and the run has >= 2 letters
+			if (i - digits >= 2 && i < s.Length && char.IsDigit(s[i]) && "FGHJKMNQUVXZ".IndexOf(s[i - 1]) >= 0) i--;
+			return s.Substring(0, i);
 		}
 
 		/// <summary>M-INSTR §4.3 rule 5 (F1): true only when both roots are non-empty and equal (ordinal; SymbolRoot output is upper
