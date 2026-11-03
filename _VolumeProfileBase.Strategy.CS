@@ -1436,11 +1436,7 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		/// <summary>Futures = ESymbolCategory.Future or ESymbolCategory.FutureRolover (typed; _McApiDump3 lists FutureRolover = 18).</summary>
-		protected static bool isFuturesCategory(ESymbolCategory category)
-		{
-			return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;
-		}
+		// isFuturesCategory (Future or FutureRolover) moved to _CustomSignal (M-INSTR F2) so the host's roll / DAILY checks share it.
 
 		/// <summary>
 		/// Build Volume On (Ettienne 2026-11-01): refuses a futures Data1 on Tick Count, and a futures Data2..N on Tick Count that feeds a

@@ -6,6 +6,8 @@ using Src = Extracted.OrderFlow.FlowSource;
 using Q = Extracted.OrderFlow.FlowQuality;
 using Side = Extracted.OrderFlow.Side;
 using Regime = Extracted.OrderFlow.Regime;
+using IH = Extracted.InstrHost;
+using Cat = Extracted.ESymbolCategory;
 
 // Spec VPF-5 Rev 2.5 acceptance tests T1-T8 (analyst-base-class-spec.md §D), run on the shipped <order-flow> block.
 static class Program
@@ -725,8 +727,9 @@ static class Program
 				&& wt16.Contains("File.AppendAllText(m_logFilePath, line + System.Environment.NewLine, s_utf8NoBom);") && !wt16.Contains("TraceLevel") && !wt16.Contains("level <") && !wt16.Contains("level >")
 				&& !rtf.Contains("trace(ETraceLevel") && !rtf.Contains("traceOn("),
 				"VB16 the Build Volume On Error is written at TraceLevel None: traceAlways has no level gate, one File.AppendAllText, no Output / Bars.Time");
-			// VB17 FutureRolover is futures (typed)
-			string ifc = MethodBody(vb, "protected static bool isFuturesCategory(ESymbolCategory category)") ?? "";
+			// VB17 FutureRolover is futures (typed); M-INSTR F2 moved the helper to _CustomSignal (one copy, shared with the host's roll checks)
+			string ifc = MethodBody(cs16, "protected static bool isFuturesCategory(ESymbolCategory category)") ?? "";
+			Check(!vb.Contains("bool isFuturesCategory("), "VB17b _VolumeProfileBase uses the inherited _CustomSignal.isFuturesCategory (no second copy)");
 			Check(ifc.Contains("return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;") && !ifc.Contains("ToString") && !ifc.Contains("Enum.") && !ifc.Contains("\"") && !ifc.Contains("(int)"),
 				"VB17 isFuturesCategory: ESymbolCategory.Future or ESymbolCategory.FutureRolover, typed members only");
 			// VB18 Data2..N: typed BarsOfData(n).Info.BVO / Category, stream named in the message, first offender throws
@@ -1045,13 +1048,10 @@ static class Program
 					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
 					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");
 				// Exemptions, each listed in the PR. _InstrProbe is the probe/dump study: it prints enum names and reads members by
-				// reflection on purpose (no trading decision). autoTradingDay's category test waits for _McApiDump3 (Forex/Crypto
-				// member names are documented, not confirmed on Ettienne's install).
+				// reflection on purpose (no trading decision). M-INSTR PR-M1b removed the three autoTradingDay Category-name exemptions
+				// (typed ClassOf switch now).
 				var exemptFiles = new HashSet<string> { "_InstrProbe.Strategy.CS" };
-				string[] exemptLines = {
-					"_CustomSignal.Strategy.CS|if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, Bars.Info.Category.ToString());",
-					"_CustomSignal.Strategy.CS|if (c.Contains(\"FOREX\") || (c.Contains(\"CURRENCY\") && !c.Contains(\"CRYPTO\"))) return ToZone(barTime, \"Eastern Standard Time\").AddHours(7).Date;",
-					"_CustomSignal.Strategy.CS|if (c.Contains(\"CRYPTO\")) return ToZone(barTime, \"UTC\").Date;" };
+				string[] exemptLines = { };
 				var used = new HashSet<string>();
 				var hits = new List<string>();
 				foreach (var kv in texts)
@@ -1123,12 +1123,91 @@ static class Program
 				Check(eq2.Contains("t.Enqueue(b.Time, b.Close, (double)b.TotalVolume);") && !cs.Contains("tickBarMember") && !cs.Contains("System.Reflection.MemberInfo"), "TE7 M-TICK enqueueTick reads the typed Bar fields; tickBarMember reflection removed");
 				string ip = MethodBody(cs, "private static bool isInputProperty(System.Reflection.PropertyInfo p)") ?? "";
 				Check(ip.Contains("return Attribute.IsDefined(p, typeof(InputAttribute), true);") && !ip.Contains(".Name"), "TE8 RUN-line inputs: typed InputAttribute (inherit = true), not a type-name compare");
-				Check(cs.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && Bars.Info.Category == ESymbolCategory.Future)")
-					&& cs.Contains("if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category == ESymbolCategory.Future) {") && !cs.Contains("Category.ToString() ==") && !cs.Contains("Type.ToString()"),
-					"TE9 _CustomSignal roll checks use ESymbolCategory.Future / EResolution.Day");
+				Check(cs.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")
+					&& cs.Contains("if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) {") && !cs.Contains("Category.ToString()") && !cs.Contains("Type.ToString()"),
+					"TE9 _CustomSignal roll checks use typed isFuturesCategory (Future or FutureRolover, M-INSTR F2) / EResolution.Day; no Category.ToString()");
 				string vpb = texts["_VolumeProfileBase.Strategy.CS"];
 				Check(vpb.Contains("oneTick = src != null && src.Info.Resolution.Type == EResolution.Tick && src.Info.Resolution.Size == 1;"), "TE10 _VolumeProfileBase own-mode 1-tick test uses EResolution.Tick");
 			}
+		}
+
+
+		// ---- M-INSTR PR-M1b (spec rev 2.3 §3.2 F2/F4, §3.3, §4.2): the shipped <instr-host-core> region of _CustomSignal, compiled
+		// against a mirror of ESymbolCategory with the §4.1 member values (no test project references PowerLanguage). ----
+		{
+			var all = (Cat[])Enum.GetValues(typeof(Cat));
+			string spec41 = "Future=0,FutureOption=1,Stock=2,StockOption=3,Index=4,CurrOption=5,MutualFund=6,MoneyMarketFund=7,IndexOption=8,Cash=9,Bond=10,Spread=11,Forex=12,CPCSymbol=13,Composites=14,FutureRoot=15,FutureOptionRoot=16,StockOptionRoot=17,FutureRolover=18,Commodity=19,Crypto=20,Warrant=21,None=254";
+			Check(all.Length == 23 && string.Join(",", all.Select(c => c + "=" + (int)c)) == spec41, "MI-B0 mirror ESymbolCategory = the 23 members and values of spec §4.1");
+			// F2: futures = Future or FutureRolover, nothing else
+			var fut = all.Where(IH.isFuturesCategory).ToList();
+			Check(fut.Count == 2 && fut.Contains(Cat.Future) && fut.Contains(Cat.FutureRolover), "MI-B1 isFuturesCategory: true for Future and FutureRolover only [" + string.Join(",", fut) + "]");
+			// §4.2 ClassOf, every member
+			var expect = new Dictionary<Cat, IH.EAssetClass> {
+				{ Cat.Future, IH.EAssetClass.Future }, { Cat.FutureRolover, IH.EAssetClass.Future }, { Cat.Stock, IH.EAssetClass.Stock },
+				{ Cat.Forex, IH.EAssetClass.SpotFx }, { Cat.Crypto, IH.EAssetClass.Crypto }, { Cat.Index, IH.EAssetClass.Index } };
+			var wrong = new List<string>();
+			foreach (Cat c in all)
+			{
+				IH.EAssetClass want = expect.ContainsKey(c) ? expect[c] : IH.EAssetClass.Unsupported, got;
+				try { got = IH.ClassOf(c); } catch (Exception ex) { wrong.Add(c + " threw " + ex.GetType().Name); continue; }
+				if (got != want) wrong.Add(c + "->" + got);
+			}
+			Check(wrong.Count == 0, "MI-B2 ClassOf maps all 23 ESymbolCategory members per §4.2 (Future/FutureRolover -> Future, Stock, Forex -> SpotFx, Crypto, Index, rest -> Unsupported) [" + string.Join(" | ", wrong) + "]");
+			string unmapped = null;
+			try { IH.ClassOf((Cat)99); } catch (InvalidOperationException ex) { unmapped = ex.Message; }
+			Check(unmapped == "M-INSTR: unmapped ESymbolCategory 99", "MI-B3 ClassOf throws on a value outside §4.1 (a later MC build) [" + unmapped + "]");
+			// L2462: the typed Auto trading day equals main's Category-name substring rule for every category (differential)
+			Func<DateTime, string, DateTime> toZone = (t, id) => id == "UTC" ? t.AddHours(5) : id == "Eastern Standard Time" ? t.AddHours(-1) : t.AddDays(1000);
+			Func<DateTime, string, DateTime> mainAuto = (t, category) => {   // main @ d2b41b7 autoTradingDay(barTime, Category.ToString())
+				string c = (category ?? "").ToUpperInvariant();
+				if (c.Contains("FOREX") || (c.Contains("CURRENCY") && !c.Contains("CRYPTO"))) return toZone(t, "Eastern Standard Time").AddHours(7).Date;
+				if (c.Contains("CRYPTO")) return toZone(t, "UTC").Date;
+				return t.Date; };
+			int cases = 0; var diff = new List<string>();
+			foreach (Cat c in all)
+				for (int h = 0; h < 24 * 3; h++)
+					for (int m = 0; m < 60; m += 15)
+					{
+						DateTime t = new DateTime(2026, 3, 6, 0, 0, 0).AddHours(h).AddMinutes(m); cases++;
+						DateTime a = mainAuto(t, c.ToString()), b = IH.autoTradingDayOf(IH.ClassOf(c), t, toZone);
+						if (a != b && diff.Count < 5) diff.Add(c + " " + t.ToString("s") + " main " + a.ToString("d") + " new " + b.ToString("d"));
+					}
+			Check(cases == 23 * 72 * 4 && diff.Count == 0, "MI-B4 typed Auto trading day == main's Category-name rule for all 23 categories (" + cases + " bar times) [" + string.Join(" | ", diff) + "]");
+			DateTime t18 = new DateTime(2026, 3, 6, 18, 30, 0);
+			Check(IH.autoTradingDayOf(IH.EAssetClass.SpotFx, t18, toZone) == new DateTime(2026, 3, 7) && IH.autoTradingDayOf(IH.EAssetClass.Crypto, new DateTime(2026, 3, 6, 20, 0, 0), toZone) == new DateTime(2026, 3, 7)
+				&& IH.autoTradingDayOf(IH.EAssetClass.Future, t18, toZone) == new DateTime(2026, 3, 6) && IH.autoTradingDayOf(IH.EAssetClass.Stock, t18, toZone) == new DateTime(2026, 3, 6),
+				"MI-B5 Auto: SpotFx rolls at 17:00 NY (+7h), Crypto keys by UTC date, Future/Stock by bar date");
+			// F4: tick resolution, no 0.01 fallback
+			Func<double, bool> bad = x => double.IsNaN(x);
+			Check(IH.tickFromMinMove(25, 100) == 0.25 && IH.tickFromMinMove(1, 100) == 0.01 && Math.Abs(IH.tickFromMinMove(5, 100000) - 5e-5) < 1e-18
+				&& IH.tickFromMinMove(-25, 100) == 0.25 && IH.tickFromMinMove(2, 0) == 2,
+				"MI-B6 tick = |MinMove / PriceScale| (ES 25/100 = 0.25, stock 1/100, 6E 5/100000), MinMove when PriceScale = 0 (as on main)");
+			Check(bad(IH.tickFromMinMove(0, 100)) && bad(IH.tickFromMinMove(0, 0)) && bad(IH.tickFromMinMove(double.NaN, 100)) && bad(IH.tickFromMinMove(1, double.NaN))
+				&& bad(IH.tickFromMinMove(-1, 0)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 1)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 0)) && bad(IH.tickFromMinMove(1e-300, 1e300)),
+				"MI-B7 a missing, zero, negative-only, NaN, infinite or underflowing tick is unresolved (NaN), never 0.01");
+			var cult = System.Threading.Thread.CurrentThread.CurrentCulture;
+			System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+			string te = IH.tickError("@6E", 0.5, 1000), te0 = IH.tickError(null, double.NaN, double.NaN);
+			System.Threading.Thread.CurrentThread.CurrentCulture = cult;
+			Check(te == "M-INSTR F4: no usable tick size for @6E (Bars.Info.MinMove = 0.5, PriceScale = 1000). There is no 0.01 fallback: set Min Movement / Price Scale for the symbol in QuoteManager."
+				&& te0.StartsWith("M-INSTR F4: no usable tick size for Data1 (Bars.Info.MinMove = NaN, PriceScale = NaN)"), "MI-B8 tick error text names the symbol and both values, culture-invariant (de-DE) [" + te + "]");
+			// host wiring (MC-bound methods: source checks)
+			string cs = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_CustomSignal.Strategy.CS"));
+			string code = System.Text.RegularExpressions.Regex.Replace(cs, @"//[^\n]*", "");
+			string rtk = MethodBody(cs, "private double resolveTick()") ?? "";
+			int iT = rtk.IndexOf("double t = tickFromMinMove(mm, ps);"), iR = rtk.IndexOf("if (t > 0) return t;"), iE = rtk.IndexOf("traceAlways(ETraceLevel.Error, name, error);"), iX = rtk.IndexOf("throw new InvalidOperationException(error);");
+			int iC = rtk.IndexOf("catch (Exception ex)"), iCE = rtk.IndexOf("traceAlways(ETraceLevel.Error, null, readError);"), iCX = rtk.IndexOf("throw new InvalidOperationException(readError, ex);");
+			Check(iT > 0 && iR > iT && iE > iR && iX > iE && iC > 0 && iCE > iC && iCX > iCE && iT > iCX && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"catch\s*\{")
+				&& !code.Contains("TICK_FALLBACK") && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"return\s+0\.01"),
+				"MI-B9 resolveTick: an unresolved tick or an unreadable Bars.Info writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
+			Check(code.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")
+				&& code.Contains("if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) {")
+				&& System.Text.RegularExpressions.Regex.IsMatch(code, @"m_rollGlobexKey = m_rollDet\.series && calendarKeyed && intraday\s*&& isFuturesCategory\(Bars\.Info\.Category\);")
+				&& System.Text.RegularExpressions.Regex.Matches(code, @"==\s*ESymbolCategory\.Future\b").Count == 1,
+				"MI-B10 F2: DAILY roll-offset warning, RollDetection-Off warning and the roll Globex key use isFuturesCategory; Category == Future only inside isFuturesCategory");
+			Check(code.Contains("if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, ClassOf(Bars.Info.Category));")
+				&& code.Contains("return autoTradingDayOf(assetClass, barTime, ToZone);") && !code.Contains("Category.ToString()") && !code.Contains("\"FOREX\"") && !code.Contains("\"CRYPTO\""),
+				"MI-B11 L2462: tradingDayKey Auto passes the typed ClassOf(Bars.Info.Category); no Category.ToString() or category-name strings left");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
