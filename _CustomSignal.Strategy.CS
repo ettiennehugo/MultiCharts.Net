@@ -1795,18 +1795,29 @@ namespace PowerLanguage.Strategy
 					throw new ArgumentException($"HtfStreams: Data{ds} is {info.Name}, Data1 is {Bars.Info.Name}; an HTF stream must carry the Data1 instrument (use XmktLegs for other markets)");
 				checkHtfSessions(ds);
 			}
-			if (HtfStreams.Length > 0 && traceOn(ETraceLevel.Journal))
-				trace(ETraceLevel.Journal, "MTF closed rule: Close, or None with Time <= Data1 time (Probe P2); requires Realtime-History Matching ON (Format Signals > Properties > Backtesting), not readable from code");
+			if (HtfStreams.Length > 0 && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "MTF closed rule: Close, or None with Time <= Data1 time (Probe P2); requires Realtime-History Matching ON (Format Signals > Properties > Backtesting), not readable from code");
 		}
 
 		/// <summary>M-MTF setup check (MC-1439): Warning when stream ds's session template differs from Data1's (count, or any session's
 		/// start/end day and time). With RHM on and different session ends the strategy stalls until Data2 prints. Typed
-		/// IInstrument.Sessions / SessionObject members only.</summary>
+		/// IInstrument.Sessions / SessionObject members only. Warning "session check unavailable" (and no mismatch report) when either
+		/// list is null or empty, or reading it throws (VERIFY: whether Sessions is populated at StartCalc).</summary>
 		private void checkHtfSessions(int ds)
 		{
-			string diff;
-			try { diff = _MtfMath.SessionMismatch(mtfSessions(Bars), mtfSessions(BarsOfData(ds))); }
-			catch (Exception e) { if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"MTF Data{ds} session check unavailable ({e.GetType().Name}); confirm Data1 and Data{ds} use the same session template (MC-1439)"); return; }
+			string diff, why;
+			try
+			{
+				_MtfMath.Session[] s1 = mtfSessions(Bars), s2 = mtfSessions(BarsOfData(ds));
+				why = _MtfMath.SessionUnavailable(s1, s2, ds);
+				diff = why == null ? _MtfMath.SessionMismatch(s1, s2) : null;
+			}
+			catch (Exception e) { why = e.GetType().Name; diff = null; }
+			if (why != null)
+			{
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"MTF Data{ds} session check unavailable ({why}); confirm Data1 and Data{ds} use the same session template (MC-1439)");
+				return;
+			}
 			if (diff != null && traceOn(ETraceLevel.Warning))
 				trace(ETraceLevel.Warning, $"MTF Data{ds} session template differs from Data1: {diff}. With Realtime-History Matching on and different session ends the strategy stalls until Data{ds} prints (MC-1439); use the same template");
 		}

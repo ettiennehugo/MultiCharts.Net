@@ -44,7 +44,8 @@
 //   Matching checkbox; on by default; VERIFY the exact tab in your MC version). MC .NET has no member to read it, so the probe
 //   cannot log it: check it by hand. Data1 and Data2 must use the SAME session template; startMtf logs a Warning
 //   "MTF Data2 session template differs from Data1" when Bars.Sessions differ (MC-1439: with RHM on and different session ends
-//   the strategy stalls until Data2 prints).
+//   the strategy stalls until Data2 prints), or "MTF Data2 session check unavailable" when either Sessions list is null or empty
+//   (VERIFY: whether Sessions is populated at StartCalc). The RHM-required line is logged at Info.
 //   IOG: Format Signals > Properties > Enable Intra-Bar Order Generation (VERIFY tab name). Bar Magnifier: Format Signals >
 //   Properties > Backtesting > Use Bar Magnifier (VERIFY). The "P2 start" line logs iog(True|False) to confirm the setting.
 //   Import order: _MtfMath.Function.CS, then _MtfProbe.Strategy.CS, then Compile.

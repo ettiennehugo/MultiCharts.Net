@@ -134,7 +134,10 @@ static class Program
 		var rhmOffN = new Call("RHM off: forming stamped ahead, None", T(19, 5), St.Close, St.None, false, forming1930);
 		var rhmOffI = new Call("RHM off: forming stamped ahead, Inside", T(19, 5), St.Close, St.Inside, false, forming1930);
 		var rhmOffO = new Call("RHM off: forming stamped ahead, Open", T(18, 31), St.Close, St.Open, false, forming1930);
-		Check(NewIdx(rhmOffN) == 1 && NewIdx(rhmOffI) == 1 && NewIdx(rhmOffO) == 1 && d(rhmOffN) == T(18, 30), "RHM off / live forming: d2 Time after Data1 -> 1 whatever the Status");
+		Check(NewIdx(rhmOffN) == 1 && NewIdx(rhmOffI) == 1 && NewIdx(rhmOffO) == 1 && d(rhmOffN) == T(18, 30), "RHM off / live forming: d2 Time after Data1, Status None/Open/Inside -> 1");
+		var futClose = new Call("Close with a future Time", T(19, 5), St.Close, St.Close, false, forming1930);
+		Check(NewIdx(futClose) == 0 && _MtfMath.BarZeroClosed(true, false, T(19, 30), T(19, 5)) && Mapped(futClose) == 1 && d(futClose) == T(18, 30),
+			"Status Close with d2 Time after Data1 -> ClosedIndex 0 (Close is closed whatever its Time); htfMapped still skips it (Time > Data1) -> 18:30");
 		Check(_MtfMath.BarZeroClosed(false, true, T(19, 30), T(19, 30)) && !_MtfMath.BarZeroClosed(false, true, T(19, 30), T(19, 29)) && _MtfMath.ClosedIndex(false, true, T(18, 30), T(19, 0), 2) == 2
 			&& _MtfMath.ClosedIndex(false, false, T(18, 30), T(19, 0), 2) == 3, "BarZeroClosed: None at equal Time closed, None ahead forming; ago adds");
 
@@ -186,7 +189,18 @@ static class Program
 		var rthEnd = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 15, 15), S(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 16, 0) };
 		var shortT = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0) };
 		string m1 = _MtfMath.SessionMismatch(globex, rthEnd), m2 = _MtfMath.SessionMismatch(globex, shortT);
-		Check(_MtfMath.SessionMismatch(globex, same) == null && _MtfMath.SessionMismatch(null, same) == null && _MtfMath.SessionMismatch(new _MtfMath.Session[0], new _MtfMath.Session[0]) == null, "same templates (or unknown) -> no warning");
+		var none = new _MtfMath.Session[0];
+		Check(_MtfMath.SessionMismatch(globex, same) == null && _MtfMath.SessionUnavailable(globex, same) == null, "same templates -> available, no mismatch");
+		Check(_MtfMath.SessionUnavailable(null, same) == "Data1 Sessions null" && _MtfMath.SessionUnavailable(globex, null, 3) == "Data3 Sessions null"
+			&& _MtfMath.SessionUnavailable(none, none) == "Data1 Sessions empty, Data2 Sessions empty" && _MtfMath.SessionUnavailable(globex, none) == "Data2 Sessions empty"
+			&& _MtfMath.SessionUnavailable(none, globex) == "Data1 Sessions empty", "null or empty Sessions list -> unavailable (two empty lists are not equal)");
+		Check(_MtfMath.SessionMismatch(null, same) == null && _MtfMath.SessionMismatch(none, none) == null && _MtfMath.SessionMismatch(globex, none) == null && _MtfMath.SessionMismatch(none, globex) == null,
+			"unavailable list -> no (misleading) mismatch report");
+		string host = File.ReadAllText(Path.Combine("..", "..", "_CustomSignal.Strategy.CS")).Replace("\r\n", "\n");
+		int iu = host.IndexOf("why = _MtfMath.SessionUnavailable(s1, s2, ds);", StringComparison.Ordinal), im = host.IndexOf("diff = why == null ? _MtfMath.SessionMismatch(s1, s2) : null;", StringComparison.Ordinal);
+		Check(iu > 0 && im > iu && host.Contains("if (why != null)") && host.Contains("session check unavailable ({why})")
+			&& host.Contains("catch (Exception e) { why = e.GetType().Name; diff = null; }"), "host: unavailable (null, empty or throw) logs the Warning before any mismatch check");
+		Check(host.Contains("traceOn(ETraceLevel.Info))\n\t\t\t\ttrace(ETraceLevel.Info, \"MTF closed rule"), "host: the RHM-required line logs at Info");
 		Check(m1 == "session 0: Data1 Sun 17:00-Mon 16:00 vs Sun 17:00-Mon 15:15", "different session end -> first difference named (" + m1 + ")");
 		Check(m2 != null && m2.StartsWith("sessions 2 vs 1 ", StringComparison.Ordinal), "different session count -> warning (" + m2 + ")");
 	}
