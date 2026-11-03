@@ -2347,21 +2347,22 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		private double resolveTick()
 		{
-			double mm, ps;
+			double mm = double.NaN, ps = double.NaN;
+			string name = null;
 			try
 			{
 				mm = Bars.Info.MinMove;
 				ps = Bars.Info.PriceScale;
+				name = Bars.Info.Name;   // inside the try: a failing read still gets the Error line below before the throw
 			}
 			catch (Exception ex)
 			{
-				string readError = tickError(null, double.NaN, double.NaN) + " Reading Bars.Info failed: " + ex.GetType().Name + ": " + ex.Message;
-				traceAlways(ETraceLevel.Error, null, readError);
+				string readError = tickError(name, mm, ps) + " Reading Bars.Info failed: " + ex.GetType().Name + ": " + ex.Message;
+				traceAlways(ETraceLevel.Error, name, readError);
 				throw new InvalidOperationException(readError, ex);
 			}
 			double t = tickFromMinMove(mm, ps);
 			if (t > 0) return t;
-			string name = Bars.Info.Name;
 			string error = tickError(name, mm, ps);
 			traceAlways(ETraceLevel.Error, name, error);
 			throw new InvalidOperationException(error);
@@ -2399,7 +2400,8 @@ namespace PowerLanguage.Strategy
 				case ESymbolCategory.Composites: case ESymbolCategory.FutureRoot: case ESymbolCategory.FutureOptionRoot:
 				case ESymbolCategory.StockOptionRoot: case ESymbolCategory.Commodity: case ESymbolCategory.Warrant:
 				case ESymbolCategory.None: return EAssetClass.Unsupported;
-				default: throw new InvalidOperationException("M-INSTR: unmapped ESymbolCategory " + ((int)c).ToString(CultureInfo.InvariantCulture));
+				default: throw new InvalidOperationException("M-INSTR: unmapped ESymbolCategory " + ((int)c).ToString(CultureInfo.InvariantCulture)
+					+ " (not in spec §4.1); update ClassOf (§4.2) for this MC build.");
 			}
 		}
 
@@ -2593,8 +2595,20 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected virtual DateTime tradingDayKey(DateTime barTime)
 		{
-			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, ClassOf(Bars.Info.Category));   // CS-6, M-INSTR L2462: typed
+			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, classOfData1());   // CS-6, M-INSTR L2462: typed
 			return barTime.Date;
+		}
+
+		/// <summary>M-INSTR §4.2: ClassOf(Bars.Info.Category); a category ClassOf does not map writes an Error line (traceAlways), then rethrows.</summary>
+		private EAssetClass classOfData1()
+		{
+			ESymbolCategory category = Bars.Info.Category;
+			try { return ClassOf(category); }
+			catch (InvalidOperationException ex)
+			{
+				traceAlways(ETraceLevel.Error, null, ex.Message);
+				throw;
+			}
 		}
 
 		/// <summary>

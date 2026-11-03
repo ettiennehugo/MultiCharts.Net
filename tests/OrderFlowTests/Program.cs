@@ -1155,7 +1155,7 @@ static class Program
 			Check(wrong.Count == 0, "MI-B2 ClassOf maps all 23 ESymbolCategory members per §4.2 (Future/FutureRolover -> Future, Stock, Forex -> SpotFx, Crypto, Index, rest -> Unsupported) [" + string.Join(" | ", wrong) + "]");
 			string unmapped = null;
 			try { IH.ClassOf((Cat)99); } catch (InvalidOperationException ex) { unmapped = ex.Message; }
-			Check(unmapped == "M-INSTR: unmapped ESymbolCategory 99", "MI-B3 ClassOf throws on a value outside §4.1 (a later MC build) [" + unmapped + "]");
+			Check(unmapped == "M-INSTR: unmapped ESymbolCategory 99 (not in spec §4.1); update ClassOf (§4.2) for this MC build.", "MI-B3 ClassOf throws on a value outside §4.1 (a later MC build) [" + unmapped + "]");
 			// L2462: the typed Auto trading day equals main's Category-name substring rule for every category (differential)
 			Func<DateTime, string, DateTime> toZone = (t, id) => id == "UTC" ? t.AddHours(5) : id == "Eastern Standard Time" ? t.AddHours(-1) : t.AddDays(1000);
 			Func<DateTime, string, DateTime> mainAuto = (t, category) => {   // main @ d2b41b7 autoTradingDay(barTime, Category.ToString())
@@ -1195,19 +1195,24 @@ static class Program
 			string cs = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_CustomSignal.Strategy.CS"));
 			string code = System.Text.RegularExpressions.Regex.Replace(cs, @"//[^\n]*", "");
 			string rtk = MethodBody(cs, "private double resolveTick()") ?? "";
+			int iN = rtk.IndexOf("name = Bars.Info.Name;"), iTry = rtk.IndexOf("try"), iNameErr = rtk.IndexOf("string error = tickError(name, mm, ps);");
 			int iT = rtk.IndexOf("double t = tickFromMinMove(mm, ps);"), iR = rtk.IndexOf("if (t > 0) return t;"), iE = rtk.IndexOf("traceAlways(ETraceLevel.Error, name, error);"), iX = rtk.IndexOf("throw new InvalidOperationException(error);");
-			int iC = rtk.IndexOf("catch (Exception ex)"), iCE = rtk.IndexOf("traceAlways(ETraceLevel.Error, null, readError);"), iCX = rtk.IndexOf("throw new InvalidOperationException(readError, ex);");
-			Check(iT > 0 && iR > iT && iE > iR && iX > iE && iC > 0 && iCE > iC && iCX > iCE && iT > iCX && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"catch\s*\{")
+			int iC = rtk.IndexOf("catch (Exception ex)"), iCE = rtk.IndexOf("traceAlways(ETraceLevel.Error, name, readError);"), iCX = rtk.IndexOf("throw new InvalidOperationException(readError, ex);");
+			Check(iT > 0 && iR > iT && iE > iR && iX > iE && iC > 0 && iCE > iC && iCX > iCE && iT > iCX && iN > iTry && iN < iC && System.Text.RegularExpressions.Regex.Matches(rtk, @"Bars\.Info\.Name").Count == 1 && iNameErr > iR && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"catch\s*\{")
 				&& !code.Contains("TICK_FALLBACK") && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"return\s+0\.01"),
-				"MI-B9 resolveTick: an unresolved tick or an unreadable Bars.Info writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
+				"MI-B9 resolveTick: an unresolved tick or an unreadable Bars.Info (MinMove, PriceScale or Name, all read inside the try) writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
 			Check(code.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")
 				&& code.Contains("if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) {")
 				&& System.Text.RegularExpressions.Regex.IsMatch(code, @"m_rollGlobexKey = m_rollDet\.series && calendarKeyed && intraday\s*&& isFuturesCategory\(Bars\.Info\.Category\);")
 				&& System.Text.RegularExpressions.Regex.Matches(code, @"==\s*ESymbolCategory\.Future\b").Count == 1,
 				"MI-B10 F2: DAILY roll-offset warning, RollDetection-Off warning and the roll Globex key use isFuturesCategory; Category == Future only inside isFuturesCategory");
-			Check(code.Contains("if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, ClassOf(Bars.Info.Category));")
+			string cod1 = MethodBody(cs, "private EAssetClass classOfData1()") ?? "";
+			int iCo = cod1.IndexOf("try { return ClassOf(category); }"), iCc = cod1.IndexOf("catch (InvalidOperationException ex)"), iCt = cod1.IndexOf("traceAlways(ETraceLevel.Error, null, ex.Message);"), iCr = cod1.IndexOf("throw;");
+			Check(cod1.Contains("ESymbolCategory category = Bars.Info.Category;") && iCo > 0 && iCc > iCo && iCt > iCc && iCr > iCt,
+				"MI-B12 an unmapped ESymbolCategory writes an Error line (traceAlways) before ClassOf's exception leaves tradingDayKey");
+			Check(code.Contains("if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, classOfData1());")
 				&& code.Contains("return autoTradingDayOf(assetClass, barTime, ToZone);") && !code.Contains("Category.ToString()") && !code.Contains("\"FOREX\"") && !code.Contains("\"CRYPTO\""),
-				"MI-B11 L2462: tradingDayKey Auto passes the typed ClassOf(Bars.Info.Category); no Category.ToString() or category-name strings left");
+				"MI-B11 L2462: tradingDayKey Auto passes the typed ClassOf(Bars.Info.Category) (via classOfData1); no Category.ToString() or category-name strings left");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
