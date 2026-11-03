@@ -1,6 +1,6 @@
 ---
 title: "Missing-functionality module specs (PRICEACTION, M-AVWAP, M-MTF, M-TOD, M-DAILY, M-XMKT, M-TICK, M-PORT)"
-subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · IBKR execution — rev 4, 2026-10-21 (ET)"
+subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · IBKR execution — rev 5, 2026-11-02 (ET)"
 ---
 
 # Changelog
@@ -11,6 +11,7 @@ subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · I
 | 2 | 2026-10-21 | Incorporated Analyst 1 review (`specs/missing-functionality-review-analyst1.md`): added **M-TICK**; listed M-GMM, M-GEX, M-COST, VP helpers as deferred/out of scope; **roll handling** for unadjusted `@ES` (VPF-4 detector, roll-gap removal, AVWAP invalidation, ATR reset, PT+IBKR symbol mapping); **zero new `[Input]`s** — all settings are protected properties (`PriceActionConfig` etc.); `ETraceLevel.Journal` facts with times, not bar numbers; per-FlowQuality-tier delta-z norms; unsupported MC claims turned into probes (function-object laziness, `FullSymbolData.Current` → `CurrentBar`, bar-end stamping, per-series MaxBarsBack); GV statement corrected (UM p488); PMMS fed by named values; PG p53–54 IOG-off caveat; `EVwapType` extended only with Week/Month/Quarter/RollDate, no `AnchoredEvent`/`AvwapMode`, event manager in `_CustomSignal` via protected `AvwapEvents`; `_PriceActionEngine` rev 2 fixes; 1m/15m acceptance trace; extended Data2 probe. |
 | 3 | 2026-10-21 | **M-SWING renamed PRICEACTION** and widened to the full PriceAction scope; all items of `specs/priceaction-improvements.md` (H1–H9, M1–M10, L1–L6) folded into §1 with a review-item → engine → test mapping (§1.7); engine file `_PriceActionEngine.Function.CS` **supersedes `_SwingEngine.Function.CS`** (removed); `SwingConfig` → `PriceActionConfig` (protected, `enabled=false`); cross-refs (AVWAP lazy dependency, XMKT leader swing, §0 examples) updated. `/workspace/PriceAction` untouched. |
 | 4 | 2026-10-21 | User decisions: PRICEACTION defaults stay at PriceAction-library parity; added `EPriceActionPreset {Library, Futures}`, `PriceActionConfig.ApplyPreset()`, `PriceActionConfig.Futures()/Library()` (§1.1); `_VolumeProfileFuturesBase` uses the Futures preset (specified in §1.8, code change deferred until `_CustomSignal` hosts `PriceActionConfig`); Q5 and Q6 resolved; library fixes submitted upstream as PRs #1–#10 (§1.9). |
+| 5 | 2026-11-02 | §3 M-MTF: Probe P2 answered (a)-(e) with run ids; closed rule (Close, or None with Time <= Data1 time) replaces `Status == Close ? 0 : 1`; RHM must be on; session-template Warning (MC-1439); §9 P2 row answered. |
 
 Source module list: `trading-idea-catalogue.md` lines 165–178. Citations: **PG** = MC .NET Programming Guide v1.0 (`mc-docs/01M5BF386FDT0VH0AYQBMXHEF2.pdf`, printed pages), **PT** = Portfolio Trader Manual (`mc-docs/01M5BF39CB6Q6Z75MKY9GA3DF8.pdf`), **UM** = MC User Manual. Base rules: `reviews/analyst-base-class-spec.md` rev 2.7 (D7 minimal inputs; validate once in StartCalc; VPB-9 helper-file convention, `_VpVwapEngine.Function.CS`).
 
@@ -231,14 +232,26 @@ Week/Month/Quarter reset at the first bar whose exchange-session date is in a ne
 
 HTF bars come from extra chart series read through `BarsOfData(n)` (PG p19–20), e.g. Data1 = ES 1-min, Data2 = ES 60-min. No internal bar building (supersedes catalogue lines 1119, 2527 — catalogue owner to update).
 
-1. `HtfClosed(ds, ago)`: if `BarsOfData(ds).Status == EBarState.Close` use index `ago`, else `ago+1`. Default for all HTF rules (`closedBarsOnly`, VPB-8). Forming-bar access only via explicit `HtfForming(ds)`, journaled.
+1. `HtfClosed(ds, ago)` (**closed rule, P2 2026-11-02**): bar 0 of `BarsOfData(ds)` is closed iff `Status == EBarState.Close`, or `Status == EBarState.None` and `BarsOfData(ds).Time[0] <= Bars.Time[0]`; then use index `ago`, else `ago+1` (`Open`/`Inside` = forming). Typed `EBarState` only (`_MtfMath.BarZeroClosed`). The former rule (`Status == Close ? 0 : 1`) mapped one HTF bar stale for 59 of every 60 minutes and was non-monotonic. The mapping is monotonic over calls except the live IOG-off k=1 call at a shared end time (d1 Close, d2 Inside, R3), which may map one bar back for that one call: conservative (an older closed bar, never a forming one). Default for all HTF rules (`closedBarsOnly`, VPB-8). Forming-bar access only via explicit `HtfForming(ds)`, journaled.
 2. HTF engines step only on that stream's closed bars (CurrentBar dedupe) — built into each engine.
-3. Mapping: for a Data1 closed bar at t, HTF context = latest closed HTF bar with Time ≤ t. Whether MC stamps bars with their **end** time (so the 10:00 60-min bar is closed and usable on the 10:00 1-min bar) is **not in the PG → Probe P2**. First mapping per session is a Journal fact.
+3. Mapping: for a Data1 closed bar at t, HTF context = latest closed HTF bar with Time ≤ t. MC stamps bars with their **end** time (the 10:00 60-min bar is closed and usable on the 10:00 1-min bar): **P2 (b) PASS**. First mapping per session is a Journal fact.
 4. Recalc consistency per §0.4.
-5. Lookback: whether MaxBarsBack applies per series is **not in the PG → unverified (P2)**; for long HTF/daily lookbacks prefer reading history via `FullSymbolData` (PG p22) at StartCalc/once per HTF bar.
-6. Session template: reuse the **VPF-3 StartCalc assertion** (24h CME Globex template, ETH bars present) for every stream; additionally assert same `Info.Name` root for HTF streams.
+5. Lookback: MaxBarsBack applies per series (**P2 (e) PASS**); for long HTF/daily lookbacks prefer reading history via `FullSymbolData` (PG p22) at StartCalc/once per HTF bar.
+6. Session template: reuse the **VPF-3 StartCalc assertion** (24h CME Globex template, ETH bars present) for every stream; additionally assert same `Info.Name` root for HTF streams. **Realtime-History Matching (RHM) must be ON** (MC wiki: Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching; on by default; **VERIFY** the tab name in the installed MC version). The MC .NET Programming Guide (v1.0, v1.1) documents no member that exposes RHM, so code cannot check it; StartCalc journals the requirement. `startMtf` logs a **Warning** when Data1's and an HTF stream's session templates differ (`IInstrument.Sessions`, `SessionObject.StartDay/StartTime/EndDay/EndTime`, compared in order; MC-1439: with RHM on and different session ends the strategy stalls until Data2 prints).
 
 **Probe P2 (VPB-8 acceptance, extended):** Data1 1-min + Data2 15/60-min, IOG on/off, backtest with/without Bar Magnifier, playback, live. Log per CalcBar: which stream triggered (Status per stream), `BarsOfData(2).Time[0]`, `Status`, `Close[0]`, `CurrentBar`. Answers: (a) forming Data2 bar values/Status intrabar; (b) whether bar times are **end** stamps; (c) **ordering** of Data1 and Data2 closes sharing a timestamp; (d) the PG p54 "last calc before Data1 Open is valid" rule in practice; (e) per-series MaxBarsBack. Expected in backtest without IOG: closed HTF bar. Code uses `HtfClosed()` regardless.
+
+**P2 results (2026-11-02, Ettienne's runs relayed by Analyst).** Setup: RHM on; @ES 1m (Data1) + @ES 60m (Data2); 60m bars stamped at :30 Exchange CT. Runs: **R1** `8356ba60` (backtest, IOG off), **R2** `05c8e4d9` (backtest, IOG on + Bar Magnifier), **R3** `c003d107` (live, IOG off), **R4** `aa78186a` (live, IOG on), plus a live IOG-on run between marks `63e2d28d`.
+
+| | Answer | Runs |
+|---|---|---|
+| (a) forming Data2 bar | On history (R1; R2 with IOG + Bar Magnifier) and live between marks (`63e2d28d`), `d2[0]` is the **last closed** bar: OHLCV frozen, Status **None**. In live IOG on (R4), during the Data1 bar whose END time equals Data2's END (d1 19:30 Open/Inside, wall clock 20:29:00-20:30:00 ET), `d2[0]` is the **FORMING** bar: Time 19:30, Status **Inside**, c follows d1's c (7580.75, then the final 7582.5), v grows (8449 to 8667). At d1 19:30 Close, d2 is Close with final values. Hence the closed rule in rule 1. | R1, R2, R4, 63e2d28d |
+| (b) END stamps | **PASS**: the hh:30 Data2 bar is visible (Close) on the hh:30 Data1 bar. | R1, R3, R4 |
+| (c) same-timestamp ordering | History: **one calc** with both Close. Live IOG off (R3 calls 2786/2787, same ms): **k=1** d1 Close, d2 Inside (values already final); **k=2** d1 None, d2 Close. **Backtest/live difference, recorded**: live code sees the shared close in two calls, and under the closed rule the k=1 call maps the previous HTF bar. | R1, R3 |
+| (d) PG p54 rule | R3: the max k at the boundary shows d2 Close and closed[18:30], so p54 holds as far as the probe can show. **Limit:** the probe sends no orders, so it shows each calc's state, not that MC discards orders from earlier calcs. | R3 |
+| (e) per-series MaxBarsBack | **PASS**. | R1, R3 |
+
+Defect found: `HtfClosedIndex = Status == Close ? 0 : 1` treated the frozen None bar as forming (one HTF bar stale for 59 of every 60 minutes, non-monotonic at the boundary). Fixed by the closed rule (rule 1; tests/MtfTests `ClosedRule` replays every pattern above).
 
 # 4. M-TOD — time-of-day normalisers
 
@@ -292,7 +305,7 @@ Extra `BarsOfData(n)` series on the chart (NQ for ES, ZN, VIX …), **bar resolu
 | # | Question | Status |
 |---|---|---|
 | P1 | Does an un-accessed `FunctionSeries` run CalcBar? (counter probe) | Open; design does not depend on it |
-| P2 | Data2 forming-bar Status/values, bar-end stamping, same-timestamp ordering, PG p54 rule, per-series MaxBarsBack (§3) | Open; VPB-8 acceptance |
+| P2 | Data2 forming-bar Status/values, bar-end stamping, same-timestamp ordering, PG p54 rule, per-series MaxBarsBack (§3) | **Answered 2026-11-02** (R1 8356ba60, R2 05c8e4d9, R3 c003d107, R4 aa78186a, 63e2d28d; §3 P2 results); closed rule fixed; `DvpConst.P2_PASSED` flip is PR-D10 |
 | P3 | dxFeed daily bar = settlement or last trade | Open; rev 2.7 §E list |
 | P4 | rev 2.7 §E6: trade-size fidelity via DataLoader (gates M-TICK size ideas) | Open |
 | P5 | .NET PMM signal API and named-value functions | **Resolved 2026-10-21** (§11, `m-port-spec.md`); live checks → P5b |

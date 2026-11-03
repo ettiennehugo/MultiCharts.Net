@@ -89,7 +89,7 @@ static class Program
 			Check(pR2.Length > 0 && Regex.IsMatch(LogLine("Info", "_MtfProbe", rid, call), pR2, ps) && Regex.IsMatch(LogLine("Info", "_MtfProbe", rid, c0945), pR2, ps) && Regex.IsMatch(LogLine("Info", "_MtfProbe", rid, callRt), pR2, ps)
 				&& !Regex.IsMatch(LogLine("Info", "_MtfProbe", rid, c1100), pR2, ps) && Regex.IsMatch(lines[2], pR2, ps) && Regex.IsMatch(lines[4], pR2, ps) && !Regex.IsMatch(lines[0], pR2, ps), "R2 extract: calls 09:40-10:19 only, start/RUN/warnings kept");
 
-			// HtfClosedIndex(2) is ClosedIndex(status==Close, 0): 0 or 1, never -1; index 1 can still be unreadable on an early calc, so the probe logs closedIdx(-1)
+			// HtfClosedIndex(2) is 0 or 1 (P2 closed rule, ClosedRule below), never -1; index 1 can still be unreadable on an early calc, so the probe logs closedIdx(-1)
 			string unread = _MtfProbeLog.Call(1, 1, t, "Close", 1, 21, t.AddHours(1), "Inside", 1, 1, 1, 1, 1, 1, -1, DateTime.MinValue, 0, -1, DateTime.MinValue, false, t);
 			Match mu = Regex.Match(unread, _MtfProbeLog.CallPattern);
 			Check(_MtfMath.ClosedIndex(false, 0) == 1 && _MtfMath.ClosedIndex(true, 0) == 0 && unread.Contains("closedIdx(-1) closed[none] mapped(-1) realTime(False)") && mu.Success && mu.Groups[15].Value == "-1" && !mu.Groups[16].Success
@@ -100,6 +100,95 @@ static class Program
 				File.WriteAllLines(sample, new[] { lines[0], LogLine("Info", "_MtfProbe", other, call), lines[1], lines[2], lines[3], LogLine("Info", "_MtfProbe", rid, c0945), LogLine("Info", "_MtfProbe", rid, c1100), LogLine("Info", "_MtfProbe", rid, callRt), LogLine("Info", "_MtfProbe", rid, unread), lines[4], LogLine("Info", "_Other", rid + "x", call) });
 		}
 		finally { Thread.CurrentThread.CurrentCulture = keep; }
+	}
+
+	// Probe P2 closed rule. Status as the MC EBarState member names; the test maps them to the two typed booleans the host passes.
+	enum St { None, Open, Inside, Close }
+	struct Call { public DateTime d1; public St s1; public DateTime[] d2; public St s2; public string what; public bool mayStepBack;
+		public Call(string what, DateTime d1, St s1, St s2, bool mayStepBack, params DateTime[] d2) { this.what = what; this.d1 = d1; this.s1 = s1; this.s2 = s2; this.d2 = d2; this.mayStepBack = mayStepBack; } }
+	static int NewIdx(Call c) { return _MtfMath.ClosedIndex(c.s2 == St.Close, c.s2 == St.None, c.d2[0], c.d1, 0); }
+	static int OldIdx(Call c) { return _MtfMath.ClosedIndex(c.s2 == St.Close, 0); }
+	static int Mapped(Call c) { return _MtfMath.MapIndex(k => c.d2[k], NewIdx(c), c.d1, 2); }
+
+	static void ClosedRule()
+	{
+		Func<int, int, DateTime> T = (h, m) => new DateTime(2026, 10, 30, h, m, 0);
+		// d2 arrays: index 0 first. 60m bars end-stamped at :30 (Exchange CT).
+		DateTime[] last1830 = { T(18, 30), T(17, 30), T(16, 30) }, forming1930 = { T(19, 30), T(18, 30), T(17, 30) };
+		var hist = new Call("R1 history between marks: frozen, None", T(19, 5), St.Close, St.None, false, last1830);
+		Check(NewIdx(hist) == 0 && d(hist) == T(18, 30) && OldIdx(hist) == 1, "history None, Time <= Data1 -> 0 (18:30; the old rule gave 1 = 17:30, one bar stale)");
+		var r2 = new Call("R2 magnifier intrabar: frozen, None", T(19, 17), St.Inside, St.None, false, last1830);
+		Check(NewIdx(r2) == 0 && Mapped(r2) == 0, "R2 (IOG + Bar Magnifier) intrabar: None frozen -> 0");
+		var bnd = new Call("boundary Close/Close", T(19, 30), St.Close, St.Close, false, forming1930);
+		Check(NewIdx(bnd) == 0 && d(bnd) == T(19, 30), "history boundary: d1 Close + d2 Close at 19:30 -> 0 (19:30, END stamp)");
+		var r4f = new Call("R4 live IOG on, last minute forming", T(19, 30), St.Inside, St.Inside, false, forming1930);
+		var r4o = new Call("R4 live IOG on, last minute open tick", T(19, 30), St.Open, St.Inside, false, forming1930);
+		Check(NewIdx(r4f) == 1 && d(r4f) == T(18, 30) && NewIdx(r4o) == 1, "R4 d1 19:30 Open/Inside, d2 Time 19:30 Inside (Time equal) -> 1 (18:30, never the forming bar)");
+		var r4c = new Call("R4 d1 19:30 Close", T(19, 30), St.Close, St.Close, false, forming1930);
+		Check(NewIdx(r4c) == 0 && d(r4c) == T(19, 30), "R4 d1 19:30 Close, d2 Close final -> 0");
+		var live = new Call("live IOG on between marks 63e2d28d", T(19, 12), St.Inside, St.None, false, last1830);
+		Check(NewIdx(live) == 0 && d(live) == T(18, 30), "live between marks: None frozen -> 0");
+		var k1 = new Call("R3 k=1", T(19, 30), St.Close, St.Inside, true, forming1930);
+		var k2 = new Call("R3 k=2", T(19, 30), St.None, St.Close, false, forming1930);
+		Check(NewIdx(k1) == 1 && d(k1) == T(18, 30) && NewIdx(k2) == 0 && d(k2) == T(19, 30), "R3 live IOG off: k=1 d1 Close / d2 Inside -> 1; k=2 d1 None / d2 Close -> 0");
+		var rhmOffN = new Call("RHM off: forming stamped ahead, None", T(19, 5), St.Close, St.None, false, forming1930);
+		var rhmOffI = new Call("RHM off: forming stamped ahead, Inside", T(19, 5), St.Close, St.Inside, false, forming1930);
+		var rhmOffO = new Call("RHM off: forming stamped ahead, Open", T(18, 31), St.Close, St.Open, false, forming1930);
+		Check(NewIdx(rhmOffN) == 1 && NewIdx(rhmOffI) == 1 && NewIdx(rhmOffO) == 1 && d(rhmOffN) == T(18, 30), "RHM off / live forming: d2 Time after Data1 -> 1 whatever the Status");
+		Check(_MtfMath.BarZeroClosed(false, true, T(19, 30), T(19, 30)) && !_MtfMath.BarZeroClosed(false, true, T(19, 30), T(19, 29)) && _MtfMath.ClosedIndex(false, true, T(18, 30), T(19, 0), 2) == 2
+			&& _MtfMath.ClosedIndex(false, false, T(18, 30), T(19, 0), 2) == 3, "BarZeroClosed: None at equal Time closed, None ahead forming; ago adds");
+
+		// replays: mapped HTF bar time over consecutive calls never goes back, except on a call flagged mayStepBack (R3 k=1), and then
+		// by at most one bar. Never the forming bar (mapped Time <= Data1 Time and not bar 0 unless closed).
+		var seqs = new[]
+		{
+			new[] { hist, new Call("19:29 Close", T(19, 29), St.Close, St.None, false, last1830), bnd, new Call("19:31 Close", T(19, 31), St.Close, St.None, false, forming1930) },
+			new[] { live, new Call("19:29 Inside", T(19, 29), St.Inside, St.None, false, last1830), r4o, r4f, new Call("R4 19:30 Inside c=7582.5", T(19, 30), St.Inside, St.Inside, false, forming1930), r4c,
+				new Call("19:31 Open", T(19, 31), St.Open, St.None, false, forming1930) },
+			new[] { new Call("19:29 Close", T(19, 29), St.Close, St.None, false, last1830), k1, k2, new Call("19:31 Close", T(19, 31), St.Close, St.None, false, forming1930) },
+			// R3 k=1 where Data2 bar 0 is still the 18:30 bar flagged Inside: maps one bar back for that one call
+			new[] { new Call("19:29 Close", T(19, 29), St.Close, St.None, false, last1830), new Call("R3 k=1 (old bar 0)", T(19, 30), St.Close, St.Inside, true, last1830), k2 },
+			new[] { new Call("18:59 Close", T(18, 59), St.Close, St.None, false, last1830), rhmOffN, rhmOffI, new Call("19:30 Close", T(19, 30), St.Close, St.Close, false, forming1930) },
+		};
+		bool mono = true, back1 = true, noForming = true, oldMono = true; int backs = 0;
+		foreach (Call[] q in seqs)
+		{
+			DateTime prev = DateTime.MinValue, prevOld = DateTime.MinValue;
+			foreach (Call c in q)
+			{
+				int i = Mapped(c); DateTime m = i >= 0 ? c.d2[i] : DateTime.MinValue;
+				noForming &= i >= 0 && m <= c.d1 && (i > 0 || c.s2 == St.Close || c.s2 == St.None);
+				if (m < prev) { backs++; if (!c.mayStepBack) mono = false; if (m < prev.AddHours(-1)) back1 = false; }
+				else prev = m;
+				int io = _MtfMath.MapIndex(k => c.d2[k], OldIdx(c), c.d1, 2); DateTime mo = io >= 0 ? c.d2[io] : DateTime.MinValue;
+				if (mo < prevOld) oldMono = false; prevOld = mo;
+			}
+		}
+		Check(mono && back1 && backs == 1, "replays: monotonic except the R3 k=1 call, which steps back at most one bar (" + backs + " step-back)");
+		Check(noForming, "replays: never the forming bar, mapped Time <= Data1 Time");
+		Check(!oldMono, "old rule (Close ? 0 : 1) is non-monotonic on the same replays (the P2 defect)");
+		int stale = 0;
+		for (int mnt = 1; mnt <= 60; mnt++)
+		{
+			DateTime t1 = T(18, 30).AddMinutes(mnt);
+			var c = mnt == 60 ? new Call("", t1, St.Close, St.Close, false, forming1930) : new Call("", t1, St.Close, St.None, false, last1830);
+			if (OldIdx(c) != NewIdx(c)) stale++;
+		}
+		Check(stale == 59, "the old rule maps one bar stale on 59 of 60 minutes (" + stale + ")");
+	}
+	static DateTime d(Call c) { int i = Mapped(c); return i >= 0 ? c.d2[i] : DateTime.MinValue; }
+
+	static void Sessions()
+	{
+		Func<DayOfWeek, int, int, DayOfWeek, int, int, _MtfMath.Session> S = (sd, sh, sm, ed, eh, em) => new _MtfMath.Session(sd, new TimeSpan(sh, sm, 0), ed, new TimeSpan(eh, em, 0));
+		var globex = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0), S(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 16, 0) };
+		var same = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0), S(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 16, 0) };
+		var rthEnd = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 15, 15), S(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 16, 0) };
+		var shortT = new[] { S(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0) };
+		string m1 = _MtfMath.SessionMismatch(globex, rthEnd), m2 = _MtfMath.SessionMismatch(globex, shortT);
+		Check(_MtfMath.SessionMismatch(globex, same) == null && _MtfMath.SessionMismatch(null, same) == null && _MtfMath.SessionMismatch(new _MtfMath.Session[0], new _MtfMath.Session[0]) == null, "same templates (or unknown) -> no warning");
+		Check(m1 == "session 0: Data1 Sun 17:00-Mon 16:00 vs Sun 17:00-Mon 15:15", "different session end -> first difference named (" + m1 + ")");
+		Check(m2 != null && m2.StartsWith("sessions 2 vs 1 ", StringComparison.Ordinal), "different session count -> warning (" + m2 + ")");
 	}
 
 	static void Main()
@@ -117,6 +206,8 @@ static class Program
 		Check(_MtfMath.SymbolRoot("@MES") == "MES" && _MtfMath.SymbolRoot("MESH25") == "MES", "micro root kept");
 		Check(_MtfMath.IsStale(t0.AddMinutes(-3), t0, TimeSpan.FromMinutes(2)) && !_MtfMath.IsStale(t0.AddMinutes(-2), t0, TimeSpan.FromMinutes(2)) && !_MtfMath.IsStale(t0.AddDays(-1), t0, TimeSpan.Zero), "IsStale; maxStale 0 disables");
 		ProbeLog();
+		ClosedRule();
+		Sessions();
 		Console.WriteLine($"MtfTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}

@@ -4510,7 +4510,7 @@ namespace PowerLanguage.Strategy
 **Pitfalls.**
 - **Assumptions (labelled):** ATR15 length 14; coverage 0.95; a fixed 2R target as a stand-in for "before the next cluster".
 - **Not coded:** DV-03's follow-through condition, the 5m HL entry arm and the near-HVN-edge level variant.
-- The box start is the open time of the oldest box bar. The profile is "after" that time, assuming bars are stamped at their end (Probe P2, **VERIFY**).
+- The box start is the open time of the oldest box bar. The profile is "after" that time, since bars are stamped at their end (Probe P2 (b) PASS, 2026-11-02).
 - A bar that touches the level without a fill (for example with MC's "fill only when price trades beyond the limit") spends the level.
 - **Coding choice (labelled):** a touch outside 09:45–15:30 spends the level (first touch only). The other reading would keep it for the next session's window.
 - Stop and target are sent from the bar after the fill (§1.7), so the fill bar has no working exit.
@@ -6468,16 +6468,20 @@ protected override void CalcBar()
 
 | Member | Plain meaning |
 |---|---|
-| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds` (0 if bar 0 has closed, else 1). |
+| `HtfClosedIndex(ds, ago = 0)` | Bars-ago index of the ago-th closed bar of stream `ds`: `ago` if bar 0 is closed, else `ago + 1`. Bar 0 is closed when its Status is Close, or its Status is None and its time is not after Data1's (Probe P2 closed rule). Open/Inside means the bar is still forming. |
 | `HtfClosed(ds, ago = 0)` | Close of that bar. |
 | `HtfClosedBar(ds, ago, out time, out o, out h, out l, out c, out v)` | All fields of that bar. |
 | `htfMapped(ds, maxBack = 2)` | Index of the last closed bar of `ds` whose time is not after Data1's; −1 = none. |
 | `HtfForming(ds)` | Deliberate access to the still-forming bar (values change intrabar; journaled once). |
-| Statics `_MtfMath.ClosedIndex`, `MapIndex`, `SymbolRoot`, `IsStale` | The same rules, MC-free, for tests. |
+| Statics `_MtfMath.BarZeroClosed`, `ClosedIndex`, `MapIndex`, `SymbolRoot`, `IsStale`, `SessionMismatch` | The same rules, MC-free, for tests. |
 
-**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`.
+**Journal.** `MTF Data{n} first mapping {t} -> {htf t} (ago i, status s)` (once per session); `MTF forming-bar access on Data{n} (not closedBarsOnly)`; at StartCalc, `MTF closed rule: ... requires Realtime-History Matching ON ...`. **Warning** at StartCalc: `MTF Data{n} session template differs from Data1: ...` when the two streams' `Sessions` differ (MC-1439: with RHM on and different session ends the strategy stalls until Data{n} prints), or `MTF Data{n} session check unavailable (...)` if `Sessions` cannot be read.
 
-**VERIFY.** Whether MC stamps HTF bars with their end time ("Probe P2" in the code).
+**Setup.** Realtime-History Matching (RHM) must be **on**: Format Signals > Signals tab > Properties > Backtesting > Realtime-History Matching (MC wiki; on by default; **VERIFY** the tab in your MC version). MC .NET documents no member that reads RHM (Programming Guide v1.0 and v1.1), so the code cannot check it. Use the same session template on Data1 and every HTF stream.
+
+**Mapping over calls.** Monotonic, with one exception: in live trading with IOG off, at a time where a Data1 and a Data2 bar both end, MC makes two calls. On the first (Data1 Close, Data2 Inside) the mapping may step back one bar for that one call. That is conservative: the bar is an older closed bar, never a forming one. Backtests make one call there.
+
+**Probe P2 (2026-11-02).** End stamps PASS and per-series MaxBarsBack PASS (runs R1 8356ba60, R2 05c8e4d9, R3 c003d107, R4 aa78186a, 63e2d28d). The full answers are in `specs/missing-functionality-specs.md` §3. The probe sends no orders, so it cannot show that MC discards orders from earlier calls (PG p54).
 
 **Tests.** `tests/MtfTests`.
 
