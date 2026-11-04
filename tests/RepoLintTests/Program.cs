@@ -67,7 +67,10 @@ static class Program
 	internal static HashSet<string> McLocals(string code)
 	{
 		var r = new HashSet<string>();
-		foreach (Match m in Regex.Matches(code, @"\b(?:" + string.Join("|", McEnums) + @")\s*(?:\[\s*\])?\s+(\w+)\s*(?=[=;,)])")) r.Add(m.Groups[1].Value);
+		// typed declarations (locals, fields, parameters, auto-properties: `ESymbolCategory m_cat { get; set; }`)
+		foreach (Match m in Regex.Matches(code, @"\b(?:" + string.Join("|", McEnums) + @")\s*(?:\[\s*\])?\s+(\w+)\s*(?=[=;,){])")) r.Add(m.Groups[1].Value);
+		// `var x = ...<MC member>;` (the right-hand side ends in an MC-enum member)
+		foreach (Match m in Regex.Matches(code, @"\bvar\s+(\w+)\s*=\s*[^;=]*\.(?:" + McMembers + @")\s*;")) r.Add(m.Groups[1].Value);
 		return r;
 	}
 
@@ -75,14 +78,29 @@ static class Program
 	{
 		var r = new List<string>();
 		string types = string.Join("|", McEnums);
-		string recv = @"(?:\.(?:" + McMembers + @")" + (locals.Count > 0 ? @"|(?<![\w.])(?:" + string.Join("|", locals) + @")" : "") + @")\s*\.\s*ToString\s*\(\s*\)";   // enum ToString() (a format-string overload is DateTime/number, not an MC enum)
-		if (Regex.IsMatch(line, recv)) r.Add("mc-enum-tostring");
+		string member = @"\.(?:" + McMembers + @")\b(?!\s*\.\s*\w)";   // an MC-enum member as a value (not followed by a further member access)
+		string local = locals.Count > 0 ? @"(?<![\w.])(?:" + string.Join("|", locals) + @")\b(?!\s*\.\s*\w)" : null;
+		string val = local == null ? member : "(?:" + member + "|" + local + ")";
+		// explicit ToString: any overload on an MC member (ToString("G") too); no-argument only on tracked locals (a format overload on a
+		// local is DateTime/number in this repo: `d.ToString("yyyy-MM-dd")`)
+		bool ts = Regex.IsMatch(line, @"\.(?:" + McMembers + @")\s*\.\s*ToString\s*\(")
+			|| (locals.Count > 0 && Regex.IsMatch(line, @"(?<![\w.])(?:" + string.Join("|", locals) + @")\s*\.\s*ToString\s*\(\s*\)"));
+		if (ts) r.Add("mc-enum-tostring");
+		// implicit stringification ($"{..}", string.Format, Convert.ToString, "" + ..) of an MC-enum value on a line that also compares or
+		// parses a string. Plain interpolation into a log line has no such marker and stays legal.
+		bool implicitStr = Regex.IsMatch(line, @"\$@?""[^""]*\{[^}]*" + val + @"[^}]*\}") || Regex.IsMatch(line, @"string\s*\.\s*Format\s*\([^;]*" + val)
+			|| Regex.IsMatch(line, @"Convert\s*\.\s*ToString\s*\([^;]*" + val) || Regex.IsMatch(line, @"""\s*\+\s*[\w.\[\]()]*" + val) || Regex.IsMatch(line, val + @"\s*\+\s*""");
+		bool strUse = Regex.IsMatch(line, @"(?:==|!=)\s*@?""|""\s*(?:==|!=)|\.\s*(?:Equals|Contains)\s*\(|StartsWith|switch\s*\(|Parse");
+		if (implicitStr && strUse) r.Add("mc-enum-implicit-string");
 		if (Regex.IsMatch(line, @"Enum\s*\.\s*(?:Try)?Parse\s*<\s*(?:[\w.]*\.)?(?:" + types + @")\s*>")
 			|| Regex.IsMatch(line, @"Enum\s*\.\s*(?:Try)?Parse\s*\([^;]*typeof\s*\(\s*(?:[\w.]*\.)?(?:" + types + @")\s*\)")
 			|| Regex.IsMatch(line, @"Enum\s*\.\s*(?:GetNames|GetValues|GetName|IsDefined|ToObject|Parse|TryParse)\s*\(\s*typeof\s*\(\s*(?:[\w.]*\.)?(?:" + types + @")\s*\)")) r.Add("mc-enum-parse");
 		if (Regex.IsMatch(line, @"\(\s*(?:[\w.]*\.)?(?:" + types + @")\s*\)\s*\(?\s*-?\d")
 			|| Regex.IsMatch(line, @"\.(?:" + McMembers + @")\s*(?:==|!=|<=|>=|<|>)\s*\(?\s*-?\d")
-			|| Regex.IsMatch(line, @"\(\s*int\s*\)\s*[\w.\[\]]*\.(?:" + McMembers + @")\s*(?:==|!=|<=|>=|<|>)\s*-?\d")) r.Add("mc-enum-int");
+			|| Regex.IsMatch(line, @"\(\s*int\s*\)\s*[\w.\[\]]*\.(?:" + McMembers + @")\s*(?:==|!=|<=|>=|<|>)\s*-?\d")
+			|| Regex.IsMatch(line, @"(?<![\w.])-?\d+\s*(?:==|!=|<=|>=|<|>)\s*\(?\s*(?:\(\s*int\s*\)\s*)?[\w.\[\]]*\.(?:" + McMembers + @")\b")   // 12 == Info.Category
+			|| Regex.IsMatch(line, @"Convert\s*\.\s*ToInt(?:16|32|64)\s*\([^;)]*\.(?:" + McMembers + @")\s*\)\s*(?:==|!=|<=|>=|<|>)\s*-?\d")
+			|| Regex.IsMatch(line, @"(?<![\w.])-?\d+\s*(?:==|!=|<=|>=|<|>)\s*Convert\s*\.\s*ToInt(?:16|32|64)\s*\([^;)]*\.(?:" + McMembers + @")\s*\)")) r.Add("mc-enum-int");
 		bool byName = false;
 		foreach (Match m in Regex.Matches(line, @"\.\s*(?:GetProperty|GetField|GetMethod|GetMember|InvokeMember)\s*\("))
 		{
@@ -179,7 +197,13 @@ static class Program
 				"if (s.SymbolCurrency.ToString() != \"eMTPA_MCSC_USD\") throw new X();", "object v = Bars.Info.GetType().GetProperty(\"Category\").GetValue(Bars.Info, null);",
 				"x = b.GetType().InvokeMember(\"Close\", f, null, b, null);", "using System.Reflection;", "var t = Type.GetType(\"PowerLanguage.ESymbolCategory\");",
 				"if (sess.StartDay.ToString() == \"Monday\") {}", "string k = cat.ToString().ToUpperInvariant();", "BuildVolumeOn b = (BuildVolumeOn)Enum.Parse(typeof(BuildVolumeOn), s);",
-				"var p = typeof(IInstrument).GetProperty(\"Category\");" };
+				"var p = typeof(IInstrument).GetProperty(\"Category\");",
+				// #95 review: implicit stringification + compare/parse, ToString overloads, reversed and Convert.ToInt32 int compares
+				"if ($\"{Bars.Info.Category}\" == \"Future\") return;", "bool fx = string.Format(\"{0}\", Bars.Info.Category).Contains(\"FOREX\");",
+				"if (Convert.ToString(Bars.Info.Category).Equals(\"Future\")) return;", "switch (\"\" + Bars.Info.Category) { }", "var v = int.Parse(\"\" + s.UnsupportedFields);",
+				"if (Bars.Info.Category + \"\" != \"Stock\") return;", "if ($\"{cat}\".StartsWith(\"Fut\")) return;",
+				"if (Bars.Info.Category.ToString(\"G\") == \"Future\") return;", "if (12 == Bars.Info.Category) return;", "if (12 == (int)Bars.Info.Category) return;",
+				"if (Convert.ToInt32(Bars.Info.Category) == 12) return;", "if (0 != Convert.ToInt32(s.UnsupportedFields)) return;" };
 			var missed = bad.Where(b => McEnumLint(b, loc, own).Count == 0).ToList();
 			Check(missed.Count == 0, "MI-T14 self-test: every forbidden pattern is flagged [" + string.Join(" | ", missed) + "]");
 			string[] good = {
@@ -187,10 +211,17 @@ static class Program
 				"if ((s.UnsupportedFields & MTPA_SymbolFields.eMTPA_SF_Root) != 0) useParsed = true;", "EResolution res = Bars.Info.Resolution.Type;",
 				"economicEvent.volatility = (EEventVolatility)Enum.Parse(typeof(EEventVolatility), line.volatility);", "string id = m_count.ToString();",
 				"if (Bars.Info.Category == ESymbolCategory.Forex) return;", "var tier = (EEventTier)Enum.Parse(typeof(EEventTier), c[4]);", "int n = Bars.Info.Resolution.Size;",
-				"var prop = typeof(Entry).GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);", "return d.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture);" };
+				"var prop = typeof(Entry).GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);", "return d.ToString(\"yyyy-MM-dd\", CultureInfo.InvariantCulture);",
+				"Output.WriteLine($\"category({info.Category}) zone({info.TimeZone}) res({info.Resolution.Type})\");", "string msg = \"cat \" + Bars.Info.Category;",
+				"traceAlways(ETraceLevel.Error, null, \"category \" + Bars.Info.Category + \" unsupported\");", "if (x == \"a\") log($\"n({n})\");",
+				"if (Bars.Info.Category == ESymbolCategory.Future && n == 12) return;", "int k = Convert.ToInt32(s, 10) == 12 ? 1 : 0;" };
 			var falsePos = good.Where(g => McEnumLint(g, loc, own).Count != 0).ToList();
 			Check(falsePos.Count == 0, "MI-T14 self-test: typed forms and repo-own enum parses pass [" + string.Join(" | ", falsePos) + "]");
 			Check(McLocals("EResolution res = x; ESymbolCategory cat; MTPA_SymbolFields[] all = y; string s;").SetEquals(new[] { "res", "cat", "all" }), "MI-T14 self-test: MC-enum locals/fields are tracked");
+			HashSet<string> lv = McLocals("var c = Bars.Info.Category; var z = info.TimeZone; var n = Bars.Info.Name; ESymbolCategory m_cat { get; set; } var r2 = Bars.Info.Resolution.Type;");
+			Check(lv.SetEquals(new[] { "c", "z", "m_cat", "r2" }) && McEnumLint("if (c.ToString() == \"Future\") return;", lv, own).Count > 0
+				&& McEnumLint("if (m_cat.ToString().Contains(\"FOREX\")) return;", lv, own).Count > 0 && McEnumLint("if (n.ToString() == \"ES\") return;", lv, own).Count == 0,
+				"MI-T14 self-test: `var x = ..<MC member>;` and MC-enum auto-properties are tracked (and a var of a non-enum member is not) [" + string.Join(",", lv) + "]");
 			Check(McEnums.Contains("MTPA_MCSymbolCategories") && McEnums.Contains("MTPA_SymbolFields") && McEnums.Length == 8, "MI-T14 scope = the eight MC enum types of spec rev 2.3 §10");
 		}
 
