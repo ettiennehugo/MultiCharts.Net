@@ -138,8 +138,8 @@ static class Program
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			var assigns = Regex.Matches(src, @"\bm_rollGlobexKey\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => Regex.Replace(m.Groups[1].Value, @"\s+", " ").Trim()).ToList();
 			Check(path != null && assigns.Count == 2 && assigns.Contains("false")
-				&& assigns.Contains("m_rollDet.series && calendarKeyed && intraday && Bars.Info.Category == ESymbolCategory.Future"),
-				"_CustomSignal Globex key = series && calendarKeyed && intraday && Future (reset false only) [" + string.Join(" | ", assigns) + "]");
+				&& assigns.Contains("m_rollDet.series && calendarKeyed && intraday && isFuturesCategory(Bars.Info.Category)"),
+				"_CustomSignal Globex key = series && calendarKeyed && intraday && futures (Future or FutureRolover, M-INSTR F2; reset false only) [" + string.Join(" | ", assigns) + "]");
 			Check(Regex.IsMatch(src, @"DateTime\s+day\s*=\s*m_rollGlobexKey\s*\?\s*_CmeSessionClock\.GlobexTradingDayEt\("), "_CustomSignal detector day = GlobexTradingDayEt when keyed");
 			Check(Regex.IsMatch(src, @"SeriesKeyWarning\(m_rollDet\.series,\s*intraday,\s*res\.ToString\(\),\s*calendarKeyed\s*&&\s*!m_rollGlobexKey\)")
 				&& Regex.IsMatch(src, @"EResolution\s+res\s*=\s*Bars\.Info\.Resolution\.Type;\s*bool\s+intraday\s*=\s*isIntradayResolution\(res\);"), "_CustomSignal warns only when calendar-keyed and not Globex-keyed (typed intraday)");

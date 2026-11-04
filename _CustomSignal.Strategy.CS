@@ -26,7 +26,6 @@ namespace PowerLanguage.Strategy
 		private static readonly TimeSpan DEFAULT_TRADE_MANAGER_REFRESH_INTERVAL = TimeSpan.FromMinutes(1);  //Refresh time for the trade manager to process events.
 		/// <summary>Spec CS-3: build tag written on the RUN line. Bump by hand (or paste a git hash) when the base classes change.</summary>
 		public const string BUILD_TAG = "base-class-rev2";
-		private const double TICK_FALLBACK = 0.01;   // tickSize() when the symbol reports no usable MinMove/PriceScale
 
 		//types
 		/// <summary>
@@ -1077,7 +1076,7 @@ namespace PowerLanguage.Strategy
 			// offset is ~0 (the spread stays in history and in ATR). Futures hosts must key days by the Globex trading day
 			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _Test6 do). Warned once below.
 			if (roll && m_daily.Days > 0 && !m_rollKeyWarned && tradingDayKey(t.Date.AddHours(1)) == tradingDayKey(t.Date.AddHours(20))
-				&& Bars.Info.Resolution.Type != EResolution.Day && Bars.Info.Category == ESymbolCategory.Future)
+				&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))
 			{
 				m_rollKeyWarned = true;
 				engineSink(ETraceLevel.Warning)?.Invoke("DAILY roll offset on a calendar-keyed intraday futures chart: if the vendor splices at the 18:00 ET Globex open the offset is ~0; key days by the Globex trading day (_CmeSessionClock.GlobexTradingDayEt)");
@@ -1919,8 +1918,8 @@ namespace PowerLanguage.Strategy
 		{
 			if (RollDetection == ERollDetection.Off)
 			{
-				// S4.4 / probe P-R1: typed ESymbolCategory.Future (the RUN line on Ettienne's @ES runs prints category(Future))
-				if (!m_rollWarned) { m_rollWarned = true; if (Bars.Info.Category == ESymbolCategory.Future) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w("RollDetection is Off on a futures symbol: rolls are not detected (AVWAP / PRICEACTION / roll-window flags never fire)"); } }
+				// S4.4 / probe P-R1, M-INSTR F2: typed futures test (Future or FutureRolover; the RUN line on Ettienne's @ES runs prints category(Future))
+				if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w("RollDetection is Off on a futures symbol: rolls are not detected (AVWAP / PRICEACTION / roll-window flags never fire)"); } }
 				return;
 			}
 			if (Bars.Status != EBarState.Close) return;
@@ -1936,7 +1935,7 @@ namespace PowerLanguage.Strategy
 				bool intraday = isIntradayResolution(res);
 				bool calendarKeyed = tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20));
 				m_rollGlobexKey = m_rollDet.series && calendarKeyed && intraday
-					&& Bars.Info.Category == ESymbolCategory.Future;
+					&& isFuturesCategory(Bars.Info.Category);
 				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, intraday, res.ToString(), calendarKeyed && !m_rollGlobexKey);
 				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
 			}
@@ -2341,22 +2340,102 @@ namespace PowerLanguage.Strategy
 			return m_tick;
 		}
 
+		/// <summary>
+		/// M-INSTR F4 (spec R6): Data1 tick from Bars.Info.MinMove / PriceScale. No silent fallback: a tick that cannot be resolved (or a
+		/// Bars.Info that cannot be read) is written as an Error line (traceAlways: one File.AppendAllText, whatever TraceLevel is) and
+		/// then thrown. The 0.01 fallback and the bare catch are gone.
+		/// </summary>
 		private double resolveTick()
 		{
+			double mm = double.NaN, ps = double.NaN;
+			string name = null;
 			try
 			{
-				double mm = Bars.Info.MinMove;
-				double ps = Bars.Info.PriceScale;
-				if (ps != 0)
-				{
-					double t = Math.Abs(mm / ps);
-					if (t > 0 && !double.IsInfinity(t)) return t;
-				}
-				if (mm > 0) return mm;
+				mm = Bars.Info.MinMove;
+				ps = Bars.Info.PriceScale;
+				name = Bars.Info.Name;   // inside the try: a failing read still gets the Error line below before the throw
 			}
-			catch { }
-			return TICK_FALLBACK;
+			catch (Exception ex)
+			{
+				string readError = tickError(name, mm, ps) + " Reading Bars.Info failed: " + ex.GetType().Name + ": " + ex.Message;
+				traceAlways(ETraceLevel.Error, name, readError);
+				throw new InvalidOperationException(readError, ex);
+			}
+			double t = tickFromMinMove(mm, ps);
+			if (t > 0) return t;
+			string error = tickError(name, mm, ps);
+			traceAlways(ETraceLevel.Error, name, error);
+			throw new InvalidOperationException(error);
 		}
+
+		// <instr-host-core> M-INSTR PR-M1b. MC-free apart from the typed ESymbolCategory: tests/OrderFlowTests/gen.sh compiles this
+		// region against a mirror of ESymbolCategory (spec §4.1 values). PR-M2/M3 move EAssetClass / ClassOf into the profile core.
+
+		/// <summary>M-INSTR §4.2 asset class of a stream (EAssetClass of spec §5).</summary>
+		public enum EAssetClass { Future, Stock, SpotFx, Crypto, Index, Unsupported }
+
+		/// <summary>M-INSTR F2: futures = ESymbolCategory.Future or ESymbolCategory.FutureRolover (typed; _McApiDump3 lists FutureRolover = 18).
+		/// Used by the DAILY roll-offset warning, the RollDetection Off warning, the roll Globex key and _VolumeProfileBase's Build Volume On check.</summary>
+		protected static bool isFuturesCategory(ESymbolCategory category)
+		{
+			return category == ESymbolCategory.Future || category == ESymbolCategory.FutureRolover;
+		}
+
+		/// <summary>
+		/// M-INSTR §4.2: exhaustive typed classification. Every ESymbolCategory member is listed by name; a value added in a later MC build
+		/// throws (formatting the int is a log, not a parse).
+		/// </summary>
+		protected static EAssetClass ClassOf(ESymbolCategory c)
+		{
+			switch (c)
+			{
+				case ESymbolCategory.Future: case ESymbolCategory.FutureRolover: return EAssetClass.Future;
+				case ESymbolCategory.Stock: return EAssetClass.Stock;      // ETF = Stock (rev-3 Q1)
+				case ESymbolCategory.Forex: return EAssetClass.SpotFx;
+				case ESymbolCategory.Crypto: return EAssetClass.Crypto;
+				case ESymbolCategory.Index: return EAssetClass.Index;
+				case ESymbolCategory.FutureOption: case ESymbolCategory.StockOption: case ESymbolCategory.CurrOption:
+				case ESymbolCategory.IndexOption: case ESymbolCategory.MutualFund: case ESymbolCategory.MoneyMarketFund:
+				case ESymbolCategory.Cash: case ESymbolCategory.Bond: case ESymbolCategory.Spread: case ESymbolCategory.CPCSymbol:
+				case ESymbolCategory.Composites: case ESymbolCategory.FutureRoot: case ESymbolCategory.FutureOptionRoot:
+				case ESymbolCategory.StockOptionRoot: case ESymbolCategory.Commodity: case ESymbolCategory.Warrant:
+				case ESymbolCategory.None: return EAssetClass.Unsupported;
+				default: throw new InvalidOperationException("M-INSTR: unmapped ESymbolCategory " + ((int)c).ToString(CultureInfo.InvariantCulture)
+					+ " (not in spec §4.1); update ClassOf (§4.2) for this MC build.");
+			}
+		}
+
+		/// <summary>
+		/// CS-6 under ETradingDayRoll.Auto, by asset class: SpotFx = date of (New York time + 7h), i.e. the 17:00 NY roll; Crypto = UTC date;
+		/// anything else = bar date. toZone = the host's ToZone(barTime, tzId). Same result as main's Category-name test for every category.
+		/// </summary>
+		protected static DateTime autoTradingDayOf(EAssetClass assetClass, DateTime barTime, Func<DateTime, string, DateTime> toZone)
+		{
+			switch (assetClass)
+			{
+				case EAssetClass.SpotFx: return toZone(barTime, "Eastern Standard Time").AddHours(7).Date;
+				case EAssetClass.Crypto: return toZone(barTime, "UTC").Date;
+				default: return barTime.Date;
+			}
+		}
+
+		/// <summary>M-INSTR F4: tick = |MinMove / PriceScale| when that is finite and &gt; 0, MinMove when PriceScale is 0 (as before); NaN = unresolved.</summary>
+		protected static double tickFromMinMove(double minMove, double priceScale)
+		{
+			if (priceScale == 0) return minMove > 0 && !double.IsInfinity(minMove) ? minMove : double.NaN;
+			double t = Math.Abs(minMove / priceScale);   // NaN / 0 / Infinity (bad MinMove or PriceScale, underflow) = unresolved; main fell back to MinMove
+			return t > 0 && !double.IsInfinity(t) ? t : double.NaN;
+		}
+
+		/// <summary>M-INSTR F4: the Error / exception text for an unresolved tick (doubles formatted invariant, R10).</summary>
+		protected static string tickError(string symbol, double minMove, double priceScale)
+		{
+			return "M-INSTR F4: no usable tick size for " + (string.IsNullOrEmpty(symbol) ? "Data1" : symbol)
+				+ " (Bars.Info.MinMove = " + minMove.ToString("R", CultureInfo.InvariantCulture)
+				+ ", PriceScale = " + priceScale.ToString("R", CultureInfo.InvariantCulture)
+				+ "). There is no 0.01 fallback: set Min Movement / Price Scale for the symbol in QuoteManager.";
+		}
+		// </instr-host-core>
 
 		// ---- CS-1: per-trade journal (gap-only) ----
 
@@ -2516,8 +2595,20 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected virtual DateTime tradingDayKey(DateTime barTime)
 		{
-			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, Bars.Info.Category.ToString());   // CS-6
+			if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, classOfData1());   // CS-6, M-INSTR L2462: typed
 			return barTime.Date;
+		}
+
+		/// <summary>M-INSTR §4.2: ClassOf(Bars.Info.Category); a category ClassOf does not map writes an Error line (traceAlways), then rethrows.</summary>
+		private EAssetClass classOfData1()
+		{
+			ESymbolCategory category = Bars.Info.Category;
+			try { return ClassOf(category); }
+			catch (InvalidOperationException ex)
+			{
+				traceAlways(ETraceLevel.Error, null, ex.Message);
+				throw;
+			}
 		}
 
 		/// <summary>
@@ -2634,13 +2725,10 @@ namespace PowerLanguage.Strategy
 			return end > start ? t >= start && t < end : t >= start || t < end;
 		}
 
-		/// <summary>CS-6: tradingDayKey under ETradingDayRoll.Auto for a category name (Forex / Crypto*; else calendar date).</summary>
-		protected DateTime autoTradingDay(DateTime barTime, string category)
+		/// <summary>CS-6: tradingDayKey under ETradingDayRoll.Auto for an asset class (M-INSTR: typed ClassOf, no Category name test).</summary>
+		protected DateTime autoTradingDay(DateTime barTime, EAssetClass assetClass)
 		{
-			string c = (category ?? "").ToUpperInvariant();
-			if (c.Contains("FOREX") || (c.Contains("CURRENCY") && !c.Contains("CRYPTO"))) return ToZone(barTime, "Eastern Standard Time").AddHours(7).Date;
-			if (c.Contains("CRYPTO")) return ToZone(barTime, "UTC").Date;
-			return barTime.Date;
+			return autoTradingDayOf(assetClass, barTime, ToZone);
 		}
 
 		/// <summary>
