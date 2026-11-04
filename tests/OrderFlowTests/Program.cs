@@ -1053,7 +1053,7 @@ static class Program
 					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
 					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");
 				// Exemptions, each listed in the PR. None left: M-INSTR PR-M1b removed the three autoTradingDay Category-name exemptions
-				// (typed ClassOf switch now) and PR-M1e retired _InstrProbe (the reflection probe; typed _InstrDump replaces it).
+				// (typed ClassOf switch now) and PR-M1e retired _InstrProbe (the reflection probe; the typed dump that replaced it was removed in e1f5b11).
 				var exemptFiles = new HashSet<string>();
 				string[] exemptLines = { };
 				var used = new HashSet<string>();
@@ -1181,14 +1181,15 @@ static class Program
 			Check(IH.autoTradingDayOf(EAssetClass.SpotFx, t18, toZone) == new DateTime(2026, 3, 7) && IH.autoTradingDayOf(EAssetClass.Crypto, new DateTime(2026, 3, 6, 20, 0, 0), toZone) == new DateTime(2026, 3, 7)
 				&& IH.autoTradingDayOf(EAssetClass.Future, t18, toZone) == new DateTime(2026, 3, 6) && IH.autoTradingDayOf(EAssetClass.Stock, t18, toZone) == new DateTime(2026, 3, 6),
 				"MI-B5 Auto: SpotFx rolls at 17:00 NY (+7h), Crypto keys by UTC date, Future/Stock by bar date");
-			// F4: tick resolution, no 0.01 fallback
+			// F4 + PR-M4 (§11.1 item 4): tick resolution, no 0.01 fallback, no PriceScale == 0 path, no Math.Abs
 			Func<double, bool> bad = x => double.IsNaN(x);
 			Check(IH.tickFromMinMove(25, 100) == 0.25 && IH.tickFromMinMove(1, 100) == 0.01 && Math.Abs(IH.tickFromMinMove(5, 100000) - 5e-5) < 1e-18
-				&& IH.tickFromMinMove(-25, 100) == 0.25 && IH.tickFromMinMove(2, 0) == 2,
-				"MI-B6 tick = |MinMove / PriceScale| (ES 25/100 = 0.25, stock 1/100, 6E 5/100000), MinMove when PriceScale = 0 (as on main)");
+				&& bad(IH.tickFromMinMove(-25, 100)) && bad(IH.tickFromMinMove(25, -100)) && bad(IH.tickFromMinMove(2, 0)),
+				"MI-B6 tick = MinMove / PriceScale (ES 25/100 = 0.25, stock 1/100, 6E 5/100000); a negative ratio or PriceScale = 0 is unresolved (PR-M4: no Math.Abs, no MinMove path)");
 			Check(bad(IH.tickFromMinMove(0, 100)) && bad(IH.tickFromMinMove(0, 0)) && bad(IH.tickFromMinMove(double.NaN, 100)) && bad(IH.tickFromMinMove(1, double.NaN))
-				&& bad(IH.tickFromMinMove(-1, 0)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 1)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 0)) && bad(IH.tickFromMinMove(1e-300, 1e300)),
-				"MI-B7 a missing, zero, negative-only, NaN, infinite or underflowing tick is unresolved (NaN), never 0.01");
+				&& bad(IH.tickFromMinMove(-1, 0)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 1)) && bad(IH.tickFromMinMove(double.PositiveInfinity, 0)) && bad(IH.tickFromMinMove(1e-300, 1e300))
+				&& bad(IH.tickFromMinMove(1, double.PositiveInfinity)),
+				"MI-B7 a missing, zero, negative, NaN, infinite or underflowing tick is unresolved (NaN), never 0.01");
 			var cult = System.Threading.Thread.CurrentThread.CurrentCulture;
 			System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
 			string te = IH.tickError("@6E", 0.5, 1000), te0 = IH.tickError(null, double.NaN, double.NaN);
@@ -1203,8 +1204,20 @@ static class Program
 			int iT = rtk.IndexOf("double t = tickFromMinMove(mm, ps);"), iR = rtk.IndexOf("if (t > 0) return t;"), iE = rtk.IndexOf("traceAlways(ETraceLevel.Error, name, error);"), iX = rtk.IndexOf("throw new InvalidOperationException(error);");
 			int iC = rtk.IndexOf("catch (Exception ex)"), iCE = rtk.IndexOf("traceAlways(ETraceLevel.Error, name, readError);"), iCX = rtk.IndexOf("throw new InvalidOperationException(readError, ex);");
 			Check(iT > 0 && iR > iT && iE > iR && iX > iE && iC > 0 && iCE > iC && iCX > iCE && iT > iCX && iN > iTry && iN < iC && System.Text.RegularExpressions.Regex.Matches(rtk, @"Bars\.Info\.Name").Count == 1 && iNameErr > iR && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"catch\s*\{")
-				&& !code.Contains("TICK_FALLBACK") && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"return\s+0\.01"),
-				"MI-B9 resolveTick: an unresolved tick or an unreadable Bars.Info (MinMove, PriceScale or Name, all read inside the try) writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
+				&& !code.Contains("TICK_FALLBACK") && !System.Text.RegularExpressions.Regex.IsMatch(rtk, @"return\s+0\.01")
+				&& rtk.IndexOf("InstrumentProfile p1 = InstrumentProfileOf(1);") >= 0 && rtk.IndexOf("if (p1 != null && p1.tick > 0 && !double.IsInfinity(p1.tick)) return p1.tick;") > 0
+				&& rtk.IndexOf("if (p1 != null && p1.tick > 0 && !double.IsInfinity(p1.tick)) return p1.tick;") < iTry,
+				"MI-B9 resolveTick: the Data1 profile tick first (PR-M4); else an unresolved tick or an unreadable Bars.Info (MinMove, PriceScale or Name, all read inside the try) writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
+			{
+				string vpbSrc = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileBase.Strategy.CS"));
+				string vceSrc = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VpConfluenceEngine.Function.CS"));
+				Func<string, string> noCmt = x => System.Text.RegularExpressions.Regex.Replace(x, @"//[^\n]*", "");
+				string bp = MethodBody(cs, "private void buildProfiles()") ?? "", fb = MethodBody(cs, "private void profilesFirstBar()") ?? "";
+				Check(!noCmt(vpbSrc).Contains("FALLBACK_TICK") && !noCmt(vceSrc).Contains("FALLBACK_TICK") && !code.Contains("FALLBACK_TICK") && bp.Length > 0 && fb.Length > 0
+					&& !code.Contains("LogOnlyLine") && bp.Contains("throw InstrumentError.Fail(err, ") && bp.Contains("InstrumentReason.Class") && bp.Contains("throw instrReadFailed(ds, name, \"sessions at StartCalc\", ex);")
+					&& fb.Contains("throw instrReadFailed(ds, null, \"sessions on the first bar\", ex);"),
+					"MI-B13 PR-M4: FALLBACK_TICK gone (VPB, VpConfluence); buildProfiles / profilesFirstBar enforce (unmapped category = 'class' Error + throw, read failures Error + throw, no log-only line)");
+			}
 			Check(code.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")
 				&& code.Contains("if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) {")
 				&& System.Text.RegularExpressions.Regex.IsMatch(code, @"m_rollGlobexKey = m_rollDet\.series && calendarKeyed && intraday\s*&& isFuturesCategory\(Bars\.Info\.Category\);")

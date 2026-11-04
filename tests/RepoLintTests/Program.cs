@@ -121,13 +121,13 @@ static class Program
 		new[] { "_MarketBreadth.Strategy.CS", "using System.Reflection;" },
 		new[] { "_CustomSignal.Strategy.CS", "try { return Bars.Info.TimeZone.ToString(); } catch { return \"?\"; }" },   // barZoneLabel (log)
 		new[] { "_CustomSignal.Strategy.CS", "string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, intraday, res.ToString(), calendarKeyed && !m_rollGlobexKey);" },   // Warning text (log)
+		// PR-M4: Ettienne's _RootDump probe (e1f5b11) lists the MTPA_SymbolFields members into its Output dump (log only, nothing read back)
+		new[] { "_RootDump.Strategy.CS", "foreach (MTPA_SymbolFields f in Enum.GetValues(typeof(MTPA_SymbolFields)))" },
 	};
-	// _TestPortMM L90 (log) is matched by prefix: the line is long and interpolated.
 	// _MtfMath Session.ToString (DayOfWeek day names into the MC-1439 mismatch text, log only; the compare is typed) is added
 	// beyond the spec's list (PR-M1d judgment call).
 	internal static readonly string[][] McAllowPrefix = {
 		new[] { "_MtfMath.Function.CS", "return StartDay.ToString().Substring(0, 3) + \" \" + StartTime.ToString(" },
-		new[] { "_TestPortMM.Signal.CS", "for (int i = 0; i < n; i++) { IStrategy s = sig(i); Output.WriteLine($\"P5b L8 StrategyCurrencyCode #{i}" },
 	};
 
 	static string StripComment(string l) { return Regex.Replace(l, @"//.*$", "").Trim(); }

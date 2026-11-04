@@ -45,7 +45,6 @@ namespace PowerLanguage.Strategy
 		public const double DEFAULT_EXCEPTIONAL_VOLUME_PERCENTILE = 0.95; // percentile used to determine whether volume on a node it exceptional
 		public const int MAX_DENSE_ROWS = 20000;  // maximum dense rows in a volume profile to use for LVN detection
 		private const int MAX_RESOLVED_CACHE = 4096;   // itemForBar memo entries per stream before it is cleared
-		internal const double FALLBACK_TICK = 0.01;     // tickSize() when the symbol reports no usable MinMove/PriceScale
 		internal const int CONFLUENCE_NODES_PER_PROFILE = 3;         // HVNs and LVNs (each, top by volume) taken from each lookback profile
 		internal const double SHARE_FACTOR_MIN = 0.5;                // volume-share factor clamp
 		internal const double SHARE_FACTOR_MAX = 1.5;
@@ -2415,7 +2414,7 @@ namespace PowerLanguage.Strategy
 
 		private static bool zoneClearsPrice(ConfluenceZone zone, double price, int dir, int clearTicks, double tick)
 		{
-			if (tick <= 0) tick = FALLBACK_TICK;
+			// tick = tickSize(): the Data1 profile tick, or Error line + throw (M-INSTR PR-M4, R6: the 0.01 FALLBACK_TICK is gone)
 			// Compare in whole ticks: robust to 1-ULP noise in derived zone edges.
 			if (dir > 0)
 				return Math.Round((zone.low - price) / tick) >= clearTicks;

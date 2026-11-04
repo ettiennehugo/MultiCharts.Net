@@ -6,8 +6,9 @@ using System.Linq;
 using PowerLanguage.Function;
 using S = PowerLanguage.Function._MtfMath.Session;
 
-// Off-MC tests for M-INSTR PR-M2 + PR-M3 (MI-T12 line formats, InstrumentStreams wiring) (specs/m-instr-spec.md rev 2.3 §10): MI-T2..T9, T11, T13, T16 (core) plus synthetic Spot FX /
-// crypto cases (their presets / class constants keep their VERIFY markers). Fixtures: the 13 PR-M0 _InstrDump runs (§4.4.2).
+// Off-MC tests for M-INSTR PR-M2 + PR-M3 (MI-T12 line formats, InstrumentStreams wiring) + PR-M4 (enforcement, Class:ROOT cost keys, floor src)
+// (specs/m-instr-spec.md rev 2.4 §10, §11.1): MI-T2..T9, T11, T13, T16 (core) plus synthetic Spot FX / crypto cases (their presets / class
+// constants keep their VERIFY markers). Fixtures: the 13 recorded PR-M0 dump runs (§4.4.2; the dump signal itself was removed in e1f5b11).
 static class Program
 {
 	static int s_fail, s_pass;
@@ -30,8 +31,13 @@ static class Program
 	static InstrumentProfile.Inputs In(string name, EAssetClass cls, string mcRoot, double minMove, double infoPs, double bpv, string ccy = "USD")
 	{
 		return new InstrumentProfile.Inputs { name = name, assetClass = cls, mcRoot = mcRoot, minMove = minMove, infoPriceScale = infoPs, structPriceScale = 1.0 / infoPs,
-			infoBigPointValue = bpv, structBigPointValue = bpv, currency = ccy, exchange = "CME", sessionName = "test", symbolExpiry = new DateTime(2038, 1, 1) };
+			infoBigPointValue = bpv, structBigPointValue = bpv, currency = ccy, exchange = "CME", sessionName = "test", symbolExpiry = new DateTime(2038, 1, 1),
+			// PR-M4 (D2): the bar zone IS the exchange zone (an Exchange-tz chart on CME), so the M3 pins keep their bar-time session text
+			barZone = CT, exchangeZone = CT, barZoneSetting = "Exchange", exchangeZoneId = "Central Standard Time" };
 	}
+	static readonly TimeZoneInfo CT = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time"), ET = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+	/// <summary>PR-M4 (D2): first bar time for WithSessions / FirstBar (a Monday; ET↔CT conversions are week-independent).</summary>
+	static readonly DateTime FB = new DateTime(2026, 1, 5, 17, 0, 0);
 
 	// ---------------------------------------------------------------- fixtures
 	sealed class Dump
@@ -217,13 +223,18 @@ static class Program
 		Check(InstrumentCalendars.BusinessDay(ECalendar.Observed) == null && InstrumentCalendars.BusinessDay(ECalendar.None) == null, "T4 Observed / None have no business-day calendar");
 		var six = InstrumentPresets.Find("6E", EAssetClass.Future);
 		Check(six.roll == ERollRule.BusinessDaysBeforeExpiry && six.rollDays == 5 && six.verify == InstrumentCalendars.NyseStandInNote, "T4 6E roll = BusinessDaysBeforeExpiry(5) (Ettienne 2026-11-04)");
-		// a root whose preset has rules but no calendar assigned: Error line, then throw 'calendar' (no silent default)
+		// a row with rules but no business-day calendar: PR-M4 rejects it in PresetRow.Validate (Error line, then throw unknown-field:config),
+		// before Build's 'calendar' refusal (no silent default either way)
 		foreach (var cal in new[] { ECalendar.Observed, ECalendar.None })
 		{
-			var ov = new InstrumentConfig { overrides = new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, cal, "ENERGY", "test", null) };
+			var row = new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, cal, "ENERGY", "test", null);
+			var ov = new InstrumentConfig { overrides = row };
+			string ve = row.Validate();
+			Check(ve != null && ve.Contains("calendar=" + InstrumentText.CalendarName(cal)), "T4 PresetRow.Validate rejects calendar " + InstrumentText.CalendarName(cal) + " [" + ve + "]");
 			var ce = Throws(s => InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), ov, s), "T4 no calendar " + cal);
-			Check(ce != null && ce.Reason == InstrumentReason.Calendar && ce.Message.Contains("calendar " + InstrumentText.CalendarName(cal)), "T4 preset with rules and calendar " + InstrumentText.CalendarName(cal) + " -> Error + calendar");
+			Check(ce != null && ce.Reason == InstrumentReason.UnknownField("config") && ce.Message.Contains("calendar=" + InstrumentText.CalendarName(cal)), "T4 override with rules and calendar " + InstrumentText.CalendarName(cal) + " -> Error + unknown-field:config");
 		}
+		Check(InstrumentPresets.Rows.All(r => r.Validate() == null), "T4 every built-in preset row validates (each has a business-day calendar)");
 		Check(InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), null, null).isBusinessDay == null, "T4 future without a preset: no rules, no calendar needed, no throw");
 		// R6 / §6.4 S4: the business-day calendar is required; no silent weekday fallback (it gave CLF26 12-22, ZNH24 03-20, ZNZ25 12-22)
 		var cl = InstrumentPresets.Find("CL", EAssetClass.Future);
@@ -367,11 +378,11 @@ static class Program
 		var p = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null);
 		Check(p.tick == 0.25 && p.bigPointValue == 50 && p.tickValue == 12.5 && p.calendar == ECalendar.CmeEquityIndex && p.expiry == EExpiryRule.ThirdFridaySoq
 			&& p.roll == ERollRule.EquityIndexCustomary && p.sizingUnit == ESizingUnit.Contracts && p.sessionsPerYear == 252 && p.cluster == "EQIDX" && MonthMask.Text(p.contractMonths) == "HMUZ", "T8 ES profile fields");
-		var p2 = p.WithSessions(g, g, null);
+		var p2 = p.WithSessions(g, g, FB, null);
 		Check(p2.hasOvernight && p2.rthSplit.source == ERthSource.EquityIndexLegacy && p.sessions == null && p2.sessions.Length == 9, "T8 WithSessions copies (profile immutable)");
-		var ex = Throws(s => p.WithSessions(g, spy.FirstBar, s), "T8 changed");
+		var ex = Throws(s => p.WithSessions(g, spy.FirstBar, FB, s), "T8 changed");
 		Check(ex != null && ex.Reason == "sessions:changed", "T8 StartCalc vs first bar differ -> sessions:changed");
-		ex = Throws(s => p.WithSessions(null, g, s), "T8 none");
+		ex = Throws(s => p.WithSessions(null, g, FB, s), "T8 none");
 		Check(ex != null && ex.Reason == "sessions:none", "T8 null sessions -> sessions:none");
 		var stk = InstrumentProfile.Build(In("SPY", EAssetClass.Stock, "SPY", 1, 100, 1), null, null);
 		Check(stk.calendar == ECalendar.Nyse && stk.presetId == null && stk.sizingUnit == ESizingUnit.Shares && stk.expiry == null && stk.roll == null && !stk.cost.known && stk.costFloorTicks == -1, "T8 SPY: Nyse, no preset, Shares, cost Unknown");
@@ -385,12 +396,12 @@ static class Program
 	static void FxCrypto()
 	{
 		var fx = Daily(DayOfWeek.Monday, DayOfWeek.Friday, new TimeSpan(17, 0, 0), new TimeSpan(17, 0, 0), true);
-		var p = InstrumentProfile.Build(In("EUR/USD", EAssetClass.SpotFx, "EUR/USD", 1, 100000, 1), null, null).WithSessions(fx, fx, null);
+		var p = InstrumentProfile.Build(In("EUR/USD", EAssetClass.SpotFx, "EUR/USD", 1, 100000, 1), null, null).WithSessions(fx, fx, FB, null);
 		Check(p.root == "EURUSD" && p.presetId == null && p.calendar == ECalendar.Observed && p.sessionsPerYear == 260 && p.sizingUnit == ESizingUnit.Units && !p.cost.known, "FX profile (sessionsPerYear 260 VERIFY)");
 		Check(p.hasOvernight && p.rthSplit == null, "FX 24h -> overnight, no rth split");
 		Check(InstrumentPresets.ClassVerify(EAssetClass.SpotFx).StartsWith("VERIFY", StringComparison.Ordinal) && InstrumentPresets.ClassVerify(EAssetClass.Crypto).StartsWith("VERIFY", StringComparison.Ordinal), "FX/crypto keep VERIFY markers");
 		var c = new List<S>(); for (var d = DayOfWeek.Sunday; d <= DayOfWeek.Saturday; d++) c.Add(new S(d, TimeSpan.Zero, d, TimeSpan.FromDays(1)));
-		var cp = InstrumentProfile.Build(In("BTCUSD", EAssetClass.Crypto, "", 1, 100, 1), null, null).WithSessions(c.ToArray(), c.ToArray(), null);
+		var cp = InstrumentProfile.Build(In("BTCUSD", EAssetClass.Crypto, "", 1, 100, 1), null, null).WithSessions(c.ToArray(), c.ToArray(), FB, null);
 		Check(cp.root == "BTCUSD" && cp.rootSource == "parsed" && cp.sessionsPerYear == 365 && cp.calendar == ECalendar.Observed && cp.sizingUnit == ESizingUnit.Units, "crypto profile");
 		Check(!cp.hasOvernight && cp.rthSplit != null && cp.rthSplit.source == ERthSource.ChartDaySession, "crypto 00:00-24:00 literal: no overnight, day split (VERIFY, PR-M4)");
 		Check(cp.InstrLine(1, "Crypto", "Exchange", "TickCount").Contains("dayOpen(00:00) sessionEnd(24:00)"), "crypto INSTR dayOpen/sessionEnd: " + cp.InstrLine(1, "Crypto", "Exchange", "TickCount"));
@@ -410,7 +421,7 @@ static class Program
 		Check(es.cost.known && es.cost.roundTripCents == 1700 && es.costFloorTicks == 14 && mes.costFloorTicks == 20, "T9 profile costs ES/MES");
 		Check(es.cost.Text() == "17.00 src=Ettienne 2026-10-31" && mes.cost.Text().StartsWith("2.50", StringComparison.Ordinal), "T9 cost text");
 		var cfg = new InstrumentConfig(); Check(cfg.Validate() == null && !cfg.applyCostFloor && cfg.enabled && cfg.overrides == null, "T9 config defaults");
-		cfg.costs["ZN"] = 1000;
+		cfg.costs["Future:ZN"] = 1000;
 		e = Throws(s => InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), cfg, s), "T9 ZN cfg");
 		Check(e != null && e.Reason == "mismatch:tickValue", "T9 ZN with a cost throws mismatch:tickValue");
 		Check(!InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null, null).cost.known, "T9 ZN without cost -> Unknown, no throw");
@@ -418,7 +429,23 @@ static class Program
 		Check(bad.Validate() != null && bad.Validate().StartsWith("InstrumentConfig: ", StringComparison.Ordinal), "T9 Validate rejects bad costs");
 		e = Throws(s => InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), bad, s), "T9 badcfg");
 		Check(e != null && e.Reason == "unknown-field:config", "T9 invalid config refuses");
-		var a = new InstrumentConfig(); var b = new InstrumentConfig { costs = new Dictionary<string, long> { { "MES", 250 }, { "ES", 1700 } } };
+		// PR-M4 D1: costs keyed <Class>:<ROOT>; a root-only key or an unknown class is refused (unknown-field:config)
+		Check(InstrumentConfig.CostKey(EAssetClass.Future, "ES") == "Future:ES" && InstrumentConfig.CostKey(EAssetClass.Stock, "ES") == "Stock:ES", "T9 D1 CostKey = <Class>:<ROOT>");
+		Check(new InstrumentConfig().costs.Count == 2 && new InstrumentConfig().costs["Future:ES"] == 1700 && new InstrumentConfig().costs["Future:MES"] == 250, "T9 D1 defaults Future:ES 1700, Future:MES 250");
+		foreach (var key in new[] { "ES", "Futures:ES", "Unsupported:ES", "Future:", "Future:es", "Future: ES", "future:ES", ":ES", "Future:ES:X" })
+		{
+			var rk = new InstrumentConfig(); rk.costs[key] = 1700;
+			string ve = rk.Validate();
+			Check(ve != null && ve.Contains("costs key " + key + " (expected <Class>:<ROOT>, e.g. Future:ES)"), "T9 D1 Validate rejects costs key '" + key + "' [" + ve + "]");
+			var ke = Throws(sk => InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), rk, sk), "T9 D1 key " + key);
+			Check(ke != null && ke.Reason == "unknown-field:config", "T9 D1 costs key '" + key + "' -> Error + unknown-field:config");
+		}
+		foreach (var cls in new[] { EAssetClass.Future, EAssetClass.Stock, EAssetClass.SpotFx, EAssetClass.Crypto, EAssetClass.Index })
+		{ var ok = new InstrumentConfig(); ok.costs[InstrumentConfig.CostKey(cls, "ABC")] = 100; Check(ok.Validate() == null, "T9 D1 " + InstrumentText.ClassName(cls) + ":ABC accepted"); }
+		Check(new InstrumentConfig().CostFor(EAssetClass.Future, "ES").roundTripCents == 1700 && !new InstrumentConfig().CostFor(EAssetClass.Stock, "ES").known
+			&& !new InstrumentConfig().CostFor(EAssetClass.Unsupported, "ES").known && !new InstrumentConfig().CostFor(EAssetClass.Future, null).known, "T9 D1 CostFor reads only the symbol's own class row");
+		Check(new InstrumentConfig().Canon().Contains(";costs=[Future:ES:1700,Future:MES:250,];"), "T9 D1 Canon costs=[Future:ES:1700,Future:MES:250,]: " + new InstrumentConfig().Canon());
+		var a = new InstrumentConfig(); var b = new InstrumentConfig { costs = new Dictionary<string, long> { { "Future:MES", 250 }, { "Future:ES", 1700 } } };
 		Check(a.Canon() == b.Canon(), "T9 Canon order-independent");
 		b.applyCostFloor = true; Check(a.Canon() != b.Canon(), "T9 Canon covers applyCostFloor");
 		// overrides replace the preset row for that root + class
@@ -446,33 +473,33 @@ static class Program
 	static void T13Hash()
 	{
 		var g = Globex9();
-		var a = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, null);
-		var b = InstrumentProfile.Build(In("ESZ26", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, null);
+		var a = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
+		var b = InstrumentProfile.Build(In("ESZ26", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
 		Check(a.ProfileHash() == b.ProfileHash() && a.ProfileHash().Length == 16, "T13 same facts -> same hash (name not hashed)");
-		var m = InstrumentProfile.Build(In("@MES", EAssetClass.Future, "MES", 25, 100, 5), null, null).WithSessions(g, g, null);
+		var m = InstrumentProfile.Build(In("@MES", EAssetClass.Future, "MES", 25, 100, 5), null, null).WithSessions(g, g, FB, null);
 		Check(a.ProfileHash() != m.ProfileHash(), "T13 MES differs");
 		var spy = Dumps().First(d => d.Name == "SPY").FirstBar;
-		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(spy, spy, null).ProfileHash() != a.ProfileHash(), "T13 sessions change the hash");
+		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(spy, spy, FB, null).ProfileHash() != a.ProfileHash(), "T13 sessions change the hash");
 		var cfg = new InstrumentConfig();
 		Check(!cfg.Canon().Contains(a.ProfileHash()) && !cfg.Canon().Contains("profileHash"), "T13 profileHash outside InstrumentConfig.Canon (Q7)");
-		Check(a.ProfileHash() == InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, null).ProfileHash(), "T13 deterministic");
+		Check(a.ProfileHash() == InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null).ProfileHash(), "T13 deterministic");
 		string line = a.InstrLine(1, "Future", "Exchange", "Volume");
 		Check(line.StartsWith("INSTR ds(1) name(@ES) cat(Future) class(Future) root(ES rootSrc=mc) preset(ES) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15;", StringComparison.Ordinal)
 			&& line.Contains(" dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + a.ProfileHash() + ")"), "T13 INSTR line: " + line);
 		Check(!line.Contains("stand-in"), "T13 ES line has no stand-in note");
-		var clLine = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null).WithSessions(g, g, null).InstrLine(1, "Future", "Exchange", "Volume");
+		var clLine = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null).WithSessions(g, g, FB, null).InstrLine(1, "Future", "Exchange", "Volume");
 		Check(clLine.Contains(" calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(FGHJKMNQUVXZ) expiry(CL25thMinus3Bd) roll(BusinessDaysBeforeExpiry(2))"), "T13 CL INSTR line names the NYSE stand-in: " + clLine);
-		var sixLine = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null).InstrLine(1, "Future", "Exchange", "Volume");
+		var sixLine = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null).InstrLine(1, "Future", "Exchange", "Volume");
 		Check(sixLine.Contains("calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8))") && sixLine.Contains("roll(BusinessDaysBeforeExpiry(5))"), "T13 6E INSTR line: " + sixLine);
 		Console.WriteLine("ES GLOBEX profileHash " + a.ProfileHash());
 		// PR-M3 review: literal pins (computed-only checks missed the runtime-dependent "R" text). Canon uses G15 / preset values, so
 		// the same hashes come out of MC (.NET Framework) and the box tools (.NET 8).
-		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null);
+		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null);
 		Console.WriteLine("6E GLOBEX profileHash " + six.ProfileHash());
 		Check(a.ProfileHash() == "020deca78d6392b7", "T13 ES GLOBEX profileHash pinned: " + a.ProfileHash());
 		Check(six.ProfileHash() == "8e8b3e9b0e230e12", "T13 6E GLOBEX profileHash pinned: " + six.ProfileHash());
 		Check(six.Canon().Contains(";tick=5E-05;bpv=125000;ccy=USD;"), "T13 6E Canon carries the preset tick / bpv: " + six.Canon());
-		Check(sixLine == "INSTR ds(1) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(none src=None) tick(5E-05) bpv(125000) tickValue(6.25) ccy(USD) bvo(Volume) calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(HMUZ) expiry(ThirdWedMinus2Bd) roll(BusinessDaysBeforeExpiry(5)) cost(Unknown) floor(Unknown) cluster(FX_EUR) profileHash(8e8b3e9b0e230e12)", "T13 6E INSTR line pinned in full: " + sixLine);
+		Check(sixLine == "INSTR ds(1) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15) xsessions(Central Standard Time n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15; rth none) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(none src=None) tick(5E-05) bpv(125000) tickValue(6.25) ccy(USD) bvo(Volume) calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(HMUZ) expiry(ThirdWedMinus2Bd) roll(BusinessDaysBeforeExpiry(5)) cost(Unknown) floor(Unknown src=no-cost) cluster(FX_EUR) profileHash(8e8b3e9b0e230e12)", "T13 6E INSTR line pinned in full: " + sixLine);
 	}
 
 	// ---------------------------------------------------------------- MI-T16 R14 session ends
@@ -519,8 +546,8 @@ static class Program
 			var warn = new List<string>(); var err = new List<string>();
 			st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, new InstrumentConfig(), err.Add, warn.Add);
 			st.Start(2, In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), g, new InstrumentConfig(), err.Add, warn.Add);
-			string l1 = st.FirstBar(1, g, "Future", "Exchange→Central Standard Time", "Volume", err.Add, warn.Add);
-			string l2 = st.FirstBar(2, g, "Future", "Exchange→Central Standard Time", "Volume", err.Add, warn.Add);
+			string l1 = st.FirstBar(1, g, FB, "Future", "Exchange→Central Standard Time", "Volume", err.Add);
+			string l2 = st.FirstBar(2, g, FB, "Future", "Exchange→Central Standard Time", "Volume", err.Add);
 			return new[] { l1, l2, st.RunSuffix(), string.Join("|", warn), string.Join("|", err) };
 		};
 		string[] inv, de;
@@ -532,16 +559,16 @@ static class Program
 		}
 		finally { CultureInfo.CurrentCulture = saved; CultureInfo.CurrentUICulture = savedUi; }
 		for (int i = 0; i < inv.Length; i++) Check(inv[i] == de[i], "T12 culture-invariant under de-DE [" + i + "]: " + de[i]);
-		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, null);
+		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
 		// pinned whole line (ES GLOBEX fixture, default InstrumentConfig)
 		string pin = "INSTR ds(1) name(@ES) cat(Future) class(Future) root(ES rootSrc=mc) preset(ES) exch(CME) tz(Exchange→Central Standard Time) sessionName(test) sessions("
-			+ InstrumentText.Sessions(g) + ") dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) "
+			+ InstrumentText.Sessions(g) + ") xsessions(Central Standard Time " + InstrumentText.Sessions(g) + "; rth 09:30-16:15) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) "
 			+ "calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + es.ProfileHash() + ")";
 		Check(inv[0] == pin, "T12 ES INSTR line pinned: " + inv[0]);
 		Check(InstrumentText.Sessions(g).StartsWith("n=9 Sun 17:00→Mon 15:15; ", StringComparison.Ordinal), "T12 sessions text");
 		Check(inv[1].StartsWith("INSTR ds(2) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) ", StringComparison.Ordinal) && inv[1].Contains(" bpv(125000) ") && inv[1].Contains(" ccy(USD) bvo(Volume) calendar(NyseStandIn; ")
 			&& inv[1].Contains("roll(BusinessDaysBeforeExpiry(5))"), "T12 6E INSTR line: " + inv[1]);
-		Check(inv[2] == " profileHash(1=" + es.ProfileHash() + ";2=" + InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null).ProfileHash() + ")", "T12 RUN suffix: " + inv[2]);
+		Check(inv[2] == " profileHash(1=" + es.ProfileHash() + ";2=" + InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null).ProfileHash() + ")", "T12 RUN suffix: " + inv[2]);
 		Check(inv[3] == "" && inv[4] == "", "T12 clean ES/6E run: no Warning, no Error [" + inv[3] + "][" + inv[4] + "]");
 		Check(!new InstrumentConfig().Canon().Contains("profileHash"), "T12 profileHash outside InstrumentConfig.Canon (Q7)");
 	}
@@ -550,84 +577,107 @@ static class Program
 	{
 		var g = Globex9(); var spy = Dumps().First(d => d.Name == "SPY").FirstBar;
 		var cfg = new InstrumentConfig();
-		// Enforced = the cross-checks only
-		Check(InstrumentStreams.Enforced(InstrumentReason.MismatchTick) && InstrumentStreams.Enforced(InstrumentReason.MismatchMcPriceScale) && InstrumentStreams.Enforced(InstrumentReason.MismatchMcBigPointValue)
-			&& InstrumentStreams.Enforced(InstrumentReason.MismatchBigPointValue) && InstrumentStreams.Enforced(InstrumentReason.MismatchTickValue) && InstrumentStreams.Enforced(InstrumentReason.SessionsChanged),
-			"M3 enforced: mismatch:* and sessions:changed");
-		Check(!InstrumentStreams.Enforced(InstrumentReason.Class) && !InstrumentStreams.Enforced(InstrumentReason.Currency) && !InstrumentStreams.Enforced(InstrumentReason.SessionsNone)
-			&& !InstrumentStreams.Enforced(InstrumentReason.Calendar) && !InstrumentStreams.Enforced(InstrumentReason.Tick) && !InstrumentStreams.Enforced(InstrumentReason.UnknownField("root")) && !InstrumentStreams.Enforced(null),
-			"M3 log only: class, currency, sessions:none, calendar, tick, unknown-field");
+		// PR-M4 (§11.1 item 1): every refusal is enforced. Start / FirstBar write exactly one Error line (the refusal), then throw
+		Func<Action<Action<string>, Action<string>>, Tuple<InstrumentException, List<string>, List<string>>> run = f =>
+		{
+			var e1 = new List<string>(); var w1 = new List<string>(); InstrumentException x = null;
+			try { f(e1.Add, w1.Add); } catch (InstrumentException e) { x = e; }
+			return Tuple.Create(x, e1, w1);
+		};
+		Func<Tuple<InstrumentException, List<string>, List<string>>, string, bool> erroredWith = (r, why) => r.Item1 != null && r.Item1.Reason == why && r.Item2.Count == 1 && r.Item2[0] == r.Item1.Message;
 		// preset cross-check mismatch (ES with a wrong big point value): Error line, then throw from Start
-		var st = new InstrumentStreams(2); var err = new List<string>(); var warn = new List<string>();
-		InstrumentException ex = null;
-		try { st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 20), g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
-		Check(ex != null && ex.Reason.StartsWith("mismatch:", StringComparison.Ordinal) && err.Count == 1 && err[0] == ex.Message && warn.Count == 0, "M3 preset mismatch -> Error line then throw [" + (ex == null ? "no throw" : ex.Reason) + "]");
+		var r0 = run((e, w) => new InstrumentStreams(2).Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 20), g, cfg, e, w));
+		Check(r0.Item1 != null && r0.Item1.Reason.StartsWith("mismatch:", StringComparison.Ordinal) && r0.Item2.Count == 1 && r0.Item2[0] == r0.Item1.Message && r0.Item3.Count == 0, "M3 preset mismatch -> Error line then throw");
 		// MC-internal mismatch
 		var bad = In("@ES", EAssetClass.Future, "ES", 25, 100, 50); bad.structBigPointValue = 5;
-		err.Clear(); ex = null;
-		try { new InstrumentStreams(1).Start(1, bad, g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
-		Check(ex != null && ex.Reason == InstrumentReason.MismatchMcBigPointValue && err.Count == 1 && err[0] == ex.Message, "M3 MC-internal mismatch -> Error then throw");
-		// log only: non-USD, Unsupported class -> one Warning each, no Error, no profile; RUN suffix says none
-		st = new InstrumentStreams(3); err.Clear(); warn.Clear();
-		st.Start(1, In("FDAX", EAssetClass.Future, "FDAX", 1, 2, 25, "EUR"), g, cfg, err.Add, warn.Add);
-		st.Start(2, In("SPX OPT", EAssetClass.Unsupported, "SPX", 1, 100, 100), g, cfg, err.Add, warn.Add);
-		Check(err.Count == 0 && warn.Count == 2 && warn[0].StartsWith("INSTR ds(1) log-only, not enforced until PR-M4: M-INSTR: INSTR cannot run on FDAX ", StringComparison.Ordinal) && warn[0].Contains("): currency (")
-			&& warn[1].StartsWith("INSTR ds(2) log-only, not enforced until PR-M4: ", StringComparison.Ordinal) && warn[1].Contains("): class."), "M3 currency / class refusals are Warning lines: " + string.Join(" | ", warn));
-		Check(st.Profile(1) == null && st.Profile(2) == null && st.FirstBar(1, g, "c", "t", "b", err.Add, warn.Add) == null && st.RunSuffix() == " profileHash(1=none;2=none)", "M3 refused streams: no INSTR line, RUN none: " + st.RunSuffix());
-		// a null typed read (host logged it): started, no profile
-		st = new InstrumentStreams(1); st.Start(1, null, g, cfg, err.Add, warn.Add);
-		Check(st.Profile(1) == null && st.RunSuffix() == " profileHash(1=none)", "M3 failed read -> none");
-		// S1: sessions:changed throws on the first bar (Error first); sessions:none is a Warning and keeps the StartCalc part
-		st = new InstrumentStreams(1); err.Clear(); warn.Clear(); ex = null;
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, bad, g, cfg, e, w)), InstrumentReason.MismatchMcBigPointValue), "M3 MC-internal mismatch -> Error then throw");
+		// PR-M4: the former log-only refusals (currency, class, tick, root, calendar, months, config) now write the Error line and throw
+		var rc = run((e, w) => new InstrumentStreams(3).Start(1, In("FDAX", EAssetClass.Future, "FDAX", 1, 2, 25, "EUR"), g, cfg, e, w));
+		Check(erroredWith(rc, InstrumentReason.Currency) && rc.Item1.Message.StartsWith("M-INSTR: INSTR cannot run on FDAX ", StringComparison.Ordinal) && rc.Item3.Count == 0, "M4 currency (non-USD) -> Error then throw");
+		var rk = run((e, w) => new InstrumentStreams(3).Start(2, In("SPX OPT", EAssetClass.Unsupported, "SPX", 1, 100, 100), g, cfg, e, w));
+		Check(erroredWith(rk, InstrumentReason.Class) && rk.Item3.Count == 0, "M4 class (Unsupported) -> Error then throw");
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, In("6BZ26", EAssetClass.Future, "6B", 0, 10000, 62500), g, cfg, e, w)), InstrumentReason.Tick), "M4 tick (MinMove 0, no preset) -> Error then throw");
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, In("6BZ26", EAssetClass.Future, "6B", -1, 10000, 62500), g, cfg, e, w)), InstrumentReason.Tick), "M4 tick (negative MinMove, no preset) -> Error then throw");
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, In("", EAssetClass.Future, "", 25, 100, 50), g, cfg, e, w)), InstrumentReason.UnknownField("root")), "M4 unknown-field:root -> Error then throw");
+		var badCfg0 = new InstrumentConfig(); badCfg0.costs["XX"] = -1;
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, badCfg0, e, w)), InstrumentReason.UnknownField("config")), "M4 unknown-field:config -> Error then throw");
+		var noMonths = new InstrumentConfig { overrides = new InstrumentPresetRow("ES", EAssetClass.Future, 0.25, 50, "USD", 0, EExpiryRule.ThirdFridaySoq, ERollRule.EquityIndexCustomary, 0, ECalendar.CmeEquityIndex, "EQIDX", "t", null) };
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, noMonths, e, w)), InstrumentReason.UnknownField("config")), "M4 a future row with no contract month -> unknown-field:config (Validate), Error then throw");
+		Check(!typeof(InstrumentStreams).GetMethods().Any(m => m.Name == "Enforced" || m.Name == "LogOnlyLine"), "M4 InstrumentStreams has no Enforced / LogOnlyLine (no log-only path left)");
+		// S1: sessions:changed and sessions:none throw on the first bar (Error first)
+		var st = new InstrumentStreams(1); var err = new List<string>(); var warn = new List<string>(); InstrumentException ex = null;
 		st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, cfg, err.Add, warn.Add);
-		try { st.FirstBar(1, spy, "Future", "Exchange", "Volume", err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
+		try { st.FirstBar(1, spy, FB, "Future", "Exchange", "Volume", err.Add); } catch (InstrumentException e) { ex = e; }
 		Check(ex != null && ex.Reason == InstrumentReason.SessionsChanged && err.Count == 1 && err[0] == ex.Message && warn.Count == 0, "M3 sessions:changed -> Error then throw");
-		st = new InstrumentStreams(1); err.Clear(); warn.Clear();
+		st = new InstrumentStreams(1); err.Clear(); warn.Clear(); ex = null;
 		st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, cfg, err.Add, warn.Add);
-		string l = st.FirstBar(1, null, "Future", "Exchange", "Volume", err.Add, warn.Add);
-		Check(err.Count == 0 && warn.Count == 1 && warn[0].Contains("): sessions:none.") && l != null && l.Contains(" sessions(n=0) ") && l.Contains(" dayOpen(?) sessionEnd(?) "), "M3 sessions:none -> Warning, INSTR line without sessions: " + l);
-		Check(st.FirstBar(1, g, "Future", "Exchange", "Volume", err.Add, warn.Add) == null && !st.Pending(1), "M3 first-bar step runs once per stream");
+		Check(err.Count == 0 && warn.Count == 0 && st.Profile(1) != null, "M4 StartCalc without sessions: instrument part built, the first bar decides");
+		try { st.FirstBar(1, null, FB, "Future", "Exchange", "Volume", err.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && ex.Reason == InstrumentReason.SessionsNone && err.Count == 1 && err[0] == ex.Message && warn.Count == 0, "M4 sessions:none -> Error then throw (was a Warning in M3)");
+		st = new InstrumentStreams(1); err.Clear();
+		st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, cfg, err.Add, warn.Add);
+		Check(st.FirstBar(1, g, FB, "Future", "Exchange", "Volume", err.Add) != null && st.FirstBar(1, g, FB, "Future", "Exchange", "Volume", err.Add) == null && !st.Pending(1) && err.Count == 0, "M3 first-bar step runs once per stream");
 		// root cross-check Warning is logged at StartCalc; absent streams are skipped by RunSuffix
 		st = new InstrumentStreams(4); warn.Clear();
 		var rw = In("@ES", EAssetClass.Future, "MES", 25, 100, 5);
 		st.Start(3, rw, g, cfg, err.Add, warn.Add);
 		Check(st.Profile(3) != null && warn.Count == (st.Profile(3).rootWarning == null ? 0 : 1) && st.RunSuffix().StartsWith(" profileHash(3=", StringComparison.Ordinal), "M3 root warning logged once; only started streams on RUN: " + st.RunSuffix() + " " + string.Join("|", warn));
 		Check(new InstrumentStreams(2).RunSuffix() == "", "M3 nothing started -> no RUN suffix");
-		// PR-M3 review: the enforced cross-checks run before every log-only refusal, so a refusal cannot hide a mismatch
+		// PR-M3 review: the cross-checks run before every other refusal, so a refusal cannot hide a mismatch
 		Func<InstrumentProfile.Inputs, InstrumentConfig, string> reason = (inp, c) => { var x = Throws(s => InstrumentProfile.Build(inp, c, s), "M3 order " + inp.name); return x == null ? null : x.Reason; };
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), null) == InstrumentReason.MismatchBigPointValue, "M3 order: preset mismatch beats currency");
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 50, "EUR"), null) == InstrumentReason.Currency, "M3 order: matching preset, then currency");
 		var mcBad = In("@ES", EAssetClass.Unsupported, "ES", 25, 100, 50); mcBad.structBigPointValue = 5;
 		Check(reason(mcBad, null) == InstrumentReason.Class, "M3 order: Unsupported class -> class refusal only, no MC-internal check (review 2)");
 		var esOpt = In("ES 6000C", EAssetClass.Unsupported, "ES", 25, 100, 50); esOpt.structBigPointValue = 5; esOpt.structPriceScale = 3;
-		Check(reason(esOpt, null) == InstrumentReason.Class, "M3 order: ES futures option (root ES, cost 1700, odd ASymbolInfo2) -> class only");
-		st = new InstrumentStreams(1); err.Clear(); warn.Clear();
-		st.Start(1, esOpt, g, cfg, err.Add, warn.Add);
-		Check(err.Count == 0 && warn.Count == 1 && warn[0].Contains("): class.") && st.Profile(1) == null, "M3 streams: Unsupported chart is a log-only Warning, no throw at StartCalc");
-		// review 2: the cost floor needs a matched preset (costs are keyed by root alone)
+		Check(reason(esOpt, null) == InstrumentReason.Class, "M3 order: ES futures option (root ES, cost Future:ES, odd ASymbolInfo2) -> class only");
+		Check(erroredWith(run((e, w) => new InstrumentStreams(1).Start(1, esOpt, g, cfg, e, w)), InstrumentReason.Class), "M4 streams: an Unsupported chart is Error + throw at StartCalc (was a log-only Warning)");
+		// PR-M4 D1: costs are keyed <Class>:<ROOT>; a stock ticker ES never uses the Future:ES row
 		var esStock = In("ES", EAssetClass.Stock, "ES", 1, 10000, 1);   // a stock ticker ES with a sub-penny tick: 0.01 cent tick value
-		Check(reason(esStock, null) == null, "M3 stock ticker ES with cost root ES: no mismatch:tickValue (no preset)");
-		var esStockP = InstrumentProfile.Build(esStock, null, null);
-		Check(esStockP.presetId == null && esStockP.cost.known && esStockP.costFloorTicks == -1, "M3 stock ES: cost shown, floor Unknown");
+		Check(reason(esStock, null) == null, "M4 stock ticker ES: no mismatch:tickValue (no preset, no Stock:ES cost)");
+		var esStockP = InstrumentProfile.Build(esStock, null, null).WithSessions(g, g, FB, null);
+		string esStockLine = esStockP.InstrLine(1, "Stock", "Exchange", "Volume");
+		Check(esStockP.presetId == null && !esStockP.cost.known && esStockP.costFloorTicks == -1 && esStockP.floorSource == FloorSource.CostClassMismatch && esStockP.costMismatchKey == "Future:ES"
+			&& esStockLine.Contains(" cost(Unknown) floor(Unknown src=cost-class-mismatch) "), "M4 D1 stock ES: cost(Unknown), floor(Unknown src=cost-class-mismatch): " + esStockLine);
+		var rs = run((e, w) => new InstrumentStreams(1).Start(1, esStock, g, cfg, e, w));
+		Check(rs.Item1 == null && rs.Item2.Count == 0 && rs.Item3.Count == 1 && rs.Item3[0] == "INSTR ds(1) cost row Future:ES not used: symbol class Stock root ES", "M4 D1 stock ES: one Warning naming the unused row: " + string.Join("|", rs.Item3));
+		var rf = run((e, w) => new InstrumentStreams(1).Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, cfg, e, w));
+		Check(rf.Item1 == null && rf.Item2.Count == 0 && rf.Item3.Count == 0, "M4 D1 ES future: no cost Warning");
+		var esFut = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
+		Check(esFut.costFloorTicks == 14 && esFut.floorSource == null && esFut.cost.Text().StartsWith("17.00", StringComparison.Ordinal) && esFut.ProfileHash() == "020deca78d6392b7",
+			"M4 D1 ES future: cost(17.00...), floor(14), profileHash 020deca78d6392b7 unchanged");
+		// floor src: no-cost (preset, no cost row), no-preset (cost row, no preset); config-invalid is a refusal (unknown-field:config) before any line
+		var zn = InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null, null);
+		Check(zn.costFloorTicks == -1 && zn.floorSource == FloorSource.NoCost && zn.costMismatchKey == null, "M4 floor src=no-cost (ZN: preset, no cost row)");
+		var c6b = new InstrumentConfig(); c6b.costs["Future:6B"] = 1000;
+		var b6 = InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), c6b, null);
+		Check(b6.cost.known && b6.costFloorTicks == -1 && b6.floorSource == FloorSource.NoPreset, "M4 floor src=no-preset (6B: cost row, no preset)");
+		var b6n = InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), null, null);
+		Check(b6n.floorSource == FloorSource.NoCost, "M4 floor src precedence: no-cost before no-preset");
+		Check(FloorSource.ConfigInvalid == "config-invalid" && FloorSource.CostClassMismatch == "cost-class-mismatch" && FloorSource.NoCost == "no-cost" && FloorSource.NoPreset == "no-preset", "M4 floor src names");
+		Check(!esStockP.Canon().Contains("cost-class-mismatch") && !esStockP.Canon().Contains("Future:ES") && esStockP.ProfileHash() == InstrumentProfile.Build(esStock, null, null).WithSessions(g, g, FB, null).ProfileHash(),
+			"M4 floor src / mismatch key are printed only, never hashed");
 		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).costFloorTicks == 14, "M3 ES future: floor 14 (preset matched)");
 		var noRoot = In("", EAssetClass.Future, "", 25, 100, 50); noRoot.structPriceScale = 0.5;
 		Check(reason(noRoot, null) == InstrumentReason.MismatchMcPriceScale, "M3 order: MC-internal mismatch beats unknown-field:root");
 		Check(reason(In("@ES", EAssetClass.Future, "ES", -25, 100, 50, "EUR"), null) == InstrumentReason.MismatchTick, "M3 order: non-positive tick vs a preset is mismatch:tick, before tick / currency");
 		var badCfg = new InstrumentConfig(); badCfg.costs["XX"] = -1;
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5), badCfg) == InstrumentReason.MismatchBigPointValue, "M3 order: preset mismatch beats an invalid config");
-		var znCost = new InstrumentConfig(); znCost.costs["ZN"] = 500;
+		var znCost = new InstrumentConfig(); znCost.costs["Future:ZN"] = 500;
 		Check(reason(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000, "EUR"), znCost) == InstrumentReason.MismatchTickValue, "M3 order: cost-floor tick value (ZN 1562.5 cents) beats currency");
 		Check(reason(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null) == null, "M3 ZN without a cost: no tick-value check");
 		var ovr = new InstrumentConfig(); ovr.costs["XX"] = -1;
 		ovr.overrides = new InstrumentPresetRow("ES", EAssetClass.Future, 0.25, 5, "USD", MonthMask.Of("HMUZ"), EExpiryRule.ThirdFridaySoq, ERollRule.EquityIndexCustomary, 0, ECalendar.CmeEquityIndex, "EQIDX", "t", null);
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5), ovr) == InstrumentReason.MismatchBigPointValue, "M3 order: an invalid config's override row is not trusted; the built-in preset cross-checks");
-		st = new InstrumentStreams(1); err.Clear(); warn.Clear(); ex = null;
-		try { st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
-		Check(ex != null && ex.Reason == InstrumentReason.MismatchBigPointValue && err.Count == 1 && warn.Count == 0, "M3 streams: non-USD with a preset mismatch throws (no longer hidden by the currency Warning)");
+		var rm = run((e, w) => new InstrumentStreams(1).Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), g, cfg, e, w));
+		Check(erroredWith(rm, InstrumentReason.MismatchBigPointValue) && rm.Item3.Count == 0, "M3 streams: non-USD with a preset mismatch throws the mismatch");
 		// nit 3: a non-InstrumentException inside a step gets its own Error line, then propagates unchanged
-		err.Clear(); warn.Clear(); Exception other = null;
-		try { InstrumentStreams.Guard<object>(2, s => { throw new ArgumentException("boom"); }, err.Add, warn.Add); } catch (ArgumentException e) { other = e; }
-		Check(other != null && other.Message == "boom" && err.Count == 1 && err[0] == "INSTR ds(2) unexpected ArgumentException: boom" && warn.Count == 0, "M3 Guard: unexpected exception -> Error line, rethrown: " + string.Join("|", err));
+		err.Clear(); Exception other = null;
+		try { InstrumentStreams.Guard<object>(2, s => { throw new ArgumentException("boom"); }, err.Add); } catch (ArgumentException e) { other = e; }
+		Check(other != null && other.Message == "boom" && err.Count == 1 && err[0] == "INSTR ds(2) unexpected ArgumentException: boom", "M3 Guard: unexpected exception -> Error line, rethrown: " + string.Join("|", err));
+		err.Clear(); ex = null;
+		try { InstrumentStreams.Guard<object>(2, s => { throw InstrumentError.Fail(s, RS, InstrumentReason.Tick, "d", "a"); }, err.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && err.Count == 1 && err[0] == ex.Message, "M4 Guard: a refusal -> its Error line once, rethrown");
 		// #96 nit 1: MonthMask.Of only on static presets; every preset row validates and round-trips its letters
 		bool presetsOk = true;
 		foreach (var r in new[] { "ES", "MES", "NQ", "MNQ", "CL", "GC", "ZN", "6E" })
@@ -640,9 +690,84 @@ static class Program
 		Check(threw, "M3 nit 1: MonthMask.Of rejects a bad letter (static data only)");
 	}
 
+	// ---------------------------------------------------------------- PR-M4 D2: profileHash over sessions in exchange time (§6.1, §11.1 item 9)
+	/// <summary>Sun–Thu start → next day end (the MC "Default" futures template shape).</summary>
+	static S[] Week5(int startH, int endH)
+	{
+		var r = new List<S>();
+		for (var d = DayOfWeek.Sunday; d <= DayOfWeek.Thursday; d++) r.Add(new S(d, TimeSpan.FromHours(startH), d + 1, TimeSpan.FromHours(endH)));
+		return r.ToArray();
+	}
+	static InstrumentProfile.Inputs Zoned(InstrumentProfile.Inputs i, TimeZoneInfo bar, string setting, string exchange = "CME")
+	{
+		i.barZone = bar; i.barZoneSetting = setting; i.exchange = exchange; return i;
+	}
+	static void D2ExchangeTime()
+	{
+		var six = In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000);
+		S[] ct = Week5(17, 16), et = Week5(18, 17), gmt = Week5(23, 22);   // January: CT = UTC-6, ET = UTC-5
+		var exch = InstrumentProfile.Build(six, null, null).WithSessions(ct, ct, FB, null);
+		var local = InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, FB, null);
+		var utc = InstrumentProfile.Build(Zoned(six, TimeZoneInfo.Utc, "GMT"), null, null).WithSessions(gmt, gmt, FB, null);
+		Console.WriteLine("D2 6E Default profileHash exchange " + exch.ProfileHash() + " local " + local.ProfileHash() + " gmt " + utc.ProfileHash());
+		Check(exch.ProfileHash() == "55576df6a8a99c05", "D2 6E Default on an Exchange-tz chart = MC 55576df6a8a99c05 (" + exch.ProfileHash() + ")");
+		Check(local.ProfileHash() == exch.ProfileHash() && local.Canon() == exch.Canon(), "D2 6E Default in Local ET (18:00→17:00) hashes as the Exchange CT list (" + local.ProfileHash() + ")");
+		Check(utc.ProfileHash() == exch.ProfileHash(), "D2 6E Default on a GMT bar zone (January week) hashes the same (GMT in MC: VERIFY)");
+		Check(InstrumentText.Sessions(local.sessions) == InstrumentText.Sessions(et) && local.InstrLine(1, "Future", "Local", "TickCount").Contains(" dayOpen(18:00) sessionEnd(17:00) "),
+			"D2 engines keep the bar-time sessions, dayOpen and sessionEnd (ET 18:00 / 17:00)");
+		Check(InstrumentText.Sessions(local.exchangeSessions) == InstrumentText.Sessions(ct), "D2 exchangeSessions = the CT list: " + InstrumentText.Sessions(local.exchangeSessions));
+		Check(local.Canon().Contains(";sessions=" + InstrumentText.Sessions(ct) + ";") && !local.Canon().Contains("18:00"), "D2 Canon hashes the exchange-time list");
+		string ll = local.InstrLine(1, "Future", "Local→America/New_York", "TickCount");
+		Check(ll.Contains(" sessions(" + InstrumentText.Sessions(et) + ") xsessions(Central Standard Time " + InstrumentText.Sessions(ct) + "; rth none) dayKey("),
+			"D2 INSTR keeps sessions(…) in bar time and adds xsessions(<exchange zone> …; rth …): " + ll);
+		// the bar-time hash of M3 (the PT Local evidence 9523b25025f9ed5b) is what D2 removes
+		var m3Local = InstrumentProfile.Build(six, null, null).WithSessions(et, et, FB, null);   // ET list declared as exchange time = M3's bar-time canon
+		Check(m3Local.ProfileHash() == "9523b25025f9ed5b", "D2 evidence: the ET list hashed as is = PT Local 9523b25025f9ed5b (" + m3Local.ProfileHash() + ")");
+
+		// ES Default (Sun–Thu 17:00→16:00 CT, EquityIndexLegacy rth): 6cff053d1b215324 on either zone
+		var es = In("@ES", EAssetClass.Future, "ES", 25, 100, 50);
+		string esX = InstrumentProfile.Build(es, null, null).WithSessions(ct, ct, FB, null).ProfileHash();
+		string esL = InstrumentProfile.Build(Zoned(es, ET, "Local"), null, null).WithSessions(et, et, FB, null).ProfileHash();
+		Console.WriteLine("D2 ES Default profileHash exchange " + esX + " local " + esL);
+		Check(esX == "6cff053d1b215324" && esL == esX, "D2 ES Default 6cff053d1b215324 on Exchange and Local (" + esX + ", " + esL + ")");
+		Check(InstrumentProfile.Build(Zoned(es, ET, "Local"), null, null).WithSessions(et, et, FB, null).ProfileHash() != "e1927ccf1ea6f41e", "D2 ES PT Local e1927ccf1ea6f41e goes away");
+
+		// ChartDaySession rth is recomputed from the exchange-time list (stock on NASDAQ shown on a CT bar zone)
+		var aapl = In("AAPL", EAssetClass.Stock, "AAPL", 1, 100, 1); aapl.exchange = "NASDAQ"; aapl.exchangeZone = ET; aapl.exchangeZoneId = "Eastern Standard Time";
+		S[] dayEt = Daily(DayOfWeek.Monday, DayOfWeek.Friday, new TimeSpan(9, 30, 0), new TimeSpan(16, 0, 0), false);
+		S[] dayCt = Daily(DayOfWeek.Monday, DayOfWeek.Friday, new TimeSpan(8, 30, 0), new TimeSpan(15, 0, 0), false);
+		var aEt = InstrumentProfile.Build(Zoned(aapl, ET, "Exchange", "NASDAQ"), null, null).WithSessions(dayEt, dayEt, FB, null);
+		var aCt = InstrumentProfile.Build(Zoned(aapl, CT, "Local", "NASDAQ"), null, null).WithSessions(dayCt, dayCt, FB, null);
+		Check(aEt.ProfileHash() == "41886799d411dd0d", "D2 AAPL (NASDAQ, ET bar zone = exchange zone) keeps MC 41886799d411dd0d (" + aEt.ProfileHash() + ")");
+		Check(aCt.ProfileHash() == aEt.ProfileHash() && aCt.Canon().Contains(";rth=09:30-16:00 src=ChartDaySession"), "D2 ChartDaySession rth hashed in exchange time: " + aCt.Canon());
+		Check(aCt.rthSplit.Text() == "08:30-15:00 src=ChartDaySession" && aCt.InstrLine(1, "Stock", "Local", "Volume").Contains("; rth 09:30-16:00) dayKey("), "D2 engine rth stays in bar time; xsessions shows the hashed rth");
+
+		// refusals (Error line, then throw), strict lookups
+		var noMap = six; noMap.exchange = "IDEALPRO"; noMap.exchangeZone = null; noMap.exchangeZoneId = null;
+		var e1 = Throws(s => InstrumentProfile.Build(noMap, null, s), "D2 tz:exchange (exchange outside the map)");
+		Check(e1 != null && e1.Reason == InstrumentReason.TzExchange && e1.Message.Contains("exchange 'IDEALPRO' not in exchangeTimeZoneId") && e1.Message.EndsWith("add the exchange to exchangeTimeZoneId."),
+			"D2 tz:exchange text: " + (e1 == null ? "none" : e1.Message));
+		var badId = six; badId.exchangeZone = null; badId.exchangeZoneId = "Nowhere Standard Time";
+		var e2 = Throws(s => InstrumentProfile.Build(badId, null, s), "D2 tz:exchange (id does not resolve)");
+		Check(e2 != null && e2.Reason == InstrumentReason.TzExchange && e2.Message.Contains("zone id 'Nowhere Standard Time' does not resolve"), "D2 tz:exchange unresolved id: " + (e2 == null ? "none" : e2.Message));
+		var noBar = six; noBar.barZone = null; noBar.barZoneSetting = "Exchange";
+		var e3 = Throws(s => InstrumentProfile.Build(noBar, null, s), "D2 tz:bar");
+		Check(e3 != null && e3.Reason == InstrumentReason.TzBar && e3.Message.EndsWith("set the chart time zone."), "D2 tz:bar text: " + (e3 == null ? "none" : e3.Message));
+		var both = noMap; both.barZone = null;
+		var e4 = Throws(s => InstrumentProfile.Build(both, null, s), "D2 both unresolved");
+		Check(e4 != null && e4.Reason == InstrumentReason.TzExchange, "D2 exchange checked before the bar zone (an Exchange-tz chart's bar zone is the exchange lookup)");
+		var sub = new InstrumentSubject("INSTR", "@6E", EAssetClass.Future, "6E", "test");
+		var e5 = Throws(s => InstrumentSessions.ToExchange(ct, CT, null, FB, sub, s), "D2 ToExchange null zone");
+		Check(e5 != null && e5.Reason == InstrumentReason.TzExchange, "D2 ToExchange refuses a null zone (no fallback)");
+		Check(InstrumentSessions.ToExchange(ct, CT, CT, FB, sub, null) != ct && InstrumentText.Sessions(InstrumentSessions.ToExchange(ct, CT, CT, FB, sub, null)) == InstrumentText.Sessions(ct), "D2 same zone id = identity copy");
+		// wrap across the week: Sat 23:30 ET → Sat 22:30 CT; Sun 00:30 ET → Sat 23:30 CT
+		var w = InstrumentSessions.ToExchange(new[] { new S(DayOfWeek.Sunday, new TimeSpan(0, 30, 0), DayOfWeek.Sunday, new TimeSpan(2, 0, 0)) }, ET, CT, FB, sub, null);
+		Check(w[0].StartDay == DayOfWeek.Saturday && w[0].StartTime == new TimeSpan(23, 30, 0) && w[0].EndDay == DayOfWeek.Sunday && w[0].EndTime == new TimeSpan(1, 0, 0), "D2 conversion wraps the week");
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}
