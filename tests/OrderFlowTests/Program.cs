@@ -15,6 +15,8 @@ using LXMode = Extracted.ESpecOrdersMode;
 static class Program
 {
 	static int s_fail, s_pass;
+	static bool lxThrows(Action a) { try { a(); return false; } catch (InvalidOperationException) { return true; } }
+	static string lxMessage(Action a) { try { a(); return ""; } catch (InvalidOperationException ex) { return ex.Message; } }
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
 	static bool Near(double a, double b) { return Math.Abs(a - b) < 1e-9; }
 	const double TICK = 0.25;
@@ -1238,12 +1240,28 @@ static class Program
 				"MI-C4 F3b round trip: MC's stop price from the amount = the price the study meant (entry - distance), in both modes [" + stopPc + ", " + stopPp + "]");
 			string lx = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_ExitHalfRiskHalfRoll.Strategy.CS"));
 			string lxc = System.Text.RegularExpressions.Regex.Replace(lx, @"//[^\n]*", "");
-			Check(!lxc.Contains("1 / m_entryResolution.Info.PriceScale") && lxc.Contains("double tick = oneTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale);")
+			Check(!lxc.Contains("1 / m_entryResolution.Info.PriceScale") && lxc.Contains("double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);")
 				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"[-+] tick\)?;").Count == 4,
 				"MI-C5 F3a wiring: the four one-tick offsets (first/second stop, long/short) use oneTick(MinMove, PriceScale)");
-			Check(lxc.Contains("GenerateStopLoss(stopLossAmount(m_firstStopPrice, m_entryResolution.Info.BigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));")
+			Check(lxc.Contains("GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));")
+				&& lxc.Contains("double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);")
+				&& lxc.IndexOf("checkedBigPointValue(m_entryResolution") < lxc.IndexOf("GenerateStopLoss(")
 				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"GenerateStopLoss\(").Count == 1,
-				"MI-C6 F3b wiring: GenerateStopLoss gets the currency amount for the strategy's CurSpecOrdersMode, not the price distance");
+				"MI-C6 F3b wiring: GenerateStopLoss gets the currency amount (guarded BigPointValue, distance clamped to one tick) for the strategy's CurSpecOrdersMode");
+			// #92 review: guards (message-only throws) and the negative-distance clamp
+			Check(lxThrows(() => LX.checkedTick(0, 100, "ES")) && lxThrows(() => LX.checkedTick(-25, 100, "ES")) && lxThrows(() => LX.checkedTick(25, 0, "ES"))
+				&& lxThrows(() => LX.checkedTick(double.NaN, 100, "ES")) && lxThrows(() => LX.checkedTick(25, double.PositiveInfinity, "ES")) && lxThrows(() => LX.checkedTick(double.PositiveInfinity, 100, "ES"))
+				&& lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("ESZ26") && lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("MinMove 0")
+				&& lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("PriceScale 100") && lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("fix in QuoteManager")
+				&& LX.checkedTick(25, 100, "ES") == 0.25,
+				"MI-C7 F3a tick guard: zero/negative/NaN/infinite tick throws InvalidOperationException naming symbol, MinMove, PriceScale, 'fix in QuoteManager'; ES passes 0.25");
+			Check(lxThrows(() => LX.checkedBigPointValue(0, "ES")) && lxThrows(() => LX.checkedBigPointValue(-50, "ES")) && lxThrows(() => LX.checkedBigPointValue(double.NaN, "ES"))
+				&& lxThrows(() => LX.checkedBigPointValue(double.PositiveInfinity, "ES")) && lxMessage(() => LX.checkedBigPointValue(0, "ESZ26")).Contains("ESZ26")
+				&& lxMessage(() => LX.checkedBigPointValue(0, "ESZ26")).Contains("fix in QuoteManager") && LX.checkedBigPointValue(50, "ES") == 50,
+				"MI-C8 F3b BigPointValue guard: <= 0 / NaN / infinite throws InvalidOperationException naming symbol, 'fix in QuoteManager'; ES 50 passes");
+			Check(LX.atLeastOneTick(-1.5, 0.25) == 0.25 && LX.atLeastOneTick(0, 0.25) == 0.25 && LX.atLeastOneTick(0.1, 0.25) == 0.25 && LX.atLeastOneTick(double.NaN, 0.25) == 0.25
+				&& LX.atLeastOneTick(4, 0.25) == 4 && LX.stopLossAmount(LX.atLeastOneTick(-1.5, 0.25), 50, LXMode.PerPosition, 2) == 25,
+				"MI-C9 F3b negative/sub-tick/NaN first-stop distance clamps to one tick (ES $12.50/contract), never a negative GenerateStopLoss amount");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

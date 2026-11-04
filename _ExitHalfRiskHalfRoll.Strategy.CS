@@ -98,11 +98,13 @@ namespace PowerLanguage.Strategy {
 			}
 			else
 			{
+				//M-INSTR F3a/F3b guards: a bad QuoteManager tick or BigPointValue throws (message only; this study has no logger)
+				double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);
+				double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);
 				switch (m_state)
 				{
 					case State.None:
 						m_state = State.FirstExit;
-						double tick = oneTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale);   // M-INSTR F3a
 						if (this.PositionSide > 0)
 						{
 							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1] - tick;
@@ -121,8 +123,9 @@ namespace PowerLanguage.Strategy {
 				}
 
 				//start sending orders
-				//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance
-				if (m_state == State.FirstExit) GenerateStopLoss(stopLossAmount(m_firstStopPrice, m_entryResolution.Info.BigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
+				//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance; a
+				//distance below one tick (entry already beyond the prior bar's low/high) is clamped to one tick so the amount is never negative
+				if (m_state == State.FirstExit) GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 			}
 		}
 		
@@ -153,6 +156,34 @@ namespace PowerLanguage.Strategy {
 		private static double oneTick(double minMove, double priceScale)
 		{
 			return minMove / priceScale;
+		}
+
+		/// <summary>M-INSTR F3a guard: oneTick, throwing if it is not a positive finite price (zero/negative/NaN/infinite MinMove or PriceScale).</summary>
+		private static double checkedTick(double minMove, double priceScale, string symbol)
+		{
+			double tick = oneTick(minMove, priceScale);
+			if (!(tick > 0) || double.IsInfinity(tick))
+				throw new InvalidOperationException("M-INSTR _ExitHalfRiskHalfRoll: invalid tick " + tick + " for symbol " + symbol + " (MinMove " + minMove
+					+ ", PriceScale " + priceScale + "); the stop offsets need a positive finite tick, fix in QuoteManager.");
+			return tick;
+		}
+
+		/// <summary>M-INSTR F3b guard: BigPointValue must be a positive finite currency value per point, else the stop amount is meaningless.</summary>
+		private static double checkedBigPointValue(double bigPointValue, string symbol)
+		{
+			if (!(bigPointValue > 0) || double.IsInfinity(bigPointValue))
+				throw new InvalidOperationException("M-INSTR _ExitHalfRiskHalfRoll: invalid BigPointValue " + bigPointValue + " for symbol " + symbol
+					+ "; the GenerateStopLoss amount needs a positive finite BigPointValue, fix in QuoteManager.");
+			return bigPointValue;
+		}
+
+		/// <summary>
+		/// M-INSTR F3b: the first-stop distance, at least one tick. A negative/sub-tick distance (entry already beyond the prior bar's
+		/// low/high) or NaN becomes one tick: the tightest valid protective stop, never a negative GenerateStopLoss amount and never no stop.
+		/// </summary>
+		private static double atLeastOneTick(double distance, double tick)
+		{
+			return distance >= tick ? distance : tick;
 		}
 
 		/// <summary>
