@@ -1,6 +1,8 @@
 // ============================================================================================
-// M-INSTR PR-M2: instrument profile core (specs/m-instr-spec.md rev 2.3, §4.3, §4.5, §5, §6.3, §8, §9). NOT WIRED: nothing calls
-// this file yet (PR-M3 wires buildProfiles() / SessionReader / the INSTR line), so no study changes behaviour.
+// M-INSTR PR-M2: instrument profile core (specs/m-instr-spec.md rev 2.3, §4.3, §4.5, §5, §6.3, §8, §9). PR-M3 wires it:
+// _CustomSignal.buildProfiles() (StartCalc) and the first-CalcBar session re-check go through InstrumentStreams below. LOG ONLY
+// apart from the cross-checks: mismatch:* and sessions:changed throw (Error line first); every other refusal is a Warning line
+// until PR-M4 applies the profile to engines. No engine reads a profile yet.
 //
 // <instr-core> is MC-free (System only + _MtfMath.Session / SymbolRoot rules): tests/InstrumentTests/gen.sh extracts it.
 // <instr-mc-fields> uses one typed MC enum (MTPA_SymbolFields); tests compile it against a mirror enum. The host adapter
@@ -46,6 +48,8 @@ namespace PowerLanguage.Function
 	public static class InstrumentReason
 	{
 		public const string Class = "class", Tick = "tick", VolumeBasis = "volume-basis", Currency = "currency", Calendar = "calendar";
+		/// <summary>PR-M3 (#96 review nit): a preset / override row with no contract month listed in the next 24 months.</summary>
+		public const string Months = "months";
 		public const string SessionsNone = "sessions:none", SessionsChanged = "sessions:changed", SessionsBarOutside = "sessions:bar-outside";
 		public const string SessionsNoRthSplit = "sessions:no-rth-split", SessionsWindowNotCovered = "sessions:window-not-covered";
 		public const string MismatchTick = "mismatch:tick", MismatchBigPointValue = "mismatch:bigPointValue", MismatchTickValue = "mismatch:tickValue";
@@ -147,6 +151,9 @@ namespace PowerLanguage.Function
 	{
 		public const string Codes = "FGHJKMNQUVXZ";
 		public const int All = 0xFFF;
+		/// <summary>Letters → mask. Called ONLY on the static preset literals of InstrumentPresets.s_rows (type initialiser: no logger in
+		/// scope, so no Error line; a bad literal fails InstrumentTests T8 at type init, never a chart). Never call it on user or config
+		/// text: InstrumentConfig.overrides carries a mask, which InstrumentPresetRow.Validate range-checks.</summary>
 		public static int Of(string letters)
 		{
 			int m = 0;
@@ -505,7 +512,7 @@ namespace PowerLanguage.Function
 				if (++m > 12) { m = 1; y++; }
 			}
 			year = 0; month = 0;
-			InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no listed contract month within 24 months of " + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " for " + p.root, "check the preset's contract months");
+			InstrumentError.Fail(errorSink, s, InstrumentReason.Months, "no listed contract month within 24 months of " + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " for " + p.root, "check the preset's contract months");
 		}
 
 		/// <summary>MI-T6 generalised SeriesWindow: [Monday, Friday] of the week holding the roll date of the next contract (nominal
@@ -606,15 +613,6 @@ namespace PowerLanguage.Function
 			if (sessions == null) return false;
 			foreach (var s in sessions) if (s.StartDay != s.EndDay) return true;
 			return false;
-		}
-
-		/// <summary>True when both lists have the same entries in order (typed DayOfWeek / TimeSpan compares).</summary>
-		public static bool Same(_MtfMath.Session[] a, _MtfMath.Session[] b)
-		{
-			if (a == null || b == null || a.Length != b.Length) return false;
-			for (int i = 0; i < a.Length; i++)
-				if (a[i].StartDay != b[i].StartDay || a[i].StartTime != b[i].StartTime || a[i].EndDay != b[i].EndDay || a[i].EndTime != b[i].EndTime) return false;
-			return true;
 		}
 
 		/// <summary>S1: null/empty → sessions:none; StartCalc vs first-bar read differ → sessions:changed.</summary>
@@ -831,13 +829,99 @@ namespace PowerLanguage.Function
 			sb.Append(") months(").Append(MonthMask.Text(contractMonths));
 			sb.Append(") expiry(").Append(expiry == null ? "Unknown" : InstrumentText.ExpiryName(expiry.Value)).Append(") roll(").Append(roll == null ? "Unknown" : InstrumentText.RollName(roll.Value, rollDays));
 			sb.Append(") cost(").Append(cost.Text()).Append(") floor(").Append(costFloorTicks < 0 ? "Unknown" : InstrumentText.Int(costFloorTicks)).Append(") cluster(").Append(cluster ?? "none");
+			if (dataNotes != null) sb.Append(") dataNotes(").Append(dataNotes);   // Q7: logged on INSTR (none configured by default)
 			sb.Append(") profileHash(").Append(ProfileHash()).Append(')');
 			return sb.ToString();
 		}
 	}
+
+	/// <summary>
+	/// PR-M3 wiring state, MC-free: one slot per data stream. StartCalc builds the instrument part (Build) and keeps the StartCalc
+	/// session read; the first CalcBar re-reads the sessions (S1 re-check, WithSessions) and yields the INSTR line. M3 is LOG ONLY
+	/// apart from the cross-checks: Enforced() reasons write the Error line and throw; any other refusal is one Warning line
+	/// ("INSTR ds(n) log-only ...") and the stream keeps going without a profile (or, for a session refusal, with the StartCalc part).
+	/// </summary>
+	public sealed class InstrumentStreams
+	{
+		readonly InstrumentProfile[] m_profile;     // per stream (index = data stream); null = absent, not built, or refused (log only)
+		readonly _MtfMath.Session[][] m_startCalc;
+		readonly bool[] m_started, m_pending;
+
+		public InstrumentStreams(int maxDataStream)
+		{
+			int n = Math.Max(1, maxDataStream) + 1;
+			m_profile = new InstrumentProfile[n]; m_startCalc = new _MtfMath.Session[n][]; m_started = new bool[n]; m_pending = new bool[n];
+		}
+
+		public int Length { get { return m_profile.Length; } }
+		public InstrumentProfile Profile(int ds) { return ds >= 0 && ds < m_profile.Length ? m_profile[ds] : null; }
+		public bool Pending(int ds) { return ds >= 0 && ds < m_pending.Length && m_pending[ds]; }
+
+		/// <summary>The cross-checks M3 enforces: §4.3 MC-internal / tick / preset mismatches and the S1 StartCalc vs first-bar
+		/// re-check (sessions:changed). Everything else is log only until PR-M4.</summary>
+		public static bool Enforced(string reason)
+		{
+			return reason != null && (reason.StartsWith("mismatch:", StringComparison.Ordinal) || reason == InstrumentReason.SessionsChanged);
+		}
+
+		public static string LogOnlyLine(int ds, string refusal)
+		{
+			return "INSTR ds(" + InstrumentText.Int(ds) + ") log-only, not enforced until PR-M4: " + refusal;
+		}
+
+		/// <summary>Runs one core step with a buffered error sink. Enforced reason: errorSink(the refusal) - the Error line - then
+		/// rethrow. Other InstrumentException: warnSink(LogOnlyLine) and null. Anything else propagates unchanged.</summary>
+		public static T Guard<T>(int ds, Func<Action<string>, T> step, Action<string> errorSink, Action<string> warnSink) where T : class
+		{
+			string msg = null;
+			try { return step(m => msg = m); }
+			catch (InstrumentException e)
+			{
+				if (Enforced(e.Reason)) { if (errorSink != null) errorSink(msg ?? e.Message); throw; }
+				if (warnSink != null) warnSink(LogOnlyLine(ds, msg ?? e.Message));
+				return null;
+			}
+		}
+
+		/// <summary>StartCalc: the instrument part of stream ds (null inputs = the typed read failed; the host logged why) and the
+		/// StartCalc session read (null = none / unreadable). Logs the root-crosscheck Warning when the parse differs from MC.</summary>
+		public void Start(int ds, InstrumentProfile.Inputs? i, _MtfMath.Session[] startCalcSessions, InstrumentConfig cfg, Action<string> errorSink, Action<string> warnSink)
+		{
+			m_started[ds] = true; m_pending[ds] = true; m_startCalc[ds] = startCalcSessions;
+			m_profile[ds] = i == null ? null : Guard(ds, s => InstrumentProfile.Build(i.Value, cfg, s), errorSink, warnSink);
+			if (m_profile[ds] != null && m_profile[ds].rootWarning != null && warnSink != null) warnSink(m_profile[ds].rootWarning);
+		}
+
+		/// <summary>First CalcBar of stream ds: S1 re-check and the session fields. Returns the INSTR line (null when the stream has no
+		/// profile). A log-only session refusal keeps the StartCalc part (sessions n=0 on the line).</summary>
+		public string FirstBar(int ds, _MtfMath.Session[] firstBarSessions, string catLabel, string tzLabel, string bvoLabel, Action<string> errorSink, Action<string> warnSink)
+		{
+			if (!Pending(ds)) return null;
+			m_pending[ds] = false;
+			InstrumentProfile p = m_profile[ds];
+			if (p == null) return null;
+			_MtfMath.Session[] sc = m_startCalc[ds];
+			InstrumentProfile full = Guard(ds, s => p.WithSessions(sc, firstBarSessions, s), errorSink, warnSink);
+			if (full != null) m_profile[ds] = full;
+			return m_profile[ds].InstrLine(ds, catLabel, tzLabel, bvoLabel);
+		}
+
+		/// <summary>RUN line suffix: " profileHash(1=&lt;hash&gt;;2=none)" over the started streams; none = no profile (log-only
+		/// refusal). Outside every configHash (rev-3 Q7). Empty when no stream was started (InstrumentConfig.enabled false).</summary>
+		public string RunSuffix()
+		{
+			var sb = new StringBuilder();
+			for (int ds = 1; ds < m_profile.Length; ds++)
+			{
+				if (!m_started[ds]) continue;
+				sb.Append(sb.Length == 0 ? " profileHash(" : ";").Append(InstrumentText.Int(ds)).Append('=').Append(m_profile[ds] == null ? "none" : m_profile[ds].ProfileHash());
+			}
+			return sb.Length == 0 ? "" : sb.Append(')').ToString();
+		}
+	}
 	// </instr-core>
 
-	/// <summary>Typed MC members for the profile (R1). NOT WIRED in PR-M2; PR-M3 calls it from buildProfiles().</summary>
+	/// <summary>Typed MC members for the profile (R1). Called by _CustomSignal.buildProfiles() (PR-M3).</summary>
 	public static class InstrumentMcFields
 	{
 		// <instr-mc-fields>
@@ -860,6 +944,20 @@ namespace PowerLanguage.Function
 			i.structPriceScale = si.PriceScale; i.structBigPointValue = si.BigPointValue;
 			i.symbolExpiry = si.SymbolExpiry;
 			return i;
+		}
+	}
+
+	/// <summary>§4.5 SessionReader (host): typed IInstrument.Sessions / SessionObject members into the MC-free _MtfMath.Session.
+	/// null when the list is null. Used in StartCalc and for the first-CalcBar re-check (and by _CustomSignal.mtfSessions).</summary>
+	public static class SessionReader
+	{
+		public static _MtfMath.Session[] Read(IInstrument b)
+		{
+			IROList<SessionObject> list = b.Sessions;
+			if (list == null) return null;
+			var r = new _MtfMath.Session[list.Count];
+			for (int i = 0; i < r.Length; i++) { SessionObject so = list[i]; r[i] = new _MtfMath.Session(so.StartDay, so.StartTime, so.EndDay, so.EndTime); }
+			return r;
 		}
 	}
 }

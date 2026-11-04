@@ -6,7 +6,7 @@ using System.Linq;
 using PowerLanguage.Function;
 using S = PowerLanguage.Function._MtfMath.Session;
 
-// Off-MC tests for M-INSTR PR-M2 (specs/m-instr-spec.md rev 2.3 §10): MI-T2..T9, T11, T13, T16 (core) plus synthetic Spot FX /
+// Off-MC tests for M-INSTR PR-M2 + PR-M3 (MI-T12 line formats, InstrumentStreams wiring) (specs/m-instr-spec.md rev 2.3 §10): MI-T2..T9, T11, T13, T16 (core) plus synthetic Spot FX /
 // crypto cases (their presets / class constants keep their VERIFY markers). Fixtures: the 13 PR-M0 _InstrDump runs (§4.4.2).
 static class Program
 {
@@ -229,7 +229,7 @@ static class Program
 		e = Throws(s => InstrumentRules.ContractFor(cl, D(2026, 1, 5), null, RS, s, out cy, out cm), "T4 no calendar contract");
 		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 ContractFor without a calendar -> calendar");
 		e = Throws(s => InstrumentRules.ContractFor(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", 0, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), D(2026, 1, 5), EventRules.IsNyseBusinessDay, RS, s, out cy, out cm), "T4 no months");
-		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 no listed month -> Error + calendar");
+		Check(e != null && e.Reason == InstrumentReason.Months && e.Reason == "months", "T4 no listed month -> Error + months (PR-M3, #96 nit 2; was calendar)");
 	}
 
 	// ---------------------------------------------------------------- MI-T5 / T6 roll + windows
@@ -316,7 +316,7 @@ static class Program
 		// inside a session whose trading day is its own date
 		foreach (var d in Dumps())
 		{
-			Check(InstrumentSessions.Same(d.StartCalc, d.FirstBar), "T7 " + d.File + " StartCalc == FirstCalcBar sessions");
+			Check(d.StartCalc != null && d.StartCalc.Length > 0 && _MtfMath.SessionMismatch(d.StartCalc, d.FirstBar) == null, "T7 " + d.File + " StartCalc == FirstCalcBar sessions (the S1 comparer)");
 			DateTime k;
 			Check(d.SessionEndBars.Count > 0, "T7 " + d.File + " has session-end bars");
 			k = InstrumentSessions.TradingDayKey(d.FirstBar, d.FirstBarTime, subj, null);
@@ -490,9 +490,106 @@ static class Program
 		}
 	}
 
+	// ---------------------------------------------------------------- PR-M3: MI-T12 line formats + InstrumentStreams wiring
+	static void T12Lines()
+	{
+		var g = Globex9();
+		CultureInfo saved = CultureInfo.CurrentCulture, savedUi = CultureInfo.CurrentUICulture;
+		Func<string[]> lines = () =>
+		{
+			var st = new InstrumentStreams(3);
+			var warn = new List<string>(); var err = new List<string>();
+			st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, new InstrumentConfig(), err.Add, warn.Add);
+			st.Start(2, In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), g, new InstrumentConfig(), err.Add, warn.Add);
+			string l1 = st.FirstBar(1, g, "Future", "Exchange→Central Standard Time", "Volume", err.Add, warn.Add);
+			string l2 = st.FirstBar(2, g, "Future", "Exchange→Central Standard Time", "Volume", err.Add, warn.Add);
+			return new[] { l1, l2, st.RunSuffix(), string.Join("|", warn), string.Join("|", err) };
+		};
+		string[] inv, de;
+		try
+		{
+			CultureInfo.CurrentCulture = CultureInfo.InvariantCulture; CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture; inv = lines();
+			CultureInfo.CurrentCulture = new CultureInfo("de-DE"); CultureInfo.CurrentUICulture = new CultureInfo("de-DE"); de = lines();
+			Check(1.5.ToString() == "1,5", "T12 de-DE is active for the second run (decimal comma)");
+		}
+		finally { CultureInfo.CurrentCulture = saved; CultureInfo.CurrentUICulture = savedUi; }
+		for (int i = 0; i < inv.Length; i++) Check(inv[i] == de[i], "T12 culture-invariant under de-DE [" + i + "]: " + de[i]);
+		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, null);
+		// pinned whole line (ES GLOBEX fixture, default InstrumentConfig)
+		string pin = "INSTR ds(1) name(@ES) cat(Future) class(Future) root(ES rootSrc=mc) preset(ES) exch(CME) tz(Exchange→Central Standard Time) sessionName(test) sessions("
+			+ InstrumentText.Sessions(g) + ") dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) "
+			+ "calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + es.ProfileHash() + ")";
+		Check(inv[0] == pin, "T12 ES INSTR line pinned: " + inv[0]);
+		Check(InstrumentText.Sessions(g).StartsWith("n=9 Sun 17:00→Mon 15:15; ", StringComparison.Ordinal), "T12 sessions text");
+		Check(inv[1].StartsWith("INSTR ds(2) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) ", StringComparison.Ordinal) && inv[1].Contains(" bpv(125000) ") && inv[1].Contains(" ccy(USD) bvo(Volume) calendar(NyseStandIn; ")
+			&& inv[1].Contains("roll(BusinessDaysBeforeExpiry(5))"), "T12 6E INSTR line: " + inv[1]);
+		Check(inv[2] == " profileHash(1=" + es.ProfileHash() + ";2=" + InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null).ProfileHash() + ")", "T12 RUN suffix: " + inv[2]);
+		Check(inv[3] == "" && inv[4] == "", "T12 clean ES/6E run: no Warning, no Error [" + inv[3] + "][" + inv[4] + "]");
+		Check(!new InstrumentConfig().Canon().Contains("profileHash"), "T12 profileHash outside InstrumentConfig.Canon (Q7)");
+	}
+
+	static void M3Wiring()
+	{
+		var g = Globex9(); var spy = Dumps().First(d => d.Name == "SPY").FirstBar;
+		var cfg = new InstrumentConfig();
+		// Enforced = the cross-checks only
+		Check(InstrumentStreams.Enforced(InstrumentReason.MismatchTick) && InstrumentStreams.Enforced(InstrumentReason.MismatchMcPriceScale) && InstrumentStreams.Enforced(InstrumentReason.MismatchMcBigPointValue)
+			&& InstrumentStreams.Enforced(InstrumentReason.MismatchBigPointValue) && InstrumentStreams.Enforced(InstrumentReason.MismatchTickValue) && InstrumentStreams.Enforced(InstrumentReason.SessionsChanged),
+			"M3 enforced: mismatch:* and sessions:changed");
+		Check(!InstrumentStreams.Enforced(InstrumentReason.Class) && !InstrumentStreams.Enforced(InstrumentReason.Currency) && !InstrumentStreams.Enforced(InstrumentReason.SessionsNone)
+			&& !InstrumentStreams.Enforced(InstrumentReason.Calendar) && !InstrumentStreams.Enforced(InstrumentReason.Tick) && !InstrumentStreams.Enforced(InstrumentReason.UnknownField("root")) && !InstrumentStreams.Enforced(null),
+			"M3 log only: class, currency, sessions:none, calendar, tick, unknown-field");
+		// preset cross-check mismatch (ES with a wrong big point value): Error line, then throw from Start
+		var st = new InstrumentStreams(2); var err = new List<string>(); var warn = new List<string>();
+		InstrumentException ex = null;
+		try { st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 20), g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && ex.Reason.StartsWith("mismatch:", StringComparison.Ordinal) && err.Count == 1 && err[0] == ex.Message && warn.Count == 0, "M3 preset mismatch -> Error line then throw [" + (ex == null ? "no throw" : ex.Reason) + "]");
+		// MC-internal mismatch
+		var bad = In("@ES", EAssetClass.Future, "ES", 25, 100, 50); bad.structBigPointValue = 5;
+		err.Clear(); ex = null;
+		try { new InstrumentStreams(1).Start(1, bad, g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && ex.Reason == InstrumentReason.MismatchMcBigPointValue && err.Count == 1 && err[0] == ex.Message, "M3 MC-internal mismatch -> Error then throw");
+		// log only: non-USD, Unsupported class -> one Warning each, no Error, no profile; RUN suffix says none
+		st = new InstrumentStreams(3); err.Clear(); warn.Clear();
+		st.Start(1, In("FDAX", EAssetClass.Future, "FDAX", 1, 2, 25, "EUR"), g, cfg, err.Add, warn.Add);
+		st.Start(2, In("SPX OPT", EAssetClass.Unsupported, "SPX", 1, 100, 100), g, cfg, err.Add, warn.Add);
+		Check(err.Count == 0 && warn.Count == 2 && warn[0].StartsWith("INSTR ds(1) log-only, not enforced until PR-M4: M-INSTR: INSTR cannot run on FDAX ", StringComparison.Ordinal) && warn[0].Contains("): currency (")
+			&& warn[1].StartsWith("INSTR ds(2) log-only, not enforced until PR-M4: ", StringComparison.Ordinal) && warn[1].Contains("): class."), "M3 currency / class refusals are Warning lines: " + string.Join(" | ", warn));
+		Check(st.Profile(1) == null && st.Profile(2) == null && st.FirstBar(1, g, "c", "t", "b", err.Add, warn.Add) == null && st.RunSuffix() == " profileHash(1=none;2=none)", "M3 refused streams: no INSTR line, RUN none: " + st.RunSuffix());
+		// a null typed read (host logged it): started, no profile
+		st = new InstrumentStreams(1); st.Start(1, null, g, cfg, err.Add, warn.Add);
+		Check(st.Profile(1) == null && st.RunSuffix() == " profileHash(1=none)", "M3 failed read -> none");
+		// S1: sessions:changed throws on the first bar (Error first); sessions:none is a Warning and keeps the StartCalc part
+		st = new InstrumentStreams(1); err.Clear(); warn.Clear(); ex = null;
+		st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), g, cfg, err.Add, warn.Add);
+		try { st.FirstBar(1, spy, "Future", "Exchange", "Volume", err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && ex.Reason == InstrumentReason.SessionsChanged && err.Count == 1 && err[0] == ex.Message && warn.Count == 0, "M3 sessions:changed -> Error then throw");
+		st = new InstrumentStreams(1); err.Clear(); warn.Clear();
+		st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, cfg, err.Add, warn.Add);
+		string l = st.FirstBar(1, null, "Future", "Exchange", "Volume", err.Add, warn.Add);
+		Check(err.Count == 0 && warn.Count == 1 && warn[0].Contains("): sessions:none.") && l != null && l.Contains(" sessions(n=0) ") && l.Contains(" dayOpen(?) sessionEnd(?) "), "M3 sessions:none -> Warning, INSTR line without sessions: " + l);
+		Check(st.FirstBar(1, g, "Future", "Exchange", "Volume", err.Add, warn.Add) == null && !st.Pending(1), "M3 first-bar step runs once per stream");
+		// root cross-check Warning is logged at StartCalc; absent streams are skipped by RunSuffix
+		st = new InstrumentStreams(4); warn.Clear();
+		var rw = In("@ES", EAssetClass.Future, "MES", 25, 100, 5);
+		st.Start(3, rw, g, cfg, err.Add, warn.Add);
+		Check(st.Profile(3) != null && warn.Count == (st.Profile(3).rootWarning == null ? 0 : 1) && st.RunSuffix().StartsWith(" profileHash(3=", StringComparison.Ordinal), "M3 root warning logged once; only started streams on RUN: " + st.RunSuffix() + " " + string.Join("|", warn));
+		Check(new InstrumentStreams(2).RunSuffix() == "", "M3 nothing started -> no RUN suffix");
+		// #96 nit 1: MonthMask.Of only on static presets; every preset row validates and round-trips its letters
+		bool presetsOk = true;
+		foreach (var r in new[] { "ES", "MES", "NQ", "MNQ", "CL", "GC", "ZN", "6E" })
+		{
+			var row = InstrumentPresets.Find(r, EAssetClass.Future);
+			presetsOk &= row != null && row.Validate() == null && MonthMask.Of(MonthMask.Text(row.contractMonths)) == row.contractMonths;
+		}
+		Check(presetsOk, "M3 nit 1: every preset row validates; month letters round-trip");
+		bool threw = false; try { MonthMask.Of("HMUA"); } catch (ArgumentException) { threw = true; }
+		Check(threw, "M3 nit 1: MonthMask.Of rejects a bad letter (static data only)");
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}

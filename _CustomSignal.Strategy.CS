@@ -1834,11 +1834,7 @@ namespace PowerLanguage.Strategy
 
 		private static _MtfMath.Session[] mtfSessions(IInstrument b)
 		{
-			IROList<SessionObject> list = b.Sessions;
-			if (list == null) return null;
-			var r = new _MtfMath.Session[list.Count];
-			for (int i = 0; i < r.Length; i++) { SessionObject so = list[i]; r[i] = new _MtfMath.Session(so.StartDay, so.StartTime, so.EndDay, so.EndTime); }
-			return r;
+			return SessionReader.Read(b);   // M-INSTR PR-M3: the same typed read, now shared with buildProfiles()
 		}
 
 		// ---- Phase 3 S4: roll detection on any base (moved from _VolumeProfileFuturesBase VPF-4; off by default) ----
@@ -2180,6 +2176,7 @@ namespace PowerLanguage.Strategy
 					_ = BarsOfData(i);
 				}
 			}
+			buildProfiles();   // M-INSTR PR-M3: log only (+ mismatch throws); before the engines, which do not read profiles yet
 			startEngines();   // lazy engines (§0.1); null unless enabled
 			startLevelStudy();   // A2-33 harness (off by default)
 			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
@@ -2191,6 +2188,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			noteCalcThread();   // cached for trace() off the calc thread (StopCalc runs on the UI thread)
+			if (m_instrPending) profilesFirstBar();   // M-INSTR PR-M3: S1 re-check + INSTR lines, before the RUN line (profileHash)
 			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
 			if (!m_runLogged)
 			{
@@ -2300,7 +2298,8 @@ namespace PowerLanguage.Strategy
 			return $"RUN id({RunId}) build({BuildTag}) strategy({this.GetType().Name}) symbol({info.Name}) category({info.Category}) " +
 				$"resolution({info.Resolution.ChartType} {info.Resolution.Type} {info.Resolution.Size}) timeZone({info.TimeZone}) " +
 				$"firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm:ss}) barNumber({Bars.FullSymbolData.Current}) app({Environment.ApplicationCode}) " +
-				$"inputs[{inputSnapshot()}]" + (m_event != null ? $" event[{EventConfig.Canon()}] journalSchema(CS-1+{EVENT_JOURNAL_COLS})" : "");
+				$"inputs[{inputSnapshot()}]" + (m_event != null ? $" event[{EventConfig.Canon()}] journalSchema(CS-1+{EVENT_JOURNAL_COLS})" : "") +
+				(m_instr != null ? m_instr.RunSuffix() : "");   // M-INSTR PR-M3: profileHash per stream, outside every configHash (rev-3 Q7)
 		}
 
 		/// <summary>CS-3: "Name=value; ..." for every [Input] property of the concrete strategy, invariant culture.</summary>
@@ -2368,9 +2367,103 @@ namespace PowerLanguage.Strategy
 			throw new InvalidOperationException(error);
 		}
 
+		// ---- M-INSTR PR-M3 (spec §4.2, §4.5, §6.1, §6.2, §11 row 7): buildProfiles() + SessionReader + INSTR line ----
+
+		/// <summary>M-INSTR §5.3: instrument profile settings (protected, no [Input]s). enabled is log-only until PR-M4: false skips
+		/// buildProfiles() (no INSTR lines, no cross-check, no profileHash on RUN). profileHash is outside every configHash (rev-3 Q7).</summary>
+		protected InstrumentConfig InstrumentConfig { get; } = new InstrumentConfig();
+
+		private InstrumentStreams m_instr;   // null until buildProfiles() ran in this StartCalc, or when InstrumentConfig.enabled is false
+		private bool m_instrPending;         // first-CalcBar session re-check still to do
+
+		/// <summary>Profile of data stream ds built by buildProfiles() (null = absent, not built or refused in log-only mode). PR-M3: no
+		/// engine reads it yet (engines move to profiles from PR-M4 on; they never read Bars.Info / Bars.Sessions for these facts).</summary>
+		protected InstrumentProfile InstrumentProfileOf(int ds) { return m_instr == null ? null : m_instr.Profile(ds); }
+
+		/// <summary>
+		/// §6.2 StartCalc part: for every existing stream, typed reads (ClassOf(Info.Category), InstrumentMcFields.Read) and the
+		/// SessionReader StartCalc read, then InstrumentProfile.Build. LOG ONLY apart from the cross-checks (InstrumentStreams.Enforced:
+		/// mismatch:* and sessions:changed write the Error line and throw); any other refusal, or a failing typed read, is one Warning.
+		/// </summary>
+		private void buildProfiles()
+		{
+			m_instr = null;
+			m_instrPending = false;
+			if (!InstrumentConfig.enabled)
+			{
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "INSTR off (InstrumentConfig.enabled = false): no profiles, no cross-checks");
+				return;
+			}
+			var streams = new InstrumentStreams(MaxDataStream);
+			Action<string> warn = engineSink(ETraceLevel.Warning);
+			for (int ds = 1; ds <= MaxDataStream && ds < streams.Length; ds++)
+			{
+				if (!IsExist(ds)) continue;
+				IInstrument b = BarsOfData(ds);
+				string name = null;
+				InstrumentProfile.Inputs? inputs = null;   // struct: null = the typed read failed
+				try
+				{
+					IInstrumentSettings info = b.Info;
+					name = info.Name;
+					inputs = InstrumentMcFields.Read(info, ClassOf(info.Category));
+				}
+				catch (Exception ex)
+				{
+					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " " + (name ?? "?") + " failed (" + ex.GetType().Name + ": " + ex.Message + "); no profile"));
+				}
+				_MtfMath.Session[] startCalc = null;
+				try { startCalc = SessionReader.Read(b); }
+				catch (Exception ex)
+				{
+					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " sessions at StartCalc failed (" + ex.GetType().Name + ": " + ex.Message + ")"));
+				}
+				string symbol = name;
+				streams.Start(ds, inputs, startCalc, InstrumentConfig, msg => traceAlways(ETraceLevel.Error, symbol, msg), warn);
+			}
+			m_instr = streams;
+			m_instrPending = true;
+		}
+
+		/// <summary>§4.5 / §6.1 first CalcBar: SessionReader re-read of every started stream (all streams are loaded when the strategy
+		/// calculates its first bar, as _InstrDump A2 read them), S1 re-check (sessions:changed throws after its Error line) and one INSTR
+		/// line per stream at Info.</summary>
+		private void profilesFirstBar()
+		{
+			m_instrPending = false;
+			if (m_instr == null) return;
+			Action<string> warn = engineSink(ETraceLevel.Warning), info = engineSink(ETraceLevel.Info);
+			for (int ds = 1; ds < m_instr.Length && ds <= MaxDataStream; ds++)
+			{
+				if (!m_instr.Pending(ds)) continue;
+				IInstrument b = BarsOfData(ds);
+				_MtfMath.Session[] firstBar = null;
+				try { firstBar = SessionReader.Read(b); }
+				catch (Exception ex)
+				{
+					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " sessions on the first bar failed (" + ex.GetType().Name + ": " + ex.Message + ")"));
+				}
+				string cat = "?", bvo = "?", symbol = null;
+				try { symbol = b.Info.Name; cat = $"{b.Info.Category}"; bvo = $"{b.Info.BVO}"; } catch (Exception) { }   // log labels only (R1)
+				string tz = instrZoneLabel(b.Info);
+				string line = m_instr.FirstBar(ds, firstBar, cat, tz, bvo, msg => traceAlways(ETraceLevel.Error, symbol, msg), warn);
+				if (line != null && info != null) info(line);
+			}
+		}
+
+		/// <summary>INSTR tz(...) label: the chart setting and the zone it resolves to, e.g. "Exchange→Central Standard Time" (log only).</summary>
+		private string instrZoneLabel(IInstrumentSettings info)
+		{
+			string setting = "?", zone = "?";
+			try { setting = $"{info.TimeZone}"; } catch (Exception) { }
+			try { TimeZoneInfo z = resolveBarTimeZone(info); if (z != null) zone = z.Id; } catch (Exception) { }
+			return setting + "→" + zone;
+		}
+
 		// <instr-host-core> M-INSTR PR-M1b. MC-free apart from the typed ESymbolCategory: tests/OrderFlowTests/gen.sh compiles this
 		// region against a mirror of ESymbolCategory (spec §4.1 values). EAssetClass is the top-level PowerLanguage.Function.EAssetClass of
-		// _InstrumentProfile.Function.CS since PR-M2 (gen.sh extracts its <instr-asset-class> region next to this one); PR-M3 moves ClassOf.
+		// _InstrumentProfile.Function.CS since PR-M2 (gen.sh extracts its <instr-asset-class> region next to this one). ClassOf stays here
+		// (the host switch, MI-T1) and is wired by buildProfiles() in PR-M3.
 
 		/// <summary>M-INSTR F2: futures = ESymbolCategory.Future or ESymbolCategory.FutureRolover (typed; _McApiDump3 lists FutureRolover = 18).
 		/// Used by the DAILY roll-offset warning, the RollDetection Off warning, the roll Globex key and _VolumeProfileBase's Build Volume On check.</summary>
