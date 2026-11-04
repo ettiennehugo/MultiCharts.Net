@@ -7,10 +7,15 @@ using System.Drawing.Text;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
-	/// Takes half of the position off at +1R and trails the rest. R is the first-stop distance: from the entry to one tick outside the
+	/// EXIT-ONLY trade management: never opens, adds to or reverses a position. It manages the position another signal opened: takes half
+	/// off at +1R and trails the rest. Every order is an exit for the open side (Sell for a long, BuyToCover for a short), sized to at most
+	/// the open lots, and sent only while that position is open; on a reversal made by another signal it re-arms exit management for the
+	/// new position. INVARIANT: every order strictly reduces the position toward flat (it only moves a long or a short position to a
+	/// smaller one or to flat) and never crosses through zero; this study never creates a new position.
+	/// R is the first-stop distance: from the position's entry price to one tick outside the
 	/// prior bar on the entry resolution (long Low[1] - tick, short High[1] + tick), at least one tick.
 	///	FirstExit: a half-size limit at entry + R (long) / entry - R (short) and GenerateStopLoss for the full position at -R, re-sent every bar.
-	///	A 1-lot trade exits whole at +1R. SecondExit (the half filled, the position got smaller): the remaining lots get one stop order that
+	///	A 1-lot position exits whole at +1R. SecondExit (the half filled, the position got smaller): the remaining lots get one stop order that
 	///	trails the roll level (the entry bar's low - tick / high + tick, then the previous day's low - tick / high + tick once the entry day is
 	///	over) and never loosens; GenerateStopLoss is no longer sent, so each stage has exactly one protective stop.
 	///	Requires two data feeds, one on the same resolution as the strategy entry (e.g. 5-minutes) and one on a longer resolution	(e.g. daily).
@@ -38,6 +43,7 @@ namespace PowerLanguage.Strategy {
 		private double m_bigPointValue;      //guarded BigPointValue captured when the position opened; re-used by the per-bar GenerateStopLoss
 		private double m_tick;               //guarded tick captured when the position opened; used by the roll level
 		private int m_previousMarketPosition; //StrategyInfo.MarketPosition at the last transition check (backtest/playback fallback)
+		private int m_armedSide;             //+1 / -1: the side exit management is armed for (its levels); 0 when flat. Orders go out only for this side
 		private IInstrument m_entryResolution;
 		private IInstrument m_longerResolution;
 		private IOrderPriced m_lxTargetOrder;
@@ -61,7 +67,7 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc() 
 		{
 			m_state = State.None;
-			clearTrade();
+			disarmExitManagement();
 			m_previousMarketPosition = 0;
 			m_entryResolution = BarsOfData(1);  //will be the same as bars of data for the strategy
 			m_longerResolution = BarsOfData(2);
@@ -86,10 +92,14 @@ namespace PowerLanguage.Strategy {
 
 			//special orders (GenerateStopLoss) and priced orders only stay live while they are re-sent on every calculation, so they are
 			//sent here on every CalcBar while in a position, whatever the CalcReason. Each stage sends exactly one protective stop.
-			switch (exitOrdersThisBar(m_state, PositionSide))
+			//EXIT-ONLY: exitOrdersThisBar returns None unless a position is open (OpenLots > 0) on the side exit management is armed for, so
+			//nothing is sent when flat or for a side the levels were not computed for. Every order is Sell (long) / BuyToCover (short), the
+			//exit for the open side, sized by halfExitLots / remainingExitLots to at most the open lots (PG: a Sell cannot open a short and a
+			//BuyToCover cannot open a long), so every order strictly reduces the position toward flat and never crosses zero
+			switch (exitOrdersThisBar(m_state, m_armedSide, PositionSide, this.CurrentPosition.OpenLots))
 			{
 				case State.FirstExit:
-					//half off at +1R (halfExitLots is at least one lot: a 1-lot position exits whole at +1R; Sell/BuyToCover cannot reverse it)
+					//half off at +1R (halfExitLots is 1..open lots: a 1-lot position exits whole at +1R)
 					if (PositionSide > 0)
 						m_lxTargetOrder.Send(m_targetPrice, halfExitLots(this.CurrentPosition.OpenLots));
 					else
@@ -120,17 +130,19 @@ namespace PowerLanguage.Strategy {
 
 		private void marketPositionChanged(int previousMarketPosition, int marketPosition)
 		{
-			bool newEntry = isNewEntry(m_state, previousMarketPosition, marketPosition);
+			//exit-only: a position change made by another signal (or by these exits) only moves this study's exit stages; it never places
+			//an entry. A new position or a reversal re-arms exit management for the position that already exists
+			bool rearm = exitManagementRearmDue(m_state, previousMarketPosition, marketPosition);
 			State next = stageAfterPositionChange(m_state, previousMarketPosition, marketPosition);
 			if (next == State.None)
 			{
-				//clear the trade once we are flat
+				//flat: disarm exit management (nothing is sent until another signal opens a position)
 				m_state = State.None;
-				clearTrade();
+				disarmExitManagement();
 				return;
 			}
 
-			if (newEntry)
+			if (rearm)
 			{
 				//M-INSTR F3a/F3b guards: a bad QuoteManager tick or BigPointValue is logged as an Error, then throws
 				double tick, bigPointValue;
@@ -155,6 +167,7 @@ namespace PowerLanguage.Strategy {
 				m_targetPrice = targetPrice(entryPrice, m_firstStopDistance, isLong);
 				m_secondStopPrice = rollStopLevel(m_entryResolution.Low[0], m_entryResolution.High[0], tick, isLong);  //the ENTRY bar's low/high
 				m_trailStopPrice = -1;
+				m_armedSide = isLong ? 1 : -1;
 			}
 			else if (m_state == State.FirstExit && next == State.SecondExit)
 			{
@@ -163,7 +176,7 @@ namespace PowerLanguage.Strategy {
 				m_state = next;
 				updateSecondExit();
 			}
-			//else an add-on, or a further partial exit in SecondExit: the stage and levels are unchanged (lots follow OpenLots each bar)
+			//else an add-on by another signal, or a further partial exit in SecondExit: the stage and levels are unchanged (lots follow OpenLots each bar)
 			m_state = next;
 		}
 		
@@ -186,7 +199,7 @@ namespace PowerLanguage.Strategy {
 				m_trailStopPrice = ratchetStop(m_trailStopPrice, m_secondStopPrice, isLong);
 		}
 
-		private void clearTrade()
+		private void disarmExitManagement()
 		{
 			m_firstStopDistance = -1;
 			m_firstStopPrice = -1;
@@ -195,6 +208,7 @@ namespace PowerLanguage.Strategy {
 			m_trailStopPrice = -1;
 			m_bigPointValue = -1;
 			m_tick = -1;
+			m_armedSide = 0;
 		}
 
 		// <legacy-exit-core> M-INSTR PR-M1c (spec rev 2.3 §3.2 F3). MC-free apart from the typed ESpecOrdersMode: tests/OrderFlowTests/gen.sh
@@ -207,12 +221,15 @@ namespace PowerLanguage.Strategy {
 		}
 
 		/// <summary>
-		/// Which exit orders CalcBar sends on this bar: the current state while in a position, None when flat. Called on EVERY CalcBar, so the
-		/// target, GenerateStopLoss and the trailing stop are re-sent each bar (MC cancels special and priced orders that are not re-sent).
+		/// Which exit orders CalcBar sends on this bar: the current state while a position is open (OpenLots > 0) on the side exit management
+		/// is armed for; None when flat, with no open lots, or when the open side differs from the armed side (exit-only: never an order for a
+		/// position the levels were not computed for). Called on EVERY CalcBar, so the target, GenerateStopLoss and the trailing stop are
+		/// re-sent each bar (MC cancels special and priced orders that are not re-sent).
 		/// </summary>
-		private static State exitOrdersThisBar(State state, int positionSide)
+		private static State exitOrdersThisBar(State state, int armedSide, int positionSide, int openLots)
 		{
-			return positionSide == 0 ? State.None : state;
+			if (positionSide == 0 || openLots <= 0 || armedSide == 0) return State.None;
+			return (positionSide > 0) == (armedSide > 0) ? state : State.None;
 		}
 
 		/// <summary>
@@ -226,38 +243,42 @@ namespace PowerLanguage.Strategy {
 		}
 
 		/// <summary>
-		/// A position change that starts a new trade (R, target and roll level computed from the new entry): in a position after no trade
-		/// (state None), or a reversal (the sign of the position flipped).
+		/// A position change that re-arms exit management (R, target and roll level recomputed from the existing position's entry price): a
+		/// position opened by another signal while disarmed (state None), or a reversal made by another signal (the sign flipped). This study
+		/// never places the entry itself.
 		/// </summary>
-		private static bool isNewEntry(State state, int previousMarketPosition, int marketPosition)
+		private static bool exitManagementRearmDue(State state, int previousMarketPosition, int marketPosition)
 		{
 			if (marketPosition == 0) return false;
 			return state == State.None || (previousMarketPosition > 0) != (marketPosition > 0) || previousMarketPosition == 0;
 		}
 
 		/// <summary>
-		/// The stage after a position change: flat -> None; a new entry or reversal -> FirstExit; FirstExit with the same side and fewer lots
+		/// The stage after a position change: flat -> None; a position opened or reversed by another signal -> FirstExit (re-armed); FirstExit with the same side and fewer lots
 		/// (the +1R half filled, whole or in part) -> SecondExit; otherwise (an add-on, or a further reduction in SecondExit) unchanged.
 		/// Lots are compared as long, so int.MinValue cannot overflow under checked arithmetic.
 		/// </summary>
 		private static State stageAfterPositionChange(State state, int previousMarketPosition, int marketPosition)
 		{
 			if (marketPosition == 0) return State.None;
-			if (isNewEntry(state, previousMarketPosition, marketPosition)) return State.FirstExit;
+			if (exitManagementRearmDue(state, previousMarketPosition, marketPosition)) return State.FirstExit;
 			if (state == State.FirstExit && Math.Abs((long)marketPosition) < Math.Abs((long)previousMarketPosition)) return State.SecondExit;
 			return state;
 		}
 
 		/// <summary>
-		/// Lots for the +1R half exit: half the open lots (Math.Round, banker's), at least one. With one lot Math.Round(0.5) is 0, which would
-		/// send a zero-lot order; one lot instead exits the whole position at +1R. Computed in double, so int.MinValue cannot overflow.
+		/// Lots for the +1R half exit: half the open lots (Math.Round, banker's), at least one and never more than the open lots (0 when none
+		/// are open). With one lot Math.Round(0.5) is 0, which would send a zero-lot order; one lot instead exits the whole position at +1R.
+		/// Computed in double, so int.MinValue cannot overflow.
 		/// </summary>
 		private static int halfExitLots(int openLots)
 		{
-			return Math.Max(1, (int)Math.Round(Math.Abs((double)openLots) / 2, 0));
+			int open = remainingExitLots(openLots);
+			if (open == 0) return 0;
+			return Math.Min(open, Math.Max(1, (int)Math.Round((double)open / 2, 0)));
 		}
 
-		/// <summary>Lots for the SecondExit stop: the whole remaining position, passed explicitly (the orders are Contracts.UserSpecified).</summary>
+		/// <summary>Lots for the SecondExit stop: exactly the open lots, never more, passed explicitly (the orders are Contracts.UserSpecified).</summary>
 		private static int remainingExitLots(int openLots)
 		{
 			if (openLots >= 0) return openLots;
