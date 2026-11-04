@@ -2599,10 +2599,18 @@ namespace PowerLanguage.Strategy
 			return barTime.Date;
 		}
 
-		/// <summary>M-INSTR §4.2: ClassOf(Bars.Info.Category); a category ClassOf does not map writes an Error line (traceAlways), then rethrows.</summary>
+		/// <summary>M-INSTR §4.2: ClassOf(Bars.Info.Category); a category ClassOf does not map, or a failing Bars.Info.Category read, writes an
+		/// Error line (traceAlways), then throws.</summary>
 		private EAssetClass classOfData1()
 		{
-			ESymbolCategory category = Bars.Info.Category;
+			ESymbolCategory category;
+			try { category = Bars.Info.Category; }   // M-INSTR #91 review: the MC read is inside a try too, so its failure also gets the Error line
+			catch (Exception ex)
+			{
+				string readError = "M-INSTR: reading Bars.Info.Category failed (" + ex.GetType().Name + ": " + ex.Message + "); the trading day under TradingDayRoll Auto needs the Data1 symbol category.";
+				traceAlways(ETraceLevel.Error, null, readError);
+				throw new InvalidOperationException(readError, ex);
+			}
 			try { return ClassOf(category); }
 			catch (InvalidOperationException ex)
 			{
