@@ -16,11 +16,7 @@ namespace PowerLanguage.Strategy {
 
 
 		//types
-		private enum State {
-			None,
-			FirstExit,    //profit = risk exit
-			SecondExit,   //roll based on previous day low
-		}
+		//(State lives in the <legacy-exit-core> region below so tests/OrderFlowTests can drive exitOrdersThisBar)
 
 		//inputs
 
@@ -30,8 +26,10 @@ namespace PowerLanguage.Strategy {
 
 		//attributes
 		private State m_state;
-		private double m_firstStopPrice;
+		private double m_firstStopDistance;  //price distance from the entry to the first stop (>= one tick); feeds the GenerateStopLoss amount
+		private double m_firstStopPrice;     //the first stop as a price (entry -/+ m_firstStopDistance); what m_leStopOrder/m_seStopOrder are sent
 		private double m_secondStopPrice;
+		private double m_bigPointValue;      //guarded BigPointValue captured when the position opened; re-used by the per-bar GenerateStopLoss
 		private IInstrument m_entryResolution;
 		private IInstrument m_longerResolution;
 		private IOrderPriced m_leStopOrder;
@@ -48,8 +46,11 @@ namespace PowerLanguage.Strategy {
 		
 		protected override void StartCalc() 
 		{
+			m_state = State.None;
+			m_firstStopDistance = -1;
 			m_firstStopPrice = -1;
 			m_secondStopPrice = -1;
+			m_bigPointValue = -1;
 			m_entryResolution = BarsOfData(1);  //will be the same as bars of data for the strategy
 			m_longerResolution = BarsOfData(2);
 		}
@@ -66,15 +67,18 @@ namespace PowerLanguage.Strategy {
 					break;
 			}
 
-			switch (m_state)
+			//special orders (GenerateStopLoss) and the stop orders only stay live while they are re-sent on every calculation, so they are
+			//sent here on every CalcBar while in a position, whatever the CalcReason, not only on the bar the position changed
+			switch (exitOrdersThisBar(m_state, PositionSide))
 			{
 				case State.FirstExit:
-					//close half of the position at the original entry day low/high
-					IMarketPosition marketPosition = this.CurrentPosition;
+					//close half of the position at the first stop PRICE (outside the prior bar's low/high), full-position stop loss as a backstop
 					if (PositionSide > 0)
 						m_leStopOrder.Send(m_firstStopPrice, (int)Math.Round((double)this.CurrentPosition.OpenLots / 2, 0));
 					else
 						m_seStopOrder.Send(m_firstStopPrice, (int)Math.Round((double)this.CurrentPosition.OpenLots / 2, 0));
+					//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance
+					GenerateStopLoss(stopLossAmount(m_firstStopDistance, m_bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 					break;
 				case State.SecondExit:
 					//close the remaining half of the position at low/high of the previous day
@@ -93,8 +97,10 @@ namespace PowerLanguage.Strategy {
 			{
 				//clear intial risk	and previous low once we are flat
 				m_state = State.None;
+				m_firstStopDistance = -1;
 				m_firstStopPrice = -1;
 				m_secondStopPrice = -1;
+				m_bigPointValue = -1;
 			}
 			else
 			{
@@ -105,27 +111,23 @@ namespace PowerLanguage.Strategy {
 				{
 					case State.None:
 						m_state = State.FirstExit;
-						if (this.PositionSide > 0)
-						{
-							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1] - tick;
+						m_bigPointValue = bigPointValue;
+						bool isLong = this.PositionSide > 0;
+						double entryPrice = this.EntryPrice();
+						//first stop one tick OUTSIDE the prior bar (long Low[1] - tick, short High[1] + tick); the distance is clamped to at least
+						//one tick (entry already beyond that level) so neither the stop price nor the GenerateStopLoss amount is on the wrong side
+						m_firstStopDistance = atLeastOneTick(firstStopDistance(entryPrice, m_entryResolution.Low[1], m_entryResolution.High[1], tick, isLong), tick);
+						m_firstStopPrice = firstStopPrice(entryPrice, m_firstStopDistance, isLong);
+						if (isLong)
 							m_secondStopPrice = m_entryResolution.Low[0] - tick;  //initialize the stop price to the ENTRY day low
-						}
 						else
-						{
-							m_firstStopPrice = m_entryResolution.High[1] - this.EntryPrice() + tick;
 							m_secondStopPrice = m_entryResolution.High[0] + tick;   //initialize the stop price to the ENTRY day high
-						}
 						break;
 					case State.FirstExit:
 						m_state = State.SecondExit;
 						updateSecondExit();
 						break;
 				}
-
-				//start sending orders
-				//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance; a
-				//distance below one tick (entry already beyond the prior bar's low/high) is clamped to one tick so the amount is never negative
-				if (m_state == State.FirstExit) GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 			}
 		}
 		
@@ -151,6 +153,36 @@ namespace PowerLanguage.Strategy {
 
 		// <legacy-exit-core> M-INSTR PR-M1c (spec rev 2.3 §3.2 F3). MC-free apart from the typed ESpecOrdersMode: tests/OrderFlowTests/gen.sh
 		// compiles this region against a mirror of ESpecOrdersMode.
+
+		private enum State {
+			None,
+			FirstExit,    //profit = risk exit
+			SecondExit,   //roll based on previous day low
+		}
+
+		/// <summary>
+		/// Which exit orders CalcBar sends on this bar: the current state while in a position, None when flat. Called on EVERY CalcBar, so the
+		/// stop orders and GenerateStopLoss are re-sent each bar (MC cancels special and priced orders that are not re-sent on a calculation).
+		/// </summary>
+		private static State exitOrdersThisBar(State state, int positionSide)
+		{
+			return positionSide == 0 ? State.None : state;
+		}
+
+		/// <summary>
+		/// First-stop price distance from the entry, one tick outside the prior bar: long entry - (priorLow - tick), short (priorHigh + tick) - entry.
+		/// May be negative/sub-tick when the entry is already beyond that level; the caller clamps it with atLeastOneTick.
+		/// </summary>
+		private static double firstStopDistance(double entryPrice, double priorLow, double priorHigh, double tick, bool isLong)
+		{
+			return isLong ? entryPrice - (priorLow - tick) : (priorHigh + tick) - entryPrice;
+		}
+
+		/// <summary>First stop as a PRICE for the stop orders: entry - distance for a long, entry + distance for a short.</summary>
+		private static double firstStopPrice(double entryPrice, double distance, bool isLong)
+		{
+			return isLong ? entryPrice - distance : entryPrice + distance;
+		}
 
 		/// <summary>M-INSTR F3a: one tick in price = MinMove / PriceScale (ES 25 / 100 = 0.25). Was 1 / PriceScale * BigPointValue (0.5 on ES).</summary>
 		private static double oneTick(double minMove, double priceScale)
