@@ -598,7 +598,18 @@ static class Program
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), null) == InstrumentReason.MismatchBigPointValue, "M3 order: preset mismatch beats currency");
 		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 50, "EUR"), null) == InstrumentReason.Currency, "M3 order: matching preset, then currency");
 		var mcBad = In("@ES", EAssetClass.Unsupported, "ES", 25, 100, 50); mcBad.structBigPointValue = 5;
-		Check(reason(mcBad, null) == InstrumentReason.MismatchMcBigPointValue, "M3 order: MC-internal mismatch beats class Unsupported");
+		Check(reason(mcBad, null) == InstrumentReason.Class, "M3 order: Unsupported class -> class refusal only, no MC-internal check (review 2)");
+		var esOpt = In("ES 6000C", EAssetClass.Unsupported, "ES", 25, 100, 50); esOpt.structBigPointValue = 5; esOpt.structPriceScale = 3;
+		Check(reason(esOpt, null) == InstrumentReason.Class, "M3 order: ES futures option (root ES, cost 1700, odd ASymbolInfo2) -> class only");
+		st = new InstrumentStreams(1); err.Clear(); warn.Clear();
+		st.Start(1, esOpt, g, cfg, err.Add, warn.Add);
+		Check(err.Count == 0 && warn.Count == 1 && warn[0].Contains("): class.") && st.Profile(1) == null, "M3 streams: Unsupported chart is a log-only Warning, no throw at StartCalc");
+		// review 2: the cost floor needs a matched preset (costs are keyed by root alone)
+		var esStock = In("ES", EAssetClass.Stock, "ES", 1, 10000, 1);   // a stock ticker ES with a sub-penny tick: 0.01 cent tick value
+		Check(reason(esStock, null) == null, "M3 stock ticker ES with cost root ES: no mismatch:tickValue (no preset)");
+		var esStockP = InstrumentProfile.Build(esStock, null, null);
+		Check(esStockP.presetId == null && esStockP.cost.known && esStockP.costFloorTicks == -1, "M3 stock ES: cost shown, floor Unknown");
+		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).costFloorTicks == 14, "M3 ES future: floor 14 (preset matched)");
 		var noRoot = In("", EAssetClass.Future, "", 25, 100, 50); noRoot.structPriceScale = 0.5;
 		Check(reason(noRoot, null) == InstrumentReason.MismatchMcPriceScale, "M3 order: MC-internal mismatch beats unknown-field:root");
 		Check(reason(In("@ES", EAssetClass.Future, "ES", -25, 100, 50, "EUR"), null) == InstrumentReason.MismatchTick, "M3 order: non-positive tick vs a preset is mismatch:tick, before tick / currency");

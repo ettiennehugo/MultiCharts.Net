@@ -750,27 +750,34 @@ namespace PowerLanguage.Function
 
 		/// <summary>StartCalc part of buildProfiles(). Two phases (PR-M3 review): first the ENFORCED cross-checks on whatever data is
 		/// there (MC-internal, preset tick / bpv, cost-floor tick value), so a log-only refusal can never hide a mismatch; then the
-		/// refusals (class, config, root, tick, currency Q8). Every refusal writes the Error line first. Profile facts: once the preset
+		/// refusals (class, config, root, tick, currency Q8). Phase 1 runs for mapped classes only; the floor needs a matched preset. Every refusal writes the Error line first. Profile facts: once the preset
 		/// cross-check passes, tick / bpv / tickValue are the PRESET's exact values (runtime-independent text and hash); the raw
 		/// detected values appear only in mismatch details. No preset: the detected values (printed with G15).</summary>
 		public static InstrumentProfile Build(Inputs i, InstrumentConfig cfg, Action<string> errorSink)
 		{
 			const string Eng = "INSTR";
 			if (cfg == null) cfg = new InstrumentConfig();
-			// ---- phase 1: enforced cross-checks (mismatch:*), before any log-only refusal
-			var pick = InstrumentRoot.Pick(i.name, i.assetClass, i.mcRoot, i.mcRootUnsupported);
-			var sx = new InstrumentSubject(Eng, i.name, i.assetClass, pick.Root, i.sessionName);
-			InstrumentChecks.McInternal(i.structPriceScale, i.infoPriceScale, i.structBigPointValue, i.infoBigPointValue, sx, errorSink);   // raw inputs only
-			double rawTick = i.infoPriceScale > 0 ? i.minMove / i.infoPriceScale : 0;
+			// ---- phase 1: enforced cross-checks (mismatch:*), before any log-only refusal. Mapped classes only: for an Unsupported
+			// category (e.g. an ES futures option) there is no evidence ASymbolInfo2 PriceScale / BigPointValue mean the same, so it only
+			// gets the class refusal below (review 2).
 			string v = cfg.Validate();
-			// an invalid config's override row is not trusted: the built-in preset still cross-checks (the config refusal follows in phase 2)
-			InstrumentPresetRow pr = pick.Root.Length == 0 ? null
-				: v == null && cfg.overrides != null && cfg.overrides.assetClass == i.assetClass && cfg.overrides.root == pick.Root ? cfg.overrides : InstrumentPresets.Find(pick.Root, i.assetClass);
-			InstrumentChecks.Preset(pr, rawTick, i.infoBigPointValue, sx, errorSink);   // a non-positive detected tick vs a preset is mismatch:tick
-			double tick = pr != null ? pr.tick : rawTick, bpv = pr != null ? pr.bigPointValue : i.infoBigPointValue;
-			CostModel cost = v == null ? cfg.CostFor(pick.Root) : CostModel.Unknown;
-			bool tickOk = tick > 0 && !double.IsInfinity(tick) && !double.IsNaN(tick);
-			int floor = cost.known && tickOk ? CostModel.FloorTicks(cost.roundTripCents, tick, bpv, sx, errorSink) : -1;   // mismatch:tickValue
+			InstrumentPresetRow pr = null;
+			int floor = -1;
+			if (i.assetClass != EAssetClass.Unsupported)
+			{
+				var pick = InstrumentRoot.Pick(i.name, i.assetClass, i.mcRoot, i.mcRootUnsupported);
+				var sx = new InstrumentSubject(Eng, i.name, i.assetClass, pick.Root, i.sessionName);
+				InstrumentChecks.McInternal(i.structPriceScale, i.infoPriceScale, i.structBigPointValue, i.infoBigPointValue, sx, errorSink);   // raw inputs only
+				double rawTick = i.infoPriceScale > 0 ? i.minMove / i.infoPriceScale : 0;
+				// an invalid config's override row is not trusted: the built-in preset still cross-checks (the config refusal follows in phase 2)
+				pr = pick.Root.Length == 0 ? null
+					: v == null && cfg.overrides != null && cfg.overrides.assetClass == i.assetClass && cfg.overrides.root == pick.Root ? cfg.overrides : InstrumentPresets.Find(pick.Root, i.assetClass);
+				InstrumentChecks.Preset(pr, rawTick, i.infoBigPointValue, sx, errorSink);   // a non-positive detected tick vs a preset is mismatch:tick
+				// cost floor only for a matched preset (review 2): costs are keyed by root alone, so a stock ticker ES or a sub-penny
+				// symbol sharing a cost root must not hit mismatch:tickValue. No preset -> floor Unknown.
+				CostModel c0 = v == null && pr != null ? cfg.CostFor(pick.Root) : CostModel.Unknown;
+				if (c0.known) floor = CostModel.FloorTicks(c0.roundTripCents, pr.tick, pr.bigPointValue, sx, errorSink);   // mismatch:tickValue
+			}
 			// ---- phase 2: refusals (log only in M3, enforced from PR-M4)
 			var subj0 = new InstrumentSubject(Eng, i.name, i.assetClass, "", i.sessionName);
 			if (i.assetClass == EAssetClass.Unsupported) InstrumentError.Fail(errorSink, subj0, InstrumentReason.Class, null, "use a Future, Stock, SpotFx, Crypto or Index symbol");
@@ -778,9 +785,10 @@ namespace PowerLanguage.Function
 			var rr = InstrumentRoot.Resolve(i.name, i.assetClass, i.mcRoot, i.mcRootUnsupported, Eng, i.sessionName, errorSink);
 			var p = new InstrumentProfile { name = i.name, assetClass = i.assetClass, root = rr.Root, rootSource = rr.Source, rootWarning = rr.Warning, exchange = i.exchange, sessionName = i.sessionName, minMove = i.minMove };
 			InstrumentSubject s = p.Subject(Eng);
-			InstrumentChecks.Tick(i.minMove, i.infoPriceScale, s, errorSink);   // refusal only; with a preset the mismatch above already fired
+			double detTick = InstrumentChecks.Tick(i.minMove, i.infoPriceScale, s, errorSink);   // refusal; with a preset the mismatch above already fired
 			if (i.currency != "USD") InstrumentError.Fail(errorSink, s, InstrumentReason.Currency, "SymbolCurrency " + (i.currency ?? "not USD"), "USD instruments only (Q8)");
 			p.currency = i.currency;
+			double tick = pr != null ? pr.tick : detTick, bpv = pr != null ? pr.bigPointValue : i.infoBigPointValue;
 			p.tick = tick;
 			p.bigPointValue = bpv;
 			p.tickValue = tick * bpv;   // preset product (0.00005 × 125000); printed / hashed with G15
@@ -796,7 +804,7 @@ namespace PowerLanguage.Function
 			p.contractExpiry = InstrumentRoot.UsableExpiry(i.symbolExpiry) ? i.symbolExpiry.Date : (DateTime?)null;
 			p.sessionsPerYear = InstrumentPresets.SessionsPerYear(i.assetClass);
 			p.sizingUnit = InstrumentPresets.SizingUnit(i.assetClass);
-			p.cost = cost;
+			p.cost = cfg.CostFor(p.root);   // the cost itself is still shown (cost(...)); only the floor needs a preset
 			string note; p.dataNotes = cfg.dataNotes != null && cfg.dataNotes.TryGetValue(p.root, out note) ? note : null;
 			p.costFloorTicks = floor;
 			return p;

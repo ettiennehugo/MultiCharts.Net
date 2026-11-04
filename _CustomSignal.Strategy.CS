@@ -2466,7 +2466,7 @@ namespace PowerLanguage.Strategy
 		{
 			string setting, zone;
 			try { setting = $"{info.TimeZone}"; } catch (Exception ex) { setting = unavailable(ex); }
-			try { TimeZoneInfo z = resolveBarTimeZone(info); zone = z != null ? z.Id : "unavailable(null)"; } catch (Exception ex) { zone = unavailable(ex); }
+			try { TimeZoneInfo z = resolveBarTimeZone(info); zone = z != null ? z.Id : "unresolved"; } catch (Exception ex) { zone = unavailable(ex); }
 			return setting + "→" + zone;
 		}
 
