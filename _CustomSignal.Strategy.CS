@@ -2410,6 +2410,8 @@ namespace PowerLanguage.Strategy
 				}
 				catch (Exception ex)
 				{
+					// M3 log only. This also catches ClassOf's default-case throw (unmapped ESymbolCategory): in M3 it becomes this Warning
+					// and the stream runs without a profile. PR-M4 MUST enforce it (Error line + throw class), like the other refusals.
 					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " " + (name ?? "?") + " failed (" + ex.GetType().Name + ": " + ex.Message + "); no profile"));
 				}
 				_MtfMath.Session[] startCalc = null;
@@ -2443,9 +2445,17 @@ namespace PowerLanguage.Strategy
 				{
 					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " sessions on the first bar failed (" + ex.GetType().Name + ": " + ex.Message + ")"));
 				}
-				string cat = "?", bvo = "?", symbol = null;
-				try { symbol = b.Info.Name; cat = $"{b.Info.Category}"; bvo = $"{b.Info.BVO}"; } catch (Exception) { }   // log labels only (R1)
-				string tz = instrZoneLabel(b.Info);
+				// log labels only (R1); each read on its own so one failure does not blank the others
+				IInstrumentSettings si = null; string symbol = null, cat, bvo, tz, infoErr = "unavailable(null)";
+				try { si = b.Info; } catch (Exception ex) { si = null; infoErr = unavailable(ex); }
+				if (si == null) cat = bvo = tz = infoErr;
+				else
+				{
+					try { symbol = si.Name; } catch (Exception) { symbol = null; }
+					try { cat = $"{si.Category}"; } catch (Exception ex) { cat = unavailable(ex); }
+					try { bvo = $"{si.BVO}"; } catch (Exception ex) { bvo = unavailable(ex); }
+					tz = instrZoneLabel(si);
+				}
 				string line = m_instr.FirstBar(ds, firstBar, cat, tz, bvo, msg => traceAlways(ETraceLevel.Error, symbol, msg), warn);
 				if (line != null && info != null) info(line);
 			}
@@ -2454,11 +2464,14 @@ namespace PowerLanguage.Strategy
 		/// <summary>INSTR tz(...) label: the chart setting and the zone it resolves to, e.g. "Exchange→Central Standard Time" (log only).</summary>
 		private string instrZoneLabel(IInstrumentSettings info)
 		{
-			string setting = "?", zone = "?";
-			try { setting = $"{info.TimeZone}"; } catch (Exception) { }
-			try { TimeZoneInfo z = resolveBarTimeZone(info); if (z != null) zone = z.Id; } catch (Exception) { }
+			string setting, zone;
+			try { setting = $"{info.TimeZone}"; } catch (Exception ex) { setting = unavailable(ex); }
+			try { TimeZoneInfo z = resolveBarTimeZone(info); zone = z != null ? z.Id : "unavailable(null)"; } catch (Exception ex) { zone = unavailable(ex); }
 			return setting + "→" + zone;
 		}
+
+		/// <summary>INSTR label for a read that threw: "unavailable(&lt;ExceptionType&gt;)" (log only).</summary>
+		private static string unavailable(Exception ex) { return "unavailable(" + (ex == null ? "?" : ex.GetType().Name) + ")"; }
 
 		// <instr-host-core> M-INSTR PR-M1b. MC-free apart from the typed ESymbolCategory: tests/OrderFlowTests/gen.sh compiles this
 		// region against a mirror of ESymbolCategory (spec §4.1 values). EAssetClass is the top-level PowerLanguage.Function.EAssetClass of

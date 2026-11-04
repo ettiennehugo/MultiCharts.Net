@@ -155,7 +155,9 @@ static class Program
 		e = Throws(s => InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 5), null, s), "T3 bpvp");
 		Check(e != null && e.Reason == "mismatch:bigPointValue", "T3 ES bpv 5 -> mismatch:bigPointValue");
 		e = Throws(s => InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 0, 100, 50), null, s), "T3 tick0");
-		Check(e != null && e.Reason == "tick", "T3 MinMove 0 -> tick");
+		Check(e != null && e.Reason == "mismatch:tick", "T3 ES MinMove 0 -> mismatch:tick (preset cross-check runs before the tick refusal, PR-M3 review)");
+		e = Throws(s => InstrumentProfile.Build(In("AAPL", EAssetClass.Stock, "AAPL", 0, 100, 1), null, s), "T3 tick0 no preset");
+		Check(e != null && e.Reason == "tick", "T3 MinMove 0 without a preset -> tick");
 		e = Throws(s => InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50, null), null, s), "T3 ccy");
 		Check(e != null && e.Reason == "currency", "T3 non-USD -> currency");
 		e = Throws(s => InstrumentProfile.Build(In("X", EAssetClass.Unsupported, "X", 1, 100, 1), null, s), "T3 class");
@@ -169,7 +171,15 @@ static class Program
 			Check(cls == EAssetClass.Stock ? pr == null : pr != null && p.presetId == pr.root, "T3 fixture preset " + d.File + " " + d.Name);
 			Check(p.rootSource == "parsed", "T3 fixture rootSrc parsed (no MC root dumped) " + d.File);
 		}
-		Check(InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).tick == 5 / 99999.999999999985, "T3 6E tick from the binary priceScale");
+		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null);
+		Check(5 / 99999.999999999985 != 0.00005 && six.tick == 0.00005 && six.bigPointValue == 125000 && six.tickValue == 0.00005 * 125000,
+			"T3 6E binary priceScale passes the cross-check; the profile carries the PRESET's exact tick / bpv (PR-M3 review)");
+		var sixBad = Throws(s => InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 12500), null, s), "T3 6E bpv");
+		Check(sixBad != null && sixBad.Reason == "mismatch:bigPointValue" && sixBad.Message.Contains("(detected 12500 vs preset 125000)"), "T3 mismatch detail keeps the raw detected value: " + (sixBad == null ? "" : sixBad.Message));
+		var sixTick = Throws(s => InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 10, 99999.999999999985, 125000), null, s), "T3 6E tick");
+		Check(sixTick != null && sixTick.Reason == "mismatch:tick" && sixTick.Message.Contains("(detected " + InstrumentText.Num(10 / 99999.999999999985) + " vs preset 5E-05)"), "T3 tick mismatch detail is the raw R value: " + (sixTick == null ? "" : sixTick.Message));
+		Check(InstrumentText.Fact(5 / 99999.999999999985) == "5E-05" && InstrumentText.Fact(0.00005 * 125000) == "6.25" && InstrumentText.Fact(0.015625) == "0.015625" && InstrumentText.Fact(99999.999999999985) == "100000",
+			"T3 Fact (G15) is runtime-independent for the profile facts");
 	}
 
 	// ---------------------------------------------------------------- MI-T4 expiry
@@ -455,6 +465,14 @@ static class Program
 		var sixLine = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null).InstrLine(1, "Future", "Exchange", "Volume");
 		Check(sixLine.Contains("calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8))") && sixLine.Contains("roll(BusinessDaysBeforeExpiry(5))"), "T13 6E INSTR line: " + sixLine);
 		Console.WriteLine("ES GLOBEX profileHash " + a.ProfileHash());
+		// PR-M3 review: literal pins (computed-only checks missed the runtime-dependent "R" text). Canon uses G15 / preset values, so
+		// the same hashes come out of MC (.NET Framework) and the box tools (.NET 8).
+		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null);
+		Console.WriteLine("6E GLOBEX profileHash " + six.ProfileHash());
+		Check(a.ProfileHash() == "020deca78d6392b7", "T13 ES GLOBEX profileHash pinned: " + a.ProfileHash());
+		Check(six.ProfileHash() == "8e8b3e9b0e230e12", "T13 6E GLOBEX profileHash pinned: " + six.ProfileHash());
+		Check(six.Canon().Contains(";tick=5E-05;bpv=125000;ccy=USD;"), "T13 6E Canon carries the preset tick / bpv: " + six.Canon());
+		Check(sixLine == "INSTR ds(1) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(none src=None) tick(5E-05) bpv(125000) tickValue(6.25) ccy(USD) bvo(Volume) calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(HMUZ) expiry(ThirdWedMinus2Bd) roll(BusinessDaysBeforeExpiry(5)) cost(Unknown) floor(Unknown) cluster(FX_EUR) profileHash(8e8b3e9b0e230e12)", "T13 6E INSTR line pinned in full: " + sixLine);
 	}
 
 	// ---------------------------------------------------------------- MI-T16 R14 session ends
@@ -575,6 +593,30 @@ static class Program
 		st.Start(3, rw, g, cfg, err.Add, warn.Add);
 		Check(st.Profile(3) != null && warn.Count == (st.Profile(3).rootWarning == null ? 0 : 1) && st.RunSuffix().StartsWith(" profileHash(3=", StringComparison.Ordinal), "M3 root warning logged once; only started streams on RUN: " + st.RunSuffix() + " " + string.Join("|", warn));
 		Check(new InstrumentStreams(2).RunSuffix() == "", "M3 nothing started -> no RUN suffix");
+		// PR-M3 review: the enforced cross-checks run before every log-only refusal, so a refusal cannot hide a mismatch
+		Func<InstrumentProfile.Inputs, InstrumentConfig, string> reason = (inp, c) => { var x = Throws(s => InstrumentProfile.Build(inp, c, s), "M3 order " + inp.name); return x == null ? null : x.Reason; };
+		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), null) == InstrumentReason.MismatchBigPointValue, "M3 order: preset mismatch beats currency");
+		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 50, "EUR"), null) == InstrumentReason.Currency, "M3 order: matching preset, then currency");
+		var mcBad = In("@ES", EAssetClass.Unsupported, "ES", 25, 100, 50); mcBad.structBigPointValue = 5;
+		Check(reason(mcBad, null) == InstrumentReason.MismatchMcBigPointValue, "M3 order: MC-internal mismatch beats class Unsupported");
+		var noRoot = In("", EAssetClass.Future, "", 25, 100, 50); noRoot.structPriceScale = 0.5;
+		Check(reason(noRoot, null) == InstrumentReason.MismatchMcPriceScale, "M3 order: MC-internal mismatch beats unknown-field:root");
+		Check(reason(In("@ES", EAssetClass.Future, "ES", -25, 100, 50, "EUR"), null) == InstrumentReason.MismatchTick, "M3 order: non-positive tick vs a preset is mismatch:tick, before tick / currency");
+		var badCfg = new InstrumentConfig(); badCfg.costs["XX"] = -1;
+		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5), badCfg) == InstrumentReason.MismatchBigPointValue, "M3 order: preset mismatch beats an invalid config");
+		var znCost = new InstrumentConfig(); znCost.costs["ZN"] = 500;
+		Check(reason(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000, "EUR"), znCost) == InstrumentReason.MismatchTickValue, "M3 order: cost-floor tick value (ZN 1562.5 cents) beats currency");
+		Check(reason(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null) == null, "M3 ZN without a cost: no tick-value check");
+		var ovr = new InstrumentConfig(); ovr.costs["XX"] = -1;
+		ovr.overrides = new InstrumentPresetRow("ES", EAssetClass.Future, 0.25, 5, "USD", MonthMask.Of("HMUZ"), EExpiryRule.ThirdFridaySoq, ERollRule.EquityIndexCustomary, 0, ECalendar.CmeEquityIndex, "EQIDX", "t", null);
+		Check(reason(In("@ES", EAssetClass.Future, "ES", 25, 100, 5), ovr) == InstrumentReason.MismatchBigPointValue, "M3 order: an invalid config's override row is not trusted; the built-in preset cross-checks");
+		st = new InstrumentStreams(1); err.Clear(); warn.Clear(); ex = null;
+		try { st.Start(1, In("@ES", EAssetClass.Future, "ES", 25, 100, 5, "EUR"), g, cfg, err.Add, warn.Add); } catch (InstrumentException e) { ex = e; }
+		Check(ex != null && ex.Reason == InstrumentReason.MismatchBigPointValue && err.Count == 1 && warn.Count == 0, "M3 streams: non-USD with a preset mismatch throws (no longer hidden by the currency Warning)");
+		// nit 3: a non-InstrumentException inside a step gets its own Error line, then propagates unchanged
+		err.Clear(); warn.Clear(); Exception other = null;
+		try { InstrumentStreams.Guard<object>(2, s => { throw new ArgumentException("boom"); }, err.Add, warn.Add); } catch (ArgumentException e) { other = e; }
+		Check(other != null && other.Message == "boom" && err.Count == 1 && err[0] == "INSTR ds(2) unexpected ArgumentException: boom" && warn.Count == 0, "M3 Guard: unexpected exception -> Error line, rethrown: " + string.Join("|", err));
 		// #96 nit 1: MonthMask.Of only on static presets; every preset row validates and round-trips its letters
 		bool presetsOk = true;
 		foreach (var r in new[] { "ES", "MES", "NQ", "MNQ", "CL", "GC", "ZN", "6E" })
