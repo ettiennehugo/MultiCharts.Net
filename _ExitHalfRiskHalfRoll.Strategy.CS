@@ -12,6 +12,8 @@ namespace PowerLanguage.Strategy {
 	/// the open lots, and sent only while that position is open; on a reversal made by another signal it re-arms exit management for the
 	/// new position. INVARIANT: every order strictly reduces the position toward flat (it only moves a long or a short position to a
 	/// smaller one or to flat) and never crosses through zero; this study never creates a new position.
+	/// After an add-on by another signal, R and the +1R target stay anchored at the first entry (not re-anchored), while GenerateStopLoss
+	/// follows MC's own average / per-entry entry price.
 	/// R is the first-stop distance: from the position's entry price to one tick outside the
 	/// prior bar on the entry resolution (long Low[1] - tick, short High[1] + tick), at least one tick.
 	///	FirstExit: a half-size limit at entry + R (long) / entry - R (short) and GenerateStopLoss for the full position at -R, re-sent every bar.
@@ -58,10 +60,12 @@ namespace PowerLanguage.Strategy {
 		{
 			//Contracts.UserSpecified: the numLots passed to Send is the order size (with Contracts.Default MC sizes the order from Strategy
 			//Properties and the half exit is not half); every Send below passes its lots explicitly
-			m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));
-			m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));
-			m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));
-			m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));
+			//OrderExit.Total: exit ONLY the lots sent, closing entries first to last (PG L1817-1819, L2584). The default OrderExit.FromAll
+			//exits that many lots from EACH entry (PG L2563-2575): after add-ons by another signal (entries 5+1+2) a half exit of 4 would sell 4+1+2 = 7
+			m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "LXHalf", EOrderAction.Sell, OrderExit.Total));
+			m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "SXHalf", EOrderAction.BuyToCover, OrderExit.Total));
+			m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "LXTrail", EOrderAction.Sell, OrderExit.Total));
+			m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "SXTrail", EOrderAction.BuyToCover, OrderExit.Total));
 		}
 		
 		protected override void StartCalc() 

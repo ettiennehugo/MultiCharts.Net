@@ -1320,15 +1320,15 @@ static class Program
 
 			// ---- #94 review: (4) order quantities, (5) one-lot positions, (6) backtest/playback position-change fallback ----
 			// (4) Contracts.UserSpecified so Send's numLots is the order size; SecondExit passes the open lots explicitly
-			Check(lxc.Contains("m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));")
-				&& lxc.Contains("m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));") && !lxc.Contains("Contracts.Default")
-				&& lxc.Contains("m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));")
-				&& lxc.Contains("m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));")
+			Check(lxc.Contains("m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, \"LXTrail\", EOrderAction.Sell, OrderExit.Total));")
+				&& lxc.Contains("m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, \"SXTrail\", EOrderAction.BuyToCover, OrderExit.Total));") && !lxc.Contains("Contracts.Default")
+				&& lxc.Contains("m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, \"LXHalf\", EOrderAction.Sell, OrderExit.Total));")
+				&& lxc.Contains("m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, \"SXHalf\", EOrderAction.BuyToCover, OrderExit.Total));")
 				&& lxCalc.Contains("m_leStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
 				&& lxCalc.Contains("m_seStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
 				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"\.Send\([^,()]*\)").Count == 0
 				&& LX.remainingExitLots(3) == 3 && LX.remainingExitLots(-3) == 3 && LX.remainingExitLots(1) == 1,
-				"MI-C13 quantities: target limits and stop orders are Contracts.UserSpecified and every Send passes its lots (SecondExit = all open lots)");
+				"MI-C13 quantities: target limits and stop orders are Contracts.UserSpecified + OrderExit.Total and every Send passes its lots (SecondExit = all open lots)");
 			// (5) one lot: half exit is at least one lot (Math.Round(0.5) = 0 would send a zero-lot order)
 			bool fxHalfOk = true;
 			for (int n = 1; n <= 50; n++) { int h = LX.halfExitLots(n); fxHalfOk &= h >= 1 && h <= n && LX.halfExitLots(-n) == h; }
@@ -1429,13 +1429,15 @@ static class Program
 			// Sell orders are sent only in the PositionSide > 0 branch and BuyToCover only in the else branch
 			var fxCreates = System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderCreator\.(\w+)\(");
 			var fxActions = System.Text.RegularExpressions.Regex.Matches(lxc, @"EOrderAction\.(\w+)");
-			bool fxExitOnly = fxCreates.Count == 4 && fxActions.Count == 4;
+			bool fxExitOnly = fxCreates.Count == 4 && fxActions.Count == 4
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderCreator\.(Limit|Stop)\(new SOrderParameters\(Contracts\.UserSpecified, ""\w+"", EOrderAction\.(Sell|BuyToCover), OrderExit\.Total\)\);").Count == 4
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderExit\.Total").Count == 4 && !lxc.Contains("OrderExit.FromAll") && !lxc.Contains("OrderExit.FromEntry");
 			foreach (System.Text.RegularExpressions.Match m in fxCreates) fxExitOnly &= m.Groups[1].Value == "Limit" || m.Groups[1].Value == "Stop";
 			foreach (System.Text.RegularExpressions.Match m in fxActions) fxExitOnly &= m.Groups[1].Value == "Sell" || m.Groups[1].Value == "BuyToCover";
 			Check(fxExitOnly && !lxc.Contains("SellShort") && !lxc.Contains("EOrderAction.Buy)") && !lxc.Contains("EOrderAction.Buy,") && !lxc.Contains("MarketNextBar") && !lxc.Contains("MarketThisBar")
 				&& System.Text.RegularExpressions.Regex.Matches(lxCalc, @"if \(PositionSide > 0\)\s*m_l[xe]\w+\.Send\([^;]*;\s*else\s*m_s[xe]\w+\.Send\(").Count == 2
 				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"\.Send\(").Count == 4 && lxc.Contains("m_armedSide = isLong ? 1 : -1;") && lxc.Contains("m_armedSide = 0;"),
-				"MI-C22 exit-only source audit: 4 orders, all Limit/Stop with Sell or BuyToCover (no Buy/SellShort/market); Sell only sent while long, BuyToCover only while short; armed side set on re-arm, cleared when flat");
+				"MI-C22 exit-only source audit: 4 orders, all Limit/Stop with Sell or BuyToCover (no Buy/SellShort/market); each OrderExit.Total (exactly the lots sent, not per entry); Sell only sent while long, BuyToCover only while short; armed side set on re-arm, cleared when flat");
 			// lots: every exit is 1..open lots while a position is open, 0 when none are open (never more than the position, so never a reversal)
 			bool fxLotsOk = LX.halfExitLots(0) == 0 && LX.remainingExitLots(0) == 0;
 			for (int n = 1; n <= 200; n++) fxLotsOk &= LX.halfExitLots(n) >= 1 && LX.halfExitLots(n) <= n && LX.remainingExitLots(n) == n && LX.halfExitLots(-n) <= n && LX.remainingExitLots(-n) == n;
@@ -1481,6 +1483,35 @@ static class Program
 			Check(fxA.EndsWith(":0") && fxB.EndsWith(":0") && fxC.EndsWith(":0") && !fxA.StartsWith("0:") && !fxB.StartsWith("0:") && !fxC.StartsWith("0:")
 				&& LX.stageAfterPositionChange(LX.State.FirstExit, 2, 5) == LX.State.FirstExit && LX.stageAfterPositionChange(LX.State.SecondExit, 2, -3) == LX.State.FirstExit,
 				"MI-C24 exit-only bar-by-bar (add-on and reversal by another signal): every order is an exit for the open side, 1..open lots, none when flat; each strictly reduces toward flat, never through zero [" + fxA + " | " + fxB + " | " + fxC + "]");
+			// multi-entry (add-ons by another signal): MC fills an exit over the entries. OrderExit.Total exits ONLY the lots sent, first to last
+			// entry (PG L2584); the default FromAll would exit that many lots from EACH entry (PG L2563-2575: 5+1+2, Sell 2 -> 5). Model both:
+			// with Total the lots exited == the lots intended <= open lots, for every order the study sends; FromAll would overshoot
+			Func<int[], int, bool, int> fxFill = (entries, lots, total) => {
+				int done = 0;
+				foreach (int e in entries) { int take = total ? Math.Min(e, lots - done) : Math.Min(e, lots); if (take <= 0) { if (total) break; else continue; } done += take; }
+				return done;
+			};
+			bool fxMultiOk = fxFill(new[] { 5, 1, 2 }, 2, false) == 5 && fxFill(new[] { 2, 1, 5 }, 5, true) == 5;   // the PG's own FromAll / Total examples
+			int fxMultiCases = 0;
+			foreach (int[] ent in new[] { new[] { 5, 1, 2 }, new[] { 1, 1, 1, 1 }, new[] { 2, 3 }, new[] { 1, 7 }, new[] { 4, 4, 4 }, new[] { 1, 1 }, new[] { 3 } })
+			{
+				int open = 0; foreach (int e in ent) open += e;
+				foreach (int side in new[] { 1, -1 })
+				{
+					int half = LX.halfExitLots(side * open), rest = LX.remainingExitLots(side * open);
+					foreach (int intended in new[] { half, rest })
+					{
+						int exited = fxFill(ent, intended, true);
+						int after = side * (open - exited);
+						fxMultiOk &= exited == intended && exited <= open && exited >= 1 && Math.Sign(after) != -side && Math.Abs(after) < open;
+						fxMultiCases++;
+					}
+				}
+			}
+			int fxAddOnHalf = LX.halfExitLots(8);
+			Check(fxMultiOk && fxMultiCases == 28 && fxAddOnHalf == 4 && fxFill(new[] { 5, 1, 2 }, fxAddOnHalf, true) == 4 && fxFill(new[] { 5, 1, 2 }, fxAddOnHalf, false) == 7
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderExit\.Total\)\);").Count == 4,
+				"MI-C24b multi-entry add-on: with OrderExit.Total every exit fills exactly the intended lots (<= open), strictly toward flat; e.g. entries 5+1+2, half = 4 exits 4 (FromAll would exit 4+1+2 = 7) [" + fxMultiCases + " cases]");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
