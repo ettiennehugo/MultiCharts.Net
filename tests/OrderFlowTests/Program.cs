@@ -8,11 +8,15 @@ using Side = Extracted.OrderFlow.Side;
 using Regime = Extracted.OrderFlow.Regime;
 using IH = Extracted.InstrHost;
 using Cat = Extracted.ESymbolCategory;
+using LX = Extracted.LegacyExit;
+using LXMode = Extracted.ESpecOrdersMode;
 
 // Spec VPF-5 Rev 2.5 acceptance tests T1-T8 (analyst-base-class-spec.md §D), run on the shipped <order-flow> block.
 static class Program
 {
 	static int s_fail, s_pass;
+	static bool lxThrows(Action a) { try { a(); return false; } catch (InvalidOperationException) { return true; } }
+	static string lxMessage(Action a) { try { a(); return ""; } catch (InvalidOperationException ex) { return ex.Message; } }
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
 	static bool Near(double a, double b) { return Math.Abs(a - b) < 1e-9; }
 	const double TICK = 0.25;
@@ -1208,11 +1212,56 @@ static class Program
 				"MI-B10 F2: DAILY roll-offset warning, RollDetection-Off warning and the roll Globex key use isFuturesCategory; Category == Future only inside isFuturesCategory");
 			string cod1 = MethodBody(cs, "private EAssetClass classOfData1()") ?? "";
 			int iCo = cod1.IndexOf("try { return ClassOf(category); }"), iCc = cod1.IndexOf("catch (InvalidOperationException ex)"), iCt = cod1.IndexOf("traceAlways(ETraceLevel.Error, null, ex.Message);"), iCr = cod1.IndexOf("throw;");
-			Check(cod1.Contains("ESymbolCategory category = Bars.Info.Category;") && iCo > 0 && iCc > iCo && iCt > iCc && iCr > iCt,
+			Check(iCo > 0 && iCc > iCo && iCt > iCc && cod1.IndexOf("throw;", iCt) > iCt,
 				"MI-B12 an unmapped ESymbolCategory writes an Error line (traceAlways) before ClassOf's exception leaves tradingDayKey");
+			int iRt = cod1.IndexOf("try { category = Bars.Info.Category; }"), iRc = cod1.IndexOf("catch (Exception ex)"), iRe = cod1.IndexOf("traceAlways(ETraceLevel.Error, null, readError);"), iRx = cod1.IndexOf("throw new InvalidOperationException(readError, ex);");
+			Check(iRt > 0 && iRc > iRt && iRe > iRc && iRx > iRe && iCo > iRx && System.Text.RegularExpressions.Regex.Matches(cod1, @"[=(,]\s*Bars\.Info\.Category\b").Count == 1,
+				"MI-B12b classOfData1 reads Bars.Info.Category only inside a try: a failing MC read writes an Error line, then throws (inner = the MC exception)");
 			Check(code.Contains("if (TradingDayRoll == ETradingDayRoll.Auto) return autoTradingDay(barTime, classOfData1());")
 				&& code.Contains("return autoTradingDayOf(assetClass, barTime, ToZone);") && !code.Contains("Category.ToString()") && !code.Contains("\"FOREX\"") && !code.Contains("\"CRYPTO\""),
 				"MI-B11 L2462: tradingDayKey Auto passes the typed ClassOf(Bars.Info.Category) (via classOfData1); no Category.ToString() or category-name strings left");
+		}
+
+
+		// ---- M-INSTR PR-M1c (spec rev 2.3 §3.2 F3, rows 60/70): _ExitHalfRiskHalfRoll's <legacy-exit-core>, compiled against a mirror of ESpecOrdersMode ----
+		{
+			// F3a: one tick = MinMove / PriceScale (Info.PriceScale convention of §4.4.3: ES 100, 6E 99999.999999999985)
+			Check(LX.oneTick(25, 100) == 0.25 && LX.oneTick(1, 100) == 0.01 && Math.Abs(LX.oneTick(5, 99999.999999999985) - 5e-5) < 1e-15 && LX.oneTick(1, 10) == 0.1,
+				"MI-C1 F3a one tick = MinMove / PriceScale (ES 0.25, CL 0.01, 6E 0.00005, GC 0.1)");
+			Check(LX.oneTick(25, 100) != 1 / 100.0 * 50, "MI-C2 F3a ES tick is no longer 1 / PriceScale * BigPointValue (0.5)");
+			// F3b: GenerateStopLoss amount in currency; PerContract per contract, PerPosition for the whole position
+			Check(LX.stopLossAmount(4.25, 50, LXMode.PerContract, 3) == 212.5 && LX.stopLossAmount(4.25, 50, LXMode.PerPosition, 3) == 637.5
+				&& LX.stopLossAmount(4.25, 50, LXMode.PerPosition, -3) == 637.5 && LX.stopLossAmount(0.0125, 125000, LXMode.PerContract, 2) == 1562.5,
+				"MI-C3 F3b stop amount = distance x BigPointValue per contract (ES 4.25 pt = $212.50, 6E 0.0125 = $1562.50), x open contracts in PerPosition");
+			// MC's stop price from the amount (PG 4.6.2: EntryPrice - amount / contracts / BigPointValue in PerPosition) lands at the intended distance
+			double entry = 4800, low1 = 4795.75, tick = LX.oneTick(25, 100), dist = entry - low1 - tick;
+			double stopPc = entry - LX.stopLossAmount(dist, 50, LXMode.PerContract, 4) / 50, stopPp = entry - LX.stopLossAmount(dist, 50, LXMode.PerPosition, 4) / 4 / 50;
+			Check(Math.Abs(stopPc - (low1 + tick)) < 1e-9 && Math.Abs(stopPp - (low1 + tick)) < 1e-9 && Math.Abs(dist - 4) < 1e-9,
+				"MI-C4 F3b round trip: MC's stop price from the amount = the price the study meant (entry - distance), in both modes [" + stopPc + ", " + stopPp + "]");
+			string lx = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_ExitHalfRiskHalfRoll.Strategy.CS"));
+			string lxc = System.Text.RegularExpressions.Regex.Replace(lx, @"//[^\n]*", "");
+			Check(!lxc.Contains("1 / m_entryResolution.Info.PriceScale") && lxc.Contains("double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"[-+] tick\)?;").Count == 4,
+				"MI-C5 F3a wiring: the four one-tick offsets (first/second stop, long/short) use oneTick(MinMove, PriceScale)");
+			Check(lxc.Contains("GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));")
+				&& lxc.Contains("double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);")
+				&& lxc.IndexOf("checkedBigPointValue(m_entryResolution") < lxc.IndexOf("GenerateStopLoss(")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"GenerateStopLoss\(").Count == 1,
+				"MI-C6 F3b wiring: GenerateStopLoss gets the currency amount (guarded BigPointValue, distance clamped to one tick) for the strategy's CurSpecOrdersMode");
+			// #92 review: guards (message-only throws) and the negative-distance clamp
+			Check(lxThrows(() => LX.checkedTick(0, 100, "ES")) && lxThrows(() => LX.checkedTick(-25, 100, "ES")) && lxThrows(() => LX.checkedTick(25, 0, "ES"))
+				&& lxThrows(() => LX.checkedTick(double.NaN, 100, "ES")) && lxThrows(() => LX.checkedTick(25, double.PositiveInfinity, "ES")) && lxThrows(() => LX.checkedTick(double.PositiveInfinity, 100, "ES"))
+				&& lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("ESZ26") && lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("MinMove 0")
+				&& lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("PriceScale 100") && lxMessage(() => LX.checkedTick(0, 100, "ESZ26")).Contains("fix in QuoteManager")
+				&& LX.checkedTick(25, 100, "ES") == 0.25,
+				"MI-C7 F3a tick guard: zero/negative/NaN/infinite tick throws InvalidOperationException naming symbol, MinMove, PriceScale, 'fix in QuoteManager'; ES passes 0.25");
+			Check(lxThrows(() => LX.checkedBigPointValue(0, "ES")) && lxThrows(() => LX.checkedBigPointValue(-50, "ES")) && lxThrows(() => LX.checkedBigPointValue(double.NaN, "ES"))
+				&& lxThrows(() => LX.checkedBigPointValue(double.PositiveInfinity, "ES")) && lxMessage(() => LX.checkedBigPointValue(0, "ESZ26")).Contains("ESZ26")
+				&& lxMessage(() => LX.checkedBigPointValue(0, "ESZ26")).Contains("fix in QuoteManager") && LX.checkedBigPointValue(50, "ES") == 50,
+				"MI-C8 F3b BigPointValue guard: <= 0 / NaN / infinite throws InvalidOperationException naming symbol, 'fix in QuoteManager'; ES 50 passes");
+			Check(LX.atLeastOneTick(-1.5, 0.25) == 0.25 && LX.atLeastOneTick(0, 0.25) == 0.25 && LX.atLeastOneTick(0.1, 0.25) == 0.25 && LX.atLeastOneTick(double.NaN, 0.25) == 0.25
+				&& LX.atLeastOneTick(4, 0.25) == 4 && LX.stopLossAmount(LX.atLeastOneTick(-1.5, 0.25), 50, LXMode.PerPosition, 2) == 25,
+				"MI-C9 F3b negative/sub-tick/NaN first-stop distance clamps to one tick (ES $12.50/contract), never a negative GenerateStopLoss amount");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");

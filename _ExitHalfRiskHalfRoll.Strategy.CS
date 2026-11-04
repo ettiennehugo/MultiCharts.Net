@@ -98,19 +98,22 @@ namespace PowerLanguage.Strategy {
 			}
 			else
 			{
+				//M-INSTR F3a/F3b guards: a bad QuoteManager tick or BigPointValue throws (message only; this study has no logger)
+				double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);
+				double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);
 				switch (m_state)
 				{
 					case State.None:
 						m_state = State.FirstExit;
 						if (this.PositionSide > 0)
 						{
-							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1] - (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);
-							m_secondStopPrice = m_entryResolution.Low[0] - (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);  //initialize the stop price to the ENTRY day low
+							m_firstStopPrice = this.EntryPrice() - m_entryResolution.Low[1] - tick;
+							m_secondStopPrice = m_entryResolution.Low[0] - tick;  //initialize the stop price to the ENTRY day low
 						}
 						else
 						{
-							m_firstStopPrice = m_entryResolution.High[1] - this.EntryPrice() + (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);
-							m_secondStopPrice = m_entryResolution.High[0] + (1 / m_entryResolution.Info.PriceScale * m_entryResolution.Info.BigPointValue);   //initialize the stop price to the ENTRY day high
+							m_firstStopPrice = m_entryResolution.High[1] - this.EntryPrice() + tick;
+							m_secondStopPrice = m_entryResolution.High[0] + tick;   //initialize the stop price to the ENTRY day high
 						}
 						break;
 					case State.FirstExit:
@@ -120,7 +123,9 @@ namespace PowerLanguage.Strategy {
 				}
 
 				//start sending orders
-				if (m_state == State.FirstExit) GenerateStopLoss(m_firstStopPrice);
+				//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance; a
+				//distance below one tick (entry already beyond the prior bar's low/high) is clamped to one tick so the amount is never negative
+				if (m_state == State.FirstExit) GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 			}
 		}
 		
@@ -143,5 +148,55 @@ namespace PowerLanguage.Strategy {
 					m_secondStopPrice = m_longerResolution.High[1];
 			}
 		}
+
+		// <legacy-exit-core> M-INSTR PR-M1c (spec rev 2.3 §3.2 F3). MC-free apart from the typed ESpecOrdersMode: tests/OrderFlowTests/gen.sh
+		// compiles this region against a mirror of ESpecOrdersMode.
+
+		/// <summary>M-INSTR F3a: one tick in price = MinMove / PriceScale (ES 25 / 100 = 0.25). Was 1 / PriceScale * BigPointValue (0.5 on ES).</summary>
+		private static double oneTick(double minMove, double priceScale)
+		{
+			return minMove / priceScale;
+		}
+
+		/// <summary>M-INSTR F3a guard: oneTick, throwing if it is not a positive finite price (zero/negative/NaN/infinite MinMove or PriceScale).</summary>
+		private static double checkedTick(double minMove, double priceScale, string symbol)
+		{
+			double tick = oneTick(minMove, priceScale);
+			if (!(tick > 0) || double.IsInfinity(tick))
+				throw new InvalidOperationException("M-INSTR _ExitHalfRiskHalfRoll: invalid tick " + tick + " for symbol " + symbol + " (MinMove " + minMove
+					+ ", PriceScale " + priceScale + "); the stop offsets need a positive finite tick, fix in QuoteManager.");
+			return tick;
+		}
+
+		/// <summary>M-INSTR F3b guard: BigPointValue must be a positive finite currency value per point, else the stop amount is meaningless.</summary>
+		private static double checkedBigPointValue(double bigPointValue, string symbol)
+		{
+			if (!(bigPointValue > 0) || double.IsInfinity(bigPointValue))
+				throw new InvalidOperationException("M-INSTR _ExitHalfRiskHalfRoll: invalid BigPointValue " + bigPointValue + " for symbol " + symbol
+					+ "; the GenerateStopLoss amount needs a positive finite BigPointValue, fix in QuoteManager.");
+			return bigPointValue;
+		}
+
+		/// <summary>
+		/// M-INSTR F3b: the first-stop distance, at least one tick. A negative/sub-tick distance (entry already beyond the prior bar's
+		/// low/high) or NaN becomes one tick: the tightest valid protective stop, never a negative GenerateStopLoss amount and never no stop.
+		/// </summary>
+		private static double atLeastOneTick(double distance, double tick)
+		{
+			return distance >= tick ? distance : tick;
+		}
+
+		/// <summary>
+		/// M-INSTR F3b: GenerateStopLoss amount (currency) for a price distance: distance * BigPointValue per contract (PerContract), times the
+		/// open contracts per position (PerPosition, PG §4.6.2: "Amount ... in currency per entire position"). mode = the strategy's
+		/// CurSpecOrdersMode (this study does not set it; the last signal that sets it wins), so the stop sits the same distance from the entry
+		/// in either mode.
+		/// </summary>
+		private static double stopLossAmount(double distance, double bigPointValue, ESpecOrdersMode mode, int openLots)
+		{
+			double perContract = distance * bigPointValue;
+			return mode == ESpecOrdersMode.PerPosition ? perContract * Math.Abs(openLots) : perContract;
+		}
+		// </legacy-exit-core>
 	}
 }

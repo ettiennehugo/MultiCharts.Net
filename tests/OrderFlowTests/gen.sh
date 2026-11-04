@@ -14,3 +14,10 @@ mkdir -p "$here/Generated"
   echo "public sealed class InstrHost {"
   awk '/\/\/ <instr-host-core>/ {on=1; next} /\/\/ <\/instr-host-core>/ {on=0} on' "$root/_CustomSignal.Strategy.CS" | sed 's/protected static/internal static/'
   echo "} }"; } > "$here/Generated/InstrHost.cs"
+# M-INSTR PR-M1c: the <legacy-exit-core> region of _ExitHalfRiskHalfRoll (F3a oneTick, F3b stopLossAmount) against a mirror of MC's
+# ESpecOrdersMode; private -> internal so the tests can call it.
+{ echo "using System;"; echo "namespace Extracted {"
+  echo "public enum ESpecOrdersMode { PerContract, PerPosition }"
+  echo "public static class LegacyExit {"
+  awk '/\/\/ <legacy-exit-core>/ {on=1; next} /\/\/ <\/legacy-exit-core>/ {on=0} on' "$root/_ExitHalfRiskHalfRoll.Strategy.CS" | sed 's/private static/internal static/'
+  echo "} }"; } > "$here/Generated/LegacyExit.cs"
