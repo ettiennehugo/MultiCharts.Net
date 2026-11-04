@@ -30,6 +30,7 @@ namespace PowerLanguage.Strategy {
 		private double m_firstStopPrice;     //the first stop as a price (entry -/+ m_firstStopDistance); what m_leStopOrder/m_seStopOrder are sent
 		private double m_secondStopPrice;
 		private double m_bigPointValue;      //guarded BigPointValue captured when the position opened; re-used by the per-bar GenerateStopLoss
+		private int m_previousMarketPosition; //StrategyInfo.MarketPosition at the last transition check (backtest/playback fallback)
 		private IInstrument m_entryResolution;
 		private IInstrument m_longerResolution;
 		private IOrderPriced m_leStopOrder;
@@ -40,8 +41,10 @@ namespace PowerLanguage.Strategy {
 
 		protected override void Create()
 		{
-			m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.Default, EOrderAction.Sell));
-			m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.Default, EOrderAction.BuyToCover));
+			//Contracts.UserSpecified: the numLots passed to Send is the order size (with Contracts.Default MC sizes the order from Strategy
+			//Properties and the half exit is not half); every Send below passes its lots explicitly
+			m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));
+			m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));
 		}
 		
 		protected override void StartCalc() 
@@ -51,18 +54,24 @@ namespace PowerLanguage.Strategy {
 			m_firstStopPrice = -1;
 			m_secondStopPrice = -1;
 			m_bigPointValue = -1;
+			m_previousMarketPosition = 0;
 			m_entryResolution = BarsOfData(1);  //will be the same as bars of data for the strategy
 			m_longerResolution = BarsOfData(2);
 		}
 		
 		protected override void CalcBar() 
 		{
+			//MC raises MarketPositionChange in real time but not in backtest or playback (see _ChartTrading_Advanced), so the Default path
+			//also compares StrategyInfo.MarketPosition with the value at the last check. Both paths go through checkPositionTransition, which
+			//runs the transition only when the position differs from the last check and then records it, so a change seen by both an
+			//event and a Default calc fires once
 			switch (Environment.CalcReason)
 			{
 				case CalculationReason.MarketPositionChange:
-					marketPositionChanged();
+					checkPositionTransition();
 					break;
 				case CalculationReason.Default:
+					checkPositionTransition();
 					defaultProcessing();
 					break;
 			}
@@ -73,24 +82,33 @@ namespace PowerLanguage.Strategy {
 			{
 				case State.FirstExit:
 					//close half of the position at the first stop PRICE (outside the prior bar's low/high), full-position stop loss as a backstop
+					//halfExitLots is at least one lot: a 1-lot position exits whole at the first stop (Sell/BuyToCover cannot reverse it)
 					if (PositionSide > 0)
-						m_leStopOrder.Send(m_firstStopPrice, (int)Math.Round((double)this.CurrentPosition.OpenLots / 2, 0));
+						m_leStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));
 					else
-						m_seStopOrder.Send(m_firstStopPrice, (int)Math.Round((double)this.CurrentPosition.OpenLots / 2, 0));
+						m_seStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));
 					//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance
 					GenerateStopLoss(stopLossAmount(m_firstStopDistance, m_bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 					break;
 				case State.SecondExit:
 					//close the remaining half of the position at low/high of the previous day
 					if (PositionSide > 0)
-						m_leStopOrder.Send(m_secondStopPrice);
+						m_leStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
 					else
-						m_seStopOrder.Send(m_secondStopPrice);
+						m_seStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
 					break;
 			}
 		}
 
 		//methods
+		private void checkPositionTransition()
+		{
+			int marketPosition = StrategyInfo.MarketPosition;
+			if (!positionTransitionDue(m_previousMarketPosition, marketPosition)) return;
+			m_previousMarketPosition = marketPosition;
+			marketPositionChanged();
+		}
+
 		private void marketPositionChanged()
 		{
 			if (this.PositionSide == 0)
@@ -167,6 +185,31 @@ namespace PowerLanguage.Strategy {
 		private static State exitOrdersThisBar(State state, int positionSide)
 		{
 			return positionSide == 0 ? State.None : state;
+		}
+
+		/// <summary>
+		/// Whether the state transition runs: only when StrategyInfo.MarketPosition differs from the value at the last check. Used by both the
+		/// MarketPositionChange event and the Default-calc fallback (backtest/playback raise no event); the caller records the new value, so a
+		/// change seen by both paths transitions once.
+		/// </summary>
+		private static bool positionTransitionDue(int previousMarketPosition, int marketPosition)
+		{
+			return previousMarketPosition != marketPosition;
+		}
+
+		/// <summary>
+		/// Lots for the first (half) exit: half the open lots (Math.Round, as before), at least one. With one lot Math.Round(0.5) is 0, which
+		/// would send a zero-lot order; one lot instead exits the whole position at the first stop, the same price GenerateStopLoss holds.
+		/// </summary>
+		private static int halfExitLots(int openLots)
+		{
+			return Math.Max(1, (int)Math.Round((double)Math.Abs(openLots) / 2, 0));
+		}
+
+		/// <summary>Lots for the second exit: the whole remaining position, passed explicitly (the orders are Contracts.UserSpecified).</summary>
+		private static int remainingExitLots(int openLots)
+		{
+			return Math.Abs(openLots);
 		}
 
 		/// <summary>

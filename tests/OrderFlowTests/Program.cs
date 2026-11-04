@@ -1313,6 +1313,55 @@ static class Program
 			Check(fxSw > fxRsEnd && fxRsEnd > 0 && fxFe > fxSw && fxGsl > fxFe && fxGsl < fxSe
 				&& !lxMpc.Contains("GenerateStopLoss(") && !lxMpc.Contains(".Send(") && !lxc.Contains("if (m_state == State.FirstExit) GenerateStopLoss"),
 				"MI-C12b fix 3 wiring: CalcBar sends the stops and GenerateStopLoss (FirstExit case) after the CalcReason switch on every bar; marketPositionChanged sends nothing");
+
+			// ---- #94 review: (4) order quantities, (5) one-lot positions, (6) backtest/playback position-change fallback ----
+			// (4) Contracts.UserSpecified so Send's numLots is the order size; SecondExit passes the open lots explicitly
+			Check(lxc.Contains("m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));")
+				&& lxc.Contains("m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));") && !lxc.Contains("Contracts.Default")
+				&& lxCalc.Contains("m_leStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
+				&& lxCalc.Contains("m_seStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"\.Send\([^,()]*\)").Count == 0
+				&& LX.remainingExitLots(3) == 3 && LX.remainingExitLots(-3) == 3 && LX.remainingExitLots(1) == 1,
+				"MI-C13 quantities: stop orders are Contracts.UserSpecified and every Send passes its lots (SecondExit = all open lots)");
+			// (5) one lot: half exit is at least one lot (Math.Round(0.5) = 0 would send a zero-lot order)
+			bool fxHalfOk = true;
+			for (int n = 1; n <= 50; n++) { int h = LX.halfExitLots(n); fxHalfOk &= h >= 1 && h <= n && LX.halfExitLots(-n) == h; }
+			Check(fxHalfOk && LX.halfExitLots(1) == 1 && LX.halfExitLots(2) == 1 && LX.halfExitLots(3) == 2 && LX.halfExitLots(4) == 2 && LX.halfExitLots(10) == 5
+				&& lxCalc.Contains("m_leStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));")
+				&& lxCalc.Contains("m_seStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));") && !lxc.Contains("Math.Round((double)this.CurrentPosition.OpenLots"),
+				"MI-C14 one lot: halfExitLots is 1..openLots for 1..50 lots (1 lot -> 1, whole position), long or short; FirstExit sends it");
+			// (6) fallback: drive positionTransitionDue as checkPositionTransition does (record the new position after a transition) and the
+			// state machine of marketPositionChanged (flat -> None; None -> FirstExit; FirstExit -> SecondExit)
+			Func<bool[], int[], string> fxRun = (evt, pos) => {
+				int prev = 0, fired = 0; LX.State st = LX.State.None; var trace = new System.Text.StringBuilder();
+				for (int i = 0; i < pos.Length; i++)
+				{
+					if (LX.positionTransitionDue(prev, pos[i]))
+					{
+						prev = pos[i]; fired++;
+						st = pos[i] == 0 ? LX.State.None : st == LX.State.None ? LX.State.FirstExit : st == LX.State.FirstExit ? LX.State.SecondExit : st;
+					}
+					trace.Append(evt[i] ? "E" : "D").Append(LX.exitOrdersThisBar(st, pos[i]) == LX.State.None ? "0" : LX.exitOrdersThisBar(st, pos[i]) == LX.State.FirstExit ? "1" : "2");
+				}
+				return fired + ":" + trace;
+			};
+			// backtest/playback: Default calcs only, 0 -> +2 -> +1 -> 0
+			string fxBt = fxRun(new[] { false, false, false, false, false, false, false }, new[] { 0, 2, 2, 1, 1, 0, 0 });
+			// real time: each change is seen by the event AND by the next Default calc; and once by a Default calc before the event
+			string fxRt = fxRun(new[] { false, true, false, false, true, false, true, false }, new[] { 0, 2, 2, 2, 1, 1, 0, 0 });
+			string fxDe = fxRun(new[] { false, false, true, false }, new[] { 0, -2, -2, -2 });
+			Check(fxBt == "3:D0D1D1D2D2D0D0" && fxRt == "3:D0E1D1D1E2D2E0D0" && fxDe == "1:D0D1E1D1",
+				"MI-C15 fallback: Default-only calcs (backtest/playback) advance None -> FirstExit -> SecondExit -> None; event + Default on one change fires once [" + fxBt + " | " + fxRt + " | " + fxDe + "]");
+			int fxCpt = lxc.IndexOf("private void checkPositionTransition()");
+			string lxCpt = fxCpt < 0 ? "" : lxc.Substring(fxCpt, lxc.IndexOf("private void marketPositionChanged()") - fxCpt);
+			Check(System.Text.RegularExpressions.Regex.Matches(lxCalc, @"checkPositionTransition\(\);").Count == 2
+				&& lxCalc.IndexOf("case CalculationReason.MarketPositionChange:") < lxCalc.IndexOf("checkPositionTransition();")
+				&& lxCalc.IndexOf("case CalculationReason.Default:") < lxCalc.LastIndexOf("checkPositionTransition();")
+				&& lxCalc.LastIndexOf("checkPositionTransition();") < lxCalc.IndexOf("defaultProcessing();")
+				&& lxCpt.Contains("int marketPosition = StrategyInfo.MarketPosition;") && lxCpt.Contains("if (!positionTransitionDue(m_previousMarketPosition, marketPosition)) return;")
+				&& lxCpt.IndexOf("m_previousMarketPosition = marketPosition;") < lxCpt.IndexOf("marketPositionChanged();")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"marketPositionChanged\(\);").Count == 1,
+				"MI-C15b fallback wiring: both CalcReason paths call checkPositionTransition (Default before defaultProcessing); it compares StrategyInfo.MarketPosition, records it, then runs marketPositionChanged (its only caller)");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
