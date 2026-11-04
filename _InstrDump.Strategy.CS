@@ -127,9 +127,9 @@ namespace PowerLanguage.Strategy
 			line("B none (both candidates commented out in this build)");
 		}
 
-		/// <summary>A1: fields that compile today (spec §4.4 A1). Enums are formatted for the log only (R1).</summary>
 		private static string exc(Exception e) { return "<" + e.GetType().Name + ">"; }
 
+		/// <summary>A1: fields that compile today (spec §4.4 A1). Enums are formatted for the log only (R1).</summary>
 		private void dumpA1(int ds, IInstrumentSettings i)
 		{
 			string p = "A1 ds(" + Int(ds) + ") ";

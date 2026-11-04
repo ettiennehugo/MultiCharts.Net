@@ -8,7 +8,8 @@
 // Editor (and the box stub type check). MC enums are never handled as strings (R1): host code converts typed values to the core's
 // own enums / plain numbers; log labels for MC enums are formatted by the host and only ever printed.
 //
-// Import order (PowerLanguage Editor): _MtfMath.Function.CS (already present), then _InstrumentProfile.Function.CS, then
+// Import order (PowerLanguage Editor): _MtfMath.Function.CS, _NyseHolidays / _EventCalendar.Function.CS (EventRules; all already
+// present), then _InstrumentProfile.Function.CS, then
 // _CustomSignal.Strategy.CS (its nested EAssetClass moved here as a top-level type), then Compile.
 // ============================================================================================
 using System;
@@ -25,8 +26,9 @@ namespace PowerLanguage.Function
 	public enum EAssetClass { Future, Stock, SpotFx, Crypto, Index, Unsupported }
 	// </instr-asset-class>
 
-	/// <summary>§5.1 holiday / early-close calendar (no session times).</summary>
-	public enum ECalendar { CmeEquityIndex, Nyse, Observed, None }
+	/// <summary>§5.1 holiday / early-close calendar (no session times). NyseStandIn: the NYSE holiday calendar as an explicit stand-in for a CME product calendar (CL/GC/ZN/6E until PR-M8;
+	/// Ettienne 2026-11-04). Observed / None carry no business-day calendar: expiry / roll rules refuse with 'calendar'.</summary>
+	public enum ECalendar { CmeEquityIndex, Nyse, NyseStandIn, Observed, None }
 
 	/// <summary>§8.2 expiry rules (contract month m of year y).</summary>
 	public enum EExpiryRule { ThirdFridaySoq, CL25thMinus3Bd, ThirdLastBd, LastBdMinus7Bd, ThirdWedMinus2Bd }
@@ -106,7 +108,7 @@ namespace PowerLanguage.Function
 		}
 		public static string CalendarName(ECalendar c)
 		{
-			switch (c) { case ECalendar.CmeEquityIndex: return "CmeEquityIndex"; case ECalendar.Nyse: return "Nyse"; case ECalendar.Observed: return "Observed"; default: return "None"; }
+			switch (c) { case ECalendar.CmeEquityIndex: return "CmeEquityIndex"; case ECalendar.Nyse: return "Nyse"; case ECalendar.NyseStandIn: return "NyseStandIn"; case ECalendar.Observed: return "Observed"; default: return "None"; }
 		}
 		public static string ExpiryName(EExpiryRule r)
 		{
@@ -210,14 +212,15 @@ namespace PowerLanguage.Function
 				"CME Micro FAQ", "VERIFY roll vs vendor splice"),
 			new InstrumentPresetRow("MNQ", EAssetClass.Future, 0.25, 2, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdFridaySoq, ERollRule.EquityIndexCustomary, 0, ECalendar.CmeEquityIndex, "EQIDX",
 				"CME Micro FAQ", "VERIFY roll as NQ"),
-			new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, ECalendar.Observed, "ENERGY",
-				"CME CL specs", "VERIFY roll vs vendor splice; business days = injected calendar"),
-			new InstrumentPresetRow("GC", EAssetClass.Future, 0.10, 100, "USD", MonthMask.Of("GJMQVZ"), EExpiryRule.ThirdLastBd, ERollRule.BeforeFirstNotice, 1, ECalendar.Observed, "METALS",
-				"CME GC specs", "VERIFY roll (first notice = last business day of the prior month)"),
-			new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of(Eq), EExpiryRule.LastBdMinus7Bd, ERollRule.BeforeFirstNotice, 1, ECalendar.Observed, "RATES",
-				"CME ZN specs", "VERIFY bigPointValue (not dumped); VERIFY roll (first notice = last business day of the prior month)"),
-			new InstrumentPresetRow("6E", EAssetClass.Future, 0.00005, 125000, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdWedMinus2Bd, ERollRule.BusinessDaysBeforeExpiry, 0, ECalendar.Observed, "FX_EUR",
-				"CME 6E specs; bpv CONFIRMED 01M6HTKV3SV1Q5QDXBFTCH8D3K.txt", "VERIFY roll: spec 'Mon of the expiry week' encoded as BusinessDaysBeforeExpiry(0) = the expiry day"),
+			new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, ECalendar.NyseStandIn, "ENERGY",
+				"CME CL specs; CME clearing notice chadv25-391 (CLF26 LTD 2025-12-19)", "VERIFY roll vs vendor splice; " + InstrumentCalendars.NyseStandInNote),
+			new InstrumentPresetRow("GC", EAssetClass.Future, 0.10, 100, "USD", MonthMask.Of("GJMQVZ"), EExpiryRule.ThirdLastBd, ERollRule.BeforeFirstNotice, 1, ECalendar.NyseStandIn, "METALS",
+				"CME GC specs; CME GC fact card", "VERIFY roll (first notice = last business day of the prior month); " + InstrumentCalendars.NyseStandInNote),
+			new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of(Eq), EExpiryRule.LastBdMinus7Bd, ERollRule.BeforeFirstNotice, 1, ECalendar.NyseStandIn, "RATES",
+				"CME ZN specs; Barchart (ZNZ25 LTD 2025-12-19, FND 2025-11-28)", "VERIFY bigPointValue (not dumped); " + InstrumentCalendars.NyseStandInNote),
+			new InstrumentPresetRow("6E", EAssetClass.Future, 0.00005, 125000, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdWedMinus2Bd, ERollRule.BusinessDaysBeforeExpiry, 5, ECalendar.NyseStandIn, "FX_EUR",
+				"CME 6E specs; CME Rulebook ch. 261 / rule 26101.G; bpv CONFIRMED 01M6HTKV3SV1Q5QDXBFTCH8D3K.txt; roll 5 business days (~1 week) before expiry (Ettienne 2026-11-04)",
+				InstrumentCalendars.NyseStandInNote),
 		};
 
 		public static IList<InstrumentPresetRow> Rows { get { return Array.AsReadOnly(s_rows); } }
@@ -406,13 +409,45 @@ namespace PowerLanguage.Function
 		}
 	}
 
-	/// <summary>§8.2 expiry / roll rule arithmetic. isBusinessDay is injected (host: EventRules.IsNyseBusinessDay for CmeEquityIndex;
-	/// non-ES calendars are Observed until PR-M8, so their business days are VERIFY). Contract = (year, month).</summary>
+	/// <summary>Business-day calendars for the expiry / roll rules. Reuses the repo's NYSE calendar (EventRules.IsNyseBusinessDay over
+	/// _NyseHolidays.Rules); no second holiday table. CmeEquityIndex = the NYSE days EventRules already uses for ES expiry / roll.</summary>
+	public static class InstrumentCalendars
+	{
+		public const string NyseStandInNote = "calendar: NYSE stand-in (CME calendar pending M8)";
+		/// <summary>The calendar's business-day test; null when none is assigned (Observed / None).</summary>
+		public static Func<DateTime, bool> BusinessDay(ECalendar c)
+		{
+			switch (c)
+			{
+				case ECalendar.CmeEquityIndex: case ECalendar.Nyse: case ECalendar.NyseStandIn: return EventRules.IsNyseBusinessDay;
+				default: return null;
+			}
+		}
+		/// <summary>Log note for a stand-in calendar (printed on the INSTR line); null otherwise.</summary>
+		public static string Note(ECalendar c) { return c == ECalendar.NyseStandIn ? NyseStandInNote : null; }
+		/// <summary>BusinessDay(c), required: no calendar assigned → Error line, then throw 'calendar' (R6 / §6.4 S4).</summary>
+		public static Func<DateTime, bool> Require(ECalendar c, InstrumentSubject s, Action<string> errorSink)
+		{
+			Func<DateTime, bool> bd = BusinessDay(c);
+			if (bd == null) InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no business-day calendar assigned (calendar " + InstrumentText.CalendarName(c) + ") for the expiry/roll rules", "assign a calendar to the preset");
+			return bd;
+		}
+	}
+
+	/// <summary>§8.2 expiry / roll rule arithmetic. isBusinessDay is injected and REQUIRED (R6 / §6.4 S4: no silent weekday fallback;
+	/// a missing calendar refuses with reason 'calendar'). Callers pass InstrumentCalendars.Require(profile.calendar) (= the profile's
+	/// isBusinessDay); CL/GC/ZN/6E use the NYSE stand-in until PR-M8. Contract = (year, month).</summary>
 	public static class InstrumentRules
 	{
 		/// <summary>Monday-before-third-Friday cutover (= EventRules.RollRuleMondayFrom; pinned equal by InstrumentTests).</summary>
 		public static readonly DateTime EquityRollMondayFrom = new DateTime(2022, 4, 1);
-		public static bool Weekday(DateTime d) { return d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday; }
+
+		/// <summary>The business-day calendar is required: null logs the Error line and throws 'calendar'.</summary>
+		static Func<DateTime, bool> requireCalendar(Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink)
+		{
+			if (isBusinessDay == null) InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no business-day calendar for the expiry/roll rules", "supply the instrument's exchange calendar");
+			return isBusinessDay;
+		}
 
 		public static DateTime Nth(int y, int m, DayOfWeek d, int n) { DateTime f = new DateTime(y, m, 1); return f.AddDays(((int)d - (int)f.DayOfWeek + 7) % 7 + 7 * (n - 1)); }
 		public static DateTime ThirdFriday(int y, int m) { return Nth(y, m, DayOfWeek.Friday, 3); }
@@ -420,9 +455,9 @@ namespace PowerLanguage.Function
 		static DateTime back(DateTime d, int n, Func<DateTime, bool> bd) { d = d.Date; for (int c = 0; c < n;) { d = d.AddDays(-1); if (bd(d)) c++; } return d; }
 		static DateTime lastBd(int y, int m, Func<DateTime, bool> bd) { return prevOrSelf(new DateTime(y, m, DateTime.DaysInMonth(y, m)), bd); }
 
-		public static DateTime Expiry(EExpiryRule rule, int y, int m, Func<DateTime, bool> isBusinessDay)
+		public static DateTime Expiry(EExpiryRule rule, int y, int m, Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink)
 		{
-			Func<DateTime, bool> bd = isBusinessDay ?? Weekday;
+			Func<DateTime, bool> bd = requireCalendar(isBusinessDay, s, errorSink);
 			switch (rule)
 			{
 				case EExpiryRule.ThirdFridaySoq: return prevOrSelf(ThirdFriday(y, m), bd);
@@ -439,44 +474,47 @@ namespace PowerLanguage.Function
 
 		/// <summary>Nominal contract date used as the per-contract key and for "next contract": the unadjusted third Friday for
 		/// ThirdFridaySoq (as _RollDetector.SeriesWindow), else the expiry.</summary>
-		public static DateTime Nominal(EExpiryRule rule, int y, int m, Func<DateTime, bool> isBusinessDay)
+		public static DateTime Nominal(EExpiryRule rule, int y, int m, Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink)
 		{
-			return rule == EExpiryRule.ThirdFridaySoq ? ThirdFriday(y, m) : Expiry(rule, y, m, isBusinessDay);
+			requireCalendar(isBusinessDay, s, errorSink);
+			return rule == EExpiryRule.ThirdFridaySoq ? ThirdFriday(y, m) : Expiry(rule, y, m, isBusinessDay, s, errorSink);
 		}
 
 		/// <summary>Roll date of contract (y, m); null for ERollRule.None. First notice (BeforeFirstNotice) = last business day of the
 		/// month before the contract month (VERIFY per root).</summary>
-		public static DateTime? Roll(InstrumentPresetRow p, int y, int m, Func<DateTime, bool> isBusinessDay)
+		public static DateTime? Roll(InstrumentPresetRow p, int y, int m, Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink)
 		{
-			Func<DateTime, bool> bd = isBusinessDay ?? Weekday;
+			Func<DateTime, bool> bd = requireCalendar(isBusinessDay, s, errorSink);
 			switch (p.roll)
 			{
 				case ERollRule.EquityIndexCustomary: { DateTime f = ThirdFriday(y, m); return f >= EquityRollMondayFrom ? f.AddDays(-4) : f.AddDays(-8); }
-				case ERollRule.BusinessDaysBeforeExpiry: return back(Expiry(p.expiry, y, m, bd), p.rollDays, bd);
+				case ERollRule.BusinessDaysBeforeExpiry: return back(Expiry(p.expiry, y, m, bd, s, errorSink), p.rollDays, bd);
 				case ERollRule.BeforeFirstNotice: { DateTime pm = new DateTime(y, m, 1).AddMonths(-1); return back(lastBd(pm.Year, pm.Month, bd), p.rollDays, bd); }
 				default: return null;
 			}
 		}
 
 		/// <summary>The listed contract (in p.contractMonths) whose nominal date is the first on/after day.</summary>
-		public static void ContractFor(InstrumentPresetRow p, DateTime day, Func<DateTime, bool> isBusinessDay, out int year, out int month)
+		public static void ContractFor(InstrumentPresetRow p, DateTime day, Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink, out int year, out int month)
 		{
+			requireCalendar(isBusinessDay, s, errorSink);
 			DateTime d = day.Date; int y = d.Year, m = d.Month;
 			for (int k = 0; k < 24; k++)
 			{
-				if (MonthMask.Has(p.contractMonths, m) && Nominal(p.expiry, y, m, isBusinessDay) >= d) { year = y; month = m; return; }
+				if (MonthMask.Has(p.contractMonths, m) && Nominal(p.expiry, y, m, isBusinessDay, s, errorSink) >= d) { year = y; month = m; return; }
 				if (++m > 12) { m = 1; y++; }
 			}
-			throw new InvalidOperationException("M-INSTR: no contract month for " + p.root);
+			year = 0; month = 0;
+			InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no listed contract month within 24 months of " + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " for " + p.root, "check the preset's contract months");
 		}
 
 		/// <summary>MI-T6 generalised SeriesWindow: [Monday, Friday] of the week holding the roll date of the next contract (nominal
 		/// date on/after tradingDay). expiry = that contract's nominal date (latch key). ES = _RollDetector.SeriesWindow.</summary>
-		public static bool SeriesWindow(InstrumentPresetRow p, DateTime tradingDay, Func<DateTime, bool> isBusinessDay, out DateTime expiry)
+		public static bool SeriesWindow(InstrumentPresetRow p, DateTime tradingDay, Func<DateTime, bool> isBusinessDay, InstrumentSubject s, Action<string> errorSink, out DateTime expiry)
 		{
-			int y, m; ContractFor(p, tradingDay, isBusinessDay, out y, out m);
-			expiry = Nominal(p.expiry, y, m, isBusinessDay);
-			DateTime? r = Roll(p, y, m, isBusinessDay);
+			int y, m; ContractFor(p, tradingDay, isBusinessDay, s, errorSink, out y, out m);
+			expiry = Nominal(p.expiry, y, m, isBusinessDay, s, errorSink);
+			DateTime? r = Roll(p, y, m, isBusinessDay, s, errorSink);
 			if (r == null) return false;
 			DateTime rule = r.Value, from = rule.AddDays(-(((int)rule.DayOfWeek + 6) % 7)), d = tradingDay.Date;
 			return d >= from && d <= from.AddDays(4);
@@ -583,8 +621,9 @@ namespace PowerLanguage.Function
 		public static void Require(_MtfMath.Session[] startCalc, _MtfMath.Session[] firstBar, InstrumentSubject s, Action<string> errorSink)
 		{
 			if (startCalc == null || startCalc.Length == 0 || firstBar == null || firstBar.Length == 0) InstrumentError.Fail(errorSink, s, InstrumentReason.SessionsNone, null, InstrumentReason.ActionSessions);
-			if (!Same(startCalc, firstBar))
-				InstrumentError.Fail(errorSink, s, InstrumentReason.SessionsChanged, "StartCalc " + InstrumentText.Sessions(startCalc) + " vs first bar " + InstrumentText.Sessions(firstBar), InstrumentReason.ActionSessions);
+			// detail text from the shared M1a comparer (Data1 = the StartCalc list, other = the first-bar list)
+			string mismatch = _MtfMath.SessionMismatch(startCalc, firstBar);
+			if (mismatch != null) InstrumentError.Fail(errorSink, s, InstrumentReason.SessionsChanged, "StartCalc vs first bar: " + mismatch, InstrumentReason.ActionSessions);
 		}
 	}
 
@@ -626,14 +665,22 @@ namespace PowerLanguage.Function
 		}
 		readonly _MtfMath.Session[] m_sessions;
 		bool m_hasPrev; InstrumentSessions.Hit m_prev; DateTime m_prevBar;
-		readonly HashSet<long> m_fired = new HashSet<long>();
-		readonly Queue<long> m_order = new Queue<long>();
+		readonly HashSet<EndKey> m_fired = new HashSet<EndKey>();
+		readonly Queue<EndKey> m_order = new Queue<EndKey>();
 		public SessionEndDetector(_MtfMath.Session[] sessions) { m_sessions = sessions; }
 
-		static long key(InstrumentSessions.Hit h) { return h.End.Ticks ^ ((long)h.Index << 56); }
+		/// <summary>Dedupe key: one session instance = (end time, session index); compared field by field, no bit packing.</summary>
+		struct EndKey : IEquatable<EndKey>
+		{
+			public readonly DateTime End; public readonly int Index;
+			public EndKey(InstrumentSessions.Hit h) { End = h.End; Index = h.Index; }
+			public bool Equals(EndKey o) { return End == o.End && Index == o.Index; }
+			public override bool Equals(object o) { return o is EndKey && Equals((EndKey)o); }
+			public override int GetHashCode() { return unchecked(End.GetHashCode() * 31 + Index); }
+		}
 		bool fire(InstrumentSessions.Hit h, DateTime bar, char why, List<EndEvent> outList)
 		{
-			long k = key(h);
+			var k = new EndKey(h);
 			if (!m_fired.Add(k)) return false;
 			m_order.Enqueue(k); while (m_order.Count > 64) m_fired.Remove(m_order.Dequeue());
 			outList.Add(new EndEvent { Index = h.Index, TradingDay = h.Key, SessionEnd = h.End, BarTime = bar, Why = why });
@@ -673,6 +720,7 @@ namespace PowerLanguage.Function
 		public bool hasOvernight;
 		public RthSplit rthSplit;
 		public string rootWarning;
+		public Func<DateTime, bool> isBusinessDay;   // from calendar (InstrumentCalendars); not hashed (calendar is)
 
 		InstrumentProfile() { }
 
@@ -716,6 +764,8 @@ namespace PowerLanguage.Function
 			p.roll = pr == null ? (ERollRule?)null : pr.roll;
 			p.rollDays = pr == null ? 0 : pr.rollDays;
 			p.cluster = pr == null ? null : pr.cluster;
+			// R6 / §6.4 S4: a preset with expiry / roll rules needs an assigned business-day calendar (no silent weekday default)
+			p.isBusinessDay = p.expiry != null || p.roll != null ? InstrumentCalendars.Require(p.calendar, s, errorSink) : InstrumentCalendars.BusinessDay(p.calendar);
 			p.contractExpiry = InstrumentRoot.UsableExpiry(i.symbolExpiry) ? i.symbolExpiry.Date : (DateTime?)null;
 			p.sessionsPerYear = InstrumentPresets.SessionsPerYear(i.assetClass);
 			p.sizingUnit = InstrumentPresets.SizingUnit(i.assetClass);
@@ -775,7 +825,10 @@ namespace PowerLanguage.Function
 			sb.Append(") sessionName(").Append(sessionName).Append(") sessions(").Append(InstrumentText.Sessions(sessions)).Append(") dayKey(SessionEnd) dayOpen(").Append(dayOpen);
 			sb.Append(") sessionEnd(").Append(sessEnd).Append(") overnight(").Append(hasOvernight ? "yes" : "no").Append(") rth(").Append(rthSplit == null ? "none src=None" : rthSplit.Text());
 			sb.Append(") tick(").Append(InstrumentText.Num(tick)).Append(") bpv(").Append(InstrumentText.Num(bigPointValue)).Append(") tickValue(").Append(InstrumentText.Num(tickValue));
-			sb.Append(") ccy(").Append(currency).Append(") bvo(").Append(bvoLabel).Append(") calendar(").Append(InstrumentText.CalendarName(calendar)).Append(") months(").Append(MonthMask.Text(contractMonths));
+			sb.Append(") ccy(").Append(currency).Append(") bvo(").Append(bvoLabel).Append(") calendar(").Append(InstrumentText.CalendarName(calendar));
+			string calNote = InstrumentCalendars.Note(calendar);
+			if (calNote != null) sb.Append("; ").Append(calNote);
+			sb.Append(") months(").Append(MonthMask.Text(contractMonths));
 			sb.Append(") expiry(").Append(expiry == null ? "Unknown" : InstrumentText.ExpiryName(expiry.Value)).Append(") roll(").Append(roll == null ? "Unknown" : InstrumentText.RollName(roll.Value, rollDays));
 			sb.Append(") cost(").Append(cost.Text()).Append(") floor(").Append(costFloorTicks < 0 ? "Unknown" : InstrumentText.Int(costFloorTicks)).Append(") cluster(").Append(cluster ?? "none");
 			sb.Append(") profileHash(").Append(ProfileHash()).Append(')');

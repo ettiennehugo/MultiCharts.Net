@@ -13,6 +13,7 @@ static class Program
 	static int s_fail, s_pass;
 	static void Check(bool ok, string what) { if (ok) s_pass++; else { s_fail++; Console.WriteLine("FAIL " + what); } }
 	static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+	static readonly InstrumentSubject RS = new InstrumentSubject("INSTR", "@X", EAssetClass.Future, "X", "s");
 	static string Fx(string f) { return Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "fixtures", f); }
 	static DateTime D(int y, int m, int d, int h = 0, int mi = 0) { return new DateTime(y, m, d, h, mi, 0); }
 	static string Ds(DateTime d) { return d.ToString("yyyy-MM-dd", Inv); }
@@ -178,8 +179,8 @@ static class Program
 		int n = 0;
 		for (int y = 2016; y <= 2027; y++) for (int m = 3; m <= 12; m += 3)
 		{
-			Check(InstrumentRules.Expiry(es.expiry, y, m, EventRules.IsNyseBusinessDay) == EventRules.RuleExpiryDate(y, m), "T4 ES expiry " + y + "-" + m); n++;
-			Check(InstrumentRules.Expiry(EExpiryRule.ThirdFridaySoq, y, m, EventRules.IsNyseBusinessDay) == EventRules.RuleExpiryDate(y, m), "T4 MES/NQ/MNQ share ThirdFridaySoq");
+			Check(InstrumentRules.Expiry(es.expiry, y, m, EventRules.IsNyseBusinessDay, RS, null) == EventRules.RuleExpiryDate(y, m), "T4 ES expiry " + y + "-" + m); n++;
+			Check(InstrumentRules.Expiry(EExpiryRule.ThirdFridaySoq, y, m, EventRules.IsNyseBusinessDay, RS, null) == EventRules.RuleExpiryDate(y, m), "T4 MES/NQ/MNQ share ThirdFridaySoq");
 		}
 		Check(n == 48, "T4 48 ES rows");
 		foreach (var raw in File.ReadAllLines(Fx("expiry-worked.csv")))
@@ -187,11 +188,48 @@ static class Program
 			string l = raw.Trim(); if (l.Length == 0 || l[0] == '#') continue;
 			var c = l.Split(',');
 			var p = InstrumentPresets.Find(c[0], EAssetClass.Future);
-			DateTime got = InstrumentRules.Expiry(p.expiry, int.Parse(c[2], Inv), int.Parse(c[3], Inv), EventRules.IsNyseBusinessDay);
+			Check(p.calendar == ECalendar.NyseStandIn, "T4 " + c[0] + " preset names the NYSE stand-in calendar");
+			var bd = InstrumentCalendars.Require(p.calendar, RS, null);   // the preset's calendar, not an injected default
+			int y = int.Parse(c[2], Inv), m = int.Parse(c[3], Inv);
+			DateTime got = InstrumentRules.Expiry(p.expiry, y, m, bd, RS, null);
 			Check(Ds(got) == c[4], "T4 " + c[1] + " expiry " + Ds(got) + " want " + c[4]);
+			DateTime roll = InstrumentRules.Roll(p, y, m, bd, RS, null).Value;
+			Check(Ds(roll) == c[5], "T4 " + c[1] + " roll " + Ds(roll) + " want " + c[5]);
 		}
-		// weekday-only fallback differs only on holidays (CLF26: Dec 25 counted as a business day without a calendar)
-		Check(Ds(InstrumentRules.Expiry(EExpiryRule.CL25thMinus3Bd, 2026, 1, null)) == "2025-12-22", "T4 CLF26 weekday-only fallback (calendar VERIFY)");
+		// analyst-sourced rows that the old weekday fallback got wrong (CLF26 12-22, ZNH24 03-20, ZNZ25 12-22), via a built profile
+		var clp = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
+		var znp = InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null, null);
+		Check(clp.isBusinessDay != null && Ds(InstrumentRules.Expiry(clp.expiry.Value, 2026, 1, clp.isBusinessDay, RS, null)) == "2025-12-19", "T4 CLF26 LTD 2025-12-19 (NYSE stand-in; chadv25-391)");
+		Check(Ds(InstrumentRules.Expiry(znp.expiry.Value, 2024, 3, znp.isBusinessDay, RS, null)) == "2024-03-19", "T4 ZNH24 LTD 2024-03-19 (Good Friday skipped)");
+		Check(Ds(InstrumentRules.Expiry(znp.expiry.Value, 2025, 12, znp.isBusinessDay, RS, null)) == "2025-12-19", "T4 ZNZ25 LTD 2025-12-19 (Barchart)");
+		for (DateTime d = D(2016, 1, 1); d <= D(2030, 12, 31); d = d.AddDays(1))
+			if (InstrumentCalendars.BusinessDay(ECalendar.NyseStandIn)(d) != EventRules.IsNyseBusinessDay(d)) { Check(false, "T4 NyseStandIn == EventRules.IsNyseBusinessDay " + Ds(d)); break; }
+		Check(InstrumentCalendars.BusinessDay(ECalendar.Observed) == null && InstrumentCalendars.BusinessDay(ECalendar.None) == null, "T4 Observed / None have no business-day calendar");
+		var six = InstrumentPresets.Find("6E", EAssetClass.Future);
+		Check(six.roll == ERollRule.BusinessDaysBeforeExpiry && six.rollDays == 5 && six.verify == InstrumentCalendars.NyseStandInNote, "T4 6E roll = BusinessDaysBeforeExpiry(5) (Ettienne 2026-11-04)");
+		// a root whose preset has rules but no calendar assigned: Error line, then throw 'calendar' (no silent default)
+		foreach (var cal in new[] { ECalendar.Observed, ECalendar.None })
+		{
+			var ov = new InstrumentConfig { overrides = new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, cal, "ENERGY", "test", null) };
+			var ce = Throws(s => InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), ov, s), "T4 no calendar " + cal);
+			Check(ce != null && ce.Reason == InstrumentReason.Calendar && ce.Message.Contains("calendar " + InstrumentText.CalendarName(cal)), "T4 preset with rules and calendar " + InstrumentText.CalendarName(cal) + " -> Error + calendar");
+		}
+		Check(InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), null, null).isBusinessDay == null, "T4 future without a preset: no rules, no calendar needed, no throw");
+		// R6 / §6.4 S4: the business-day calendar is required; no silent weekday fallback (it gave CLF26 12-22, ZNH24 03-20, ZNZ25 12-22)
+		var cl = InstrumentPresets.Find("CL", EAssetClass.Future);
+		var e = Throws(s => InstrumentRules.Expiry(EExpiryRule.CL25thMinus3Bd, 2026, 1, null, RS, s), "T4 no calendar expiry");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 Expiry without a calendar -> calendar");
+		e = Throws(s => InstrumentRules.Roll(cl, 2026, 1, null, RS, s), "T4 no calendar roll");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 Roll without a calendar -> calendar");
+		e = Throws(s => InstrumentRules.Nominal(EExpiryRule.ThirdFridaySoq, 2026, 3, null, RS, s), "T4 no calendar nominal");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 Nominal without a calendar -> calendar (even ThirdFridaySoq)");
+		DateTime ex; int cy, cm;
+		e = Throws(s => InstrumentRules.SeriesWindow(cl, D(2026, 1, 5), null, RS, s, out ex), "T4 no calendar window");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 SeriesWindow without a calendar -> calendar");
+		e = Throws(s => InstrumentRules.ContractFor(cl, D(2026, 1, 5), null, RS, s, out cy, out cm), "T4 no calendar contract");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 ContractFor without a calendar -> calendar");
+		e = Throws(s => InstrumentRules.ContractFor(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", 0, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), D(2026, 1, 5), EventRules.IsNyseBusinessDay, RS, s, out cy, out cm), "T4 no months");
+		Check(e != null && e.Reason == InstrumentReason.Calendar, "T4 no listed month -> Error + calendar");
 	}
 
 	// ---------------------------------------------------------------- MI-T5 / T6 roll + windows
@@ -202,7 +240,7 @@ static class Program
 		var dates = new List<DateTime>();
 		for (int y = 2000; y <= 2035; y++) for (int m = 3; m <= 12; m += 3)
 		{
-			DateTime r = InstrumentRules.Roll(es, y, m, EventRules.IsNyseBusinessDay).Value; dates.Add(r);
+			DateTime r = InstrumentRules.Roll(es, y, m, EventRules.IsNyseBusinessDay, RS, null).Value; dates.Add(r);
 			Check(r == EventRules.RollDate(y, m), "T5 roll == EventRules.RollDate " + y + "-" + m);
 		}
 		Check(_RollDetector.DatesDigest(dates) == "fdd63bd8f179a8d4", "T5 digest " + _RollDetector.DatesDigest(dates));
@@ -214,7 +252,7 @@ static class Program
 		for (DateTime d = D(2000, 1, 1); d <= D(2035, 12, 31); d = d.AddDays(1))
 		{
 			DateTime e1, e2;
-			bool a = _RollDetector.SeriesWindow(d, out e1), b = InstrumentRules.SeriesWindow(es, d, EventRules.IsNyseBusinessDay, out e2);
+			bool a = _RollDetector.SeriesWindow(d, out e1), b = InstrumentRules.SeriesWindow(es, d, EventRules.IsNyseBusinessDay, RS, null, out e2);
 			if (a != b || e1 != e2) { Check(false, "T6 ES SeriesWindow identity " + Ds(d) + " " + a + "/" + b + " " + Ds(e1) + "/" + Ds(e2)); break; }
 			days++; if (a) inWin++;
 		}
@@ -226,10 +264,10 @@ static class Program
 			for (DateTime d = D(2024, 1, 1); d <= D(2024, 12, 31); d = d.AddDays(1))
 			{
 				DateTime ex;
-				if (!InstrumentRules.SeriesWindow(p, d, EventRules.IsNyseBusinessDay, out ex)) continue;
+				if (!InstrumentRules.SeriesWindow(p, d, EventRules.IsNyseBusinessDay, RS, null, out ex)) continue;
 				keys.Add(ex);
-				int y, m; InstrumentRules.ContractFor(p, d, EventRules.IsNyseBusinessDay, out y, out m);
-				DateTime r = InstrumentRules.Roll(p, y, m, EventRules.IsNyseBusinessDay).Value;
+				int y, m; InstrumentRules.ContractFor(p, d, EventRules.IsNyseBusinessDay, RS, null, out y, out m);
+				DateTime r = InstrumentRules.Roll(p, y, m, EventRules.IsNyseBusinessDay, RS, null).Value;
 				if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || Math.Abs((r - d).Days) > 4 || r > ex) okWeek = false;
 			}
 			int want = root == "CL" ? 12 : root == "GC" ? 6 : 4;
@@ -237,10 +275,12 @@ static class Program
 			Check(keys.Count >= want - 1 && keys.Count <= want + 1, "T6 " + root + " ~" + want + " windows in 2024: " + keys.Count);
 		}
 		var cl = InstrumentPresets.Find("CL", EAssetClass.Future);
-		Check(Ds(InstrumentRules.Roll(cl, 2020, 5, EventRules.IsNyseBusinessDay).Value) == "2020-04-17", "T6 CLK20 roll = 2 bd before 2020-04-21");
+		Check(Ds(InstrumentRules.Roll(cl, 2020, 5, EventRules.IsNyseBusinessDay, RS, null).Value) == "2020-04-17", "T6 CLK20 roll = 2 bd before 2020-04-21");
+		var zn = InstrumentPresets.Find("ZN", EAssetClass.Future);
+		Check(Ds(InstrumentRules.Roll(zn, 2025, 12, EventRules.IsNyseBusinessDay, RS, null).Value) == "2025-11-26", "T6 ZNZ25 roll = 1 bd before FND 2025-11-28 (Barchart)");
 		var gc = InstrumentPresets.Find("GC", EAssetClass.Future);
-		Check(Ds(InstrumentRules.Roll(gc, 2024, 8, EventRules.IsNyseBusinessDay).Value) == "2024-07-30", "T6 GCQ24 roll = 1 bd before FND 2024-07-31 (VERIFY)");
-		Check(InstrumentRules.Roll(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", MonthMask.All, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), 2024, 1, null) == null, "T6 ERollRule.None -> no roll");
+		Check(Ds(InstrumentRules.Roll(gc, 2024, 8, EventRules.IsNyseBusinessDay, RS, null).Value) == "2024-07-30", "T6 GCQ24 roll = 1 bd before FND 2024-07-31 (VERIFY)");
+		Check(InstrumentRules.Roll(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", MonthMask.All, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), 2024, 1, EventRules.IsNyseBusinessDay, RS, null) == null, "T6 ERollRule.None -> no roll");
 	}
 
 	// ---------------------------------------------------------------- MI-T7 / T8 sessions + derived fields
@@ -326,7 +366,7 @@ static class Program
 		var stk = InstrumentProfile.Build(In("SPY", EAssetClass.Stock, "SPY", 1, 100, 1), null, null);
 		Check(stk.calendar == ECalendar.Nyse && stk.presetId == null && stk.sizingUnit == ESizingUnit.Shares && stk.expiry == null && stk.roll == null && !stk.cost.known && stk.costFloorTicks == -1, "T8 SPY: Nyse, no preset, Shares, cost Unknown");
 		var cl2 = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
-		Check(cl2.calendar == ECalendar.Observed && cl2.roll == ERollRule.BusinessDaysBeforeExpiry && cl2.rollDays == 2 && MonthMask.Text(cl2.contractMonths) == "FGHJKMNQUVXZ", "T8 CL preset");
+		Check(cl2.calendar == ECalendar.NyseStandIn && cl2.isBusinessDay != null && cl2.roll == ERollRule.BusinessDaysBeforeExpiry && cl2.rollDays == 2 && MonthMask.Text(cl2.contractMonths) == "FGHJKMNQUVXZ", "T8 CL preset");
 		foreach (var row in InstrumentPresets.Rows) Check(row.Validate() == null, "T8 preset row valid " + row.root + " " + row.Validate());
 		Check(new InstrumentPresetRow("es", EAssetClass.Future, 0, 50, "EUR", 0, EExpiryRule.ThirdFridaySoq, ERollRule.None, -1, ECalendar.None, "", "", null).Validate() != null, "T8 bad preset row rejected");
 	}
@@ -372,7 +412,7 @@ static class Program
 		Check(a.Canon() == b.Canon(), "T9 Canon order-independent");
 		b.applyCostFloor = true; Check(a.Canon() != b.Canon(), "T9 Canon covers applyCostFloor");
 		// overrides replace the preset row for that root + class
-		var o = new InstrumentConfig { overrides = new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of("HMUZ"), EExpiryRule.LastBdMinus7Bd, ERollRule.None, 0, ECalendar.Observed, "RATES", "user", null) };
+		var o = new InstrumentConfig { overrides = new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of("HMUZ"), EExpiryRule.LastBdMinus7Bd, ERollRule.None, 0, ECalendar.NyseStandIn, "RATES", "user", null) };
 		Check(InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), o, null).roll == ERollRule.None, "T9 overrides row used");
 	}
 
@@ -409,6 +449,11 @@ static class Program
 		string line = a.InstrLine(1, "Future", "Exchange", "Volume");
 		Check(line.StartsWith("INSTR ds(1) name(@ES) cat(Future) class(Future) root(ES rootSrc=mc) preset(ES) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15;", StringComparison.Ordinal)
 			&& line.Contains(" dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + a.ProfileHash() + ")"), "T13 INSTR line: " + line);
+		Check(!line.Contains("stand-in"), "T13 ES line has no stand-in note");
+		var clLine = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null).WithSessions(g, g, null).InstrLine(1, "Future", "Exchange", "Volume");
+		Check(clLine.Contains(" calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(FGHJKMNQUVXZ) expiry(CL25thMinus3Bd) roll(BusinessDaysBeforeExpiry(2))"), "T13 CL INSTR line names the NYSE stand-in: " + clLine);
+		var sixLine = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, null).InstrLine(1, "Future", "Exchange", "Volume");
+		Check(sixLine.Contains("calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8))") && sixLine.Contains("roll(BusinessDaysBeforeExpiry(5))"), "T13 6E INSTR line: " + sixLine);
 		Console.WriteLine("ES GLOBEX profileHash " + a.ProfileHash());
 	}
 
