@@ -1051,10 +1051,9 @@ static class Program
 				Check(studies.Count > 50 && ownEnums.Contains("EEventKind") && ownEnums.Contains("EEventTier") && ownEnums.Contains("EEventFlags") && ownEnums.Contains("EPortProfile") && ownEnums.Contains("EPortSizing")
 					&& ownEnums.Contains("EEventVolatility") && ownEnums.Contains("EGate0BarUnit") && !mcEnums.Any(mn => ownEnums.Contains(mn) || ownTypes.Contains(mn)),
 					"TE0 lint whitelist = enums/types declared in this repo (" + studies.Count + " study files); no MultiCharts enum or type among them");
-				// Exemptions, each listed in the PR. _InstrProbe is the probe/dump study: it prints enum names and reads members by
-				// reflection on purpose (no trading decision). M-INSTR PR-M1b removed the three autoTradingDay Category-name exemptions
-				// (typed ClassOf switch now).
-				var exemptFiles = new HashSet<string> { "_InstrProbe.Strategy.CS" };
+				// Exemptions, each listed in the PR. None left: M-INSTR PR-M1b removed the three autoTradingDay Category-name exemptions
+				// (typed ClassOf switch now) and PR-M1e retired _InstrProbe (the reflection probe; typed _InstrDump replaces it).
+				var exemptFiles = new HashSet<string>();
 				string[] exemptLines = { };
 				var used = new HashSet<string>();
 				var hits = new List<string>();

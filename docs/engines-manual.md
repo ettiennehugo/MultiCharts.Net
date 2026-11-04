@@ -8650,7 +8650,7 @@ bash tests/RegimeTests/run.sh          # also supports the reference.py export p
 bash tests/EventTests/gen.sh            # regenerate only
 ```
 
-Suites (22): Avwap, Calendar, Daily, Dvp (`tests/Dvp`), Event, Gate0, Gmm, InstrProbe, LevelStudy, Mtf, OrderFlow, PortMM, PriceAction, Profile, RegimeGate, Regime, Roll, SessionClock, Tick, Tod, VpHelper, Xmkt. `gen.sh` exists in 12 of them: Calendar, Daily, Dvp, Event, Gate0, Gmm, InstrProbe, OrderFlow, Profile, RegimeGate, SessionClock and VpHelper.
+Suites (22): Avwap, Calendar, Daily, Dvp (`tests/Dvp`), Event, Gate0, Gmm, LevelStudy, Mtf, OrderFlow, PortMM, PriceAction, Profile, RegimeGate, Regime, RepoLint, Roll, SessionClock, Tick, Tod, VpHelper, Xmkt. `gen.sh` exists in 11 of them: Calendar, Daily, Dvp, Event, Gate0, Gmm, OrderFlow, Profile, RegimeGate, SessionClock and VpHelper. (`InstrProbe` was retired in M-INSTR PR-M1e; `_InstrDump` replaces the probe.)
 
 ### D. Glossary
 
