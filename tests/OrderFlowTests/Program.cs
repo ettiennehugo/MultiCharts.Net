@@ -7,6 +7,7 @@ using Q = Extracted.OrderFlow.FlowQuality;
 using Side = Extracted.OrderFlow.Side;
 using Regime = Extracted.OrderFlow.Regime;
 using IH = Extracted.InstrHost;
+using EAssetClass = Extracted.EAssetClass;
 using Cat = Extracted.ESymbolCategory;
 using LX = Extracted.LegacyExit;
 using LXMode = Extracted.ESpecOrdersMode;
@@ -1145,13 +1146,13 @@ static class Program
 			var fut = all.Where(IH.isFuturesCategory).ToList();
 			Check(fut.Count == 2 && fut.Contains(Cat.Future) && fut.Contains(Cat.FutureRolover), "MI-B1 isFuturesCategory: true for Future and FutureRolover only [" + string.Join(",", fut) + "]");
 			// §4.2 ClassOf, every member
-			var expect = new Dictionary<Cat, IH.EAssetClass> {
-				{ Cat.Future, IH.EAssetClass.Future }, { Cat.FutureRolover, IH.EAssetClass.Future }, { Cat.Stock, IH.EAssetClass.Stock },
-				{ Cat.Forex, IH.EAssetClass.SpotFx }, { Cat.Crypto, IH.EAssetClass.Crypto }, { Cat.Index, IH.EAssetClass.Index } };
+			var expect = new Dictionary<Cat, EAssetClass> {
+				{ Cat.Future, EAssetClass.Future }, { Cat.FutureRolover, EAssetClass.Future }, { Cat.Stock, EAssetClass.Stock },
+				{ Cat.Forex, EAssetClass.SpotFx }, { Cat.Crypto, EAssetClass.Crypto }, { Cat.Index, EAssetClass.Index } };
 			var wrong = new List<string>();
 			foreach (Cat c in all)
 			{
-				IH.EAssetClass want = expect.ContainsKey(c) ? expect[c] : IH.EAssetClass.Unsupported, got;
+				EAssetClass want = expect.ContainsKey(c) ? expect[c] : EAssetClass.Unsupported, got;
 				try { got = IH.ClassOf(c); } catch (Exception ex) { wrong.Add(c + " threw " + ex.GetType().Name); continue; }
 				if (got != want) wrong.Add(c + "->" + got);
 			}
@@ -1177,8 +1178,8 @@ static class Program
 					}
 			Check(cases == 23 * 72 * 4 && diff.Count == 0, "MI-B4 typed Auto trading day == main's Category-name rule for all 23 categories (" + cases + " bar times) [" + string.Join(" | ", diff) + "]");
 			DateTime t18 = new DateTime(2026, 3, 6, 18, 30, 0);
-			Check(IH.autoTradingDayOf(IH.EAssetClass.SpotFx, t18, toZone) == new DateTime(2026, 3, 7) && IH.autoTradingDayOf(IH.EAssetClass.Crypto, new DateTime(2026, 3, 6, 20, 0, 0), toZone) == new DateTime(2026, 3, 7)
-				&& IH.autoTradingDayOf(IH.EAssetClass.Future, t18, toZone) == new DateTime(2026, 3, 6) && IH.autoTradingDayOf(IH.EAssetClass.Stock, t18, toZone) == new DateTime(2026, 3, 6),
+			Check(IH.autoTradingDayOf(EAssetClass.SpotFx, t18, toZone) == new DateTime(2026, 3, 7) && IH.autoTradingDayOf(EAssetClass.Crypto, new DateTime(2026, 3, 6, 20, 0, 0), toZone) == new DateTime(2026, 3, 7)
+				&& IH.autoTradingDayOf(EAssetClass.Future, t18, toZone) == new DateTime(2026, 3, 6) && IH.autoTradingDayOf(EAssetClass.Stock, t18, toZone) == new DateTime(2026, 3, 6),
 				"MI-B5 Auto: SpotFx rolls at 17:00 NY (+7h), Crypto keys by UTC date, Future/Stock by bar date");
 			// F4: tick resolution, no 0.01 fallback
 			Func<double, bool> bad = x => double.IsNaN(x);

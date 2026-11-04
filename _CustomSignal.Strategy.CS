@@ -2369,10 +2369,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		// <instr-host-core> M-INSTR PR-M1b. MC-free apart from the typed ESymbolCategory: tests/OrderFlowTests/gen.sh compiles this
-		// region against a mirror of ESymbolCategory (spec §4.1 values). PR-M2/M3 move EAssetClass / ClassOf into the profile core.
-
-		/// <summary>M-INSTR §4.2 asset class of a stream (EAssetClass of spec §5).</summary>
-		public enum EAssetClass { Future, Stock, SpotFx, Crypto, Index, Unsupported }
+		// region against a mirror of ESymbolCategory (spec §4.1 values). EAssetClass is the top-level PowerLanguage.Function.EAssetClass of
+		// _InstrumentProfile.Function.CS since PR-M2 (gen.sh extracts its <instr-asset-class> region next to this one); PR-M3 moves ClassOf.
 
 		/// <summary>M-INSTR F2: futures = ESymbolCategory.Future or ESymbolCategory.FutureRolover (typed; _McApiDump3 lists FutureRolover = 18).
 		/// Used by the DAILY roll-offset warning, the RollDetection Off warning, the roll Globex key and _VolumeProfileBase's Build Volume On check.</summary>

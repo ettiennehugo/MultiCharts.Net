@@ -1,0 +1,14 @@
+# M-INSTR PR-M2 MI-T4 non-ES worked examples. VERIFY: derived by hand from the CME rule text of spec §8.2 with NYSE business days
+# (CME ProductCalendar was not reachable from the build box, 2026-11-04); replace with CME calendar dates when available.
+# root,contract,year,month,expiry
+CL,CLK20,2020,5,2020-04-21
+CL,CLN20,2020,7,2020-06-22
+CL,CLZ25,2025,12,2025-11-20
+CL,CLF26,2026,1,2025-12-19
+GC,GCQ24,2024,8,2024-08-28
+GC,GCZ25,2025,12,2025-12-29
+ZN,ZNH24,2024,3,2024-03-19
+ZN,ZNZ25,2025,12,2025-12-19
+6E,6EM24,2024,6,2024-06-17
+6E,6EZ25,2025,12,2025-12-15
+6E,6EH26,2026,3,2026-03-16

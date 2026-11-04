@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Off-MultiCharts tests for M-INSTR PR-M2 (_InstrumentProfile core, specs/m-instr-spec.md rev 2.3 §10). Not part of PLStudies.csproj. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0642;CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_MtfMath.Function.CS" Link="Linked\_MtfMath.cs" />
+    <Compile Include="..\..\_CmeSessionClock.Function.CS" Link="Linked\_CmeSessionClock.cs" />
+    <Compile Include="..\..\_RollDetector.Function.CS" Link="Linked\_RollDetector.cs" />
+  </ItemGroup>
+  <Target Name="GenerateExtracted" BeforeTargets="BeforeBuild">
+    <Exec Command="bash gen.sh" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <ItemGroup>
+      <Compile Include="Generated\*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>
