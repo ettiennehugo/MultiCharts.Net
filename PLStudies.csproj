@@ -518,8 +518,6 @@
     <Compile Include="_CmeSessionClockTest.Strategy.CS" />
     <Compile Include="_EventCalendarTest.Strategy.CS" />
     <Compile Include="_MtfProbe.Strategy.CS" />
-    <Compile Include="_InstrProbe.Strategy.CS" />
-    <Compile Include="_InstrProbeCore.Function.CS" />
     <Compile Include="_InstrDump.Strategy.CS" />
     <Compile Include="_OrderFlow.Function.CS" />
     <Compile Include="_PriceActionEngine.Function.CS" />
