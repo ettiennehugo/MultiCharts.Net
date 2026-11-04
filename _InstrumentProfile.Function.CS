@@ -1,6 +1,8 @@
 // ============================================================================================
-// M-INSTR PR-M2: instrument profile core (specs/m-instr-spec.md rev 2.3, §4.3, §4.5, §5, §6.3, §8, §9). NOT WIRED: nothing calls
-// this file yet (PR-M3 wires buildProfiles() / SessionReader / the INSTR line), so no study changes behaviour.
+// M-INSTR PR-M2: instrument profile core (specs/m-instr-spec.md rev 2.3, §4.3, §4.5, §5, §6.3, §8, §9). PR-M3 wires it:
+// _CustomSignal.buildProfiles() (StartCalc) and the first-CalcBar session re-check go through InstrumentStreams below. LOG ONLY
+// apart from the cross-checks: mismatch:* and sessions:changed throw (Error line first); every other refusal is a Warning line
+// until PR-M4 applies the profile to engines. No engine reads a profile yet.
 //
 // <instr-core> is MC-free (System only + _MtfMath.Session / SymbolRoot rules): tests/InstrumentTests/gen.sh extracts it.
 // <instr-mc-fields> uses one typed MC enum (MTPA_SymbolFields); tests compile it against a mirror enum. The host adapter
@@ -46,6 +48,8 @@ namespace PowerLanguage.Function
 	public static class InstrumentReason
 	{
 		public const string Class = "class", Tick = "tick", VolumeBasis = "volume-basis", Currency = "currency", Calendar = "calendar";
+		/// <summary>PR-M3 (#96 review nit): a preset / override row with no contract month listed in the next 24 months.</summary>
+		public const string Months = "months";
 		public const string SessionsNone = "sessions:none", SessionsChanged = "sessions:changed", SessionsBarOutside = "sessions:bar-outside";
 		public const string SessionsNoRthSplit = "sessions:no-rth-split", SessionsWindowNotCovered = "sessions:window-not-covered";
 		public const string MismatchTick = "mismatch:tick", MismatchBigPointValue = "mismatch:bigPointValue", MismatchTickValue = "mismatch:tickValue";
@@ -98,7 +102,13 @@ namespace PowerLanguage.Function
 	public static class InstrumentText
 	{
 		static readonly CultureInfo s_inv = CultureInfo.InvariantCulture;
+		/// <summary>Diagnostics only (mismatch / refusal details): the raw detected value, round-trip. "R" output for a 17-digit
+		/// value differs by runtime (.NET 8 5.000000000000001E-05 vs .NET Framework 5.0000000000000009E-05), so it never feeds a
+		/// hash or the INSTR facts.</summary>
 		public static string Num(double v) { return v.ToString("R", s_inv); }
+		/// <summary>Profile facts (Canon / profileHash and the INSTR line): "G15" is the same on .NET Framework (MC) and .NET 8 (box
+		/// tools, tests). Preset values are short literals, so G15 prints them exactly (0.00005 -> 5E-05, 0.015625, 12.5).</summary>
+		public static string Fact(double v) { return v.ToString("G15", s_inv); }
 		public static string Int(long v) { return v.ToString(s_inv); }
 		public static string Hm(TimeSpan t) { return t.Days >= 1 && t.Hours == 0 && t.Minutes == 0 ? "24:00" : t.ToString(@"hh\:mm", s_inv); }
 		// Own enums only (EAssetClass etc. are ours, not MultiCharts'): explicit switches so the text is fixed by code, not by names.
@@ -147,6 +157,9 @@ namespace PowerLanguage.Function
 	{
 		public const string Codes = "FGHJKMNQUVXZ";
 		public const int All = 0xFFF;
+		/// <summary>Letters → mask. Called ONLY on the static preset literals of InstrumentPresets.s_rows (type initialiser: no logger in
+		/// scope, so no Error line; a bad literal fails InstrumentTests T8 at type init, never a chart). Never call it on user or config
+		/// text: InstrumentConfig.overrides carries a mask, which InstrumentPresetRow.Validate range-checks.</summary>
 		public static int Of(string letters)
 		{
 			int m = 0;
@@ -194,7 +207,7 @@ namespace PowerLanguage.Function
 		}
 		public string Canon()
 		{
-			return root + "|" + InstrumentText.ClassName(assetClass) + "|" + InstrumentText.Num(tick) + "|" + InstrumentText.Num(bigPointValue) + "|" + currency + "|" + MonthMask.Text(contractMonths)
+			return root + "|" + InstrumentText.ClassName(assetClass) + "|" + InstrumentText.Fact(tick) + "|" + InstrumentText.Fact(bigPointValue) + "|" + currency + "|" + MonthMask.Text(contractMonths)
 				+ "|" + InstrumentText.ExpiryName(expiry) + "|" + InstrumentText.RollName(roll, rollDays) + "|" + InstrumentText.CalendarName(calendar) + "|" + cluster;
 		}
 	}
@@ -284,6 +297,16 @@ namespace PowerLanguage.Function
 		/// Both roots empty → Error + throw unknown-field:root. A differing parse gives the Warning text; MC wins.</summary>
 		public static Result Resolve(string name, EAssetClass cls, string mcRoot, bool mcRootUnsupported, string engine, string sessionName, Action<string> errorSink)
 		{
+			var r = Pick(name, cls, mcRoot, mcRootUnsupported);
+			if (string.IsNullOrEmpty(r.Root))
+				InstrumentError.Fail(errorSink, new InstrumentSubject(engine, name, cls, "", sessionName), InstrumentReason.UnknownField("root"), "SymbolRoot empty and the name gives no root", InstrumentReason.ActionQuoteManager);
+			return r;
+		}
+
+		/// <summary>The root Resolve would return, without the refusal (Root "" when there is none). Build uses it to run the enforced
+		/// cross-checks before any log-only refusal (PR-M3 review).</summary>
+		public static Result Pick(string name, EAssetClass cls, string mcRoot, bool mcRootUnsupported)
+		{
 			string parsed = Parse(name, cls);
 			bool useMc = !mcRootUnsupported && !string.IsNullOrWhiteSpace(mcRoot);
 			var r = new Result();
@@ -294,9 +317,7 @@ namespace PowerLanguage.Function
 				if (parsed.Length > 0 && !_MtfMath.SameRoot(r.Root, parsed))
 					r.Warning = "INSTR root-crosscheck mc(" + r.Root + ") parsed(" + parsed + ") name(" + (name ?? "") + ")";
 			}
-			else { r.Root = parsed; r.Source = "parsed"; }
-			if (string.IsNullOrEmpty(r.Root))
-				InstrumentError.Fail(errorSink, new InstrumentSubject(engine, name, cls, "", sessionName), InstrumentReason.UnknownField("root"), "SymbolRoot empty and the name gives no root", InstrumentReason.ActionQuoteManager);
+			else { r.Root = parsed ?? ""; r.Source = "parsed"; }
 			return r;
 		}
 
@@ -505,7 +526,7 @@ namespace PowerLanguage.Function
 				if (++m > 12) { m = 1; y++; }
 			}
 			year = 0; month = 0;
-			InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no listed contract month within 24 months of " + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " for " + p.root, "check the preset's contract months");
+			InstrumentError.Fail(errorSink, s, InstrumentReason.Months, "no listed contract month within 24 months of " + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " for " + p.root, "check the preset's contract months");
 		}
 
 		/// <summary>MI-T6 generalised SeriesWindow: [Monday, Friday] of the week holding the roll date of the next contract (nominal
@@ -606,15 +627,6 @@ namespace PowerLanguage.Function
 			if (sessions == null) return false;
 			foreach (var s in sessions) if (s.StartDay != s.EndDay) return true;
 			return false;
-		}
-
-		/// <summary>True when both lists have the same entries in order (typed DayOfWeek / TimeSpan compares).</summary>
-		public static bool Same(_MtfMath.Session[] a, _MtfMath.Session[] b)
-		{
-			if (a == null || b == null || a.Length != b.Length) return false;
-			for (int i = 0; i < a.Length; i++)
-				if (a[i].StartDay != b[i].StartDay || a[i].StartTime != b[i].StartTime || a[i].EndDay != b[i].EndDay || a[i].EndTime != b[i].EndTime) return false;
-			return true;
 		}
 
 		/// <summary>S1: null/empty → sessions:none; StartCalc vs first-bar read differ → sessions:changed.</summary>
@@ -736,27 +748,50 @@ namespace PowerLanguage.Function
 			public DateTime symbolExpiry;
 		}
 
-		/// <summary>StartCalc part of buildProfiles(): class gate, root (§4.3), MC-internal check, tick, currency (Q8), preset match and
-		/// cross-check, cost and cost floor. Every refusal writes the Error line first.</summary>
+		/// <summary>StartCalc part of buildProfiles(). Two phases (PR-M3 review): first the ENFORCED cross-checks on whatever data is
+		/// there (MC-internal, preset tick / bpv, cost-floor tick value), so a log-only refusal can never hide a mismatch; then the
+		/// refusals (class, config, root, tick, currency Q8). Phase 1 runs for mapped classes only; the floor needs a matched preset. Every refusal writes the Error line first. Profile facts: once the preset
+		/// cross-check passes, tick / bpv / tickValue are the PRESET's exact values (runtime-independent text and hash); the raw
+		/// detected values appear only in mismatch details. No preset: the detected values (printed with G15).</summary>
 		public static InstrumentProfile Build(Inputs i, InstrumentConfig cfg, Action<string> errorSink)
 		{
 			const string Eng = "INSTR";
 			if (cfg == null) cfg = new InstrumentConfig();
+			// ---- phase 1: enforced cross-checks (mismatch:*), before any log-only refusal. Mapped classes only: for an Unsupported
+			// category (e.g. an ES futures option) there is no evidence ASymbolInfo2 PriceScale / BigPointValue mean the same, so it only
+			// gets the class refusal below (review 2).
+			string v = cfg.Validate();
+			InstrumentPresetRow pr = null;
+			int floor = -1;
+			if (i.assetClass != EAssetClass.Unsupported)
+			{
+				var pick = InstrumentRoot.Pick(i.name, i.assetClass, i.mcRoot, i.mcRootUnsupported);
+				var sx = new InstrumentSubject(Eng, i.name, i.assetClass, pick.Root, i.sessionName);
+				InstrumentChecks.McInternal(i.structPriceScale, i.infoPriceScale, i.structBigPointValue, i.infoBigPointValue, sx, errorSink);   // raw inputs only
+				double rawTick = i.infoPriceScale > 0 ? i.minMove / i.infoPriceScale : 0;
+				// an invalid config's override row is not trusted: the built-in preset still cross-checks (the config refusal follows in phase 2)
+				pr = pick.Root.Length == 0 ? null
+					: v == null && cfg.overrides != null && cfg.overrides.assetClass == i.assetClass && cfg.overrides.root == pick.Root ? cfg.overrides : InstrumentPresets.Find(pick.Root, i.assetClass);
+				InstrumentChecks.Preset(pr, rawTick, i.infoBigPointValue, sx, errorSink);   // a non-positive detected tick vs a preset is mismatch:tick
+				// cost floor only for a matched preset (review 2): costs are keyed by root alone, so a stock ticker ES or a sub-penny
+				// symbol sharing a cost root must not hit mismatch:tickValue. No preset -> floor Unknown.
+				CostModel c0 = v == null && pr != null ? cfg.CostFor(pick.Root) : CostModel.Unknown;
+				if (c0.known) floor = CostModel.FloorTicks(c0.roundTripCents, pr.tick, pr.bigPointValue, sx, errorSink);   // mismatch:tickValue
+			}
+			// ---- phase 2: refusals (log only in M3, enforced from PR-M4)
 			var subj0 = new InstrumentSubject(Eng, i.name, i.assetClass, "", i.sessionName);
 			if (i.assetClass == EAssetClass.Unsupported) InstrumentError.Fail(errorSink, subj0, InstrumentReason.Class, null, "use a Future, Stock, SpotFx, Crypto or Index symbol");
-			string v = cfg.Validate();
 			if (v != null) InstrumentError.Fail(errorSink, subj0, InstrumentReason.UnknownField("config"), v, "fix InstrumentConfig");
 			var rr = InstrumentRoot.Resolve(i.name, i.assetClass, i.mcRoot, i.mcRootUnsupported, Eng, i.sessionName, errorSink);
 			var p = new InstrumentProfile { name = i.name, assetClass = i.assetClass, root = rr.Root, rootSource = rr.Source, rootWarning = rr.Warning, exchange = i.exchange, sessionName = i.sessionName, minMove = i.minMove };
 			InstrumentSubject s = p.Subject(Eng);
-			InstrumentChecks.McInternal(i.structPriceScale, i.infoPriceScale, i.structBigPointValue, i.infoBigPointValue, s, errorSink);
-			p.tick = InstrumentChecks.Tick(i.minMove, i.infoPriceScale, s, errorSink);
-			p.bigPointValue = i.infoBigPointValue;
-			p.tickValue = p.tick * p.bigPointValue;
+			double detTick = InstrumentChecks.Tick(i.minMove, i.infoPriceScale, s, errorSink);   // refusal; with a preset the mismatch above already fired
 			if (i.currency != "USD") InstrumentError.Fail(errorSink, s, InstrumentReason.Currency, "SymbolCurrency " + (i.currency ?? "not USD"), "USD instruments only (Q8)");
 			p.currency = i.currency;
-			InstrumentPresetRow pr = cfg.overrides != null && cfg.overrides.assetClass == i.assetClass && cfg.overrides.root == p.root ? cfg.overrides : InstrumentPresets.Find(p.root, i.assetClass);
-			InstrumentChecks.Preset(pr, p.tick, p.bigPointValue, s, errorSink);
+			double tick = pr != null ? pr.tick : detTick, bpv = pr != null ? pr.bigPointValue : i.infoBigPointValue;
+			p.tick = tick;
+			p.bigPointValue = bpv;
+			p.tickValue = tick * bpv;   // preset product (0.00005 × 125000); printed / hashed with G15
 			p.presetId = pr == null ? null : pr.root;
 			p.calendar = pr == null ? InstrumentPresets.DefaultCalendar(i.assetClass) : pr.calendar;
 			p.contractMonths = pr == null ? 0 : pr.contractMonths;
@@ -769,9 +804,9 @@ namespace PowerLanguage.Function
 			p.contractExpiry = InstrumentRoot.UsableExpiry(i.symbolExpiry) ? i.symbolExpiry.Date : (DateTime?)null;
 			p.sessionsPerYear = InstrumentPresets.SessionsPerYear(i.assetClass);
 			p.sizingUnit = InstrumentPresets.SizingUnit(i.assetClass);
-			p.cost = cfg.CostFor(p.root);
+			p.cost = cfg.CostFor(p.root);   // the cost itself is still shown (cost(...)); only the floor needs a preset
 			string note; p.dataNotes = cfg.dataNotes != null && cfg.dataNotes.TryGetValue(p.root, out note) ? note : null;
-			p.costFloorTicks = p.cost.known ? CostModel.FloorTicks(p.cost.roundTripCents, p.tick, p.bigPointValue, s, errorSink) : -1;
+			p.costFloorTicks = floor;
 			return p;
 		}
 
@@ -791,7 +826,7 @@ namespace PowerLanguage.Function
 		{
 			var sb = new StringBuilder();
 			sb.Append("class=").Append(InstrumentText.ClassName(assetClass)).Append(";root=").Append(root).Append(";preset=").Append(presetId ?? "-");
-			sb.Append(";tick=").Append(InstrumentText.Num(tick)).Append(";bpv=").Append(InstrumentText.Num(bigPointValue)).Append(";ccy=").Append(currency);
+			sb.Append(";tick=").Append(InstrumentText.Fact(tick)).Append(";bpv=").Append(InstrumentText.Fact(bigPointValue)).Append(";ccy=").Append(currency);
 			sb.Append(";cal=").Append(InstrumentText.CalendarName(calendar)).Append(";months=").Append(MonthMask.Text(contractMonths));
 			sb.Append(";expiry=").Append(expiry == null ? "-" : InstrumentText.ExpiryName(expiry.Value)).Append(";roll=").Append(roll == null ? "-" : InstrumentText.RollName(roll.Value, rollDays));
 			sb.Append(";cost=").Append(cost.known ? InstrumentText.Int(cost.roundTripCents) : "-").Append(";floor=").Append(InstrumentText.Int(costFloorTicks));
@@ -824,20 +859,113 @@ namespace PowerLanguage.Function
 			sb.Append(") root(").Append(root).Append(" rootSrc=").Append(rootSource).Append(") preset(").Append(presetId ?? "none").Append(") exch(").Append(exchange).Append(") tz(").Append(tzLabel);
 			sb.Append(") sessionName(").Append(sessionName).Append(") sessions(").Append(InstrumentText.Sessions(sessions)).Append(") dayKey(SessionEnd) dayOpen(").Append(dayOpen);
 			sb.Append(") sessionEnd(").Append(sessEnd).Append(") overnight(").Append(hasOvernight ? "yes" : "no").Append(") rth(").Append(rthSplit == null ? "none src=None" : rthSplit.Text());
-			sb.Append(") tick(").Append(InstrumentText.Num(tick)).Append(") bpv(").Append(InstrumentText.Num(bigPointValue)).Append(") tickValue(").Append(InstrumentText.Num(tickValue));
+			sb.Append(") tick(").Append(InstrumentText.Fact(tick)).Append(") bpv(").Append(InstrumentText.Fact(bigPointValue)).Append(") tickValue(").Append(InstrumentText.Fact(tickValue));
 			sb.Append(") ccy(").Append(currency).Append(") bvo(").Append(bvoLabel).Append(") calendar(").Append(InstrumentText.CalendarName(calendar));
 			string calNote = InstrumentCalendars.Note(calendar);
 			if (calNote != null) sb.Append("; ").Append(calNote);
 			sb.Append(") months(").Append(MonthMask.Text(contractMonths));
 			sb.Append(") expiry(").Append(expiry == null ? "Unknown" : InstrumentText.ExpiryName(expiry.Value)).Append(") roll(").Append(roll == null ? "Unknown" : InstrumentText.RollName(roll.Value, rollDays));
 			sb.Append(") cost(").Append(cost.Text()).Append(") floor(").Append(costFloorTicks < 0 ? "Unknown" : InstrumentText.Int(costFloorTicks)).Append(") cluster(").Append(cluster ?? "none");
+			if (dataNotes != null) sb.Append(") dataNotes(").Append(dataNotes);   // Q7: logged on INSTR (none configured by default)
 			sb.Append(") profileHash(").Append(ProfileHash()).Append(')');
 			return sb.ToString();
 		}
 	}
+
+	/// <summary>
+	/// PR-M3 wiring state, MC-free: one slot per data stream. StartCalc builds the instrument part (Build) and keeps the StartCalc
+	/// session read; the first CalcBar re-reads the sessions (S1 re-check, WithSessions) and yields the INSTR line. M3 is LOG ONLY
+	/// apart from the cross-checks: Enforced() reasons write the Error line and throw; any other refusal is one Warning line
+	/// ("INSTR ds(n) log-only ...") and the stream keeps going without a profile (or, for a session refusal, with the StartCalc part).
+	/// </summary>
+	public sealed class InstrumentStreams
+	{
+		readonly InstrumentProfile[] m_profile;     // per stream (index = data stream); null = absent, not built, or refused (log only)
+		readonly _MtfMath.Session[][] m_startCalc;
+		readonly bool[] m_started, m_pending;
+
+		public InstrumentStreams(int maxDataStream)
+		{
+			int n = Math.Max(1, maxDataStream) + 1;
+			m_profile = new InstrumentProfile[n]; m_startCalc = new _MtfMath.Session[n][]; m_started = new bool[n]; m_pending = new bool[n];
+		}
+
+		public int Length { get { return m_profile.Length; } }
+		public InstrumentProfile Profile(int ds) { return ds >= 0 && ds < m_profile.Length ? m_profile[ds] : null; }
+		public bool Pending(int ds) { return ds >= 0 && ds < m_pending.Length && m_pending[ds]; }
+
+		/// <summary>The cross-checks M3 enforces: §4.3 MC-internal / tick / preset mismatches and the S1 StartCalc vs first-bar
+		/// re-check (sessions:changed). Everything else is log only until PR-M4.</summary>
+		public static bool Enforced(string reason)
+		{
+			return reason != null && (reason.StartsWith("mismatch:", StringComparison.Ordinal) || reason == InstrumentReason.SessionsChanged);
+		}
+
+		public static string LogOnlyLine(int ds, string refusal)
+		{
+			return "INSTR ds(" + InstrumentText.Int(ds) + ") log-only, not enforced until PR-M4: " + refusal;
+		}
+
+		/// <summary>Runs one core step with a buffered error sink. Enforced reason: errorSink(the refusal) - the Error line - then
+		/// rethrow. Other InstrumentException: warnSink(LogOnlyLine) and null. Any other exception: its own Error line, then rethrown
+		/// unchanged (the host's buildProfiles catch-all then only adds the log-only Warning; see there).</summary>
+		public static T Guard<T>(int ds, Func<Action<string>, T> step, Action<string> errorSink, Action<string> warnSink) where T : class
+		{
+			string msg = null;
+			try { return step(m => msg = m); }
+			catch (InstrumentException e)
+			{
+				if (Enforced(e.Reason)) { if (errorSink != null) errorSink(msg ?? e.Message); throw; }
+				if (warnSink != null) warnSink(LogOnlyLine(ds, msg ?? e.Message));
+				return null;
+			}
+			catch (Exception e)
+			{
+				// not a refusal (a bug or an MC failure inside the step): Error line here, then rethrow unchanged
+				if (errorSink != null) errorSink("INSTR ds(" + InstrumentText.Int(ds) + ") unexpected " + e.GetType().Name + ": " + e.Message);
+				throw;
+			}
+		}
+
+		/// <summary>StartCalc: the instrument part of stream ds (null inputs = the typed read failed; the host logged why) and the
+		/// StartCalc session read (null = none / unreadable). Logs the root-crosscheck Warning when the parse differs from MC.</summary>
+		public void Start(int ds, InstrumentProfile.Inputs? i, _MtfMath.Session[] startCalcSessions, InstrumentConfig cfg, Action<string> errorSink, Action<string> warnSink)
+		{
+			m_started[ds] = true; m_pending[ds] = true; m_startCalc[ds] = startCalcSessions;
+			m_profile[ds] = i == null ? null : Guard(ds, s => InstrumentProfile.Build(i.Value, cfg, s), errorSink, warnSink);
+			if (m_profile[ds] != null && m_profile[ds].rootWarning != null && warnSink != null) warnSink(m_profile[ds].rootWarning);
+		}
+
+		/// <summary>First CalcBar of stream ds: S1 re-check and the session fields. Returns the INSTR line (null when the stream has no
+		/// profile). A log-only session refusal keeps the StartCalc part (sessions n=0 on the line).</summary>
+		public string FirstBar(int ds, _MtfMath.Session[] firstBarSessions, string catLabel, string tzLabel, string bvoLabel, Action<string> errorSink, Action<string> warnSink)
+		{
+			if (!Pending(ds)) return null;
+			m_pending[ds] = false;
+			InstrumentProfile p = m_profile[ds];
+			if (p == null) return null;
+			_MtfMath.Session[] sc = m_startCalc[ds];
+			InstrumentProfile full = Guard(ds, s => p.WithSessions(sc, firstBarSessions, s), errorSink, warnSink);
+			if (full != null) m_profile[ds] = full;
+			return m_profile[ds].InstrLine(ds, catLabel, tzLabel, bvoLabel);
+		}
+
+		/// <summary>RUN line suffix: " profileHash(1=&lt;hash&gt;;2=none)" over the started streams; none = no profile (log-only
+		/// refusal). Outside every configHash (rev-3 Q7). Empty when no stream was started (InstrumentConfig.enabled false).</summary>
+		public string RunSuffix()
+		{
+			var sb = new StringBuilder();
+			for (int ds = 1; ds < m_profile.Length; ds++)
+			{
+				if (!m_started[ds]) continue;
+				sb.Append(sb.Length == 0 ? " profileHash(" : ";").Append(InstrumentText.Int(ds)).Append('=').Append(m_profile[ds] == null ? "none" : m_profile[ds].ProfileHash());
+			}
+			return sb.Length == 0 ? "" : sb.Append(')').ToString();
+		}
+	}
 	// </instr-core>
 
-	/// <summary>Typed MC members for the profile (R1). NOT WIRED in PR-M2; PR-M3 calls it from buildProfiles().</summary>
+	/// <summary>Typed MC members for the profile (R1). Called by _CustomSignal.buildProfiles() (PR-M3).</summary>
 	public static class InstrumentMcFields
 	{
 		// <instr-mc-fields>
@@ -860,6 +988,20 @@ namespace PowerLanguage.Function
 			i.structPriceScale = si.PriceScale; i.structBigPointValue = si.BigPointValue;
 			i.symbolExpiry = si.SymbolExpiry;
 			return i;
+		}
+	}
+
+	/// <summary>§4.5 SessionReader (host): typed IInstrument.Sessions / SessionObject members into the MC-free _MtfMath.Session.
+	/// null when the list is null. Used in StartCalc and for the first-CalcBar re-check (and by _CustomSignal.mtfSessions).</summary>
+	public static class SessionReader
+	{
+		public static _MtfMath.Session[] Read(IInstrument b)
+		{
+			IROList<SessionObject> list = b.Sessions;
+			if (list == null) return null;
+			var r = new _MtfMath.Session[list.Count];
+			for (int i = 0; i < r.Length; i++) { SessionObject so = list[i]; r[i] = new _MtfMath.Session(so.StartDay, so.StartTime, so.EndDay, so.EndTime); }
+			return r;
 		}
 	}
 }
