@@ -1240,12 +1240,19 @@ static class Program
 				"MI-C4 F3b round trip: MC's stop price from the amount = the price the study meant (entry - distance), in both modes [" + stopPc + ", " + stopPp + "]");
 			string lx = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_ExitHalfRiskHalfRoll.Strategy.CS"));
 			string lxc = System.Text.RegularExpressions.Regex.Replace(lx, @"//[^\n]*", "");
-			Check(!lxc.Contains("1 / m_entryResolution.Info.PriceScale") && lxc.Contains("double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);")
-				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"[-+] tick\)?;").Count == 4,
-				"MI-C5 F3a wiring: the four one-tick offsets (first/second stop, long/short) use oneTick(MinMove, PriceScale)");
-			Check(lxc.Contains("GenerateStopLoss(stopLossAmount(atLeastOneTick(m_firstStopPrice, tick), bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));")
-				&& lxc.Contains("double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);")
-				&& lxc.IndexOf("checkedBigPointValue(m_entryResolution") < lxc.IndexOf("GenerateStopLoss(")
+			// fix/exit-half-risk-legacy: the first-stop offsets moved into firstStopDistance (one tick outside the prior bar, long and short)
+			Check(!lxc.Contains("1 / m_entryResolution.Info.PriceScale") && lxc.Contains("tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);")
+				&& lxc.Contains("return isLong ? entryPrice - (priorLow - tick) : (priorHigh + tick) - entryPrice;")
+				&& lxc.Contains("firstStopDistance(entryPrice, m_entryResolution.Low[1], m_entryResolution.High[1], tick, isLong), tick);")
+				&& lxc.Contains("return isLong ? low - tick : high + tick;") && lxc.Contains("m_tick = tick;")
+				&& lxc.Contains("rollStopLevel(m_entryResolution.Low[0], m_entryResolution.High[0], tick, isLong);")
+				&& lxc.Contains("rollStopLevel(m_longerResolution.Low[1], m_longerResolution.High[1], m_tick, isLong);")
+				&& LX.rollStopLevel(4790, 4810, 0.25, true) == 4789.75 && LX.rollStopLevel(4790, 4810, 0.25, false) == 4810.25,
+				"MI-C5 F3a wiring: the one-tick offsets (first stop via firstStopDistance, roll level entry bar / previous day via rollStopLevel) use oneTick(MinMove, PriceScale)");
+			Check(lxc.Contains("GenerateStopLoss(stopLossAmount(m_firstStopDistance, m_bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));")
+				&& lxc.Contains("bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);")
+				&& lxc.Contains("m_bigPointValue = bigPointValue;") && lxc.Contains("m_firstStopDistance = atLeastOneTick(firstStopDistance(")
+				&& lxc.IndexOf("checkedBigPointValue(m_entryResolution") < lxc.IndexOf("m_bigPointValue = bigPointValue;")
 				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"GenerateStopLoss\(").Count == 1,
 				"MI-C6 F3b wiring: GenerateStopLoss gets the currency amount (guarded BigPointValue, distance clamped to one tick) for the strategy's CurSpecOrdersMode");
 			// #92 review: guards (message-only throws) and the negative-distance clamp
@@ -1262,6 +1269,250 @@ static class Program
 			Check(LX.atLeastOneTick(-1.5, 0.25) == 0.25 && LX.atLeastOneTick(0, 0.25) == 0.25 && LX.atLeastOneTick(0.1, 0.25) == 0.25 && LX.atLeastOneTick(double.NaN, 0.25) == 0.25
 				&& LX.atLeastOneTick(4, 0.25) == 4 && LX.stopLossAmount(LX.atLeastOneTick(-1.5, 0.25), 50, LXMode.PerPosition, 2) == 25,
 				"MI-C9 F3b negative/sub-tick/NaN first-stop distance clamps to one tick (ES $12.50/contract), never a negative GenerateStopLoss amount");
+
+			// ---- fix/exit-half-risk-legacy: (1) stop orders get a PRICE, not a distance; (2) long/short symmetry; (3) orders re-sent every bar ----
+			// (1) price vs distance. ES long: entry 4800, prior low 4795.75 -> distance 4.5, stop price 4795.50 (Low[1] - tick), not 4.5
+			double fxTick = LX.oneTick(25, 100), fxEntry = 4800, fxLow1 = 4795.75, fxHigh1 = 4804.25;
+			double fxDl = LX.atLeastOneTick(LX.firstStopDistance(fxEntry, fxLow1, fxHigh1, fxTick, true), fxTick), fxPl = LX.firstStopPrice(fxEntry, fxDl, true);
+			double fxDs = LX.atLeastOneTick(LX.firstStopDistance(fxEntry, fxLow1, fxHigh1, fxTick, false), fxTick), fxPs = LX.firstStopPrice(fxEntry, fxDs, false);
+			Check(fxDl == 4.5 && fxPl == 4795.5 && fxDs == 4.5 && fxPs == 4804.5 && fxPl != fxDl && fxPs != fxDs
+				&& Math.Abs((fxEntry - LX.stopLossAmount(fxDl, 50, LXMode.PerContract, 2) / 50) - fxPl) < 1e-9
+				&& Math.Abs((fxEntry + LX.stopLossAmount(fxDs, 50, LXMode.PerPosition, -2) / 2 / 50) - fxPs) < 1e-9,
+				"MI-C10 fix 1 price vs distance: ES long stop price 4795.50 = entry - 4.5, short 4804.50 = entry + 4.5 (not the 4.5 distance); GenerateStopLoss amount lands on the same price [" + fxPl + ", " + fxPs + "]");
+			string lxCalc = lxc.Substring(lxc.IndexOf("protected override void CalcBar()"), lxc.IndexOf("private void marketPositionChanged(") - lxc.IndexOf("protected override void CalcBar()"));
+			string lxMpc = lxc.Substring(lxc.IndexOf("private void marketPositionChanged("), lxc.IndexOf("private void defaultProcessing()") - lxc.IndexOf("private void marketPositionChanged("));
+			Check(lxCalc.Contains("m_lxTargetOrder.Send(m_targetPrice, ") && lxCalc.Contains("m_sxTargetOrder.Send(m_targetPrice, ")
+				&& lxMpc.Contains("m_firstStopPrice = firstStopPrice(entryPrice, m_firstStopDistance, isLong);")
+				&& lxMpc.Contains("m_targetPrice = targetPrice(entryPrice, m_firstStopDistance, isLong);")
+				&& !lxc.Contains("m_firstStopPrice = this.EntryPrice()") && !lxc.Contains("atLeastOneTick(m_firstStopPrice")
+				&& !System.Text.RegularExpressions.Regex.IsMatch(lxc, @"Send\(m_firstStopDistance") && !System.Text.RegularExpressions.Regex.IsMatch(lxc, @"stopLossAmount\(m_firstStopPrice"),
+				"MI-C10b fix 1 wiring: the +1R limits get m_targetPrice (a price from entry and R), the -R stop is m_firstStopPrice = firstStopPrice(entry, R); only m_firstStopDistance feeds stopLossAmount");
+			// (2) symmetry: mirrored bars give equal distances; long stop is one tick BELOW Low[1], short one tick ABOVE High[1]
+			bool fxSym = true;
+			foreach (double[] c in new[] { new[] { 4800, 4795.75, 4804.25 }, new[] { 4801.5, 4790, 4813 }, new[] { 4800.25, 4800, 4800.5 } })
+			{
+				double e = c[0], lo = c[1], hi = 2 * e - lo;   // hi mirrors lo about the entry
+				double dl = LX.firstStopDistance(e, lo, hi, fxTick, true), ds = LX.firstStopDistance(e, lo, hi, fxTick, false);
+				fxSym &= Math.Abs(dl - ds) < 1e-9 && Math.Abs(LX.firstStopPrice(e, dl, true) - (lo - fxTick)) < 1e-9 && Math.Abs(LX.firstStopPrice(e, ds, false) - (hi + fxTick)) < 1e-9
+					&& LX.firstStopPrice(e, dl, true) < lo && LX.firstStopPrice(e, ds, false) > hi;
+			}
+			Check(fxSym, "MI-C11 fix 2 long/short symmetry: long first stop = Low[1] - tick (outside the low), short = High[1] + tick, equal distances on mirrored bars");
+			// entry already beyond the level (gap through it): distance clamps to one tick, stop price still on the protective side of the entry
+			double gDl = LX.atLeastOneTick(LX.firstStopDistance(4790, 4795.75, 4804.25, fxTick, true), fxTick), gDs = LX.atLeastOneTick(LX.firstStopDistance(4810, 4795.75, 4804.25, fxTick, false), fxTick);
+			Check(gDl == 0.25 && LX.firstStopPrice(4790, gDl, true) == 4789.75 && gDs == 0.25 && LX.firstStopPrice(4810, gDs, false) == 4810.25,
+				"MI-C11b fix 2 clamp symmetry: entry beyond Low[1] - tick / High[1] + tick clamps to one tick; long stop entry - tick, short entry + tick");
+			// (3) orders re-sent every bar: drive exitOrdersThisBar bar by bar as CalcBar does (Default bars and the position-change bar alike)
+			LX.State[] fxStates = { LX.State.FirstExit, LX.State.FirstExit, LX.State.FirstExit, LX.State.SecondExit, LX.State.SecondExit, LX.State.SecondExit, LX.State.None };
+			int[] fxSides = { 1, 1, 1, 1, 1, 1, 0 };
+			int fxFirstBars = 0, fxSecondBars = 0, fxFlatSends = 0;
+			for (int b = 0; b < fxStates.Length; b++)
+			{
+				LX.State o = LX.exitOrdersThisBar(fxStates[b], 1, fxSides[b], fxSides[b] == 0 ? 0 : 2);
+				if (o == LX.State.FirstExit) fxFirstBars++; else if (o == LX.State.SecondExit) fxSecondBars++; else if (fxSides[b] == 0 && o != LX.State.None) fxFlatSends++;
+			}
+			Check(fxFirstBars == 3 && fxSecondBars == 3 && fxFlatSends == 0 && LX.exitOrdersThisBar(LX.State.FirstExit, -1, -1, 2) == LX.State.FirstExit
+				&& LX.exitOrdersThisBar(LX.State.FirstExit, 1, 0, 0) == LX.State.None && LX.exitOrdersThisBar(LX.State.SecondExit, 1, 0, 0) == LX.State.None,
+				"MI-C12 fix 3 re-send: exit orders are planned on every bar in a position (3 FirstExit + 3 SecondExit of 6), long or short; none when flat (stale state)");
+			int fxSw = lxCalc.IndexOf("switch (exitOrdersThisBar(m_state, m_armedSide, PositionSide, this.CurrentPosition.OpenLots))"), fxRsEnd = lxCalc.IndexOf("case CalculationReason.Default:");
+			int fxFe = lxCalc.IndexOf("case State.FirstExit:"), fxSe = lxCalc.IndexOf("case State.SecondExit:"), fxGsl = lxCalc.IndexOf("GenerateStopLoss(");
+			Check(fxSw > fxRsEnd && fxRsEnd > 0 && fxFe > fxSw && fxGsl > fxFe && fxGsl < fxSe
+				&& !lxMpc.Contains("GenerateStopLoss(") && !lxMpc.Contains(".Send(") && !lxc.Contains("if (m_state == State.FirstExit) GenerateStopLoss"),
+				"MI-C12b fix 3 wiring: CalcBar sends the stops and GenerateStopLoss (FirstExit case) after the CalcReason switch on every bar; marketPositionChanged sends nothing");
+
+			// ---- #94 review: (4) order quantities, (5) one-lot positions, (6) backtest/playback position-change fallback ----
+			// (4) Contracts.UserSpecified so Send's numLots is the order size; SecondExit passes the open lots explicitly
+			Check(lxc.Contains("m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, \"LXTrail\", EOrderAction.Sell, OrderExit.Total));")
+				&& lxc.Contains("m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, \"SXTrail\", EOrderAction.BuyToCover, OrderExit.Total));") && !lxc.Contains("Contracts.Default")
+				&& lxc.Contains("m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, \"LXHalf\", EOrderAction.Sell, OrderExit.Total));")
+				&& lxc.Contains("m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, \"SXHalf\", EOrderAction.BuyToCover, OrderExit.Total));")
+				&& lxCalc.Contains("m_leStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
+				&& lxCalc.Contains("m_seStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"\.Send\([^,()]*\)").Count == 0
+				&& LX.remainingExitLots(3) == 3 && LX.remainingExitLots(-3) == 3 && LX.remainingExitLots(1) == 1,
+				"MI-C13 quantities: target limits and stop orders are Contracts.UserSpecified + OrderExit.Total and every Send passes its lots (SecondExit = all open lots)");
+			// (5) one lot: half exit is at least one lot (Math.Round(0.5) = 0 would send a zero-lot order)
+			bool fxHalfOk = true;
+			for (int n = 1; n <= 50; n++) { int h = LX.halfExitLots(n); fxHalfOk &= h >= 1 && h <= n && LX.halfExitLots(-n) == h; }
+			Check(fxHalfOk && LX.halfExitLots(1) == 1 && LX.halfExitLots(2) == 1 && LX.halfExitLots(3) == 2 && LX.halfExitLots(4) == 2 && LX.halfExitLots(10) == 5
+				&& lxCalc.Contains("m_lxTargetOrder.Send(m_targetPrice, halfExitLots(this.CurrentPosition.OpenLots));")
+				&& lxCalc.Contains("m_sxTargetOrder.Send(m_targetPrice, halfExitLots(this.CurrentPosition.OpenLots));") && !lxc.Contains("Math.Round((double)this.CurrentPosition.OpenLots"),
+				"MI-C14 one lot: halfExitLots is 1..openLots for 1..50 lots (1 lot -> 1, whole position), long or short; the FirstExit +1R limit sends it");
+			// (6) fallback: drive positionTransitionDue as checkPositionTransition does (record the new position after a transition) and the
+			// study's stage machine stageAfterPositionChange (flat -> None; opened/reversed by another signal -> re-armed FirstExit; FirstExit and fewer lots -> SecondExit)
+			Func<bool[], int[], string> fxRun = (evt, pos) => {
+				int prev = 0, fired = 0; LX.State st = LX.State.None; var trace = new System.Text.StringBuilder();
+				for (int i = 0; i < pos.Length; i++)
+				{
+					if (LX.positionTransitionDue(prev, pos[i]))
+					{
+						st = LX.stageAfterPositionChange(st, prev, pos[i]);
+						prev = pos[i]; fired++;
+					}
+					LX.State o = LX.exitOrdersThisBar(st, st == LX.State.None ? 0 : Math.Sign(prev), Math.Sign(pos[i]), Math.Abs(pos[i]));
+					trace.Append(evt[i] ? "E" : "D").Append(o == LX.State.None ? "0" : o == LX.State.FirstExit ? "1" : "2");
+				}
+				return fired + ":" + trace;
+			};
+			// backtest/playback: Default calcs only, 0 -> +2 -> +1 -> 0
+			string fxBt = fxRun(new[] { false, false, false, false, false, false, false }, new[] { 0, 2, 2, 1, 1, 0, 0 });
+			// real time: each change is seen by the event AND by the next Default calc; and once by a Default calc before the event
+			string fxRt = fxRun(new[] { false, true, false, false, true, false, true, false }, new[] { 0, 2, 2, 2, 1, 1, 0, 0 });
+			string fxDe = fxRun(new[] { false, false, true, false }, new[] { 0, -2, -2, -2 });
+			Check(fxBt == "3:D0D1D1D2D2D0D0" && fxRt == "3:D0E1D1D1E2D2E0D0" && fxDe == "1:D0D1E1D1",
+				"MI-C15 fallback: Default-only calcs (backtest/playback) advance None -> FirstExit -> SecondExit -> None; event + Default on one change fires once [" + fxBt + " | " + fxRt + " | " + fxDe + "]");
+			int fxCpt = lxc.IndexOf("private void checkPositionTransition()");
+			string lxCpt = fxCpt < 0 ? "" : lxc.Substring(fxCpt, lxc.IndexOf("private void marketPositionChanged(") - fxCpt);
+			Check(System.Text.RegularExpressions.Regex.Matches(lxCalc, @"checkPositionTransition\(\);").Count == 2
+				&& lxCalc.IndexOf("case CalculationReason.MarketPositionChange:") < lxCalc.IndexOf("checkPositionTransition();")
+				&& lxCalc.IndexOf("case CalculationReason.Default:") < lxCalc.LastIndexOf("checkPositionTransition();")
+				&& lxCalc.LastIndexOf("checkPositionTransition();") < lxCalc.IndexOf("defaultProcessing();")
+				&& lxCpt.Contains("int marketPosition = StrategyInfo.MarketPosition;") && lxCpt.Contains("if (!positionTransitionDue(m_previousMarketPosition, marketPosition)) return;")
+				&& lxCpt.IndexOf("m_previousMarketPosition = marketPosition;") < lxCpt.IndexOf("marketPositionChanged(previousMarketPosition, marketPosition);")
+				&& lxCpt.IndexOf("int previousMarketPosition = m_previousMarketPosition;") < lxCpt.IndexOf("m_previousMarketPosition = marketPosition;")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"marketPositionChanged\(previousMarketPosition, marketPosition\);").Count == 1,
+				"MI-C15b fallback wiring: both CalcReason paths call checkPositionTransition (Default before defaultProcessing); it compares StrategyInfo.MarketPosition, records it, then runs marketPositionChanged (its only caller)");
+
+			// ---- #94 redesign: half off at +1R (limit), full GenerateStopLoss at -R, then the rest on a trailing roll stop that never loosens ----
+			// error log before throw on the tick / BigPointValue guards
+			int fxCatch = lxMpc.IndexOf("catch (InvalidOperationException ex)"), fxLog = lxMpc.IndexOf("Output.WriteLine(\"{0}\", \"Error: \" + ex.Message);"), fxRethrow = lxMpc.IndexOf("throw;");
+			Check(fxCatch > 0 && fxLog > fxCatch && fxRethrow > fxLog && lxMpc.IndexOf("checkedTick(") < fxCatch && lxMpc.IndexOf("checkedBigPointValue(") < fxCatch,
+				"MI-C16 guards: a tick / BigPointValue guard failure writes an Error line to Output, then rethrows the InvalidOperationException");
+			// +1R limit price in both directions: ES entry 4800, Low[1] 4795.75 / High[1] 4804.25 -> R 4.5; long target 4804.50, short 4795.50
+			double rT = LX.atLeastOneTick(LX.firstStopDistance(4800, 4795.75, 4804.25, 0.25, true), 0.25), rS = LX.atLeastOneTick(LX.firstStopDistance(4800, 4795.75, 4804.25, 0.25, false), 0.25);
+			double tL = LX.targetPrice(4800, rT, true), tS = LX.targetPrice(4800, rS, false), sL = LX.firstStopPrice(4800, rT, true), sS = LX.firstStopPrice(4800, rS, false);
+			double gR = LX.atLeastOneTick(LX.firstStopDistance(4790, 4795.75, 4804.25, 0.25, true), 0.25);
+			Check(tL == 4804.5 && tS == 4795.5 && tL - 4800 == 4800 - sL && sS - 4800 == 4800 - tS && LX.targetPrice(4790, gR, true) == 4790.25 && LX.targetPrice(4810, 0.25, false) == 4809.75
+				&& LX.halfExitLots(4) == 2 && LX.halfExitLots(-4) == 2 && LX.halfExitLots(6) == 3 && LX.halfExitLots(-7) == 4,
+				"MI-C17 +1R limit: long entry + R (4804.50), short entry - R (4795.50), the mirror of the -R stop; gap clamp -> entry +/- one tick; half the lots long or short [" + tL + ", " + tS + "]");
+			// 1 lot: the +1R limit is the whole position, so the trade goes FirstExit -> flat (None), never SecondExit
+			LX.State oneLot = LX.stageAfterPositionChange(LX.State.None, 0, 1);
+			LX.State oneLotOut = LX.stageAfterPositionChange(oneLot, 1, 0);
+			LX.State oneLotS = LX.stageAfterPositionChange(LX.State.None, 0, -1);
+			Check(LX.halfExitLots(1) == 1 && LX.halfExitLots(-1) == 1 && LX.halfExitLots(1) == LX.remainingExitLots(1) && oneLot == LX.State.FirstExit && oneLotOut == LX.State.None
+				&& oneLotS == LX.State.FirstExit && LX.stageAfterPositionChange(oneLotS, -1, 0) == LX.State.None,
+				"MI-C18 one lot: the +1R limit sends 1 lot (the whole position), long or short; filling it goes FirstExit -> None, not SecondExit");
+			// the trailing stop never loosens: starts at the -R stop, follows the roll level up (long) / down (short) only; NaN keeps it
+			double[] lvL = { 4790, 4797, 4796, 4801, double.NaN, 4800, 4803.25 }, expL = { 4795.5, 4797, 4797, 4801, 4801, 4801, 4803.25 };
+			double[] lvS = { 4810, 4803, 4804, 4799, double.NaN, 4800, 4796.75 }, expS = { 4804.5, 4803, 4803, 4799, 4799, 4799, 4796.75 };
+			double trL = 4795.5, trS = 4804.5; bool trOk = true;
+			for (int i = 0; i < lvL.Length; i++)
+			{
+				double nL = LX.ratchetStop(trL, lvL[i], true), nS = LX.ratchetStop(trS, lvS[i], false);
+				trOk &= nL >= trL && nS <= trS && nL == expL[i] && nS == expS[i];
+				trL = nL; trS = nS;
+			}
+			int fxTr = lxMpc.IndexOf("m_trailStopPrice = m_firstStopPrice;");
+			Check(trOk && fxTr > 0 && fxTr < lxMpc.IndexOf("updateSecondExit();") && lxc.Contains("m_trailStopPrice = ratchetStop(m_trailStopPrice, m_secondStopPrice, isLong);")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"m_trailStopPrice = ").Count == 4,
+				"MI-C19 trailing stop never loosens: starts at the -R stop, long only moves up, short only moves down, NaN level ignored; the only writes are the -R start, the ratchet and the resets (re-arm, flat)");
+			// the state moves to SecondExit on a (partial) fill of the half; add-ons and further reductions keep the stage; reversal by another signal = re-arm
+			Check(LX.stageAfterPositionChange(LX.State.FirstExit, 4, 2) == LX.State.SecondExit && LX.stageAfterPositionChange(LX.State.FirstExit, 4, 3) == LX.State.SecondExit
+				&& LX.stageAfterPositionChange(LX.State.FirstExit, -4, -3) == LX.State.SecondExit && LX.stageAfterPositionChange(LX.State.FirstExit, 4, 6) == LX.State.FirstExit
+				&& LX.stageAfterPositionChange(LX.State.SecondExit, 3, 1) == LX.State.SecondExit && LX.stageAfterPositionChange(LX.State.SecondExit, 3, 5) == LX.State.SecondExit
+				&& LX.stageAfterPositionChange(LX.State.SecondExit, 3, 0) == LX.State.None && LX.stageAfterPositionChange(LX.State.FirstExit, 4, 0) == LX.State.None
+				&& LX.stageAfterPositionChange(LX.State.FirstExit, 2, -2) == LX.State.FirstExit && LX.exitManagementRearmDue(LX.State.FirstExit, 2, -2)
+				&& LX.stageAfterPositionChange(LX.State.SecondExit, -1, 1) == LX.State.FirstExit && LX.exitManagementRearmDue(LX.State.None, 0, 3) && !LX.exitManagementRearmDue(LX.State.FirstExit, 4, 2)
+				&& !LX.exitManagementRearmDue(LX.State.FirstExit, 4, 6) && !LX.exitManagementRearmDue(LX.State.None, 2, 0)
+				&& LX.stageAfterPositionChange(LX.State.FirstExit, int.MinValue, -5) == LX.State.SecondExit && LX.remainingExitLots(int.MinValue) == int.MaxValue && LX.halfExitLots(int.MinValue) > 0,
+				"MI-C20 stages: FirstExit -> SecondExit when the same-side position gets smaller (partial fill too); add-on / further exits keep the stage; flat -> None; reversal by another signal -> re-armed FirstExit; int.MinValue safe");
+			// one protective stop per stage: FirstExit = GenerateStopLoss only (plus the +1R limit), SecondExit = the trailing stop order only
+			int fxSw2 = lxCalc.IndexOf("switch (exitOrdersThisBar(m_state, m_armedSide, PositionSide, this.CurrentPosition.OpenLots))");
+			string fxFeSeg = lxCalc.Substring(lxCalc.IndexOf("case State.FirstExit:", fxSw2), lxCalc.IndexOf("case State.SecondExit:", fxSw2) - lxCalc.IndexOf("case State.FirstExit:", fxSw2));
+			string fxSeSeg = lxCalc.Substring(lxCalc.IndexOf("case State.SecondExit:", fxSw2));
+			Check(fxFeSeg.Contains("GenerateStopLoss(") && !fxFeSeg.Contains("m_leStopOrder") && !fxFeSeg.Contains("m_seStopOrder")
+				&& fxSeSeg.Contains("m_leStopOrder.Send(") && fxSeSeg.Contains("m_seStopOrder.Send(") && !fxSeSeg.Contains("GenerateStopLoss(") && !fxSeSeg.Contains("TargetOrder")
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"GenerateStopLoss\(").Count == 1 && System.Text.RegularExpressions.Regex.Matches(lxc, @"m_[ls]eStopOrder\.Send\(").Count == 2
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"m_[ls]xTargetOrder\.Send\(").Count == 2,
+				"MI-C21 one protective stop per stage: FirstExit sends the +1R limit and GenerateStopLoss (-R), no stop order; SecondExit sends only the trailing stop (GenerateStopLoss dropped)");
+
+			// ---- #94 exit-only audit: no order can open, add to or reverse a position ----
+			// source: the only orders are 4 Limit/Stop exits (Sell / BuyToCover) plus GenerateStopLoss; no market or entry-type orders;
+			// Sell orders are sent only in the PositionSide > 0 branch and BuyToCover only in the else branch
+			var fxCreates = System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderCreator\.(\w+)\(");
+			var fxActions = System.Text.RegularExpressions.Regex.Matches(lxc, @"EOrderAction\.(\w+)");
+			bool fxExitOnly = fxCreates.Count == 4 && fxActions.Count == 4
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderCreator\.(Limit|Stop)\(new SOrderParameters\(Contracts\.UserSpecified, ""\w+"", EOrderAction\.(Sell|BuyToCover), OrderExit\.Total\)\);").Count == 4
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderExit\.Total").Count == 4 && !lxc.Contains("OrderExit.FromAll") && !lxc.Contains("OrderExit.FromEntry");
+			foreach (System.Text.RegularExpressions.Match m in fxCreates) fxExitOnly &= m.Groups[1].Value == "Limit" || m.Groups[1].Value == "Stop";
+			foreach (System.Text.RegularExpressions.Match m in fxActions) fxExitOnly &= m.Groups[1].Value == "Sell" || m.Groups[1].Value == "BuyToCover";
+			Check(fxExitOnly && !lxc.Contains("SellShort") && !lxc.Contains("EOrderAction.Buy)") && !lxc.Contains("EOrderAction.Buy,") && !lxc.Contains("MarketNextBar") && !lxc.Contains("MarketThisBar")
+				&& System.Text.RegularExpressions.Regex.Matches(lxCalc, @"if \(PositionSide > 0\)\s*m_l[xe]\w+\.Send\([^;]*;\s*else\s*m_s[xe]\w+\.Send\(").Count == 2
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"\.Send\(").Count == 4 && lxc.Contains("m_armedSide = isLong ? 1 : -1;") && lxc.Contains("m_armedSide = 0;"),
+				"MI-C22 exit-only source audit: 4 orders, all Limit/Stop with Sell or BuyToCover (no Buy/SellShort/market); each OrderExit.Total (exactly the lots sent, not per entry); Sell only sent while long, BuyToCover only while short; armed side set on re-arm, cleared when flat");
+			// lots: every exit is 1..open lots while a position is open, 0 when none are open (never more than the position, so never a reversal)
+			bool fxLotsOk = LX.halfExitLots(0) == 0 && LX.remainingExitLots(0) == 0;
+			for (int n = 1; n <= 200; n++) fxLotsOk &= LX.halfExitLots(n) >= 1 && LX.halfExitLots(n) <= n && LX.remainingExitLots(n) == n && LX.halfExitLots(-n) <= n && LX.remainingExitLots(-n) == n;
+			fxLotsOk &= LX.halfExitLots(int.MaxValue) <= int.MaxValue && LX.halfExitLots(int.MaxValue) > 0;
+			// orders: none when flat, with no open lots, or for a side the exits were not armed for (stale levels after an unseen reversal)
+			fxLotsOk &= LX.exitOrdersThisBar(LX.State.FirstExit, 1, 0, 0) == LX.State.None && LX.exitOrdersThisBar(LX.State.FirstExit, 1, 1, 0) == LX.State.None
+				&& LX.exitOrdersThisBar(LX.State.SecondExit, 1, -1, 3) == LX.State.None && LX.exitOrdersThisBar(LX.State.FirstExit, -1, 1, 3) == LX.State.None
+				&& LX.exitOrdersThisBar(LX.State.FirstExit, 0, 1, 3) == LX.State.None && LX.exitOrdersThisBar(LX.State.SecondExit, -1, -1, 3) == LX.State.SecondExit;
+			Check(fxLotsOk, "MI-C23 exit sizes and gating: half / remaining exits are 1..open lots (0 with none open); nothing is sent flat, with 0 lots, unarmed or for the opposite side");
+			// bar-by-bar: other signals open, add to and reverse the position; at every bar each order this study would send is an exit for
+			// the open side with lots <= open, so filling any one of them (or all, as MC caps exits at the position) leaves the same side or flat
+			Func<int[], string> fxAudit = pos => {
+				int prev = 0, armed = 0, bad = 0, sent = 0; LX.State st = LX.State.None;
+				for (int i = 0; i < pos.Length; i++)
+				{
+					if (LX.positionTransitionDue(prev, pos[i]))
+					{
+						bool rearm = LX.exitManagementRearmDue(st, prev, pos[i]);
+						st = LX.stageAfterPositionChange(st, prev, pos[i]);
+						if (st == LX.State.None) armed = 0; else if (rearm) armed = Math.Sign(pos[i]);
+						prev = pos[i];
+					}
+					int open = Math.Abs(pos[i]), side = Math.Sign(pos[i]);
+					LX.State o = LX.exitOrdersThisBar(st, armed, side, open);
+					var lots = new System.Collections.Generic.List<int>();
+					if (o == LX.State.FirstExit) { lots.Add(LX.halfExitLots(open)); lots.Add(open); }   // +1R limit, GenerateStopLoss (full position)
+					else if (o == LX.State.SecondExit) lots.Add(LX.remainingExitLots(open));            // trailing stop
+					foreach (int l in lots)
+					{
+						sent++;
+						bool closesLong = side > 0;                                                     // Sell while long, BuyToCover while short
+						int after = closesLong ? pos[i] - l : pos[i] + l;
+						// invariant: strictly toward flat, never through zero: 0 <= |after| < open, same side or flat
+						if (side == 0 || l <= 0 || l > open || Math.Sign(after) == -side || Math.Abs(after) >= open || (after != 0 && Math.Sign(after) != side)) bad++;
+					}
+					if (side == 0 && lots.Count > 0) bad++;
+				}
+				return sent + ":" + bad;
+			};
+			string fxA = fxAudit(new[] { 0, 4, 4, 2, 2, 5, 5, -3, -3, -6, -6, -2, 0, 0 });   // open, half fills, add-on, reversal, add-on, partial, flat
+			string fxB = fxAudit(new[] { 0, 1, 1, -1, -1, 1, 0 });                             // 1 lot reversed twice by another signal
+			string fxC = fxAudit(new[] { 0, -2, -1, 3, 3, 1, 0 });                             // short half fills, reversed long in SecondExit
+			Check(fxA.EndsWith(":0") && fxB.EndsWith(":0") && fxC.EndsWith(":0") && !fxA.StartsWith("0:") && !fxB.StartsWith("0:") && !fxC.StartsWith("0:")
+				&& LX.stageAfterPositionChange(LX.State.FirstExit, 2, 5) == LX.State.FirstExit && LX.stageAfterPositionChange(LX.State.SecondExit, 2, -3) == LX.State.FirstExit,
+				"MI-C24 exit-only bar-by-bar (add-on and reversal by another signal): every order is an exit for the open side, 1..open lots, none when flat; each strictly reduces toward flat, never through zero [" + fxA + " | " + fxB + " | " + fxC + "]");
+			// multi-entry (add-ons by another signal): MC fills an exit over the entries. OrderExit.Total exits ONLY the lots sent, first to last
+			// entry (PG L2584); the default FromAll would exit that many lots from EACH entry (PG L2563-2575: 5+1+2, Sell 2 -> 5). Model both:
+			// with Total the lots exited == the lots intended <= open lots, for every order the study sends; FromAll would overshoot
+			Func<int[], int, bool, int> fxFill = (entries, lots, total) => {
+				int done = 0;
+				foreach (int e in entries) { int take = total ? Math.Min(e, lots - done) : Math.Min(e, lots); if (take <= 0) { if (total) break; else continue; } done += take; }
+				return done;
+			};
+			bool fxMultiOk = fxFill(new[] { 5, 1, 2 }, 2, false) == 5 && fxFill(new[] { 2, 1, 5 }, 5, true) == 5;   // the PG's own FromAll / Total examples
+			int fxMultiCases = 0;
+			foreach (int[] ent in new[] { new[] { 5, 1, 2 }, new[] { 1, 1, 1, 1 }, new[] { 2, 3 }, new[] { 1, 7 }, new[] { 4, 4, 4 }, new[] { 1, 1 }, new[] { 3 } })
+			{
+				int open = 0; foreach (int e in ent) open += e;
+				foreach (int side in new[] { 1, -1 })
+				{
+					int half = LX.halfExitLots(side * open), rest = LX.remainingExitLots(side * open);
+					foreach (int intended in new[] { half, rest })
+					{
+						int exited = fxFill(ent, intended, true);
+						int after = side * (open - exited);
+						fxMultiOk &= exited == intended && exited <= open && exited >= 1 && Math.Sign(after) != -side && Math.Abs(after) < open;
+						fxMultiCases++;
+					}
+				}
+			}
+			int fxAddOnHalf = LX.halfExitLots(8);
+			Check(fxMultiOk && fxMultiCases == 28 && fxAddOnHalf == 4 && fxFill(new[] { 5, 1, 2 }, fxAddOnHalf, true) == 4 && fxFill(new[] { 5, 1, 2 }, fxAddOnHalf, false) == 7
+				&& System.Text.RegularExpressions.Regex.Matches(lxc, @"OrderExit\.Total\)\);").Count == 4,
+				"MI-C24b multi-entry add-on: with OrderExit.Total every exit fills exactly the intended lots (<= open), strictly toward flat; e.g. entries 5+1+2, half = 4 exits 4 (FromAll would exit 4+1+2 = 7) [" + fxMultiCases + " cases]");
 		}
 
 		Console.WriteLine("OrderFlowTests: " + s_pass + " passed, " + s_fail + " failed");
