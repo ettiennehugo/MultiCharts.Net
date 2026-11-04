@@ -7,8 +7,12 @@ using System.Drawing.Text;
 
 namespace PowerLanguage.Strategy {
 	/// <summary>
-	/// Exits half of the position once the risk level is reached and the remaining half is free rolled based on the previous days low.
-	/// The risk is computed based off the previous bar on the entry bar on the trading resolution, should typically be a 1/5/10/15-minute bar.
+	/// Takes half of the position off at +1R and trails the rest. R is the first-stop distance: from the entry to one tick outside the
+	/// prior bar on the entry resolution (long Low[1] - tick, short High[1] + tick), at least one tick.
+	///	FirstExit: a half-size limit at entry + R (long) / entry - R (short) and GenerateStopLoss for the full position at -R, re-sent every bar.
+	///	A 1-lot trade exits whole at +1R. SecondExit (the half filled, the position got smaller): the remaining lots get one stop order that
+	///	trails the roll level (the entry bar's low - tick / high + tick, then the previous day's low - tick / high + tick once the entry day is
+	///	over) and never loosens; GenerateStopLoss is no longer sent, so each stage has exactly one protective stop.
 	///	Requires two data feeds, one on the same resolution as the strategy entry (e.g. 5-minutes) and one on a longer resolution	(e.g. daily).
 	/// </summary>
 	public class _ExitHalfRiskHalfRoll : PortfolioSignalObject {
@@ -16,7 +20,7 @@ namespace PowerLanguage.Strategy {
 
 
 		//types
-		//(State lives in the <legacy-exit-core> region below so tests/OrderFlowTests can drive exitOrdersThisBar)
+		//(State lives in the <legacy-exit-core> region below so tests/OrderFlowTests can drive it)
 
 		//inputs
 
@@ -26,13 +30,18 @@ namespace PowerLanguage.Strategy {
 
 		//attributes
 		private State m_state;
-		private double m_firstStopDistance;  //price distance from the entry to the first stop (>= one tick); feeds the GenerateStopLoss amount
-		private double m_firstStopPrice;     //the first stop as a price (entry -/+ m_firstStopDistance); what m_leStopOrder/m_seStopOrder are sent
-		private double m_secondStopPrice;
+		private double m_firstStopDistance;  //R: price distance from the entry to the first stop (>= one tick); feeds the GenerateStopLoss amount and the +1R target
+		private double m_firstStopPrice;     //the -R stop as a price (entry -/+ R); where the SecondExit trailing stop starts
+		private double m_targetPrice;        //the +1R half-exit limit price (entry +/- R)
+		private double m_secondStopPrice;    //the current roll level (entry bar / previous day low - tick, high + tick)
+		private double m_trailStopPrice;     //SecondExit stop: ratcheted towards the roll level, never loosened
 		private double m_bigPointValue;      //guarded BigPointValue captured when the position opened; re-used by the per-bar GenerateStopLoss
+		private double m_tick;               //guarded tick captured when the position opened; used by the roll level
 		private int m_previousMarketPosition; //StrategyInfo.MarketPosition at the last transition check (backtest/playback fallback)
 		private IInstrument m_entryResolution;
 		private IInstrument m_longerResolution;
+		private IOrderPriced m_lxTargetOrder;
+		private IOrderPriced m_sxTargetOrder;
 		private IOrderPriced m_leStopOrder;
 		private IOrderPriced m_seStopOrder;
 
@@ -43,6 +52,8 @@ namespace PowerLanguage.Strategy {
 		{
 			//Contracts.UserSpecified: the numLots passed to Send is the order size (with Contracts.Default MC sizes the order from Strategy
 			//Properties and the half exit is not half); every Send below passes its lots explicitly
+			m_lxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));
+			m_sxTargetOrder = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));
 			m_leStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.Sell));
 			m_seStopOrder = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EOrderAction.BuyToCover));
 		}
@@ -50,10 +61,7 @@ namespace PowerLanguage.Strategy {
 		protected override void StartCalc() 
 		{
 			m_state = State.None;
-			m_firstStopDistance = -1;
-			m_firstStopPrice = -1;
-			m_secondStopPrice = -1;
-			m_bigPointValue = -1;
+			clearTrade();
 			m_previousMarketPosition = 0;
 			m_entryResolution = BarsOfData(1);  //will be the same as bars of data for the strategy
 			m_longerResolution = BarsOfData(2);
@@ -76,26 +84,26 @@ namespace PowerLanguage.Strategy {
 					break;
 			}
 
-			//special orders (GenerateStopLoss) and the stop orders only stay live while they are re-sent on every calculation, so they are
-			//sent here on every CalcBar while in a position, whatever the CalcReason, not only on the bar the position changed
+			//special orders (GenerateStopLoss) and priced orders only stay live while they are re-sent on every calculation, so they are
+			//sent here on every CalcBar while in a position, whatever the CalcReason. Each stage sends exactly one protective stop.
 			switch (exitOrdersThisBar(m_state, PositionSide))
 			{
 				case State.FirstExit:
-					//close half of the position at the first stop PRICE (outside the prior bar's low/high), full-position stop loss as a backstop
-					//halfExitLots is at least one lot: a 1-lot position exits whole at the first stop (Sell/BuyToCover cannot reverse it)
+					//half off at +1R (halfExitLots is at least one lot: a 1-lot position exits whole at +1R; Sell/BuyToCover cannot reverse it)
 					if (PositionSide > 0)
-						m_leStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));
+						m_lxTargetOrder.Send(m_targetPrice, halfExitLots(this.CurrentPosition.OpenLots));
 					else
-						m_seStopOrder.Send(m_firstStopPrice, halfExitLots(this.CurrentPosition.OpenLots));
-					//M-INSTR F3b: GenerateStopLoss takes currency (per contract or per position, CurSpecOrdersMode), not a price distance
+						m_sxTargetOrder.Send(m_targetPrice, halfExitLots(this.CurrentPosition.OpenLots));
+					//the stage's one protective stop: full position at -R. M-INSTR F3b: GenerateStopLoss takes currency (per contract or per
+					//position, CurSpecOrdersMode), not a price distance
 					GenerateStopLoss(stopLossAmount(m_firstStopDistance, m_bigPointValue, CurSpecOrdersMode, this.CurrentPosition.OpenLots));
 					break;
 				case State.SecondExit:
-					//close the remaining half of the position at low/high of the previous day
+					//the stage's one protective stop: the remaining lots at the trailing roll stop (GenerateStopLoss is not re-sent, so MC drops it)
 					if (PositionSide > 0)
-						m_leStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
+						m_leStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
 					else
-						m_seStopOrder.Send(m_secondStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
+						m_seStopOrder.Send(m_trailStopPrice, remainingExitLots(this.CurrentPosition.OpenLots));
 					break;
 			}
 		}
@@ -105,48 +113,58 @@ namespace PowerLanguage.Strategy {
 		{
 			int marketPosition = StrategyInfo.MarketPosition;
 			if (!positionTransitionDue(m_previousMarketPosition, marketPosition)) return;
+			int previousMarketPosition = m_previousMarketPosition;
 			m_previousMarketPosition = marketPosition;
-			marketPositionChanged();
+			marketPositionChanged(previousMarketPosition, marketPosition);
 		}
 
-		private void marketPositionChanged()
+		private void marketPositionChanged(int previousMarketPosition, int marketPosition)
 		{
-			if (this.PositionSide == 0)
+			bool newEntry = isNewEntry(m_state, previousMarketPosition, marketPosition);
+			State next = stageAfterPositionChange(m_state, previousMarketPosition, marketPosition);
+			if (next == State.None)
 			{
-				//clear intial risk	and previous low once we are flat
+				//clear the trade once we are flat
 				m_state = State.None;
-				m_firstStopDistance = -1;
-				m_firstStopPrice = -1;
-				m_secondStopPrice = -1;
-				m_bigPointValue = -1;
+				clearTrade();
+				return;
 			}
-			else
+
+			if (newEntry)
 			{
-				//M-INSTR F3a/F3b guards: a bad QuoteManager tick or BigPointValue throws (message only; this study has no logger)
-				double tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);
-				double bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);
-				switch (m_state)
+				//M-INSTR F3a/F3b guards: a bad QuoteManager tick or BigPointValue is logged as an Error, then throws
+				double tick, bigPointValue;
+				try
 				{
-					case State.None:
-						m_state = State.FirstExit;
-						m_bigPointValue = bigPointValue;
-						bool isLong = this.PositionSide > 0;
-						double entryPrice = this.EntryPrice();
-						//first stop one tick OUTSIDE the prior bar (long Low[1] - tick, short High[1] + tick); the distance is clamped to at least
-						//one tick (entry already beyond that level) so neither the stop price nor the GenerateStopLoss amount is on the wrong side
-						m_firstStopDistance = atLeastOneTick(firstStopDistance(entryPrice, m_entryResolution.Low[1], m_entryResolution.High[1], tick, isLong), tick);
-						m_firstStopPrice = firstStopPrice(entryPrice, m_firstStopDistance, isLong);
-						if (isLong)
-							m_secondStopPrice = m_entryResolution.Low[0] - tick;  //initialize the stop price to the ENTRY day low
-						else
-							m_secondStopPrice = m_entryResolution.High[0] + tick;   //initialize the stop price to the ENTRY day high
-						break;
-					case State.FirstExit:
-						m_state = State.SecondExit;
-						updateSecondExit();
-						break;
+					tick = checkedTick(m_entryResolution.Info.MinMove, m_entryResolution.Info.PriceScale, m_entryResolution.Info.Name);
+					bigPointValue = checkedBigPointValue(m_entryResolution.Info.BigPointValue, m_entryResolution.Info.Name);
 				}
+				catch (InvalidOperationException ex)
+				{
+					Output.WriteLine("{0}", "Error: " + ex.Message);
+					throw;
+				}
+				m_tick = tick;
+				m_bigPointValue = bigPointValue;
+				bool isLong = marketPosition > 0;
+				double entryPrice = this.EntryPrice();
+				//R: one tick OUTSIDE the prior bar (long Low[1] - tick, short High[1] + tick), clamped to at least one tick (entry already beyond
+				//that level) so neither the stop, the target nor the GenerateStopLoss amount is on the wrong side
+				m_firstStopDistance = atLeastOneTick(firstStopDistance(entryPrice, m_entryResolution.Low[1], m_entryResolution.High[1], tick, isLong), tick);
+				m_firstStopPrice = firstStopPrice(entryPrice, m_firstStopDistance, isLong);
+				m_targetPrice = targetPrice(entryPrice, m_firstStopDistance, isLong);
+				m_secondStopPrice = rollStopLevel(m_entryResolution.Low[0], m_entryResolution.High[0], tick, isLong);  //the ENTRY bar's low/high
+				m_trailStopPrice = -1;
 			}
+			else if (m_state == State.FirstExit && next == State.SecondExit)
+			{
+				//the half filled: the trailing stop starts at the -R stop it replaces and ratchets to the roll level, never looser
+				m_trailStopPrice = m_firstStopPrice;
+				m_state = next;
+				updateSecondExit();
+			}
+			//else an add-on, or a further partial exit in SecondExit: the stage and levels are unchanged (lots follow OpenLots each bar)
+			m_state = next;
 		}
 		
 		private void defaultProcessing()
@@ -159,14 +177,24 @@ namespace PowerLanguage.Strategy {
 
 		private void updateSecondExit()
 		{
+			if (m_state == State.None) return;
+			bool isLong = PositionSide > 0;
 			var entryTime = this.EntryTime();
 			if (entryTime.DayOfYear != m_longerResolution.Time[0].DayOfYear || entryTime.Year != m_longerResolution.Time[0].Year)
-			{
-				if (PositionSide > 0)
-					m_secondStopPrice = m_longerResolution.Low[1];
-				else
-					m_secondStopPrice = m_longerResolution.High[1];
-			}
+				m_secondStopPrice = rollStopLevel(m_longerResolution.Low[1], m_longerResolution.High[1], m_tick, isLong);  //the previous day's low/high
+			if (m_state == State.SecondExit)
+				m_trailStopPrice = ratchetStop(m_trailStopPrice, m_secondStopPrice, isLong);
+		}
+
+		private void clearTrade()
+		{
+			m_firstStopDistance = -1;
+			m_firstStopPrice = -1;
+			m_targetPrice = -1;
+			m_secondStopPrice = -1;
+			m_trailStopPrice = -1;
+			m_bigPointValue = -1;
+			m_tick = -1;
 		}
 
 		// <legacy-exit-core> M-INSTR PR-M1c (spec rev 2.3 §3.2 F3). MC-free apart from the typed ESpecOrdersMode: tests/OrderFlowTests/gen.sh
@@ -174,13 +202,13 @@ namespace PowerLanguage.Strategy {
 
 		private enum State {
 			None,
-			FirstExit,    //profit = risk exit
-			SecondExit,   //roll based on previous day low
+			FirstExit,    //half off at +1R, full-position GenerateStopLoss at -R
+			SecondExit,   //remaining lots on a trailing roll stop (entry bar, then previous day low/high)
 		}
 
 		/// <summary>
 		/// Which exit orders CalcBar sends on this bar: the current state while in a position, None when flat. Called on EVERY CalcBar, so the
-		/// stop orders and GenerateStopLoss are re-sent each bar (MC cancels special and priced orders that are not re-sent on a calculation).
+		/// target, GenerateStopLoss and the trailing stop are re-sent each bar (MC cancels special and priced orders that are not re-sent).
 		/// </summary>
 		private static State exitOrdersThisBar(State state, int positionSide)
 		{
@@ -198,18 +226,63 @@ namespace PowerLanguage.Strategy {
 		}
 
 		/// <summary>
-		/// Lots for the first (half) exit: half the open lots (Math.Round, as before), at least one. With one lot Math.Round(0.5) is 0, which
-		/// would send a zero-lot order; one lot instead exits the whole position at the first stop, the same price GenerateStopLoss holds.
+		/// A position change that starts a new trade (R, target and roll level computed from the new entry): in a position after no trade
+		/// (state None), or a reversal (the sign of the position flipped).
+		/// </summary>
+		private static bool isNewEntry(State state, int previousMarketPosition, int marketPosition)
+		{
+			if (marketPosition == 0) return false;
+			return state == State.None || (previousMarketPosition > 0) != (marketPosition > 0) || previousMarketPosition == 0;
+		}
+
+		/// <summary>
+		/// The stage after a position change: flat -> None; a new entry or reversal -> FirstExit; FirstExit with the same side and fewer lots
+		/// (the +1R half filled, whole or in part) -> SecondExit; otherwise (an add-on, or a further reduction in SecondExit) unchanged.
+		/// Lots are compared as long, so int.MinValue cannot overflow under checked arithmetic.
+		/// </summary>
+		private static State stageAfterPositionChange(State state, int previousMarketPosition, int marketPosition)
+		{
+			if (marketPosition == 0) return State.None;
+			if (isNewEntry(state, previousMarketPosition, marketPosition)) return State.FirstExit;
+			if (state == State.FirstExit && Math.Abs((long)marketPosition) < Math.Abs((long)previousMarketPosition)) return State.SecondExit;
+			return state;
+		}
+
+		/// <summary>
+		/// Lots for the +1R half exit: half the open lots (Math.Round, banker's), at least one. With one lot Math.Round(0.5) is 0, which would
+		/// send a zero-lot order; one lot instead exits the whole position at +1R. Computed in double, so int.MinValue cannot overflow.
 		/// </summary>
 		private static int halfExitLots(int openLots)
 		{
-			return Math.Max(1, (int)Math.Round((double)Math.Abs(openLots) / 2, 0));
+			return Math.Max(1, (int)Math.Round(Math.Abs((double)openLots) / 2, 0));
 		}
 
-		/// <summary>Lots for the second exit: the whole remaining position, passed explicitly (the orders are Contracts.UserSpecified).</summary>
+		/// <summary>Lots for the SecondExit stop: the whole remaining position, passed explicitly (the orders are Contracts.UserSpecified).</summary>
 		private static int remainingExitLots(int openLots)
 		{
-			return Math.Abs(openLots);
+			if (openLots >= 0) return openLots;
+			return openLots == int.MinValue ? int.MaxValue : -openLots;
+		}
+
+		/// <summary>The +1R half-exit limit price: entry + R for a long, entry - R for a short.</summary>
+		private static double targetPrice(double entryPrice, double distance, bool isLong)
+		{
+			return isLong ? entryPrice + distance : entryPrice - distance;
+		}
+
+		/// <summary>The roll level for the SecondExit stop: one tick outside the bar/day (long low - tick, short high + tick).</summary>
+		private static double rollStopLevel(double low, double high, double tick, bool isLong)
+		{
+			return isLong ? low - tick : high + tick;
+		}
+
+		/// <summary>
+		/// Trailing stop that never loosens: a long stop only moves up, a short stop only moves down. A NaN level keeps the current stop.
+		/// </summary>
+		private static double ratchetStop(double currentStop, double level, bool isLong)
+		{
+			if (isLong) return level > currentStop ? level : currentStop;
+			return level < currentStop ? level : currentStop;
 		}
 
 		/// <summary>
@@ -270,7 +343,7 @@ namespace PowerLanguage.Strategy {
 		private static double stopLossAmount(double distance, double bigPointValue, ESpecOrdersMode mode, int openLots)
 		{
 			double perContract = distance * bigPointValue;
-			return mode == ESpecOrdersMode.PerPosition ? perContract * Math.Abs(openLots) : perContract;
+			return mode == ESpecOrdersMode.PerPosition ? perContract * Math.Abs((double)openLots) : perContract;
 		}
 		// </legacy-exit-core>
 	}
