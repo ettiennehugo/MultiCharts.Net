@@ -127,19 +127,30 @@ namespace PowerLanguage.Strategy
 			line("B none (both candidates commented out in this build)");
 		}
 
+		private static string exc(Exception e) { return "<" + e.GetType().Name + ">"; }
+
 		/// <summary>A1: fields that compile today (spec §4.4 A1). Enums are formatted for the log only (R1).</summary>
 		private void dumpA1(int ds, IInstrumentSettings i)
 		{
 			string p = "A1 ds(" + Int(ds) + ") ";
-			line(p + "name(" + i.Name + ")");
-			line(p + "cat(" + i.Category + ") catInt(" + Int((int)i.Category) + ")");
-			line(p + "exch(" + i.Exchange + ")");
-			line(p + "tz(" + i.TimeZone + ")");
-			line(p + "minMove(" + Num(i.MinMove) + ") priceScale(" + Num(i.PriceScale) + ") bpv(" + Num(i.BigPointValue) + ")");
-			line(p + "bvo(" + i.BVO + ")");
-			line(p + "res.Type(" + i.Resolution.Type + ")");
+			// PR-M2: every read guarded (a member that throws on some feed prints <ExceptionType> instead of aborting the dump)
+			string v;
+			try { v = "name(" + i.Name + ")"; } catch (Exception e) { v = "name(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "cat(" + i.Category + ") catInt(" + Int((int)i.Category) + ")"; } catch (Exception e) { v = "cat(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "exch(" + i.Exchange + ")"; } catch (Exception e) { v = "exch(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "tz(" + i.TimeZone + ")"; } catch (Exception e) { v = "tz(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "minMove(" + Num(i.MinMove) + ") priceScale(" + Num(i.PriceScale) + ") bpv(" + Num(i.BigPointValue) + ")"; } catch (Exception e) { v = "minMove(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "bvo(" + i.BVO + ")"; } catch (Exception e) { v = "bvo(" + exc(e) + ")"; }
+			line(p + v);
+			try { v = "res.Type(" + i.Resolution.Type + ")"; } catch (Exception e) { v = "res.Type(" + exc(e) + ")"; }
+			line(p + v);
 			string sn;
-			try { sn = i.SessionName; } catch (Exception e) { sn = "<" + e.GetType().Name + ">"; }
+			try { sn = i.SessionName; } catch (Exception e) { sn = exc(e); }
 			line(p + "sessionName(" + sn + ")");
 		}
 

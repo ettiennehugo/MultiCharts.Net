@@ -1,0 +1,25 @@
+M-INSTR PR-M0 dump run(0cf41029) written(2026-11-03 17:39:56) app(Portfolio) maxDataStream(10)
+A1 ds(1) name(@ES)
+A1 ds(1) cat(Future) catInt(0)
+A1 ds(1) exch(CME)
+A1 ds(1) tz(Local)
+A1 ds(1) minMove(25) priceScale(100) bpv(50)
+A1 ds(1) bvo(Volume)
+A1 ds(1) res.Type(Minute)
+A1 ds(1) sessionName(Default)
+A2 ds(1) at(StartCalc) sessions(n=5; Sunday 18:00:00 -> Monday 17:00:00; Monday 18:00:00 -> Tuesday 17:00:00; Tuesday 18:00:00 -> Wednesday 17:00:00; Wednesday 18:00:00 -> Thursday 17:00:00; Thursday 18:00:00 -> Friday 17:00:00)
+ds(2) absent
+ds(3) absent
+ds(4) absent
+ds(5) absent
+ds(6) absent
+ds(7) absent
+ds(8) absent
+ds(9) absent
+ds(10) absent
+A2 ds(1) at(FirstCalcBar) sessions(n=5; Sunday 18:00:00 -> Monday 17:00:00; Monday 18:00:00 -> Tuesday 17:00:00; Tuesday 18:00:00 -> Wednesday 17:00:00; Wednesday 18:00:00 -> Thursday 17:00:00; Thursday 18:00:00 -> Friday 17:00:00) sameAsStartCalc(yes)
+A2 ds(1) firstBar time(2026-10-25 18:52:00) tz(Local) lastBarInSession(False)
+B none (both candidates commented out in this build)
+A2 ds(1) sessionEndBar(1) time(2026-10-26 17:00:00) lastBarInSession(True)
+A2 ds(1) sessionEndBar(2) time(2026-10-27 17:00:00) lastBarInSession(True)
+A2 ds(1) sessionEndBar(3) time(2026-10-28 17:00:00) lastBarInSession(True)
