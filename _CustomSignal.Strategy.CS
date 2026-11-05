@@ -1638,7 +1638,7 @@ namespace PowerLanguage.Strategy
 
 		private void startPortfolio()
 		{
-			m_portOn = false;
+			m_portOn = false; m_portOnLogPending = false;
 			try { m_portOn = PortfolioPublish; } catch (Exception) { m_portOn = false; }
 			m_portRet = new _PortReturns(); m_portURet = new _PortReturns();
 			m_portDay = DateTime.MinValue; m_portDayStartPnl = m_portLastPnl = m_portDayClose = m_portPrevDayClose = double.NaN; m_portRollToday = false;
@@ -1653,6 +1653,15 @@ namespace PowerLanguage.Strategy
 			MyPortfolioData[_PortKeys.RiskNew] = 0.0;
 			_PortArm.Init((k, v) => MyPortfolioData[k] = v);   // rev 2: pm.R$w = NaN until armed
 			MyPortfolioData[_PortKeys.State] = (int)EPortState.Flat;
+			m_portOnLogPending = true;   // PR-M4: "PORT publish on" is written on the first CalcBar (calc thread: bar date + zone known)
+		}
+
+		/// <summary>PR-M4: the "PORT publish on" Info line, deferred from StartCalc to the first CalcBar. At StartCalc no bar has been
+		/// calculated, so the line was stamped 0001-01-01 with zone '?' (the off-calc-thread trace path).</summary>
+		private bool m_portOnLogPending;
+		private void portOnLine()
+		{
+			m_portOnLogPending = false;
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"PORT publish on: id({Name}@{Bars.Info.Name}) family({PortfolioFamily}) cluster({PortfolioCluster})");
 		}
 
@@ -2104,6 +2113,8 @@ namespace PowerLanguage.Strategy
 			stopEngines();   // §0.1 rule 6: re-calc starts clean
 			m_levelStudy = null;
 			m_portOn = false;
+			m_instr = null;   // M-INSTR PR-M4: no stale Data1 profile tick before the next pass builds profiles
+			m_instrPending = false;
 			base.StopCalc();
 			m_calcThreadId = 0;   // set again by the next pass's first CalcBar; until then trace lines are stamped off-thread
 		}
@@ -2158,6 +2169,7 @@ namespace PowerLanguage.Strategy
 			m_calcThreadId = 0;                   // set by the first CalcBar of this pass (noteCalcThread)
 			System.Threading.Volatile.Write(ref m_lastCalcBarTicks, 0L);   // MinValue until the first CalcBar
 			m_tick = 0;   // tickSize() re-resolved on first use
+			m_instr = null;   // PR-M4: the Data1 profile tick comes from this pass's buildProfiles() only
 			m_journal = null;                                   // CS-1: one file per run
 			m_journalArms = new Dictionary<string, JournalArm>(StringComparer.Ordinal);
 			m_journalWritten = new HashSet<string>(StringComparer.Ordinal);
@@ -2176,7 +2188,7 @@ namespace PowerLanguage.Strategy
 					_ = BarsOfData(i);
 				}
 			}
-			buildProfiles();   // M-INSTR PR-M3: log only (+ mismatch throws); before the engines, which do not read profiles yet
+			buildProfiles();   // M-INSTR PR-M4: enforced (every refusal: Error line, then throw); before the engines (tickSize() reads the Data1 profile tick)
 			startEngines();   // lazy engines (§0.1); null unless enabled
 			startLevelStudy();   // A2-33 harness (off by default)
 			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
@@ -2188,13 +2200,14 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			noteCalcThread();   // cached for trace() off the calc thread (StopCalc runs on the UI thread)
-			if (m_instrPending) profilesFirstBar();   // M-INSTR PR-M3: S1 re-check + INSTR lines, before the RUN line (profileHash)
+			if (m_instrPending) profilesFirstBar();   // M-INSTR PR-M3/M4: S1 re-check (enforced) + INSTR lines, before the RUN line (profileHash)
 			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
 			if (!m_runLogged)
 			{
 				m_runLogged = true;
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, runLine());
 			}
+			if (m_portOnLogPending) portOnLine();   // PR-M4: after the RUN line, on the calc thread (real bar date + zone)
 
 			//ensure latest account equity is available, this method seems to kick off async internal processes
 			//to update interface elements like the Accounts etc, this can be deduced from how the interface looks
@@ -2340,12 +2353,16 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// M-INSTR F4 (spec R6): Data1 tick from Bars.Info.MinMove / PriceScale. No silent fallback: a tick that cannot be resolved (or a
-		/// Bars.Info that cannot be read) is written as an Error line (traceAlways: one File.AppendAllText, whatever TraceLevel is) and
-		/// then thrown. The 0.01 fallback and the bare catch are gone.
+		/// M-INSTR F4 (spec R6) + PR-M4 (§11.1 item 4): the Data1 profile tick when buildProfiles() built one (the preset's exact tick
+		/// after the cross-check, else the detected MinMove / PriceScale), so engines and the profile use the same tick. Without a
+		/// profile (InstrumentConfig.enabled false, or before buildProfiles ran in this StartCalc): Bars.Info.MinMove / PriceScale, strict
+		/// (tickFromMinMove). No silent fallback: a tick that cannot be resolved (or a Bars.Info that cannot be read) is written as an
+		/// Error line (traceAlways: one File.AppendAllText, whatever TraceLevel is) and then thrown.
 		/// </summary>
 		private double resolveTick()
 		{
+			InstrumentProfile p1 = InstrumentProfileOf(1);
+			if (p1 != null && p1.tick > 0 && !double.IsInfinity(p1.tick)) return p1.tick;   // Build refuses any other tick ('tick' / mismatch:tick)
 			double mm = double.NaN, ps = double.NaN;
 			string name = null;
 			try
@@ -2369,21 +2386,22 @@ namespace PowerLanguage.Strategy
 
 		// ---- M-INSTR PR-M3 (spec §4.2, §4.5, §6.1, §6.2, §11 row 7): buildProfiles() + SessionReader + INSTR line ----
 
-		/// <summary>M-INSTR §5.3: instrument profile settings (protected, no [Input]s). enabled is log-only until PR-M4: false skips
-		/// buildProfiles() (no INSTR lines, no cross-check, no profileHash on RUN). profileHash is outside every configHash (rev-3 Q7).</summary>
+		/// <summary>M-INSTR §5.3: instrument profile settings (protected, no [Input]s). enabled = false is the off switch since refusals are
+		/// enforced (PR-M4): it skips buildProfiles() (no INSTR lines, no refusals, no profileHash on RUN; tickSize() then reads
+		/// MinMove / PriceScale strictly). profileHash is outside every configHash (rev-3 Q7).</summary>
 		protected InstrumentConfig InstrumentConfig { get; } = new InstrumentConfig();
 
 		private InstrumentStreams m_instr;   // null until buildProfiles() ran in this StartCalc, or when InstrumentConfig.enabled is false
 		private bool m_instrPending;         // first-CalcBar session re-check still to do
 
-		/// <summary>Profile of data stream ds built by buildProfiles() (null = absent, not built or refused in log-only mode). PR-M3: no
-		/// engine reads it yet (engines move to profiles from PR-M4 on; they never read Bars.Info / Bars.Sessions for these facts).</summary>
+		/// <summary>Profile of data stream ds built by buildProfiles() (null = absent stream or InstrumentConfig.enabled false; a refusal
+		/// throws, PR-M4). tickSize() reads the Data1 tick from it (PR-M4); no other engine reads it yet (engines move to profiles from PR-M4 on; they never read Bars.Info / Bars.Sessions for these facts).</summary>
 		protected InstrumentProfile InstrumentProfileOf(int ds) { return m_instr == null ? null : m_instr.Profile(ds); }
 
 		/// <summary>
 		/// §6.2 StartCalc part: for every existing stream, typed reads (ClassOf(Info.Category), InstrumentMcFields.Read) and the
-		/// SessionReader StartCalc read, then InstrumentProfile.Build. LOG ONLY apart from the cross-checks (InstrumentStreams.Enforced:
-		/// mismatch:* and sessions:changed write the Error line and throw); any other refusal, or a failing typed read, is one Warning.
+		/// SessionReader StartCalc read, then InstrumentProfile.Build. ENFORCED (PR-M4, §11.1 item 1): every refusal, an unmapped
+		/// ESymbolCategory ('class', item 2) and a failing typed or session read write the Error line (traceAlways) and throw.
 		/// </summary>
 		private void buildProfiles()
 		{
@@ -2400,51 +2418,59 @@ namespace PowerLanguage.Strategy
 			{
 				if (!IsExist(ds)) continue;
 				IInstrument b = BarsOfData(ds);
-				string name = null;
-				InstrumentProfile.Inputs? inputs = null;   // struct: null = the typed read failed
+				string name = null, sessionName = null;
+				Action<string> err = msg => traceAlways(ETraceLevel.Error, name, msg);
+				IInstrumentSettings info;
+				ESymbolCategory category;
+				try { info = b.Info; name = info.Name; sessionName = info.SessionName; category = info.Category; }
+				catch (Exception ex) { throw instrReadFailed(ds, name, "Bars.Info", ex); }
+				EAssetClass cls;
+				try { cls = ClassOf(category); }
+				catch (InvalidOperationException ex)
+				{
+					// PR-M4 (§11.1 item 2): an unmapped ESymbolCategory is the 'class' refusal: Error line, then throw (as classOfData1)
+					throw InstrumentError.Fail(err, new InstrumentSubject("INSTR", name, EAssetClass.Unsupported, "", sessionName), InstrumentReason.Class, ex.Message,
+						"use a Future, Stock, SpotFx, Crypto or Index symbol");
+				}
+				InstrumentProfile.Inputs inputs;
+				try { inputs = InstrumentMcFields.Read(info, cls); }
+				catch (Exception ex) { throw instrReadFailed(ds, name, "Bars.Info.ASymbolInfo2", ex); }
+				// PR-M4 (D2, §6.1): strict zones for the exchange-time profileHash (null = unresolved: Build refuses tz:bar / tz:exchange)
 				try
 				{
-					IInstrumentSettings info = b.Info;
-					name = info.Name;
-					inputs = InstrumentMcFields.Read(info, ClassOf(info.Category));
+					inputs.barZoneSetting = $"{info.TimeZone}";   // refusal detail only (log)
+					inputs.exchangeZoneId = exchangeTimeZoneId(info.Exchange);
+					inputs.exchangeZone = inputs.exchangeZoneId == null ? null : findTzStrict(inputs.exchangeZoneId);
+					inputs.barZone = strictBarTimeZone(info);
 				}
-				catch (Exception ex)
-				{
-					// M3 log only. This also catches ClassOf's default-case throw (unmapped ESymbolCategory): in M3 it becomes this Warning
-					// and the stream runs without a profile. PR-M4 MUST enforce it (Error line + throw class), like the other refusals.
-					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " " + (name ?? "?") + " failed (" + ex.GetType().Name + ": " + ex.Message + "); no profile"));
-				}
-				_MtfMath.Session[] startCalc = null;
+				catch (Exception ex) { throw instrReadFailed(ds, name, "Bars.Info.TimeZone / Exchange", ex); }
+				_MtfMath.Session[] startCalc;
 				try { startCalc = SessionReader.Read(b); }
-				catch (Exception ex)
-				{
-					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " sessions at StartCalc failed (" + ex.GetType().Name + ": " + ex.Message + ")"));
-				}
-				string symbol = name;
-				streams.Start(ds, inputs, startCalc, InstrumentConfig, msg => traceAlways(ETraceLevel.Error, symbol, msg), warn);
+				catch (Exception ex) { throw instrReadFailed(ds, name, "sessions at StartCalc", ex); }
+				streams.Start(ds, inputs, startCalc, InstrumentConfig, err, warn);   // a refusal writes its Error line and throws
 			}
 			m_instr = streams;
 			m_instrPending = true;
 		}
 
 		/// <summary>§4.5 / §6.1 first CalcBar: SessionReader re-read of every started stream (all streams are loaded when the strategy
-		/// calculates its first bar, as _InstrDump A2 read them), S1 re-check (sessions:changed throws after its Error line) and one INSTR
-		/// line per stream at Info.</summary>
+		/// calculates its first bar, as the PR-M0 dump runs showed), S1 re-check (sessions:none / sessions:changed throw after their Error
+		/// line) and one INSTR line per stream at Info.</summary>
 		private void profilesFirstBar()
 		{
 			m_instrPending = false;
 			if (m_instr == null) return;
-			Action<string> warn = engineSink(ETraceLevel.Warning), info = engineSink(ETraceLevel.Info);
+			Action<string> info = engineSink(ETraceLevel.Info);
 			for (int ds = 1; ds < m_instr.Length && ds <= MaxDataStream; ds++)
 			{
 				if (!m_instr.Pending(ds)) continue;
 				IInstrument b = BarsOfData(ds);
-				_MtfMath.Session[] firstBar = null;
+				_MtfMath.Session[] firstBar;
 				try { firstBar = SessionReader.Read(b); }
-				catch (Exception ex)
-				{
-					if (warn != null) warn(InstrumentStreams.LogOnlyLine(ds, "reading Data" + ds + " sessions on the first bar failed (" + ex.GetType().Name + ": " + ex.Message + ")"));
-				}
+				catch (Exception ex) { throw instrReadFailed(ds, null, "sessions on the first bar", ex); }
+				DateTime firstBarTime;   // PR-M4 (D2): week of the bar zone → exchange zone session conversion
+				try { firstBarTime = b.Time[0]; }
+				catch (Exception ex) { throw instrReadFailed(ds, null, "the first bar time", ex); }
 				// log labels only (R1); each read on its own so one failure does not blank the others
 				IInstrumentSettings si = null; string symbol = null, cat, bvo, tz, infoErr = "unavailable(null)";
 				try { si = b.Info; } catch (Exception ex) { si = null; infoErr = unavailable(ex); }
@@ -2456,9 +2482,19 @@ namespace PowerLanguage.Strategy
 					try { bvo = $"{si.BVO}"; } catch (Exception ex) { bvo = unavailable(ex); }
 					tz = instrZoneLabel(si);
 				}
-				string line = m_instr.FirstBar(ds, firstBar, cat, tz, bvo, msg => traceAlways(ETraceLevel.Error, symbol, msg), warn);
+				string line = m_instr.FirstBar(ds, firstBar, firstBarTime, cat, tz, bvo, msg => traceAlways(ETraceLevel.Error, symbol, msg));
 				if (line != null && info != null) info(line);
 			}
+		}
+
+		/// <summary>PR-M4: a failing typed / session read in buildProfiles() or the first-bar re-check (was a log-only Warning in M3):
+		/// Error line (traceAlways), then the returned exception is thrown by the caller.</summary>
+		private InvalidOperationException instrReadFailed(int ds, string name, string what, Exception ex)
+		{
+			string ds_ = ds.ToString(CultureInfo.InvariantCulture);
+			string msg = "M-INSTR: INSTR ds(" + ds_ + ") reading Data" + ds_ + " " + what + (name == null ? "" : " of " + name) + " failed (" + ex.GetType().Name + ": " + ex.Message + ").";
+			traceAlways(ETraceLevel.Error, name, msg);
+			return new InvalidOperationException(msg, ex);
 		}
 
 		/// <summary>INSTR tz(...) label: the chart setting and the zone it resolves to, e.g. "Exchange→Central Standard Time" (log only).</summary>
@@ -2466,7 +2502,9 @@ namespace PowerLanguage.Strategy
 		{
 			string setting, zone;
 			try { setting = $"{info.TimeZone}"; } catch (Exception ex) { setting = unavailable(ex); }
-			try { TimeZoneInfo z = resolveBarTimeZone(info); zone = z != null ? z.Id : "unresolved"; } catch (Exception ex) { zone = unavailable(ex); }
+			// "unresolved" stays on purpose: this is a second, log-only read on the first bar. Build already refused tz:bar for a null
+			// zone at StartCalc, so it is not expected; it keeps the label from throwing if MC answers differently the second time.
+			try { TimeZoneInfo z = strictBarTimeZone(info); zone = z != null ? z.Id : "unresolved"; } catch (Exception ex) { zone = unavailable(ex); }
 			return setting + "→" + zone;
 		}
 
@@ -2523,11 +2561,13 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		/// <summary>M-INSTR F4: tick = |MinMove / PriceScale| when that is finite and &gt; 0, MinMove when PriceScale is 0 (as before); NaN = unresolved.</summary>
+		/// <summary>M-INSTR F4 + PR-M4 (§11.1 item 4): tick = MinMove / PriceScale when PriceScale &gt; 0 and the ratio is finite and &gt; 0;
+		/// anything else is NaN = unresolved (resolveTick: Error line, then throw). Same rule as the profile's 'tick' refusal
+		/// (InstrumentChecks.Tick): the PriceScale == 0 → MinMove path and Math.Abs of a negative ratio (silent fallbacks) are gone.</summary>
 		protected static double tickFromMinMove(double minMove, double priceScale)
 		{
-			if (priceScale == 0) return minMove > 0 && !double.IsInfinity(minMove) ? minMove : double.NaN;
-			double t = Math.Abs(minMove / priceScale);   // NaN / 0 / Infinity (bad MinMove or PriceScale, underflow) = unresolved; main fell back to MinMove
+			if (!(priceScale > 0) || double.IsInfinity(priceScale)) return double.NaN;
+			double t = minMove / priceScale;   // NaN / 0 / negative / Infinity (bad MinMove, underflow) = unresolved
 			return t > 0 && !double.IsInfinity(t) ? t : double.NaN;
 		}
 
@@ -2538,6 +2578,40 @@ namespace PowerLanguage.Strategy
 				+ " (Bars.Info.MinMove = " + minMove.ToString("R", CultureInfo.InvariantCulture)
 				+ ", PriceScale = " + priceScale.ToString("R", CultureInfo.InvariantCulture)
 				+ "). There is no 0.01 fallback: set Min Movement / Price Scale for the symbol in QuoteManager.";
+		}
+
+		/// <summary>PR-M4 (review nit 5): Windows zone id of an exchange's Exchange-time bars, or null when unknown. The exchange name as
+		/// the feed reports it is split into tokens (letters/digits; any other character separates) and a token must equal one of the
+		/// names below exactly (case-insensitive); the first matching token wins. No substring match: "NYSEARCA" or "CMEX" are unknown
+		/// (tz:exchange / the resolveBarTimeZone exception) until they are added here or in an exchangeTimeZoneId override.</summary>
+		protected static string exchangeZoneIdOf(string exchange)
+		{
+			if (string.IsNullOrWhiteSpace(exchange)) return null;
+			var tok = new System.Text.StringBuilder();
+			string e = exchange.ToUpperInvariant();
+			for (int i = 0; i <= e.Length; i++)
+			{
+				if (i < e.Length && char.IsLetterOrDigit(e[i])) { tok.Append(e[i]); continue; }
+				if (tok.Length == 0) continue;
+				string id = exchangeTokenZoneId(tok.ToString());
+				if (id != null) return id;
+				tok.Clear();
+			}
+			return null;
+		}
+		private static string exchangeTokenZoneId(string token)
+		{
+			switch (token)
+			{
+				// Chicago: CME Group's CME/CBOT (GLOBEX, ECBOT, CBT; MIC XCME / XCBT) and CBOE
+				case "CME": case "XCME": case "GLOBEX": case "CBOT": case "ECBOT": case "CBT": case "XCBT": case "CBOE":
+					return "Central Standard Time";
+				// New York: NYMEX/COMEX and the US equity exchanges
+				case "NYMEX": case "COMEX": case "NYSE": case "NASDAQ": case "ARCA":
+					return "Eastern Standard Time";
+				default:
+					return null;
+			}
 		}
 		// </instr-host-core>
 
@@ -2866,17 +2940,39 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
-		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
+		/// the data feed reports it: exact, case-insensitive token match (exchangeZoneIdOf; PR-M4 replaced the substring match).
+		/// Override to add feeds/exchanges.
 		/// </summary>
 		protected virtual string exchangeTimeZoneId(string exchange)
 		{
-			if (string.IsNullOrWhiteSpace(exchange)) return null;
-			string e = exchange.ToUpperInvariant();
-			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
-			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
-			// New York: NYMEX/COMEX and the US equity exchanges
-			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
-			return null;
+			return exchangeZoneIdOf(exchange);
+		}
+
+		/// <summary>PR-M4 (D2, §6.1): the profile's bar zone, strict: Local → Local, GMT → UTC, Exchange → the exchange zone; null when
+		/// unresolved (an exchange outside exchangeTimeZoneId, an id that does not resolve, or an unknown RequestTimeZone). No Local /
+		/// New York fallback (resolveBarTimeZone / findTz keep theirs for the existing ET-anchored callers).</summary>
+		protected TimeZoneInfo strictBarTimeZone(IInstrumentSettings info)
+		{
+			switch (info.TimeZone)
+			{
+				case RequestTimeZone.Local:
+					return TimeZoneInfo.Local;
+				case RequestTimeZone.GMT:
+					return TimeZoneInfo.Utc;
+				case RequestTimeZone.Exchange:
+					string id = exchangeTimeZoneId(info.Exchange);
+					return id == null ? null : findTzStrict(id);
+				default:
+					return null;
+			}
+		}
+
+		/// <summary>PR-M4 (D2): TimeZoneInfo for an id, or null when it does not resolve (no fallback zone).</summary>
+		protected static TimeZoneInfo findTzStrict(string id)
+		{
+			try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+			catch (TimeZoneNotFoundException) { return null; }
+			catch (InvalidTimeZoneException) { return null; }
 		}
 
 		protected static TimeZoneInfo findTz(string windowsId)

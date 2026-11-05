@@ -7,16 +7,16 @@ namespace PowerLanguage.Strategy
 	/// <summary>
 	/// THROW-AWAY TEST SIGNAL for Portfolio Trader live checks P5b L1-L7 (specs/m-port-spec.md §9, specs/live-check-sheet.md Check 7).
 	/// Not derived from _CustomSignal on purpose (stands alone; the saved settings of the real strategies are not touched).
-	/// Pair it with the MM signal _TestPortMM (_TestPortMM.Signal.CS). Delete both after the sitting.
+	/// Its companion MM signal _TestPortMM was deleted in M-INSTR PR-M4 (2026-11-04); the MM-side checks it drove are retired.
 	///
 	/// COMMON SETUP (Check 7)
-	///   1. Import _TestPortArm.Strategy.CS, _TestPortMM.Signal.CS (and _PortMM.Function.CS if not already imported) into the
+	///   1. Import _TestPortArm.Strategy.CS (and _PortMM.Function.CS if not already imported) into the
 	///      PowerLanguage .NET Editor and compile.
 	///   2. Portfolio Trader: new portfolio, 2 strategies, each with ONLY this signal: index 0 = @ES 1 min, index 1 = @NQ 1 min,
 	///      both dxFeed. (L7: index 0 = @ES 1 min, index 1 = @CL 5 min.) Symbol-table order defines MyIndex (0 = first row).
-	///   3. Portfolio Settings tab -> Money management signal -> Select -> _TestPortMM. Exposure / Max % Capital at Risk per
-	///      Position = 100% / 100% so MC's own Money & Risk layer never cuts an order. Strategy Properties trade size = 1 contract.
-	///   4. Set the SAME Test and Variant on _TestPortArm (both strategies) and on _TestPortMM.
+	///   3. Portfolio Settings tab: Exposure / Max % Capital at Risk per Position = 100% / 100% so MC's own Money & Risk
+	///      layer never cuts an order. Strategy Properties trade size = 1 contract.
+	///   4. Set the SAME Test and Variant on _TestPortArm (both strategies).
 	///   5. Backtest first (1 session of data is enough). L6 also: real-time PT on the IBKR paper profile, then restart PT.
 	///   6. Read the PowerLanguage .NET Editor Output; every line starts with "P5b L&lt;n&gt;" so it can be filtered/grepped.
 	///
@@ -34,7 +34,7 @@ namespace PowerLanguage.Strategy
 	///   All     publishes pm.stamp = Bars.Time[0] (and test.bar = CurrentBar) every bar and journals every fill:
 	///           "P5b Lx ARM#i FILL entry|exit time(..) price(..) size(..)" plus "P5b Lx ARM#i STAMP .." each bar.
 	///
-	/// EXPECTED OUTCOMES: see the per-test table in _TestPortMM.Signal.CS (the MM header is the pass/fail sheet).
+	/// EXPECTED OUTCOMES: the pass/fail sheet lived in the deleted _TestPortMM header; see specs/live-check-sheet.md Check 7.
 	/// </summary>
 	public class _TestPortArm : PortfolioSignalObject
 	{

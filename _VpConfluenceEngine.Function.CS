@@ -1152,8 +1152,7 @@ namespace PowerLanguage.Function
 		private double confluenceTolerance()
 		{
 			int ticks = m_owner.ConfluenceAlignTicks;
-			double tick = m_owner.helperTickSize();
-			if (tick <= 0) tick = FALLBACK_TICK;
+			double tick = m_owner.helperTickSize();   // tickSize(): the Data1 profile tick, or Error line + throw (M-INSTR PR-M4, R6: no 0.01 fallback)
 			return ticks * tick;
 		}
 	}
