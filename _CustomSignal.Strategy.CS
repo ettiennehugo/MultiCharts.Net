@@ -2502,6 +2502,8 @@ namespace PowerLanguage.Strategy
 		{
 			string setting, zone;
 			try { setting = $"{info.TimeZone}"; } catch (Exception ex) { setting = unavailable(ex); }
+			// "unresolved" stays on purpose: this is a second, log-only read on the first bar. Build already refused tz:bar for a null
+			// zone at StartCalc, so it is not expected; it keeps the label from throwing if MC answers differently the second time.
 			try { TimeZoneInfo z = strictBarTimeZone(info); zone = z != null ? z.Id : "unresolved"; } catch (Exception ex) { zone = unavailable(ex); }
 			return setting + "→" + zone;
 		}
@@ -2576,6 +2578,40 @@ namespace PowerLanguage.Strategy
 				+ " (Bars.Info.MinMove = " + minMove.ToString("R", CultureInfo.InvariantCulture)
 				+ ", PriceScale = " + priceScale.ToString("R", CultureInfo.InvariantCulture)
 				+ "). There is no 0.01 fallback: set Min Movement / Price Scale for the symbol in QuoteManager.";
+		}
+
+		/// <summary>PR-M4 (review nit 5): Windows zone id of an exchange's Exchange-time bars, or null when unknown. The exchange name as
+		/// the feed reports it is split into tokens (letters/digits; any other character separates) and a token must equal one of the
+		/// names below exactly (case-insensitive); the first matching token wins. No substring match: "NYSEARCA" or "CMEX" are unknown
+		/// (tz:exchange / the resolveBarTimeZone exception) until they are added here or in an exchangeTimeZoneId override.</summary>
+		protected static string exchangeZoneIdOf(string exchange)
+		{
+			if (string.IsNullOrWhiteSpace(exchange)) return null;
+			var tok = new System.Text.StringBuilder();
+			string e = exchange.ToUpperInvariant();
+			for (int i = 0; i <= e.Length; i++)
+			{
+				if (i < e.Length && char.IsLetterOrDigit(e[i])) { tok.Append(e[i]); continue; }
+				if (tok.Length == 0) continue;
+				string id = exchangeTokenZoneId(tok.ToString());
+				if (id != null) return id;
+				tok.Clear();
+			}
+			return null;
+		}
+		private static string exchangeTokenZoneId(string token)
+		{
+			switch (token)
+			{
+				// Chicago: CME Group's CME/CBOT (GLOBEX, ECBOT, CBT; MIC XCME / XCBT) and CBOE
+				case "CME": case "XCME": case "GLOBEX": case "CBOT": case "ECBOT": case "CBT": case "XCBT": case "CBOE":
+					return "Central Standard Time";
+				// New York: NYMEX/COMEX and the US equity exchanges
+				case "NYMEX": case "COMEX": case "NYSE": case "NASDAQ": case "ARCA":
+					return "Eastern Standard Time";
+				default:
+					return null;
+			}
 		}
 		// </instr-host-core>
 
@@ -2904,17 +2940,12 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>
 		/// Windows time zone id of an exchange's Exchange-time bars, or null when unknown. Matching is on the exchange name as
-		/// the data feed reports it (case-insensitive, substring). Override to add feeds/exchanges.
+		/// the data feed reports it: exact, case-insensitive token match (exchangeZoneIdOf; PR-M4 replaced the substring match).
+		/// Override to add feeds/exchanges.
 		/// </summary>
 		protected virtual string exchangeTimeZoneId(string exchange)
 		{
-			if (string.IsNullOrWhiteSpace(exchange)) return null;
-			string e = exchange.ToUpperInvariant();
-			// Chicago: CME Group's CME/CBOT (incl. GLOBEX, ECBOT, CBT) exchange time
-			if (e.Contains("CME") || e.Contains("CBOT") || e.Contains("CBT") || e.Contains("GLOBEX") || e.Contains("CBOE")) return "Central Standard Time";
-			// New York: NYMEX/COMEX and the US equity exchanges
-			if (e.Contains("NYMEX") || e.Contains("COMEX") || e.Contains("NYSE") || e.Contains("NASDAQ") || e.Contains("ARCA")) return "Eastern Standard Time";
-			return null;
+			return exchangeZoneIdOf(exchange);
 		}
 
 		/// <summary>PR-M4 (D2, §6.1): the profile's bar zone, strict: Local → Local, GMT → UTC, Exchange → the exchange zone; null when

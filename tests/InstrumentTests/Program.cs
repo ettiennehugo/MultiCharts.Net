@@ -403,7 +403,7 @@ static class Program
 		var c = new List<S>(); for (var d = DayOfWeek.Sunday; d <= DayOfWeek.Saturday; d++) c.Add(new S(d, TimeSpan.Zero, d, TimeSpan.FromDays(1)));
 		var cp = InstrumentProfile.Build(In("BTCUSD", EAssetClass.Crypto, "", 1, 100, 1), null, null).WithSessions(c.ToArray(), c.ToArray(), FB, null);
 		Check(cp.root == "BTCUSD" && cp.rootSource == "parsed" && cp.sessionsPerYear == 365 && cp.calendar == ECalendar.Observed && cp.sizingUnit == ESizingUnit.Units, "crypto profile");
-		Check(!cp.hasOvernight && cp.rthSplit != null && cp.rthSplit.source == ERthSource.ChartDaySession, "crypto 00:00-24:00 literal: no overnight, day split (VERIFY, PR-M4)");
+		Check(!cp.hasOvernight && cp.rthSplit != null && cp.rthSplit.source == ERthSource.ChartDaySession, "crypto 00:00-24:00 literal: no overnight (StartDay == EndDay), day split; MC template VERIFY");
 		Check(cp.InstrLine(1, "Crypto", "Exchange", "TickCount").Contains("dayOpen(00:00) sessionEnd(24:00)"), "crypto INSTR dayOpen/sessionEnd: " + cp.InstrLine(1, "Crypto", "Exchange", "TickCount"));
 	}
 
@@ -763,6 +763,48 @@ static class Program
 		// wrap across the week: Sat 23:30 ET → Sat 22:30 CT; Sun 00:30 ET → Sat 23:30 CT
 		var w = InstrumentSessions.ToExchange(new[] { new S(DayOfWeek.Sunday, new TimeSpan(0, 30, 0), DayOfWeek.Sunday, new TimeSpan(2, 0, 0)) }, ET, CT, FB, sub, null);
 		Check(w[0].StartDay == DayOfWeek.Saturday && w[0].StartTime == new TimeSpan(23, 30, 0) && w[0].EndDay == DayOfWeek.Sunday && w[0].EndTime == new TimeSpan(1, 0, 0), "D2 conversion wraps the week");
+		D2DstWeeks(six, sub);
+	}
+
+	/// <summary>PR-M4 review nit 1: ToExchange on a summer week and on the two US DST boundary weeks (2026-03-08 spring forward,
+	/// 2026-11-01 fall back; both zones switch at 02:00 local). The sessions are placed on the week of the first bar.</summary>
+	static void D2DstWeeks(InstrumentProfile.Inputs six, InstrumentSubject sub)
+	{
+		Func<S, string> hm = x => x.StartDay + " " + InstrumentText.Hm(x.StartTime) + "-" + x.EndDay + " " + InstrumentText.Hm(x.EndTime);
+		// summer (EDT/CDT, UTC-4/-5): the ET list still maps to the CT list and keeps the MC hash; a GMT bar zone needs the summer list
+		DateTime summer = new DateTime(2026, 7, 6, 17, 0, 0);
+		S[] ct = Week5(17, 16), et = Week5(18, 17), gmtSummer = Week5(22, 21), gmtWinter = Week5(23, 22);
+		Check(InstrumentText.Sessions(InstrumentSessions.ToExchange(et, ET, CT, summer, sub, null)) == InstrumentText.Sessions(ct), "D2 summer week: ET 18:00→17:00 = CT 17:00→16:00");
+		var sLocal = InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, summer, null);
+		var sGmt = InstrumentProfile.Build(Zoned(six, TimeZoneInfo.Utc, "GMT"), null, null).WithSessions(gmtSummer, gmtSummer, summer, null);
+		Check(sLocal.ProfileHash() == "55576df6a8a99c05" && sGmt.ProfileHash() == "55576df6a8a99c05", "D2 summer week: 6E Default in Local ET and GMT 22:00→21:00 keep 55576df6a8a99c05 (" + sLocal.ProfileHash() + ", " + sGmt.ProfileHash() + ")");
+		string wInSummer = InstrumentText.Sessions(InstrumentSessions.ToExchange(gmtWinter, TimeZoneInfo.Utc, CT, summer, sub, null));
+		Check(wInSummer == InstrumentText.Sessions(Week5(18, 17)), "D2 summer week: the January GMT list (23:00→22:00) is CT 18:00→17:00 in July (UTC offsets move): " + wInSummer);
+
+		// spring forward, week of Sun 2026-03-08: 01:30 EST (valid) → 06:30 UTC, 03:00 EDT → 07:00 UTC; a gap time 02:00 / 02:30 moves +1h
+		// to 03:00 / 03:30 EDT → 07:00 / 07:30 UTC
+		DateTime spring = new DateTime(2026, 3, 9, 17, 0, 0);
+		var sp = InstrumentSessions.ToExchange(new[] {
+			new S(DayOfWeek.Sunday, new TimeSpan(1, 30, 0), DayOfWeek.Sunday, new TimeSpan(3, 0, 0)),
+			new S(DayOfWeek.Sunday, new TimeSpan(2, 0, 0), DayOfWeek.Sunday, new TimeSpan(2, 30, 0)) }, ET, TimeZoneInfo.Utc, spring, sub, null);
+		Check(hm(sp[0]) == "Sunday 06:30-Sunday 07:00", "D2 spring-forward boundary: Sun 01:30 EST-03:00 EDT = 06:30-07:00 UTC: " + hm(sp[0]));
+		Check(hm(sp[1]) == "Sunday 07:00-Sunday 07:30", "D2 spring-forward gap: Sun 02:00-02:30 ET (invalid) moves +1h = 07:00-07:30 UTC: " + hm(sp[1]));
+		// the same gap times into CT: 07:00 / 07:30 UTC is still CST (CT switches at 08:00 UTC) = 01:00 / 01:30
+		var spCt = InstrumentSessions.ToExchange(new[] { new S(DayOfWeek.Sunday, new TimeSpan(2, 0, 0), DayOfWeek.Sunday, new TimeSpan(2, 30, 0)) }, ET, CT, spring, sub, null);
+		Check(hm(spCt[0]) == "Sunday 01:00-Sunday 01:30", "D2 spring-forward gap ET→CT = 01:00-01:30 CST: " + hm(spCt[0]));
+		// the regular 6E Default week across the switch still hashes as MC (Sun 18:00 is after the 02:00 switch)
+		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, spring, null).ProfileHash() == "55576df6a8a99c05", "D2 spring-forward week: 6E Default Local ET keeps 55576df6a8a99c05");
+
+		// fall back, week of Sun 2026-11-01: 01:00-02:00 ET happens twice; .NET ConvertTime reads an ambiguous time as standard
+		// time (EST, UTC-5): 00:30 EDT → 04:30 UTC, 01:30 (ambiguous) → 06:30 UTC (not 05:30), 02:00 EST → 07:00 UTC
+		DateTime fall = new DateTime(2026, 11, 2, 17, 0, 0);
+		var fb = InstrumentSessions.ToExchange(new[] {
+			new S(DayOfWeek.Sunday, new TimeSpan(0, 30, 0), DayOfWeek.Sunday, new TimeSpan(1, 30, 0)),
+			new S(DayOfWeek.Sunday, new TimeSpan(1, 30, 0), DayOfWeek.Sunday, new TimeSpan(2, 0, 0)) }, ET, TimeZoneInfo.Utc, fall, sub, null);
+		Check(ET.IsAmbiguousTime(new DateTime(2026, 11, 1, 1, 30, 0)), "D2 fall-back: Sun 2026-11-01 01:30 ET is ambiguous");
+		Check(hm(fb[0]) == "Sunday 04:30-Sunday 06:30", "D2 fall-back boundary: Sun 00:30 EDT-01:30 (ambiguous, read as EST) = 04:30-06:30 UTC: " + hm(fb[0]));
+		Check(hm(fb[1]) == "Sunday 06:30-Sunday 07:00", "D2 fall-back ambiguous start: Sun 01:30 (EST)-02:00 EST = 06:30-07:00 UTC: " + hm(fb[1]));
+		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, fall, null).ProfileHash() == "55576df6a8a99c05", "D2 fall-back week: 6E Default Local ET keeps 55576df6a8a99c05");
 	}
 
 	static int Main()

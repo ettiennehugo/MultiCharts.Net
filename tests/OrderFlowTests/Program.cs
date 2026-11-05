@@ -1209,6 +1209,22 @@ static class Program
 				&& rtk.IndexOf("if (p1 != null && p1.tick > 0 && !double.IsInfinity(p1.tick)) return p1.tick;") < iTry,
 				"MI-B9 resolveTick: the Data1 profile tick first (PR-M4); else an unresolved tick or an unreadable Bars.Info (MinMove, PriceScale or Name, all read inside the try) writes an Error line (traceAlways) and throws; no bare catch, no TICK_FALLBACK");
 			{
+				// PR-M4 review nit 5: exchangeTimeZoneId is an exact token match (exchangeZoneIdOf), no substring
+				const string C = "Central Standard Time", E = "Eastern Standard Time";
+				Check(IH.exchangeZoneIdOf("CME") == C && IH.exchangeZoneIdOf("cme") == C && IH.exchangeZoneIdOf("CBOT") == C && IH.exchangeZoneIdOf("ECBOT") == C
+					&& IH.exchangeZoneIdOf("CBT") == C && IH.exchangeZoneIdOf("GLOBEX") == C && IH.exchangeZoneIdOf("CBOE") == C && IH.exchangeZoneIdOf("XCME") == C && IH.exchangeZoneIdOf("XCBT") == C
+					&& IH.exchangeZoneIdOf("NYMEX") == E && IH.exchangeZoneIdOf("COMEX") == E && IH.exchangeZoneIdOf("NYSE") == E && IH.exchangeZoneIdOf("NASDAQ") == E && IH.exchangeZoneIdOf("ARCA") == E,
+					"MI-B10 exchangeZoneIdOf: each listed exchange (case-insensitive) maps to its zone");
+				Check(IH.exchangeZoneIdOf("NYSE ARCA") == E && IH.exchangeZoneIdOf("CME-GLOBEX") == C && IH.exchangeZoneIdOf(" CME_MINI ") == C && IH.exchangeZoneIdOf("ESZ24:XCME") == C
+					&& IH.exchangeZoneIdOf("IDEALPRO / NASDAQ") == E,
+					"MI-B10 exchangeZoneIdOf: any non-alphanumeric separates tokens; the first listed token wins");
+				Check(IH.exchangeZoneIdOf("CMEX") == null && IH.exchangeZoneIdOf("NYSEARCA") == null && IH.exchangeZoneIdOf("ACME") == null && IH.exchangeZoneIdOf("NASDAQGS") == null
+					&& IH.exchangeZoneIdOf("IDEALPRO") == null && IH.exchangeZoneIdOf("") == null && IH.exchangeZoneIdOf("  ") == null && IH.exchangeZoneIdOf(null) == null,
+					"MI-B10 exchangeZoneIdOf: no substring match (CMEX, NYSEARCA, ACME, NASDAQGS unknown); blank/null = null");
+				string etz = MethodBody(cs, "protected virtual string exchangeTimeZoneId(string exchange)") ?? "";
+				Check(etz.Contains("return exchangeZoneIdOf(exchange);") && !etz.Contains("Contains("), "MI-B10 exchangeTimeZoneId delegates to exchangeZoneIdOf (no Contains)");
+			}
+			{
 				string vpbSrc = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VolumeProfileBase.Strategy.CS"));
 				string vceSrc = System.IO.File.ReadAllText(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "../../_VpConfluenceEngine.Function.CS"));
 				Func<string, string> noCmt = x => System.Text.RegularExpressions.Regex.Replace(x, @"//[^\n]*", "");

@@ -268,8 +268,10 @@ namespace PowerLanguage.Function
 		/// <summary>Class-level VERIFY notes kept with the FX / crypto defaults (§4.5, §8.3).</summary>
 		public static string ClassVerify(EAssetClass c)
 		{
-			if (c == EAssetClass.SpotFx) return "VERIFY sessionsPerYear 260; hasOvernight for 24h templates fixed in PR-M4";
-			if (c == EAssetClass.Crypto) return "VERIFY hasOvernight for 00:00-24:00 templates fixed in PR-M4";
+			// hasOvernight is fixed (PR-M4): StartDay != EndDay, so a Sun-Fri 17:00->17:00 FX template is overnight and a 00:00-24:00
+			// single-day crypto template is not. What stays VERIFY is the class constants and the template as MC reports it (no MC run yet).
+			if (c == EAssetClass.SpotFx) return "VERIFY sessionsPerYear 260; 24h template as MC reports it (hasOvernight = StartDay != EndDay: yes)";
+			if (c == EAssetClass.Crypto) return "VERIFY 00:00-24:00 template as MC reports it (hasOvernight = StartDay != EndDay: no)";
 			return null;
 		}
 	}
@@ -671,7 +673,8 @@ namespace PowerLanguage.Function
 			foreach (var h in d) if (h.End > end) end = h.End;
 			return d.Count > 0;
 		}
-		/// <summary>hasOvernight = some session crosses midnight in session time (StartDay != EndDay). 24 h single-day templates: VERIFY (PR-M4).</summary>
+		/// <summary>hasOvernight = some session crosses midnight in session time (StartDay != EndDay). Fixed in PR-M4: a 24 h single-day
+		/// template (crypto 00:00-24:00) is not overnight; an FX 17:00-17:00 next-day template is. MC's own crypto/FX templates: VERIFY.</summary>
 		public static bool HasOvernight(_MtfMath.Session[] sessions)
 		{
 			if (sessions == null) return false;
@@ -710,7 +713,8 @@ namespace PowerLanguage.Function
 		/// rth times are the ones hashed in Canon (the zone id is not hashed).</summary>
 		public static string XSessionsText(TimeZoneInfo exchangeZone, _MtfMath.Session[] exchangeSessions, RthSplit exchangeRth)
 		{
-			return (exchangeZone == null ? "unresolved" : exchangeZone.Id) + " " + InstrumentText.Sessions(exchangeSessions) + "; rth "
+			// exchangeZone is never null here: Build refuses tz:exchange first (PR-M4 review nit 4 removed the 'unresolved' branch)
+			return exchangeZone.Id + " " + InstrumentText.Sessions(exchangeSessions) + "; rth "
 				+ (exchangeRth == null ? "none" : InstrumentText.Hm(exchangeRth.start) + "-" + InstrumentText.Hm(exchangeRth.end));
 		}
 
@@ -1037,9 +1041,8 @@ namespace PowerLanguage.Function
 		/// sessions:none). Logs the root-crosscheck Warning and the D1 cost-class Warning.</summary>
 		public void Start(int ds, InstrumentProfile.Inputs i, _MtfMath.Session[] startCalcSessions, InstrumentConfig cfg, Action<string> errorSink, Action<string> warnSink)
 		{
-			m_started[ds] = true; m_pending[ds] = true; m_startCalc[ds] = startCalcSessions;
-			InstrumentProfile p = Guard(ds, s => InstrumentProfile.Build(i, cfg, s), errorSink);
-			m_profile[ds] = p;
+			InstrumentProfile p = Guard(ds, s => InstrumentProfile.Build(i, cfg, s), errorSink);   // a refusal throws: the stream is not started
+			m_profile[ds] = p; m_started[ds] = true; m_pending[ds] = true; m_startCalc[ds] = startCalcSessions;
 			if (warnSink == null) return;
 			if (p.rootWarning != null) warnSink(p.rootWarning);
 			string cw = p.CostMismatchWarning(ds);
@@ -1060,15 +1063,16 @@ namespace PowerLanguage.Function
 			return full.InstrLine(ds, catLabel, tzLabel, bvoLabel);
 		}
 
-		/// <summary>RUN line suffix: " profileHash(1=&lt;hash&gt;;2=...)" over the started streams; none = no profile (unreachable once
-		/// a refusal throws; kept for a half-started run). Outside every configHash (rev-3 Q7). Empty when no stream was started (InstrumentConfig.enabled false).</summary>
+		/// <summary>RUN line suffix: " profileHash(1=&lt;hash&gt;;2=...)" over the started streams. A stream counts as started only once
+		/// Build returned a profile; every refusal throws (PR-M4), so there is no 'none' entry any more (review nit 4). Outside every
+		/// configHash (rev-3 Q7). Empty when no stream was started (InstrumentConfig.enabled false).</summary>
 		public string RunSuffix()
 		{
 			var sb = new StringBuilder();
 			for (int ds = 1; ds < m_profile.Length; ds++)
 			{
 				if (!m_started[ds]) continue;
-				sb.Append(sb.Length == 0 ? " profileHash(" : ";").Append(InstrumentText.Int(ds)).Append('=').Append(m_profile[ds] == null ? "none" : m_profile[ds].ProfileHash());
+				sb.Append(sb.Length == 0 ? " profileHash(" : ";").Append(InstrumentText.Int(ds)).Append('=').Append(m_profile[ds].ProfileHash());
 			}
 			return sb.Length == 0 ? "" : sb.Append(')').ToString();
 		}
