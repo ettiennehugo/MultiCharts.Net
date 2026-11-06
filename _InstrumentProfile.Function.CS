@@ -620,6 +620,15 @@ namespace PowerLanguage.Function
 			return es != null && p.contractMonths == es.contractMonths;
 		}
 
+		/// <summary>M5 (Ettienne 2026-11-06): off or no profile → equity-index dates (the off switch and the ES/MES/NQ/MNQ shape).
+		/// A profile with roll facts that is not that shape → Profile. Profile enforcement on and no roll facts → Unavailable
+		/// (do not answer with the equity-index quarter).</summary>
+		public static EOwnContractSource OwnSource(bool profilesOn, InstrumentProfile p)
+		{
+			if (!profilesOn || p == null || IsEquityIndexQuarterly(p)) return EOwnContractSource.EquityIndex;
+			return HasRollFacts(p) ? EOwnContractSource.Profile : EOwnContractSource.Unavailable;
+		}
+
 		/// <summary>A preset row carrying the profile's roll facts. Tick / bpv fall back to 1 only so the row can be built; callers
 		/// use the expiry / roll fields, not the prices. Requires <see cref="HasRollFacts"/>.</summary>
 		public static InstrumentPresetRow RollRow(InstrumentProfile p)

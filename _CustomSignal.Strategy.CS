@@ -1216,24 +1216,30 @@ namespace PowerLanguage.Strategy
 			m_event = e;
 		}
 
-		/// <summary>M5 §7 EVENT. Equity-index quarterly profiles (ES/MES/NQ/MNQ) stay on EventRules so every own-expiry answer matches
-		/// the static quarter, including generated QuarterlyExpiry / RollWeek. Any other known profile with roll facts is bound:
-		/// ContractRollDate, ContractExpiryDate, IsRollWeek, InSpan, and the year's QuarterlyExpiry / RollWeek records all use that
-		/// profile. Shared macro rows and the other calendar kinds stay. NyseStandIn: those date queries use the stand-in business
-		/// days; SessionsToExpiry still refuses calendar (S4). A profile with no roll facts is not bound. That leaves the equity-index
-		/// answers in place. It is a pending owner decision, not an approved fallback (see the PR). EventConfig.classes is not changed.</summary>
+		/// <summary>M5 §7 EVENT (Ettienne 2026-11-06 12:13 ET). Equity-index profiles and the off switch stay on EventRules.
+		/// Any other known profile with roll facts is bound. No roll facts → Unavailable: Step/Classify keep running and do not
+		/// inherit the equity-index quarter; an explicit own-expiry query throws unknown-field:roll. sharedCalendar and ownContract
+		/// are independent. NyseStandIn SessionsToExpiry still refuses calendar (S4).</summary>
 		private void bindEventContract(_EventCalendar e)
 		{
 			e.contract = null;
 			e.contractCalendarVerified = true;
 			e.contractRefuse = null;
-			if (m_instr == null) return;
-			InstrumentProfile p = InstrumentProfileOf(1);
-			if (p == null || InstrumentRules.IsEquityIndexQuarterly(p) || !InstrumentRules.HasRollFacts(p)) return;
+			InstrumentProfile p = m_instr == null ? null : InstrumentProfileOf(1);
+			e.ownSource = InstrumentRules.OwnSource(m_instr != null, p);
+			InstrumentSubject sub = p != null ? p.Subject("EVENT") : new InstrumentSubject("EVENT", "", EAssetClass.Unsupported, "?", "");
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p == null ? null : p.name, msg);
+			string root = p == null || string.IsNullOrEmpty(p.root) ? "?" : p.root;
+			e.ownQueryRefuse = delegate
+			{
+				bool missing = e.OwnStatus() == EOwnContractStatus.Unavailable;
+				InstrumentError.Fail(err, sub, InstrumentReason.UnknownField("roll"),
+					missing ? "no preset expiry, roll rule, contract months, or business-day calendar" : "own-contract expiry is not selected",
+					missing ? "add a preset row / cost for " + root : "set EventConfig.ownContract and include Calendar in EventConfig.classes");
+			};
+			if (e.ownSource != EOwnContractSource.Profile || p == null) return;
 			InstrumentPresetRow row = InstrumentRules.RollRow(p);
 			Func<DateTime, bool> bd = p.isBusinessDay;
-			InstrumentSubject sub = p.Subject("EVENT");
-			Action<string> err = msg => traceAlways(ETraceLevel.Error, p.name, msg);
 			e.contract = delegate (DateTime day, out DateTime expiry, out DateTime roll)
 			{
 				int y, m;
@@ -1246,7 +1252,6 @@ namespace PowerLanguage.Strategy
 			e.contractCalendarVerified = p.calendar == ECalendar.CmeEquityIndex;
 			if (!e.contractCalendarVerified)
 			{
-				string root = string.IsNullOrEmpty(p.root) ? "?" : p.root;
 				e.contractRefuse = delegate (string _)
 				{
 					InstrumentError.Fail(err, sub, InstrumentReason.Calendar,

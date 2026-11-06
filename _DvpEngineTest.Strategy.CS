@@ -210,7 +210,7 @@ namespace PowerLanguage.Strategy
 			int mbb = ExecInfo.MaxBarsBack;                       // typed IExecInfo member (as in _MtfProbe / _VolumeProfileBase)
 			bool mbbOk = mbb == RunMaxBarsBack;
 			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
-			bool rootOk = root == "ES";                           // the RollDate table (EventRules.RollDate) is ES-only
+			bool rootOk = root == "ES";                           // D9a baseline chart is @ES; the roll table itself follows the profile (M6g is not this check)
 			// first = the first CALCULATED bar, not the first loaded one: the first @ES bar of 2016 is Sun 2016-01-03 18:00 ET, but with
 			// Max bars back = RunMaxBarsBack (50) Data2's skip (50 bars of 60 Minute, 23 per Globex day) puts the first calculated bar at
 			// about Tue 2016-01-05 evening ET. Changing RunMaxBarsBack requires changing this startOk window and the header's Q21 /
