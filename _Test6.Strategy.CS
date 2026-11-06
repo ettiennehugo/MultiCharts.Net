@@ -97,8 +97,8 @@ namespace PowerLanguage.Strategy
 			RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig);   // before base.StartCalc: the engines are created there
 			NeedsDaily = true;
 			// educator review A2 7a / R1: roll detection ON, Table mode (tests/RollTests source-checks this line). Table years =
-			// HostConfig.rollFromYear-rollToYear. M5 fills the dates from the Data1 profile after base.StartCalc (profiles exist then).
-			// ES EquityIndexCustomary dates equal EventRules.RollDate, so the digest stays fdd63bd8f179a8d4.
+			// HostConfig.rollFromYear-rollToYear are contract years. M5 fills them from the Data1 profile after base.StartCalc.
+			// ES EquityIndexCustomary dates equal EventRules.RollDate and fall inside the contract year, so the digest stays fdd63bd8f179a8d4.
 			RollDetection = ERollDetection.Table;
 			// PR #46 (DECIDED by Ettienne): carry ATR20d on from the roll-adjusted history; only the splice day's TR is skipped
 			HostConfig.atrRestartOnRoll = false;

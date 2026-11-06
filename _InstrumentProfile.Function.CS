@@ -628,16 +628,19 @@ namespace PowerLanguage.Function
 				string.IsNullOrEmpty(p.currency) ? "USD" : p.currency, p.contractMonths, p.expiry.Value, p.roll.Value, p.rollDays, p.calendar, p.cluster ?? "", "profile", null);
 		}
 
-		/// <summary>M5: one roll date per listed contract month in [yearFrom, yearTo]. Years outside 1970..2100, or yearTo &lt; yearFrom,
-		/// refuse unknown-field:roll (no clamp). Equity-index quarterly dates equal EventRules.RollDate. NyseStandIn rows are counted
-		/// with that stand-in; this does not mark them CME-verified.</summary>
+		/// <summary>M5 contract-year roll dates: the roll date of each listed contract whose contract month is in [yearFrom, yearTo].
+		/// This is not calendar coverage. A roll can fall in the previous calendar year (CLF24 rolls 2023-12-15; that date is in the
+		/// 2024 contract year and is absent from a 2023 contract year). The next January contract (CLF25 roll 2024-12-17) is not in
+		/// the 2024 contract year. Equity-index quarterly dates equal EventRules.RollDate and fall inside the contract year, so the
+		/// ES digest is unchanged. 1970..2100 is an overflow guard, not a market rule. An out-of-range or inverted pair refuses
+		/// unknown-field:roll and tells the caller to fix the years (it does not ask for a preset). NyseStandIn is still a stand-in.</summary>
 		public static void CollectRollDates(InstrumentProfile p, int yearFrom, int yearTo, string engine, Action<string> errorSink, ICollection<DateTime> into)
 		{
 			RequireRollFacts(p, engine, errorSink);
 			string eng = string.IsNullOrEmpty(engine) ? "ROLL" : engine;
 			InstrumentSubject s = p.Subject(eng);
 			if (yearFrom < 1970 || yearTo > 2100 || yearTo < yearFrom)
-				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "year range " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo) + " (allowed 1970..2100)", "add a preset row / cost for " + s.Root);
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "contract-year range " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo) + " is inverted or outside 1970..2100", "pass yearFrom <= yearTo with both years inside 1970..2100");
 			InstrumentPresetRow row = RollRow(p);
 			int n = 0;
 			for (int y = yearFrom; y <= yearTo; y++)

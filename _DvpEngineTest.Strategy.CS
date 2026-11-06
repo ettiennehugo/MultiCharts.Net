@@ -119,7 +119,7 @@ namespace PowerLanguage.Strategy
 			RollDetection = ERollDetection.Table;   // before base.StartCalc: the DVP engine reads the mode there (skipShare needs roll detection)
 			base.StartCalc();
 			if (RollDates.Count == 0)
-				fillProfileRollDates(RollFromYear, RollToYear, "DVP");   // M5: profile contract months / roll; ES dates = EventRules.RollDate
+				fillProfileRollDates(RollFromYear, RollToYear, "DVP");   // M5 contract years 2015-2025 (not calendar coverage). ES dates = EventRules.RollDate. A CL January contract rolls in the prior December, so this range includes Dec 2024 (CLF25) and omits Dec 2025 (CLF26); DVP's 2025-01-01 holdout means that omitted date is outside the feed window.
 			m_rep = null;
 			if (DvpConfig.enabled)
 			{

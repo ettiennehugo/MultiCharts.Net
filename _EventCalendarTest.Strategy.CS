@@ -10,16 +10,24 @@ namespace PowerLanguage.Strategy
 	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke), Info (probe) or Journal (roll: EVROLL lines
 	/// need Info, the VPF-4 roll splice lines with RollSpliceDiag need Journal).
 	///
+	/// SMOKE AND NyseStandIn (M5, S4): mode 0 calls SessionsToExpiry once per trading day, at Info only. _CustomSignal.stepEvent does
+	/// not call it, so other strategies do not stop for that reason. On CL/GC/ZN/6E the profile calendar is the NYSE stand-in, which
+	/// is not a verified holiday calendar, so that call logs an Error line and throws. That stop is intentional. Do not catch it.
+	/// Supported smoke, probe, and the equity-index splice check are the ES/NQ chart this header names. Mode 1 and mode 2 do not call
+	/// SessionsToExpiry.
+	///
 	/// RUN (Mode input):
 	///   0 smoke - EventConfig.enabled with defaults. Expect the "EVENT created ..." journal line; with the PR A empty table also
-	///             "EVENT table missing: <kinds>", day lines and no exception. Rule kinds (claims, ISM, opex, expiry, roll week, half day)
+	///             "EVENT table missing: <kinds>", day lines and no exception on an ES/NQ chart. Rule kinds (claims, ISM, opex, expiry, roll week, half day)
 	///             still appear. The trade journal gains evtDayTier,evtMinSince when a derived strategy trades.
 	///   1 probe P-EV1 - one EVPROBE line per scheduled event at ProbeTier+ (default T3 so rule-only Claims shows up while the table
 	///             is empty until PR B): ET time, UTC, the bar whose [open, close) contains it, and the week class
 	///             (dst = US/EU DST mismatch weeks, mismatch = chart zone offset differs from ET, normal). Ends with an EVPROBE summary.
 	///             CHECK: every 08:30 ET event lands on the bar that closes at 08:31..08:35 ET equivalent in the chart zone, in all classes.
-	///   2 roll - RollDetection = Series; one EVROLL line per detected splice day with RuleRollDate and the offset in sessions.
-	///             CHECK against tools/m-event/out/roll_splices_2016_2024.csv; offsets other than 0 are the VERIFY items for PR B.
+	///   2 roll - RollDetection = Series; one EVROLL line per detected splice day with the engine's own roll date (ContractRollDate:
+	///             the profile rule when one is bound, otherwise the static equity-index RuleRollDate) and the offset in sessions.
+	///             On ES/NQ, CHECK against tools/m-event/out/roll_splices_2016_2024.csv; offsets other than 0 are the VERIFY items for PR B.
+	///             On CL/GC/ZN/6E the date is the preset rule on the NYSE stand-in, not a CME verification and not that CSV.
 	/// </summary>
 	public class _EventCalendarTest : _CustomSignal
 	{
@@ -110,7 +118,7 @@ namespace PowerLanguage.Strategy
 			if (!ev.IsRollDay() || ev.TradingDay == m_lastSplice) return;
 			m_lastSplice = ev.TradingDay;
 			m_rollCount++;
-			DateTime rule = _EventCalendar.RuleRollDate(m_lastSplice.AddDays(-14));
+			DateTime rule = ev.ContractRollDate(m_lastSplice.AddDays(-14));
 			int off = 0; DateTime a = rule < m_lastSplice ? rule : m_lastSplice, b = rule < m_lastSplice ? m_lastSplice : rule;
 			for (DateTime d = a; d < b; d = d.AddDays(1)) if (EventRules.IsNyseBusinessDay(d)) off++;
 			if (rule > m_lastSplice) off = -off;

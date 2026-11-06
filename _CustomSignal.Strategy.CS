@@ -1216,12 +1216,12 @@ namespace PowerLanguage.Strategy
 			m_event = e;
 		}
 
-		/// <summary>M5 §7 EVENT. Equity-index quarterly profiles (ES/MES/NQ/MNQ) keep EventRules.ExpiryDate / RollDate so IsRollWeek and
-		/// SessionsToExpiry stay on that code path. Any other profile with roll facts is bound. A profile without roll facts is left
-		/// on the equity-index path: §7 also says "event classes per asset class", but no mask per class is specified (row 36 only
-		/// says EIA is absent from the ES default). EventConfig.classes stays Macro|Calendar. Applying S5 here would refuse EVENT on
-		/// every stock. Both are reported, not chosen. NyseStandIn: IsRollWeek uses the stand-in business days; SessionsToExpiry
-		/// refuses calendar (S4 — the stand-in is not a verified holiday calendar).</summary>
+		/// <summary>M5 §7 EVENT. Equity-index quarterly profiles (ES/MES/NQ/MNQ) stay on EventRules so every own-expiry answer matches
+		/// the static quarter, including generated QuarterlyExpiry / RollWeek. Any other known profile with roll facts is bound:
+		/// ContractRollDate, ContractExpiryDate, IsRollWeek, InSpan, and the year's QuarterlyExpiry / RollWeek records all use that
+		/// profile. Shared macro rows and the other calendar kinds stay. NyseStandIn: those date queries use the stand-in business
+		/// days; SessionsToExpiry still refuses calendar (S4). A profile with no roll facts is not bound. That leaves the equity-index
+		/// answers in place. It is a pending owner decision, not an approved fallback (see the PR). EventConfig.classes is not changed.</summary>
 		private void bindEventContract(_EventCalendar e)
 		{
 			e.contract = null;
@@ -1979,9 +1979,11 @@ namespace PowerLanguage.Strategy
 			m_rollSeriesBound = true;
 		}
 
-		/// <summary>M5: fill RollDates from the Data1 profile for [yearFrom, yearTo]. No profile (M-INSTR off) keeps the equity-index
-		/// quarterly EventRules.RollDate table — the off switch, not a fallback for a profile that failed to build. A built profile
-		/// without roll facts throws unknown-field:roll (S5). ES dates equal EventRules.RollDate (digest fdd63bd8f179a8d4 for 2000-2035).</summary>
+		/// <summary>M5: fill RollDates with contract-year roll dates (InstrumentRules.CollectRollDates), not every roll whose calendar
+		/// date falls in the range. No profile (M-INSTR off) keeps the equity-index quarterly EventRules.RollDate table — the off
+		/// switch. A built profile without roll facts throws unknown-field:roll (S5). ES dates equal EventRules.RollDate (digest
+		/// fdd63bd8f179a8d4 for 2000-2035). Leaving a symbol with no roll facts on that equity-index event path is a pending owner
+		/// decision, not an approved fallback.</summary>
 		protected void fillProfileRollDates(int yearFrom, int yearTo, string engine)
 		{
 			if (m_instr == null)
