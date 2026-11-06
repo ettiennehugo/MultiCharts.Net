@@ -23,6 +23,11 @@ namespace PowerLanguage.Function
 		public int gapTicks = 8;
 		public ICollection<DateTime> dates; // Table: trading dates on which the continuous series switched contract
 
+		/// <summary>M5: Series window. Null keeps the ES quarterly <see cref="SeriesWindow"/> (RollTests, and a host with no profile
+		/// bound). The host sets it from the Data1 profile's contract months / expiry / roll (<c>InstrumentRules.SeriesWindow</c>).</summary>
+		public delegate bool SeriesWindowFn(DateTime tradingDay, out DateTime expiry);
+		public SeriesWindowFn seriesWindow;
+
 		private readonly List<int> m_rollBars = new List<int>();
 		private DateTime m_lastDay = DateTime.MinValue;
 		private int m_lastBar = -1;
@@ -107,7 +112,8 @@ namespace PowerLanguage.Function
 			{
 				if (table && dates != null && dates.Contains(tradingDay.Date)) roll = true;
 				DateTime expiry;
-				if (series && gapTicks > 0 && SeriesWindow(tradingDay, out expiry) && expiry != m_seriesLatch
+				bool inWindow = seriesWindow != null ? seriesWindow(tradingDay, out expiry) : SeriesWindow(tradingDay, out expiry);
+				if (series && gapTicks > 0 && inWindow && expiry != m_seriesLatch
 					&& Math.Abs(open - prevClose) >= gapTicks * tick - tick * 1e-6) { roll = true; bySeries = true; m_seriesLatch = expiry; }
 			}
 			bool added = false;

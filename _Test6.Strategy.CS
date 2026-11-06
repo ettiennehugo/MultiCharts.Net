@@ -36,13 +36,15 @@ namespace PowerLanguage.Strategy
 	//   first available bar. Dev runs end 2024-12-31 (prereg §8 step 3). Exclusions (roll ±1, half days, not-usable days) are
 	//   applied OFFLINE to all arms equally; the MC run trades them so G/A = U's trades minus the blocked days (§4.1 equivalence).
 	//
-	// ROLLS (educator review A2 7a / R1): RollDetection = Table, set in StartCalc (no [Input]). RollDates = EventRules.RollDate(y, m)
-	//   for every quarterly month of HostConfig.rollFromYear-rollToYear (2000-2035): the customary roll date (Thursday eight days before the
-	//   third Friday; the Monday before it for contracts expiring from EventRules.RollRuleMondayFrom = 2022-04-01, i.e. from ESM22,
-	//   rolled Mon 2022-06-13). That is the rule that generated tools/m-event/out/roll_splices_2016_2024.csv
-	//   (tools/m-event/roll_splices.py, column rule_roll); tests/EventTests checks the two agree for 2016-2024. Nothing reads the CSV
-	//   at run time (an MC study has no repo path), and its observed_splice column is still empty: the vendor's actual splice
-	//   date is unverified (fill it from _EventCalendarTest Mode 2 EVROLL lines; PR #46 review: a blocker before any dev run).
+	// ROLLS (educator review A2 7a / R1): RollDetection = Table, set in StartCalc (no [Input]). RollDates are filled from the Data1
+	//   profile (M5): every listed contract month of HostConfig.rollFromYear-rollToYear (2000-2035). On ES that preset is
+	//   EquityIndexCustomary, which is EventRules.RollDate (Thursday eight days before the third Friday; the Monday before it for
+	//   contracts expiring from EventRules.RollRuleMondayFrom = 2022-04-01, i.e. from ESM22, rolled Mon 2022-06-13). That is the rule
+	//   that generated tools/m-event/out/roll_splices_2016_2024.csv (tools/m-event/roll_splices.py, column rule_roll); tests/EventTests
+	//   checks the two agree for 2016-2024. Nothing reads the CSV at run time (an MC study has no repo path), and its observed_splice
+	//   column is still empty: the vendor's actual splice date is unverified (fill it from _EventCalendarTest Mode 2 EVROLL lines;
+	//   PR #46 review: a blocker before any dev run). NQ/MNQ share the ES rule and stay VERIFY against that splice. CL/GC/ZN/6E use
+	//   their preset roll on the NYSE stand-in calendar (not CME-verified; M8). N2 (REGGATE accepts ES only) is M6h, not this fill.
 	//   Series is NOT used. DAY KEY (PR #46 review Q3b): tradingDayKey = the Globex trading day (_CmeSessionClock.GlobexTradingDayEt,
 	//   ET >= 18:00 -> next date), so a splice at the 18:00 ET Globex open lands on the first bar of the roll day and the M-DAILY
 	//   roll offset is the real calendar spread. M-DAILY days / ATR20d are therefore Globex days (18:00-17:00 ET). The REGGATE header
@@ -95,20 +97,20 @@ namespace PowerLanguage.Strategy
 			RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig);   // before base.StartCalc: the engines are created there
 			NeedsDaily = true;
 			// educator review A2 7a / R1: roll detection ON, Table mode (tests/RollTests source-checks this line). Table years =
-			// HostConfig.rollFromYear-rollToYear (EventRules.RollDate = roll_splices_2016_2024.csv rule_roll, checked by EventTests).
+			// HostConfig.rollFromYear-rollToYear. M5 fills the dates from the Data1 profile after base.StartCalc (profiles exist then).
+			// ES EquityIndexCustomary dates equal EventRules.RollDate, so the digest stays fdd63bd8f179a8d4.
 			RollDetection = ERollDetection.Table;
+			// PR #46 (DECIDED by Ettienne): carry ATR20d on from the roll-adjusted history; only the splice day's TR is skipped
+			HostConfig.atrRestartOnRoll = false;
+			DailyConfig.atrLength = HostConfig.atrLength;
+			DailyConfig.atrRestartOnRoll = HostConfig.atrRestartOnRoll;
+			base.StartCalc();
 			if (RollDates.Count == 0)
-				for (int y = HostConfig.rollFromYear; y <= HostConfig.rollToYear; y++)
-					for (int m = 3; m <= 12; m += 3) RollDates.Add(EventRules.RollDate(y, m));
+				fillProfileRollDates(HostConfig.rollFromYear, HostConfig.rollToYear, "ROLL");
 			// PR #46 review Q1: hash what actually runs
 			HostConfig.rollDetection = RollDetection.ToString();
 			HostConfig.rollDatesDigest = _RollDetector.DatesDigest(RollDates);
 			HostConfig.tradingDay = "Globex18ET";
-			DailyConfig.atrLength = HostConfig.atrLength;
-			// PR #46 (DECIDED by Ettienne): carry ATR20d on from the roll-adjusted history; only the splice day's TR is skipped
-			HostConfig.atrRestartOnRoll = false;
-			DailyConfig.atrRestartOnRoll = HostConfig.atrRestartOnRoll;
-			base.StartCalc();
 			m_core = new A263Core(HostConfig);
 			m_terc = new AtrTercileTracker(RegimeConfig.atrPctLookback, RegimeConfig.K);
 			m_cfgHash = RegimeGate.Hash(RegimeConfig, RegimeGateConfig, HostConfig);

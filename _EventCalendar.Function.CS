@@ -1122,6 +1122,16 @@ namespace PowerLanguage.Function
 		/// <summary>Test seam: expected table hash (null = EventRules.ExpectedTableSha); used only with the compiled table.</summary>
 		public string tableShaExpected;
 
+		/// <summary>M5: null = the equity-index quarterly path (EventRules.ExpiryDate / RollDate). The host sets this for a profile that
+		/// is not that shape. The shared macro table (Generate) stays equity-index; this binding is the live roll/expiry query only.</summary>
+		public delegate bool ContractFn(DateTime day, out DateTime expiry, out DateTime roll);
+		public ContractFn contract;
+		/// <summary>False → SessionsToExpiry refuses (S4: NyseStandIn is not a verified holiday calendar). IsRollWeek still uses
+		/// <see cref="contract"/> (expiry/roll business days are the stand-in's approved use).</summary>
+		public bool contractCalendarVerified = true;
+		/// <summary>Host logs the Error line and throws. Called when a session count needs a verified calendar.</summary>
+		public Action<string> contractRefuse;
+
 		sealed class Year
 		{
 			public EventRec[] recs;
@@ -1906,26 +1916,53 @@ namespace PowerLanguage.Function
 		}
 
 		// ---- roll / expiry (EV-6.9) ----
-		/// <summary>Trading day inside a RollWeek span [roll date, expiry date] (rule kind; the class mask does not apply).</summary>
+		/// <summary>Trading day inside a RollWeek span [roll date, expiry date] (rule kind; the class mask does not apply).
+		/// M5: a bound contract uses that profile's roll and expiry; otherwise the equity-index quarter.</summary>
 		public bool IsRollWeek(DateTime day)
 		{
 			day = day.Date;
+			if (contract != null)
+			{
+				DateTime exp, roll;
+				if (!contract(day, out exp, out roll)) return false;
+				return day >= roll && day <= exp;
+			}
 			DateTime q = nextQuarterlyExpiry(day);
 			return day >= RollDateFor(q) && day <= q;
 		}
 		public bool IsRollWeek() { return m_day != DateTime.MinValue && IsRollWeek(m_day); }
 		/// <summary>A roll splice (rollOn(1)) was seen on the current trading day.</summary>
 		public bool IsRollDay() { return m_day != DateTime.MinValue && m_lastSpliceDay == m_day; }
-		/// <summary>Globex sessions after `day` up to and including the next quarterly expiry date (0 on expiry day).</summary>
+		/// <summary>Sessions after `day` up to and including the next expiry (0 on expiry day). Equity-index path counts CME Globex
+		/// sessions (_CmeHolidays). A bound contract whose calendar is not verified refuses before counting (S4).</summary>
 		public int SessionsToExpiry(DateTime day)
 		{
 			day = day.Date;
-			DateTime q = nextQuarterlyExpiry(day);
+			DateTime q = nextExpiry(day);
 			int n = 0;
 			for (DateTime d = day.AddDays(1); d <= q; d = d.AddDays(1)) if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(d)) ++n;
 			return n;
 		}
 		public int SessionsToExpiry() { return SessionsToExpiry(m_day); }
+		DateTime nextExpiry(DateTime day)
+		{
+			if (contract == null) return nextQuarterlyExpiry(day);
+			if (!contractCalendarVerified)
+			{
+				if (contractRefuse != null) contractRefuse("calendar");
+				string msg = "M-INSTR: EVENT cannot count sessions to expiry: the bound calendar is not verified. add a verified calendar (PR-M8).";
+				if (error != null) error(msg);
+				throw new InvalidOperationException(msg);
+			}
+			DateTime exp, roll;
+			if (!contract(day, out exp, out roll))
+			{
+				string msg = "M-INSTR: EVENT cannot count sessions to expiry: no roll date for the next contract.";
+				if (error != null) error(msg);
+				throw new InvalidOperationException(msg);
+			}
+			return exp;
+		}
 		static DateTime nextQuarterlyExpiry(DateTime day)
 		{
 			int y = day.Year, m = (day.Month + 2) / 3 * 3;
@@ -1934,8 +1971,18 @@ namespace PowerLanguage.Function
 			return q;
 		}
 		public static DateTime RollDateFor(DateTime expiry) { return EventRules.RollDate(expiry.Year, expiry.Month); }
-		/// <summary>Customary roll date of the quarterly contract expiring nearest on/after `day` (roll-splice tabulation).</summary>
+		/// <summary>Customary roll date of the quarterly contract expiring nearest on/after `day` (roll-splice tabulation).
+		/// Stays on the equity-index rule. <see cref="ContractRollDate"/> follows a bound profile.</summary>
 		public static DateTime RuleRollDate(DateTime day) { return RollDateFor(nextQuarterlyExpiry(day.Date)); }
+		/// <summary>M5: roll date of the contract the bound profile selects; the equity-index rule when no contract is bound.</summary>
+		public DateTime ContractRollDate(DateTime day)
+		{
+			day = day.Date;
+			if (contract == null) return RuleRollDate(day);
+			DateTime exp, roll;
+			if (!contract(day, out exp, out roll)) return DateTime.MinValue;
+			return roll;
+		}
 
 		/// <summary>Instant inside a span record of `kind` (RollWeek: [roll date 00:00 ET, expiry 09:30 ET)).</summary>
 		public bool InSpan(EEventKind kind, DateTime utc)

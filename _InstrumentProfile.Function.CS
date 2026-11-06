@@ -592,6 +592,66 @@ namespace PowerLanguage.Function
 			DateTime rule = r.Value, from = rule.AddDays(-(((int)rule.DayOfWeek + 6) % 7)), d = tradingDay.Date;
 			return d >= from && d <= from.AddDays(4);
 		}
+
+		/// <summary>M5 §6.4 S5: a roll consumer needs a preset expiry, a roll rule other than None, listed contract months and a
+		/// business-day calendar. Missing → Error line, then throw unknown-field:roll. Action text is the S5 sentence.</summary>
+		public static bool HasRollFacts(InstrumentProfile p)
+		{
+			return p != null && p.expiry.HasValue && p.roll.HasValue && p.roll.Value != ERollRule.None && p.contractMonths != 0 && p.isBusinessDay != null;
+		}
+
+		public static void RequireRollFacts(InstrumentProfile p, string engine, Action<string> errorSink)
+		{
+			string eng = string.IsNullOrEmpty(engine) ? "ROLL" : engine;
+			InstrumentSubject s = p == null ? new InstrumentSubject(eng, "", EAssetClass.Future, "?", "") : p.Subject(eng);
+			string action = "add a preset row / cost for " + (string.IsNullOrEmpty(s.Root) ? "?" : s.Root);
+			if (p == null || !p.expiry.HasValue || !p.roll.HasValue || p.contractMonths == 0 || p.isBusinessDay == null)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "no preset expiry, roll rule, contract months, or business-day calendar", action);
+			if (p.roll.Value == ERollRule.None)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "roll rule is None", action);
+		}
+
+		/// <summary>ES/MES/NQ/MNQ shape: ThirdFridaySoq + EquityIndexCustomary + CmeEquityIndex + the ES month mask. Those keep
+		/// EventRules.ExpiryDate / RollDate / nextQuarterlyExpiry (the adjusted-Friday path). Any other shape uses InstrumentRules.</summary>
+		public static bool IsEquityIndexQuarterly(InstrumentProfile p)
+		{
+			if (p == null || p.expiry != EExpiryRule.ThirdFridaySoq || p.roll != ERollRule.EquityIndexCustomary || p.calendar != ECalendar.CmeEquityIndex) return false;
+			InstrumentPresetRow es = InstrumentPresets.Find("ES", EAssetClass.Future);
+			return es != null && p.contractMonths == es.contractMonths;
+		}
+
+		/// <summary>A preset row carrying the profile's roll facts. Tick / bpv fall back to 1 only so the row can be built; callers
+		/// use the expiry / roll fields, not the prices. Requires <see cref="HasRollFacts"/>.</summary>
+		public static InstrumentPresetRow RollRow(InstrumentProfile p)
+		{
+			return new InstrumentPresetRow(string.IsNullOrEmpty(p.root) ? "?" : p.root, p.assetClass, p.tick > 0 ? p.tick : 1, p.bigPointValue > 0 ? p.bigPointValue : 1,
+				string.IsNullOrEmpty(p.currency) ? "USD" : p.currency, p.contractMonths, p.expiry.Value, p.roll.Value, p.rollDays, p.calendar, p.cluster ?? "", "profile", null);
+		}
+
+		/// <summary>M5: one roll date per listed contract month in [yearFrom, yearTo]. Years outside 1970..2100, or yearTo &lt; yearFrom,
+		/// refuse unknown-field:roll (no clamp). Equity-index quarterly dates equal EventRules.RollDate. NyseStandIn rows are counted
+		/// with that stand-in; this does not mark them CME-verified.</summary>
+		public static void CollectRollDates(InstrumentProfile p, int yearFrom, int yearTo, string engine, Action<string> errorSink, ICollection<DateTime> into)
+		{
+			RequireRollFacts(p, engine, errorSink);
+			string eng = string.IsNullOrEmpty(engine) ? "ROLL" : engine;
+			InstrumentSubject s = p.Subject(eng);
+			if (yearFrom < 1970 || yearTo > 2100 || yearTo < yearFrom)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "year range " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo) + " (allowed 1970..2100)", "add a preset row / cost for " + s.Root);
+			InstrumentPresetRow row = RollRow(p);
+			int n = 0;
+			for (int y = yearFrom; y <= yearTo; y++)
+				for (int m = 1; m <= 12; m++)
+				{
+					if (!MonthMask.Has(p.contractMonths, m)) continue;
+					DateTime? r = Roll(row, y, m, p.isBusinessDay, s, errorSink);
+					if (r == null) continue;
+					into.Add(r.Value.Date);
+					n++;
+				}
+			if (n == 0)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "no roll dates in " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo), "add a preset row / cost for " + s.Root);
+		}
 	}
 
 	/// <summary>§4.5 derived session fields (MC-free) over the stream's Sessions list in session (= bar) time. Sessions are a weekly

@@ -199,6 +199,9 @@ static class Program
 			Check(InstrumentRules.Expiry(EExpiryRule.ThirdFridaySoq, y, m, EventRules.IsNyseBusinessDay, RS, null) == EventRules.RuleExpiryDate(y, m), "T4 MES/NQ/MNQ share ThirdFridaySoq");
 		}
 		Check(n == 48, "T4 48 ES rows");
+		string csvText = File.ReadAllText(Fx("expiry-worked.csv"));
+		Check(csvText.Contains("checked by the analyst") && csvText.Contains("roll = preset roll rule applied by hand") && csvText.Contains("not a vendor date"),
+			"T4 fixture distinguishes analyst-checked expiry dates from hand-computed roll dates (not a vendor splice)");
 		foreach (var raw in File.ReadAllLines(Fx("expiry-worked.csv")))
 		{
 			string l = raw.Trim(); if (l.Length == 0 || l[0] == '#') continue;
@@ -265,6 +268,14 @@ static class Program
 			Check(r == EventRules.RollDate(y, m), "T5 roll == EventRules.RollDate " + y + "-" + m);
 		}
 		Check(_RollDetector.DatesDigest(dates) == "fdd63bd8f179a8d4", "T5 digest " + _RollDetector.DatesDigest(dates));
+		var esP = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null);
+		Check(InstrumentRules.IsEquityIndexQuarterly(esP), "T5 built ES profile is equity-index quarterly (host keeps EventRules for expiry queries)");
+		var collected = new List<DateTime>();
+		InstrumentRules.CollectRollDates(esP, 2000, 2035, "ROLL", null, collected);
+		Check(collected.Count == 144 && _RollDetector.DatesDigest(collected) == "fdd63bd8f179a8d4", "T5 CollectRollDates digest fdd63bd8f179a8d4");
+		bool order = collected.Count == dates.Count;
+		for (int i = 0; order && i < dates.Count; i++) if (collected[i] != dates[i]) order = false;
+		Check(order, "T5 CollectRollDates == EventRules.RollDate in quarter order");
 	}
 	static void T6Windows()
 	{
@@ -302,6 +313,55 @@ static class Program
 		var gc = InstrumentPresets.Find("GC", EAssetClass.Future);
 		Check(Ds(InstrumentRules.Roll(gc, 2024, 8, EventRules.IsNyseBusinessDay, RS, null).Value) == "2024-07-30", "T6 GCQ24 roll = 1 bd before FND 2024-07-31 (VERIFY)");
 		Check(InstrumentRules.Roll(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", MonthMask.All, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), 2024, 1, EventRules.IsNyseBusinessDay, RS, null) == null, "T6 ERollRule.None -> no roll");
+		// M5: host quarterly loops call CollectRollDates. Counts are the preset's listed months, not a hardcoded H/M/U/Z loop.
+		// Calendars stay NyseStandIn (not CME-verified).
+		var clB = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
+		var gcB = InstrumentProfile.Build(In("@GC", EAssetClass.Future, "GC", 1, 10, 100), null, null);
+		var znB = InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null, null);
+		var sixB = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 1, 20000, 125000), null, null);
+		foreach (var pair in new[] { new object[] { clB, 12 }, new object[] { gcB, 6 }, new object[] { znB, 4 }, new object[] { sixB, 4 } })
+		{
+			var bp = (InstrumentProfile)pair[0];
+			int want = (int)pair[1];
+			var bag = new List<DateTime>();
+			InstrumentRules.CollectRollDates(bp, 2024, 2024, "DVP", null, bag);
+			Check(bag.Count == want, "T6 CollectRollDates " + bp.root + " 2024 = " + want + " (" + bag.Count + ")");
+			Check(bp.calendar == ECalendar.NyseStandIn && !InstrumentRules.IsEquityIndexQuarterly(bp), "T6 " + bp.root + " stays NyseStandIn, not the equity-index path");
+		}
+		DateTime esEx, clEx;
+		bool esWin = _RollDetector.SeriesWindow(new DateTime(2020, 4, 15), out esEx);
+		var clRow = InstrumentPresets.Find("CL", EAssetClass.Future);
+		_RollDetector.SeriesWindowFn clWin = (DateTime day, out DateTime ex) => InstrumentRules.SeriesWindow(clRow, day, EventRules.IsNyseBusinessDay, RS, null, out ex);
+		bool clHit = clWin(new DateTime(2020, 4, 15), out clEx);
+		Check(!esWin && clHit && clEx == new DateTime(2020, 4, 21), "T6 2020-04-15 is inside the CL window and outside the ES quarterly window");
+		var clDet = new _RollDetector { series = true, gapTicks = 8, seriesWindow = clWin };
+		clDet.Step(1, new DateTime(2020, 4, 14), 40, 40, "CL", 0.01);
+		Check(clDet.Step(2, new DateTime(2020, 4, 15), 40.10, 40, "CL", 0.01), "T6 detector seriesWindow delegate takes the CL roll week (10 ticks)");
+		var esDet = new _RollDetector { series = true };
+		esDet.Step(1, new DateTime(2020, 4, 14), 3000, 3000, "ES", 0.25);
+		Check(!esDet.Step(2, new DateTime(2020, 4, 15), 3003, 3000, "ES", 0.25), "T6 null seriesWindow stays the ES quarterly window (2020-04-15 out)");
+		var bare = InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), null, null);
+		var miss = Throws(s => InstrumentRules.CollectRollDates(bare, 2020, 2021, "ROLL", s, new List<DateTime>()), "T6 no preset");
+		Check(miss != null && miss.Reason == InstrumentReason.UnknownField("roll") && miss.Message.Contains("add a preset row / cost for 6B"), "T6 S5 no preset -> unknown-field:roll (" + (miss == null ? "" : miss.Message) + ")");
+		var ov = new InstrumentConfig { overrides = new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.None, 0, ECalendar.NyseStandIn, "ENERGY", "t", null) };
+		var noneP = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), ov, null);
+		var noneE = Throws(s => InstrumentRules.CollectRollDates(noneP, 2024, 2024, "DVP", s, new List<DateTime>()), "T6 roll None");
+		Check(noneE != null && noneE.Reason == InstrumentReason.UnknownField("roll") && noneE.Message.Contains("roll rule is None"), "T6 S5 roll None -> unknown-field:roll");
+		var rangeE = Throws(s => InstrumentRules.CollectRollDates(clB, 2025, 2024, "ROLL", s, new List<DateTime>()), "T6 year range");
+		Check(rangeE != null && rangeE.Reason == InstrumentReason.UnknownField("roll") && rangeE.Message.Contains("2025..2024"), "T6 inverted year range refuses (no clamp)");
+		var ev = new _EventCalendar();
+		ev.contract = delegate (DateTime day, out DateTime exp, out DateTime roll) { exp = new DateTime(2024, 4, 21); roll = new DateTime(2024, 4, 17); return true; };
+		ev.contractCalendarVerified = false;
+		int refused = 0;
+		ev.contractRefuse = delegate (string _) { refused++; throw new InvalidOperationException("refused"); };
+		bool threw = false;
+		try { ev.SessionsToExpiry(new DateTime(2024, 4, 18)); }
+		catch (InvalidOperationException) { threw = true; }
+		Check(threw && refused == 1, "T6 SessionsToExpiry on an unverified bound calendar calls contractRefuse and does not count");
+		Check(ev.IsRollWeek(new DateTime(2024, 4, 18)) && ev.IsRollWeek(new DateTime(2024, 4, 21)) && !ev.IsRollWeek(new DateTime(2024, 4, 16)) && !ev.IsRollWeek(new DateTime(2024, 4, 22)),
+			"T6 IsRollWeek uses the bound roll/expiry and does not refuse");
+		Check(ev.ContractRollDate(new DateTime(2024, 4, 18)) == new DateTime(2024, 4, 17), "T6 ContractRollDate follows the bound profile");
+		Check(!InstrumentRules.HasRollFacts(bare) && InstrumentRules.HasRollFacts(clB), "T6 HasRollFacts: preset yes, bare future no");
 	}
 
 	// ---------------------------------------------------------------- MI-T7 / T8 sessions + derived fields
