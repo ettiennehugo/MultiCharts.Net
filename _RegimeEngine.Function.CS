@@ -8,7 +8,7 @@ namespace PowerLanguage.Function
 	// ============================================================================================
 	// Phase 3 §3.3 — G-R market regime engine (pure managed C#, MC-free; tests/RegimeTests compile this file as is).
 	// Daily features from M-DAILY's roll-adjusted RTH closes (S2): f1 = ln(rc_t / rc_t-1), f2 = ln(HV20_t),
-	// f3 = ln(rc_t / rc_t-63) / (HV63_t x sqrt(63/252)), optional f4 = ln(Parkinson sigma of the last 10 daily bars) (off).
+	// f3 = ln(rc_t / rc_t-63) / (HV63_t x sqrt(63/sessionsPerYear)), sessionsPerYear 252 for futures (M6c). Optional f4 = ln(Parkinson sigma of the last 10 daily bars) (off).
 	// Z-scored with the fit window's mean / SD (frozen until the next refit). Gaussian HMM, full covariance, K = 3, Baum-Welch with
 	// Rabiner scaling, initialised from the §3.1 _Gmm fit (10 restarts) and A = 0.9 diagonal; or method Gmm (i.i.d. days).
 	// Walk-forward: trailing 1000 valid days (expanding from 500), refit after the close of the first trading day of each month
@@ -59,6 +59,8 @@ namespace PowerLanguage.Function
 		public bool bicDiagnostic = true;       // journal BIC for K = 2 and K = 4 at each refit (diagnostic only, never switches K)
 		public double rollSuspectZ = 5;         // |z(f1)| on a roll day above this journals "roll adjust suspect"
 		public int gapBusinessDays = 4;         // a longer gap is kept as one HMM step and journaled (Q11)
+		/// <summary>M6c. Denominator of the 63-session momentum z-score. Default 252. The host sets the profile's sessionsPerYear. Not an [Input].</summary>
+		public int sessionsPerYear = 252;
 
 		public int D { get { return features == null ? 0 : features.Length; } }
 
@@ -269,7 +271,7 @@ namespace PowerLanguage.Function
 				{
 					case ERegimeFeature.Return: v = Math.Log(c0 / c1); break;
 					case ERegimeFeature.LogHv20: v = hv20 > 0 ? Math.Log(hv20) : double.NaN; break;
-					case ERegimeFeature.Tsmom63z: v = hv63 > 0 ? Math.Log(c0 / c63) / (hv63 * Math.Sqrt(63.0 / 252.0)) : double.NaN; break;
+					case ERegimeFeature.Tsmom63z: v = hv63 > 0 && config.sessionsPerYear > 0 ? Math.Log(c0 / c63) / (hv63 * Math.Sqrt(63.0 / config.sessionsPerYear)) : double.NaN; break;
 					default: v = parkinson(); v = v > 0 ? Math.Log(v) : double.NaN; break;
 				}
 				if (double.IsNaN(v) || double.IsInfinity(v)) return null;

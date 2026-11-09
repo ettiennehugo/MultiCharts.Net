@@ -31,6 +31,17 @@ namespace PowerLanguage.Function
 		// ---- Spec S2 (all off by default) ----
 		public int[] hvLengths = { };    // e.g. {6, 20, 100}: HV_n = sqrt(hvAnnualisation) x sample SD of the last n daily log returns
 		public int hvAnnualisation = 252;
+
+		/// <summary>M6c. 252 / 126 / 63 and hvAnnualisation 252 are one year, half a year and a quarter at 252 sessions.
+		/// A profile replaces those defaults with sessionsPerYear, sessionsPerYear/2 and sessionsPerYear/4 (integer division;
+		/// 252 stays 252, 126, 63). An explicit other value is left alone. Not an [Input].</summary>
+		public void ApplySessionsPerYear(int sessionsPerYear)
+		{
+			if (sessionsPerYear < 1) return;
+			if (hvAnnualisation == 252) hvAnnualisation = sessionsPerYear;
+			if (tsmomLookbacks != null && tsmomLookbacks.Length == 3 && tsmomLookbacks[0] == 252 && tsmomLookbacks[1] == 126 && tsmomLookbacks[2] == 63)
+				tsmomLookbacks = new[] { sessionsPerYear, sessionsPerYear / 2, sessionsPerYear / 4 };
+		}
 		public int hvPctLookback = 0;    // 0 = off; 504 for A2-70 (mid-rank of today's HV_n among the previous hvPctLookback days)
 		public int lbrRsiLength = 0;     // 0 = off; 3 for A2-56: Wilder RSI of the ROC1 series (review Q8 default reading)
 		public EDailyClose closeBasis = EDailyClose.RthValue;
