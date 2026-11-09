@@ -63,9 +63,9 @@ The template repeats these lines, in this order:
 | Trade management | What changes while the position is open |
 | Exits | Hard stop, target, time exit, and what invalidates the idea |
 | Regimes | Where the idea is meant to work, and where it is meant to stand aside |
-| Dependencies | Engines, base class, and config fields the strategy turns on |
+| Dependencies | Engines and base class. Protected engine settings stay there. Strategy inputs are section 17 |
 | Pitfalls | Lookahead, repaint, survivorship, rolls, data quality, and anything else that bites |
-| Parameters | The config class and its defaults. What was fixed before any run |
+| Parameters | Each exposed strategy input: purpose, default, units, range, effect, interactions, and whether it is fixed or research-tuned |
 | Acceptance policy | Which written policy this file is judged under |
 | Validation | Status, and links to evidence. `Not yet verified` until a real run exists |
 | Edge monitoring | How a person would notice the edge fading. See below |
@@ -150,23 +150,47 @@ Do not invent a drawdown percent, a slippage band, or a trade count and present 
 
 Parameter changes, if a review later wants them, are a new parameter set written offline (catalogue M2, M11, M24). They are not applied by the monitor.
 
-## Parameters and the config class
+## Parameters
 
-Defaults live on a protected nested config class, set in code. `_CustomSignal` keeps `TraceLevel` as its only `[Input]` (engines manual §1.2). Do not add a new `[Input]` for a research default.
-
-Match the pattern already used by the sandbox studies:
+A new research strategy exposes each of its own parameters as one MultiCharts input. The shape verified in this repo is a public property with a parameterless `[Input]` attribute, and the code default assigned in the constructor (engines manual §1.2 and example 2):
 
 ```csharp
-protected sealed class ExampleConfig
+[Input]
+public int DownCloses { get; set; }
+
+public _A2_69_KaufmanThreeDay(object _ctx) : base(_ctx)
 {
-    public int contracts = 1;
-    public int costFloorTicks = 14;
-    public double riskBudgetFraction = 0.01;
+    DownCloses = 2;
 }
-protected ExampleConfig Cfg { get; } = new ExampleConfig();
 ```
 
-Section 17 lists every field that changes behaviour, the default, and whether it was fixed before any run. A placeholder that must not be read as a result is labelled `PLACEHOLDER` in both the header and the field comment.
+That `2` is the catalogue's "two down closes", written down as a predeclared choice. It is not a fitted optimum.
+
+No description argument on [Input] was verified in this repo. Study sources use a parameterless `[Input]`, and the attribute type itself is not in this repo. Do not invent an attribute, a constructor argument, or a description property. Header section 17 is the required description of every exposed parameter.
+
+Do not put those strategy parameters in an input class, an input struct, or a protected config class. That earlier preference applied to research strategies and is superseded for new ones. It still applies to shared engines and to strategies already in the repo: leave their config classes as they are. Engine settings such as `DailyConfig` and `RollDetection` stay on the protected engine objects. Name those under Dependencies. They are not strategy inputs.
+
+Section 17 has one block per exposed input, with these lines in this order:
+
+```
+// Purpose:
+// Default:
+// Units:
+// Range:
+// Effect:
+// Interactions:
+// Fixed or research-tuned:
+```
+
+- **Purpose.** What the input is for.
+- **Default.** The constructor value. Call it a predeclared choice. Do not call a default optimal, best, or fitted unless a cited run, outside the sealed holdout, supports that word. If no default has been chosen, write `Not yet verified`.
+- **Units.** Ticks, bars, closes, a fraction of equity, or `Not applicable`.
+- **Range.** The values the strategy accepts, including what it does with a value outside that range. If the legal range has not been set, write `Not yet verified`.
+- **Effect.** How changing it changes entries, size, or exits.
+- **Interactions.** Other inputs it depends on or overrides. `Not applicable` when it stands alone.
+- **Fixed or research-tuned.** `Fixed` means chosen before any run and not searched. `Research-tuned` means a range that was written down before any run. A value chosen after seeing results is a new parameter set (catalogue M2).
+
+`TraceLevel` stays the base `[Input]` on `_CustomSignal`. A new strategy does not re-declare it unless it is deliberately overriding that input.
 
 ## Lifecycle
 

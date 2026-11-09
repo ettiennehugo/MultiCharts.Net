@@ -217,6 +217,17 @@ static class Program
 		"Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay.",
 	};
 
+	// Section 17 of the research-strategy header. Descriptions live here: no [Input] description argument was verified in this repo.
+	static readonly string[] ParameterFields = {
+		"// Purpose:",
+		"// Default:",
+		"// Units:",
+		"// Range:",
+		"// Effect:",
+		"// Interactions:",
+		"// Fixed or research-tuned:",
+	};
+
 	// null when the name is not a strategy file, or it matches the catalogue-id file rule and is not the StudyName placeholder.
 	static string ResearchStrategyNameProblem(string fileName)
 	{
@@ -340,6 +351,14 @@ static class Program
 		Check(mapOk && docText.Contains("Compile Include=\"sandbox\\_A2_69_KaufmanThreeDay.Strategy.CS\"")
 			&& templateText.Contains("StudyName is a placeholder") && docText.Contains("StudyName") && docText.Contains("placeholder"),
 			"header standard and template map A2-69 onto _A2_69_KaufmanThreeDay and mark StudyName as a placeholder");
+		string paramWhy, paramDocWhy;
+		bool paramOrder = InOrder(templateText, ParameterFields, out paramWhy);
+		bool paramDocOrder = InOrder(docText, ParameterFields, out paramDocWhy);
+		const string inputSentence = "No description argument on [Input] was verified in this repo.";
+		Check(paramOrder && paramDocOrder && templateText.Contains(inputSentence) && docText.Contains(inputSentence)
+			&& templateText.Contains("Each exposed strategy parameter is its own [Input] property")
+			&& docText.Contains("Do not put those strategy parameters in an input class"),
+			"section 17 documents each [Input] in the required order" + (paramOrder && paramDocOrder ? "" : " (" + paramWhy + "; " + paramDocWhy + ")"));
 
 		// self-test: the classifiers, not the repo
 		Check(PointsAtSandbox(@"sandbox\_X.Strategy.CS") && PointsAtSandbox("sandbox/_X.Strategy.CS")

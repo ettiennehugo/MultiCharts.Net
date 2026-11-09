@@ -61,7 +61,7 @@
 //
 // ## 10. Position sizing and risk
 // Size: <contracts or the formula>
-// Risk limit: <e.g. skip if the widened stop risks more than Cfg.riskBudgetFraction of equity>
+// Risk limit: <the input that caps risk, or Not applicable>
 // Size is never shrunk to fit a stop: <yes, or describe the difference>
 //
 // ## 11. Orders, execution, and costs
@@ -86,7 +86,7 @@
 // ## 15. Dependencies
 // Base class: <_CustomSignal or _VolumeProfileFuturesBase>
 // Engines enabled: <list, or Not applicable>
-// Config fields: <Cfg members that switch behaviour>
+// Engine settings enabled: <protected engine config, such as RollDetection. Not strategy inputs>
 //
 // ## 16. Pitfalls
 // Lookahead: <how it is avoided, or Not yet verified>
@@ -97,10 +97,18 @@
 // Other: <or Not applicable>
 //
 // ## 17. Parameters
-// Defaults live on a protected nested config class (Cfg), not on a new [Input].
-// TraceLevel stays the base [Input].
-// <field> = <default> — <fixed before any run, or PLACEHOLDER>
-// Pre-registered before any run: <list, or Not yet verified>
+// Each exposed strategy parameter is its own [Input] property. No input class or protected config class for those parameters.
+// No description argument on [Input] was verified in this repo. This section is the description. Do not invent an attribute.
+// TraceLevel stays the base [Input] on _CustomSignal.
+// Repeat the seven lines for every input. The sample below is the catalogue wording for A2-69, not a fitted optimum.
+// Input: DownCloses
+// Purpose: how many consecutive lower closes must print before a buy is allowed
+// Default: 2 — predeclared from the catalogue phrase "two down closes", not an empirically optimal default
+// Units: closes (count)
+// Range: integer >= 1. A searched range is Not yet verified.
+// Effect: a larger count waits through a longer decline before an entry is allowed
+// Interactions: Not applicable
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
