@@ -3221,7 +3221,7 @@ namespace PowerLanguage.Strategy
 		private bool m_weekSessionRoll, m_weekSessionPartial;
 		private int m_weekLastBar = -1;
 		private readonly Dictionary<WeekProfile, VpExtra> m_weekExtras = new Dictionary<WeekProfile, VpExtra>();
-		private bool m_weeklyQueryWarned;
+		private bool m_weeklyQueryWarned, m_weeklyRthChecked;
 
 		private _BarLadderStore m_ladders;
 		private readonly Dictionary<long, LadderBar> m_htfLadders = new Dictionary<long, LadderBar>();
@@ -3239,7 +3239,7 @@ namespace PowerLanguage.Strategy
 		{
 			m_rangeOn = false; m_rangeHandles.Clear(); m_rangeHandleClosedSession.Clear(); m_rangeCache.Clear(); m_rangeStats.Clear();
 			m_rangeQueryWarned = m_rangeHandleWarned = false; m_vpSessionNo = 0; m_vpSessionDay = DateTime.MinValue; m_vpSessionLastBar = -1;
-			m_weekly = null; m_weekSession = null; m_weekSessionDay = DateTime.MinValue; m_weekLastBar = -1; m_weekExtras.Clear(); m_weeklyQueryWarned = false;
+			m_weekly = null; m_weekSession = null; m_weekSessionDay = DateTime.MinValue; m_weekLastBar = -1; m_weekExtras.Clear(); m_weeklyQueryWarned = false; m_weeklyRthChecked = false;
 			m_ladders = null; m_htfLadders.Clear(); m_ladderQueryWarned = m_ladderNoFlowWarned = false; m_ladderFn = null;
 			string err;
 			if (BarLadders.enabled)
@@ -3263,6 +3263,8 @@ namespace PowerLanguage.Strategy
 				requireRing(1, ProfileStats.ringBars, "VP-4/6");
 				m_rangeOn = true;   // VP-4 / VP-6 build their histograms through VP-1
 				if (!RangeProfiles.enabled) { RangeProfiles.enabled = true; if (Array.IndexOf(RangeProfiles.streams, 1) < 0) RangeProfiles.streams = new[] { 1 }; }
+				// M6e: the 4-tick KDE disagreement stays. One Info line; not part of any configHash.
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "CFG PSTATS applied{disagree>4xtick ES-tuned default} undefined{} degraded{}");
 			}
 			if (WeeklyProfiles.enabled)
 			{
@@ -3277,6 +3279,7 @@ namespace PowerLanguage.Strategy
 		private void stepVpbHelpers()
 		{
 			if (!m_rangeOn && m_weekly == null && m_ladders == null) return;
+			requireWeeklyRth();
 			if (Bars.Status == EBarState.Close && Bars.CurrentBar != m_vpSessionLastBar)
 			{
 				m_vpSessionLastBar = Bars.CurrentBar;
@@ -3500,6 +3503,19 @@ namespace PowerLanguage.Strategy
 		{
 			if (m_weekly == null && !m_weeklyQueryWarned) { m_weeklyQueryWarned = true; if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "Weekly profile queried but WeeklyProfiles.enabled is false"); }
 			return m_weekly;
+		}
+
+		/// <summary>M6e. RthSessions on a filled profile with no rthSplit is S7 (Error line, then throw). GlobexSessions does not need a split.
+		/// The bar filter stays isRthBar, so an ES EquityIndexLegacy chart keeps today's value window, including holidays and early closes.</summary>
+		private void requireWeeklyRth()
+		{
+			if (m_weeklyRthChecked || m_weekly == null) return;
+			if (WeeklyProfiles.source != EWeeklySource.RthSessions) { m_weeklyRthChecked = true; return; }
+			InstrumentProfile p = InstrumentProfileOf(WeeklyProfiles.dataStream);
+			if (p == null) { m_weeklyRthChecked = true; return; }
+			if (p.sessions == null) return;
+			m_weeklyRthChecked = true;
+			InstrumentSessions.RequireWeeklyRth(p, msg => traceAlways(ETraceLevel.Error, p.name, msg));
 		}
 
 		private void stepWeekly()

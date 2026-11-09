@@ -8326,6 +8326,8 @@ protected override void CalcBar()
 
 **Why it exists.** Profiles over any window (opening hour, last N bars, last week) and fair-value gaps supply levels beyond the daily session profile.
 
+`RangeProfileConfig.ringBars` (2880) and `ProfileStatsConfig.ringBars` (1440) are bar counts and stay those literals. Weekly `RthSessions` on a 24-hour chart whose profile has no RTH split (not ES, MES, NQ, or MNQ) logs an Error line and throws `sessions:no-rth-split`, with the action "use a day-session template for &lt;root&gt;". `GlobexSessions` does not need a split. The bars that count as RTH stay on `isRthBar`, so ES keeps the equity-index value window. When profile stats are enabled, one Info line notes that the 4-tick KDE disagreement is an ES-tuned default: `CFG PSTATS applied{disagree>4xtick ES-tuned default} undefined{} degraded{}`.
+
 **Where.** `_RangeProfile.Function.CS` (`RangeProfileConfig`; host `RangeProfiles`, `RangeProfile`, `RangeProfileAfter`, `RangeProfileBars`, `OpenRange`, `CloseRange`); `_WeeklyProfiles.Function.CS` (`WeeklyProfiles`, `Week`, `WeeklyComposite`); `_BarLadder.Function.CS` (`BarLadders`, `Ladder`, `HtfLadder`, `LadderBar`); `_FvgDetector.Function.CS` (`Fvgs`, `FvgDetector`, `Fvg`, `fvgLevel`); `_BarRing.Function.CS` (`RingBar`, `ringBarOf`); `_LevelRef.Function.CS` (`LevelRef`, `ELevelKind`)
 
 **Key signatures.**

@@ -64,6 +64,8 @@ namespace PowerLanguage.Function
 		public static string UnknownField(string f) { return "unknown-field:" + f; }
 		public static string Mismatch(string f) { return "mismatch:" + f; }
 		public const string ActionSessions = "check the chart's session template";
+		/// <summary>S7 action. The root is appended by <see cref="ActionDaySession"/>.</summary>
+		public static string ActionDaySession(string root) { return "use a day-session template for " + (string.IsNullOrEmpty(root) ? "?" : root); }
 		public const string ActionQuoteManager = "Check the symbol's settings in QuoteManager";
 	}
 
@@ -808,6 +810,15 @@ namespace PowerLanguage.Function
 				}
 			}
 			return true;
+		}
+
+		/// <summary>M6e S7. A filled profile (sessions already applied) whose rthSplit is null cannot feed WEEKLY RthSessions.
+		/// ES/MES/NQ/MNQ on a 24-hour chart have EquityIndexLegacy, and a day-only chart has ChartDaySession, so neither throws.
+		/// Sessions not filled yet, or profiles off (null), is not this refusal. Error line, then sessions:no-rth-split.</summary>
+		public static void RequireWeeklyRth(InstrumentProfile p, Action<string> errorSink)
+		{
+			if (p == null || p.sessions == null || p.rthSplit != null) return;
+			InstrumentError.Fail(errorSink, p.Subject("WEEKLY"), InstrumentReason.SessionsNoRthSplit, null, InstrumentReason.ActionDaySession(p.root));
 		}
 
 		/// <summary>M6a S3: Error line, then throw sessions:window-not-covered. Action text is the spec sentence.</summary>

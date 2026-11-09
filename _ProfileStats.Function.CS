@@ -44,7 +44,7 @@ namespace PowerLanguage.Function
 		public double kdeMedFloorTicks = 1;          // review Q7: 1-tick floor; 0 = literal Keller sensitivity arm
 		public int kdeFolds = 5;
 		public ECvFolding kdeFolding = ECvFolding.Contiguous;
-		public int ringBars = 1440;
+		public int ringBars = 1440;                 // M6e: bar count, kept literal (not derived from session minutes)
 
 		public string Validate()
 		{
@@ -554,7 +554,7 @@ namespace PowerLanguage.Function
 		/// f_j on the 1-tick grid (kernel truncated at 5 h_j); POC_j = argmax f_j (ties to the lowest price); J_j = |POC_j - POC_{j-1}|;
 		/// verdict BIMODAL if max J &gt; 5 med, STABLE if max J &lt; 2 med + 1e-9 and range &lt; 0.15 sigma, else FLAT, with
 		/// med = max(median J, medFloorTicks x tick). h_cv = argmax of the held-out log-likelihood under `folds`-fold CV by bar.
-		/// disagree = |mcPoc - POC at h_cv| &gt; 4 ticks (false when mcPoc is NaN).
+		/// disagree = |mcPoc - POC at h_cv| &gt; 4 ticks (false when mcPoc is NaN). The 4 is an ES-tuned default (M6e CFG note); it is not scaled.
 		/// </summary>
 		public static KdeResult KdeSweep(IList<RingBar> bars, double tick, int distribution, double mcPoc = double.NaN, double medFloorTicks = 1, int folds = 5, ECvFolding folding = ECvFolding.Contiguous)
 		{
