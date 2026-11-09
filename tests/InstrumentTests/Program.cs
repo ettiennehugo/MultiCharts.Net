@@ -1058,9 +1058,29 @@ static class Program
 		Check(es.ProfileHash() == "020deca78d6392b7", "M6e ES pin unchanged " + es.ProfileHash());
 	}
 
+	static void M6fCluster()
+	{
+		Check(InstrumentPresets.Find("ES", EAssetClass.Future).cluster == "EQIDX" && InstrumentPresets.Find("MES", EAssetClass.Future).cluster == "EQIDX"
+			&& InstrumentPresets.Find("NQ", EAssetClass.Future).cluster == "EQIDX" && InstrumentPresets.Find("MNQ", EAssetClass.Future).cluster == "EQIDX", "M6f preset ES/MES/NQ/MNQ EQIDX");
+		Check(InstrumentPresets.Find("CL", EAssetClass.Future).cluster == "ENERGY" && InstrumentPresets.Find("GC", EAssetClass.Future).cluster == "METALS"
+			&& InstrumentPresets.Find("ZN", EAssetClass.Future).cluster == "RATES" && InstrumentPresets.Find("6E", EAssetClass.Future).cluster == "FX_EUR", "M6f preset CL/GC/ZN/6E clusters");
+		var g = Globex9();
+		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
+		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null);
+		Check(es.cluster == "EQIDX" && es.ProfileHash() == "020deca78d6392b7", "M6f ES cluster and pin " + es.ProfileHash());
+		Check(six.cluster == "FX_EUR" && six.ProfileHash() == "8e8b3e9b0e230e12", "M6f 6E cluster and pin " + six.ProfileHash());
+		S[] ct = Week5(17, 16);
+		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(ct, ct, FB, null).ProfileHash() == "6cff053d1b215324", "M6f ES Default pin");
+		Check(InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(ct, ct, FB, null).ProfileHash() == "55576df6a8a99c05", "M6f 6E Default pin");
+		var esRow = InstrumentPresets.Find("ES", EAssetClass.Future);
+		var dates = new List<DateTime>();
+		for (int y = 2000; y <= 2035; y++) for (int m = 3; m <= 12; m += 3) dates.Add(InstrumentRules.Roll(esRow, y, m, EventRules.IsNyseBusinessDay, RS, null).Value);
+		Check(_RollDetector.DatesDigest(dates) == "fdd63bd8f179a8d4", "M6f roll digest pin");
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly, M6fCluster })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}

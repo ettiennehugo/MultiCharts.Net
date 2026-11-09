@@ -1667,20 +1667,13 @@ namespace PowerLanguage.Strategy
 		protected virtual double PortfolioScore { get { return double.NaN; } }
 		/// <summary>M-PORT: the strategy's own kill rule fired (pm.state = Halted; the MM flattens and pauses it).</summary>
 		protected virtual bool PortfolioHalted { get { return false; } }
-		/// <summary>M-PORT: correlation-cluster seed from the symbol root (ES/MES/NQ/MNQ/YM/MYM/RTY/M2K = EQIDX ...).</summary>
+		/// <summary>M-PORT cluster seed. M6f: the Data1 profile cluster when it has one (6E is FX_EUR). Otherwise the root groups (YM stays EQIDX; a stock stays its root). Not an [Input].</summary>
 		protected virtual string PortfolioCluster
 		{
 			get
 			{
-				string root = _MtfMath.SymbolRoot(Bars.Info.Name).ToUpperInvariant();
-				switch (root)
-				{
-					case "ES": case "MES": case "NQ": case "MNQ": case "YM": case "MYM": case "RTY": case "M2K": return "EQIDX";
-					case "ZN": case "ZB": case "ZF": case "ZT": case "UB": case "TN": return "RATES";
-					case "CL": case "MCL": case "NG": case "RB": case "HO": case "QM": return "ENERGY";
-					case "GC": case "MGC": case "SI": case "SIL": case "HG": case "PL": return "METALS";
-					default: return root;
-				}
+				InstrumentProfile p = InstrumentProfileOf(1);
+				return PortfolioClusters.Seed(p == null ? null : p.cluster, _MtfMath.SymbolRoot(Bars.Info.Name));
 			}
 		}
 

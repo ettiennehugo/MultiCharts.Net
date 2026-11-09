@@ -40,6 +40,24 @@ namespace PowerLanguage.Function
 		public const string Profile = "pm.profile", Uncorr = "pm.uncorr", Uncorr03 = "pm.uncorr03";
 	}
 
+	/// <summary>M6f. Portfolio cluster seed. A profile cluster wins (6E is FX_EUR). No profile, or a profile with no cluster, keeps the root groups. Not an [Input].</summary>
+	public static class PortfolioClusters
+	{
+		public static string Seed(string profileCluster, string root)
+		{
+			if (!string.IsNullOrEmpty(profileCluster)) return profileCluster;
+			string r = string.IsNullOrEmpty(root) ? "" : root.ToUpperInvariant();
+			switch (r)
+			{
+				case "ES": case "MES": case "NQ": case "MNQ": case "YM": case "MYM": case "RTY": case "M2K": return "EQIDX";
+				case "ZN": case "ZB": case "ZF": case "ZT": case "UB": case "TN": return "RATES";
+				case "CL": case "MCL": case "NG": case "RB": case "HO": case "QM": return "ENERGY";
+				case "GC": case "MGC": case "SI": case "SIL": case "HG": case "PL": return "METALS";
+				default: return r;
+			}
+		}
+	}
+
 	public enum EPortState { Flat = 0, Armed = 1, Long = 2, Short = 3, Exiting = 4, Halted = 5 }
 	public enum EPortSizing { CodeSize = 0, RiskParity = 1, VolTarget = 2 }
 	/// <summary>Risk profile (spec §5.1/§5.1a): Starter is the default until uncorr ≥ 3 and uncorr03 ≥ 3; switched manually only.</summary>
