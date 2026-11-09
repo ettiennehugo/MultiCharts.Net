@@ -82,6 +82,20 @@ static class Program
 			&& def.switchProb == 0.60 && def.switchMargin == 0.10 && def.seed == 20261021 && def.fallback == ERegimeFallback.AtrTercile && def.Validate() == null
 			&& def.features.SequenceEqual(new[] { ERegimeFeature.Return, ERegimeFeature.LogHv20, ERegimeFeature.Tsmom63z }), "spec defaults (enabled=false, publish=false, f4 off)");
 		Check(new RegimeConfig { K = 5 }.Validate() != null && new RegimeConfig { fitSessions = 100 }.Validate() != null, "Validate rejects bad config");
+		Check(def.sessionsPerYear == 252, "M6c default year length is 252");
+		{
+			var yearMkt = Market(120, 7);
+			RegimeConfig y(int spy) { var c = new RegimeConfig { enabled = true, method = ERegimeMethod.Gmm, minSessions = 40, fitSessions = 80, restarts = 1, maxIter = 30, features = new[] { ERegimeFeature.Tsmom63z }, sessionsPerYear = spy }; return c; }
+			var a = Replay(yearMkt, y(252));
+			var b = Replay(yearMkt, y(365));
+			RegimeFit fa = null, fb = null;
+			foreach (var f in a.fits) if (f.failReason == null) fa = f;
+			foreach (var f in b.fits) if (f.failReason == null) fb = f;
+			double ratio = fa != null && fb != null && fa.zSd != null && fa.zSd.Length > 0 && fa.zSd[0] > 0 ? fb.zSd[0] / fa.zSd[0] : 0;
+			double expect = Math.Sqrt(365.0 / 252.0);
+			Check(a.states.Count == yearMkt.Count && fa != null && fb != null && Math.Abs(ratio - expect) < 0.02,
+				"M6c raw 63-day z-score scales with sqrt(sessionsPerYear) got " + ratio.ToString("R") + " expect " + expect.ToString("R") + " fits " + a.fits.Count + "/" + b.fits.Count);
+		}
 		Check(RegimeFit.ParamCount(ERegimeMethod.Hmm, 3, 3) == 2 + 6 + 9 + 18 && RegimeFit.ParamCount(ERegimeMethod.Gmm, 3, 3) == 2 + 9 + 18, "HMM/GMM BIC parameter counts");
 
 		// ---------------- 1. GMM recovery ----------------

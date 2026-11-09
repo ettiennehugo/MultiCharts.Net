@@ -1022,6 +1022,15 @@ namespace PowerLanguage.Strategy
 		/// <summary>M-DAILY: today's gap vs the (roll-adjusted) previous daily close; NaN when not available.</summary>
 		protected double DailyGapPct { get { return m_daily == null ? double.NaN : m_daily.GapPct(m_dailyTodayOpen); } }
 
+		/// <summary>M6c. Futures and stocks are 252, so an ES/MES profile does not change the defaults. Crypto is 365, spot FX is 260.</summary>
+		void applyYearLength()
+		{
+			InstrumentProfile p = InstrumentProfileOf(1);
+			if (p == null || p.sessionsPerYear < 1) return;
+			DailyConfig.ApplySessionsPerYear(p.sessionsPerYear);
+			RegimeConfig.sessionsPerYear = p.sessionsPerYear;
+		}
+
 		private void startDaily()
 		{
 			m_dailyQueryWarned = false;
@@ -1030,6 +1039,7 @@ namespace PowerLanguage.Strategy
 			m_dailyAggDay = DateTime.MinValue; m_dailyTodayOpen = double.NaN; m_dailyTodayKey = DateTime.MinValue;
 			m_dailyRth.Observe(DateTime.MinValue, false, double.NaN); m_dailyBasisLogged = false; m_rollKeyWarned = false;
 			if (!NeedsDaily) return;
+			applyYearLength();
 			if (DailyConfig.dataStream > 0) requireDataStream("DailyConfig.dataStream", DailyConfig.dataStream);
 			if (DailyConfig.weeklyStream > 0) requireDataStream("DailyConfig.weeklyStream", DailyConfig.weeklyStream);
 			var d = new _DailyContext { config = DailyConfig, label = "DAILY", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
@@ -1140,6 +1150,7 @@ namespace PowerLanguage.Strategy
 			m_regime = null; m_regimeQueryWarned = false;
 			m_regimeLastDay = m_regimeRollDay = DateTime.MinValue;
 			if (!RegimeConfig.enabled || m_daily == null) return;
+			applyYearLength();
 			var r = new _RegimeEngine { config = RegimeConfig, label = "REGIME", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
 			string err = r.Configure();
 			if (err != null) throw new ArgumentException(err);

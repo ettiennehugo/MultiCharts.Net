@@ -27,9 +27,29 @@ static class Program
 
 	static void Main()
 	{
-		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay(); EveningSplice(); RollCarryAtr();
+		Validation(); Indicators(); Roll(); OnRollIntraday(); Weeks(); OutOfOrder(); S2Hv(); S2Lbr(); S2Roll(); S2Pct(); S2HalfDay(); EveningSplice(); RollCarryAtr(); M6cYear();
 		Console.WriteLine($"DailyTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
+	}
+
+	static void M6cYear()
+	{
+		var es = new DailyConfig();
+		es.ApplySessionsPerYear(252);
+		Check(es.hvAnnualisation == 252 && es.tsmomLookbacks[0] == 252 && es.tsmomLookbacks[1] == 126 && es.tsmomLookbacks[2] == 63, "M6c ES 252 leaves 252/126/63");
+		var cr = new DailyConfig();
+		cr.ApplySessionsPerYear(365);
+		Check(cr.hvAnnualisation == 365 && cr.tsmomLookbacks[0] == 365 && cr.tsmomLookbacks[1] == 182 && cr.tsmomLookbacks[2] == 91, "M6c crypto 365 -> 365/182/91");
+		var fx = new DailyConfig();
+		fx.ApplySessionsPerYear(260);
+		Check(fx.hvAnnualisation == 260 && fx.tsmomLookbacks[0] == 260 && fx.tsmomLookbacks[1] == 130 && fx.tsmomLookbacks[2] == 65, "M6c FX 260 -> 260/130/65");
+		var custom = new DailyConfig { hvAnnualisation = 260, tsmomLookbacks = new[] { 20 } };
+		custom.ApplySessionsPerYear(365);
+		Check(custom.hvAnnualisation == 260 && custom.tsmomLookbacks.Length == 1 && custom.tsmomLookbacks[0] == 20, "M6c explicit lengths are not replaced");
+		var d = Ctx(c => { c.hvLengths = new[] { 6 }; c.ApplySessionsPerYear(365); });
+		var al = new List<double> { 100 }; for (int i = 1; i <= 6; i++) al.Add(al[i - 1] * Math.Exp(i % 2 == 1 ? 0.01 : -0.01));
+		Feed(d, al);
+		Check(Near(d.Hv(6), Math.Sqrt(365) * Math.Sqrt(6e-4 / 5), 1e-12), "M6c HV uses sqrt(sessionsPerYear) got " + d.Hv(6));
 	}
 
 	static void Validation()

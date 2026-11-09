@@ -5886,6 +5886,7 @@ protected override void CalcBar()
 - `dataStream 0` (aggregate Data1 per `tradingDayKey`), `weeklyStream 0`;
 - `atrLength 20`, `smaLength 200`, `rsiLength 2`, `tsmomLookbacks {252,126,63}`;
 - `hvLengths {}`, `hvAnnualisation 252`, `hvPctLookback 0`, `lbrRsiLength 0`;
+- When a profile exists, `ApplySessionsPerYear` replaces those two defaults with the profile's `sessionsPerYear` (futures and stocks 252, so ES and MES stay `{252,126,63}` and HV scale 252; crypto 365 → `{365,182,91}`; spot FX 260 → `{260,130,65}`). An explicit other length is not replaced.
 - `closeBasis EDailyClose.RthValue`; `HvOn`; `Validate()`.
 
 **API.**
@@ -5966,7 +5967,8 @@ protected override void CalcBar()
 - Model: `method Hmm`, `K 3`, `kSelect Fixed`, `features {Return, LogHv20, Tsmom63z}`.
 - Fitting: `fitSessions 1000`, `minSessions 500`, `refit Monthly`, `refitEveryN 21`, `restarts 10`, `maxIter 200`, `tol 1e-6`, `regCovar 1e-6`, `transPrior 1`.
 - Filtering and switching: `warmFilter 63`, `switchProb 0.60`, `switchMargin 0.10`.
-- Other: `seed 20261021`, `fallback AtrTercile`, `publish false`, `atrPctLookback 250`, `parkinsonBars 10`, `bicDiagnostic true`, `rollSuspectZ 5`, `gapBusinessDays 4`.
+- Other: `seed 20261021`, `fallback AtrTercile`, `publish false`, `atrPctLookback 250`, `parkinsonBars 10`, `bicDiagnostic true`, `rollSuspectZ 5`, `gapBusinessDays 4`, `sessionsPerYear 252`.
+- `Tsmom63z` is `ln(close/close_63) / (HV63 × sqrt(63/sessionsPerYear))`. The host sets `sessionsPerYear` from the Data1 profile. The 63-session window does not change. Futures stay at 252. The fit standardises features, so a constant rescaling does not move labels; it does move the raw-feature `zSd`.
 - Methods: `Validate()`, `Copy()`, `IndexOf`.
 
 **Enums.** `ERegimeMethod {Hmm, Gmm}`, `ERegimeKSelect {Fixed, Bic}`, `ERegimeRefit {Monthly, EveryNSessions, Quarterly}`, `ERegimeFallback {AtrTercile, Unknown}`, `ERegimeFeature {Return, LogHv20, Tsmom63z, Parkinson10}`.
