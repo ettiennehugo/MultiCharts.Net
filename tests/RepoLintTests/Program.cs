@@ -9,6 +9,8 @@ using System.Xml.Linq;
 // _<Name>.Function.CS / _<Name>.Strategy.CS / _<Name>.Indicator.CS has to appear as <Compile Include="..."/> in PLStudies.csproj.
 // Matching is case-insensitive (MSBuild on Windows). Root files named literally (or by a simple * glob) in the root .gitignore are
 // skipped: they are local MultiCharts files that are not in the repo and may sit in a working copy without a csproj entry.
+// sandbox/ is the research draft folder (docs/research-strategy-header.md). Those studies stay out of every csproj. Production
+// projects stay on explicit file names: no wildcard Compile, no EnableDefaultCompileItems.
 // Runs in the normal check via tests/RepoLintTests/run.sh (check-mport-wt.sh runs every tests/* suite).
 static class Program
 {
@@ -132,6 +134,267 @@ static class Program
 
 	static string StripComment(string l) { return Regex.Replace(l, @"//.*$", "").Trim(); }
 
+	// ---- research sandbox (docs/research-strategy-header.md) ----
+	// Production projects list every file. A wildcard, or any Compile path that names the sandbox folder, would pull unproven
+	// studies into the one MultiCharts assembly. The template is comments only and is not a study file.
+
+	static readonly string[] HeaderSections = {
+		"// ## 1. Identity",
+		"// ## 2. Provenance",
+		"// ## 3. Hypothesis",
+		"// ## 4. Trade walkthrough",
+		"// ## 5. Timing",
+		"// ## 6. Position and re-entry",
+		"// ## 7. Instruments",
+		"// ## 8. Data",
+		"// ## 9. Entry and filters",
+		"// ## 10. Position sizing and risk",
+		"// ## 11. Orders, execution, and costs",
+		"// ## 12. Trade management",
+		"// ## 13. Exits",
+		"// ## 14. Regimes",
+		"// ## 15. Dependencies",
+		"// ## 16. Pitfalls",
+		"// ## 17. Parameters",
+		"// ## 18. Acceptance policy",
+		"// ## 19. Validation",
+		"// ## 20. Edge monitoring",
+		"// ## 21. Log diagnostics",
+		"// ## 22. Notes",
+	};
+
+	// Existing sandbox files whose public class predates the "class name = file stem" rule. New files are not added here.
+	static readonly Dictionary<string, string> SandboxClassAllow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+	{
+		{ "_A2_70_OpenFadeHvGate.Strategy.CS", "_Ex17OpenFadeHvGate" },
+		{ "_DV_15_EmaVwapPullback.Strategy.CS", "_Ex20EmaVwapPullback" },
+	};
+
+	static bool HasGlob(string include) { return include != null && (include.IndexOf('*') >= 0 || include.IndexOf('?') >= 0); }
+
+	static bool PointsAtSandbox(string include)
+	{
+		if (string.IsNullOrEmpty(include)) return false;
+		string n = include.Replace('/', '\\').Trim();
+		while (n.StartsWith(".\\", StringComparison.Ordinal)) n = n.Substring(2);
+		foreach (string p in n.Split('\\'))
+			if (string.Equals(p, "sandbox", StringComparison.OrdinalIgnoreCase)) return true;
+		return false;
+	}
+
+	static bool IsProductionProject(string csprojPath)
+	{
+		string name = Path.GetFileName(csprojPath);
+		return string.Equals(name, "PLStudies.csproj", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(name, "PLStudiesPY.csproj", StringComparison.OrdinalIgnoreCase);
+	}
+
+	static bool EnablesDefaultCompile(string csprojText)
+	{
+		return Regex.IsMatch(csprojText ?? "", @"<EnableDefaultCompileItems>\s*true\s*</EnableDefaultCompileItems>", RegexOptions.IgnoreCase);
+	}
+
+	static List<string> AllCsproj(string root)
+	{
+		var list = new List<string>(Directory.GetFiles(root, "*.csproj"));
+		string tests = Path.Combine(root, "tests");
+		if (Directory.Exists(tests)) list.AddRange(Directory.GetFiles(tests, "*.csproj", SearchOption.AllDirectories));
+		return list;
+	}
+
+	static string StudyStem(string fileName)
+	{
+		Match m = Regex.Match(fileName ?? "", @"^(_[^\\/]+)\.(Function|Strategy|Indicator)\.CS$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+		return m.Success ? m.Groups[1].Value : null;
+	}
+
+	// New research strategies: _<ID>_<DescriptiveName>.Strategy.CS. ID is the catalogue id (FAM-NN) with the hyphen written as an underscore.
+	// The descriptive name is PascalCase. The literal placeholder StudyName is not a developed strategy stem.
+	// The class is that file stem and does not include ".Strategy.CS".
+	static readonly Regex ResearchStrategyFileRx = new Regex(@"^_[A-Z][A-Z0-9]*_[0-9]{2}_([A-Z][A-Za-z0-9]*)\.Strategy\.CS$", RegexOptions.CultureInvariant);
+
+	static readonly string[] IdFileMap = {
+		"Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay.",
+	};
+
+	// Section 17 of the research-strategy header. Descriptions live here: no [Input] description argument was verified in this repo.
+	static readonly string[] ParameterFields = {
+		"// Purpose:",
+		"// Default:",
+		"// Units:",
+		"// Range:",
+		"// Effect:",
+		"// Interactions:",
+		"// Fixed or research-tuned:",
+	};
+
+	// null when the name is not a strategy file, or it matches the catalogue-id file rule and is not the StudyName placeholder.
+	static string ResearchStrategyNameProblem(string fileName)
+	{
+		if (string.IsNullOrEmpty(fileName) || !fileName.EndsWith(".Strategy.CS", StringComparison.Ordinal)) return null;
+		Match m = ResearchStrategyFileRx.Match(fileName);
+		if (!m.Success) return fileName + " must be _<ID>_<DescriptiveName>.Strategy.CS (catalogue ID with hyphens as underscores; .Strategy.CS suffix; class is the file stem)";
+		if (string.Equals(m.Groups[1].Value, "StudyName", StringComparison.Ordinal)) return fileName + " uses the StudyName placeholder; use a short PascalCase name from the catalogue description";
+		return null;
+	}
+
+	static List<string> PublicClasses(string text)
+	{
+		string code = Regex.Replace(text ?? "", @"//[^\n]*", "");
+		var r = new List<string>();
+		foreach (Match m in Regex.Matches(code, @"\bpublic\s+class\s+(_\w+)")) r.Add(m.Groups[1].Value);
+		return r;
+	}
+
+	// null when the file is not a study, or its single public class matches the stem (or the allow-list).
+	static string ClassStemProblem(string fileName, IList<string> classes, Dictionary<string, string> allow)
+	{
+		string stem = StudyStem(fileName);
+		if (stem == null) return null;
+		if (classes == null || classes.Count != 1) return fileName + " public class count " + (classes == null ? 0 : classes.Count);
+		string cls = classes[0];
+		if (string.Equals(cls, stem, StringComparison.Ordinal)) return null;
+		string allowed;
+		if (allow != null && allow.TryGetValue(fileName, out allowed) && string.Equals(cls, allowed, StringComparison.Ordinal)) return null;
+		return fileName + " class " + cls + " != stem " + stem;
+	}
+
+	static bool InOrder(string text, string[] markers, out string why)
+	{
+		int at = -1;
+		why = null;
+		if (text == null) { why = "empty"; return false; }
+		foreach (string m in markers)
+		{
+			int i = text.IndexOf(m, StringComparison.Ordinal);
+			if (i < 0) { why = "missing " + m; return false; }
+			if (i <= at) { why = "out of order " + m; return false; }
+			at = i;
+		}
+		return true;
+	}
+
+	static void SandboxGuard(string root)
+	{
+		const string templateRel = "sandbox/ResearchStrategyHeader.template.txt";
+		string template = Path.Combine(root, "sandbox", "ResearchStrategyHeader.template.txt");
+		string doc = Path.Combine(root, "docs", "research-strategy-header.md");
+		string sandbox = Path.Combine(root, "sandbox");
+
+		List<string> projects = AllCsproj(root);
+		var sandboxHits = new List<string>();
+		var globHits = new List<string>();
+		var defaultCompileHits = new List<string>();
+		foreach (string proj in projects)
+		{
+			string text = File.ReadAllText(proj);
+			if (IsProductionProject(proj) && EnablesDefaultCompile(text)) defaultCompileHits.Add(Path.GetFileName(proj));
+			foreach (string inc in Includes(proj))
+			{
+				if (PointsAtSandbox(inc)) sandboxHits.Add(Path.GetFileName(proj) + " -> " + inc);
+				if (IsProductionProject(proj) && HasGlob(inc)) globHits.Add(Path.GetFileName(proj) + " -> " + inc);
+			}
+		}
+		foreach (string h in sandboxHits) Console.WriteLine("  sandbox compile: " + h);
+		foreach (string h in globHits) Console.WriteLine("  production wildcard: " + h);
+		foreach (string h in defaultCompileHits) Console.WriteLine("  EnableDefaultCompileItems: " + h);
+		Check(projects.Count >= 2 && sandboxHits.Count == 0, "no csproj Compile Include points at sandbox (" + sandboxHits.Count + " hits in " + projects.Count + " projects)");
+		Check(globHits.Count == 0 && defaultCompileHits.Count == 0, "PLStudies.csproj and PLStudiesPY.csproj stay on explicit file names (" + globHits.Count + " wildcards, " + defaultCompileHits.Count + " default-compile)");
+
+		var rootNames = new HashSet<string>(Directory.GetFiles(root).Select(Path.GetFileName), StringComparer.OrdinalIgnoreCase);
+		var sandboxStudies = Directory.Exists(sandbox)
+			? Directory.GetFiles(sandbox).Select(Path.GetFileName).Where(f => StudyRx.IsMatch(f)).OrderBy(f => f, StringComparer.Ordinal).ToList()
+			: new List<string>();
+		var nameClash = sandboxStudies.Where(f => rootNames.Contains(f)).ToList();
+		foreach (string n in nameClash) Console.WriteLine("  sandbox file also at repo root: " + n);
+		Check(sandboxStudies.Count >= 1 && nameClash.Count == 0, "sandbox study file names are not also at the repo root (" + nameClash.Count + " clashes, " + sandboxStudies.Count + " sandbox studies)");
+
+		var rootClasses = new HashSet<string>(StringComparer.Ordinal);
+		foreach (string f in Directory.GetFiles(root, "*.CS"))
+			foreach (string c in PublicClasses(File.ReadAllText(f))) rootClasses.Add(c);
+		var stemProblems = new List<string>();
+		var fileNameProblems = new List<string>();
+		var classClash = new List<string>();
+		var seenSandbox = new HashSet<string>(StringComparer.Ordinal);
+		foreach (string name in sandboxStudies)
+		{
+			string nameProblem = ResearchStrategyNameProblem(name);
+			if (nameProblem != null) fileNameProblems.Add(nameProblem);
+			string problem = ClassStemProblem(name, PublicClasses(File.ReadAllText(Path.Combine(sandbox, name))), SandboxClassAllow);
+			if (problem != null) stemProblems.Add(problem);
+			foreach (string c in PublicClasses(File.ReadAllText(Path.Combine(sandbox, name))))
+			{
+				if (!seenSandbox.Add(c)) classClash.Add("duplicate sandbox class " + c);
+				if (rootClasses.Contains(c)) classClash.Add("class also in a root study: " + c);
+			}
+		}
+		foreach (string p in fileNameProblems) Console.WriteLine("  strategy file name: " + p);
+		foreach (string p in stemProblems) Console.WriteLine("  class/stem: " + p);
+		foreach (string p in classClash) Console.WriteLine("  class clash: " + p);
+		Check(fileNameProblems.Count == 0, "sandbox strategy files are _<ID>_<DescriptiveName>.Strategy.CS and do not use the StudyName placeholder (" + fileNameProblems.Count + ")");
+		Check(stemProblems.Count == 0, "sandbox study class matches the file stem, except the two recorded mismatches (" + stemProblems.Count + ")");
+		Check(classClash.Count == 0, "sandbox study class names are unique and absent from root studies (" + classClash.Count + ")");
+
+		string templateText = File.Exists(template) ? File.ReadAllText(template) : "";
+		string docText = File.Exists(doc) ? File.ReadAllText(doc) : "";
+		string templateWhy, docWhy;
+		bool templateOrder = InOrder(templateText, HeaderSections, out templateWhy);
+		bool docOrder = InOrder(docText, HeaderSections, out docWhy);
+		Check(File.Exists(template) && templateOrder, "header template has the 22 sections in order" + (templateOrder ? "" : " (" + templateWhy + ")"));
+		Check(File.Exists(doc) && docOrder, "header standard repeats the 22 sections in order" + (docOrder ? "" : " (" + docWhy + ")"));
+		Check(templateText.Contains("Not applicable") && templateText.Contains("Not yet verified"), "header template tells the author to write Not applicable / Not yet verified");
+		Check(templateText.Contains("win_rate * avg_win - loss_rate * avg_loss") && docText.Contains("win_rate * avg_win - loss_rate * avg_loss"), "header standard and template state the cost-adjusted expectancy formula");
+		Check(docText.Contains(templateRel) && !StudyRx.IsMatch(Path.GetFileName(template)), "template path is documented and the template is not a study file name");
+		bool mapOk = true;
+		foreach (string sentence in IdFileMap)
+			if (!templateText.Contains(sentence) || !docText.Contains(sentence)) mapOk = false;
+		Check(mapOk && docText.Contains("Compile Include=\"sandbox\\_A2_69_KaufmanThreeDay.Strategy.CS\"")
+			&& templateText.Contains("StudyName is a placeholder") && docText.Contains("StudyName") && docText.Contains("placeholder"),
+			"header standard and template map A2-69 onto _A2_69_KaufmanThreeDay and mark StudyName as a placeholder");
+		string paramWhy, paramDocWhy;
+		bool paramOrder = InOrder(templateText, ParameterFields, out paramWhy);
+		bool paramDocOrder = InOrder(docText, ParameterFields, out paramDocWhy);
+		const string inputSentence = "No description argument on [Input] was verified in this repo.";
+		Check(paramOrder && paramDocOrder && templateText.Contains(inputSentence) && docText.Contains(inputSentence)
+			&& templateText.Contains("Each exposed strategy parameter is its own [Input] property")
+			&& docText.Contains("Do not put those strategy parameters in an input class"),
+			"section 17 documents each [Input] in the required order" + (paramOrder && paramDocOrder ? "" : " (" + paramWhy + "; " + paramDocWhy + ")"));
+
+		// self-test: the classifiers, not the repo
+		Check(PointsAtSandbox(@"sandbox\_X.Strategy.CS") && PointsAtSandbox("sandbox/_X.Strategy.CS")
+			&& PointsAtSandbox(@"..\sandbox\_X.Strategy.CS") && PointsAtSandbox(@".\sandbox\_X.Strategy.CS")
+			&& !PointsAtSandbox("_SandboxHelper.Strategy.CS") && !PointsAtSandbox("_CustomSignal.Strategy.CS"),
+			"self-test: a path segment named sandbox is an inclusion; a file name containing those letters is not");
+		Check(HasGlob("*.CS") && HasGlob(@"sandbox\*.CS") && HasGlob(@"**\*.CS") && HasGlob("Generated\\?.cs") && !HasGlob("_CustomSignal.Strategy.CS"),
+			"self-test: * and ? are wildcards");
+		string orderWhy;
+		Check(!InOrder("// ## 2. Provenance\n// ## 1. Identity", HeaderSections, out orderWhy) && orderWhy != null,
+			"self-test: a header with Identity after Provenance fails (" + orderWhy + ")");
+		var allow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "_Old.Strategy.CS", "_Legacy" } };
+		Check(ClassStemProblem("_A.Strategy.CS", new[] { "_A" }, allow) == null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "_A2_69_KaufmanThreeDay" }, allow) == null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "_A2_69_KaufmanThreeDay.Strategy" }, allow) != null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "A2_69_KaufmanThreeDay" }, allow) != null
+			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Legacy" }, allow) == null
+			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Old" }, allow) == null
+			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Other" }, allow) != null
+			&& ClassStemProblem("_A.Strategy.CS", new[] { "_A", "_B" }, allow) != null
+			&& ClassStemProblem("notes.md", new[] { "_A" }, allow) == null,
+			"self-test: class name is the file stem, not the .Strategy.CS suffix, and the allow-list still works");
+		Check(ResearchStrategyNameProblem("_A2_69_KaufmanThreeDay.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_A2_49_MiddayBreakout.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_L2_01_DomFade.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_A2_63_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_OK_02_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2-69_KaufmanThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_69_kaufmanThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_69_Kaufman_ThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_a2_69_KaufmanThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("ResearchStrategyHeader.template.txt") == null,
+			"self-test: descriptive PascalCase names pass, and the literal StudyName placeholder does not");
+	}
+
 	static int Main()
 	{
 		string root = Root(), csproj = Path.Combine(root, "PLStudies.csproj");
@@ -224,6 +487,9 @@ static class Program
 				"MI-T14 self-test: `var x = ..<MC member>;` and MC-enum auto-properties are tracked (and a var of a non-enum member is not) [" + string.Join(",", lv) + "]");
 			Check(McEnums.Contains("MTPA_MCSymbolCategories") && McEnums.Contains("MTPA_SymbolFields") && McEnums.Length == 8, "MI-T14 scope = the eight MC enum types of spec rev 2.3 §10");
 		}
+
+		// (6) research drafts in sandbox/ stay out of the production project (docs/research-strategy-header.md)
+		SandboxGuard(root);
 
 		Console.WriteLine($"RepoLintTests: {s_pass} passed, {s_fail} failed");
 		return s_fail == 0 ? 0 : 1;

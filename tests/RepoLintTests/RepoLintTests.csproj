@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Repo lint (PR-D9a): every root-level _*.Function.CS / _*.Strategy.CS / _*.Indicator.CS must be compiled by PLStudies.csproj.
+       Sandbox studies must stay out of every csproj (docs/research-strategy-header.md).
        Reads the files only; links no study source. Not part of PLStudies.csproj. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

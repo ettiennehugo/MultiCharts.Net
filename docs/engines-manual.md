@@ -102,6 +102,10 @@ namespace PowerLanguage.Strategy
 
 `TraceLevel` is the only `[Input]` that `_CustomSignal` defines (`[Input] public virtual ETraceLevel TraceLevel`). Set it to **Journal** in Format Signals. The default `None` is set in the `_CustomSignal` constructor (PR #49), so `Create()` no longer overwrites a Format Signals value; a code default belongs in the derived class's constructor. **VERIFY:** that MC applies the saved dialog value after the constructor is MC behaviour I have not confirmed in this repo.
 
+### 1.2a Research strategies
+
+A new research strategy is drafted in `sandbox/`, with the header in `docs/research-strategy-header.md`, and is left out of `PLStudies.csproj`. The file name is the catalogue ID with hyphens written as underscores, then a short name from the catalogue description. `StudyName` in the pattern is a placeholder, not a file stem. Catalogue ID A2-69 maps to file `_A2_69_KaufmanThreeDay.Strategy.CS` and class `_A2_69_KaufmanThreeDay`. Copy `sandbox/ResearchStrategyHeader.template.txt` onto the new strategy file and fill in that strategy's own ID and name. Each of that strategy's own parameters is a separate `[Input]` property, described in header section 17. Shared engines keep their protected config, and existing studies are left as they are. A selective test adds one explicit `Compile Include` for that file and removes it when the test ends. The file joins the root project only after validation and the owner's approval. The worked examples in this manual are a different set of files.
+
 ### 1.3 Enabling an engine lazily and setting its config
 
 There are two real patterns in the repo:
@@ -225,6 +229,7 @@ These bodies mirror `_VolumeProfileFuturesBase` lines 357–513. Since PR #46 `_
 
 ### 1.7 Pitfalls checklist
 
+- [ ] **Research draft.** A new research strategy starts in `sandbox/` under `docs/research-strategy-header.md`. It is not added to `PLStudies.csproj` with the root studies. A temporary test adds one explicit include and removes it again.
 - [ ] **Lookahead.**
   - Read engines only after `base.CalcBar()` and on `EBarState.Close`.
   - Daily values require `PrevDate < today`; Regime requires `AsOf < today`; AVWAP requires `UsableFrom <= Bars.Time[0]`; HTF requires `HtfClosedIndex`/`htfMapped`, never `[0]` of a forming bar.

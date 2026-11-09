@@ -1,0 +1,151 @@
+// Research strategy header template.
+// Standard: docs/research-strategy-header.md
+// File name pattern: _<ID>_<StudyName>.Strategy.CS. StudyName is a placeholder, never a real stem.
+// Take a short PascalCase name from the catalogue description. The suffix is .Strategy.CS.
+// Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay.
+// The class is the file stem. It does not include .Strategy.CS. The Catalogue ID line keeps the hyphen.
+// Copy from the next section onto the new file and replace the A2-69 example with that strategy's own ID and name.
+// This file is comments only. It is not a study. Do not add it to a csproj.
+// Keep every // ## title, in this order. Write "Not applicable" or "Not yet verified" in the body.
+// Strategy-specific detail goes under Notes. Link the catalogue entry instead of pasting it.
+// Do not cite the sealed holdout (W-M and W-D Jan 2025–Oct 2026; W-T last 125 sessions).
+//
+// ## 1. Identity
+// Catalogue ID: A2-69
+// ID mapping: A2-69 → _A2_69_KaufmanThreeDay.Strategy.CS (class _A2_69_KaufmanThreeDay). KaufmanThreeDay shortens the catalogue title "Kaufman 3-day trade".
+// Name: Kaufman three-day
+// Header version: 1
+// Rules version: <catalogue version or entry revision this file follows>
+// Study class: _A2_69_KaufmanThreeDay
+// File: sandbox/_A2_69_KaufmanThreeDay.Strategy.CS
+// Stage: sandbox
+// Owner approval: Not yet verified
+//
+// ## 2. Provenance
+// Source: <book, video, catalogue ID, link>
+// Taken from the source: <rules copied from that source>
+// Research assumption: <what we added or changed, and why>
+//
+// ## 3. Hypothesis
+// Mechanism: <a few sentences on why the trade might have an edge>
+// Link: <catalogue path and heading; do not paste the entry>
+//
+// ## 4. Trade walkthrough
+// Trigger: <what opens the trade, in plain English>
+// Management: <what happens while it is open>
+// Exit: <what closes it>
+//
+// ## 5. Timing
+// Signal evaluated: <closed bar only, or say otherwise; which CalcBar path>
+// Order sent: <MarketNextBar, stop, or limit, and the price>
+// Can fill: <which bar; house rule is the next bar after a close>
+//
+// ## 6. Position and re-entry
+// Position: <flat-or-one, scale-in, or reverse>
+// Re-entry: <allowed under which rule, or not allowed>
+// Same session after a stop: <yes/no, and the rule>
+//
+// ## 7. Instruments
+// Typical: <where the idea is usually discussed>
+// Validated: Not yet verified
+//
+// ## 8. Data
+// Data1: <symbol, bar size, what the series is, session template, timezone, adjustment>
+// Data2: Not applicable
+// Further series: Not applicable
+// Warmup: <bars or sessions the signal needs before it may trade>
+//
+// ## 9. Entry and filters
+// All of these must be true: <list>
+// Skip when: <list, or Not applicable>
+//
+// ## 10. Position sizing and risk
+// Size: <contracts or the formula>
+// Risk limit: <the input that caps risk, or Not applicable>
+// Size is never shrunk to fit a stop: <yes, or describe the difference>
+//
+// ## 11. Orders, execution, and costs
+// Entry order: <type and name>
+// Exit orders: <type and name>
+// Fill assumption: <next bar, stop, limit; slippage>
+// Costs: <commission, fees, slippage model, or Not yet verified>
+//
+// ## 12. Trade management
+// While open: <what is adjusted, or Not applicable>
+//
+// ## 13. Exits
+// Hard stop: <price rule>
+// Target: <price rule, or Not applicable>
+// Time exit: <clock or bar count, or Not applicable>
+// Invalidation: <what kills the setup before or after entry>
+//
+// ## 14. Regimes
+// Suitable: <where it is meant to trade>
+// Unsuitable: <where it is meant to stand aside>
+//
+// ## 15. Dependencies
+// Base class: <_CustomSignal or _VolumeProfileFuturesBase>
+// Engines enabled: <list, or Not applicable>
+// Engine settings enabled: <protected engine config, such as RollDetection. Not strategy inputs>
+//
+// ## 16. Pitfalls
+// Lookahead: <how it is avoided, or Not yet verified>
+// Repaint: <or Not applicable>
+// Survivorship: <or Not applicable>
+// Rolls: <continuous unadjusted, roll window, or Not applicable>
+// Data quality: <session, timezone, missing bars, or Not yet verified>
+// Other: <or Not applicable>
+//
+// ## 17. Parameters
+// Each exposed strategy parameter is its own [Input] property. No input class or protected config class for those parameters.
+// No description argument on [Input] was verified in this repo. This section is the description. Do not invent an attribute.
+// TraceLevel stays the base [Input] on _CustomSignal.
+// Repeat the seven lines for every input. The sample below is the catalogue wording for A2-69, not a fitted optimum.
+// Input: DownCloses
+// Purpose: how many consecutive lower closes must print before a buy is allowed
+// Default: 2 — predeclared from the catalogue phrase "two down closes", not an empirically optimal default
+// Units: closes (count)
+// Range: integer >= 1. A searched range is Not yet verified.
+// Effect: a larger count waits through a longer decline before an entry is allowed
+// Interactions: Not applicable
+// Fixed or research-tuned: fixed
+//
+// ## 18. Acceptance policy
+// Policy: catalogue-default
+// Predeclared before any result was read: <yes, with the date — or Not yet verified>
+// catalogue-default: judge this file by its catalogue kill, catalogue §2.3, and the A2 generic kill when the idea is A2-origin. The stricter stated rule decides. This header does not change the catalogue.
+// big-winner-trend: Not applied
+// big-winner-trend applies only when Policy is set to that name before any result is read, and only because the written premise is a few large winners. Then a hard gate of "largest winning trade ≤ 10% of profits" is not applied to this file. Other gates still apply. Cost-adjusted expectancy must stay positive after the largest 1% of winning trades are removed. Report original expectancy and trimmed expectancy. Write here, before the run, how many winning trades are removed when 1% is not a whole number.
+// Expectancy = win_rate * avg_win - loss_rate * avg_loss, on cost-adjusted trades. avg_win and avg_loss are both positive magnitudes. Define scratches before the run if any trade is neither a win nor a loss.
+//
+// ## 19. Validation
+// Status: Not yet verified
+// Evidence: Not yet verified
+// Window used: <dev or validation window, when a run exists>
+// Holdout (W-M and W-D Jan 2025–Oct 2026; W-T last 125 sessions) stays unviewed. Do not put those results here.
+//
+// ## 20. Edge monitoring
+// A person reads this section. It does not place orders and it does not change parameters.
+// Expectancy: Not yet verified
+//   Formula: win_rate * avg_win - loss_rate * avg_loss, same cost model as section 11.
+// Observations: Not yet verified
+//   Catalogue M19 discusses sample error. A minimum count for this strategy is written here before incubation, or it stays Not yet verified.
+// Drift: Not yet verified
+//   Compare regime mix, fill versus system price, and costs with the tested profile. Numbers come from this strategy's own test, written down before incubation.
+// Warning: Not yet verified
+//   Warning means look. It is not an order.
+// Pause: Not yet verified
+//   Pause means stop new entries. Open positions keep the exits in section 13.
+// Review: Not yet verified
+//   Review means the owner looks before new entries resume.
+// Uncertainty: <short sample, one regime, cost assumption, data gap, holdout still sealed>
+// No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
+//
+// ## 21. Log diagnostics
+// journalArm name: <or Not yet verified>
+// logSignal tag: <or Not yet verified>
+// Skip / flatten lines: <the strings a reader can search for>
+// How to turn logging on: engines manual §1.5 (TraceLevel Journal). Do not paste that section.
+//
+// ## 22. Notes
+// Not applicable

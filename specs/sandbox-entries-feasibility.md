@@ -1,5 +1,7 @@
 # Feasibility: developing every catalogue entry in a sandbox that plugs into _Test1.._Test10
 
+**Update 9 Nov 2026.** Where an unproven study lives, and the header it carries, is now [`docs/research-strategy-header.md`](../docs/research-strategy-header.md). Owner commit `c862ad2` put research copies in `sandbox/` and left them out of `PLStudies.csproj`. The flat-prefix layout in §3.1 below is the earlier recommendation. Follow the header standard for new research files. The rest of this note is unchanged.
+
 Prepared by Grok Bot (Analyst 2), Thu 22 Oct 2026 (EDT). This is a study only: I changed no code and pushed nothing.
 I read the repo at origin/main 6450a9f (PR #20 merged), PRs #13–#20, the catalogue §2.5/§4/§5 and the A2 file.
 The local working copy is on `feat/gmm-core` with an untracked `_Gmm.Function.CS`. I left it untouched.
