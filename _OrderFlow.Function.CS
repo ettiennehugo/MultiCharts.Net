@@ -120,7 +120,8 @@ namespace PowerLanguage.Function
 			/// <summary>Bounded wait (ms) at the first bar of each Globex day for that day's chunks; 0 = off. With a wait, late days are
 			/// loaded (not skipped). DataLoader callbacks arrive on their own thread while CalcBar sleeps (probe P-RC7).</summary>
 			public int TickChunkWaitMs = 0;
-			/// <summary>Chunk boundary, US Eastern (CME daily halt start), so no tick straddles two chunks.</summary>
+			/// <summary>Chunk boundary, US Eastern. The host replaces this with the template's listed session end converted to ET
+			/// (M6b). 17:00 remains only until that replacement, for a profile-off chart.</summary>
 			public TimeSpan TickChunkBoundaryEt = new TimeSpan(17, 0, 0);
 			/// <summary>An in-flight chunk with no callback for this many seconds is failed (and split like any failure); 0 = no timeout.</summary>
 			public int TickChunkTimeoutSec = 300;
@@ -925,6 +926,52 @@ namespace PowerLanguage.Function
 				m_bars = m_aggressor = m_mc = m_quote = m_tickRule = m_barUpDown = m_unavailable = 0;
 				return line;
 			}
+		}
+
+		/// <summary>One row of a session template (bar-zone clock). The host copies Bars.Sessions.</summary>
+		public struct WeekSession
+		{
+			public DayOfWeek StartDay, EndDay;
+			public TimeSpan Start, End;
+			public WeekSession(DayOfWeek startDay, TimeSpan start, DayOfWeek endDay, TimeSpan end)
+			{ StartDay = startDay; Start = start; EndDay = endDay; End = end; }
+		}
+
+		/// <summary>M6b. The template's listed session end, converted from the bar zone to US Eastern, as a time of day.
+		/// Listed end = the latest weekday session End after that conversion (R14: the template row, not the last bar's close).
+		/// On the stale CME Globex template, 16:30 CT is 17:30 ET. Spot FX is unsupported: the Error line is written, then the throw.
+		/// Same conversion as InstrumentSessions.ToExchange (spring-forward gap moved +1h; identity when the zones match).</summary>
+		public static TimeSpan ChunkBoundaryEt(WeekSession[] sessions, TimeZoneInfo barZone, TimeZoneInfo eastern, DateTime anchor, bool spotFx, string name, Action<string> errorSink)
+		{
+			if (spotFx) Fail(errorSink, name, "spot FX is unsupported (no central traded volume or aggressor side)", "disable order flow, or run the idea on the currency future (6E)");
+			if (sessions == null || sessions.Length == 0) Fail(errorSink, name, "sessions:none", "check the chart's session template");
+			if (barZone == null || eastern == null) Fail(errorSink, name, "tz:bar", "set the chart time zone");
+			DateTime sunday = DateTime.SpecifyKind(anchor.Date, DateTimeKind.Unspecified).AddDays(-(int)anchor.DayOfWeek);
+			TimeSpan best = TimeSpan.Zero;
+			bool any = false;
+			for (int i = 0; i < sessions.Length; i++)
+			{
+				DateTime end = ToZone(sunday.AddDays((int)sessions[i].EndDay) + sessions[i].End, barZone, eastern);
+				DateTime key = end.TimeOfDay == TimeSpan.Zero ? end.Date.AddDays(-1) : end.Date;
+				if (key.DayOfWeek == DayOfWeek.Saturday || key.DayOfWeek == DayOfWeek.Sunday) continue;
+				if (!any || end.TimeOfDay > best) { best = end.TimeOfDay; any = true; }
+			}
+			if (!any) Fail(errorSink, name, "sessions:none", "check the chart's session template");
+			return best;
+		}
+
+		static DateTime ToZone(DateTime wall, TimeZoneInfo src, TimeZoneInfo dst)
+		{
+			if (src.Id == dst.Id) return wall;
+			if (src.IsInvalidTime(wall)) wall = wall.AddHours(1);
+			return TimeZoneInfo.ConvertTime(wall, src, dst);
+		}
+
+		static void Fail(Action<string> errorSink, string name, string reason, string action)
+		{
+			string msg = "M-INSTR: FLOW cannot run on " + (name ?? "") + ": " + reason + ". " + action + ".";
+			if (errorSink != null) errorSink(msg);
+			throw new InvalidOperationException(msg);
 		}
 
 		/// <summary>Tick-chunk spec §5.1: one Globex day's tick window, US Eastern: [GlobexDate − 1 day + boundary, GlobexDate + boundary).</summary>

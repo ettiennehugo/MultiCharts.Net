@@ -972,12 +972,27 @@ namespace PowerLanguage.Strategy
 			return queued || mc || tickChunksPending() > 0;
 		}
 
+		/// <summary>M6b. Listed session end of the Data1 template, converted to US Eastern. 16:30 CT on the stale Globex template is 17:30 ET.
+		/// Profiles off keeps the 17:00 field. Spot FX throws (Error line first) and never gets a boundary.</summary>
+		TimeSpan chunkBoundaryEt()
+		{
+			InstrumentProfile p = InstrumentProfileOf(1);
+			if (p == null) return FlowCfg.TickChunkBoundaryEt;
+			var rows = new _OrderFlow.WeekSession[p.sessions == null ? 0 : p.sessions.Length];
+			if (p.sessions != null)
+				for (int i = 0; i < p.sessions.Length; i++)
+					rows[i] = new _OrderFlow.WeekSession(p.sessions[i].StartDay, p.sessions[i].StartTime, p.sessions[i].EndDay, p.sessions[i].EndTime);
+			TimeZoneInfo et = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+			return _OrderFlow.ChunkBoundaryEt(rows, p.barZone, et, Bars.Time[0], p.assetClass == EAssetClass.SpotFx, p.name, msg => traceAlways(ETraceLevel.Error, p.name, msg));
+		}
+
 		// Tick-chunk spec §5.1: plan one chunk per Globex day (calc thread). false: nothing to chunk (legacy single request).
 		private bool planTickChunks(DateTime firstBar, DateTime lastBar, DateTime rtTo, RequestQuoteField[] fields)
 		{
 			_CmeSessionClock ck = clock();
 			DateTime gx0 = ck.GlobexDate(firstBar), gx1 = ck.GlobexDate(lastBar);
 			var closed = new List<DateTime>();
+			FlowCfg.TickChunkBoundaryEt = chunkBoundaryEt();
 			List<_OrderFlow.DayChunk> days = _OrderFlow.PlanGlobexDays(gx0, gx1, ck.IsGlobexClosedDay, FlowCfg.TickChunkBoundaryEt, closed);
 			if (days.Count == 0)
 			{
