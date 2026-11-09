@@ -309,11 +309,13 @@ public enum EGate0Canary { VW08 = 0, A2_24_i = 1, A2_24_ii = 2, A2_24_iii = 3, D
 // class Gate0Engine
 public EGate0Mode mode = EGate0Mode.EventStudy;
 public int variant;
-public double tick = 0.25;
+public double tick;                              // no default; the host sets tickSize()
+public string root;                              // KD-02: Data1 profile root
 public long seed = 33;
 public double vaPct = 0.70;
 public Action<string> journal;
-public string Configure();                       // null/"" = OK, else an error text (the host throws it)
+public Action<string> error;                     // Error line, then the tick throw
+public string Configure();                       // null/"" = OK, else an error text (the host throws it). tick <= 0 throws after error()
 public void Bar(Gate0Bar b, int mp = 0);         // one CLOSED Data1 bar; mp = market position sign
 public List<Gate0Result> Finish();               // scores and journals; call once
 public bool InRollWindow(DateTime day);
@@ -326,7 +328,7 @@ public const int CompositeSessions = 5;
 public const double KdeBandwidthTicks = 6, KdeProminence = 0.10;
 ```
 
-`Configure()` returns these errors (the host turns them into an `ArgumentException` at StartCalc): `tick must be > 0`; `Canary Variant must be 0..7 or 100..123 (A2-53 sweep)`; `level-study Variant must be 0..13`; or the `_LevelStudy.Configure()` error. Mode **Strategy** is not runnable: `_TestGate0.StartCalc` throws `Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary`.
+`Configure()` returns these errors (the host turns them into an `ArgumentException` at StartCalc): `Canary Variant must be 0..8, 100..123 (A2-53 sweep) or 130..133 (KD-02 sweep)`; `level-study Variant must be 0..13`; or the `_LevelStudy.Configure()` error. A tick that is 0, unset, or not finite does not return: `error` is called with `G0: tick must be > 0`, then `Configure` throws `InvalidOperationException`. The host sets `tick` from `tickSize()` and `root` from the Data1 profile (`p.root`). On the first bar the host checks that the chart sessions, converted to US Eastern, cover (09:30, 16:00] Monday–Friday; if not, it writes an Error line and throws `sessions:window-not-covered` with the action "use a session template that covers 09:30–16:00 ET". The 09:30–16:00 and 15:55 windows themselves are unchanged. Mode **Strategy** is not runnable: `_TestGate0.StartCalc` throws `Mode Strategy does not run Gate 0 - use EventStudy/Control*/Canary`.
 
 ### 2.2 Inputs and pre-registered constants
 
