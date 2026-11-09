@@ -150,7 +150,8 @@ namespace PowerLanguage.Function
 	{
 		public AvwapLimits limits = new AvwapLimits();
 		public EAvwapAnchor events = EAvwapAnchor.None;
-		public double tickSize = 0.25;
+		/// <summary>M6d. No implicit 0.25. The host sets this from tickSize(). Configure rejects a tick that is not &gt; 0. Not an [Input].</summary>
+		public double tickSize;
 		public string label = "AV";
 		public Action<string> journal;     // ETraceLevel.Journal: create / expire / invalidate (bar times only)
 		public Action<string> trace;       // Debug

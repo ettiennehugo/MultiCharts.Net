@@ -19,6 +19,7 @@ static class Program
 	{
 		var cfg = new LevelStudyConfig();
 		Check(cfg.Validate() == null && !cfg.enabled && cfg.controls == 20 && cfg.distLo == 0.9 && cfg.distHi == 1.1 && cfg.maxAge == 15, "defaults (off, 20 controls at 0.9-1.1x, ages 1-15)");
+		Check(new _LevelStudy().tickSize == 0, "M6d no implicit 0.25 tick");
 		var bad = new LevelStudyConfig { controls = 0, distLo = 1.2, reactionBars = 0 }.Validate();
 		Check(bad != null && bad.Contains("controls=0") && bad.Contains("distLo") && bad.Contains("reactionBars=0"), "Validate names every bad value");
 
@@ -46,7 +47,7 @@ static class Program
 		var sw = new StringWriter(); ls.Finish(); ls.WriteCsv(sw);
 		Check(sw.ToString().Split('\n')[0].StartsWith("day,type,key,age") && sw.ToString().Contains("2024-03-12,VAH"), "CSV");
 		Check(Near(lv.volAttraction, (300 + 100 + 100) / 3.0 / 100.0, 1e-9), $"volume attraction = mean vol after touch / session mean before ({lv.volAttraction})");
-		var ls2 = new _LevelStudy { config = new LevelStudyConfig { enabled = true, from = D0.AddDays(5) } }; ls2.Configure();
+		var ls2 = new _LevelStudy { config = new LevelStudyConfig { enabled = true, from = D0.AddDays(5) }, tickSize = 0.25 }; ls2.Configure();
 		ls2.BeginSession(D0); for (int i = 0; i < 70; i++) ls2.Bar(100, 101, 99, 100 + i % 2, 1); ls2.BeginSession(D0.AddDays(1)); ls2.Bar(100, 101, 99, 100, 1);
 		Check(!ls2.AddLevel("POC", 101, 1), "sessions outside the decision window are skipped");
 

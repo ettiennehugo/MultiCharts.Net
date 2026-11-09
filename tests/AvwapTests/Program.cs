@@ -45,6 +45,8 @@ static class Program
 		string e = l.Validate();
 		Check(e != null && e.Contains("maxAnchors=0") && e.Contains("slopeBars=0") && e.Contains("bandSigmas contains -1"), "Validate names every bad value");
 		Check(new AvwapLimits().Validate() == null, "defaults valid");
+		var bare = new _AvwapManager();
+		Check(bare.tickSize == 0 && bare.Configure() != null && bare.Configure().Contains("tickSize="), "M6d no implicit 0.25; unset tick rejected");
 		var m = new _AvwapManager { tickSize = 0 }; Check(m.Configure() != null, "tickSize 0 rejected");
 	}
 

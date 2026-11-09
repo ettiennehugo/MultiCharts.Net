@@ -76,7 +76,8 @@ namespace PowerLanguage.Function
 	internal sealed class _LevelStudy
 	{
 		public LevelStudyConfig config = new LevelStudyConfig();
-		public double tickSize = 0.25;
+		/// <summary>M6d. No implicit 0.25. The host sets this from tickSize() (the Data1 profile tick). Gate 0 copies its own tick in Configure. 0 leaves controls unsnapped and a touch tolerance of 0. Not an [Input].</summary>
+		public double tickSize;
 		public Action<string> journal;
 
 		private readonly List<LevelEvent> m_all = new List<LevelEvent>();
