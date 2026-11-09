@@ -199,6 +199,9 @@ static class Program
 			Check(InstrumentRules.Expiry(EExpiryRule.ThirdFridaySoq, y, m, EventRules.IsNyseBusinessDay, RS, null) == EventRules.RuleExpiryDate(y, m), "T4 MES/NQ/MNQ share ThirdFridaySoq");
 		}
 		Check(n == 48, "T4 48 ES rows");
+		string csvText = File.ReadAllText(Fx("expiry-worked.csv"));
+		Check(csvText.Contains("checked by the analyst") && csvText.Contains("roll = preset roll rule applied by hand") && csvText.Contains("not a vendor date"),
+			"T4 fixture distinguishes analyst-checked expiry dates from hand-computed roll dates (not a vendor splice)");
 		foreach (var raw in File.ReadAllLines(Fx("expiry-worked.csv")))
 		{
 			string l = raw.Trim(); if (l.Length == 0 || l[0] == '#') continue;
@@ -265,6 +268,14 @@ static class Program
 			Check(r == EventRules.RollDate(y, m), "T5 roll == EventRules.RollDate " + y + "-" + m);
 		}
 		Check(_RollDetector.DatesDigest(dates) == "fdd63bd8f179a8d4", "T5 digest " + _RollDetector.DatesDigest(dates));
+		var esP = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null);
+		Check(InstrumentRules.IsEquityIndexQuarterly(esP), "T5 built ES profile is equity-index quarterly (host keeps EventRules for expiry queries)");
+		var collected = new List<DateTime>();
+		InstrumentRules.CollectRollDates(esP, 2000, 2035, "ROLL", null, collected);
+		Check(collected.Count == 144 && _RollDetector.DatesDigest(collected) == "fdd63bd8f179a8d4", "T5 CollectRollDates digest fdd63bd8f179a8d4");
+		bool order = collected.Count == dates.Count;
+		for (int i = 0; order && i < dates.Count; i++) if (collected[i] != dates[i]) order = false;
+		Check(order, "T5 CollectRollDates == EventRules.RollDate in quarter order");
 	}
 	static void T6Windows()
 	{
@@ -302,6 +313,208 @@ static class Program
 		var gc = InstrumentPresets.Find("GC", EAssetClass.Future);
 		Check(Ds(InstrumentRules.Roll(gc, 2024, 8, EventRules.IsNyseBusinessDay, RS, null).Value) == "2024-07-30", "T6 GCQ24 roll = 1 bd before FND 2024-07-31 (VERIFY)");
 		Check(InstrumentRules.Roll(new InstrumentPresetRow("X", EAssetClass.Future, 1, 1, "USD", MonthMask.All, EExpiryRule.ThirdLastBd, ERollRule.None, 0, ECalendar.Observed, "X", "", null), 2024, 1, EventRules.IsNyseBusinessDay, RS, null) == null, "T6 ERollRule.None -> no roll");
+		// M5: CollectRollDates is contract-year, not "rolls whose calendar date is in the year".
+		// CLF24 rolls 2023-12-15 (inside the 2024 contract year). CLF25 rolls 2024-12-17 (January 2025 contract, not in 2024).
+		var clB = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
+		var gcB = InstrumentProfile.Build(In("@GC", EAssetClass.Future, "GC", 1, 10, 100), null, null);
+		var znB = InstrumentProfile.Build(In("@ZN", EAssetClass.Future, "ZN", 1, 64, 1000), null, null);
+		var sixB = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 1, 20000, 125000), null, null);
+		foreach (var pair in new[] { new object[] { clB, 12 }, new object[] { gcB, 6 }, new object[] { znB, 4 }, new object[] { sixB, 4 } })
+		{
+			var bp = (InstrumentProfile)pair[0];
+			int wantN = (int)pair[1];
+			var bag = new List<DateTime>();
+			InstrumentRules.CollectRollDates(bp, 2024, 2024, "DVP", null, bag);
+			var expect = new List<DateTime>();
+			var row = InstrumentRules.RollRow(bp);
+			for (int m = 1; m <= 12; m++) if (MonthMask.Has(bp.contractMonths, m)) expect.Add(InstrumentRules.Roll(row, 2024, m, bp.isBusinessDay, RS, null).Value.Date);
+			bag.Sort(); expect.Sort();
+			bool same = bag.Count == expect.Count;
+			for (int i = 0; same && i < bag.Count; i++) if (bag[i] != expect[i]) same = false;
+			Check(same && bag.Count == wantN, "T6 CollectRollDates " + bp.root + " 2024 contract-year equals one roll per listed month (" + bag.Count + ")");
+			Check(bp.calendar == ECalendar.NyseStandIn && !InstrumentRules.IsEquityIndexQuarterly(bp), "T6 " + bp.root + " stays NyseStandIn, not the equity-index path");
+		}
+		var cl2024 = new List<DateTime>();
+		InstrumentRules.CollectRollDates(clB, 2024, 2024, "DVP", null, cl2024);
+		var cl2025 = new List<DateTime>();
+		InstrumentRules.CollectRollDates(clB, 2025, 2025, "DVP", null, cl2025);
+		Check(cl2024.Contains(D(2023, 12, 15)) && !cl2024.Contains(D(2024, 12, 17)) && cl2025.Contains(D(2024, 12, 17)) && !cl2025.Contains(D(2023, 12, 15)),
+			"T6 CL contract-year endpoints: 2024 includes CLF24 roll 2023-12-15 and omits CLF25 roll 2024-12-17; 2025 is the reverse");
+		Check(cl2024.Min() == D(2023, 12, 15) && cl2024.Max() == InstrumentRules.Roll(InstrumentRules.RollRow(clB), 2024, 12, clB.isBusinessDay, RS, null).Value.Date,
+			"T6 CL 2024 contract-year lower endpoint is the January contract's prior-December roll; upper is the December contract");
+		DateTime gcFebRoll = InstrumentRules.Roll(InstrumentRules.RollRow(gcB), 2024, 2, gcB.isBusinessDay, RS, null).Value.Date;
+		var gc2024 = new List<DateTime>();
+		InstrumentRules.CollectRollDates(gcB, 2024, 2024, "DVP", null, gc2024);
+		Check(gc2024.Contains(gcFebRoll) && gcFebRoll.Year == 2024 && gcFebRoll.Month < 2 && gc2024.TrueForAll(d => d.Year == 2024),
+			"T6 GC 2024 contract-year rolls stay in 2024; February's roll is in January (month before the contract), not a prior calendar year (" + Ds(gcFebRoll) + ")");
+		DateTime esEx, clEx;
+		bool esWin = _RollDetector.SeriesWindow(new DateTime(2020, 4, 15), out esEx);
+		var clRow = InstrumentPresets.Find("CL", EAssetClass.Future);
+		_RollDetector.SeriesWindowFn clWin = (DateTime day, out DateTime ex) => InstrumentRules.SeriesWindow(clRow, day, EventRules.IsNyseBusinessDay, RS, null, out ex);
+		bool clHit = clWin(new DateTime(2020, 4, 15), out clEx);
+		Check(!esWin && clHit && clEx == new DateTime(2020, 4, 21), "T6 2020-04-15 is inside the CL window and outside the ES quarterly window");
+		var clDet = new _RollDetector { series = true, gapTicks = 8, seriesWindow = clWin };
+		clDet.Step(1, new DateTime(2020, 4, 14), 40, 40, "CL", 0.01);
+		Check(clDet.Step(2, new DateTime(2020, 4, 15), 40.10, 40, "CL", 0.01), "T6 detector seriesWindow delegate takes the CL roll week (10 ticks)");
+		var esDet = new _RollDetector { series = true };
+		esDet.Step(1, new DateTime(2020, 4, 14), 3000, 3000, "ES", 0.25);
+		Check(!esDet.Step(2, new DateTime(2020, 4, 15), 3003, 3000, "ES", 0.25), "T6 null seriesWindow stays the ES quarterly window (2020-04-15 out)");
+		var bare = InstrumentProfile.Build(In("6BZ26", EAssetClass.Future, "6B", 1, 10000, 62500), null, null);
+		var miss = Throws(s => InstrumentRules.CollectRollDates(bare, 2020, 2021, "ROLL", s, new List<DateTime>()), "T6 no preset");
+		Check(miss != null && miss.Reason == InstrumentReason.UnknownField("roll") && miss.Message.Contains("add a preset row / cost for 6B"), "T6 S5 no preset -> unknown-field:roll (" + (miss == null ? "" : miss.Message) + ")");
+		var ov = new InstrumentConfig { overrides = new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.None, 0, ECalendar.NyseStandIn, "ENERGY", "t", null) };
+		var noneP = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), ov, null);
+		var noneE = Throws(s => InstrumentRules.CollectRollDates(noneP, 2024, 2024, "DVP", s, new List<DateTime>()), "T6 roll None");
+		Check(noneE != null && noneE.Reason == InstrumentReason.UnknownField("roll") && noneE.Message.Contains("roll rule is None"), "T6 S5 roll None -> unknown-field:roll");
+		var rangeE = Throws(s => InstrumentRules.CollectRollDates(clB, 2025, 2024, "ROLL", s, new List<DateTime>()), "T6 year range");
+		Check(rangeE != null && rangeE.Reason == InstrumentReason.UnknownField("roll") && rangeE.Message.Contains("2025..2024")
+			&& rangeE.Action.Contains("yearFrom") && rangeE.Message.IndexOf("add a preset row", StringComparison.Ordinal) < 0,
+			"T6 inverted contract-year range tells the caller to fix the years (" + (rangeE == null ? "" : rangeE.Message) + ")");
+		var ev = new _EventCalendar { config = new EventConfig { enabled = true }, ownSource = EOwnContractSource.Profile };
+		ev.contract = delegate (DateTime day, out DateTime exp, out DateTime roll) { exp = new DateTime(2024, 4, 21); roll = new DateTime(2024, 4, 17); return true; };
+		ev.contractCalendarVerified = false;
+		int refused = 0;
+		ev.contractRefuse = delegate (string _) { refused++; throw new InvalidOperationException("refused"); };
+		bool threw = false;
+		try { ev.SessionsToExpiry(new DateTime(2024, 4, 18)); }
+		catch (InvalidOperationException) { threw = true; }
+		Check(threw && refused == 1, "T6 SessionsToExpiry on an unverified bound calendar calls contractRefuse and does not count");
+		Check(ev.IsRollWeek(new DateTime(2024, 4, 18)) && ev.IsRollWeek(new DateTime(2024, 4, 21)) && !ev.IsRollWeek(new DateTime(2024, 4, 16)) && !ev.IsRollWeek(new DateTime(2024, 4, 22)),
+			"T6 IsRollWeek uses the bound roll/expiry and does not refuse");
+		Check(ev.ContractRollDate(new DateTime(2024, 4, 18)) == new DateTime(2024, 4, 17), "T6 ContractRollDate follows the bound profile");
+		Check(!InstrumentRules.HasRollFacts(bare) && InstrumentRules.HasRollFacts(clB), "T6 HasRollFacts: preset yes, bare future no");
+		// CLK20: static equity-index answers stay June; the bound engine's own queries, spans, and classification use April.
+		// SessionsToExpiry still refuses (S4) and the Error line is the exception text.
+		DateTime clk = new DateTime(2020, 4, 17);
+		Check(_EventCalendar.RuleRollDate(clk) == new DateTime(2020, 6, 11), "T6 static RuleRollDate(2020-04-17) stays the equity-index roll 2020-06-11");
+		bool genJune = false;
+		foreach (var rec in EventRules.Generate(2020, false))
+			if (rec.kind == EEventKind.QuarterlyExpiry && rec.etTime.Date == new DateTime(2020, 6, 19)) genJune = true;
+		Check(genJune, "T6 static Generate(2020) still emits the equity-index QuarterlyExpiry 2020-06-19");
+		var clEng = new _EventCalendar { config = new EventConfig { enabled = true }, ownSource = EOwnContractSource.Profile };
+		var clSub = clB.Subject("EVENT");
+		Action<string> clErr = null;
+		var clSink = new List<string>();
+		clErr = s => clSink.Add(s);
+		var clRowB = InstrumentRules.RollRow(clB);
+		clEng.contract = delegate (DateTime day, out DateTime expiry, out DateTime roll)
+		{
+			int cy, cm;
+			InstrumentRules.ContractFor(clRowB, day, clB.isBusinessDay, clSub, clErr, out cy, out cm);
+			expiry = InstrumentRules.Expiry(clRowB.expiry, cy, cm, clB.isBusinessDay, clSub, clErr);
+			DateTime? rr = InstrumentRules.Roll(clRowB, cy, cm, clB.isBusinessDay, clSub, clErr);
+			roll = rr ?? expiry;
+			return rr.HasValue;
+		};
+		clEng.contractCalendarVerified = false;
+		clEng.contractRefuse = delegate (string _)
+		{
+			InstrumentError.Fail(clErr, clSub, InstrumentReason.Calendar,
+				"session count needs a verified holiday calendar; " + InstrumentText.CalendarName(clB.calendar) + " serves expiry/roll business days only (CME calendar pending M8)",
+				"add a verified calendar for " + clB.root + " (PR-M8)");
+		};
+		clEng.error = clErr;
+		string cfgErr = clEng.Configure();
+		Check(cfgErr == null, "T6 CL engine Configure (" + (cfgErr ?? "ok") + ")");
+		Check(clEng.ContractRollDate(clk) == clk && clEng.ContractExpiryDate(clk) == new DateTime(2020, 4, 21) && clEng.IsRollWeek(clk) && !clEng.IsRollWeek(new DateTime(2020, 6, 11)),
+			"T6 bound CLK20 ContractRollDate/Expiry/IsRollWeek are 2020-04-17/2020-04-21, not the June equity-index roll");
+		EventDay apr21 = clEng.Classify(new DateTime(2020, 4, 21)), jun19 = clEng.Classify(new DateTime(2020, 6, 19));
+		bool aprExp = false, junExp = false, claims = false;
+		foreach (var rec in clEng.EventsOn(new DateTime(2020, 4, 21))) if (rec.kind == EEventKind.QuarterlyExpiry) aprExp = true;
+		foreach (var rec in clEng.EventsOn(new DateTime(2020, 6, 19))) if (rec.kind == EEventKind.QuarterlyExpiry) junExp = true;
+		foreach (var rec in clEng.EventsOn(new DateTime(2020, 1, 2))) if (rec.kind == EEventKind.Claims) claims = true;
+		DateTime aprUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(new DateTime(2020, 4, 17, 12, 0, 0), DateTimeKind.Unspecified), clEng.Eastern);
+		DateTime junUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(new DateTime(2020, 6, 11, 12, 0, 0), DateTimeKind.Unspecified), clEng.Eastern);
+		Check(apr21.ownContract == EOwnContractStatus.Evaluated && apr21.isQuarterlyExpiry == true && apr21.isRollWeek == true
+			&& jun19.isQuarterlyExpiry == false && jun19.isOpex && aprExp && !junExp && claims
+			&& clEng.InSpan(EEventKind.RollWeek, aprUtc) && !clEng.InSpan(EEventKind.RollWeek, junUtc),
+			"T6 bound CL classification uses April own-expiry, keeps June opex and January claims, and InSpan follows the profile span");
+		var s4 = Throws(s => { clSink.Clear(); clEng.contractRefuse = delegate (string __) { InstrumentError.Fail(s, clSub, InstrumentReason.Calendar, "session count needs a verified holiday calendar; " + InstrumentText.CalendarName(clB.calendar) + " serves expiry/roll business days only (CME calendar pending M8)", "add a verified calendar for " + clB.root + " (PR-M8)"); }; clEng.SessionsToExpiry(clk); }, "T6 CL SessionsToExpiry");
+		Check(s4 != null && s4.Reason == InstrumentReason.Calendar && s4.Message.Contains("add a verified calendar for CL (PR-M8)") && s4.Message.Contains("NyseStandIn"),
+			"T6 SessionsToExpiry on NyseStandIn is Error + calendar, not a count (" + (s4 == null ? "" : s4.Message) + ")");
+		string evTest = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_EventCalendarTest.Strategy.CS")));
+		string step = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_CustomSignal.Strategy.CS")));
+		int stepAt = step.IndexOf("private void stepEvent()", StringComparison.Ordinal);
+		int stepEnd = stepAt < 0 ? -1 : step.IndexOf("private void publishEvent", stepAt, StringComparison.Ordinal);
+		string stepBody = stepAt >= 0 && stepEnd > stepAt ? step.Substring(stepAt, stepEnd - stepAt) : "";
+		var clSharedOnly = new _EventCalendar { config = new EventConfig { enabled = true, sharedCalendar = true, ownContract = false }, ownSource = EOwnContractSource.Profile, contract = clEng.contract };
+		var clOwnOnly = new _EventCalendar { config = new EventConfig { enabled = true, sharedCalendar = false, ownContract = true }, ownSource = EOwnContractSource.Profile, contract = clEng.contract, contractCalendarVerified = false };
+		Check(clSharedOnly.Configure() == null && clOwnOnly.Configure() == null, "T6 CL control engines configure");
+		bool sharedOpex = false, sharedQ = false, ownOpex = false, ownQ = false;
+		foreach (var r in clSharedOnly.EventsOn(new DateTime(2020, 6, 19))) { if (r.kind == EEventKind.MonthlyOpex) sharedOpex = true; if (r.kind == EEventKind.QuarterlyExpiry) sharedQ = true; }
+		foreach (var r in clOwnOnly.EventsOn(new DateTime(2020, 4, 21))) if (r.kind == EEventKind.QuarterlyExpiry) ownQ = true;
+		foreach (var r in clOwnOnly.EventsOn(new DateTime(2020, 6, 19))) if (r.kind == EEventKind.MonthlyOpex) ownOpex = true;
+		EventDay sharedDay = clSharedOnly.Classify(new DateTime(2020, 6, 19));
+		Check(sharedOpex && !sharedQ && sharedDay.ownContract == EOwnContractStatus.NotSelected && sharedDay.isRollWeek == null && sharedDay.isOpex
+			&& ownQ && !ownOpex && clOwnOnly.Classify(new DateTime(2020, 4, 21)).ownContract == EOwnContractStatus.Evaluated && clOwnOnly.ContractExpiryDate(new DateTime(2020, 4, 17)) == new DateTime(2020, 4, 21),
+			"T6 CL controls: ownContract off keeps June opex; sharedCalendar off keeps the April own expiry and drops opex");
+		Check(evTest.Contains("toExpiry({ev.SessionsToExpiry()})") && evTest.Contains("NyseStandIn") && evTest.Contains("Do not catch it")
+			&& stepBody.IndexOf("SessionsToExpiry", StringComparison.Ordinal) < 0,
+			"T6 smoke calls SessionsToExpiry and says NyseStandIn stops it; stepEvent does not call SessionsToExpiry");
+		Check(InstrumentRules.OwnSource(false, clB) == EOwnContractSource.EquityIndex && InstrumentRules.OwnSource(true, null) == EOwnContractSource.EquityIndex
+			&& InstrumentRules.OwnSource(true, InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null)) == EOwnContractSource.EquityIndex
+			&& InstrumentRules.OwnSource(true, clB) == EOwnContractSource.Profile,
+			"T6 off-switch and ES stay EquityIndex; CL with facts is Profile");
+		OwnFactsGap(InstrumentProfile.Build(In("AAPL", EAssetClass.Stock, "AAPL", 1, 100, 1), null, null), "AAPL");
+		OwnFactsGap(bare, "6B");
+	}
+
+	static void BarEv(_EventCalendar e, DateTime et)
+	{
+		DateTime utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(et, DateTimeKind.Unspecified), e.Eastern);
+		e.Step(et, utc.AddMinutes(-1), utc, false);
+	}
+	static void OwnFactsGap(InstrumentProfile p, string label)
+	{
+		Check(InstrumentRules.OwnSource(true, p) == EOwnContractSource.Unavailable, label + " profile on, no roll facts → Unavailable");
+		var shared = new _EventCalendar { config = new EventConfig { enabled = true, sharedCalendar = true, ownContract = true }, ownSource = EOwnContractSource.Unavailable };
+		var macro = new _EventCalendar { config = new EventConfig { enabled = true, classes = EEventClassMask.Macro, sharedCalendar = true, ownContract = true }, ownSource = EOwnContractSource.Unavailable };
+		Action<string> sink = null;
+		Action refuse = () => InstrumentError.Fail(sink, p.Subject("EVENT"), InstrumentReason.UnknownField("roll"), "no preset expiry, roll rule, contract months, or business-day calendar", "add a preset row / cost for " + p.root);
+		shared.ownQueryRefuse = refuse;
+		macro.ownQueryRefuse = refuse;
+		Check(shared.Configure() == null && macro.Configure() == null, label + " engines configure");
+		var journal = new List<string>();
+		shared.journal = s => journal.Add(s);
+		BarEv(shared, new DateTime(2020, 1, 2, 9, 0, 0));
+		BarEv(shared, new DateTime(2020, 6, 19, 10, 0, 0));
+		EventDay claims = shared.Classify(new DateTime(2020, 1, 2)), opex = shared.Classify(new DateTime(2020, 6, 19));
+		bool hasClaims = false, hasOpex = false, hasOwn = false;
+		foreach (var r in shared.EventsOn(new DateTime(2020, 1, 2))) if (r.kind == EEventKind.Claims) hasClaims = true;
+		foreach (var r in shared.EventsOn(new DateTime(2020, 6, 19)))
+		{
+			if (r.kind == EEventKind.MonthlyOpex) hasOpex = true;
+			if (r.kind == EEventKind.QuarterlyExpiry) hasOwn = true;
+		}
+		Check(hasClaims && claims.ownContract == EOwnContractStatus.Unavailable && claims.isRollWeek == null && claims.count > 0
+			&& hasOpex && opex.isOpex && !hasOwn && opex.isQuarterlyExpiry == null && opex.ownContract == EOwnContractStatus.Unavailable
+			&& journal.Exists(s => s.Contains("Claims@08:30") && s.Contains("ownContract(unavailable)")),
+			label + " default Calendar+Macro Step/Classify keeps claims and opex, own expiry unavailable, no ES quarter");
+		BarEv(macro, new DateTime(2020, 1, 2, 9, 0, 0));
+		EventDay macroDay = macro.Classify(new DateTime(2020, 1, 2));
+		bool macroClaims = false, macroOpex = false;
+		foreach (var r in macro.EventsOn(new DateTime(2020, 1, 2)))
+		{
+			if (r.kind == EEventKind.Claims) macroClaims = true;
+			if (r.kind == EEventKind.MonthlyOpex) macroOpex = true;
+		}
+		Check(macroClaims && !macroOpex && macroDay.ownContract == EOwnContractStatus.Unavailable && macroDay.isRollWeek == null && macroDay.count > 0,
+			label + " Macro-only Step/Classify keeps claims, drops unselected opex, own expiry unavailable");
+		var q = Throws(s => { sink = s; shared.ContractRollDate(new DateTime(2020, 4, 17)); }, label + " query");
+		Check(q != null && q.Reason == InstrumentReason.UnknownField("roll") && q.Message.Contains("add a preset row / cost for " + p.root),
+			label + " explicit ContractRollDate is Error + unknown-field:roll (" + (q == null ? "" : q.Message) + ")");
+		var offOwn = new _EventCalendar { config = new EventConfig { enabled = true, ownContract = false, sharedCalendar = true }, ownSource = EOwnContractSource.Unavailable };
+		offOwn.ownQueryRefuse = refuse;
+		Check(offOwn.Configure() == null, label + " ownContract off configures");
+		EventDay offDay = offOwn.Classify(new DateTime(2020, 6, 19));
+		bool offOpex = false, offQ = false;
+		foreach (var r in offOwn.EventsOn(new DateTime(2020, 6, 19)))
+		{
+			if (r.kind == EEventKind.MonthlyOpex) offOpex = true;
+			if (r.kind == EEventKind.QuarterlyExpiry) offQ = true;
+		}
+		Check(offOpex && !offQ && offDay.ownContract == EOwnContractStatus.NotSelected && offDay.isRollWeek == null && offDay.isOpex,
+			label + " ownContract off keeps opex and marks own expiry not-selected");
 	}
 
 	// ---------------------------------------------------------------- MI-T7 / T8 sessions + derived fields

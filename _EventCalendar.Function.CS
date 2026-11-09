@@ -55,6 +55,14 @@ namespace PowerLanguage.Function
 	[Flags]
 	public enum EEventClassMask : byte { None = 0, Macro = 1, Calendar = 2, Energy = 4, All = 7 }
 
+	/// <summary>M5 own-contract status. Evaluated is the only state in which isRollWeek / isQuarterlyExpiry / ContractRollDate are results.
+	/// Unavailable: profile enforcement is on and the root has no roll facts (do not inherit the equity-index quarter).
+	/// NotSelected: EventConfig.ownContract is off or Calendar is not in classes.</summary>
+	public enum EOwnContractStatus : byte { Evaluated = 0, Unavailable = 1, NotSelected = 2 }
+
+	/// <summary>Where an evaluated own-contract answer comes from. Unavailable is not a source of dates.</summary>
+	public enum EOwnContractSource : byte { EquityIndex = 0, Profile = 1, Unavailable = 2 }
+
 	/// <summary>One event instance. Spans (RollWeek) use etTime = start and etEnd = end.</summary>
 	public struct EventRec
 	{
@@ -93,7 +101,13 @@ namespace PowerLanguage.Function
 		public DateTime day;
 		public EEventTier maxTier;       // macro class only (T1..T3 or None)
 		public ulong kindsMask;          // bit (1 << kind)
-		public bool hasFomc, hasSep, isHalfDay, isRollWeek, isQuarterlyExpiry, isOpex, isRebalance;
+		public bool hasFomc, hasSep, isHalfDay, isOpex, isRebalance;
+		/// <summary>Own-contract roll week. Null unless <see cref="ownContract"/> is Evaluated: true/false are results, null is not a result.</summary>
+		public bool? isRollWeek;
+		/// <summary>Own-contract expiry day. Null unless <see cref="ownContract"/> is Evaluated.</summary>
+		public bool? isQuarterlyExpiry;
+		/// <summary>Whether own-contract expiry/roll was evaluated. Unavailable and NotSelected are not false.</summary>
+		public EOwnContractStatus ownContract;
 		public TimeSpan? firstReleaseEt; // earliest macro release (ET time of day)
 		public int count;                // R2.1-g: Macro-class records only (like maxTier / firstReleaseEt)
 		public bool eiaRuleOnly;         // R2.1-e: an EIA release on the day is RuleOnly (outside the published exception table)
@@ -134,6 +148,12 @@ namespace PowerLanguage.Function
 		public EEventTier blackoutTier = EEventTier.T1;
 		public bool blackoutFlatten = false;
 		public bool publish = false;
+		/// <summary>M5 (Ettienne 2026-11-06 12:13 ET): shared calendar rows (MonthlyOpex, VixExpiry, IndexRebalance, HalfDay, RussellRecon).
+		/// Independent of <see cref="ownContract"/>. Default true. Off does not remove own-contract rows, and missing roll facts do not remove these.</summary>
+		public bool sharedCalendar = true;
+		/// <summary>M5: own-contract QuarterlyExpiry and RollWeek. Default true. Off means not selected (not "not in the roll week").
+		/// Does not remove shared calendar rows.</summary>
+		public bool ownContract = true;
 		// ---- spec-silent knobs ----
 		public bool includeRussell = false;          // RussellRecon (optional, VERIFY rule) off
 		internal string csvSha = null;               // set by Configure (EV-4.4: the CSV hash goes into Canon)
@@ -166,6 +186,7 @@ namespace PowerLanguage.Function
 			sb.Append(";partial=").Append(allowPartialCoverage ? 1 : 0);
 			sb.Append(";blackout=").Append(blackoutPreMin).Append('/').Append(blackoutPostMin).Append('/').Append(blackoutTier).Append('/').Append(blackoutFlatten ? 1 : 0);
 			sb.Append(";publish=").Append(publish ? 1 : 0).Append(";russell=").Append(includeRussell ? 1 : 0);
+			sb.Append(";shared=").Append(sharedCalendar ? 1 : 0).Append(";own=").Append(ownContract ? 1 : 0);
 			sb.Append(";table=").Append(EventRules.TableSha());
 			return sb.ToString();
 		}
@@ -1122,6 +1143,20 @@ namespace PowerLanguage.Function
 		/// <summary>Test seam: expected table hash (null = EventRules.ExpectedTableSha); used only with the compiled table.</summary>
 		public string tableShaExpected;
 
+		/// <summary>M5: null = the equity-index quarterly path (EventRules.ExpiryDate / RollDate). The host sets this for a profile that
+		/// is not that shape. The shared macro table (Generate) stays equity-index; this binding is the live roll/expiry query only.</summary>
+		public delegate bool ContractFn(DateTime day, out DateTime expiry, out DateTime roll);
+		public ContractFn contract;
+		/// <summary>Default EquityIndex: static quarter (EventTests, InstrumentConfig off, ES/MES/NQ/MNQ). Profile: bound contract.
+		/// Unavailable: profile on, no roll facts. Set before the first Step/Classify (the year cache is not rebuilt).</summary>
+		public EOwnContractSource ownSource = EOwnContractSource.EquityIndex;
+		/// <summary>False → SessionsToExpiry refuses (S4) after the own-contract query is allowed. NyseStandIn is not a verified holiday calendar.</summary>
+		public bool contractCalendarVerified = true;
+		/// <summary>Host logs the Error line and throws. Called when a session count needs a verified calendar.</summary>
+		public Action<string> contractRefuse;
+		/// <summary>Host logs the Error line and throws InstrumentException for an explicit own-expiry/roll query that is not Evaluated.</summary>
+		public Action ownQueryRefuse;
+
 		sealed class Year
 		{
 			public EventRec[] recs;
@@ -1352,12 +1387,85 @@ namespace PowerLanguage.Function
 			return yr;
 		}
 
+		static bool isOwnKind(EEventKind k) { return k == EEventKind.QuarterlyExpiry || k == EEventKind.RollWeek; }
+		static bool isSharedCalendarKind(EEventKind k)
+		{
+			return k == EEventKind.MonthlyOpex || k == EEventKind.IndexRebalance || k == EEventKind.HalfDay || k == EEventKind.VixExpiry || k == EEventKind.RussellRecon;
+		}
+		bool calendarSelected() { return config != null && (config.classes & EEventClassMask.Calendar) != 0; }
+		bool keepShared() { return config != null && config.sharedCalendar && calendarSelected(); }
+		bool keepOwn() { return config != null && config.ownContract && calendarSelected() && ownSource != EOwnContractSource.Unavailable; }
+		/// <summary>Evaluated only when own-contract rows are selected and a source of dates exists. Step/Classify read this and do not throw.</summary>
+		public EOwnContractStatus OwnStatus()
+		{
+			if (config == null || !config.ownContract) return EOwnContractStatus.NotSelected;
+			if (ownSource == EOwnContractSource.Unavailable) return EOwnContractStatus.Unavailable;
+			if (!calendarSelected()) return EOwnContractStatus.NotSelected;
+			return EOwnContractStatus.Evaluated;
+		}
+		static string ownContractToken(EventDay d)
+		{
+			if (d.ownContract == EOwnContractStatus.Evaluated) return d.isRollWeek == true ? " rollWeek" : "";
+			return d.ownContract == EOwnContractStatus.Unavailable ? " ownContract(unavailable)" : " ownContract(not-selected)";
+		}
+		void RequireOwnQuery()
+		{
+			if (OwnStatus() == EOwnContractStatus.Evaluated) return;
+			if (ownQueryRefuse != null) ownQueryRefuse();
+			string why = OwnStatus() == EOwnContractStatus.Unavailable ? "no preset expiry, roll rule, contract months, or business-day calendar" : "own-contract expiry is not selected";
+			string action = OwnStatus() == EOwnContractStatus.Unavailable ? "add a preset row / cost for the root" : "set EventConfig.ownContract and include Calendar in EventConfig.classes";
+			string msg = "M-INSTR: EVENT cannot run on (class ?, root ?, sessions ?): unknown-field:roll (" + why + "). " + action + ".";
+			if (error != null) error(msg);
+			throw new InvalidOperationException(msg);
+		}
+		bool EvaluatedRollWeek(DateTime day)
+		{
+			DateTime exp, roll;
+			if (!TryContract(day, out exp, out roll)) return false;
+			day = day.Date;
+			return day >= roll.Date && day <= exp.Date;
+		}
+
+		/// <summary>Replace equity-index QuarterlyExpiry and RollWeek with the bound profile's own contracts. Records whose roll or
+		/// expiry falls in year y are kept here; a roll that lands in the previous calendar year is emitted by that year's build.
+		/// Span end is the midnight after the expiry date so the whole expiry date is inside, the same dates IsRollWeek uses.</summary>
+		void replaceOwnExpiry(List<EventRec> list, int y)
+		{
+			for (int i = list.Count - 1; i >= 0; --i)
+				if (list[i].kind == EEventKind.QuarterlyExpiry || list[i].kind == EEventKind.RollWeek) list.RemoveAt(i);
+			var seen = new HashSet<DateTime>();
+			DateTime cursor = new DateTime(y - 1, 10, 1);
+			for (int n = 0; n < 40 && cursor.Year <= y + 1; n++)
+			{
+				DateTime exp, roll;
+				if (!contract(cursor, out exp, out roll)) break;
+				if (seen.Add(exp.Date))
+				{
+					if (exp.Year == y)
+						list.Add(EventRec.Make(EEventKind.QuarterlyExpiry, exp.Date + EventRules.T0930, EEventTier.C, exp.Month % 3 == 0 ? EEventFlags.Quad : EEventFlags.None));
+					if (roll.Year == y)
+					{
+						EventRec s = EventRec.Make(EEventKind.RollWeek, roll.Date, EEventTier.C);
+						s.etEnd = exp.Date.AddDays(1);
+						list.Add(s);
+					}
+				}
+				DateTime next = exp.Date.AddDays(1);
+				if (next <= cursor) next = cursor.AddDays(1);
+				cursor = next;
+			}
+		}
+
 		Year build(int y)
 		{
 			var list = EventRules.Generate(y, config.includeRussell);
 			foreach (var t in m_table) if (t.etTime.Year == y) list.Add(t);
 			foreach (var c in m_corr) applyCorrection(list, c, y);
 			foreach (var row in m_csv) if (row.date.Year == y) applyCsv(list, row);
+			// M5: a bound non-equity profile owns QuarterlyExpiry and RollWeek. The static Generate rows of those two kinds are the
+			// equity-index calendar (kept when contract is null, so ES is unchanged). Shared macro rows and the other calendar kinds
+			// (opex, rebalance, VIX, half day) stay. The span covers the whole expiry date, matching IsRollWeek.
+			if (keepOwn() && ownSource == EOwnContractSource.Profile && contract != null) replaceOwnExpiry(list, y);
 			var missing = new List<string>();
 			foreach (var k in EventRules.TableKinds) { bool any = false; foreach (var r in list) if (r.kind == k) { any = true; break; } if (!any) missing.Add(k.ToString()); }
 			if (missing.Count > 0 && m_warnedYears.Add(y)) warn(y + " table kinds missing: " + string.Join(",", missing));
@@ -1374,7 +1482,9 @@ namespace PowerLanguage.Function
 				EventRec r = r0;
 				EEventTier ot;
 				if (config.tierOverride != null && config.tierOverride.TryGetValue(r.kind, out ot)) r.tier = ot;
-				if ((r.Class & config.classes) == 0) continue;
+				if (isOwnKind(r.kind)) { if (!keepOwn()) continue; }
+				else if (isSharedCalendarKind(r.kind)) { if (!keepShared()) continue; }
+				else if ((r.Class & config.classes) == 0) continue;
 				if (EventConfig.IsMacroTier(config.minTier) && r.tier != EEventTier.C && r.tier < config.minTier) continue;
 				r.utc = toUtc(r.etTime);
 				r.tradingDay = TradingDayOf(r.utc);
@@ -1534,7 +1644,7 @@ namespace PowerLanguage.Function
 					var ks = new StringBuilder();
 					foreach (var r in EventsOn(day, EEventClassMask.All)) { if (ks.Length > 0) ks.Append(','); ks.Append(r.KindName).Append('@').Append(hm(r.etTime)); }
 					jr("day " + ymd(day) + " at " + barTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) + " tier(" + d.maxTier + ") kinds(" + ks + ") firstRelease(" +
-						(d.firstReleaseEt.HasValue ? d.firstReleaseEt.Value.ToString(@"hh\:mm") + " ET" : "-") + ")" + (d.isRollWeek ? " rollWeek" : "") + (d.isHalfDay ? " halfDay" : "") + (eiaRo ? " EiaRuleOnly" : ""));
+						(d.firstReleaseEt.HasValue ? d.firstReleaseEt.Value.ToString(@"hh\:mm") + " ET" : "-") + ")" + ownContractToken(d) + (d.isHalfDay ? " halfDay" : "") + (eiaRo ? " EiaRuleOnly" : ""));
 				}
 			}
 			// blackout (exposed only; the base never blocks orders)
@@ -1891,13 +2001,28 @@ namespace PowerLanguage.Function
 					{
 						case EEventKind.FomcDecision: d.hasFomc = true; if ((r.flags & EEventFlags.Sep) != 0) d.hasSep = true; break;
 						case EEventKind.HalfDay: d.isHalfDay = true; break;
-						case EEventKind.QuarterlyExpiry: d.isQuarterlyExpiry = true; break;
+						case EEventKind.QuarterlyExpiry: break;   // own-contract flag is set only when Evaluated, below
 						case EEventKind.MonthlyOpex: d.isOpex = true; break;
 						case EEventKind.IndexRebalance: d.isRebalance = true; break;
 					}
 				}
 			}
-			d.isRollWeek = IsRollWeek(day);
+			d.ownContract = OwnStatus();
+			if (d.ownContract == EOwnContractStatus.Evaluated)
+			{
+				d.isRollWeek = EvaluatedRollWeek(day);
+				d.isQuarterlyExpiry = false;
+				foreach (var yy2 in new[] { day.Year - 1, day.Year })
+				{
+					var yr2 = year(yy2); int[] idx2;
+					if (!yr2.dayIdx.TryGetValue(day, out idx2)) continue;
+					foreach (int i2 in idx2)
+					{
+						EventRec q = yr2.recs[i2];
+						if (!q.IsSpan && q.kind == EEventKind.QuarterlyExpiry) d.isQuarterlyExpiry = true;
+					}
+				}
+			}
 			// per kind and day: only kinds that are requested (config.classes) AND Unknown on this day; a year-wide missing table
 			// kind is reported by NoCoverageYear only (no event table is fabricated for it)
 			foreach (var uk in unknownKinds(day)) if ((kindClass(uk) & config.classes) != 0) d.noCoverageKinds |= 1UL << (int)uk;
@@ -1906,23 +2031,46 @@ namespace PowerLanguage.Function
 		}
 
 		// ---- roll / expiry (EV-6.9) ----
-		/// <summary>Trading day inside a RollWeek span [roll date, expiry date] (rule kind; the class mask does not apply).</summary>
-		public bool IsRollWeek(DateTime day)
+		/// <summary>Own-instrument contract on or after day. Caller must already know the status is Evaluated.
+		/// EquityIndex: the static quarter. Profile: the bound contract. Does not answer Unavailable.</summary>
+		public bool TryContract(DateTime day, out DateTime expiry, out DateTime roll)
 		{
 			day = day.Date;
-			DateTime q = nextQuarterlyExpiry(day);
-			return day >= RollDateFor(q) && day <= q;
+			if (ownSource != EOwnContractSource.Profile || contract == null) { expiry = nextQuarterlyExpiry(day); roll = RollDateFor(expiry); return true; }
+			return contract(day, out expiry, out roll);
+		}
+		/// <summary>Explicit query. Throws when own-contract status is not Evaluated (Error line, then InstrumentException via ownQueryRefuse).</summary>
+		public bool IsRollWeek(DateTime day)
+		{
+			RequireOwnQuery();
+			return EvaluatedRollWeek(day);
 		}
 		public bool IsRollWeek() { return m_day != DateTime.MinValue && IsRollWeek(m_day); }
 		/// <summary>A roll splice (rollOn(1)) was seen on the current trading day.</summary>
 		public bool IsRollDay() { return m_day != DateTime.MinValue && m_lastSpliceDay == m_day; }
-		/// <summary>Globex sessions after `day` up to and including the next quarterly expiry date (0 on expiry day).</summary>
+		/// <summary>Sessions after `day` up to and including the next own expiry (0 on expiry day). The equity-index path counts CME
+		/// Globex sessions (_CmeHolidays). A bound profile whose calendar is not CmeEquityIndex refuses before any count (S4 / R6):
+		/// NyseStandIn is the expiry/roll business-day stand-in, not a verified holiday calendar. stepEvent does not call this.</summary>
 		public int SessionsToExpiry(DateTime day)
 		{
 			day = day.Date;
-			DateTime q = nextQuarterlyExpiry(day);
+			RequireOwnQuery();
+			if (ownSource == EOwnContractSource.Profile && contract != null && !contractCalendarVerified)
+			{
+				if (contractRefuse != null) contractRefuse("calendar");
+				string msg = "M-INSTR: EVENT cannot count sessions to expiry: the bound calendar is not verified. add a verified calendar (PR-M8).";
+				if (error != null) error(msg);
+				throw new InvalidOperationException(msg);
+			}
+			DateTime exp, roll;
+			if (!TryContract(day, out exp, out roll))
+			{
+				string msg = "M-INSTR: EVENT cannot count sessions to expiry: no roll date for the next contract.";
+				if (error != null) error(msg);
+				throw new InvalidOperationException(msg);
+			}
 			int n = 0;
-			for (DateTime d = day.AddDays(1); d <= q; d = d.AddDays(1)) if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(d)) ++n;
+			for (DateTime d = day.AddDays(1); d <= exp.Date; d = d.AddDays(1)) if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(d)) ++n;
 			return n;
 		}
 		public int SessionsToExpiry() { return SessionsToExpiry(m_day); }
@@ -1934,12 +2082,32 @@ namespace PowerLanguage.Function
 			return q;
 		}
 		public static DateTime RollDateFor(DateTime expiry) { return EventRules.RollDate(expiry.Year, expiry.Month); }
-		/// <summary>Customary roll date of the quarterly contract expiring nearest on/after `day` (roll-splice tabulation).</summary>
+		/// <summary>Equity-index roll of the quarterly contract expiring nearest on/after `day`. This is the static rule EventTests
+		/// and the ES splice tabulation use. It is not the bound instrument's roll; that is <see cref="ContractRollDate"/>.</summary>
 		public static DateTime RuleRollDate(DateTime day) { return RollDateFor(nextQuarterlyExpiry(day.Date)); }
+		/// <summary>Explicit own-instrument roll date. EquityIndex equals <see cref="RuleRollDate"/>. Unavailable / NotSelected throw.</summary>
+		public DateTime ContractRollDate(DateTime day)
+		{
+			RequireOwnQuery();
+			DateTime exp, roll;
+			if (!TryContract(day, out exp, out roll)) { RequireOwnQuery(); return DateTime.MinValue; }
+			return roll.Date;
+		}
+		/// <summary>Explicit own-instrument expiry date. Unavailable / NotSelected throw.</summary>
+		public DateTime ContractExpiryDate(DateTime day)
+		{
+			RequireOwnQuery();
+			DateTime exp, roll;
+			if (!TryContract(day, out exp, out roll)) { RequireOwnQuery(); return DateTime.MinValue; }
+			return exp.Date;
+		}
 
-		/// <summary>Instant inside a span record of `kind` (RollWeek: [roll date 00:00 ET, expiry 09:30 ET)).</summary>
+		/// <summary>Instant inside a span record of `kind`. RollWeek's end is the record's etEnd: equity-index rows from Generate end at
+		/// expiry 09:30 ET; a bound profile's span ends at the midnight after the expiry date (the whole expiry date, same as IsRollWeek).
+		/// An explicit RollWeek query throws when own-contract status is not Evaluated.</summary>
 		public bool InSpan(EEventKind kind, DateTime utc)
 		{
+			if (kind == EEventKind.RollWeek) RequireOwnQuery();
 			int y = ToEt(utc).Year;
 			for (int yy = y - 1; yy <= y; ++yy)
 				foreach (var r in year(yy).recs)

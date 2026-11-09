@@ -18,7 +18,7 @@ namespace PowerLanguage.Strategy
 	//   (DvpConst.HoldoutFrom), so no 2025+ bar ever reaches a DVP stream even when the chart loads more data (counted in withheld()).
 	//
 	// HELPER FILES TO IMPORT (PowerLanguage .NET Editor → File → Import, in this order, then compile all)
-	//   _EventCalendar.Function.CS  (EventRules.RollDate for RollDetection = Table; on main, skip if already imported)
+	//   _EventCalendar.Function.CS  (equity-index EventRules; the M5 roll table comes from the Data1 profile. On main, skip if already imported)
 	//   _DvpEngine.Function.CS      (PR-D9 head; the DVP engine)
 	//   _DvpDegreeReport.Function.CS (new: the report-only online-vs-offline comparison)
 	//   _CustomSignal.Strategy.CS   (PR-D9a: dvpFeed / dvpFinish hooks)
@@ -42,8 +42,9 @@ namespace PowerLanguage.Strategy
 	//      Q21). With 50, Data2's (60 Minute) MaxBarsBack skip makes the first calculated bar about Tue 2016-01-05 evening ET, inside
 	//      the setup check's chart-start window. The setup line prints it (maxBarsBack, ExecInfo.MaxBarsBack) and flags any other
 	//      value (Warning in the log AND in the Output window). Bar Magnifier off (no orders).
-	//      Nothing else to set: RollDetection = Table (EventRules.RollDate, 2015-2025, ES quarterly rolls only: the setup line warns
-	//      when the Data1 root is not ES) and every DvpConfig field are set in code.
+	//      Nothing else to set: RollDetection = Table. M5 fills 2015-2025 from the Data1 profile's contract months and roll rule
+	//      (ES = EventRules.RollDate). The setup line still flags a non-ES root because this baseline chart is @ES. A NyseStandIn
+	//      calendar is named as not CME-verified. Every DvpConfig field is set in code.
 	//   4. Let it calculate to the last bar (it writes the report on Bars.LastBarOnChart; if it is stopped early nothing is reported);
 	//      expect a few minutes. Don't open the CSV in Excel or an editor while it runs (a lock drops lines).
 	//      The log is %LOCALAPPDATA%\MCSignalLogs\MCSignal<yyyyMMdd-HHmmss>-<pid>.csv (one file per MultiCharts process; the Output
@@ -115,11 +116,10 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
-			RollDetection = ERollDetection.Table;   // before base.StartCalc: the DVP engine reads it there (skipShare needs roll detection)
-			if (RollDates.Count == 0)
-				for (int y = RollFromYear; y <= RollToYear; y++)
-					for (int m = 3; m <= 12; m += 3) RollDates.Add(EventRules.RollDate(y, m));
+			RollDetection = ERollDetection.Table;   // before base.StartCalc: the DVP engine reads the mode there (skipShare needs roll detection)
 			base.StartCalc();
+			if (RollDates.Count == 0)
+				fillProfileRollDates(RollFromYear, RollToYear, "DVP");   // M5 contract years 2015-2025 (not calendar coverage). ES dates = EventRules.RollDate. A CL January contract rolls in the prior December, so this range includes Dec 2024 (CLF25) and omits Dec 2025 (CLF26); DVP's 2025-01-01 holdout means that omitted date is outside the feed window.
 			m_rep = null;
 			if (DvpConfig.enabled)
 			{
@@ -210,7 +210,7 @@ namespace PowerLanguage.Strategy
 			int mbb = ExecInfo.MaxBarsBack;                       // typed IExecInfo member (as in _MtfProbe / _VolumeProfileBase)
 			bool mbbOk = mbb == RunMaxBarsBack;
 			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
-			bool rootOk = root == "ES";                           // the RollDate table (EventRules.RollDate) is ES-only
+			bool rootOk = root == "ES";                           // D9a baseline chart is @ES; the roll table itself follows the profile (M6g is not this check)
 			// first = the first CALCULATED bar, not the first loaded one: the first @ES bar of 2016 is Sun 2016-01-03 18:00 ET, but with
 			// Max bars back = RunMaxBarsBack (50) Data2's skip (50 bars of 60 Minute, 23 per Globex day) puts the first calculated bar at
 			// about Tue 2016-01-05 evening ET. Changing RunMaxBarsBack requires changing this startOk window and the header's Q21 /
@@ -227,7 +227,15 @@ namespace PowerLanguage.Strategy
 					+ RunMaxBarsBack + " (got data1=" + (d1ok ? 0 : 1) + " data2=" + (d2ok ? 0 : 1) + " chartStart=" + (startOk ? 0 : 1) + " maxBarsBack=" + mbb
 					+ "; see the header of _DvpEngineTest)");
 			if (!rootOk)
-				setupWarning("DVP D9A setup: symbol root " + root + " is not ES; RollDetection = Table uses EventRules.RollDate, which is the ES quarterly roll table only");
+			{
+				// One call site (D9a host source check counts two setupWarning calls in logSetup). The stand-in sentence is only
+				// appended for CL/GC/ZN/6E; it does not say the dates are CME-verified. ES never takes this branch.
+				string standIn = "";
+				InstrumentProfile prof = InstrumentProfileOf(1);
+				if (prof != null && prof.calendar == ECalendar.NyseStandIn)
+					standIn = " Roll dates use the NYSE stand-in calendar (CME calendar pending M8); not CME-verified.";
+				setupWarning("DVP D9A setup: symbol root " + root + " is not ES; the D9a baseline chart is @ES." + standIn);
+			}
 		}
 
 		/// <summary>A setup Warning: to the log (TraceLevel >= Warning) and always to the MultiCharts Output window.</summary>

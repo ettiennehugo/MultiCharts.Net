@@ -430,7 +430,7 @@ static class Program
 		Check(e.IsRollWeek(new DateTime(2026, 6, 15)) && e.IsRollWeek(new DateTime(2026, 6, 18)) && !e.IsRollWeek(new DateTime(2026, 6, 19)) && !e.IsRollWeek(new DateTime(2026, 6, 12)), "2026-06 roll week");
 		Check(e.SessionsToExpiry(new DateTime(2026, 6, 15)) == 3 && e.SessionsToExpiry(new DateTime(2026, 6, 18)) == 0, "SessionsToExpiry");
 		Bar(e, ET(2026, 6, 15, 10, 0), 1, true);
-		Check(e.IsRollDay() && e.IsRollWeek() && e.Classify(new DateTime(2026, 6, 15)).isRollWeek, "IsRollDay after splice");
+		Check(e.IsRollDay() && e.IsRollWeek() && e.Classify(new DateTime(2026, 6, 15)).isRollWeek == true, "IsRollDay after splice");
 		Check(e.InSpan(EEventKind.RollWeek), "InSpan RollWeek");
 		Bar(e, ET(2026, 6, 16, 10, 0));
 		Check(!e.IsRollDay(), "IsRollDay next day false");

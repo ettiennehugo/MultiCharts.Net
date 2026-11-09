@@ -1212,7 +1212,53 @@ namespace PowerLanguage.Strategy
 			var e = new _EventCalendar { config = EventConfig, label = "EVENT", journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning), barDuration = dur, error = engineSink(ETraceLevel.Error), firstBarUtc = eventFirstBarUtc() };
 			string err = e.Configure();
 			if (err != null) throw new ArgumentException(err);
+			bindEventContract(e);   // M5: after Configure (the shared macro table stays equity-index); before the engine is published
 			m_event = e;
+		}
+
+		/// <summary>M5 §7 EVENT (Ettienne 2026-11-06 12:13 ET). Equity-index profiles and the off switch stay on EventRules.
+		/// Any other known profile with roll facts is bound. No roll facts → Unavailable: Step/Classify keep running and do not
+		/// inherit the equity-index quarter; an explicit own-expiry query throws unknown-field:roll. sharedCalendar and ownContract
+		/// are independent. NyseStandIn SessionsToExpiry still refuses calendar (S4).</summary>
+		private void bindEventContract(_EventCalendar e)
+		{
+			e.contract = null;
+			e.contractCalendarVerified = true;
+			e.contractRefuse = null;
+			InstrumentProfile p = m_instr == null ? null : InstrumentProfileOf(1);
+			e.ownSource = InstrumentRules.OwnSource(m_instr != null, p);
+			InstrumentSubject sub = p != null ? p.Subject("EVENT") : new InstrumentSubject("EVENT", "", EAssetClass.Unsupported, "?", "");
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p == null ? null : p.name, msg);
+			string root = p == null || string.IsNullOrEmpty(p.root) ? "?" : p.root;
+			e.ownQueryRefuse = delegate
+			{
+				bool missing = e.OwnStatus() == EOwnContractStatus.Unavailable;
+				InstrumentError.Fail(err, sub, InstrumentReason.UnknownField("roll"),
+					missing ? "no preset expiry, roll rule, contract months, or business-day calendar" : "own-contract expiry is not selected",
+					missing ? "add a preset row / cost for " + root : "set EventConfig.ownContract and include Calendar in EventConfig.classes");
+			};
+			if (e.ownSource != EOwnContractSource.Profile || p == null) return;
+			InstrumentPresetRow row = InstrumentRules.RollRow(p);
+			Func<DateTime, bool> bd = p.isBusinessDay;
+			e.contract = delegate (DateTime day, out DateTime expiry, out DateTime roll)
+			{
+				int y, m;
+				InstrumentRules.ContractFor(row, day, bd, sub, err, out y, out m);
+				expiry = InstrumentRules.Expiry(row.expiry, y, m, bd, sub, err);
+				DateTime? r = InstrumentRules.Roll(row, y, m, bd, sub, err);
+				roll = r ?? expiry;
+				return r.HasValue;
+			};
+			e.contractCalendarVerified = p.calendar == ECalendar.CmeEquityIndex;
+			if (!e.contractCalendarVerified)
+			{
+				e.contractRefuse = delegate (string _)
+				{
+					InstrumentError.Fail(err, sub, InstrumentReason.Calendar,
+						"session count needs a verified holiday calendar; " + InstrumentText.CalendarName(p.calendar) + " serves expiry/roll business days only (CME calendar pending M8)",
+						"add a verified calendar for " + root + " (PR-M8)");
+				};
+			}
 		}
 
 		/// <summary>After stepRegime, before portfolioBar: one Step per closed bar with [open, close) in UTC and the roll splice flag.</summary>
@@ -1864,6 +1910,7 @@ namespace PowerLanguage.Strategy
 		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
 
 		private readonly _RollDetector m_rollDet = new _RollDetector();
+		private bool m_rollSeriesBound;            // M5: profile Series window bound for this StartCalc
 		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
 		private bool m_rollWarned;
 		// fix-i: detector keyed by _CmeSessionClock.GlobexTradingDayEt. Decided ONCE, on the first closed bar the detector steps
@@ -1883,10 +1930,13 @@ namespace PowerLanguage.Strategy
 		private void startRollDetector()
 		{
 			m_rollDet.Reset();
+			m_rollDet.seriesWindow = null;
+			m_rollSeriesBound = false;
 			m_rollPending = null;
 			m_rollWarned = false;
 			m_rollGlobexKey = false;
 			RollSpliceDiag = null;
+			bindRollWindow();   // M5: Series on a profile without roll facts throws here (StartCalc), after buildProfiles
 		}
 
 		// settings are read live (derived StartCalc may set them after base.StartCalc, as VPF-4 allowed)
@@ -1896,11 +1946,60 @@ namespace PowerLanguage.Strategy
 			m_rollDet.table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
 			m_rollDet.gapTicks = RollGapTicks;
 			m_rollDet.dates = RollDates;
+			bindRollWindow();   // a derived StartCalc that turns Series on after base.StartCalc still binds
 			if (m_rollPending != null) return;
 			m_rollPending = new _RollPending[MaxDataStream + 1];
 			string root = _MtfMath.SymbolRoot(Bars.Info.Name);
 			for (int ds = 2; ds <= MaxDataStream; ds++)
 				if (IsExist(ds) && _MtfMath.SameRoot(_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name), root)) m_rollPending[ds] = new _RollPending();   // a different (or empty, M-INSTR F1) root never inherits (S4.3)
+		}
+
+		/// <summary>M5: Series / SeriesOrTable uses the Data1 profile's contract months, expiry and roll. No profile
+		/// (InstrumentConfig.enabled false) keeps the static ES quarterly window. A profile without roll facts throws
+		/// unknown-field:roll (S5). gapTicks stays RollGapTicks (8). The 18:00 ET Globex re-key below is unchanged:
+		/// RollTests source-pins that assignment, and on the ES Globex template it matches the session day (MI-T7).</summary>
+		private void bindRollWindow()
+		{
+			bool series = RollDetection == ERollDetection.Series || RollDetection == ERollDetection.SeriesOrTable;
+			if (!series)
+			{
+				m_rollDet.seriesWindow = null;
+				m_rollSeriesBound = false;
+				return;
+			}
+			if (m_rollSeriesBound) return;
+			if (m_instr == null)
+			{
+				m_rollDet.seriesWindow = null;
+				m_rollSeriesBound = true;
+				return;
+			}
+			InstrumentProfile p = InstrumentProfileOf(1);
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p == null ? null : p.name, msg);
+			InstrumentRules.RequireRollFacts(p, "ROLL", err);
+			InstrumentPresetRow row = InstrumentRules.RollRow(p);
+			Func<DateTime, bool> bd = p.isBusinessDay;
+			InstrumentSubject sub = p.Subject("ROLL");
+			m_rollDet.seriesWindow = (DateTime day, out DateTime expiry) => InstrumentRules.SeriesWindow(row, day, bd, sub, err, out expiry);
+			m_rollSeriesBound = true;
+		}
+
+		/// <summary>M5: fill RollDates with contract-year roll dates (InstrumentRules.CollectRollDates), not every roll whose calendar
+		/// date falls in the range. No profile (M-INSTR off) keeps the equity-index quarterly EventRules.RollDate table — the off
+		/// switch. A built profile without roll facts throws unknown-field:roll (S5). ES dates equal EventRules.RollDate (digest
+		/// fdd63bd8f179a8d4 for 2000-2035). Leaving a symbol with no roll facts on that equity-index event path is a pending owner
+		/// decision, not an approved fallback.</summary>
+		protected void fillProfileRollDates(int yearFrom, int yearTo, string engine)
+		{
+			if (m_instr == null)
+			{
+				for (int y = yearFrom; y <= yearTo; y++)
+					for (int m = 3; m <= 12; m += 3) RollDates.Add(EventRules.RollDate(y, m));
+				return;
+			}
+			InstrumentProfile p = InstrumentProfileOf(1);
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p == null ? null : p.name, msg);
+			InstrumentRules.CollectRollDates(p, yearFrom, yearTo, engine, err, RollDates);
 		}
 
 		/// <summary>PR #51 N3 (typed): false for the daily-and-longer resolutions Day/Week/Month/Quarter/Year, true otherwise
