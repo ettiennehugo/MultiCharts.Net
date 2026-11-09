@@ -165,7 +165,7 @@ static class Program
 		{
 			Func<int, Gate0Engine> runFam = v =>
 			{
-				var fe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = v }; fe.Configure();
+				var fe = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = v }; fe.Configure();
 				var fr = new Random(11); double fp = 4800; var fs = new DateTime(2024, 3, 4);
 				for (int d = 0; d < 21; d++)
 				{
@@ -181,20 +181,33 @@ static class Program
 		}
 
 		// ---- roll window (+-1 session) ----
-		var g = new Gate0Engine();
+		var g = new Gate0Engine { tick = 0.25 };
 		for (int d = 0; d < 6; d++) g.sessionDays.Add(d0.AddDays(d));
 		g.rollDays.Add(d0.AddDays(3));
 		Check(!g.InRollWindow(d0.AddDays(1)) && g.InRollWindow(d0.AddDays(2)) && g.InRollWindow(d0.AddDays(3)) && g.InRollWindow(d0.AddDays(4)) && !g.InRollWindow(d0.AddDays(5)), "roll session +-1 excluded");
 
 		// ---- configuration ----
 		Check(Gate0Engine.DevEnd == new DateTime(2025, 1, 1), "development window ends 2025-01-01");
-		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 9 }.Configure() != null, "canary variant out of range rejected (9; 8 = KD02 since PR-D8)");
-		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 134 }.Configure() != null && new Gate0Engine { mode = EGate0Mode.Canary, variant = 129 }.Configure() != null
-			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "KD-02 sweep cell out of range rejected (129, 134; 124..129 unused)");
-		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "A2-53 sweep cell out of range rejected");
-		Check(new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 14 }.Configure() != null, "level variant out of range rejected");
-		Check(new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 }.Configure() == null, "valid configuration accepted");
-		Check(!new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 }.VerdictRun && new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 3 }.VerdictRun, "Variant 0 is not a verdict run");
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 9 }.Configure() != null, "canary variant out of range rejected (9; 8 = KD02 since PR-D8)");
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 134 }.Configure() != null && new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 129 }.Configure() != null
+			&& new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "KD-02 sweep cell out of range rejected (129, 134; 124..129 unused)");
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 124 }.Configure() != null, "A2-53 sweep cell out of range rejected");
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 14 }.Configure() != null, "level variant out of range rejected");
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 0 }.Configure() == null, "valid configuration accepted");
+		{
+			var sink = new List<string>();
+			bool threw = false; string msg = "";
+			try { new Gate0Engine { error = sink.Add }.Configure(); }
+			catch (InvalidOperationException ex) { threw = true; msg = ex.Message; }
+			Check(threw && sink.Count == 1 && sink[0] == msg && msg.IndexOf("tick must be > 0", StringComparison.Ordinal) >= 0, "M6a unset tick: Error line then throw (" + msg + ")");
+			sink.Clear(); threw = false; msg = "";
+			try { new Gate0Engine { tick = 0, error = sink.Add }.Configure(); }
+			catch (InvalidOperationException ex) { threw = true; msg = ex.Message; }
+			Check(threw && sink.Count == 1 && sink[0] == msg, "M6a tick 0: Error line then throw");
+			var kd = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, root = "CL" };
+			Check(kd.Configure() == null && kd.Kd02Engine != null && kd.Kd02Engine.Stream(1) != null && kd.Kd02Engine.Stream(1).Root == "CL", "M6a KD-02 root is the profile root");
+		}
+		Check(!new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 0 }.VerdictRun && new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 3 }.VerdictRun, "Variant 0 is not a verdict run");
 		{
 			double gp; int j, m; bool fl;
 			Check(Gate0Engine.DecodeA253(100, out gp, out j, out m, out fl) && Near(gp, 0.003) && j == 1 && m == 30 && fl, "A2-53 cell 100 = 0.3% j1 30m filter on");
@@ -203,14 +216,14 @@ static class Program
 			Check(Gate0Engine.DecodeA253(5, out gp, out j, out m, out fl) && Near(gp, 0.005) && j == 1 && m == 30 && fl, "Variant 5 = default cell");
 			var cells = new HashSet<string>(); for (int v = 100; v <= 123; v++) { Gate0Engine.DecodeA253(v, out gp, out j, out m, out fl); cells.Add(gp + "/" + j + "/" + m + "/" + fl); }
 			Check(cells.Count == 24 && !Gate0Engine.DecodeA253(99, out gp, out j, out m, out fl), "24 distinct sweep cells");
-			var ce = new Gate0Engine { mode = EGate0Mode.Canary, variant = 111 }; ce.Configure();
+			var ce = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 111 }; ce.Configure();
 			Check(ce.a253Minutes == 15 && ce.a253Bar == 1 && Near(ce.a253Gap, 0.005) && !ce.a253Filter && ce.CanaryName.StartsWith("A2_53"), "Configure applies the decoded cell");
 		}
 		Check(Gate0Engine.InsideDay(10, 5, 10, 5) && Gate0Engine.InsideDay(9, 6, 10, 5) && !Gate0Engine.InsideDay(10.25, 6, 10, 5) && !Gate0Engine.InsideDay(9, 4.75, 10, 5), "inside day is inclusive");
 
 		// ---- DV_ROT_POC: rotation -> breakout -> follow-through ----
 		{
-			var de = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 10 }; de.Configure();
+			var de = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 10 }; de.Configure();
 			var day0 = new DateTime(2023, 3, 6); bool found = false;
 			for (int d = 0; d < 3; d++)
 			{
@@ -230,11 +243,11 @@ static class Program
 		// ---- pre-registration journal + h_cv arm ----
 		{
 			var lines = new List<string>();
-			var pe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 11, journal = lines.Add };
+			var pe = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 11, journal = lines.Add };
 			Check(pe.Configure() == null && lines.Count == 1 && lines[0].StartsWith("G0 PRE-REGISTERED") && lines[0].Contains("DV_ROT_POC_R6") && lines[0].Contains("DV_ROT_POC_R12")
 				&& lines[0].Contains("6 ticks") && lines[0].Contains("HVN_HCV") && lines[0].Contains("h_cv"), "pre-registered line journaled at Configure");
 			Check(Gate0Engine.AllTypes.Contains("HVN_HCV") && Gate0Engine.AllTypes.Contains("LVN_HCV"), "h_cv arm types are in the Holm family");
-			var ce2 = new List<string>(); new Gate0Engine { mode = EGate0Mode.Canary, variant = 0, journal = ce2.Add }.Configure();
+			var ce2 = new List<string>(); new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 0, journal = ce2.Add }.Configure();
 			Check(ce2.Count == 0, "no pre-registration line in Canary mode");
 		}
 
@@ -244,7 +257,7 @@ static class Program
 			bool ok = true;
 			try
 			{
-				var ke = new Gate0Engine { mode = EGate0Mode.Canary, variant = cvn }; ok = ke.Configure() == null;
+				var ke = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = cvn }; ok = ke.Configure() == null;
 				var kr = new Random(5); double kp = 4800; var ks = new DateTime(2023, 1, 2);
 				for (int d = 0; d < 10; d++)
 				{
@@ -265,7 +278,7 @@ static class Program
 			var want = new Dictionary<int, string> { { 1, "POC" }, { 7, "WPOC" }, { 8, "CVAH" }, { 11, "HVN" }, { -11, "HVN_HCV" }, { 12, "GMM_MU" }, { 13, "SIG_MU" } };
 			foreach (var kv in want)
 			{
-				var fe = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = Math.Abs(kv.Key) }; fe.Configure();
+				var fe = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = Math.Abs(kv.Key) }; fe.Configure();
 				var fr = new Random(11); double fp = 4800; var fs = new DateTime(2023, 1, 2);
 				for (int d = 0; d < 45; d++)
 				{
@@ -284,7 +297,7 @@ static class Program
 		{
 			Func<double, bool, int, Gate0Engine> runRoll = (gap, flag, endMin) =>
 			{
-				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var re = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
 				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
 				for (int d = 0; d < 6; d++)
 				{
@@ -314,7 +327,7 @@ static class Program
 		{
 			Func<double, bool, Gate0Engine> runOffStamp = (gap, flag) =>
 			{
-				var re = new Gate0Engine { mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
+				var re = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 0 }; re.Configure();
 				var rs = new DateTime(2024, 3, 4); double rp = 4000; int sd = 0;
 				for (int d = 0; d < 6; d++)
 				{
@@ -336,7 +349,7 @@ static class Program
 		}
 
 		// ---- smoke: random walk across the holdout boundary never records holdout events ----
-		var eng = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 0 };
+		var eng = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 0 };
 		Check(eng.Configure() == null, "configure smoke engine");
 		var rng = new Random(7); double px = 4800; var start = new DateTime(2024, 11, 1);
 		for (int d = 0; d < 75; d++)
@@ -418,22 +431,22 @@ static class Program
 		var cells = new[] { 130, 131, 132, 133 }.Select(v => { Gate0Engine.DecodeKd02(v, out ts, out k); return ts + "/" + k.ToString(System.Globalization.CultureInfo.InvariantCulture); }).ToArray();
 		Check(string.Join(" ", cells) == "19/3 40/3 19/2.5 40/2.5", "KD02 sweep cells 130..133 = {19,40} x {3.0,2.5}: " + string.Join(" ", cells));
 		Check(!Gate0Engine.DecodeKd02(7, out ts, out k) && !Gate0Engine.DecodeKd02(129, out ts, out k) && !Gate0Engine.DecodeKd02(134, out ts, out k), "KD02 decode rejects 7, 129, 134");
-		var ok = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 };
+		var ok = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8 };
 		Check(ok.Configure() == null && ok.Kd02Engine != null && ok.Kd02Ring != null && ok.CanaryName == "KD02[15m stop=3.0s time=19]", "KD02 configures, allocates its DVP engine: " + ok.CanaryName);
-		var c131 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 131 }; c131.Configure();
+		var c131 = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 131 }; c131.Configure();
 		Check(c131.CanaryName == "KD02[15m stop=3.0s time=40]", "KD02 cell 131 name: " + c131.CanaryName);
-		bool lazy = new[] { 0, 4, 5, 7, 108 }.All(v => { var e = new Gate0Engine { mode = EGate0Mode.Canary, variant = v }; e.Configure(); return e.Kd02Engine == null && e.Kd02Ring == null; })
-			&& new Func<bool>(() => { var e = new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 3 }; e.Configure(); return e.Kd02Engine == null; })();
+		bool lazy = new[] { 0, 4, 5, 7, 108 }.All(v => { var e = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = v }; e.Configure(); return e.Kd02Engine == null && e.Kd02Ring == null; })
+			&& new Func<bool>(() => { var e = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 3 }; e.Configure(); return e.Kd02Engine == null; })();
 		Check(lazy, "KD02 laziness: no DVP engine for the other canaries or the level study");
-		Check(new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02Minutes = 0 }.Configure() != null
-			&& new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, kd02StopPadAtr = -0.1 }.Configure() != null, "KD02 parameters out of range rejected (minutes < 1, pad < 0; stop k comes from the Variant decode)");
-		var cfg = new Gate0Engine { kd02StopK = 2.5 }.Kd02Config();
+		Check(new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, kd02Minutes = 0 }.Configure() != null
+			&& new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, kd02StopPadAtr = -0.1 }.Configure() != null, "KD02 parameters out of range rejected (minutes < 1, pad < 0; stop k comes from the Variant decode)");
+		var cfg = new Gate0Engine { tick = 0.25, kd02StopK = 2.5 }.Kd02Config();
 		Check(cfg.enabled && cfg.journalFits && !cfg.journalRails && cfg.degMode == EDvpDegMode.SelfCalibrate && Array.IndexOf(cfg.sigmaList, 2.5) >= 0 && Array.IndexOf(cfg.sigmaList, 2.0) >= 0 && cfg.sigmaList.SequenceEqual(cfg.sigmaList.OrderBy(x => x))
 			&& new DvpConfig().sigmaList.Length + (Array.IndexOf(new DvpConfig().sigmaList, 2.5) < 0 ? 1 : 0) == cfg.sigmaList.Length, "KD02 config: the stop rail k is added to sigmaList (sorted, once)");
 
 		// simulated run: mean-reverting 1m prices, fills simulated from the intent (market entry next bar, stop/target/flatten exits)
 		var jl = new List<string>();
-		var g = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = jl.Add }; Check(g.Configure() == null, "KD02 run configures");
+		var g = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, journal = jl.Add }; Check(g.Configure() == null, "KD02 run configures");
 		double entryC = double.NaN; int badTgt = 0;
 		var r = new Random(17); double p = 4800, anchor = 4800; int mp = 0; double stp = double.NaN, tgt = double.NaN;
 		int entries = 0, badGeom = 0, badTime = 0, exits = 0;
@@ -483,12 +496,12 @@ static class Program
 		Check(dg.pocNaN == 0 && dg.data1ZeroVol == 0 && !jl.Any(l => l.Contains("DVP window volume is 0")), "KD02 diag: volume > 0 => no POC NaN, no zero-volume warning");
 		string dl = g.CanaryDiagLine();
 		Check(dl.StartsWith("signals(" + dg.signals + ") rollSkips(0) rollDays(0) sessions(") && dl.Contains("skips{noPrior=") && dl.Contains(",pocNaN=0,") && dl.Contains(",expired=") && dl.EndsWith("}"), "KD02 diag line: " + dl);
-		var c5 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5 }; c5.Configure();
-		Check(c5.Diag != null && !c5.CanaryDiagLine().Contains("dvpBars") && new Gate0Engine { mode = EGate0Mode.EventStudy, variant = 3 }.Diag == null, "diag: allocated in Canary mode only, KD-02 fields only for KD-02");
+		var c5 = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 5 }; c5.Configure();
+		Check(c5.Diag != null && !c5.CanaryDiagLine().Contains("dvpBars") && new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 3 }.Diag == null, "diag: allocated in Canary mode only, KD-02 fields only for KD-02");
 
 		// zero volume on every bar (the KD-02 zero-entries reproduction): no signals, POC NaN counted, one warning, behaviour unchanged
 		var zw = new List<string>(); var zd = new List<string>();
-		var z = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, warn = zw.Add, debug = zd.Add }; z.Configure();
+		var z = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, warn = zw.Add, debug = zd.Add }; z.Configure();
 		var zr = new Random(17); double zp = 4800, za = 4800; var zs = new DateTime(2024, 9, 2);
 		for (int d = 0; d < 70; d++)
 		{
@@ -524,11 +537,11 @@ static class Program
 			&& tail.Last().Contains(" summary H(") && tail.Any(l => l.Contains(" year(2024) d(1) windows(")) && !tail.Any(l => l.Contains(" year(2025)")),
 			"KD02 finish hook: summary, DVP RUN, DVP CAL (" + (tail.Count > 0 ? tail[0] : "-") + ")");
 		Check(jl.Count == before + tail.Count, "KD02 finish hook is idempotent (FinishCanary twice + Finish)");
-		var noJ = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; noJ.Configure(); noJ.FinishCanary();
-		var lv = new Gate0Engine { mode = EGate0Mode.Canary, variant = 5, journal = jl.Add }; lv.Configure(); int b2 = jl.Count; lv.FinishCanary();
+		var noJ = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8 }; noJ.Configure(); noJ.FinishCanary();
+		var lv = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 5, journal = jl.Add }; lv.Configure(); int b2 = jl.Count; lv.FinishCanary();
 		Check(jl.Count == b2, "FinishCanary: other canaries journal nothing, no journal sink is safe");
 		// StopCalc fallback: a run stopped early (never reached DevEnd / the last bar) still writes its end-of-run lines, tagged partial
-		var pj = new List<string>(); var pe = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8, journal = pj.Add }; pe.Configure();
+		var pj = new List<string>(); var pe = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8, journal = pj.Add }; pe.Configure();
 		var pr = new Random(5); double pq = 4800; var pd = new DateTime(2024, 3, 4);
 		for (int dd = 0; dd < 7; dd++)
 		{
@@ -557,7 +570,7 @@ static class Program
 			&& tg0.IndexOf("FinishCanary(true)", sc0, StringComparison.Ordinal) < tg0.IndexOf("m_g0 = null", sc0, StringComparison.Ordinal), "_TestGate0.StopCalc calls FinishCanary(true) before releasing the engine");
 
 		// the signal rule on the run's own engine and ring (any state where the t-1 rails exist)
-		var e2 = new Gate0Engine { mode = EGate0Mode.Canary, variant = 8 }; e2.Configure();
+		var e2 = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 8 }; e2.Configure();
 		var r2 = new Random(3); double q = 4800; bool tested = false; var st2 = new DateTime(2024, 3, 4);
 		for (int d = 0; d < 14 && !tested; d++)
 		{

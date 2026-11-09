@@ -354,10 +354,15 @@ namespace PowerLanguage.Function
 		// ---- configuration (set before the first Bar) ----
 		public EGate0Mode mode = EGate0Mode.EventStudy;
 		public int variant;
-		public double tick = 0.25;
+		/// <summary>M6a: no implicit 0.25. The host sets this from the profile tick (tickSize()) before Configure. 0 / unset is an Error line, then a throw.</summary>
+		public double tick;
+		/// <summary>M6a: KD-02 DVP root. The host sets the Data1 profile root (p.root). Not an [Input].</summary>
+		public string root;
 		public long seed = 33;
 		public double vaPct = 0.70;
 		public Action<string> journal;
+		/// <summary>Error sink. The host writes it at Error (one line) before a throw. Null only skips the write.</summary>
+		public Action<string> error;
 		/// <summary>Warning / Debug sinks (kd02-zero-entries diagnostics; null = off, nothing is formatted). _TestGate0 passes
 		/// engineSink(Warning) / engineSink(Debug).</summary>
 		public Action<string> warn, debug;
@@ -448,7 +453,12 @@ namespace PowerLanguage.Function
 
 		public string Configure()
 		{
-			if (tick <= 0) return "tick must be > 0";
+			if (!(tick > 0) || double.IsInfinity(tick))
+			{
+				var ex = new InvalidOperationException("G0: tick must be > 0");
+				if (error != null) error(ex.Message);
+				throw ex;
+			}
 			if (mode == EGate0Mode.Canary && !((variant >= 0 && variant <= 8) || (variant >= 100 && variant <= 123) || (variant >= 130 && variant <= 133))) return "Canary Variant must be 0..8, 100..123 (A2-53 sweep) or 130..133 (KD-02 sweep)";
 			if (mode != EGate0Mode.Canary && (variant < 0 || variant > 13)) return "level-study Variant must be 0..13";
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.A2_53) DecodeA253(variant, out a253Gap, out a253Bar, out a253Minutes, out a253Filter);
@@ -1201,7 +1211,7 @@ namespace PowerLanguage.Function
 			DvpConfig c = Kd02Config();
 			List<string> errs = c.Validate(); if (errs != null && errs.Count > 0) return "KD-02 DVP config: " + string.Join("; ", errs);
 			Action<string> j = journal;
-			m_kd = new _DvpEngine(c, "G0KD02", "ES", tick, true, true, j, j == null ? (Action<string>)null : (x => j("G0-b KD02 warning: " + x)));
+			m_kd = new _DvpEngine(c, "G0KD02", root, tick, true, true, j, j == null ? (Action<string>)null : (x => j("G0-b KD02 warning: " + x)));
 			m_kdRing = new _BarRing(DvpStream.RingNeed(c));
 			m_kdB = new Gate0Bucket(kd02Minutes);
 			return null;

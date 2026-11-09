@@ -1020,9 +1020,31 @@ static class Program
 		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, fall, null).ProfileHash() == "55576df6a8a99c05", "D2 fall-back week: 6E Default Local ET keeps 55576df6a8a99c05");
 	}
 
+	static void M6aWindow()
+	{
+		var g = Globex9();
+		var et = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+		var ct = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+		var subj = new InstrumentSubject("G0", "@ES", EAssetClass.Future, "ES", "GLOBEX");
+		var etSessions = InstrumentSessions.ToExchange(g, ct, et, new DateTime(2024, 1, 8, 18, 0, 0), subj, null);
+		Check(InstrumentSessions.CoversGate0Rth(etSessions), "M6a CME Globex 9-entry, Central to Eastern, covers 09:30-16:00 ET");
+		var full = new S[5];
+		var gap = new S[5];
+		for (int d = 1; d <= 5; d++)
+		{
+			full[d - 1] = new S((DayOfWeek)d, new TimeSpan(9, 30, 0), (DayOfWeek)d, new TimeSpan(16, 0, 0));
+			gap[d - 1] = new S((DayOfWeek)d, new TimeSpan(9, 30, 0), (DayOfWeek)d, new TimeSpan(15, 0, 0));
+		}
+		Check(InstrumentSessions.CoversGate0Rth(full), "M6a Mon-Fri 09:30-16:00 ET is covered");
+		Check(!InstrumentSessions.CoversGate0Rth(gap), "M6a Mon-Fri 09:30-15:00 ET is not covered");
+		var e = Throws(s => InstrumentSessions.RequireGate0Rth(gap, subj, s), "M6a S3");
+		Check(e != null && e.Reason == InstrumentReason.SessionsWindowNotCovered && e.Action == InstrumentReason.ActionGate0Window
+			&& e.Message.Contains("use a session template that covers 09:30\u201316:00 ET"), "M6a S3 reason and action: " + (e == null ? "" : e.Message));
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}

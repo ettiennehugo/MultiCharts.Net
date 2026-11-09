@@ -53,6 +53,8 @@ namespace PowerLanguage.Function
 		public const string Months = "months";
 		public const string SessionsNone = "sessions:none", SessionsChanged = "sessions:changed", SessionsBarOutside = "sessions:bar-outside";
 		public const string SessionsNoRthSplit = "sessions:no-rth-split", SessionsWindowNotCovered = "sessions:window-not-covered";
+		/// <summary>S3 action for the frozen G0 09:30–16:00 ET window. The en dash is the spec's.</summary>
+		public const string ActionGate0Window = "use a session template that covers 09:30\u201316:00 ET";
 		/// <summary>PR-M4 (D2, §6.1): tz:bar = the bar time zone cannot be resolved; tz:exchange = exchangeTimeZoneId(Info.Exchange) gives
 		/// no zone, or its id does not resolve. Strict lookups, never a fallback zone (profileHash hashes the sessions in exchange time).</summary>
 		public const string TzBar = "tz:bar", TzExchange = "tz:exchange";
@@ -788,6 +790,31 @@ namespace PowerLanguage.Function
 			// exchangeZone is never null here: Build refuses tz:exchange first (PR-M4 review nit 4 removed the 'unresolved' branch)
 			return exchangeZone.Id + " " + InstrumentText.Sessions(exchangeSessions) + "; rth "
 				+ (exchangeRth == null ? "none" : InstrumentText.Hm(exchangeRth.start) + "-" + InstrumentText.Hm(exchangeRth.end));
+		}
+
+		/// <summary>M6a S3. Sessions are already in ET. True when every minute of (09:30, 16:00] on Monday–Friday is inside some session
+		/// (start exclusive, end inclusive, the same rule as Find / IsRthTime).</summary>
+		public static bool CoversGate0Rth(_MtfMath.Session[] sessionsEt)
+		{
+			if (sessionsEt == null || sessionsEt.Length == 0) return false;
+			DateTime monday = new DateTime(2024, 1, 8);
+			for (int d = 0; d < 5; d++)
+			{
+				DateTime day = monday.AddDays(d);
+				for (int minute = 9 * 60 + 31; minute <= 16 * 60; minute++)
+				{
+					Hit h;
+					if (!Find(sessionsEt, day + TimeSpan.FromMinutes(minute), out h)) return false;
+				}
+			}
+			return true;
+		}
+
+		/// <summary>M6a S3: Error line, then throw sessions:window-not-covered. Action text is the spec sentence.</summary>
+		public static void RequireGate0Rth(_MtfMath.Session[] sessionsEt, InstrumentSubject s, Action<string> errorSink)
+		{
+			if (!CoversGate0Rth(sessionsEt))
+				InstrumentError.Fail(errorSink, s, InstrumentReason.SessionsWindowNotCovered, "09:30-16:00 ET", InstrumentReason.ActionGate0Window);
 		}
 
 		/// <summary>S1: null/empty → sessions:none; StartCalc vs first-bar read differ → sessions:changed.</summary>

@@ -186,7 +186,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int Variant { get; set; }
 
 		private Gate0Engine m_g0;
-		private bool m_done, m_configured;
+		private bool m_done, m_configured, m_windowChecked;
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_leLmt, m_seLmt, m_leStp, m_seStp, m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
 
@@ -214,6 +214,21 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "G0SXt", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		/// <summary>M6a S3: the frozen 09:30–16:00 ET window must sit inside the chart sessions after they are converted to ET.
+		/// Profiles off (no profile) is the existing off switch: no new refusal. Sessions are filled on the first bar.</summary>
+		void requireGate0Window()
+		{
+			if (m_windowChecked) return;
+			InstrumentProfile p = InstrumentProfileOf(1);
+			if (p == null) { m_windowChecked = true; return; }
+			if (p.sessions == null || p.barZone == null) return;
+			m_windowChecked = true;
+			TimeZoneInfo et = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p.name, msg);
+			_MtfMath.Session[] etSessions = InstrumentSessions.ToExchange(p.sessions, p.barZone, et, Bars.Time[0], p.Subject("G0"), err);
+			InstrumentSessions.RequireGate0Rth(etSessions, p.Subject("G0"), err);
+		}
+
 		/// <summary>Educator review G2: typed EResolution -> Gate 0 bar unit (members confirmed by Ettienne's EResolution dump).</summary>
 		private static EGate0BarUnit gate0Unit(EResolution t)
 		{
@@ -234,11 +249,14 @@ namespace PowerLanguage.Strategy
 			Resolution res = Bars.Info.Resolution;
 			string resErr = Gate0Data1.Check(res.ChartType == ChartType.Regular, gate0Unit(res.Type), (long)res.Size, res.Type + " " + res.ChartType);   // educator review G2 (typed)
 			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
-			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), journal = engineSink(ETraceLevel.Journal), warn = engineSink(ETraceLevel.Warning), debug = engineSink(ETraceLevel.Debug) };
+			InstrumentProfile p1 = InstrumentProfileOf(1);
+			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), root = p1 != null ? p1.root : _MtfMath.SymbolRoot(Bars.Info.Name),
+				journal = engineSink(ETraceLevel.Journal), warn = engineSink(ETraceLevel.Warning), debug = engineSink(ETraceLevel.Debug),
+				error = msg => traceAlways(ETraceLevel.Error, Bars.Info.Name, msg) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();
 			string err = m_g0.Configure();
 			if (!string.IsNullOrEmpty(err)) throw new ArgumentException("_TestGate0: " + err);
-			m_done = false; m_configured = true;
+			m_done = false; m_configured = true; m_windowChecked = false;
 		}
 
 		protected override void StopCalc()
@@ -253,6 +271,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+			requireGate0Window();
 			if (!m_configured || Bars.Status != EBarState.Close) return;
 			DateTime t = Bars.Time[0];
 			var b = new Gate0Bar(ToEastern(t), GlobexDate(t), Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0], rollOn(1));
