@@ -1,14 +1,14 @@
-# Trading-Idea Catalogue (v2.7): Volume Profile, VWAP, Anchored VWAP and Companions
+# Trading-Idea Catalogue (v2.8): Volume Profile, VWAP, Anchored VWAP and Companions
 
-**For:** Ettienne Hugo · **Prepared by:** Grok Bot · **Date:** Tuesday 20 Oct 2026 (America/New_York, EDT) · **v2.4:** Saturday 31 Oct 2026 (EDT), implementation status re-checked against `origin/main` @ `3f9e9be` (PRs #30–#58) · **v2.5:** Saturday 31 Oct 2026 (EDT), adds families VX (volatility) and LE (leveraged ETFs) from R7 `volatility-leveraged-etf-research.md` · **v2.6:** Sunday 1 Nov 2026 (EST), adds family YV (10 ideas from 8 YouTube videos; `specs/video-ideas-2026-11-01-additions.md`) · **v2.6a:** Sunday 1 Nov 2026 (EST), per-contract costs confirmed (ES $17, MES $2.50 per round trip) · **v2.7:** Sunday 8 Nov 2026 (EST), adds PF-08, SP-09, OF-09, OF-10 and EX-13 (`specs/video-ideas-2026-11-08-additions.md`)
+**For:** Ettienne Hugo · **Prepared by:** Grok Bot · **Date:** Tuesday 20 Oct 2026 (America/New_York, EDT) · **v2.4:** Saturday 31 Oct 2026 (EDT), implementation status re-checked against `origin/main` @ `3f9e9be` (PRs #30–#58) · **v2.5:** Saturday 31 Oct 2026 (EDT), adds families VX (volatility) and LE (leveraged ETFs) from R7 `volatility-leveraged-etf-research.md` · **v2.6:** Sunday 1 Nov 2026 (EST), adds family YV (10 ideas from 8 YouTube videos; `specs/video-ideas-2026-11-01-additions.md`) · **v2.6a:** Sunday 1 Nov 2026 (EST), per-contract costs confirmed (ES $17, MES $2.50 per round trip) · **v2.7:** Sunday 8 Nov 2026 (EST), adds PF-08, SP-09, OF-09, OF-10 and EX-13 (`specs/video-ideas-2026-11-08-additions.md`) · **v2.8:** Monday 9 Nov 2026 (EST), adds family OK, Oliver Kell Cycle of Price Action, OK-01…OK-24 (`specs/kell-ideas-2026-11-08-additions.md`)
 
 **Data / broker:** **dxFeed through MultiCharts .NET is the data source; IBKR is the broker only** (commissions and fills). The data constraints follow `reviews/analyst-base-class-spec.md` **Rev 2.7**: about 2 years of ticks, about 9–10 years of 1-minute bars, about 40 years of daily bars; the bid/ask-traded split is readable only inside the tick window; continuous symbols are **not back-adjusted**.
 
 **Merged (v2, 20 Oct 2026):** (1) catalogue v1 (114 entries); (2) Analyst 2 **Rev 6** (`trading-ideas-analyst2.md`: A2-01…A2-79, Appendix A L2-01…L2-07, Methodology M1…M30), checked against `catalogue-merge-audit-analyst2.md` and `analyst2-handoff-ids.md`; (3) Trader Dale's YouTube strategies DV-01…DV-24 (`trading-ideas-dale-video.md`). Every source ID is either its own entry or "Merged into X" (Appendix A, script-checked). v1 is kept as `trading-idea-catalogue-v1.md/.pdf`. **Update v2.3 (23 Oct 2026):** (4) Keller Book 5 *Detrended Volume Profile & Order Flow* additions **rev 3.1, signed off by Ettienne 23 Oct 2026 (acceptance N = 2 primary)** (`specs/keller-b5-catalogue-additions.md`, with `specs/keller-b5-p6p7-entries-analyst2.md` as amended by rev 3.1): KD-01…KD-11 and the M-DVP engine (§2.4b, §3.16, Appendix A.6, Appendix B v2.3). **Update v2.3b (23 Oct 2026):** implementation statuses re-audited against `MultiCharts.Net` `origin/main` @ `629da0d` (PRs #14–#29); see §2.4a and Appendix B v2.3b.
 
-**Status:** documentation, with per-entry implementation status in §2.4c (v2.4; v2.5 adds 15 new entries and v2.6 adds 10 YV entries, all not started; v2.7 adds 5 entries, all not started). Of 223 entries: **6 implemented** (coded on `main`, none yet run in MultiCharts), **16 partial**, **12 spec'd**, **189 not started**. Nothing here has been tested. Every idea is a **hypothesis to be put through the final-synthesis validation gates**.
+**Status:** documentation, with per-entry implementation status in §2.4c (v2.4; v2.5 adds 15 new entries and v2.6 adds 10 YV entries, all not started; v2.7 adds 5 entries, all not started; v2.8 adds 24 OK entries, all not started). Of 247 entries: **6 implemented** (coded on `main`, none yet run in MultiCharts), **16 partial**, **12 spec'd**, **213 not started**. Nothing here has been tested. Every idea is a **hypothesis to be put through the final-synthesis validation gates**.
 
-**Companion documents:** `final-synthesis.md` (validation gates, costs, specs 1–4); the six research reports (R1 volume-profile-futures, R2 high-winrate-low-RR, R3 orderflow-volume-profile, R4 price-action-confluence, R5 structural-price-action, R6 futures-edges-beyond-volume-profile); `reviews/analyst-base-class-spec.md` and `reviews/base-class-rev2-status.md`; Kindle notes on Keller B1–B4, Dale (VP and Order Flow) and Levy; `trading-ideas-analyst2.md` (Rev 6) with its Kindle notes on Kaufman (TSaM, KCTS) and Minervini; `trading-ideas-dale-video.md`; Keller B5 notes `kindle-notes/detrended-vp-orderflow.md` and `kindle-notes/keller-b5-dvp-analyst2.md`, with `specs/keller-b5-catalogue-additions.md` (rev 3.1), `specs/keller-b5-p6p7-entries-analyst2.md` and `specs/keller-b5-p6p7-review-analyst1.md`.
+**Companion documents:** `final-synthesis.md` (validation gates, costs, specs 1–4); the six research reports (R1 volume-profile-futures, R2 high-winrate-low-RR, R3 orderflow-volume-profile, R4 price-action-confluence, R5 structural-price-action, R6 futures-edges-beyond-volume-profile); `reviews/analyst-base-class-spec.md` and `reviews/base-class-rev2-status.md`; Kindle notes on Keller B1–B4, Dale (VP and Order Flow) and Levy; `trading-ideas-analyst2.md` (Rev 6) with its Kindle notes on Kaufman (TSaM, KCTS) and Minervini; `trading-ideas-dale-video.md`; Keller B5 notes `kindle-notes/detrended-vp-orderflow.md` and `kindle-notes/keller-b5-dvp-analyst2.md`, with `specs/keller-b5-catalogue-additions.md` (rev 3.1), `specs/keller-b5-p6p7-entries-analyst2.md` and `specs/keller-b5-p6p7-review-analyst1.md`; v2.7 video specifications `specs/video-ideas-2026-11-08-additions.md`; v2.8 Kell family `specs/kell-ideas-2026-11-08-additions.md`.
 
 ---
 
@@ -271,7 +271,7 @@ Checked on Sat 31 Oct 2026 (EDT) against every PR merged up to #58 (#30–#58 ne
 
 **Definitions.** **Implemented:** the entry's own rule or measurement is coded on `main`. **Partial:** part of it is coded (one arm, or the core statistic without the rule or host). **Spec'd:** no entry-specific code, but a build spec beyond this catalogue exists (final-synthesis Specs 1–4, `specs/m-dvp-spec.md` §10.4). **Not started:** catalogue entry only; the engines it needs may exist (see each Readiness line).
 
-**Counts (223 entries, v2.7):** Implemented **6** · Partial **16** · Spec'd **12** · Not started **189** (v2.4: 193 entries, 159 not started; v2.5 adds VX-01…VX-08 and LE-01…LE-07; v2.6 adds YV-01…YV-10; v2.7 adds PF-08, SP-09, OF-09, OF-10, EX-13; all not started).
+**Counts (247 entries, v2.8):** Implemented **6** · Partial **16** · Spec'd **12** · Not started **213** (v2.4: 193 entries, 159 not started; v2.5 adds VX-01…VX-08 and LE-01…LE-07; v2.6 adds YV-01…YV-10; v2.7 adds PF-08, SP-09, OF-09, OF-10, EX-13; v2.8 adds OK-01…OK-24; all not started).
 
 | ID | Status | Evidence (PRs, files) |
 |---|---|---|
@@ -329,8 +329,9 @@ Checked on Sat 31 Oct 2026 (EDT) against every PR merged up to #58 (#30–#58 ne
 - **VX** (8, v2.5): VX-01, VX-02, VX-03, VX-04, VX-05, VX-06, VX-07, VX-08
 - **LE** (7, v2.5): LE-01, LE-02, LE-03, LE-04, LE-05, LE-06, LE-07
 - **YV** (10, v2.6): YV-01, YV-02, YV-03, YV-04, YV-05, YV-06, YV-07, YV-08, YV-09, YV-10
+- **OK** (24, v2.8): OK-01, OK-02, OK-03, OK-04, OK-05, OK-06, OK-07, OK-08, OK-09, OK-10, OK-11, OK-12, OK-13, OK-14, OK-15, OK-16, OK-17, OK-18, OK-19, OK-20, OK-21, OK-22, OK-23, OK-24
 
-Each `####` entry below also carries an **Implementation status (v2.4)** line under its heading (VX/LE entries: **v2.5**; YV entries: **v2.6**; PF-08, SP-09, OF-09, OF-10 and EX-13: **v2.7**). The EX rows EX-01…EX-12 (§3.10) are covered by this list only; EX-13 also has a `####` entry.
+Each `####` entry below also carries an **Implementation status (v2.4)** line under its heading (VX/LE entries: **v2.5**; YV entries: **v2.6**; PF-08, SP-09, OF-09, OF-10 and EX-13: **v2.7**; OK-01…OK-24: **v2.8**). The EX rows EX-01…EX-12 (§3.10) are covered by this list only; EX-13 also has a `####` entry. Presenter variants OK-05P, OK-22P and the 21-EMA sensitivity sit inside their hosts and are not extra IDs in this count.
 
 ### 2.5 The ten sandbox slots
 
@@ -363,10 +364,10 @@ The order is fixed. An idea's Gate-3 result is not read until every item that ap
 
 ## 3. The catalogue
 
-Counts (v2.7): **223 entries** = the v2.3 193 + 8 VX + 7 LE (R7, v2.5) + 10 YV (YouTube videos 2026-11-01, v2.6) + 5 video specifications (PF-08, SP-09, OF-09, OF-10, EX-13; v2.7). v2.3 breakdown: **193 entries** = 114 from v1 + 49 new Analyst 2 entries + 12 Dale (DV) entries + 7 parked L2 entries + 11 Keller B5 (KD) entries, plus the 30 methodology items M1–M30 (§9).
-- **By family:** PS 25 · VW 8 · AV 13 · MT 7 · OF 10 · SP 9 · TS 7 · SW 6 · RG 10 · EX 13 · PF 8 · A2 56 (by type: EX 2 · G0 4 · IM 13 · OF 1 · PS 6 · RG 10 · SW 4 · TS 1 · XR 8 · v1 7; "v1" = the 7 A2 entries kept from v1) · DV 12 · L2 7 · KD 7 · VX 8 · LE 7 (v2.5) · YV 10 (v2.6, §3.19) (§3.16; KD-01/03/04/05 sit in PS/RG/MT as PS-25, RG-09, RG-10, MT-07). v2.7 adds OF-09, OF-10, SP-09, EX-13, PF-08.
-- **By source:** catalogue v1 107 (non-A2) + Analyst 2 56 own (23 more merged into hosts) + Trader Dale 12 own (12 merged) + L2 7 (parked) + Keller B5 11 own (KD-01…KD-11; none merged) + YouTube videos 2026-11-01 10 own (YV-01…YV-10; 4 NEW, 6 VARIANT; 'existing-only' ideas mapped in Appendix A.8) + YouTube specifications 2026-11-08 5 own (PF-08, SP-09, OF-09, OF-10, EX-13; Appendix A.9).
-- **Testable rows in the §4 matrix:** 150 (v2.7: +4 rows [est], PF-08, SP-09, OF-09, OF-10; v2.6: +8 YV rows [est]; v2.5: +13 VX/LE rows [est]; v2.4: 125) (standalone, layers, canaries). The rest are modules, gates or parked ideas. EX-13 is a module and is not a row.
+Counts (v2.8): **247 entries** = the v2.7 223 + 24 OK (Oliver Kell, §3.20). v2.7 was the v2.3 193 + 8 VX + 7 LE (R7, v2.5) + 10 YV (YouTube videos 2026-11-01, v2.6) + 5 video specifications (PF-08, SP-09, OF-09, OF-10, EX-13; v2.7). v2.3 breakdown: **193 entries** = 114 from v1 + 49 new Analyst 2 entries + 12 Dale (DV) entries + 7 parked L2 entries + 11 Keller B5 (KD) entries, plus the 30 methodology items M1–M30 (§9).
+- **By family:** PS 25 · VW 8 · AV 13 · MT 7 · OF 10 · SP 9 · TS 7 · SW 6 · RG 10 · EX 13 · PF 8 · A2 56 (by type: EX 2 · G0 4 · IM 13 · OF 1 · PS 6 · RG 10 · SW 4 · TS 1 · XR 8 · v1 7; "v1" = the 7 A2 entries kept from v1) · DV 12 · L2 7 · KD 7 · VX 8 · LE 7 (v2.5) · YV 10 (v2.6, §3.19) · OK 24 (v2.8, §3.20) (§3.16; KD-01/03/04/05 sit in PS/RG/MT as PS-25, RG-09, RG-10, MT-07). v2.7 adds OF-09, OF-10, SP-09, EX-13, PF-08.
+- **By source:** catalogue v1 107 (non-A2) + Analyst 2 56 own (23 more merged into hosts) + Trader Dale 12 own (12 merged) + L2 7 (parked) + Keller B5 11 own (KD-01…KD-11; none merged) + YouTube videos 2026-11-01 10 own (YV-01…YV-10; 4 NEW, 6 VARIANT; 'existing-only' ideas mapped in Appendix A.8) + YouTube specifications 2026-11-08 5 own (PF-08, SP-09, OF-09, OF-10, EX-13; Appendix A.9) + Oliver Kell 24 own (OK-01…OK-24; Appendix A.10). Presenter-only variants are not in this 24.
+- **Testable rows in the §4 matrix:** 150 (v2.7: +4 rows [est], PF-08, SP-09, OF-09, OF-10; v2.6: +8 YV rows [est]; v2.5: +13 VX/LE rows [est]; v2.4: 125) (standalone, layers, canaries). The rest are modules, gates or parked ideas. EX-13 is a module and is not a row. v2.8 does not add matrix rows: OK-01…OK-24 are unscored this pass (build order is in §3.20, not a priority score).
 - **Every source ID** (114 v1 IDs, A2-01…A2-79, L2-01…L2-07, M1…M30, DV-01…DV-24) is either its own entry or "Merged into X" (Appendix A, script-checked).
 
 ### 3.0 Gate 0: prerequisite entries (run before any level-based idea; §2.6)
@@ -911,6 +912,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** K-SH on the delta condition; the sweep fade **S7 canary** (expected ≈ 0) without the shape filter. **Kill:** no lift over the canary.
 - **See also (v2.7):** SP-09 is another sweep-fade (clock window + FVG). The Telonics 49.9% vs 50.0% prior cited here applies to it. This entry's rules are unchanged.
+- **See also (v2.8):** OK-01 (reversal extension) and OK-10 (pivot-low failure) are related reclaim ideas without this P/b-profile filter. This entry's rules are unchanged.
 
 #### PS-19 · Poor high/low run-through (not repair-as-magnet)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -1709,6 +1711,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Needs:** ✓ M-SWING.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** K-RT, K-FL (shift the pattern level). **Kill:** ≤ 0 R or < a random breakout of a 20-bar high.
+- **See also (v2.8):** OK-04 is a Kell base-break stage host, not this failed-double-top pattern. This entry's rules are unchanged.
 
 #### SP-02 · Double top at VAH with second-test divergence (T2, control)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -1736,6 +1739,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Needs:** F-COMP, ✓ M-SWING, ✓ M-TOD.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** the no-test version is the canary (S7-like). **Kill:** ≤ canary.
+- **See also (v2.8):** OK-09 (higher-low double bottom) and OK-10 (undercut-and-reclaim) are related and are not this composite-VAL spring. This entry's rules are unchanged.
 
 #### SP-04 · Lower high after a failed auction at a composite extreme (T6)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -1764,6 +1768,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Needs:** F-PROF, F-OF.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** report each condition's marginal contribution; K-SH. **Kill:** conjunction ≤ best single condition.
+- **See also (v2.8):** OK-01 and OK-17 are cycle reversal bars and are not this four-part profile-extreme event. This entry's rules are unchanged.
 
 #### SP-06 · First higher low after a downtrend at composite VAL (change of character)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -1778,6 +1783,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Needs:** F-COMP, ✓ M-SWING (multi-TF via `ExtraPriceAction`, PR #19).
 - **Readiness (v2.3b):** Buildable now on the merged base (extra PRICEACTION instances via `ExtraPriceAction`, PR #19).
 - **Test:** K-FL (fake VAL). **Kill:** ≤ fake.
+- **See also (v2.8):** OK-01 is an extension below the 10-EMA at HTF support, not this first higher low at composite VAL. This entry's rules are unchanged.
 
 #### SP-07 · Failed-failure re-break (Spec 4)
 - **Implementation status (v2.4):** **Spec'd** — final-synthesis Spec 4; no strategy code.
@@ -2083,6 +2089,7 @@ Regime filters never trade. Each is a **layer** tested on host events through th
 - **Hosts · Needs:** all · ✓ M-DAILY, ✓ M-SWING.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test · Kill:** **drift confound**: on ES/NQ, "long only when TSMOM > 0" partly re-earns the index drift, so require the effect on CL/GC/ZN too.
+- **See also (v2.8):** OK-23 is a 10/20-EMA index gate on Kell hosts and a variant of this module. This rule is unchanged.
 
 #### RG-07 · Event, roll and thin-session exclusions
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -2166,6 +2173,7 @@ Exits are selected **inside** each slot through the `ExitModule` input. **Data w
 
 - **Merged · A2-03** (row **EX-04** above): Analyst 2's breakout-AVWAP trail on Spec 1 is the pre-registered primary arm of EX-04, tested on identical Spec-1 (PS-01, host H1) entries. Original A2 grade **B** (for the VWAP-trail role) → catalogue **B (+)** trail role / **H** for the breakout-anchored transfer.
 - **Merged · A2-22** (row **EX-12** above): Analyst 2's AVWAP-anchored CVD divergence exit; W-T only (250/125/125 split), ES and NQ pooled to reach a sample. Original A2 grade **C** → catalogue **E**.
+- **See also (v2.8):** OK-21 (pivot trail) and OK-22 (EMA trail) are related modules. The EX-05 rule in the table is unchanged.
 - **Merged · DV-24** (into **EX-01**; Trader Dale exit module: TP before the barrier, SL behind it, daily-close stop + catastrophic stop; Dale priority 4). Original DV grade: E → catalogue **E**. Books: Agree (EX-01; P2). Dale's specification, verbatim:
   - **Sources:**
     - https://www.youtube.com/watch?v=MJKANontC4s ("take profit before a barrier at its start… most commonly heavy volume zone… exit at the first one"; "stop goes behind a barrier at its far edge… if there is a little swing point close to the end of the barrier… place my stop there"; "if the barrier fails then the trade is over")
@@ -2240,6 +2248,7 @@ Exits are selected **inside** each slot through the `ExitModule` input. **Data w
 - **Rules:** per-trade risk = min(0.25 × Kelly on the *deflated* win rate, 0.5% of equity); portfolio open risk ≤ 1.5%; at most 2 cards live (Keller B1).
 - **Needs:** CS-4 sizeForRisk (done), ◐ M-PORT (coded, PRs #14/#17/#22; P5b live checks pending).
 - **Readiness (v2.3b):** Buildable with caveats — ◐ M-PORT is coded (PRs #14/#17/#22: `_PortMM`, `_PortfolioRiskManager`); run Probe P5b live checks before reading any portfolio result.
+- **See also (v2.8):** OK-24 documents Kell allocation tiers and does not change this risk budget. Margin tiers are not enabled.
 
 #### PF-05 · Drawdown throttles + two-CUSUM monitoring
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -2266,6 +2275,7 @@ Exits are selected **inside** each slot through the `ExitModule` input. **Data w
   - **Tests:** (1) In-sample-factor version vs rolling version (expect the in-sample one to look better; report it only as the "cheat" bound). (2) Turnover cost of rebalancing under A2-59. (3) Hysteresis 0% / 20% / 40%.
   - **Kill:** n/a (infrastructure). Adopt the vol-target overlay only if the rolling version raises net IR and does not raise max DD on validation; otherwise keep ATR per-trade sizing alone.
   - **See also (v2.7):** PF-08 is a Donchian entry this overlay could size later. The −20% size per 10% drawdown rule stays here and is not part of PF-08.
+- **See also (v2.8):** OK-24 does not replace this ATR / ≤1% sizing. Kell's 25–35% tiers stay documentation.
 
 #### PF-07 · Meta-labelling the survivors (later)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -3562,6 +3572,7 @@ These are **modules, not entries**. They are tested as ablations on three fixed 
   - **Test window:** M (per host). D for H2's daily proxy.
   - **Tests:** (1) Net P&L, IR and max DD vs fixed 100% and vs fixed 50% (the same average exposure: a ladder that only "wins" by being smaller is a null). (2) Serial correlation of the host's trade outcomes (runs test, lag-1 autocorrelation of sign): the ladder has an edge only if outcomes cluster. (3) Shuffled-order control: re-run the ladder on 1,000 permutations of the host's trade sequence; the real result must exceed the 90th percentile.
   - **Kill:** IR not above the fixed-size host at matched average exposure; **or** the real sequence within the shuffled 90% band (no clustering → the ladder only lowers size); **or** helps < 2 of 3 hosts.
+- **See also (v2.8):** OK-24 records Kell's 25–35% allocation tiers as documentation only. This ladder is unchanged, and those tiers are not enabled.
 
 #### A2-73 · Breakeven stop at ≈ 3R or above the rolling average gain (exit module)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -3584,6 +3595,7 @@ These are **modules, not entries**. They are tested as ablations on three fixed 
   - **Test window:** M.
   - **Tests:** (1) The fraction of host trades that reach each trigger (if < 10% reach 3R on H2/H3, T1 is inert, report and move on). (2) "Choke rate": trades stopped at BE that later reach the host's original exit at a profit. (3) MFE/MAE scatter of the host to locate where winners and losers separate before the run.
   - **Kill:** no trigger lifts the host's net R/trade ≥ 0.02R with max DD not higher; **or** choke rate > 50% at the best trigger; **or** helps < 2 of 3 hosts.
+- **See also (v2.8):** OK-22 moves a stop to cost after a partial. This 3R breakeven module is unchanged.
 
 #### A2-74 · Free roll: sell half at 2–3R, remainder at breakeven (scale-out module)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -3605,6 +3617,7 @@ These are **modules, not entries**. They are tested as ablations on three fixed 
   - **Test window:** M (T re-check of partial fills for H1).
   - **Tests:** (1) Net R/trade and the distribution change (expect lower mean, lower variance; report both — the book's claim is psychological, so a lower-variance, equal-IR result counts as "neutral", not a pass). (2) Compare with A2-73 alone on the same trades. (3) Skew and worst-decile trade.
   - **Kill:** net IR (not R/trade) not above the host; **or** below A2-73 alone on ≥ 2 hosts (then the partial adds nothing over the BE move); **or** generic criteria.
+- **See also (v2.8):** OK-22's 3–5R scale-out overlaps this free-roll. This module is unchanged.
 
 #### A2-75 · Rolling hit-rate throttle (RBA module)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -3653,6 +3666,7 @@ These are **modules, not entries**. They are tested as ablations on three fixed 
   - **Test window:** M.
   - **Tests:** (1) Event study: forward return over 30/60 minutes after C1–C4 bars inside open host winners vs the same bars outside trades and vs matched random bars of the host (does a climax bar mark a local top intraday, or is it momentum? A2-51's and Gao et al.'s evidence points to momentum). (2) Ablation. (3) Report give-back avoided vs upside forgone.
   - **Kill:** forward 30-minute return after the climax bar ≥ 0 (no exhaustion) for the best condition on both ES and NQ; **or** net R/trade not above the host on ≥ 2 hosts; **or** generic criteria.
+- **See also (v2.8):** OK-05 (exhaustion trim) and OK-20 (ignite-bar stop raise) are related and are not this climax exit. This module is unchanged.
 
 #### A2-77 · Failed follow-through exit: time stop and bar-quality test (exit module)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -3726,6 +3740,7 @@ These are **modules, not entries**. They are tested as ablations on three fixed 
   - **Test window:** M.
   - **Tests:** (1) Gated vs ungated host $/trade, PF, trade-count fraction (expect 10–30%). (2) Contraction-only vs dry-up-only vs both (does the volume half add anything?). (3) Overlap and AND with A2-55's best gate. (4) Placebo: the same contraction rule on volume-shuffled bars (P2-style) for the dry-up leg.
   - **Kill:** no setting lifts net expectancy ≥ 0.05R on ≥ 2 hosts with ≥ 100 gated trades; **or** the dry-up leg adds < 0.02R over contraction-only (then drop the volume claim and fold the contraction leg into A2-55 as a new gate number); **or** ES-only improvement (M10).
+- **See also (v2.8):** OK-02, OK-04, OK-11 and OK-15 may later use this contraction gate as a layer. The IDs are not merged. This gate is unchanged.
 
 
   ---
@@ -4044,6 +4059,7 @@ Source: `/workspace/trading-ideas-dale-video.md` (transcripts of 63 strategy vid
   - Replicate his EUR/USD number on 6E in W-M as a pipeline sanity check, then ES/NQ.
   - **Kill:** < break-even net at ≥ 150 events, or the gate gives no lift over the ungated version.
 - **Books:** **Agree:** a trend filter on pullbacks (RG-06/VW-01 logic) and the cheapest to test. **Priority 4.**
+- **See also (v2.8):** OK-03 is an EMA crossback with no VWAP gate. An OK-03 VWAP arm is research-authored and is not this entry. This entry's rules are unchanged.
 
 #### DV-16 · Order-flow confirmation at a pre-defined level (layer)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -4614,6 +4630,7 @@ Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-1
 - **Feasibility · costs:** 0.75% risk (3% × 25%) is below the 1% budget; fine. Futures port: not feasible as stated. Futures costs (ES $17 / MES $2.50 per round trip) and the 14-tick floor do not apply to stocks. Costs/risk per §2.1 (v2.6a, confirmed 2026-11-01): **ES $17 per round trip**, **MES $2.50 per round trip** (= 2 MES ticks), 1% risk per trade, stop = max(structural, 14-tick floor). On ES the floor is 3.5 pt = $175 + $17 = $192 per contract at 1% → ≥ $19.2k equity per ES contract (cost ≈ 0.097 R). On MES the 14-tick floor is $17.50 + $2.50 = $20 per contract at 1% → ≥ $2k equity per MES contract; cost = 2/14 ticks ≈ 0.14 R at 14 ticks, 0.10 R at the §2.1 MES floor of 20 ticks.
 - **What to look for (frames, `video-ideas-2026-11-01/frames/`):** Daily candles with two coloured MAs (likely 10/20, inference — legend not readable) on ALM; stair-step trend marked by a hand pointer (01_0205). · Animated slides: 'No Big Breakdowns — look for daily price moves below ADR' (02_0345); 'Min 4%' breakout candle with higher volume (03_0426). · Scanner slide: Market Cap > $100 mn, < $10 bn, Daily Change ≥ 4%, **No Volume Filter**, Top Performers (04_0520). · Entry slide: horizontal ENTRY line at the consolidation top; callout 'enter within the first 10–15 minutes… 14% to 30% on day one' (05_0710). Sizing slide: 3% RISK + 25% POSITION SIZE = 0.75% ACCOUNT RISK (06_0750). · AXTI daily with '$5.4' level and a checklist: Linear Trend ✓, Orderly Consolidation ✓, Narrow Range Day ✓, No 3 Days Up ✓, 4% Move ✓; the NR day labelled −1% and breakout +13% (07_1020, 08_1050). **Adds to speech:** two checklist boxes (No Big Breakdowns, Volume Higher, Strong Close) appear unticked in the frame while the narration says it 'checked all the boxes' [10:40]. Frames: `9ksbN69G7i8/04_0520_scanner-criteria.jpg`, `9ksbN69G7i8/05_0710_entry-at-consolidation-break.jpg`, `9ksbN69G7i8/08_1050_AXTI-checklist-NR-day-minus1pct.jpg`.
 - **Test:** if stock data is ever added: vs a random 4%-up-day control with the same hold. **Kill:** no lift over the random-4%-day control after costs.
+- **See also (v2.8):** OK-04 and OK-07 are related base and post-earnings-flag hosts. OK-23 is the Kell form of the weekly 10/20 EMA regime mentioned here. This extract is unchanged.
 
 #### YV-04 · Environment → location → confirmation: discount pullback in value-up structure with absorption and a second seller failure (Robbins Cup order flow)
 - **Implementation status (v2.6):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -4751,6 +4768,595 @@ Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-1
 - **Test:** vs RG-06 TSMOM(20) sign on W-D (information beyond the sign of the 20-day return?). **Kill:** correlation with TSMOM(20) sign > 0.9 or no lift over it.
 ---
 
+### 3.20 Family OK: Oliver Kell Cycle of Price Action (OK-01…OK-24; v2.8)
+
+Source write-up: `specs/kell-ideas-2026-11-08-additions.md`. Evidence is practitioner video plus a secondary rulebook digest. There is no independent controlled sample. CME futures are untested. Grade **E** throughout. Nothing here has been run. Source win-rate language is **not** a design target and **not** a forecast; the conflicting figures are recorded only in the write-up.
+
+**ID check.** The draft prefix `OK` was re-checked against this file at v2.7 (families PS, VW, AV, MT, OF, SP, TS, SW, RG, EX, PF, A2, DV, L2, KD, VX, LE, YV). No `OK-` ID existed. The prefix is kept. OK-01…OK-24 are the 24 entries. Presenter variants are not extra entries.
+
+**Who said what.** Tag every rule. **K** = Kell speaking (wedge-pop video; ten-principles video) or a slide those videos show. **P** = the third-party presenter of the long breakout video, including paraphrases. **S** = the secondary rulebook only; videos win when they conflict. **R** = research-authored here so the rule can be coded. Kell's materials contain no volume-profile, footprint, delta, or Fibonacci rule. The only VWAP mention is Kell naming VWAP, with pivot points and an intraday 20-EMA, as an intraday chart tool (ten principles, about 70:22–70:28). No trigger is defined. Every VWAP, volume-profile, order-flow, and Fibonacci arm below is **R**.
+
+**Owner constraints (bind every OK ID).** These override Kell's big-winner language.
+
+1. Evaluation and validation use data only through **2024-12-31**. The program holdout from **2025-01-01** onward (through the catalogue's Oct 2026 end) stays unviewed. No OK host and no refinement arm is designed, tuned, or kill-read on 2025–2026.
+2. Owner gates, after costs: no single trade may exceed the user-set share of total profit; the largest winner is ≤ **10%** of net (the cap still binds if the user-set share is looser); the book stays **net positive after removing the top 1% of trades**. A result that needs a handful of giant winners is a **kill**, not a reason to weaken a gate.
+3. One arm at a time. Trial budget: ≤ 2 thresholds × ≤ 3 values per layer; ≤ 30 configs on W-M or W-D; ≤ 4 configs on W-T.
+4. Kell's allocation tiers (25–35 / 15–20 / 12–15 / 10–12 / 7–8 percent of equity) are **documentation only** (OK-24). They are not risk defaults. Margin tiers are **not enabled**. Tests size at the program default: ≤ 1% of equity per new risk unit (A2-71), with PF-04's budget left as it is.
+5. Do not conflate allocation %, price-stop %, and account-risk %. Account risk is about allocation × price-stop, before gaps and costs. The presenter distinguishes top-idea allocation from account risk. This catalogue does not adopt either slide as a default.
+6. No unavailable L2. Ordinary total volume is not delta, footprint, or aggressor. A "bull snort" is relative **total** volume (K).
+7. No lookahead: confirmed swing pivots only after the confirmation bar; completed profiles only; closed higher-timeframe bars only; a same-bar fill may not use that bar's final volume and close. Signal on the closed bar; fill at the next open (primary) or, as a separate arm, at the next close.
+8. Absolute stock-point buffers (0.5–1 point; "10+ points") are not portable to ES/NQ. Futures rows use the ATR/tick versions below. The stock-point numbers stay as source text only.
+
+**Family defaults (R where Kell is silent).** Core MAs: 10-EMA and 20-EMA on the timeframe in use; 50-SMA and 200-SMA are daily only (K). A 21-EMA in place of the 20-EMA is the presenter chart convention, one sensitivity, not a setup (P). Volume average: 50 sessions daily, 20 sessions intraday (R). Extension: close beyond the 10-EMA by k·ATR(20), k ∈ {1.5, 2.5}, primary k = 1.5 (R). Swing pivot: symmetrical N = 3, usable only after it confirms (R; Kell's "three pivot highs" is the count, K). Tight EMA band: the 10/20 spread is at or below the 40th percentile of the prior 20 spreads, and the range is contracting; sensitivity percentile 25 (R). Initial stop is structural, then the §2.1 cost floor; skip the trade if the widened stop breaches 1% of equity. Do not shrink size to fit. Costs are §2.1 (v2.6a).
+
+**Research arms (optional, R, not Kell).** Attach to a host only after that host's baseline exists. Never AND an arm into the first cell. Conjunction only if the budget remains and the conjunction was pre-registered.
+
+1. **VP (R):** a completed prior-session or multi-session composite VAH, VAL, POC, HVN, or LVN sits within δ of the Kell trigger (EMA band, pivot, or breakout line). Developing profile only from closed bars. No L2.
+2. **VWAP (R):** session VWAP, or an event-anchored AVWAP at an earnings open or an ignition-bar open, confirms by slope or by reclaim. An optional distance gate is a second cell, not the first. This is not Kell's unnamed intraday VWAP.
+3. **OF (R, W-T only):** at the trigger, affirming BarDelta or CumDelta, or a failed opposing stacked imbalance, at MC-BidAsk quality. Skip when flow quality is below that. A total-volume snort does not satisfy this arm.
+4. **Fib (R):** a confirmed-pivot retracement at 0.382, 0.5, or 0.618 sits on the EMA or the pivot. Kell has no Fib rule.
+
+**Instruments.** ES and NQ first, then CL and 6E, then ETFs, then US stocks. Stock-native patterns (OK-07, OK-08) may be prototyped only on a point-in-time liquid US universe. That universe is not in this pipeline, so those literal rows are data-blocked. The planning priority still ranks an ES/NQ adaptation above a stock-only row. Cash indexes are not in the dxFeed futures set; OK-23 says how the proxy is labelled.
+
+**Build order (not a matrix score, not a forecast).** Suggested sequence: OK-23; then exit modules OK-22, OK-20, OK-21 on a stub host; then OK-02 baseline on ES/NQ through 2024-12-31; then OK-02 plus VP alone, VWAP alone, and OF alone (OF is W-T); then OK-03 baseline and its VWAP arm (a later comparison with DV-15, not a merge); then OK-04 with the OK-12 flag arm; OK-16; OK-15 as a layer; OK-17, OK-01, OK-10; stock-native OK-07 and OK-08 only after a point-in-time earnings universe exists; OK-05, OK-06, and OK-18 last, with the owner gates enforced. Source priority ranks are on each entry. They overlap between hosts and modules; the sequence is the order.
+
+**Tiering, for later planning, not applied as code.** Tier 1 stays the existing pure VP / VWAP / OF / Fib ideas. There is no pure-Kell tier-1 row. Tier 2 is an OK host plus exactly one research arm. Tier 3 is the plain Kell baseline. The Strategy-planning page was not edited.
+
+**Aliases (not new IDs).** Basin Break = Base n' Break. EMA cross back = EMA Crossback. Ignite bar = ignition bar. The presenter's "bullish synchronicity" is a name for the ignite bar only. Scum = shakeout reclaim. Bull snort = heavy relative total volume. Presenter 21-EMA ↔ Kell 20-EMA. "Darvish" = Darvas. Folded into hosts, not given IDs: an extra inside bar on a host is OK-15; a naked earnings-gap buy is an arm of OK-07; a weekly 10-EMA extension trim is an arm of OK-22.
+
+**Presenter-only, off by default, not a baseline.** OK-05P and OK-22P are the same rule: once price is extended, trail the stop each bar to that bar's low. Source: the breakout-video presenter, about 94:11–96:01, described as the presenter's own spin. OK-P21EMA is the single 21-vs-20 sensitivity. The presenter's "I use PAR" remark is undefined and is **not codified**.
+
+**Not given IDs.** Rulebook universe screens (sales growth, EPS surprise, theme, beta, price, share volume) stay S notes. There is no point-in-time fundamental feed here, and they are not setups. Emotion checks are discretionary and are not rules. Rulebook checklist text that puts the 10-EMA below the 20-EMA in an uptrend is a sign error (S) and is not implemented. Uptrend in this family means the 10-EMA is above the 20-EMA.
+
+**Shared test line.** Controls are §2.3, plus the control named on the entry. **Kill:** net profit factor ≤ 1 after costs, or any owner gate fails, or the entry's own control is not beaten. Below 30 development trades: no evaluation. Between 30 and 149: park. Do not loosen a rule to raise the count. No post-2024 read.
+
+#### OK-01 · Reversal Extension (bottoming capitulation)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW (stock-cycle host). Related to SP-05, SP-06, and PS-18. Not profile-based. Not merged.
+- **Family · Source:** OK · Kell cycle schematic (K, wedge-pop video); presenter examples (P); rulebook module 3 (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. CME untested. A rulebook success-rate claim on this setup is unsupported and is not a target.
+- **Markets · TF:** stocks native; ES/NQ adaptation on daily context with a 15m or 5m trigger. Then CL, 6E.
+- **Data · test window:** daily and 1m · W-D and W-M, through 2024-12-31 only. Family gates apply.
+- **Why it might work:** At a higher-timeframe support, a wide bar that closes up on heavy total volume is Kell's capitulation. Late shorts cover and responsive buyers step in. That is a practitioner story, not a measured edge.
+- **Rules:**
+  - *Filter (K/S, distance R):* higher-timeframe support is the daily 200-SMA, or a confirmed prior swing low, or a trendline with at least three confirmed touches. Price is extended below the lower-timeframe 10-EMA by the family extension rule. The phrases "10+ points" and "10+ EMA gap" (S) are not the futures rule. OK-23 may filter; it is off in the primary cell.
+  - *Signal (K/S, width R):* the bar's range is at least 1.5 × ATR of its timeframe, it closes above its open, and its volume is at least 2× the family average. That volume is total volume (K), not delta.
+  - *Entry (K):* primary, next open after the signal close. Arm: next session still confirms (R: the next bar closes above the signal bar's midpoint). A fill at the signal close is not used; it would need the final print.
+  - *Stop (K):* beyond the signal bar's low, then the §2.1 floor.
+  - *Exit (S):* first touch of the 20-EMA is an arm. A measured move of 1.5× or 2× the signal bar's range is a separate arm, not both at once. Primary exit is OK-22. A partial that moves the stop to cost is an arm (S).
+  - *Skip (S):* the weekly or monthly trend is still a sharp decline; the volume spike is missing. A retest of the low within one or two sessions is a prospective skip only. Do not delete a loser after the fact.
+- **Sweep:** extension k ∈ {1.5, 2.5} × entry {next open, next-session confirm} → 4. Other arms wait.
+- **Frequency (est.):** a few per year on daily ES. Author estimate only.
+- **Fails when:** a V-shaped bar with no higher-timeframe support; an overnight gap through the stop.
+- **Needs:** ✓ M-DAILY (200-SMA, ATR), ✓ M-SWING (confirmed pivots), bar volume. VP arm needs a completed profile.
+- **Readiness (v2.8):** price-and-volume baseline is buildable on W-D / W-M. OF arm is W-T only.
+- **Build order (v2.8):** source rank 7. After OK-17 in the sequence. Tier 3 baseline; tier 2 with one research arm. Not a forecast.
+- **Refinement arms (R, not Kell):** the four family arms. Preferred first: VP.
+- **Test:** against a random wide up-bar that is equally extended and has no support filter. **Kill:** the shared test line.
+
+#### OK-02 · Wedge Pop
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW (core cycle long). A2-79 may later gate contraction. YV-03 is a different stock burst. Do not merge.
+- **Family · Source:** OK · Kell wedge-pop video (K); ten-principles examples (K); rulebook module 4 (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. CME untested.
+- **Markets · TF:** ES, NQ first; daily context, 15m or 5m trigger. Then CL, 6E, then stocks.
+- **Data · test window:** daily and 1m · W-D and W-M, through 2024-12-31 only. Family gates apply.
+- **Why it might work:** After a downcycle, the first close back through a tight 10/20 band is where Kell starts the long cycle. Shorts who sold the decline are the trapped side in that story.
+- **Rules:**
+  - *Filter (K, tightness R):* an OK-01-type low, or a downcycle, has already printed. The 10-EMA and 20-EMA are recaptured or tight by the family default. Relative-strength filter (K concept, R metric): on stocks, the name holds a higher low while the index makes a lower low over the same lookback, or the relative-strength line is at a 52-week high while price bases. On ES/NQ the primary cell turns this filter off (the instrument is the index). OK-23 is optional and off in the primary cell.
+  - *Signal (K):* a close breaks the consolidation high, or closes above the tight EMA band, on rising volume (R: volume above the median of the consolidation bars). At least three confirmed pivot highs form a descending or flat lid.
+  - *Entry (K methods, R fill):* primary, next open after the breaking close. Arms: breakout then first pullback that holds the lid; bounce off the supporting EMA.
+  - *Stop (K):* the nearer of the consolidation low and the supporting EMA, then the floor. Arm (K/P examples): the breakout bar's low, when it is still a real stop and not inside the floor.
+  - *Exit:* OK-22 in the primary cell. Arms, not stacked: 50-SMA, prior high, consolidation-height measured move.
+  - *Skip (S, bar count R):* EMAs diverging rather than tight. "Immediate rejection" means a close back inside the lid within one or two bars; that trade is exited, and the case is not re-labelled after the fact.
+- **Sweep:** lid {required, not} × extension-free primary only. Two cells. Pullback and EMA-bounce entries are later arms.
+- **Frequency (est.):** a few per month on a daily chart. Author estimate only.
+- **Fails when:** there is no compression; the break closes back inside on the next bar; the book depends on a rare runner (owner gates).
+- **Needs:** ✓ M-DAILY or the intraday EMA, ✓ M-SWING. A2-79 is not required for the baseline.
+- **Readiness (v2.8):** baseline buildable on W-D / W-M for ES/NQ.
+- **Build order (v2.8):** source rank 1. First host in the sequence, after the shared gate and the exit modules. Tier 3; tier 2 with one arm. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP (acceptance beyond VAH, or an HVN at the lid). Then VWAP. Then OF on W-T. Fib last.
+- **Test:** against the same break with the lid and the tight-band filter removed. **Kill:** the shared test line.
+
+#### OK-03 · EMA Crossback
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. DV-15 is an EMA20 pullback that **requires** a VWAP slope. This baseline has no VWAP gate. Keep both IDs.
+- **Family · Source:** OK · Kell cycle (K); rulebook module 5 (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. CME untested.
+- **Markets · TF:** ES, NQ first; the host's timeframe. Then CL, 6E, stocks.
+- **Data · test window:** 1m or daily · W-M or W-D, through 2024-12-31 only. Family gates apply.
+- **Why it might work:** After a wedge pop, the first pullback that holds the 10/20 band is Kell's lower-risk add. The story is that the new trend defends the average. Untested.
+- **Rules:**
+  - *Filter (K):* an OK-02, or a close back above both EMAs, has already occurred. Price is above the 10-EMA and the 20-EMA.
+  - *Signal (K, wick R):* a pullback touches the 10/20 zone and does not **close** below the touched EMA. A wick through is allowed (R). The bounce bar closes back above that EMA and its volume is at least the prior bar's (R for "volume up").
+  - *Entry (K):* primary, next open after that bounce close. Arms: a close above the pullback low; wait until volume returns to the family average.
+  - *Stop (S buffer, R on futures):* a close back through the EMA. The source buffer is 0.5–1 **stock point** and is not used on ES/NQ. Futures buffer = max(4 ticks, 0.25 × ATR(20) of the entry timeframe). The stock-point figure stays documentation.
+  - *Skip (S):* a heavy-volume close below the EMA (R: volume ≥ 1.5× average); loss of the daily 50-SMA; higher timeframe against the trade (OK-23 red, when that gate is on).
+- **Sweep:** which EMA is touched {10, 20} × buffer {4 ticks, 0.25 ATR} → 4.
+- **Frequency (est.):** rides on OK-02. Author estimate only.
+- **Fails when:** the pullback closes through the band on heavy volume; the first crossback is just chop.
+- **Needs:** EMA, bar volume, ✓ M-DAILY for the 50-SMA skip. No VWAP on the baseline.
+- **Readiness (v2.8):** baseline buildable on W-M / W-D.
+- **Build order (v2.8):** source rank 2. After OK-02. Tier 3; tier 2 with the VWAP arm. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first **VWAP** (slope or reclaim). Still R, even though Kell mentions VWAP as a chart tool. A later ablation may compare this baseline, this baseline plus the VWAP arm, and DV-15. That comparison is not a merge.
+- **Test:** against an EMA touch with no "close must hold" rule. **Kill:** the shared test line. The DV-15 comparison is not the first kill.
+
+#### OK-04 · Base n' Break (stage host)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW host. Pattern arms OK-08, OK-11, OK-12, OK-13, and OK-14 are not separate families until pre-registered. Related to A2-79, YV-03, and SP-01. Not merged. Alias: Basin Break.
+- **Family · Source:** OK · Kell cycle (K); rulebook module 6 (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. CME untested. Target formulas in the rulebook conflict and are not silently picked.
+- **Markets · TF:** ES, NQ, then stocks. Daily base; trigger on the daily close.
+- **Data · test window:** daily · W-D, through 2024-12-31 only. Family gates apply.
+- **Why it might work:** A multi-week rest on top of a defended 10/20 band, with drying volume, is Kell's continuation stage. The break is the point where resting supply is gone, in that story.
+- **Rules:**
+  - *Filter (K, dry-up R):* one to four or more weeks (primary: 5 to 20 daily bars) spent above both the 10-EMA and the 20-EMA. Volume z versus the 50-session average is below 0 over the base.
+  - *Signal (K/S):* a close above the base high with volume at least 1.5× the family average.
+  - *Entry (K):* primary, next open after that close. Arms: first pullback that holds the base high; next-session confirmation.
+  - *Stop (K):* the **base low**, not the EMA. Arm (K/P): after a decisive break, raise to the breakout day's low. "Decisive" is R: the close is beyond the base high by at least 0.5 × ATR(20) and the next bar holds above the base high. Primary cell does not raise.
+  - *Target:* not chosen. Arms, separate: 1.5× base height, 2× base height, the daily 50-SMA as the first target (S conflict). Primary exit is OK-22, with no projection.
+  - *Strength filter (K qualitative, R boolean, off in the primary):* an unfilled downside gap under the base.
+- **Sweep:** base length {5–20, 10–30} daily bars × volume multiple {1.5, 2.0} → 4. Projections stay out of this grid.
+- **Frequency (est.):** several per year per market. Author estimate only.
+- **Fails when:** the break has no volume; the higher timeframe is still down; a target formula is picked because it backtests best.
+- **Needs:** ✓ M-DAILY, bar volume.
+- **Readiness (v2.8):** baseline buildable on W-D.
+- **Build order (v2.8):** source rank 3. Test with the OK-12 arm after OK-03. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** against a close through a 20-day high with no EMA-hold and no dry-up. **Kill:** the shared test line.
+
+#### OK-05 · Exhaustion Extension (exit module; short not specified)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW module, used as an exit on long hosts. Related to A2-76 and the EX family. Not merged. A short is **not** part of the Kell baseline: the sources do not give an initial short stop and target, and none is invented here.
+- **Family · Source:** OK · Kell / rulebook module 7 (K/S). Presenter LOD trail is OK-05P (P), off.
+- **Evidence:** **E** · Lit: YouTube + secondary digest. This module is where "let winners run" collides with the owner gates. The gates win.
+- **Markets · TF:** the host's. ES/NQ daily management first.
+- **Data · test window:** inherits the host, and still stops at 2024-12-31. Family gates apply. Concentration risk is the point of the test.
+- **Why it might work:** Kell trims a long as closes stretch away from the 10-EMA, and trims faster when the weekly average is also extended. Whether that helps or taxes the trend is the test. It is not a forecast.
+- **Rules (long management only):**
+  - *Distance (R, not the stock %):* a daily close beyond the daily 10-EMA by k·ATR(20), k ∈ {1.5, 2.5}. The source "≥ 5% above the daily 10-EMA" and "≥ 15% weekly" (S) are a stock-only arm, not the ES/NQ rule.
+  - *Count (S, reset R):* an episode ends when a daily close is back at or below the 10-EMA. The next stretch starts at count 1. First extension: hold. Second: sell about half and move the stop to cost. Third: exit the core. These steps are one arm.
+  - *Competing arm (S):* do not run the extension count and a percent-gain scale (OK-22) on the same position. Pre-register which arm.
+  - *Weekly (K rule of thumb, not a hard exit):* a weekly close extended from the weekly 10-EMA by the same k·ATR rule moves the trim forward one step. "About 12–15% above the 10-week average" (K) is the stock phrase, not the futures trigger.
+  - *Gap (K/S):* a gap up while already extended is an arm that sells a partial into that strength.
+  - *OK-05P (P, off):* while extended, set the stop to the session low each bar. Presenter, not Kell. Same rule as OK-22P.
+- **Sweep:** k ∈ {1.5, 2.5} × weekly acceleration {on, off} → 4. The percent arm and OK-05P are outside this grid.
+- **Frequency (est.):** one management path per open host trade that extends. Author estimate only.
+- **Fails when:** the trims give away the trend the host was built to hold; or the untrimmed host passes only because one trade is most of the net (owner gates).
+- **Needs:** ✓ M-DAILY ATR and EMA. No new engine.
+- **Readiness (v2.8):** buildable as an exit on a host. Not a standalone entry.
+- **Build order (v2.8):** source rank 17. Near the end of the sequence, on a host that already exists. Tier 3. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VWAP (distance from session VWAP as the extension measure, replacing ATR — a replacement arm, not an extra filter on the first cell).
+- **Test:** on the same host fills, this module versus the host's own exit. Report mean R, the largest winner's share of net, and net after dropping the top 1% of trades. **Kill:** the shared test line, and kill if mean R falls without a lower max drawdown.
+
+#### OK-06 · Wedge Drop
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW short host. Lower priority. Kell de-emphasizes aggressive shorting (K).
+- **Family · Source:** OK · Kell cycle, downside mirror of the wedge pop (K); rulebook module 8 (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. CME untested.
+- **Markets · TF:** ES, NQ; daily or 60m. Stocks later.
+- **Data · test window:** W-D or W-M, through 2024-12-31 only. Family gates apply.
+- **Why it might work:** After an exhaustion, a close back through the 10/20 on heavy volume is Kell's downcycle start. The story is trapped longs. Untested, and not his preferred side.
+- **Rules:**
+  - *Signal (K/S, "near the low" R):* a close below the chosen EMA on above-average volume, with the close in the bottom quarter of the bar. Primary EMA is the 20-EMA. The 10-EMA is an arm.
+  - *Entry (K):* primary, next open after that close. Arms: the next session still holding below; a retest of the EMA from below that closes back under it.
+  - *Stop (S, buffer R):* above the consolidation high if one exists; otherwise above the EMA by the OK-03 futures buffer (not a 1-point stock buffer).
+  - *Exit:* mirror of OK-22 (close back above the trailed EMA). Target arms, separate: daily 50-SMA, prior low, measured bar.
+- **Sweep:** EMA {20, 10} × entry {breakdown, retest fail} → 4.
+- **Frequency (est.):** less often than OK-02 if the long regime gate is on. Author estimate only.
+- **Fails when:** a bull trend tags the EMA and goes; borrow or gap risk on a stock short. Futures gap the same way overnight.
+- **Needs:** EMA, volume, ✓ M-SWING if a consolidation high is the stop.
+- **Readiness (v2.8):** buildable on W-D / W-M. Do not enable margin.
+- **Build order (v2.8):** source rank 18. After OK-05. Tier 3; tier 2 with OF. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first OF (failure at support). W-T only for that arm.
+- **Test:** against a close below the 20-EMA with no volume and no close-location rule. **Kill:** the shared test line.
+
+#### OK-07 · Post-EPS Flag Breakout
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. Related to YV-03. The naked earnings gap is an arm of this ID, not its own ID. Kell's preference, as the presenter reads it, is the flag (K via P).
+- **Family · Source:** OK · Kell, via the presenter (P reporting K): prefers the flag over the naked gap; may buy the gap day, stop out, and re-enter the flag.
+- **Evidence:** **E** · Lit: YouTube. CME untested. A true earnings test needs point-in-time timestamps.
+- **Markets · TF:** the literal pattern is US stocks and ETFs, daily. An ES/NQ row is a different rule (below) and is labelled R.
+- **Data · test window:** stock daily, only if a point-in-time universe exists; otherwise not run. Any futures adaptation: W-D through 2024-12-31. Family gates apply. No future earnings surprise.
+- **Why it might work:** Kell would rather buy the flag that forms after an earnings gap than the gap itself. The gap is the shock; the flag is the digestion. Untested here.
+- **Rules:**
+  - *Stock version (K/P, windows R):* an earnings session gaps and prints volume at least 2× the 50-session average (total volume, K). Then a flag or pennant of n days, n ∈ {3, 5}, with volume z < 0, above a rising 10-EMA and 20-EMA. Primary entry: next open after the close through the flag high on volume ≥ 1.5×. Arms: a touch of the EMAs inside the flag; a break of the earnings-day high.
+  - *Adds (K concept, program risk):* a later add is allowed only if **open risk stays ≤ 1%** of equity. The add raises the shared stop; it does not raise account risk. Kell's 50/25/25 allocation pyramid is not used (OK-24).
+  - *Stop (K):* the flag low. Arm: the breakout day's low once the break has held one session.
+  - *Naked gap arm:* buy the earnings-day close, stop under that day's low. This arm is not the primary. It exists so the flag can be compared with the gap Kell said he likes less.
+  - *Futures adaptation (R, not an earnings strategy):* a session gap of at least k·ATR(20), k ∈ {1.5, 2.5}, then the same flag. No EPS is pretended. Label every report "catalyst-gap flag, R".
+- **Sweep:** stock flag, if data exists: n ∈ {3, 5} × naked-gap arm {off, on} → 4. Futures adaptation is a separate four-cell grid, not crossed with the stock grid.
+- **Frequency (est.):** many names per earnings season if the universe exists; rare on ES as a gap-plus-flag. Author estimate only.
+- **Fails when:** the earnings timestamp is not point-in-time; the gap fills before the flag breaks; survivorship in a current-constituent list.
+- **Needs:** ✗ point-in-time earnings and a survivorship-free stock universe for the literal row. The futures adaptation needs only daily bars (✓ M-DAILY).
+- **Readiness (v2.8):** literal EPS row is **data-blocked**. The labelled R futures adaptation is buildable on W-D and ranks below the ES/NQ cycle hosts.
+- **Build order (v2.8):** source rank 10. After the price-pattern hosts. Tier 3; tier 2 with an AVWAP anchored at the gap open (R). Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VWAP / event AVWAP. Not Kell.
+- **Test:** flag entry versus the naked-gap arm on the same events. **Kill:** the shared test line. Do not read 2025–2026 earnings.
+
+#### OK-08 · Cup and Handle
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. Arm under OK-04 or a standalone weekly pattern. Alias in the rulebook: cup n' handle.
+- **Family · Source:** OK · rulebook module 9 (S). Weekly examples in the source material (S).
+- **Evidence:** **E** · Lit: secondary digest. A source success-rate claim is not a target.
+- **Markets · TF:** US stocks and ETFs, weekly. An ES/NQ weekly port is R and is lower priority than OK-02.
+- **Data · test window:** weekly bars from daily · W-D through 2024-12-31. Family gates apply. Holds may exceed a one-month soft limit. Journal the hold. The soft limit is program policy, not a Kell exit, and it is not applied in secret.
+- **Why it might work:** A rounded base and a short handle are a classical continuation. Kell's materials treat it as a base subtype. Untested here.
+- **Rules (S, with R fills):**
+  - Cup depth 20–50% of the prior swing (measured low to high into the left rim). Handle: 1–2 weeks, declining volume, in the upper half of the cup.
+  - Entry: next open after a close through the handle high on volume ≥ 1.5× the family average. Arms: breakout retest; second-week confirmation.
+  - Stop: handle low. If that stop is inside the cost floor, the alternate is the cup low, and the trade is skipped when the cup low still breaches 1%.
+  - Target arms, not stacked: project the cup depth above the breakout (primary arm among targets); the source phrase "cup height + handle" is the other arm. Primary cell may instead exit with OK-22 and no projection. Pre-register which.
+- **Sweep:** depth cap {50%, none} × target {cup depth, OK-22} → 4.
+- **Frequency (est.):** a few per year per stock. Author estimate only.
+- **Fails when:** the handle is a new downtrend; the weekly hold is longer than the test was willing to carry and the result is dropped for that reason after the fact.
+- **Needs:** weekly aggregation from ✓ M-DAILY. Stock universe ✗ for the literal row.
+- **Readiness (v2.8):** ES weekly adaptation buildable on W-D. Stock row data-blocked.
+- **Build order (v2.8):** source rank 16. With the other stock-native rows, after ES/NQ hosts. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** against a weekly close through a 26-week high with no cup depth rule. **Kill:** the shared test line.
+
+#### OK-09 · Double bottom (higher low)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. **Not** OK-10. The rulebook calls a higher-low double bottom a "2B shakeout" and also defines a true undercut. Those stay split. Related to SP-03 only by subject. Not a composite-VAL spring.
+- **Family · Source:** OK · rulebook module 9 (S). The higher-low condition is the one this ID keeps.
+- **Evidence:** **E** · Lit: secondary digest. CME untested.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** daily · W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** A second low that holds above the first, on heavier volume, is the rulebook's double bottom. The undercut case is OK-10 on purpose.
+- **Rules (S, volume R):**
+  - Two confirmed swing lows. The second low is **above** the first. The bounce between them makes a swing high.
+  - The second low's reversal bar has volume ≥ 1.5× the family average.
+  - Entry: next open after that reversal close. Arms: a later close back above the midpoint of the bounce; next-session confirmation.
+  - Stop: the lower of the two lows, then the floor.
+  - Target arms: the intervening high; that high projected again above itself. Primary exit may be OK-22. Pre-register.
+- **Sweep:** separation of the two lows {10–60, 20–80} daily bars × volume gate {on, off} → 4.
+- **Frequency (est.):** a few per year on ES. Author estimate only.
+- **Fails when:** the second low is quietly an undercut and the two IDs are mixed; a downtrend of lower lows is called a double bottom.
+- **Needs:** ✓ M-SWING.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 15. After OK-10. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP. A profile test does not turn this into SP-03.
+- **Test:** against OK-10's undercut rule on the same swings, reported separately. **Kill:** the shared test line. Do not merge the winner back into one ID.
+
+#### OK-10 · Pivot-low failure / 2B
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. Distinct from OK-09. Related to SP-03 and PS-18. Not profile-specific. Aliases: 2B, spring-like reclaim.
+- **Family · Source:** OK · rulebook rule 34 (S). Undercut, then reclaim.
+- **Evidence:** **E** · Lit: secondary digest. The sweep-fade prior elsewhere in this catalogue is about a coin flip (PS-18). This entry does not inherit a pass from that prior.
+- **Markets · TF:** ES, NQ, then stocks. Daily primary; 60m arm later.
+- **Data · test window:** daily · W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** Stops under a prior swing are run, and a close back above the swing traps the breakdown. That is the same story as a spring, without a value area.
+- **Rules (S, pivot R):**
+  - A confirmed swing low (N = 3). A later bar trades at least one tick below it and **closes back above** it on that session or the next. Volume above the family average. Close in the upper half of the bar.
+  - Entry: next open after the reclaim close. Arms: next session's bounce above the swing; a retest that holds.
+  - Stop: the failed low (the undercut extreme), then the floor.
+  - This ID requires the undercut. A higher low is OK-09 and is not a fill here.
+- **Sweep:** reclaim window {same session, next session} × volume {1.0×, 1.5×} → 4.
+- **Frequency (est.):** a few per month on daily ES. Author estimate only.
+- **Fails when:** the undercut is the start of a trend; the close-back rule is dropped to raise the count.
+- **Needs:** ✓ M-SWING, bar volume.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 8. With OK-17 and OK-01. Tier 3; tier 2 with OF (W-T). Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first OF. A VP arm that requires VAL is a different test and must be labelled, so it is not confused with SP-03.
+- **Test:** against PS-18's sweep-fade shape and against OK-09. **Kill:** the shared test line, or no lift over the no-volume undercut.
+
+#### OK-11 · Flat base
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT arm of OK-04. Related to A2-79 (tightness). Not merged.
+- **Family · Source:** OK · rulebook module 9 (S).
+- **Evidence:** **E** · Lit: secondary digest.
+- **Markets · TF:** the 10%-of-price range is a stock rule (S). ES/NQ use the ATR arm (R). Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** A long, tight base is the rulebook's "bigger base" continuation. Whether tightness helps a Kell break is the test.
+- **Rules:**
+  - *Stock (S):* at least six weeks, range under 10% of the high of the range, declining volume, then OK-04's breakout.
+  - *Futures primary (R):* at least 30 daily bars, range ≤ m × ATR(20), m ∈ {4, 6}, primary m = 6. The 10% stock figure is not applied to ES.
+  - Stop arms: base low (primary, same as OK-04) or the EMA that later holds. Target: OK-04's unresolved set. Primary exit OK-22.
+- **Sweep:** m ∈ {4, 6} × minimum bars {30, 42} → 4.
+- **Frequency (est.):** a few per year. Author estimate only.
+- **Fails when:** a 10% ES range is used as if it were a stock flat base; the ATR cap is widened after seeing results.
+- **Needs:** ✓ M-DAILY.
+- **Readiness (v2.8):** futures arm buildable on W-D. Stock 10% arm waits on a stock universe.
+- **Build order (v2.8):** source rank 14. After the shorter patterns. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** as a gate on OK-04 (flat versus any base), not as a second family. **Kill:** the shared test line, or the flat gate does not lift OK-04.
+
+#### OK-12 · Bull flag
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT arm of OK-04. The first pattern arm to test on that host.
+- **Family · Source:** OK · rulebook module 10 (S); flag language also in the videos (K/P).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. Flagpole versus flag-height targets conflict (S). Neither is the primary exit.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** A one-to-three-day rest of lower highs and lower lows, still above the 10-EMA, is Kell's short continuation after a thrust.
+- **Rules:**
+  - *Pole (R):* a prior advance of at least k·ATR(20) within five sessions, k = 1.5.
+  - *Flag (K/S):* the next 1–3 daily bars make lower highs and lower lows, hold above the 10-EMA, and volume declines versus the pole.
+  - *Entry:* next open after a close through the flag high on volume ≥ 1.5×. Arms: a pullback into the flag then a break; next-session confirmation.
+  - *Stop:* flag low (primary) or the 10-EMA (arm).
+  - *Target (S, arms only):* flag height, or the pole projected from the break. Primary exit is OK-22. Do not run both projections.
+  - *Unfilled downside gap (K qualitative, R boolean):* off in the primary cell.
+- **Sweep:** flag length {1–3, 2–3} × stop {flag low, 10-EMA} → 4.
+- **Frequency (est.):** several per year on ES. Author estimate only.
+- **Fails when:** every pause is called a flag; the target is chosen after the test.
+- **Needs:** ✓ M-DAILY.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 9. With OK-04, early among the pattern arms. Tier 3; tier 2 with VWAP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VWAP.
+- **Test:** against OK-04's generic base on the same breaks. **Kill:** the shared test line, or no lift over OK-04.
+
+#### OK-13 · Bull pennant
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT arm of OK-04.
+- **Family · Source:** OK · rulebook module 10 (S).
+- **Evidence:** **E** · Lit: secondary digest. The source projection wording is ambiguous and is an arm, not the baseline.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** A contracting triangle above the EMAs is the rulebook's pennant form of the same continuation.
+- **Rules (S, geometry R):**
+  - After a pole as in OK-12, at least three confirmed touches of lower highs and higher lows, above both EMAs, volume declining.
+  - Entry: next open after a close through the upper line on volume ≥ 1.5×.
+  - Stop: pennant low (primary) or the supporting EMA (arm).
+  - Target arms: prior high; the source's entry-to-pennant-start projection. Primary exit OK-22.
+- **Sweep:** minimum touches {3, 4} × stop {pennant low, EMA} → 4.
+- **Frequency (est.):** less often than OK-12. Author estimate only.
+- **Fails when:** a widening swing is called a pennant; touches are counted before the pivot confirms.
+- **Needs:** ✓ M-SWING, ✓ M-DAILY.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 13. After OK-12. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** against OK-12 on the same poles. **Kill:** the shared test line.
+
+#### OK-14 · Descending channel break
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW host (also usable as an OK-04 pattern arm). Not merged into an SP trendline row; those rows are not this channel.
+- **Family · Source:** OK · rulebook module 10 (S). Three touches to draw a line is K language applied here.
+- **Evidence:** **E** · Lit: secondary digest.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** A multi-week descending channel that breaks up is the rulebook's trendline continuation. The parallel bounds are what make it a channel rather than one line (OK-19).
+- **Rules:**
+  - *Geometry (K count, R parallel):* at least three confirmed touches on the upper line and three on the lower, over at least 15 daily bars. The two slopes differ by at most 10% of the upper slope (R catalogue assumption for "parallel"). Volume declines through the channel.
+  - *Entry (S):* next open after a close through the upper line on volume ≥ 1.5×. Arms: retest of the line; next-session confirmation.
+  - *Stop:* pre-register. Primary is the channel low. Arm: the channel midpoint. Do not switch after the test.
+  - *Target arms:* channel height projected from the break; prior high. Primary exit OK-22.
+- **Sweep:** minimum bars {15, 30} × stop {channel low, midpoint} → 4.
+- **Frequency (est.):** a few per year. Author estimate only.
+- **Fails when:** two non-parallel lines are called a channel; the midpoint stop is chosen because the channel low lost.
+- **Needs:** ✓ M-SWING.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 11. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** against a close through a descending three-touch line with no lower boundary (that object is closer to OK-19). **Kill:** the shared test line.
+
+#### OK-15 · Inside bars (trigger module)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW trigger. Prefer it as a layer on OK-02, OK-04, and OK-07 before any standalone test. "Add inside bar prior" is this layer, not a new ID. Related to A2-79's contraction, which is a different gate.
+- **Family · Source:** OK · rulebook module 11 (S); "even better if a tight inside bar prints before the wedge pop" (K/P).
+- **Evidence:** **E** · Lit: YouTube + secondary digest.
+- **Markets · TF:** the host's bar size. ES/NQ first.
+- **Data · test window:** inherits the host, through 2024-12-31. OF arm is W-T. Family gates apply.
+- **Why it might work:** A bar entirely inside the prior bar, on less volume, is the source's compression trigger. It does not by itself supply a cycle stage.
+- **Rules (S):**
+  - Strict inside: high below the prior high and low above the prior low. Volume below the prior bar. Primary requires one inside bar. Arm: two or three consecutive.
+  - Long: next open after a trade through the inside high. The short through the inside low is an arm and carries OK-06's caution. On cycle hosts the primary is long-only.
+  - Stop: the opposite end of the inside bar, then the floor.
+  - Target arm: one prior-bar range beyond the break. Primary exit: the host's exit (OK-22 when the host uses it).
+- **Sweep:** count {1, 2–3} × role {layer on OK-02, standalone} → 4. Standalone is the comparison, not the first read.
+- **Frequency (est.):** many inside bars; few that sit on a host signal. Author estimate only.
+- **Fails when:** the inside bar is traded with no cycle host and the layer was the only hypothesis.
+- **Needs:** bar high, low, and volume. No new engine.
+- **Readiness (v2.8):** buildable as a layer now.
+- **Build order (v2.8):** source rank 5. After OK-16, as a layer. Tier 3; tier 2 with OF. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first OF.
+- **Test:** host with the inside-bar layer versus the same host without it. **Kill:** the shared test line, or the layer does not lift the host.
+
+#### OK-16 · Wick play
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. Kell: never an isolated wick (K). A larger base or structure is required.
+- **Family · Source:** OK · Kell wedge-pop video (K); rulebook rule 35 (S). Directional details the sources leave open are R.
+- **Evidence:** **E** · Lit: YouTube + secondary digest. Wick direction is fixed here before any code.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** Day one leaves supply at an upper wick. Day two holds inside that wick on quieter volume. The break of the wick high is the long. That is Kell's sequence, and it is untested on futures.
+- **Rules (long only; R definitions):**
+  - *Context (K):* the wick tags a larger structure: a base high, a prior confirmed swing high, or a three-touch trendline. No structure, no trade.
+  - *Day 1 (R):* upper wick at least twice the body, and the high tags that structure.
+  - *Day 2 (K/S):* the open is inside the wick, the bar holds inside the wick (low above the wick low and high below the wick high), volume below day 1.
+  - *Entry:* next open after a later close above the wick high.
+  - *Stop:* the wick low. Arm: day 2's low if day 2 is also an inside bar (OK-15).
+  - *Void (R):* a close below the wick low kills the setup. That is the directional reading of "closes outside the wick = weakness."
+- **Sweep:** wick/body {2, 3} × structure {swing high, base high} → 4.
+- **Frequency (est.):** uncommon. Author estimate only.
+- **Fails when:** any upper wick is traded; the day-2 hold is widened after the fact.
+- **Needs:** ✓ M-SWING or an OK-04 base. No profile on the baseline.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 4. Early, after OK-04's first pass. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP (the structure is a HVN or a prior VAH). The wick rule stays the Kell part.
+- **Test:** against the same wick with no day-2 hold. **Kill:** the shared test line.
+
+#### OK-17 · Outside reversal / scum-shakeout
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. Two arms, one ID, never mixed in one signal. Aliases: outside reversal, scum, shakeout, demand tail. Related to SP-05, which also wants a profile extreme. Not merged.
+- **Family · Source:** OK · outside bar in the rulebook (S) and in examples (K/P); scum / 20-EMA shakeout reclaim in ten principles (K).
+- **Evidence:** **E** · Lit: YouTube + secondary digest.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. OF arm W-T. Family gates apply.
+- **Why it might work:** An outside bar that closes back in the direction of the reversal, or a quick break of obvious support that is reclaimed, is Kell's shakeout. The trapped side is the breakdown seller.
+- **Rules:**
+  - *Arm A, outside bar (S/K):* the bar trades above the prior high **and** below the prior low, volume ≥ 1.5× average, close in the upper half (long). Entry: next open after that close. Alternate entry arm: the next session trades above the outside bar's high. Stop: the outside bar's low. A lower-half close is the short arm and is off in the primary cell.
+  - *Arm B, scum (K):* price breaks below the 20-EMA (the "obvious support" primary; a confirmed swing low is the arm) and closes back above it on the same session or the next. Entry: next open after the reclaim close. Stop: the shakeout low.
+  - Do not require both arms on one bar.
+- **Sweep:** which arm {A, B} × reclaim/entry {close, next-session break} → 4. That is the whole first grid.
+- **Frequency (est.):** Arm A is rarer than Arm B. Author estimate only.
+- **Fails when:** every engulfing candle is treated as Arm A; the two arms are AND-ed.
+- **Needs:** EMA, bar range, volume. ✓ M-SWING only for the swing-low support arm.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 6. With OK-01 and OK-10. Tier 3; tier 2 with OF. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first OF.
+- **Test:** Arm A and Arm B reported separately, each against a close-location shuffle. **Kill:** the shared test line, per arm. A pass on one arm does not carry the other.
+
+#### OK-18 · Too tight for too long (TTFTL, short)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW short. Lowest priority among the OK hosts. Shorting caution applies.
+- **Family · Source:** OK · rulebook rule 37 (S).
+- **Evidence:** **E** · Lit: secondary digest.
+- **Markets · TF:** the literal rule is a stock that is weak while the index bounces. Futures adaptation (R): NQ versus ES, with ES as the index. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** The rulebook avoids the long, and allows a short, when a base is very tight and the name fails to bounce with the index. Untested, and easy to overfit.
+- **Rules (S, tightness R):**
+  - Two or three weeks (10–15 daily bars) with range ≤ the OK-11 futures cap (primary m = 4) and declining volume.
+  - Relative weakness (R): the instrument's high over the window is below its prior swing high, while the index's high is above the index's prior swing high. Stock index proxy, if a stock row is ever run, has to be a traded series (QQQ), not a cash index that this pipeline does not have. Futures primary: NQ weak versus ES.
+  - Action: do not take the OK long. Short arm: next open after a close below the tight range's low. Stop: the window's high. Exit: mirror of OK-22. A range-height target is an arm.
+- **Sweep:** window {10, 15} bars × weakness {on, off} → 4. The "off" cell is the control.
+- **Frequency (est.):** rare. Author estimate only.
+- **Fails when:** tightness is just low volatility in a bull trend; the short is the only OK trade that "works" and it fails the owner gates.
+- **Needs:** two daily series (✓ M-DAILY, a second root). No new engine.
+- **Readiness (v2.8):** the NQ-versus-ES form is buildable on W-D. A broad stock scan is data-blocked.
+- **Build order (v2.8):** source rank 19. Last among hosts. Tier 3; tier 2 with VP. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first VP.
+- **Test:** the weakness filter on versus off. **Kill:** the shared test line.
+
+#### OK-19 · Magic line
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** NEW. The line break plus a backtest that holds. Related to OK-14's upper line and to OK-22's three-touch exit. Not the same trade.
+- **Family · Source:** OK · descending trendline language (K/S): a major line of at least three touches, broken, then held as support.
+- **Evidence:** **E** · Lit: YouTube + secondary digest.
+- **Markets · TF:** ES, NQ, then stocks. Daily.
+- **Data · test window:** W-D through 2024-12-31. Family gates apply.
+- **Why it might work:** Kell treats a well-touched descending line, once broken and retested, as new support. The backtest is the entry. The break alone is not.
+- **Rules:**
+  - *Line (K):* a descending line through at least three confirmed pivot highs. The line is known only after the third pivot confirms.
+  - *Break:* a daily close above the line.
+  - *Entry (K):* not the break. The first later bar that trades to the line from above and closes back above it. Fill next open. If price never returns, there is no trade.
+  - *Stop:* below that backtest bar's low, then the floor.
+  - *Exit link:* a later break of a three-touch line, often with loss of the 20-EMA, is an OK-22 exit arm, not a second magic-line entry.
+- **Sweep:** touches {3, 4} × backtest deadline {5, 10} bars after the break → 4. No return inside the deadline: skip.
+- **Frequency (est.):** a few per year. Author estimate only.
+- **Fails when:** the line is redrawn to pass through the entry; the break is bought with no backtest.
+- **Needs:** ✓ M-SWING. Fib arm is optional and R.
+- **Readiness (v2.8):** buildable on W-D.
+- **Build order (v2.8):** source rank 12. Tier 3; tier 2 with Fib. Not a forecast.
+- **Refinement arms (R, not Kell):** preferred first **Fib** (the line coincides with 0.382, 0.5, or 0.618 of the prior confirmed swing). Kell has no Fib rule. This preference does not make Fib part of the baseline.
+- **Test:** backtest entry versus buying the break with no return to the line. **Kill:** the shared test line.
+
+#### OK-20 · Ignite-bar stop raise (module)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT exit module. Related to A2-76, which sells a climax, and to structural trails. This module only raises a stop. Alias: ignition bar. "Bullish synchronicity" (P) is a name, not a rule.
+- **Family · Source:** OK · Kell wedge-pop video, raise the stop to the ignite bar's low (K, about 58:06). The rulebook conflicts on whether the bar is small-and-heavy or wide-and-heavy (S).
+- **Evidence:** **E** · Lit: YouTube + secondary digest. The conflict is resolved by an R definition, not by using both readings as the baseline.
+- **Markets · TF:** the host's.
+- **Data · test window:** inherits the host, through 2024-12-31. Family gates apply.
+- **Why it might work:** Kell tightens to the low of the bar that "ignites" the move, so a failure of that bar ends the trade. Whether that bar is information or noise is the test.
+- **Rules (R joint definition):**
+  - Primary: range ≥ q × ATR of the bar's timeframe, q = 1.5, **and** volume ≥ 1.5× the family average. Sensitivity arms drop the range test or the volume test, one at a time. q ∈ {1.0, 1.5} is the range sensitivity.
+  - On that bar's close, raise the stop to the bar's low. Never loosen. If the low is already through the position, exit.
+  - Does not sell the position by itself. A2-76 remains the climax-exit module.
+- **Sweep:** definition {both, range only, volume only} with q fixed at 1.5, plus one cell q = 1.0 with both conditions → 4.
+- **Frequency (est.):** a subset of host trades. Author estimate only.
+- **Fails when:** ordinary wide bars ratchet the stop into the noise; the small-range reading and the wide-range reading are both left on.
+- **Needs:** ATR, volume, a working stop (✓ F-TM).
+- **Readiness (v2.8):** buildable on any host window.
+- **Build order (v2.8):** source module rank 40. Built with OK-22 and OK-21, before OK-02's management test. Tier 3. Not a forecast.
+- **Refinement arms (R, not Kell):** optional OF confirmation of the ignite bar, W-T, as a replacement for the total-volume clause, not as a second filter on the first cell. A volume snort is not that arm.
+- **Test:** host with this stop versus the host's original stop, same entries. **Kill:** the shared test line, or mean R falls.
+
+#### OK-21 · Darvas / higher-high pivot trail (module)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT exit module. Related to EX-05. Not merged. "Darvish" in a transcript is Darvas (ASR).
+- **Family · Source:** OK · presenter, breakout video part 7, attributing the idea to Kell (P reporting K): after a pullback, a trade back through the prior high raises the stop under the new higher low.
+- **Evidence:** **E** · Lit: YouTube. The attribution is through the presenter.
+- **Markets · TF:** the host's bar size. Daily on daily hosts. EX-05's 5m higher-low trail is a different module.
+- **Data · test window:** inherits the host, through 2024-12-31. Family gates apply.
+- **Why it might work:** The stop moves up only after the market has made a new high and a confirmed higher low. It waits longer than an EMA trail. That can keep a trend or give back more. The test decides.
+- **Rules:**
+  - Pivots confirm with N = 3 before they are used.
+  - After entry, a pullback prints a confirmed low. A later bar trades above the prior confirmed high. The stop then moves to that new confirmed higher low, minus one tick, if tighter. Never loosen.
+  - Not combined with OK-22 in the baseline. Ablate head to head.
+- **Sweep:** N ∈ {2, 3} × buffer {0, 1 tick} → 4. Primary N = 3, buffer 1 tick.
+- **Frequency (est.):** one trail per host trade. Author estimate only.
+- **Fails when:** the pivot is used before confirmation; the trail is stacked with the EMA trail and the stack is called one rule.
+- **Needs:** ✓ M-SWING.
+- **Readiness (v2.8):** buildable on the host window.
+- **Build order (v2.8):** source module rank 41. With OK-20 and OK-22. Tier 3. Not a forecast.
+- **Refinement arms (R, not Kell):** none in the first test. A later Fib arm (stop beyond a 0.382 retracement of the new leg) is R and off.
+- **Test:** against EX-05 and against OK-22 on the same entries. **Kill:** the shared test line. A tie keeps the host's original stop.
+
+#### OK-22 · EMA trail and scale-out (module)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT exit module. The shared exit for OK hosts unless an entry names another primary. Related to A2-73, A2-74, A2-76, and EX-05. Not merged.
+- **Family · Source:** OK · close through the EMA the name respects (K); scale language in the breakout video part 7 (P, presented as Kell). Competing percent schedules are S.
+- **Evidence:** **E** · Lit: YouTube + secondary digest. Scale rules that exist to nurse a giant winner still face the owner gates.
+- **Markets · TF:** the host's.
+- **Data · test window:** inherits the host, through 2024-12-31. Family gates apply.
+- **Why it might work:** Kell exits when the average that held the pullbacks breaks. A partial after a few sessions at a multiple of risk is the presenter's scale. Both can tax a trend. Both are tests.
+- **Rules:**
+  - *Which EMA (R state, chosen at entry):* the one of {10, 20} that held the last pullback (the pullback low stayed above it). If both held, use 20. If neither held, do not invent a trail; the structural stop remains. The choice is recorded at entry and is not changed because of the outcome.
+  - *Trail (K):* a close below that EMA exits at the next open. Never widen.
+  - *5-EMA arm (S):* when the close is already extended by the family rule, trail the 5-EMA instead. Off in the primary cell.
+  - *Scale arm (P, attributed to Kell):* sell one quarter to one half about three to five sessions after the break, if open profit is at least 3R to 5R. Primary numbers inside that sentence: session 4 and 3R, fraction one half, and only if size is at least 2. Remainder exits on the EMA break or on OK-05 if that module is the pre-registered partner. It is not both by default.
+  - *Other S schedules, each a separate arm, stock-scale unless labelled:* sell 25% every 5–10% gain; sell half on the first extension; sell half at 5R. Do not run them together. Futures primary uses R, not percent of price.
+  - *After a partial (S):* stop to cost (entry plus the round-trip cost). That does not remove gap risk.
+  - *Saying (P, attributed to Kell):* "Sell margin into strength and equity into weakness." It is not a license to turn margin on.
+  - *OK-22P (P, off):* while extended, trail each bar's low. Same rule as OK-05P. Not the baseline.
+  - *Three-touch line (K/S):* a break of a line with at least three confirmed touches, together with the EMA loss, is an exit arm. Off in the primary cell. It is the exit side of OK-19, not a new ID.
+- **Sweep:** EMA choice {rule above, always 20} × scale {off, on at 3R} → 4. Other schedules wait.
+- **Frequency (est.):** every host trade that uses this module. Author estimate only.
+- **Fails when:** "whichever EMA looks respected" is decided after the trade; several scale schedules fire together; a pass exists only because the largest winner exceeds 10% of net.
+- **Needs:** EMA, ✓ F-TM for the partial. ✓ M-SWING only for the line-break arm.
+- **Readiness (v2.8):** buildable on W-D / W-M.
+- **Build order (v2.8):** source module rank 20. Early, with OK-20 and OK-21, before host tests that depend on it. Tier 3. Not a forecast.
+- **Refinement arms (R, not Kell):** a VWAP trail in place of the EMA is a replacement arm, R, and is not the Kell baseline.
+- **Test:** scale on versus off, and this trail versus OK-21, on the same entries. Report the owner-gate statistics every time. **Kill:** the shared test line.
+
+#### OK-23 · Index 10/20 EMA regime gate (module)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only; no entry-specific code or build spec.
+- **Classification (v2.8):** VARIANT of RG-06. A gate on OK hosts, not a standalone edge. YV-03's weekly index EMA is the related stock-video fold. Not merged.
+- **Family · Source:** OK · QQQ or Nasdaq Composite above the 10-EMA and the 20-EMA as a green light (K/S). The stricter tree (no new longs below the 20; major warning below the 50) is S.
+- **Evidence:** **E** for this gate as Kell states it. RG-06's time-series-momentum evidence does **not** transfer to a 10/20 EMA cross. Lit: YouTube + secondary digest.
+- **Markets · TF:** daily. Futures hosts use the traded root (ES or NQ) as the proxy (R): a cash Nasdaq index is not in the futures data set. Stock hosts, if ever tested, use QQQ (K's named traded fund), not a cash index.
+- **Data · test window:** daily · W-D through 2024-12-31. The gate is applied with information known at the prior close. Family gates apply.
+- **Why it might work:** Kell stands aside from new longs when the growth index is under its short averages. On an index future, "long only above the 10 and 20" can be the index drift itself. RG-06 already flags that confound. This gate has to be read with that warning.
+- **Rules:**
+  - *Green (K):* the proxy's last **closed** daily bar is above both its 10-EMA and its 20-EMA. New OK longs are allowed.
+  - *Below the 20 (S, primary strict tree):* no new OK longs. Open longs are not flattened by this line alone.
+  - *Below the daily 50-SMA (S):* still no new longs. The source's exception for "extreme relative strength" is discretionary and is **not** in the primary cell.
+  - *Sign error (S):* do not implement "10-EMA below 20-EMA" as the uptrend. Uptrend means 10-EMA above 20-EMA.
+  - The gate does not size, and it does not turn on margin.
+- **Sweep:** green definition {above both, above the 20 only} × 50-SMA veto {on, off} → 4. Primary: above both, 50-SMA veto on.
+- **Frequency (est.):** a state, not a trade count. Author estimate only.
+- **Fails when:** the ES gate is just "be long the bull market" and is reported as a Kell edge; the cash index is quietly used.
+- **Needs:** ✓ M-DAILY on the traded root. No new series for the futures primary.
+- **Readiness (v2.8):** buildable now on W-D.
+- **Build order (v2.8):** source module rank 15, and first in the suggested sequence, so later hosts can take it as an optional filter. Off on those hosts' primary cells until this gate has been ablated. Tier 3. Not a forecast.
+- **Refinement arms (R, not Kell):** none on the first pass. A VWAP regime would be a different gate and is not Kell's.
+- **Test:** each early host with the gate versus without it, including CL or a second root so an ES-only drift is visible (the RG-06 confound). **Kill:** the shared test line, or the lift is ES/NQ drift only.
+
+#### OK-24 · Allocation documentation (not a sizer)
+- **Implementation status (v2.8):** **Not started** — catalogue entry only. **Do not code this as position sizing.** No strategy file.
+- **Classification (v2.8):** documentation module. Sits next to A2-72, A2-71, and PF-04. Changes none of them.
+- **Family · Source:** OK · Kell wedge-pop slides (K) for the tiers and the 50/25/25 build; presenter clarification that allocation is not account risk (P); rulebook margin schedule (S).
+- **Evidence:** **E** as a record of source slides. Not a test. Not a forecast. The slides can sum to more than 100% of equity. That is recorded and **not enabled**.
+- **Markets · TF:** none. No orders.
+- **Data · test window:** not run. If someone later asks for a research parameter sweep, it still cannot use 2025–2026, and it is not authorized by this entry.
+- **Why it is here:** so the tier numbers have one ID and are not copied into a sizer by accident.
+- **Rules (record only):**
+  - *Tiers (K), share of equity, not account risk:* top idea 25–35% on a margin account and 12–15% without; conviction core 15–20% (no-margin table also shows 12–15%); volatile conviction 10–12%; core 10–12% (the no-margin table also shows 12–15% — both figures are recorded, the conflict is not resolved by picking one); swing 7–8% with margin and 3–5% without. A checklist that wants 8–12 names and the top ideas at half the book can disagree with the rows. Precedence is unspecified in the source. Neither version is a default.
+  - *Pyramid (K):* a 50/25/25 build is recorded. It is not enabled. Any add on an OK host still has to keep open risk ≤ 1% (see OK-07).
+  - *Margin book (S):* net exposure 120–150% is a rulebook proposal. It is **not** a user default and it is **not enabled**.
+  - *What tests use instead:* A2-71 at ≤ 1% of equity per new risk unit, the §2.1 floor, and PF-04 as written. Owner concentration gates still apply to every OK result.
+- **Sweep:** none. There is nothing to sweep.
+- **Frequency (est.):** not a trade.
+- **Fails when:** a backtest turns a 25–35% tier on and calls it Kell fidelity. That result is out of this catalogue.
+- **Needs:** nothing. Do not add a margin input for this ID.
+- **Readiness (v2.8):** documentation only. Not buildable as a strategy, on purpose.
+- **Build order (v2.8):** source rank 99. Not in the code sequence. Tier 3 label in the source file means "not a research-arm hybrid". It does not mean "implement the tiers."
+- **Refinement arms:** none. VP, VWAP, OF, and Fib do not attach to a note.
+- **Test:** none. **Kill:** not applicable. Shipping a sizer from this entry is a process failure, not a statistical one.
+
+---
+
 ## 4. Prioritisation matrix
 
 **Scores (1–5; halves allowed):**
@@ -4823,6 +5429,8 @@ Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-1
 *v2.6 note:* the 8 YV rows are **drafter estimates** (§4.2 ³). Estimated priorities: YV-08 57, YV-10 55, YV-07 53, YV-03 51, YV-09 47, YV-02 45, YV-01 41, YV-04 41. None reaches the rank-40 cut (59); ranks unchanged.
 
 *v2.7 note:* four further **drafter estimates** (§4.2 ⁴): PF-08 49, SP-09 50, OF-10 37, OF-09 35. None reaches the rank-40 cut (59). Ranks above are unchanged. EX-13 is not scored (module).
+
+*v2.8 note:* OK-01…OK-24 are **not scored** and are not inserted above. Build order is the sequence in §3.20 (tier 2 = one research arm; tier 3 = the plain Kell baseline). That order is not a priority score and not a forecast.
 
 ### 4.2 Full matrix (125 testable entries: standalone, layers, canaries; v2 adds 37 rows: 25 A2 and 12 DV; v2.3 adds PS-25 = KD-01 and MT-07 = KD-05 [est]; v2.5 adds 13 VX/LE rows [est] → 138; v2.6 adds 8 YV rows [est] → 146; v2.7 adds 4 rows [est] → 150)
 
@@ -4979,13 +5587,15 @@ Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-1
 | OF-09 | Weekly → 30m VA → 1m failed-seller cascade | S | 1.5 | 3⁴ | 2⁴ | 1⁴ | 2⁴ | **35** [est] |
 | OF-10 | ES vs NQ order-flow selection (layer) | L | 1.5 | 4⁴ | 2⁴ | 1⁴ | 2⁴ | **37** [est] |
 
-*Not scored (they ride inside a slot or are infrastructure):* EX-01…EX-13, RG-01…RG-08, PF-01…PF-07, AV-13; Gate 0 (A2-33, A2-39, A2-40, A2-59); A2 gate modules (A2-25, 26, 29, 31, 36, 37, 43, 50, 61, 70); A2 exit modules (A2-34, A2-48); exit/risk modules A2-72…A2-79; L2-01…L2-07 (parked, no data); Keller B5 (v2.3): KD-02 (canary), RG-09/KD-09 and RG-10 (modules), KD-06/KD-10 (robustness arms inside PS-25's row), KD-07 (gate), KD-08/KD-11 (studies). Merged IDs inherit their host's row. ¹ **[est] (v2.3, Keller B5):** PS-25's and MT-07's Nov, Freq, Impl/Data and Smooth scores — and hence their priorities — are **drafter estimates**, not statistics; only Ev comes from the source (PS-25 Ev 3 = C (+) family, setup untested; MT-07 Ev 1.5 = H). **ES evidence is prior 0** (FX/crypto only · no true delta). MT-07 follows the catalogue's convention of scoring MT modules as layers (type L). Weights unchanged. The A2-xx and DV-xx scores use the **catalogue** grade (Ev), not the original grade.
+*Not scored (they ride inside a slot or are infrastructure):* EX-01…EX-13, RG-01…RG-08, PF-01…PF-07, AV-13; Gate 0 (A2-33, A2-39, A2-40, A2-59); A2 gate modules (A2-25, 26, 29, 31, 36, 37, 43, 50, 61, 70); A2 exit modules (A2-34, A2-48); exit/risk modules A2-72…A2-79; L2-01…L2-07 (parked, no data); Keller B5 (v2.3): KD-02 (canary), RG-09/KD-09 and RG-10 (modules), KD-06/KD-10 (robustness arms inside PS-25's row), KD-07 (gate), KD-08/KD-11 (studies); **v2.8 OK-01…OK-24** (left unscored on purpose; §3.20 build order is not a matrix score). Merged IDs inherit their host's row. ¹ **[est] (v2.3, Keller B5):** PS-25's and MT-07's Nov, Freq, Impl/Data and Smooth scores — and hence their priorities — are **drafter estimates**, not statistics; only Ev comes from the source (PS-25 Ev 3 = C (+) family, setup untested; MT-07 Ev 1.5 = H). **ES evidence is prior 0** (FX/crypto only · no true delta). MT-07 follows the catalogue's convention of scoring MT modules as layers (type L). Weights unchanged. The A2-xx and DV-xx scores use the **catalogue** grade (Ev), not the original grade.
 
 ² v2.5 VX/LE rows: drafter estimates from R7 (Impl 1 = data-blocked on CFE per-contract history / index feed / borrow data); Ev follows the entry grade. *Not scored (v2.5):* VX-05 (portfolio sleeve, §6) and VX-07 (module).
 
 ³ v2.6 YV rows: drafter estimates; Ev 1.5 = grade E (presenter claims only). Order-flow rows (YV-01, YV-02, YV-04) take Impl 1 (W-T only, bid/ask from 2024-10-28, −1 for order flow); YV-03 Impl 1 = no stock data in the pipeline; YV-07 Impl 2 (1m arm on W-M, 15s arm W-T). *Not scored (v2.6):* YV-05 (gate) and YV-06 (risk module).
 
 ⁴ v2.7 rows: drafter estimates, not statistics. Ev follows the entry grade (E → 1.5, except SP-09 Ev 1 because the naked sweep-fade prior is 0). PF-08 is scored even though PF-01…PF-07 are infrastructure and unscored: PF-08 is an entry sleeve. Impl 4 = W-D with a local Donchian buffer; SP-09 Impl 4 = Arm M on W-M; OF-09 and OF-10 Impl 1 = W-T, and OF-10 is not buildable until a second footprint exists. *Not scored (v2.7):* EX-13 (module).
+
+⁵ v2.8: OK-01…OK-24 are unscored. No Ev / Nov / Freq / Impl numbers were assigned. The §4 row count stays 150.
 
 ---
 
@@ -5569,7 +6179,7 @@ Disposition is either **Own entry** (with its section) or **Merged into X**, whe
 |---|---|---|---|---|---|
 | YV-01 | 30m VA break → 5m big trades → 1m failed-seller entry | Trader Oxygen jmX_ReJxFm8 | VARIANT | PS-01; DV-16, OF-08, EX-11; **OF-09, EX-13** (v2.7 spec) | E |
 | YV-02 | Cross-index flow selection | Trader Oxygen jmX_ReJxFm8 | NEW (layer) | M-XMKT, PF-03; **OF-10** (v2.7 spec) | E |
-| YV-03 | Momentum burst (stocks) | Financial Wisdom 9ksbN69G7i8 | NEW | RG-06 (regime), A2-71/PF-04 (sizing), RG-08/A2-55 (NR conflict) | E |
+| YV-03 | Momentum burst (stocks) | Financial Wisdom 9ksbN69G7i8 | NEW | RG-06 (regime), A2-71/PF-04 (sizing), RG-08/A2-55 (NR conflict); **OK-04, OK-07, OK-23** (v2.8) | E |
 | YV-04 | Environment–location–confirmation absorption | IQCapital PL7LKUsCgIQ | VARIANT | OF-04, DV-16, MT-01, A2-36 | E |
 | YV-05 | Absolute participation gate (20,000 MNQ/5m) | IQCapital PL7LKUsCgIQ | VARIANT | A2-50 | E |
 | YV-06 | Session stop after 2 losses / 1–2 attempts | IQCapital PL7LKUsCgIQ; JadeCap DQiOqFFptfA | VARIANT | A2-78, A2-75, F-TM | E |
@@ -5584,7 +6194,7 @@ Disposition is either **Own entry** (with its section) or **Merged into X**, whe
 | — | Acceleration through an LVN/below value | Tom Vorwald EN YmygDgtoxO8 | EXISTING | PS-02, PS-15 | — |
 | — | GEX regime (positive/negative gamma, call/put wall) | IQCapital PL7LKUsCgIQ | EXISTING | A2-36 (data-blocked) | — |
 | — | Weekly POC as HTF magnet/target | Trader Oxygen jmX_ReJxFm8 | EXISTING | MT-02, EX-02 | — |
-| — | Weekly 10/20 EMA index regime | Financial Wisdom 9ksbN69G7i8 | VARIANT folded into YV-03 | RG-06 | — |
+| — | Weekly 10/20 EMA index regime | Financial Wisdom 9ksbN69G7i8 | VARIANT folded into YV-03 | RG-06; **OK-23** (v2.8) | — |
 | — | Turtle risk 1–2% per trade / drawdown | Dollar Wisdom lDn93erRQSM | EXISTING | A2-71 | — |
 ---
 
@@ -5600,6 +6210,38 @@ Source: `specs/video-ideas-2026-11-08-additions.md`. These are closed-bar specif
 | OF-09 | Weekly bias → 30m VA break → 1m failed-seller | Own entry (§3.5); extends DV-16 | E | Trader Oxygen jmX_ReJxFm8 |
 | OF-10 | ES vs NQ order-flow selection | Own entry (§3.5); layer; not buildable yet | E | Trader Oxygen jmX_ReJxFm8 |
 | EX-13 | 1.5R partial, deep-pullback breakeven, initiative trail | Own entry (§3.10); module on OF-09 | E | Trader Oxygen jmX_ReJxFm8 |
+
+### A.10 Oliver Kell IDs OK-01…OK-24 (v2.8)
+
+Source: `specs/kell-ideas-2026-11-08-additions.md`. Prefix `OK` was free at v2.7 and is kept. Presenter variants OK-05P, OK-22P and the 21-EMA sensitivity are not rows. Grade **E** for every trading ID. OK-24 is documentation and is not a sizer. No source win rate is a target or a forecast.
+
+| ID | Name | Disposition (v2.8) | Kind | Preferred research arm (R, not Kell) |
+|---|---|---|---|---|
+| OK-01 | Reversal extension | Own entry (§3.20) | host | VP |
+| OK-02 | Wedge pop | Own entry (§3.20) | host | VP |
+| OK-03 | EMA crossback | Own entry (§3.20). DV-15 stays separate | host | VWAP |
+| OK-04 | Base n' break | Own entry (§3.20). Pattern arms are not new families | host | VP |
+| OK-05 | Exhaustion extension | Own entry (§3.20). Exit module. Short not specified | module | VWAP |
+| OK-06 | Wedge drop | Own entry (§3.20) | short host | OF |
+| OK-07 | Post-EPS flag | Own entry (§3.20). Literal EPS row data-blocked | host | VWAP |
+| OK-08 | Cup and handle | Own entry (§3.20) | host / OK-04 arm | VP |
+| OK-09 | Double bottom, higher low | Own entry (§3.20). Not OK-10 | host | VP |
+| OK-10 | Pivot-low failure / 2B | Own entry (§3.20). Not OK-09 | host | OF |
+| OK-11 | Flat base | Own entry (§3.20) | OK-04 arm | VP |
+| OK-12 | Bull flag | Own entry (§3.20) | OK-04 arm | VWAP |
+| OK-13 | Bull pennant | Own entry (§3.20) | OK-04 arm | VP |
+| OK-14 | Descending channel break | Own entry (§3.20) | host | VP |
+| OK-15 | Inside bars | Own entry (§3.20). Layer first | trigger | OF |
+| OK-16 | Wick play | Own entry (§3.20) | host | VP |
+| OK-17 | Outside reversal / scum | Own entry (§3.20). Two arms, not mixed | host | OF |
+| OK-18 | TTFTL short | Own entry (§3.20) | short host | VP |
+| OK-19 | Magic line | Own entry (§3.20) | host | Fib |
+| OK-20 | Ignite-bar stop raise | Own entry (§3.20) | exit module | OF optional |
+| OK-21 | Darvas / pivot trail | Own entry (§3.20) | exit module | none on first test |
+| OK-22 | EMA trail and scale-out | Own entry (§3.20) | exit module | VWAP replacement only |
+| OK-23 | Index 10/20 EMA gate | Own entry (§3.20). Variant of RG-06 | regime module | none |
+| OK-24 | Allocation documentation | Own entry (§3.20). Not enabled as sizing | documentation | none |
+
 
 ## Appendix B. Changes vs v1 (`trading-idea-catalogue-v1.md`)
 
@@ -5714,6 +6356,14 @@ Source: `specs/video-ideas-2026-11-08-additions.md`. These are closed-bar specif
 - Header, §2.4c counts (223 entries; 189 not started), §2.6 note, §3 counts (OF 10, SP 9, EX 13, PF 8; matrix 150 rows). §4.1 / §4.2: four [est] rows (footnote ⁴); ranks unchanged. EX-13 unscored.
 - Cross-references only, no rule changes, on PF-01, DV-16, PS-18, DV-08, OF-01, OF-02, the A2-71 block inside PF-06, and YV-01, YV-02, YV-07, YV-09. Appendix A.8 related-ID cells for those four YV rows gain the new IDs.
 - No existing grade, rule, sweep or matrix score was edited. No performance number was computed.
+
+
+**v2.8 (2026-11-09, Oliver Kell Cycle of Price Action)**
+- New §3.20, OK-01…OK-24, each **Implementation status (v2.8): Not started**. Write-up: `specs/kell-ideas-2026-11-08-additions.md`. Appendix A.10. The draft prefix `OK` was free and is kept. Presenter variants OK-05P, OK-22P and the 21-EMA sensitivity are inside their hosts, not extra entries.
+- Header, §2.4c (247 entries; 213 not started), §3 counts (OK 24). §4 matrix stays at 150 rows: OK IDs are unscored (footnote ⁵). Build order is in §3.20 and is not a priority score and not a forecast.
+- Cross-references only, no rule changes, on PS-18, SP-01, SP-03, SP-05, SP-06, RG-06, EX-05, PF-04, the A2-71 block inside PF-06, A2-72, A2-73, A2-74, A2-76, A2-79, DV-15, and YV-03. Appendix A.8 related-ID cells for YV-03 and the weekly 10/20 EMA row gain OK IDs.
+- VWAP, volume profile, order flow, and Fibonacci arms are labelled research-authored. Kell allocation tiers and margin are documentation (OK-24) and are not enabled. No post-2024 test. No existing grade, rule, sweep, or matrix score was edited.
+
 
 - No rules of v1's own ideas were changed, apart from the A2-restorations listed above.
 - There is still no trapped-trader section (deferred). Trapped-trader ideas stay where they were.
