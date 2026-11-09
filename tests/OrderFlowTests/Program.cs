@@ -801,10 +801,53 @@ static class Program
 			for (int i = 1; i < pd.Count; i++)
 				if (pd[i].GlobexDate.DayOfWeek != DayOfWeek.Monday && pd[i].FromEt != pd[i - 1].ToEt) contiguous = false;
 			var mon = pd.First(d => d.GlobexDate == new DateTime(2026, 9, 14));
-			Check(contiguous && mon.FromEt == new DateTime(2026, 9, 13, 17, 0, 0) && mon.ToEt == new DateTime(2026, 9, 14, 17, 0, 0), "TC2 contiguous within a week; Monday starts Sunday 17:00 ET");
+			Check(contiguous && mon.FromEt == new DateTime(2026, 9, 13, 17, 0, 0) && mon.ToEt == new DateTime(2026, 9, 14, 17, 0, 0), "TC2 contiguous within a week; an explicit 17:00 boundary still starts Monday on Sunday 17:00 ET");
+			var b1730 = new TimeSpan(17, 30, 0);
+			var moved = OF.PlanGlobexDays(new DateTime(2026, 9, 14), new DateTime(2026, 9, 14), null, b1730);
+			Check(moved.Count == 1 && moved[0].FromEt == new DateTime(2026, 9, 13, 17, 30, 0) && moved[0].ToEt == new DateTime(2026, 9, 14, 17, 30, 0),
+				"M6b stale Globex boundary 17:30 ET: Monday chunk is Sunday 17:30 to Monday 17:30 (was 17:00)");
 			var closed = new List<DateTime>();
 			var pl = OF.PlanGlobexDays(new DateTime(2026, 9, 1), new DateTime(2026, 9, 18), d => d == new DateTime(2026, 9, 7), b17, closed);
 			Check(pl.Count == 13 && closed.Count == 1 && closed[0] == new DateTime(2026, 9, 7) && pl.All(d => d.GlobexDate.DayOfWeek != DayOfWeek.Saturday && d.GlobexDate.DayOfWeek != DayOfWeek.Sunday), "TC3 closed day and weekends skipped, closed day reported");
+		}
+
+		// ---- M6b: listed session end converted to ET ----
+		{
+			OF.WeekSession Row(DayOfWeek a, int sh, int sm, DayOfWeek b, int eh, int em)
+			{ return new OF.WeekSession(a, new TimeSpan(sh, sm, 0), b, new TimeSpan(eh, em, 0)); }
+			var globex = new[] {
+				Row(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 15, 15),
+				Row(DayOfWeek.Monday, 15, 30, DayOfWeek.Monday, 16, 30),
+				Row(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 15, 15),
+				Row(DayOfWeek.Tuesday, 15, 30, DayOfWeek.Tuesday, 16, 30),
+				Row(DayOfWeek.Tuesday, 17, 0, DayOfWeek.Wednesday, 15, 15),
+				Row(DayOfWeek.Wednesday, 15, 30, DayOfWeek.Wednesday, 16, 30),
+				Row(DayOfWeek.Wednesday, 17, 0, DayOfWeek.Thursday, 15, 15),
+				Row(DayOfWeek.Thursday, 15, 30, DayOfWeek.Thursday, 16, 30),
+				Row(DayOfWeek.Thursday, 17, 0, DayOfWeek.Friday, 15, 15) };
+			var ct = TimeZoneInfo.FindSystemTimeZoneById("Central Standard Time");
+			var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+			TimeSpan At(DateTime day) { return OF.ChunkBoundaryEt(globex, ct, eastern, day, false, "@ES", null); }
+			var t1730 = new TimeSpan(17, 30, 0);
+			Check(At(new DateTime(2024, 1, 8)) == t1730, "M6b ES Globex winter: listed 16:30 CT = 17:30 ET");
+			Check(At(new DateTime(2024, 7, 8)) == t1730, "M6b ES Globex summer: 16:30 CDT = 17:30 EDT");
+			Check(At(new DateTime(2024, 3, 11)) == t1730, "M6b ES Globex spring-forward week: still 17:30 ET");
+			Check(At(new DateTime(2024, 11, 4)) == t1730, "M6b ES Globex fall-back week: still 17:30 ET");
+			var close = new[] { Row(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0), Row(DayOfWeek.Monday, 17, 0, DayOfWeek.Tuesday, 16, 0),
+				Row(DayOfWeek.Tuesday, 17, 0, DayOfWeek.Wednesday, 16, 0), Row(DayOfWeek.Wednesday, 17, 0, DayOfWeek.Thursday, 16, 0),
+				Row(DayOfWeek.Thursday, 17, 0, DayOfWeek.Friday, 16, 0) };
+			Check(OF.ChunkBoundaryEt(close, ct, eastern, new DateTime(2024, 1, 8), false, "@ES", null) == new TimeSpan(17, 0, 0),
+				"M6b listed end 16:00 CT equals the last bar close: boundary stays 17:00 ET");
+			var six = new[] { Row(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 16, 0), Row(DayOfWeek.Thursday, 17, 0, DayOfWeek.Friday, 16, 0) };
+			Check(OF.ChunkBoundaryEt(six, ct, eastern, new DateTime(2024, 1, 8), false, "@6E", null) == new TimeSpan(17, 0, 0), "M6b 6E own end 16:00 CT = 17:00 ET, not the ES 17:30");
+			var sixEarly = new[] { Row(DayOfWeek.Sunday, 17, 0, DayOfWeek.Monday, 15, 0) };
+			Check(OF.ChunkBoundaryEt(sixEarly, ct, eastern, new DateTime(2024, 7, 8), false, "@6E", null) == new TimeSpan(16, 0, 0), "M6b 6E own end 15:00 CT = 16:00 ET in summer");
+			var sink = new List<string>();
+			string thrown = "";
+			try { OF.ChunkBoundaryEt(globex, ct, eastern, new DateTime(2024, 1, 8), true, "EUR/USD", sink.Add); }
+			catch (InvalidOperationException ex) { thrown = ex.Message; }
+			Check(sink.Count == 1 && sink[0] == thrown && thrown.IndexOf("spot FX is unsupported", StringComparison.Ordinal) >= 0 && thrown.IndexOf("6E", StringComparison.Ordinal) >= 0,
+				"M6b spot FX: Error line then throw, no boundary (" + thrown + ")");
 		}
 
 		// ---- Tick-chunk spec §5.1: scheduler ----
