@@ -208,6 +208,23 @@ static class Program
 		return m.Success ? m.Groups[1].Value : null;
 	}
 
+	// New research strategies: _<ID>_<StudyName>.Strategy.CS. ID is the catalogue id (FAM-NN) with the hyphen written as an underscore.
+	// StudyName is PascalCase so the stem is one valid C# identifier and does not include ".Strategy.CS".
+	static readonly Regex ResearchStrategyFileRx = new Regex(@"^_[A-Z][A-Z0-9]*_[0-9]{2}_[A-Z][A-Za-z0-9]*\.Strategy\.CS$", RegexOptions.CultureInvariant);
+
+	static readonly string[] IdFileMap = {
+		"Catalogue ID A2-63 maps to file _A2_63_StudyName.Strategy.CS and class _A2_63_StudyName.",
+		"Catalogue ID OK-02 maps to file _OK_02_StudyName.Strategy.CS and class _OK_02_StudyName.",
+	};
+
+	// null when the name is not a strategy file, or it matches the catalogue-id file rule.
+	static string ResearchStrategyNameProblem(string fileName)
+	{
+		if (string.IsNullOrEmpty(fileName) || !fileName.EndsWith(".Strategy.CS", StringComparison.Ordinal)) return null;
+		if (ResearchStrategyFileRx.IsMatch(fileName)) return null;
+		return fileName + " must be _<ID>_<StudyName>.Strategy.CS (catalogue ID with hyphens as underscores; class is the file stem)";
+	}
+
 	static List<string> PublicClasses(string text)
 	{
 		string code = Regex.Replace(text ?? "", @"//[^\n]*", "");
@@ -283,10 +300,13 @@ static class Program
 		foreach (string f in Directory.GetFiles(root, "*.CS"))
 			foreach (string c in PublicClasses(File.ReadAllText(f))) rootClasses.Add(c);
 		var stemProblems = new List<string>();
+		var fileNameProblems = new List<string>();
 		var classClash = new List<string>();
 		var seenSandbox = new HashSet<string>(StringComparer.Ordinal);
 		foreach (string name in sandboxStudies)
 		{
+			string nameProblem = ResearchStrategyNameProblem(name);
+			if (nameProblem != null) fileNameProblems.Add(nameProblem);
 			string problem = ClassStemProblem(name, PublicClasses(File.ReadAllText(Path.Combine(sandbox, name))), SandboxClassAllow);
 			if (problem != null) stemProblems.Add(problem);
 			foreach (string c in PublicClasses(File.ReadAllText(Path.Combine(sandbox, name))))
@@ -295,8 +315,10 @@ static class Program
 				if (rootClasses.Contains(c)) classClash.Add("class also in a root study: " + c);
 			}
 		}
+		foreach (string p in fileNameProblems) Console.WriteLine("  strategy file name: " + p);
 		foreach (string p in stemProblems) Console.WriteLine("  class/stem: " + p);
 		foreach (string p in classClash) Console.WriteLine("  class clash: " + p);
+		Check(fileNameProblems.Count == 0, "sandbox strategy files are _<ID>_<StudyName>.Strategy.CS (" + fileNameProblems.Count + ")");
 		Check(stemProblems.Count == 0, "sandbox study class matches the file stem, except the two recorded mismatches (" + stemProblems.Count + ")");
 		Check(classClash.Count == 0, "sandbox study class names are unique and absent from root studies (" + classClash.Count + ")");
 
@@ -310,6 +332,10 @@ static class Program
 		Check(templateText.Contains("Not applicable") && templateText.Contains("Not yet verified"), "header template tells the author to write Not applicable / Not yet verified");
 		Check(templateText.Contains("win_rate * avg_win - loss_rate * avg_loss") && docText.Contains("win_rate * avg_win - loss_rate * avg_loss"), "header standard and template state the cost-adjusted expectancy formula");
 		Check(docText.Contains(templateRel) && !StudyRx.IsMatch(Path.GetFileName(template)), "template path is documented and the template is not a study file name");
+		bool mapOk = true;
+		foreach (string sentence in IdFileMap)
+			if (!templateText.Contains(sentence) || !docText.Contains(sentence)) mapOk = false;
+		Check(mapOk && docText.Contains("Compile Include=\"sandbox\\_A2_63_StudyName.Strategy.CS\""), "header standard and template map hyphenated catalogue IDs onto the file name and the class stem");
 
 		// self-test: the classifiers, not the repo
 		Check(PointsAtSandbox(@"sandbox\_X.Strategy.CS") && PointsAtSandbox("sandbox/_X.Strategy.CS")
@@ -323,12 +349,26 @@ static class Program
 			"self-test: a header with Identity after Provenance fails (" + orderWhy + ")");
 		var allow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "_Old.Strategy.CS", "_Legacy" } };
 		Check(ClassStemProblem("_A.Strategy.CS", new[] { "_A" }, allow) == null
+			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "_A2_63_StudyName" }, allow) == null
+			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "_A2_63_StudyName.Strategy" }, allow) != null
+			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "A2_63_StudyName" }, allow) != null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Legacy" }, allow) == null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Old" }, allow) == null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Other" }, allow) != null
 			&& ClassStemProblem("_A.Strategy.CS", new[] { "_A", "_B" }, allow) != null
 			&& ClassStemProblem("notes.md", new[] { "_A" }, allow) == null,
-			"self-test: class/stem match, the allow-list, and a third name");
+			"self-test: class name is the file stem, not the .Strategy.CS suffix, and the allow-list still works");
+		Check(ResearchStrategyNameProblem("_A2_63_StudyName.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_OK_02_StudyName.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_A2_49_MiddayBreakout.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_L2_01_DomFade.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2-63_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_63_studyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_63_Study_Name.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_a2_63_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("ResearchStrategyHeader.template.txt") == null,
+			"self-test: strategy file names use the catalogue ID with underscores, then a PascalCase study name");
 	}
 
 	static int Main()
