@@ -30,6 +30,17 @@ static class Program
 	static PortStratView W(int i, double rw, string cl, EPortState st = EPortState.Armed, int pos = 0, double riskOpen = 0)
 	{ var x = V(i, st, 1, 500, 2, cl, pos, 0, riskOpen); x.rDollarW = rw; return x; }
 
+	static void M6fCluster()
+	{
+		Check(PortfolioClusters.Seed("EQIDX", "ES") == "EQIDX" && PortfolioClusters.Seed("EQIDX", "MES") == "EQIDX"
+			&& PortfolioClusters.Seed("EQIDX", "NQ") == "EQIDX" && PortfolioClusters.Seed("EQIDX", "MNQ") == "EQIDX", "M6f profile ES/MES/NQ/MNQ stay EQIDX");
+		Check(PortfolioClusters.Seed("FX_EUR", "6E") == "FX_EUR", "M6f profile 6E is FX_EUR, not the raw root");
+		Check(PortfolioClusters.Seed("ENERGY", "CL") == "ENERGY" && PortfolioClusters.Seed("METALS", "GC") == "METALS" && PortfolioClusters.Seed("RATES", "ZN") == "RATES", "M6f profile CL/GC/ZN stay their groups");
+		Check(PortfolioClusters.Seed(null, "YM") == "EQIDX" && PortfolioClusters.Seed(null, "RTY") == "EQIDX" && PortfolioClusters.Seed("", "M2K") == "EQIDX", "M6f no profile: YM/RTY/M2K stay EQIDX");
+		Check(PortfolioClusters.Seed(null, "ZB") == "RATES" && PortfolioClusters.Seed(null, "MCL") == "ENERGY" && PortfolioClusters.Seed(null, "SI") == "METALS", "M6f no profile: ZB/MCL/SI stay their groups");
+		Check(PortfolioClusters.Seed(null, "AAPL") == "AAPL" && PortfolioClusters.Seed(null, "spy") == "SPY", "M6f no profile: a stock stays its raw root");
+	}
+
 	static void Main()
 	{
 		// config
@@ -749,6 +760,7 @@ static class Program
 				Check(r6.allowEntries && r6.entryContracts == full(), "T-P6: next ISO week (Sunday key) -> both cleared, full size" + L);
 			}
 		}
+		M6fCluster();
 		Console.WriteLine($"PortMMTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
