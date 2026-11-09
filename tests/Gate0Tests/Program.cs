@@ -138,7 +138,7 @@ static class Program
 
 		// ---- A2-33 study wiring: 20 controls, either side, frozen sigma, reaction after touch ----
 		{
-			var st = new _LevelStudy(); st.config.enabled = true; st.config.controls = 20; st.config.reactionBars = 12; st.config.maxAge = 15;
+			var st = new _LevelStudy(); st.tickSize = 0.25; st.config.enabled = true; st.config.controls = 20; st.config.reactionBars = 12; st.config.maxAge = 15;
 			st.config.controlsEitherSide = true; st.config.reactionAfterTouch = true;
 			Check(st.Configure() == null, "study configure");
 			st.BeginSession(d0); st.SetSessionReference(100, 2.0);
@@ -150,7 +150,7 @@ static class Program
 			Check(ctl.Any(e => e.price > 100) && ctl.Any(e => e.price < 100), "controls on either side of the RTH open");
 			Check(ctl.All(e => Math.Abs(e.price - 100) >= 0.9 * 4 - 0.25 && Math.Abs(e.price - 100) <= 1.1 * 4 + 0.25), "controls at 0.9-1.1x the distance from the RTH open");
 			Check(st.Events.All(e => Near(e.sigma, 2.0) && Near(e.refPrice, 100)), "sigma frozen at registration (ATR14 5m), ref = RTH open");
-			var s2 = new _LevelStudy(); s2.config.enabled = true; s2.config.controls = 1; s2.config.reactionBars = 2; s2.config.reactionAfterTouch = true; s2.Configure();
+			var s2 = new _LevelStudy(); s2.tickSize = 0.25; s2.config.enabled = true; s2.config.controls = 1; s2.config.reactionBars = 2; s2.config.reactionAfterTouch = true; s2.Configure();
 			s2.BeginSession(d0); s2.SetSessionReference(100, 1.0); s2.AddLevel("Y", 101, 1, double.NaN, "y");
 			s2.Bar(100, 101, 100, 101, 1);    // touch bar: |101-101| = 0, not counted
 			s2.Bar(101, 103, 101, 103, 1);    // k=1: 2 sigma

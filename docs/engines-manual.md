@@ -6226,6 +6226,7 @@ protected override void CalcBar()
 - Bands and slope: `bandSigmas {1,2,3}`, `slopeBars 5`, `dataStream 1`.
 - Detection thresholds: `gapAtrFraction 0.5`, `gapFallbackTrMultiple 3`, `climaxZ 3`, `fallbackLength 20`, `backfillBars 2`.
 - Placebos: `placebos EAvwapPlacebo.None`, `p2MinPool 10`.
+- `tickSize` has no default. The host sets it from `tickSize()` (the Data1 profile tick; ES and MES are 0.25). `Configure` rejects a tick that is not greater than 0.
 
 **API.**
 
@@ -6954,6 +6955,7 @@ All lines below are printed to the PowerLanguage .NET Editor Output. `{…}` are
 **Level study.**
 - Enable with `LevelStudyConfig.enabled = true`.
 - Defaults: `controls 20`, `distLo .9`, `distHi 1.1`, `reactionBars 60`, `sigmaBars 60`, `touchTicks 0`, `maxAge 15`, `deathR 1`, `seed 33`, `from`/`to`, `csvPath ""`, `controlsEitherSide false`, `reactionAfterTouch false`.
+- `tickSize` has no default. The host sets it from `tickSize()`. Gate 0 copies its own `tick` onto the embedded study in `Configure`. An unset tick does not snap controls.
 - Register prior-session levels on the session's first bar with `levelStudyAdd(type, price, ageSessions, quality = NaN, key = null)`.
 - Results: Info `A2-33 RESULT events() types() window()` plus a summary per type at RUN-END, and an optional CSV.
 - No strategy on `main` enables `LevelStudyConfig`: `_Gate0` drives `_LevelStudy` directly. The catalogue and the `LevelStudyConfig` comment in `_CustomSignal` name `_Test1`, but `_Test1` is a plain `SignalObject` (discrepancy, Appendix F).
