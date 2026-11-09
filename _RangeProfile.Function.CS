@@ -28,7 +28,7 @@ namespace PowerLanguage.Function
 		public int maxRows = 4000;
 		public int cacheSize = 8;
 		public int maxOpenHandles = 8;
-		public int ringBars = 2880;                // ring need per stream (2 Globex sessions of 1m)
+		public int ringBars = 2880;                // M6e: bar count, kept literal (not derived from session minutes). 2 Globex sessions of 1m.
 
 		public string Validate()
 		{

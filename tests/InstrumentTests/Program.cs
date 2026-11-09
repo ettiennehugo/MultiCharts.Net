@@ -1042,9 +1042,25 @@ static class Program
 			&& e.Message.Contains("use a session template that covers 09:30\u201316:00 ET"), "M6a S3 reason and action: " + (e == null ? "" : e.Message));
 	}
 
+	static void M6eWeekly()
+	{
+		var g = Globex9();
+		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
+		var cl = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null).WithSessions(g, g, FB, null);
+		var bare = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
+		Check(es.rthSplit != null && cl.rthSplit == null && bare.sessions == null, "M6e ES has a split, CL 24h does not, sessions not filled yet");
+		InstrumentSessions.RequireWeeklyRth(es, null);
+		InstrumentSessions.RequireWeeklyRth(bare, null);
+		InstrumentSessions.RequireWeeklyRth(null, null);
+		var ex = Throws(s => InstrumentSessions.RequireWeeklyRth(cl, s), "M6e CL");
+		Check(ex != null && ex.Engine == "WEEKLY" && ex.Reason == InstrumentReason.SessionsNoRthSplit && ex.Action == "use a day-session template for CL",
+			"M6e CL S7: " + (ex == null ? "" : ex.Message));
+		Check(es.ProfileHash() == "020deca78d6392b7", "M6e ES pin unchanged " + es.ProfileHash());
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}
