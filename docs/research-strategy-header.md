@@ -6,9 +6,9 @@
 
 **Template:** [`sandbox/ResearchStrategyHeader.template.txt`](../sandbox/ResearchStrategyHeader.template.txt). Copy it to the top of the new strategy file. The template is comments only. It is not a study, and it stays out of every project file.
 
-**File name.** `_<ID>_<StudyName>.Strategy.CS`. `ID` is the catalogue ID with each hyphen turned into an underscore. `StudyName` is a PascalCase name (an uppercase letter, then letters and digits). The public class is the file stem, a normal C# identifier, and does not include `.Strategy.CS`. The header still records the catalogue ID with its hyphen.
+**File name.** The pattern is `_<ID>_<StudyName>.Strategy.CS`. The word `StudyName` in that pattern is a placeholder only. It is never the stem of a developed strategy. Replace it with a short PascalCase name taken from the catalogue description: an uppercase letter, then letters and digits. `ID` is the catalogue ID with each hyphen turned into an underscore. The suffix is `.Strategy.CS`. The public class is the file stem, a normal C# identifier, and does not include `.Strategy.CS`. The header's Catalogue ID line keeps the hyphen.
 
-Catalogue ID A2-63 maps to file _A2_63_StudyName.Strategy.CS and class _A2_63_StudyName. Catalogue ID OK-02 maps to file _OK_02_StudyName.Strategy.CS and class _OK_02_StudyName.
+Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay. The catalogue calls that entry "Kaufman 3-day trade"; `KaufmanThreeDay` is that description shortened. A file named `_A2_69_StudyName.Strategy.CS` does not follow this rule.
 
 **Catalogue:** [`specs/trading-idea-catalogue.md`](../specs/trading-idea-catalogue.md) remains the idea library. Link the entry. Do not paste it into the header.
 
@@ -185,9 +185,9 @@ Incubation and selective tests may load the study in MultiCharts. Broker setup, 
 
 ## Where a new file goes
 
-1. Copy the template onto `sandbox/_A2_63_StudyName.Strategy.CS` (catalogue ID `A2-63`). The same rule gives OK-02 the file `sandbox/_OK_02_StudyName.Strategy.CS`.
-2. The public class, the file stem, and the MultiCharts study name are `_A2_63_StudyName`. That string is a valid C# identifier. It does not contain `.Strategy.CS`.
-3. The header's Catalogue ID line keeps the hyphenated id, `A2-63`, and the file line shows the mapped name.
+1. Copy the template onto a new sandbox file whose stem is the catalogue ID plus a short descriptive name. For A2-69 that file is `sandbox/_A2_69_KaufmanThreeDay.Strategy.CS`. Do not leave the placeholder `StudyName` in the file name.
+2. The public class, the file stem, and the MultiCharts study name are `_A2_69_KaufmanThreeDay`. That string is a valid C# identifier. It does not contain `.Strategy.CS`.
+3. The header's Catalogue ID line keeps the hyphenated id, `A2-69`, and the file line shows `_A2_69_KaufmanThreeDay.Strategy.CS`.
 4. That class name is unique among root studies and among sandbox studies. One assembly compiles every included study, so two public classes with one name fail the build.
 5. The file stays in `sandbox/` through sandbox, selective-test, validated, and incubation.
 6. Only a `promoted` file moves to the repo root and receives a `Compile Include`. Files already in `sandbox/` are left on their current names.
@@ -216,7 +216,7 @@ The test projects under `tests/` link named engine files (`..\..\_SomeEngine.Fun
 - any `Compile Include` in any repo `csproj` points at `sandbox`
 - `PLStudies.csproj` or `PLStudiesPY.csproj` uses a wildcard include, or turns on `EnableDefaultCompileItems`
 - a sandbox study file name also exists at the repo root
-- a sandbox strategy file is not `_<ID>_<StudyName>.Strategy.CS`, or its public class disagrees with that file stem, or the class collides with another study
+- a sandbox strategy file is not `_<ID>_<DescriptiveName>.Strategy.CS`, uses the literal placeholder `StudyName`, disagrees in its public class with that file stem, or collides with another study
 
 ### Selective test, and putting it back
 
@@ -225,7 +225,7 @@ Known-safe for MSBuild, because the project only compiles listed files:
 1. Add one line to the existing `Compile` item group:
 
    ```xml
-   <Compile Include="sandbox\_A2_63_StudyName.Strategy.CS" />
+   <Compile Include="sandbox\_A2_69_KaufmanThreeDay.Strategy.CS" />
    ```
 
 2. Load that one file in the PowerLanguage Editor (File → Import of the single file, the same gesture the engines manual uses for a new study).
@@ -243,7 +243,7 @@ Known: studies are imported one file at a time (engines manual import lists; `sp
 
 Known: after that commit, the ten sandbox sources were still absent from `PLStudies.csproj`. Storing a file under `sandbox/` did not, by itself, add a `Compile` line in the tree that was committed.
 
-Not verified in the Editor on this machine: whether File → Import accepts a path in `sandbox\`, or only a file in the flat studies folder. `specs/sandbox-entries-feasibility.md` §7.1 left subfolder support open, and this change does not close it. If the Editor will not compile `sandbox\_A2_63_StudyName.Strategy.CS`, the temporary workaround is a **local uncommitted** copy at the repo root, with the same unique class and file name, plus one explicit root `Compile Include`. Delete the copy and the include when the test ends. Do not commit the root copy.
+Not verified in the Editor on this machine: whether File → Import accepts a path in `sandbox\`, or only a file in the flat studies folder. `specs/sandbox-entries-feasibility.md` §7.1 left subfolder support open, and this change does not close it. If the Editor will not compile `sandbox\_A2_69_KaufmanThreeDay.Strategy.CS`, the temporary workaround is a **local uncommitted** copy at the repo root, with the same unique class and file name, plus one explicit root `Compile Include`. Delete the copy and the include when the test ends. Do not commit the root copy.
 
 Also not claimed here: that opening the Editor rescans folders and rewrites the project. If a save touches any `Compile` line other than the one under test, restore those lines before committing. That is the churn to avoid. Do not "fix" it by switching the project to a wildcard.
 

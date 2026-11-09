@@ -208,21 +208,23 @@ static class Program
 		return m.Success ? m.Groups[1].Value : null;
 	}
 
-	// New research strategies: _<ID>_<StudyName>.Strategy.CS. ID is the catalogue id (FAM-NN) with the hyphen written as an underscore.
-	// StudyName is PascalCase so the stem is one valid C# identifier and does not include ".Strategy.CS".
-	static readonly Regex ResearchStrategyFileRx = new Regex(@"^_[A-Z][A-Z0-9]*_[0-9]{2}_[A-Z][A-Za-z0-9]*\.Strategy\.CS$", RegexOptions.CultureInvariant);
+	// New research strategies: _<ID>_<DescriptiveName>.Strategy.CS. ID is the catalogue id (FAM-NN) with the hyphen written as an underscore.
+	// The descriptive name is PascalCase. The literal placeholder StudyName is not a developed strategy stem.
+	// The class is that file stem and does not include ".Strategy.CS".
+	static readonly Regex ResearchStrategyFileRx = new Regex(@"^_[A-Z][A-Z0-9]*_[0-9]{2}_([A-Z][A-Za-z0-9]*)\.Strategy\.CS$", RegexOptions.CultureInvariant);
 
 	static readonly string[] IdFileMap = {
-		"Catalogue ID A2-63 maps to file _A2_63_StudyName.Strategy.CS and class _A2_63_StudyName.",
-		"Catalogue ID OK-02 maps to file _OK_02_StudyName.Strategy.CS and class _OK_02_StudyName.",
+		"Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay.",
 	};
 
-	// null when the name is not a strategy file, or it matches the catalogue-id file rule.
+	// null when the name is not a strategy file, or it matches the catalogue-id file rule and is not the StudyName placeholder.
 	static string ResearchStrategyNameProblem(string fileName)
 	{
 		if (string.IsNullOrEmpty(fileName) || !fileName.EndsWith(".Strategy.CS", StringComparison.Ordinal)) return null;
-		if (ResearchStrategyFileRx.IsMatch(fileName)) return null;
-		return fileName + " must be _<ID>_<StudyName>.Strategy.CS (catalogue ID with hyphens as underscores; class is the file stem)";
+		Match m = ResearchStrategyFileRx.Match(fileName);
+		if (!m.Success) return fileName + " must be _<ID>_<DescriptiveName>.Strategy.CS (catalogue ID with hyphens as underscores; .Strategy.CS suffix; class is the file stem)";
+		if (string.Equals(m.Groups[1].Value, "StudyName", StringComparison.Ordinal)) return fileName + " uses the StudyName placeholder; use a short PascalCase name from the catalogue description";
+		return null;
 	}
 
 	static List<string> PublicClasses(string text)
@@ -318,7 +320,7 @@ static class Program
 		foreach (string p in fileNameProblems) Console.WriteLine("  strategy file name: " + p);
 		foreach (string p in stemProblems) Console.WriteLine("  class/stem: " + p);
 		foreach (string p in classClash) Console.WriteLine("  class clash: " + p);
-		Check(fileNameProblems.Count == 0, "sandbox strategy files are _<ID>_<StudyName>.Strategy.CS (" + fileNameProblems.Count + ")");
+		Check(fileNameProblems.Count == 0, "sandbox strategy files are _<ID>_<DescriptiveName>.Strategy.CS and do not use the StudyName placeholder (" + fileNameProblems.Count + ")");
 		Check(stemProblems.Count == 0, "sandbox study class matches the file stem, except the two recorded mismatches (" + stemProblems.Count + ")");
 		Check(classClash.Count == 0, "sandbox study class names are unique and absent from root studies (" + classClash.Count + ")");
 
@@ -335,7 +337,9 @@ static class Program
 		bool mapOk = true;
 		foreach (string sentence in IdFileMap)
 			if (!templateText.Contains(sentence) || !docText.Contains(sentence)) mapOk = false;
-		Check(mapOk && docText.Contains("Compile Include=\"sandbox\\_A2_63_StudyName.Strategy.CS\""), "header standard and template map hyphenated catalogue IDs onto the file name and the class stem");
+		Check(mapOk && docText.Contains("Compile Include=\"sandbox\\_A2_69_KaufmanThreeDay.Strategy.CS\"")
+			&& templateText.Contains("StudyName is a placeholder") && docText.Contains("StudyName") && docText.Contains("placeholder"),
+			"header standard and template map A2-69 onto _A2_69_KaufmanThreeDay and mark StudyName as a placeholder");
 
 		// self-test: the classifiers, not the repo
 		Check(PointsAtSandbox(@"sandbox\_X.Strategy.CS") && PointsAtSandbox("sandbox/_X.Strategy.CS")
@@ -349,26 +353,27 @@ static class Program
 			"self-test: a header with Identity after Provenance fails (" + orderWhy + ")");
 		var allow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { { "_Old.Strategy.CS", "_Legacy" } };
 		Check(ClassStemProblem("_A.Strategy.CS", new[] { "_A" }, allow) == null
-			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "_A2_63_StudyName" }, allow) == null
-			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "_A2_63_StudyName.Strategy" }, allow) != null
-			&& ClassStemProblem("_A2_63_StudyName.Strategy.CS", new[] { "A2_63_StudyName" }, allow) != null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "_A2_69_KaufmanThreeDay" }, allow) == null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "_A2_69_KaufmanThreeDay.Strategy" }, allow) != null
+			&& ClassStemProblem("_A2_69_KaufmanThreeDay.Strategy.CS", new[] { "A2_69_KaufmanThreeDay" }, allow) != null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Legacy" }, allow) == null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Old" }, allow) == null
 			&& ClassStemProblem("_Old.Strategy.CS", new[] { "_Other" }, allow) != null
 			&& ClassStemProblem("_A.Strategy.CS", new[] { "_A", "_B" }, allow) != null
 			&& ClassStemProblem("notes.md", new[] { "_A" }, allow) == null,
 			"self-test: class name is the file stem, not the .Strategy.CS suffix, and the allow-list still works");
-		Check(ResearchStrategyNameProblem("_A2_63_StudyName.Strategy.CS") == null
-			&& ResearchStrategyNameProblem("_OK_02_StudyName.Strategy.CS") == null
+		Check(ResearchStrategyNameProblem("_A2_69_KaufmanThreeDay.Strategy.CS") == null
 			&& ResearchStrategyNameProblem("_A2_49_MiddayBreakout.Strategy.CS") == null
 			&& ResearchStrategyNameProblem("_L2_01_DomFade.Strategy.CS") == null
+			&& ResearchStrategyNameProblem("_A2_63_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_OK_02_StudyName.Strategy.CS") != null
 			&& ResearchStrategyNameProblem("_StudyName.Strategy.CS") != null
-			&& ResearchStrategyNameProblem("_A2-63_StudyName.Strategy.CS") != null
-			&& ResearchStrategyNameProblem("_A2_63_studyName.Strategy.CS") != null
-			&& ResearchStrategyNameProblem("_A2_63_Study_Name.Strategy.CS") != null
-			&& ResearchStrategyNameProblem("_a2_63_StudyName.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2-69_KaufmanThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_69_kaufmanThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_A2_69_Kaufman_ThreeDay.Strategy.CS") != null
+			&& ResearchStrategyNameProblem("_a2_69_KaufmanThreeDay.Strategy.CS") != null
 			&& ResearchStrategyNameProblem("ResearchStrategyHeader.template.txt") == null,
-			"self-test: strategy file names use the catalogue ID with underscores, then a PascalCase study name");
+			"self-test: descriptive PascalCase names pass, and the literal StudyName placeholder does not");
 	}
 
 	static int Main()

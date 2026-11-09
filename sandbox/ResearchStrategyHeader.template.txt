@@ -1,23 +1,23 @@
 // Research strategy header template.
 // Standard: docs/research-strategy-header.md
-// File name: _<ID>_<StudyName>.Strategy.CS. ID is the catalogue ID with hyphens written as underscores.
-// Catalogue ID A2-63 maps to file _A2_63_StudyName.Strategy.CS and class _A2_63_StudyName.
-// Catalogue ID OK-02 maps to file _OK_02_StudyName.Strategy.CS and class _OK_02_StudyName.
+// File name pattern: _<ID>_<StudyName>.Strategy.CS. StudyName is a placeholder, never a real stem.
+// Take a short PascalCase name from the catalogue description. The suffix is .Strategy.CS.
+// Catalogue ID A2-69 maps to file _A2_69_KaufmanThreeDay.Strategy.CS and class _A2_69_KaufmanThreeDay.
 // The class is the file stem. It does not include .Strategy.CS. The Catalogue ID line keeps the hyphen.
-// Copy from the next section onto sandbox/_A2_63_StudyName.Strategy.CS and replace StudyName.
+// Copy from the next section onto the new file and replace the A2-69 example with that strategy's own ID and name.
 // This file is comments only. It is not a study. Do not add it to a csproj.
 // Keep every // ## title, in this order. Write "Not applicable" or "Not yet verified" in the body.
 // Strategy-specific detail goes under Notes. Link the catalogue entry instead of pasting it.
 // Do not cite the sealed holdout (W-M and W-D Jan 2025–Oct 2026; W-T last 125 sessions).
 //
 // ## 1. Identity
-// Catalogue ID: A2-63
-// ID mapping: A2-63 → _A2_63_StudyName.Strategy.CS (class _A2_63_StudyName). Same rule: OK-02 → _OK_02_StudyName.Strategy.CS (class _OK_02_StudyName).
-// Name: <short name>
+// Catalogue ID: A2-69
+// ID mapping: A2-69 → _A2_69_KaufmanThreeDay.Strategy.CS (class _A2_69_KaufmanThreeDay). KaufmanThreeDay shortens the catalogue title "Kaufman 3-day trade".
+// Name: Kaufman three-day
 // Header version: 1
 // Rules version: <catalogue version or entry revision this file follows>
-// Study class: _A2_63_StudyName
-// File: sandbox/_A2_63_StudyName.Strategy.CS
+// Study class: _A2_69_KaufmanThreeDay
+// File: sandbox/_A2_69_KaufmanThreeDay.Strategy.CS
 // Stage: sandbox
 // Owner approval: Not yet verified
 //

@@ -104,7 +104,7 @@ namespace PowerLanguage.Strategy
 
 ### 1.2a Research strategies
 
-A new research strategy is drafted in `sandbox/`, with the header in `docs/research-strategy-header.md`, and is left out of `PLStudies.csproj`. The file name is the catalogue ID with hyphens written as underscores, then the study name: catalogue ID A2-63 maps to file `_A2_63_StudyName.Strategy.CS` and class `_A2_63_StudyName`. Copy `sandbox/ResearchStrategyHeader.template.txt` onto that file. Defaults sit on a protected config class, as the existing sandbox studies do with `Cfg`. A selective test adds one explicit `Compile Include` for that file and removes it when the test ends. The file joins the root project only after validation and the owner's approval. The worked examples in this manual are a different set of files.
+A new research strategy is drafted in `sandbox/`, with the header in `docs/research-strategy-header.md`, and is left out of `PLStudies.csproj`. The file name is the catalogue ID with hyphens written as underscores, then a short name from the catalogue description. `StudyName` in the pattern is a placeholder, not a file stem. Catalogue ID A2-69 maps to file `_A2_69_KaufmanThreeDay.Strategy.CS` and class `_A2_69_KaufmanThreeDay`. Copy `sandbox/ResearchStrategyHeader.template.txt` onto the new strategy file and fill in that strategy's own ID and name. Defaults sit on a protected config class, as the existing sandbox studies do with `Cfg`. A selective test adds one explicit `Compile Include` for that file and removes it when the test ends. The file joins the root project only after validation and the owner's approval. The worked examples in this manual are a different set of files.
 
 ### 1.3 Enabling an engine lazily and setting its config
 
