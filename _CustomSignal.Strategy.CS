@@ -1901,6 +1901,19 @@ namespace PowerLanguage.Strategy
 		/// <summary>VPF-4 / S4: how rolls are found. Off (default) = never flag.</summary>
 		public enum ERollDetection { Off = 0, Series = 1, Table = 2, SeriesOrTable = 3 }
 
+		/// <summary>M6h. Hash spelling of the roll mode. Same words as the enum names. An unknown value returns null; the host logs Error, then throws.</summary>
+		public static string RollDetectionText(ERollDetection mode)
+		{
+			switch (mode)
+			{
+				case ERollDetection.Off: return "Off";
+				case ERollDetection.Series: return "Series";
+				case ERollDetection.Table: return "Table";
+				case ERollDetection.SeriesOrTable: return "SeriesOrTable";
+				default: return null;
+			}
+		}
+
 		/// <summary>VPF-4 / S4: roll detection mode. Not an [Input].</summary>
 		protected ERollDetection RollDetection { get; set; } = ERollDetection.Off;
 		/// <summary>
