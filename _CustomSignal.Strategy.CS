@@ -1949,9 +1949,10 @@ namespace PowerLanguage.Strategy
 		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
 		private bool m_rollWarned;
 		// fix-i: detector keyed by _CmeSessionClock.GlobexTradingDayEt. Decided ONCE, on the first closed bar the detector steps
-		// (PR #51 review): a derived class that turns Series on only after that bar stays on tradingDayKey (pre-existing edge).
-		// Side effect for SeriesOrTable on an intraday futures chart: Table dates are matched against the Globex day too, so a
-		// Monday RollDates entry now fires on the Sunday 18:00 ET open instead of the first bar after Monday midnight.
+		// (PR #51 review): a derived class that turns detection on only after that bar stays on tradingDayKey (pre-existing edge).
+		// Check 7 L9 (2026-11-10): Table uses the same key as Series. On a calendar-keyed intraday futures chart a Monday
+		// RollDates entry fires on the Sunday 18:00 ET open, not the first bar after Monday midnight. A host that already
+		// overrides tradingDayKey with the Globex date (VPFUT, _Test6) has calendarKeyed false, so this flag stays off.
 		private bool m_rollGlobexKey;
 		private TimeZoneInfo m_rollEtTz;           // PR #51 N2: cached ET zone for the Globex key (lazy)
 
@@ -2083,8 +2084,7 @@ namespace PowerLanguage.Strategy
 				EResolution res = Bars.Info.Resolution.Type;
 				bool intraday = isIntradayResolution(res);
 				bool calendarKeyed = tradingDayKey(d0.AddHours(1)) == tradingDayKey(d0.AddHours(20));
-				m_rollGlobexKey = m_rollDet.series && calendarKeyed && intraday
-					&& isFuturesCategory(Bars.Info.Category);
+				m_rollGlobexKey = (m_rollDet.series || m_rollDet.table) && calendarKeyed && intraday && isFuturesCategory(Bars.Info.Category);
 				string warn = _RollDetector.SeriesKeyWarning(m_rollDet.series, intraday, res.ToString(), calendarKeyed && !m_rollGlobexKey);
 				if (warn != null) { Action<string> w = engineSink(ETraceLevel.Warning); if (w != null) w(warn); }
 			}

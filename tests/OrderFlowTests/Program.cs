@@ -1279,7 +1279,7 @@ static class Program
 			}
 			Check(code.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")
 				&& code.Contains("if (!m_rollWarned) { m_rollWarned = true; if (isFuturesCategory(Bars.Info.Category)) {")
-				&& System.Text.RegularExpressions.Regex.IsMatch(code, @"m_rollGlobexKey = m_rollDet\.series && calendarKeyed && intraday\s*&& isFuturesCategory\(Bars\.Info\.Category\);")
+				&& System.Text.RegularExpressions.Regex.IsMatch(code, @"m_rollGlobexKey = \(m_rollDet\.series \|\| m_rollDet\.table\) && calendarKeyed && intraday && isFuturesCategory\(Bars\.Info\.Category\);")
 				&& System.Text.RegularExpressions.Regex.Matches(code, @"==\s*ESymbolCategory\.Future\b").Count == 1,
 				"MI-B10 F2: DAILY roll-offset warning, RollDetection-Off warning and the roll Globex key use isFuturesCategory; Category == Future only inside isFuturesCategory");
 			string cod1 = MethodBody(cs, "private EAssetClass classOfData1()") ?? "";
