@@ -1923,10 +1923,15 @@ namespace PowerLanguage.Strategy
 		/// detector is keyed by the Globex trading day instead (fix-i), so the Sunday/18:00 ET open is the first bar of its day.
 		/// </summary>
 		protected int RollGapTicks { get; set; } = 8;
+		/// <summary>M9. Default false (not an [Input]). Off, Series keeps <see cref="RollGapTicks"/> for every root.
+		/// The calibrated tick count is logged once at Info and is not applied. No study sets this.</summary>
+		protected bool applyRollGapCalibration = false;
 		/// <summary>VPF-4 Table: trading dates (tradingDayKey) on which the continuous series switched contract (set by the strategy).</summary>
 		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
 
 		private readonly _RollDetector m_rollDet = new _RollDetector();
+		private readonly RollGapCalibrator m_gapCal = new RollGapCalibrator();
+		private bool m_gapLogged;
 		private bool m_rollSeriesBound;            // M5: profile Series window bound for this StartCalc
 		private _RollPending[] m_rollPending;      // S4: Data n (same root as Data1) -> pending Data1 roll
 		private bool m_rollWarned;
@@ -1947,6 +1952,8 @@ namespace PowerLanguage.Strategy
 		private void startRollDetector()
 		{
 			m_rollDet.Reset();
+			m_gapCal.Reset();
+			m_gapLogged = false;
 			m_rollDet.seriesWindow = null;
 			m_rollSeriesBound = false;
 			m_rollPending = null;
@@ -1963,6 +1970,13 @@ namespace PowerLanguage.Strategy
 			m_rollDet.table = RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable;
 			m_rollDet.gapTicks = RollGapTicks;
 			m_rollDet.dates = RollDates;
+			// M9: the switch defaults off and no study sets it, so every root keeps the literal 8. The on-path exists
+			// for a later reproduction against a filled splice list; it is not used here.
+			if (applyRollGapCalibration && m_rollDet.series)
+			{
+				int calTicks = RollGapCalibrator.Ticks(m_gapCal.Atr, tickSize());
+				if (calTicks > 0) m_rollDet.gapTicks = calTicks;
+			}
 			bindRollWindow();   // a derived StartCalc that turns Series on after base.StartCalc still binds
 			if (m_rollPending != null) return;
 			m_rollPending = new _RollPending[MaxDataStream + 1];
@@ -1973,7 +1987,8 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>M5: Series / SeriesOrTable uses the Data1 profile's contract months, expiry and roll. No profile
 		/// (InstrumentConfig.enabled false) keeps the static ES quarterly window. A profile without roll facts throws
-		/// unknown-field:roll (S5). gapTicks stays RollGapTicks (8). The 18:00 ET Globex re-key below is unchanged:
+		/// unknown-field:roll (S5). gapTicks stays RollGapTicks (8) unless applyRollGapCalibration is set, which no study does.
+		/// The 18:00 ET Globex re-key below is unchanged:
 		/// RollTests source-pins that assignment, and on the ES Globex template it matches the session day (MI-T7).</summary>
 		private void bindRollWindow()
 		{
@@ -2064,6 +2079,22 @@ namespace PowerLanguage.Strategy
 			string name = Bars.Info.Name;
 			if (m_rollGlobexKey && m_rollEtTz == null) m_rollEtTz = findTz("Eastern Standard Time");
 			DateTime day = m_rollGlobexKey ? _CmeSessionClock.GlobexTradingDayEt(ToZone(Bars.Time[0], m_rollEtTz)) : tradingDayKey(Bars.Time[0]);
+			if (m_rollDet.series)
+			{
+				m_gapCal.AddBar(day, Bars.High[0], Bars.Low[0], Bars.Close[0]);
+				if (!m_gapLogged)
+				{
+					double tkLog = tickSize();
+					int calTicks = RollGapCalibrator.Ticks(m_gapCal.Atr, tkLog);
+					if (calTicks > 0)
+					{
+						m_gapLogged = true;
+						if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+							"CFG ROLL gap calibrated({0}) inUse({1}) c({2:R}) atr({3:R}) tick({4:R}) apply({5})",
+							calTicks, RollGapTicks, RollGapCalibrator.C, m_gapCal.Atr, tkLog, applyRollGapCalibration ? 1 : 0));
+					}
+				}
+			}
 			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
 			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
 			{

@@ -144,5 +144,80 @@ namespace PowerLanguage.Function
 		}
 		public void Reset() { m_armed = DateTime.MaxValue; m_firedBar = int.MinValue; }
 	}
+
+	/// <summary>
+	/// M9. Series gap in ticks = round-half-away-from-zero(C × Wilder ATR(20) / tick). The true range is
+	/// _DailyContext's: max(high, previous close) − min(low, previous close). The seed is the average of the first
+	/// 20 true ranges; after that one Wilder update per completed day. The first completed day has no previous close
+	/// and contributes no true range. Splice days are not skipped and the seed does not restart (the series-b fit).
+	/// C = 8 × 0.25 / A, where A is the higher of the two central ATR values on RollTests series b (index n/2 of the
+	/// sorted sample). The host keeps RollGapTicks (8) unless <see cref="Apply"/> is set. No study sets it.
+	/// </summary>
+	public sealed class RollGapCalibrator
+	{
+		public const int AtrLength = 20;
+		public const int InUseTicks = 8;
+		/// <summary>8 × 0.25 / the series-b median ATR. Locked by RollTests after the fit; not a rounded 0.893.</summary>
+		public const double C = 0.8933716847476064;
+
+		/// <summary>M9 opt-in. Default false: the calibrated tick count is not written onto a detector.</summary>
+		public bool Apply;
+
+		private DateTime m_day = DateTime.MinValue;
+		private double m_high, m_low, m_close, m_prevClose, m_seed, m_atr = double.NaN;
+		private bool m_open, m_havePrev;
+		private int m_trSeen;
+
+		public int TrCount { get { return m_trSeen; } }
+		public double Atr { get { return m_trSeen >= AtrLength ? m_atr : double.NaN; } }
+
+		public void Reset()
+		{
+			m_day = DateTime.MinValue; m_high = m_low = m_close = m_prevClose = m_seed = 0; m_atr = double.NaN;
+			m_open = m_havePrev = false; m_trSeen = 0;
+		}
+
+		/// <summary>One closed bar of a trading day. High and low are that bar's high and low (series b passes max(open, close) and min(open, close)).</summary>
+		public void AddBar(DateTime tradingDay, double high, double low, double close)
+		{
+			if (double.IsNaN(high) || double.IsNaN(low) || double.IsNaN(close) || double.IsInfinity(high) || double.IsInfinity(low) || double.IsInfinity(close)) return;
+			DateTime d = tradingDay.Date;
+			if (!m_open) { m_day = d; m_high = high; m_low = low; m_close = close; m_open = true; return; }
+			if (d == m_day)
+			{
+				if (high > m_high) m_high = high;
+				if (low < m_low) m_low = low;
+				m_close = close;
+				return;
+			}
+			if (d < m_day) return;
+			Commit();
+			m_day = d; m_high = high; m_low = low; m_close = close; m_open = true;
+		}
+
+		/// <summary>Close the day still open (end of a series). The host does not call this: the next day's first bar commits the previous day, and the log fires then.</summary>
+		public void Flush() { if (m_open) { Commit(); m_open = false; } }
+
+		/// <summary>Calibrated tick count, or −1 when ATR or tick is not usable.</summary>
+		public static int Ticks(double atr, double tick)
+		{
+			if (!(atr > 0) || !(tick > 0) || double.IsInfinity(atr) || double.IsInfinity(tick)) return -1;
+			double x = C * atr / tick;
+			if (double.IsNaN(x) || double.IsInfinity(x) || x <= 0 || x >= int.MaxValue) return -1;
+			int n = (int)Math.Round(x, 0, MidpointRounding.AwayFromZero);
+			return n > 0 ? n : -1;
+		}
+
+		private void Commit()
+		{
+			double close = m_close, high = m_high, low = m_low;
+			if (!m_havePrev) { m_prevClose = close; m_havePrev = true; return; }
+			double tr = Math.Max(high, m_prevClose) - Math.Min(low, m_prevClose);
+			m_prevClose = close;
+			m_trSeen++;
+			if (m_trSeen <= AtrLength) { m_seed += tr; if (m_trSeen == AtrLength) m_atr = m_seed / AtrLength; }
+			else m_atr = (m_atr * (AtrLength - 1) + tr) / AtrLength;
+		}
+	}
 	// </roll-detector>
 }
