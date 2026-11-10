@@ -7,7 +7,7 @@ namespace PowerLanguage.Strategy
 	/// <summary>
 	/// THROW-AWAY TEST SIGNAL for Portfolio Trader live checks P5b L1-L7 (specs/m-port-spec.md §9, specs/live-check-sheet.md Check 7).
 	/// Not derived from _CustomSignal on purpose (stands alone; the saved settings of the real strategies are not touched).
-	/// Its companion MM signal _TestPortMM was deleted in M-INSTR PR-M4 (2026-11-04); the MM-side checks it drove are retired.
+	/// Companion MM: _TestPortMM.Signal.CS (restored 2026-11-10 for Check 7). Same Test/Variant on both. Protocol: specs/check7-protocol.md. Delete after the checks.
 	///
 	/// COMMON SETUP (Check 7)
 	///   1. Import _TestPortArm.Strategy.CS (and _PortMM.Function.CS if not already imported) into the

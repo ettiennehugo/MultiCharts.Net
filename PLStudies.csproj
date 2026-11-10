@@ -553,6 +553,8 @@
     <Compile Include="_Gmm.Function.CS" />
     <Compile Include="_RegimeEngine.Function.CS" />
     <Compile Include="_TestPortArm.Strategy.CS" />
+    <Compile Include="_TestPortMM.Signal.CS" />
+    <Compile Include="_TestCheck7Roll.Strategy.CS" />
     <Compile Include="_EventCalendar.Function.CS" />
     <Compile Include="_EventCalendarTest.Strategy.CS" />
     <Compile Include="_RegimeGate.Function.CS" />
