@@ -207,7 +207,7 @@ static class Program
 			string l = raw.Trim(); if (l.Length == 0 || l[0] == '#') continue;
 			var c = l.Split(',');
 			var p = InstrumentPresets.Find(c[0], EAssetClass.Future);
-			Check(p.calendar == ECalendar.NyseStandIn, "T4 " + c[0] + " preset names the NYSE stand-in calendar");
+			Check(p.calendar == (c[0] == "CL" ? ECalendar.CmeEnergy : c[0] == "GC" ? ECalendar.CmeMetals : c[0] == "ZN" ? ECalendar.CmeRates : ECalendar.CmeFx), "T4 " + c[0] + " preset uses its CME product calendar");
 			var bd = InstrumentCalendars.Require(p.calendar, RS, null);   // the preset's calendar, not an injected default
 			int y = int.Parse(c[2], Inv), m = int.Parse(c[3], Inv);
 			DateTime got = InstrumentRules.Expiry(p.expiry, y, m, bd, RS, null);
@@ -225,7 +225,7 @@ static class Program
 			if (InstrumentCalendars.BusinessDay(ECalendar.NyseStandIn)(d) != EventRules.IsNyseBusinessDay(d)) { Check(false, "T4 NyseStandIn == EventRules.IsNyseBusinessDay " + Ds(d)); break; }
 		Check(InstrumentCalendars.BusinessDay(ECalendar.Observed) == null && InstrumentCalendars.BusinessDay(ECalendar.None) == null, "T4 Observed / None have no business-day calendar");
 		var six = InstrumentPresets.Find("6E", EAssetClass.Future);
-		Check(six.roll == ERollRule.BusinessDaysBeforeExpiry && six.rollDays == 5 && six.verify == InstrumentCalendars.NyseStandInNote, "T4 6E roll = BusinessDaysBeforeExpiry(5) (Ettienne 2026-11-04)");
+		Check(six.roll == ERollRule.BusinessDaysBeforeExpiry && six.rollDays == 5 && six.calendar == ECalendar.CmeFx && six.verify == null, "T4 6E roll = BusinessDaysBeforeExpiry(5) on CmeFx (Ettienne 2026-11-04)");
 		// a row with rules but no business-day calendar: PR-M4 rejects it in PresetRow.Validate (Error line, then throw unknown-field:config),
 		// before Build's 'calendar' refusal (no silent default either way)
 		foreach (var cal in new[] { ECalendar.Observed, ECalendar.None })
@@ -332,7 +332,7 @@ static class Program
 			bool same = bag.Count == expect.Count;
 			for (int i = 0; same && i < bag.Count; i++) if (bag[i] != expect[i]) same = false;
 			Check(same && bag.Count == wantN, "T6 CollectRollDates " + bp.root + " 2024 contract-year equals one roll per listed month (" + bag.Count + ")");
-			Check(bp.calendar == ECalendar.NyseStandIn && !InstrumentRules.IsEquityIndexQuarterly(bp), "T6 " + bp.root + " stays NyseStandIn, not the equity-index path");
+			Check(InstrumentCalendars.IsProduct(bp.calendar) && !InstrumentRules.IsEquityIndexQuarterly(bp), "T6 " + bp.root + " uses a CME product calendar, not the equity-index path");
 		}
 		var cl2024 = new List<DateTime>();
 		InstrumentRules.CollectRollDates(clB, 2024, 2024, "DVP", null, cl2024);
@@ -430,8 +430,12 @@ static class Program
 			&& clEng.InSpan(EEventKind.RollWeek, aprUtc) && !clEng.InSpan(EEventKind.RollWeek, junUtc),
 			"T6 bound CL classification uses April own-expiry, keeps June opex and January claims, and InSpan follows the profile span");
 		var s4 = Throws(s => { clSink.Clear(); clEng.contractRefuse = delegate (string __) { InstrumentError.Fail(s, clSub, InstrumentReason.Calendar, "session count needs a verified holiday calendar; " + InstrumentText.CalendarName(clB.calendar) + " serves expiry/roll business days only (CME calendar pending M8)", "add a verified calendar for " + clB.root + " (PR-M8)"); }; clEng.SessionsToExpiry(clk); }, "T6 CL SessionsToExpiry");
-		Check(s4 != null && s4.Reason == InstrumentReason.Calendar && s4.Message.Contains("add a verified calendar for CL (PR-M8)") && s4.Message.Contains("NyseStandIn"),
-			"T6 SessionsToExpiry on NyseStandIn is Error + calendar, not a count (" + (s4 == null ? "" : s4.Message) + ")");
+		Check(s4 != null && s4.Reason == InstrumentReason.Calendar && s4.Message.Contains("add a verified calendar for CL (PR-M8)") && s4.Message.Contains("CmeEnergy"),
+			"T6 SessionsToExpiry with the verified flag off is Error + calendar, not a count (" + (s4 == null ? "" : s4.Message) + ")");
+		clEng.contractCalendarVerified = true;
+		clEng.countsAsSession = clB.isBusinessDay;
+		int clSess = clEng.SessionsToExpiry(clk);
+		Check(clSess > 0, "T6 CL SessionsToExpiry counts on the verified energy calendar (" + clSess + ")");
 		string evTest = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_EventCalendarTest.Strategy.CS")));
 		string step = File.ReadAllText(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_CustomSignal.Strategy.CS")));
 		int stepAt = step.IndexOf("private void stepEvent()", StringComparison.Ordinal);
@@ -600,7 +604,7 @@ static class Program
 		var stk = InstrumentProfile.Build(In("SPY", EAssetClass.Stock, "SPY", 1, 100, 1), null, null);
 		Check(stk.calendar == ECalendar.Nyse && stk.presetId == null && stk.sizingUnit == ESizingUnit.Shares && stk.expiry == null && stk.roll == null && !stk.cost.known && stk.costFloorTicks == -1, "T8 SPY: Nyse, no preset, Shares, cost Unknown");
 		var cl2 = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null);
-		Check(cl2.calendar == ECalendar.NyseStandIn && cl2.isBusinessDay != null && cl2.roll == ERollRule.BusinessDaysBeforeExpiry && cl2.rollDays == 2 && MonthMask.Text(cl2.contractMonths) == "FGHJKMNQUVXZ", "T8 CL preset");
+		Check(cl2.calendar == ECalendar.CmeEnergy && cl2.isBusinessDay != null && cl2.roll == ERollRule.BusinessDaysBeforeExpiry && cl2.rollDays == 2 && MonthMask.Text(cl2.contractMonths) == "FGHJKMNQUVXZ", "T8 CL preset");
 		foreach (var row in InstrumentPresets.Rows) Check(row.Validate() == null, "T8 preset row valid " + row.root + " " + row.Validate());
 		Check(new InstrumentPresetRow("es", EAssetClass.Future, 0, 50, "EUR", 0, EExpiryRule.ThirdFridaySoq, ERollRule.None, -1, ECalendar.None, "", "", null).Validate() != null, "T8 bad preset row rejected");
 	}
@@ -701,18 +705,18 @@ static class Program
 			&& line.Contains(" dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(09:30-16:15 src=EquityIndexLegacy) tick(0.25) bpv(50) tickValue(12.5) ccy(USD) bvo(Volume) calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + a.ProfileHash() + ")"), "T13 INSTR line: " + line);
 		Check(!line.Contains("stand-in"), "T13 ES line has no stand-in note");
 		var clLine = InstrumentProfile.Build(In("@CL", EAssetClass.Future, "CL", 1, 100, 1000), null, null).WithSessions(g, g, FB, null).InstrLine(1, "Future", "Exchange", "Volume");
-		Check(clLine.Contains(" calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(FGHJKMNQUVXZ) expiry(CL25thMinus3Bd) roll(BusinessDaysBeforeExpiry(2))"), "T13 CL INSTR line names the NYSE stand-in: " + clLine);
+		Check(clLine.Contains(" calendar(CmeEnergy) months(FGHJKMNQUVXZ) expiry(CL25thMinus3Bd) roll(BusinessDaysBeforeExpiry(2))"), "T13 CL INSTR line names the energy calendar: " + clLine);
 		var sixLine = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null).InstrLine(1, "Future", "Exchange", "Volume");
-		Check(sixLine.Contains("calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8))") && sixLine.Contains("roll(BusinessDaysBeforeExpiry(5))"), "T13 6E INSTR line: " + sixLine);
+		Check(sixLine.Contains("calendar(CmeFx)") && sixLine.Contains("roll(BusinessDaysBeforeExpiry(5))") && !sixLine.Contains("pending M8"), "T13 6E INSTR line: " + sixLine);
 		Console.WriteLine("ES GLOBEX profileHash " + a.ProfileHash());
 		// PR-M3 review: literal pins (computed-only checks missed the runtime-dependent "R" text). Canon uses G15 / preset values, so
 		// the same hashes come out of MC (.NET Framework) and the box tools (.NET 8).
 		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null);
 		Console.WriteLine("6E GLOBEX profileHash " + six.ProfileHash());
 		Check(a.ProfileHash() == "020deca78d6392b7", "T13 ES GLOBEX profileHash pinned: " + a.ProfileHash());
-		Check(six.ProfileHash() == "8e8b3e9b0e230e12", "T13 6E GLOBEX profileHash pinned: " + six.ProfileHash());
+		Check(six.ProfileHash() == "d60dd6584c2159e9", "T13 6E GLOBEX profileHash pinned: " + six.ProfileHash());
 		Check(six.Canon().Contains(";tick=5E-05;bpv=125000;ccy=USD;"), "T13 6E Canon carries the preset tick / bpv: " + six.Canon());
-		Check(sixLine == "INSTR ds(1) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15) xsessions(Central Standard Time n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15; rth none) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(none src=None) tick(5E-05) bpv(125000) tickValue(6.25) ccy(USD) bvo(Volume) calendar(NyseStandIn; calendar: NYSE stand-in (CME calendar pending M8)) months(HMUZ) expiry(ThirdWedMinus2Bd) roll(BusinessDaysBeforeExpiry(5)) cost(Unknown) floor(Unknown src=no-cost) cluster(FX_EUR) profileHash(8e8b3e9b0e230e12)", "T13 6E INSTR line pinned in full: " + sixLine);
+		Check(sixLine == "INSTR ds(1) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) exch(CME) tz(Exchange) sessionName(test) sessions(n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15) xsessions(Central Standard Time n=9 Sun 17:00→Mon 15:15; Mon 15:30→Mon 16:30; Mon 17:00→Tue 15:15; Tue 15:30→Tue 16:30; Tue 17:00→Wed 15:15; Wed 15:30→Wed 16:30; Wed 17:00→Thu 15:15; Thu 15:30→Thu 16:30; Thu 17:00→Fri 15:15; rth none) dayKey(SessionEnd) dayOpen(17:00) sessionEnd(16:30) overnight(yes) rth(none src=None) tick(5E-05) bpv(125000) tickValue(6.25) ccy(USD) bvo(Volume) calendar(CmeFx) months(HMUZ) expiry(ThirdWedMinus2Bd) roll(BusinessDaysBeforeExpiry(5)) cost(Unknown) floor(Unknown src=no-cost) cluster(FX_EUR) profileHash(d60dd6584c2159e9)", "T13 6E INSTR line pinned in full: " + sixLine);
 	}
 
 	// ---------------------------------------------------------------- MI-T16 R14 session ends
@@ -779,7 +783,7 @@ static class Program
 			+ "calendar(CmeEquityIndex) months(HMUZ) expiry(ThirdFridaySoq) roll(EquityIndexCustomary) cost(17.00 src=Ettienne 2026-10-31) floor(14) cluster(EQIDX) profileHash(" + es.ProfileHash() + ")";
 		Check(inv[0] == pin, "T12 ES INSTR line pinned: " + inv[0]);
 		Check(InstrumentText.Sessions(g).StartsWith("n=9 Sun 17:00→Mon 15:15; ", StringComparison.Ordinal), "T12 sessions text");
-		Check(inv[1].StartsWith("INSTR ds(2) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) ", StringComparison.Ordinal) && inv[1].Contains(" bpv(125000) ") && inv[1].Contains(" ccy(USD) bvo(Volume) calendar(NyseStandIn; ")
+		Check(inv[1].StartsWith("INSTR ds(2) name(@6E) cat(Future) class(Future) root(6E rootSrc=mc) preset(6E) ", StringComparison.Ordinal) && inv[1].Contains(" bpv(125000) ") && inv[1].Contains(" ccy(USD) bvo(Volume) calendar(CmeFx) ")
 			&& inv[1].Contains("roll(BusinessDaysBeforeExpiry(5))"), "T12 6E INSTR line: " + inv[1]);
 		Check(inv[2] == " profileHash(1=" + es.ProfileHash() + ";2=" + InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null).ProfileHash() + ")", "T12 RUN suffix: " + inv[2]);
 		Check(inv[3] == "" && inv[4] == "", "T12 clean ES/6E run: no Warning, no Error [" + inv[3] + "][" + inv[4] + "]");
@@ -923,7 +927,7 @@ static class Program
 		var local = InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, FB, null);
 		var utc = InstrumentProfile.Build(Zoned(six, TimeZoneInfo.Utc, "GMT"), null, null).WithSessions(gmt, gmt, FB, null);
 		Console.WriteLine("D2 6E Default profileHash exchange " + exch.ProfileHash() + " local " + local.ProfileHash() + " gmt " + utc.ProfileHash());
-		Check(exch.ProfileHash() == "55576df6a8a99c05", "D2 6E Default on an Exchange-tz chart = MC 55576df6a8a99c05 (" + exch.ProfileHash() + ")");
+		Check(exch.ProfileHash() == "adf60a3179735f02", "D2 6E Default on an Exchange-tz chart = MC adf60a3179735f02 (" + exch.ProfileHash() + ")");
 		Check(local.ProfileHash() == exch.ProfileHash() && local.Canon() == exch.Canon(), "D2 6E Default in Local ET (18:00→17:00) hashes as the Exchange CT list (" + local.ProfileHash() + ")");
 		Check(utc.ProfileHash() == exch.ProfileHash(), "D2 6E Default on a GMT bar zone (January week) hashes the same (GMT in MC: VERIFY)");
 		Check(InstrumentText.Sessions(local.sessions) == InstrumentText.Sessions(et) && local.InstrLine(1, "Future", "Local", "TickCount").Contains(" dayOpen(18:00) sessionEnd(17:00) "),
@@ -933,9 +937,9 @@ static class Program
 		string ll = local.InstrLine(1, "Future", "Local→America/New_York", "TickCount");
 		Check(ll.Contains(" sessions(" + InstrumentText.Sessions(et) + ") xsessions(Central Standard Time " + InstrumentText.Sessions(ct) + "; rth none) dayKey("),
 			"D2 INSTR keeps sessions(…) in bar time and adds xsessions(<exchange zone> …; rth …): " + ll);
-		// the bar-time hash of M3 (the PT Local evidence 9523b25025f9ed5b) is what D2 removes
+		// the bar-time hash of M3 (the PT Local evidence ac8bbad6890f1214) is what D2 removes
 		var m3Local = InstrumentProfile.Build(six, null, null).WithSessions(et, et, FB, null);   // ET list declared as exchange time = M3's bar-time canon
-		Check(m3Local.ProfileHash() == "9523b25025f9ed5b", "D2 evidence: the ET list hashed as is = PT Local 9523b25025f9ed5b (" + m3Local.ProfileHash() + ")");
+		Check(m3Local.ProfileHash() == "ac8bbad6890f1214", "D2 evidence: the ET list hashed as is = PT Local ac8bbad6890f1214 (" + m3Local.ProfileHash() + ")");
 
 		// ES Default (Sun–Thu 17:00→16:00 CT, EquityIndexLegacy rth): 6cff053d1b215324 on either zone
 		var es = In("@ES", EAssetClass.Future, "ES", 25, 100, 50);
@@ -990,7 +994,7 @@ static class Program
 		Check(InstrumentText.Sessions(InstrumentSessions.ToExchange(et, ET, CT, summer, sub, null)) == InstrumentText.Sessions(ct), "D2 summer week: ET 18:00→17:00 = CT 17:00→16:00");
 		var sLocal = InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, summer, null);
 		var sGmt = InstrumentProfile.Build(Zoned(six, TimeZoneInfo.Utc, "GMT"), null, null).WithSessions(gmtSummer, gmtSummer, summer, null);
-		Check(sLocal.ProfileHash() == "55576df6a8a99c05" && sGmt.ProfileHash() == "55576df6a8a99c05", "D2 summer week: 6E Default in Local ET and GMT 22:00→21:00 keep 55576df6a8a99c05 (" + sLocal.ProfileHash() + ", " + sGmt.ProfileHash() + ")");
+		Check(sLocal.ProfileHash() == "adf60a3179735f02" && sGmt.ProfileHash() == "adf60a3179735f02", "D2 summer week: 6E Default in Local ET and GMT 22:00→21:00 keep adf60a3179735f02 (" + sLocal.ProfileHash() + ", " + sGmt.ProfileHash() + ")");
 		string wInSummer = InstrumentText.Sessions(InstrumentSessions.ToExchange(gmtWinter, TimeZoneInfo.Utc, CT, summer, sub, null));
 		Check(wInSummer == InstrumentText.Sessions(Week5(18, 17)), "D2 summer week: the January GMT list (23:00→22:00) is CT 18:00→17:00 in July (UTC offsets move): " + wInSummer);
 
@@ -1006,7 +1010,7 @@ static class Program
 		var spCt = InstrumentSessions.ToExchange(new[] { new S(DayOfWeek.Sunday, new TimeSpan(2, 0, 0), DayOfWeek.Sunday, new TimeSpan(2, 30, 0)) }, ET, CT, spring, sub, null);
 		Check(hm(spCt[0]) == "Sunday 01:00-Sunday 01:30", "D2 spring-forward gap ET→CT = 01:00-01:30 CST: " + hm(spCt[0]));
 		// the regular 6E Default week across the switch still hashes as MC (Sun 18:00 is after the 02:00 switch)
-		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, spring, null).ProfileHash() == "55576df6a8a99c05", "D2 spring-forward week: 6E Default Local ET keeps 55576df6a8a99c05");
+		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, spring, null).ProfileHash() == "adf60a3179735f02", "D2 spring-forward week: 6E Default Local ET keeps adf60a3179735f02");
 
 		// fall back, week of Sun 2026-11-01: 01:00-02:00 ET happens twice; .NET ConvertTime reads an ambiguous time as standard
 		// time (EST, UTC-5): 00:30 EDT → 04:30 UTC, 01:30 (ambiguous) → 06:30 UTC (not 05:30), 02:00 EST → 07:00 UTC
@@ -1017,7 +1021,7 @@ static class Program
 		Check(ET.IsAmbiguousTime(new DateTime(2026, 11, 1, 1, 30, 0)), "D2 fall-back: Sun 2026-11-01 01:30 ET is ambiguous");
 		Check(hm(fb[0]) == "Sunday 04:30-Sunday 06:30", "D2 fall-back boundary: Sun 00:30 EDT-01:30 (ambiguous, read as EST) = 04:30-06:30 UTC: " + hm(fb[0]));
 		Check(hm(fb[1]) == "Sunday 06:30-Sunday 07:00", "D2 fall-back ambiguous start: Sun 01:30 (EST)-02:00 EST = 06:30-07:00 UTC: " + hm(fb[1]));
-		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, fall, null).ProfileHash() == "55576df6a8a99c05", "D2 fall-back week: 6E Default Local ET keeps 55576df6a8a99c05");
+		Check(InstrumentProfile.Build(Zoned(six, ET, "Local"), null, null).WithSessions(et, et, fall, null).ProfileHash() == "adf60a3179735f02", "D2 fall-back week: 6E Default Local ET keeps adf60a3179735f02");
 	}
 
 	static void M6aWindow()
@@ -1068,10 +1072,10 @@ static class Program
 		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
 		var six = InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(g, g, FB, null);
 		Check(es.cluster == "EQIDX" && es.ProfileHash() == "020deca78d6392b7", "M6f ES cluster and pin " + es.ProfileHash());
-		Check(six.cluster == "FX_EUR" && six.ProfileHash() == "8e8b3e9b0e230e12", "M6f 6E cluster and pin " + six.ProfileHash());
+		Check(six.cluster == "FX_EUR" && six.ProfileHash() == "d60dd6584c2159e9", "M6f 6E cluster and pin " + six.ProfileHash());
 		S[] ct = Week5(17, 16);
 		Check(InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(ct, ct, FB, null).ProfileHash() == "6cff053d1b215324", "M6f ES Default pin");
-		Check(InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(ct, ct, FB, null).ProfileHash() == "55576df6a8a99c05", "M6f 6E Default pin");
+		Check(InstrumentProfile.Build(In("@6E", EAssetClass.Future, "6E", 5, 99999.999999999985, 125000), null, null).WithSessions(ct, ct, FB, null).ProfileHash() == "adf60a3179735f02", "M6f 6E Default pin");
 		var esRow = InstrumentPresets.Find("ES", EAssetClass.Future);
 		var dates = new List<DateTime>();
 		for (int y = 2000; y <= 2035; y++) for (int m = 3; m <= 12; m += 3) dates.Add(InstrumentRules.Roll(esRow, y, m, EventRules.IsNyseBusinessDay, RS, null).Value);

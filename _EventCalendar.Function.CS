@@ -1150,8 +1150,11 @@ namespace PowerLanguage.Function
 		/// <summary>Default EquityIndex: static quarter (EventTests, InstrumentConfig off, ES/MES/NQ/MNQ). Profile: bound contract.
 		/// Unavailable: profile on, no roll facts. Set before the first Step/Classify (the year cache is not rebuilt).</summary>
 		public EOwnContractSource ownSource = EOwnContractSource.EquityIndex;
-		/// <summary>False → SessionsToExpiry refuses (S4) after the own-contract query is allowed. NyseStandIn is not a verified holiday calendar.</summary>
+		/// <summary>False → SessionsToExpiry refuses (S4) after the own-contract query is allowed. NyseStandIn is not a verified holiday calendar.
+		/// A CME product calendar (rates, FX, energy, metals) is verified for 2016–2026.</summary>
 		public bool contractCalendarVerified = true;
+		/// <summary>M8. When set, a weekday counts toward SessionsToExpiry when this returns true. Null keeps the equity-index Globex clock.</summary>
+		public Func<DateTime, bool> countsAsSession;
 		/// <summary>Host logs the Error line and throws. Called when a session count needs a verified calendar.</summary>
 		public Action<string> contractRefuse;
 		/// <summary>Host logs the Error line and throws InstrumentException for an explicit own-expiry/roll query that is not Evaluated.</summary>
@@ -2070,7 +2073,12 @@ namespace PowerLanguage.Function
 				throw new InvalidOperationException(msg);
 			}
 			int n = 0;
-			for (DateTime d = day.AddDays(1); d <= exp.Date; d = d.AddDays(1)) if (d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday && !m_clock.IsGlobexClosedDay(d)) ++n;
+			for (DateTime d = day.AddDays(1); d <= exp.Date; d = d.AddDays(1))
+			{
+				if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+				bool open = countsAsSession != null ? countsAsSession(d) : !m_clock.IsGlobexClosedDay(d);
+				if (open) ++n;
+			}
 			return n;
 		}
 		public int SessionsToExpiry() { return SessionsToExpiry(m_day); }

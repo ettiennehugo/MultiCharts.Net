@@ -10,9 +10,9 @@ namespace PowerLanguage.Strategy
 	/// (the roll mode wants 2016-2024). Apply this strategy; set TraceLevel to Journal (smoke), Info (probe) or Journal (roll: EVROLL lines
 	/// need Info, the VPF-4 roll splice lines with RollSpliceDiag need Journal).
 	///
-	/// SMOKE AND NyseStandIn (M5, S4): mode 0 calls SessionsToExpiry once per trading day, at Info only. _CustomSignal.stepEvent does
-	/// not call it, so other strategies do not stop for that reason. On CL/GC/ZN/6E the profile calendar is the NYSE stand-in, which
-	/// is not a verified holiday calendar, so that call logs an Error line and throws. That stop is intentional. Do not catch it.
+	/// SMOKE AND NyseStandIn (M5, S4; M8 product tables): mode 0 calls SessionsToExpiry once per trading day, at Info only. _CustomSignal.stepEvent does
+	/// not call it, so other strategies do not stop for that reason. CL/GC/ZN/6E use the verified CME product calendars for 2016–2026 and that
+	/// call counts. NyseStandIn is still not a verified holiday calendar, so a profile left on it logs an Error line and throws. Do not catch it.
 	/// A symbol with no roll facts (a stock, or a future with no preset) also stops that explicit call (unknown-field:roll). Step and
 	/// Classify do not. Supported smoke, probe, and the equity-index splice check are the ES/NQ chart this header names. Mode 1 and
 	/// mode 2 do not call SessionsToExpiry.

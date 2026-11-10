@@ -31,7 +31,7 @@ namespace PowerLanguage.Function
 
 	/// <summary>§5.1 holiday / early-close calendar (no session times). NyseStandIn: the NYSE holiday calendar as an explicit stand-in for a CME product calendar (CL/GC/ZN/6E until PR-M8;
 	/// Ettienne 2026-11-04). Observed / None carry no business-day calendar: expiry / roll rules refuse with 'calendar'.</summary>
-	public enum ECalendar { CmeEquityIndex, Nyse, NyseStandIn, Observed, None }
+	public enum ECalendar { CmeEquityIndex, Nyse, NyseStandIn, Observed, None, CmeRates, CmeFx, CmeEnergy, CmeMetals }
 
 	/// <summary>§8.2 expiry rules (contract month m of year y).</summary>
 	public enum EExpiryRule { ThirdFridaySoq, CL25thMinus3Bd, ThirdLastBd, LastBdMinus7Bd, ThirdWedMinus2Bd }
@@ -134,7 +134,18 @@ namespace PowerLanguage.Function
 		}
 		public static string CalendarName(ECalendar c)
 		{
-			switch (c) { case ECalendar.CmeEquityIndex: return "CmeEquityIndex"; case ECalendar.Nyse: return "Nyse"; case ECalendar.NyseStandIn: return "NyseStandIn"; case ECalendar.Observed: return "Observed"; default: return "None"; }
+			switch (c)
+			{
+				case ECalendar.CmeEquityIndex: return "CmeEquityIndex";
+				case ECalendar.Nyse: return "Nyse";
+				case ECalendar.NyseStandIn: return "NyseStandIn";
+				case ECalendar.Observed: return "Observed";
+				case ECalendar.CmeRates: return "CmeRates";
+				case ECalendar.CmeFx: return "CmeFx";
+				case ECalendar.CmeEnergy: return "CmeEnergy";
+				case ECalendar.CmeMetals: return "CmeMetals";
+				default: return "None";
+			}
 		}
 		public static string ExpiryName(EExpiryRule r)
 		{
@@ -244,15 +255,15 @@ namespace PowerLanguage.Function
 				"CME Micro FAQ", "VERIFY roll vs vendor splice"),
 			new InstrumentPresetRow("MNQ", EAssetClass.Future, 0.25, 2, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdFridaySoq, ERollRule.EquityIndexCustomary, 0, ECalendar.CmeEquityIndex, "EQIDX",
 				"CME Micro FAQ", "VERIFY roll as NQ"),
-			new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, ECalendar.NyseStandIn, "ENERGY",
-				"CME CL specs; CME clearing notice chadv25-391 (CLF26 LTD 2025-12-19)", "VERIFY roll vs vendor splice; " + InstrumentCalendars.NyseStandInNote),
-			new InstrumentPresetRow("GC", EAssetClass.Future, 0.10, 100, "USD", MonthMask.Of("GJMQVZ"), EExpiryRule.ThirdLastBd, ERollRule.BeforeFirstNotice, 1, ECalendar.NyseStandIn, "METALS",
-				"CME GC specs; CME GC fact card", "VERIFY roll (first notice = last business day of the prior month); " + InstrumentCalendars.NyseStandInNote),
-			new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of(Eq), EExpiryRule.LastBdMinus7Bd, ERollRule.BeforeFirstNotice, 1, ECalendar.NyseStandIn, "RATES",
-				"CME ZN specs; Barchart (ZNZ25 LTD 2025-12-19, FND 2025-11-28)", "VERIFY bigPointValue (not dumped); " + InstrumentCalendars.NyseStandInNote),
-			new InstrumentPresetRow("6E", EAssetClass.Future, 0.00005, 125000, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdWedMinus2Bd, ERollRule.BusinessDaysBeforeExpiry, 5, ECalendar.NyseStandIn, "FX_EUR",
+			new InstrumentPresetRow("CL", EAssetClass.Future, 0.01, 1000, "USD", MonthMask.All, EExpiryRule.CL25thMinus3Bd, ERollRule.BusinessDaysBeforeExpiry, 2, ECalendar.CmeEnergy, "ENERGY",
+				"CME CL specs; CME clearing notice chadv25-391 (CLF26 LTD 2025-12-19)", "VERIFY roll vs vendor splice"),
+			new InstrumentPresetRow("GC", EAssetClass.Future, 0.10, 100, "USD", MonthMask.Of("GJMQVZ"), EExpiryRule.ThirdLastBd, ERollRule.BeforeFirstNotice, 1, ECalendar.CmeMetals, "METALS",
+				"CME GC specs; CME GC fact card", "VERIFY roll (first notice = last business day of the prior month)"),
+			new InstrumentPresetRow("ZN", EAssetClass.Future, 0.015625, 1000, "USD", MonthMask.Of(Eq), EExpiryRule.LastBdMinus7Bd, ERollRule.BeforeFirstNotice, 1, ECalendar.CmeRates, "RATES",
+				"CME ZN specs; Barchart (ZNZ25 LTD 2025-12-19, FND 2025-11-28)", "VERIFY bigPointValue (not dumped)"),
+			new InstrumentPresetRow("6E", EAssetClass.Future, 0.00005, 125000, "USD", MonthMask.Of(Eq), EExpiryRule.ThirdWedMinus2Bd, ERollRule.BusinessDaysBeforeExpiry, 5, ECalendar.CmeFx, "FX_EUR",
 				"CME 6E specs; CME Rulebook ch. 261 / rule 26101.G; bpv CONFIRMED 01M6HTKV3SV1Q5QDXBFTCH8D3K.txt; roll 5 business days (~1 week) before expiry (Ettienne 2026-11-04)",
-				InstrumentCalendars.NyseStandInNote),
+				null),
 		};
 
 		public static IList<InstrumentPresetRow> Rows { get { return Array.AsReadOnly(s_rows); } }
@@ -493,17 +504,49 @@ namespace PowerLanguage.Function
 		}
 	}
 
-	/// <summary>Business-day calendars for the expiry / roll rules. Reuses the repo's NYSE calendar (EventRules.IsNyseBusinessDay over
-	/// _NyseHolidays.Rules); no second holiday table. CmeEquityIndex = the NYSE days EventRules already uses for ES expiry / roll.</summary>
+	/// <summary>Business-day calendars for the expiry / roll rules. CmeEquityIndex and NyseStandIn still use NYSE days
+	/// (EventRules.IsNyseBusinessDay): equity-index expiry stays on that calendar, and NyseStandIn remains only for an override.
+	/// CmeRates / CmeFx / CmeEnergy / CmeMetals use the 2016–2026 product table: a weekday that is not a full Globex close.
+	/// A date outside that range refuses calendar (Error line when a sink is passed).</summary>
 	public static class InstrumentCalendars
 	{
 		public const string NyseStandInNote = "calendar: NYSE stand-in (CME calendar pending M8)";
+		public static bool IsProduct(ECalendar c)
+		{
+			return c == ECalendar.CmeRates || c == ECalendar.CmeFx || c == ECalendar.CmeEnergy || c == ECalendar.CmeMetals;
+		}
+		public static _CmeHolidays.Rules.Product.EGroup ProductGroup(ECalendar c)
+		{
+			switch (c)
+			{
+				case ECalendar.CmeRates: return _CmeHolidays.Rules.Product.EGroup.Rates;
+				case ECalendar.CmeFx: return _CmeHolidays.Rules.Product.EGroup.Fx;
+				case ECalendar.CmeEnergy: return _CmeHolidays.Rules.Product.EGroup.Energy;
+				default: return _CmeHolidays.Rules.Product.EGroup.Metals;
+			}
+		}
 		/// <summary>The calendar's business-day test; null when none is assigned (Observed / None).</summary>
 		public static Func<DateTime, bool> BusinessDay(ECalendar c)
+		{
+			return ProductOrNyse(c, false, new InstrumentSubject("CAL", "", EAssetClass.Future, "?", ""), null);
+		}
+		static Func<DateTime, bool> ProductOrNyse(ECalendar c, bool hasSubject, InstrumentSubject s, Action<string> errorSink)
 		{
 			switch (c)
 			{
 				case ECalendar.CmeEquityIndex: case ECalendar.Nyse: case ECalendar.NyseStandIn: return EventRules.IsNyseBusinessDay;
+				case ECalendar.CmeRates: case ECalendar.CmeFx: case ECalendar.CmeEnergy: case ECalendar.CmeMetals:
+					var g = ProductGroup(c);
+					var sub = hasSubject ? s : new InstrumentSubject("CAL", "", EAssetClass.Future, "?", "");
+					return d =>
+					{
+						if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) return false;
+						if (!_CmeHolidays.Rules.Product.Covers(d))
+							InstrumentError.Fail(errorSink, sub, InstrumentReason.Calendar,
+								"date " + d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " is outside the verified CME product calendar 2016-2026",
+								"the table covers 2016-01-01 through 2026-12-31");
+						return !_CmeHolidays.Rules.Product.Of(d, g).Closed;
+					};
 				default: return null;
 			}
 		}
@@ -512,7 +555,7 @@ namespace PowerLanguage.Function
 		/// <summary>BusinessDay(c), required: no calendar assigned → Error line, then throw 'calendar' (R6 / §6.4 S4).</summary>
 		public static Func<DateTime, bool> Require(ECalendar c, InstrumentSubject s, Action<string> errorSink)
 		{
-			Func<DateTime, bool> bd = BusinessDay(c);
+			Func<DateTime, bool> bd = ProductOrNyse(c, true, s, errorSink);
 			if (bd == null) InstrumentError.Fail(errorSink, s, InstrumentReason.Calendar, "no business-day calendar assigned (calendar " + InstrumentText.CalendarName(c) + ") for the expiry/roll rules", "assign a calendar to the preset");
 			return bd;
 		}

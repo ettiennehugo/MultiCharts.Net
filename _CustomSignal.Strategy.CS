@@ -1260,8 +1260,21 @@ namespace PowerLanguage.Strategy
 				roll = r ?? expiry;
 				return r.HasValue;
 			};
-			e.contractCalendarVerified = p.calendar == ECalendar.CmeEquityIndex;
-			if (!e.contractCalendarVerified)
+			bool product = InstrumentCalendars.IsProduct(p.calendar);
+			e.contractCalendarVerified = p.calendar == ECalendar.CmeEquityIndex || product;
+			if (product)
+			{
+				var g = InstrumentCalendars.ProductGroup(p.calendar);
+				e.countsAsSession = delegate (DateTime d)
+				{
+					if (!_CmeHolidays.Rules.Product.Covers(d))
+						InstrumentError.Fail(err, sub, InstrumentReason.Calendar,
+							"date " + d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + " is outside the verified CME product calendar 2016-2026",
+							"the table covers 2016-01-01 through 2026-12-31");
+					return !_CmeHolidays.Rules.Product.Of(d, g).Closed;
+				};
+			}
+			else if (!e.contractCalendarVerified)
 			{
 				e.contractRefuse = delegate (string _)
 				{

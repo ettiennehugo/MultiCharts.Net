@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 using Nyse = Extracted.Nyse.Rules;
 using Cme = Extracted.Cme.Rules;
 
@@ -66,8 +68,8 @@ static class Program
 		NyseHoliday(D(2022, 12, 26), true); NyseHoliday(D(2023, 1, 2), true); NyseHoliday(D(2017, 1, 2), true);
 		// New Year on Saturday (2022): NYSE and CME open on Fri 31 Dec 2021
 		NyseHoliday(D(2021, 12, 31), false); Normal(D(2021, 12, 31));
-		// Christmas on Saturday (2021): NYSE closed Fri 24 Dec; CME no RTH, 13:15 ET halt
-		NyseHoliday(D(2021, 12, 24), true); Halt(D(2021, 12, 24), H1315);
+		// Christmas on Saturday (2021): NYSE closed Fri 24 Dec; Globex fully closed (M8; was a 13:15 ET halt)
+		NyseHoliday(D(2021, 12, 24), true); Closed(D(2021, 12, 24));
 		// July 4 on Saturday (2020, 2026) -> Friday; on Sunday (2021) -> Monday
 		NyseHoliday(D(2020, 7, 3), true); Halt(D(2020, 7, 3), H1300);
 		NyseHoliday(D(2026, 7, 3), true); Halt(D(2026, 7, 3), H1300);
@@ -128,7 +130,58 @@ static class Program
 			Check(now.SetEquals(OldNyse(y)), "NYSE rules changed vs old implementation in " + y);
 		}
 
+		ProductRows();
+
 		Console.WriteLine("calendar tests: " + s_pass + " passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
+	}
+
+	// M8: every product-group row in Analyst's table. The test interprets the token; it does not trust Of() to echo Code().
+	static void ProductRows()
+	{
+		using (var sha = SHA256.Create())
+		{
+			var hex = new StringBuilder();
+			foreach (byte b in sha.ComputeHash(Encoding.UTF8.GetBytes(Cme.Product.Table))) hex.Append(b.ToString("x2"));
+			Check(hex.ToString() == Cme.Product.TableSha256 && Cme.Product.Rows == 128, "M8 table sha and 128 dates (" + hex + " rows " + Cme.Product.Rows + ")");
+		}
+		int n = 0;
+		foreach (string line in Cme.Product.Table.Split(';'))
+		{
+			string[] p = line.Split(' ');
+			string[] ymd = p[0].Split('-');
+			var d = new DateTime(2000 + int.Parse(ymd[0]), int.Parse(ymd[1]), int.Parse(ymd[2]));
+			Check(Cme.Product.Confidence(d) == p[2][0], "M8 confidence " + d.ToString("yyyy-MM-dd"));
+			bool prov = d == D(2026, 11, 26) || d == D(2026, 11, 27) || d == D(2026, 12, 24);
+			Check(Cme.Product.Provisional(d) == prov, "M8 provisional " + d.ToString("yyyy-MM-dd"));
+			for (int g = 1; g <= 4; g++)
+			{
+				var group = (Cme.Product.EGroup)g;
+				string token = p[3 + g];
+				var day = Cme.Product.Of(d, group);
+				Check(Cme.Product.Code(d, group) == token && TokenMatches(day, token, prov),
+					"M8 " + group + " " + d.ToString("yyyy-MM-dd") + " " + token + " got " + Describe(day));
+				n++;
+			}
+		}
+		Check(n == 512, "M8 128 dates x 4 groups (" + n + ")");
+		Check(!Cme.Product.Of(D(2016, 1, 4), Cme.Product.EGroup.Energy).Closed && Cme.Product.Code(D(2016, 1, 4), Cme.Product.EGroup.Fx) == "N",
+			"M8 a weekday that is not in the table is a normal day");
+		Check(!Cme.Product.IsBusinessDay(D(2016, 1, 1), Cme.Product.EGroup.Energy) && Cme.Product.IsBusinessDay(D(2016, 1, 18), Cme.Product.EGroup.Energy),
+			"M8 a full close is not a business day; a halt day is");
+		Check(Cme.Product.Of(D(2018, 12, 5), Cme.Product.EGroup.Rates).Closed && !Cme.Product.Of(D(2018, 12, 5), Cme.Product.EGroup.Energy).Closed,
+			"M8 2018-12-05 rates closed, energy open");
+	}
+
+	static bool TokenMatches(Cme.Day day, string token, bool provisional)
+	{
+		if (provisional && (day.Name == null || day.Name.IndexOf("provisional", StringComparison.Ordinal) < 0) && token != "N" && token != "X") return false;
+		if (token == "C") return day.Closed && day.NoRth && day.HaltEt == null;
+		if (token == "N" || token == "X") return !day.Closed && !day.NoRth && day.HaltEt == null && day.RthCloseEt == null;
+		int hh = int.Parse(token.Substring(1, 2)), mm = int.Parse(token.Substring(4, 2));
+		var et = new TimeSpan(hh + 1, mm, 0);
+		if (token[0] == 'E') return !day.Closed && !day.NoRth && day.HaltEt == et && day.RthCloseEt == et;
+		if (token[0] == 'F' && (day.Name == null || day.Name.IndexOf("shut until Sunday", StringComparison.Ordinal) < 0)) return false;
+		return !day.Closed && day.NoRth && day.HaltEt == et && day.RthCloseEt == null;
 	}
 }
