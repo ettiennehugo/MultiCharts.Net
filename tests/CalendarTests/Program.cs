@@ -68,8 +68,8 @@ static class Program
 		NyseHoliday(D(2022, 12, 26), true); NyseHoliday(D(2023, 1, 2), true); NyseHoliday(D(2017, 1, 2), true);
 		// New Year on Saturday (2022): NYSE and CME open on Fri 31 Dec 2021
 		NyseHoliday(D(2021, 12, 31), false); Normal(D(2021, 12, 31));
-		// Christmas on Saturday (2021): NYSE closed Fri 24 Dec; CME no RTH, 13:15 ET halt
-		NyseHoliday(D(2021, 12, 24), true); Halt(D(2021, 12, 24), H1315);
+		// Christmas on Saturday (2021): NYSE closed Fri 24 Dec; Globex fully closed (M8; was a 13:15 ET halt)
+		NyseHoliday(D(2021, 12, 24), true); Closed(D(2021, 12, 24));
 		// July 4 on Saturday (2020, 2026) -> Friday; on Sunday (2021) -> Monday
 		NyseHoliday(D(2020, 7, 3), true); Halt(D(2020, 7, 3), H1300);
 		NyseHoliday(D(2026, 7, 3), true); Halt(D(2026, 7, 3), H1300);

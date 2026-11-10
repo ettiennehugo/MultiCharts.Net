@@ -77,7 +77,12 @@ namespace PowerLanguage.Function
 				if (ny.DayOfWeek != DayOfWeek.Saturday && d == SundayToMonday(ny)) return closed("New Year's Day");
 				DateTime xmas = new DateTime(y, 12, 25);
 				if (xmas.DayOfWeek != DayOfWeek.Saturday && d == SundayToMonday(xmas)) return closed("Christmas");
-				if (xmas.DayOfWeek == DayOfWeek.Saturday && d == xmas.AddDays(-1)) return halt("Christmas (observed Fri)", EarlyCloseEt);
+				if (xmas.DayOfWeek == DayOfWeek.Saturday && d == xmas.AddDays(-1))
+				{
+					// M8: the 2021 archive is a full Globex close, not the 12:15 CT halt. Only this date (Ettienne 2026-11-10).
+					if (d.Year == 2021) return closed("Christmas (observed Fri)");
+					return halt("Christmas (observed Fri)", EarlyCloseEt);
+				}
 				DateTime goodFriday = Easter(y).AddDays(-2);
 				if (d == goodFriday)
 					return Array.IndexOf(s_goodFridayOpenYears, y) >= 0 ? halt("Good Friday (abbreviated)", GoodFridayCloseEt) : closed("Good Friday");
