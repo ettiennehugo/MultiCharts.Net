@@ -207,6 +207,18 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 | L8 | `PortfolioCurrency` and `StrategyCurrencyCode` for dxFeed CME symbols | Print both once in MM StartCalc | Values | Both USD | The MM refuses to size (spec rule); fix the symbol currency in QuoteManager |
 | L9 | IBKR symbol-mapping roll in PT live/paper | **See Check 8.** | — | — | — |
 
+**Results (2026-11-10, MC .NET64 16.0, Analyst, EttienneMiniPC).** Backtest unless noted.
+
+- **L1 pass.** No extra lag. `AllowEntries` on an odd MM bar affects that step. The fill is still the next bar's open because the order is `buy next bar market`.
+- **L2 corrected.** In the MM, the value read before any write is **−1** (coded size). `@ES` filled 3. `@NQ` filled 2; that 2 is recorded as a Portfolio Trader capital/exposure cut, not as `EntryContracts`. **Writing 0 blocks every entry.** The old pass line "(b) = 1 (properties size)" is withdrawn.
+- **L3 corrected.** `ForceClosePosition` fills at the **close of bar T**, not the T+1 open. `AllowExits=false` does **not** block the force-close.
+- **L4 verified.** `Paused=true` blocks all fills, including a protective stop price has crossed; the position stayed long. Calculation and stamps continue. One `stampAdvancing(False)` at 2024-11-17 23:57. Backtest only.
+- **L5 pass.** `_PortfolioRiskManager` is in the Money management signal list and runs. No extra attribute was required.
+- **L6 backtest pass.** `sameRef True` on all 5,420 lines. **Live paper run and restart persistence still pending.**
+- **L7 accepted** on `@ES` 1-minute + `@NQ` 5-minute (Check7 L7.pws, two strategies). The MM steps with the faster strategy. **`@CL` is unusable for this check:** dxFeed returned 0 minute bars for Nov 2024, and mixing time zones fails when the portfolio is on Exchange time zone. That is a known MultiCharts limitation, not an MM bug.
+- **L8 pass.** `PortfolioCurrency` and `StrategyCurrencyCode` are USD.
+- **L9 backtest detector only.** `_TestCheck7Roll` fired at **2024-12-16 00:00**, not at the Sunday 18:00 ET session open. Table-only did not set `m_rollGlobexKey` (that flag required Series), so the roll date was matched to the calendar `tradingDayKey`, and 00:00 is the first bar of that date on an Exchange-time chart. **Follow-up:** Table on an intraday futures chart now uses the same Globex re-key as Series when `tradingDayKey` is the calendar date. `_Test6` and `_DvpEngineTest` already key days with the Globex date (`tradingDayKey` override), so `calendarKeyed` is false and their roll bar does not move. G0 is Series, so its key does not move. **Live L9 across the Dec 2026 ES roll is still pending.** The IBKR `@ES` remap (ESZ6 → ESH7) stays manual.
+
 ---
 
 # Check 8: contract roll on an IBKR paper account (L9, Rev 2.7 §E8, MFS §0.3)

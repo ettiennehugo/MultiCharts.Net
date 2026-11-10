@@ -424,7 +424,7 @@ namespace PowerLanguage.Function
 	{
 		public int index;
 		public bool allowEntries, allowLong, allowShort;
-		public int entryContracts = -1;  // ALWAYS applied: -1 = code size (entries denied anyway when allowEntries is false)
+		public int entryContracts = -1;  // ALWAYS applied. Check 7 L2 (MC .NET64 16.0, 2026-11-10): the untouched value is -1 (code size). 0 blocks every entry; it is not the Strategy Properties size.
 		public bool forceClose, pause;
 		public string status = "";
 		public string reason = "";
