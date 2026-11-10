@@ -127,7 +127,11 @@ static class Program
 			var assigns = Regex.Matches(src, @"\bRollDetection\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => m.Groups[1].Value.Trim()).ToList();
 			Check(path != null && assigns.Count == 1 && assigns[0] == "ERollDetection.Table", "_Test6 sets RollDetection = ERollDetection.Table exactly once [" + string.Join(" | ", assigns) + "]");
 			Check(Regex.IsMatch(src, @"override\s+DateTime\s+tradingDayKey\s*\([^)]*\)\s*\{\s*return\s+_CmeSessionClock\.GlobexTradingDayEt\("), "_Test6 tradingDayKey = _CmeSessionClock.GlobexTradingDayEt");
-			Check(Regex.IsMatch(src, @"HostConfig\.rollDetection\s*=\s*RollDetection\.ToString\(\)") && Regex.IsMatch(src, @"HostConfig\.rollDatesDigest\s*=\s*_RollDetector\.DatesDigest\(RollDates\)"), "_Test6 hashes the roll mode and date digest it runs");
+			Check(Regex.IsMatch(src, @"HostConfig\.rollDetection\s*=\s*rollText") && Regex.IsMatch(src, @"RollDetectionText\(RollDetection\)") && !src.Contains("RollDetection.ToString()")
+				&& Regex.IsMatch(src, @"HostConfig\.rollDatesDigest\s*=\s*_RollDetector\.DatesDigest\(RollDates\)")
+				&& Regex.IsMatch(src, @"TradingDayText\(ETradingDayKey\.Globex18ET\)")
+				&& src.Contains("ES only (N2)") && src.Contains("RequireGate0Rth"),
+				"_Test6 hashes explicit roll and day-key spellings, accepts ES only, and checks the frozen window");
 			Check(Regex.IsMatch(src, @"HostConfig\.atrRestartOnRoll\s*=\s*false\s*;") && Regex.IsMatch(src, @"DailyConfig\.atrRestartOnRoll\s*=\s*HostConfig\.atrRestartOnRoll\s*;"), "_Test6 carries ATR20d across rolls (atrRestartOnRoll = false, hashed) - rulings (h)");
 		}
 		// PR #51 review item 2: host-side Globex key in _CustomSignal (no suite compiles it, so a source check like _Test6's).

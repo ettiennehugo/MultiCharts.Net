@@ -68,7 +68,7 @@ namespace PowerLanguage.Strategy
 		private A263Core m_core;
 		private AtrTercileTracker m_terc;
 		private string m_cfgHash;
-		private bool m_headerLogged;
+		private bool m_headerLogged, m_windowChecked;
 		private RegimeGateCounts m_counts;
 
 		public _Test6(object _ctx) : base(_ctx)
@@ -105,12 +105,17 @@ namespace PowerLanguage.Strategy
 			DailyConfig.atrLength = HostConfig.atrLength;
 			DailyConfig.atrRestartOnRoll = HostConfig.atrRestartOnRoll;
 			base.StartCalc();
+			requireEsOnly();
 			if (RollDates.Count == 0)
 				fillProfileRollDates(HostConfig.rollFromYear, HostConfig.rollToYear, "ROLL");
-			// PR #46 review Q1: hash what actually runs
-			HostConfig.rollDetection = RollDetection.ToString();
+			// PR #46 review Q1: hash what actually runs. M6h: explicit spellings, not enum ToString.
+			string rollText = RollDetectionText(RollDetection);
+			if (rollText == null) refuse("roll detection " + (int)RollDetection + " has no hash spelling");
+			HostConfig.rollDetection = rollText;
 			HostConfig.rollDatesDigest = _RollDetector.DatesDigest(RollDates);
-			HostConfig.tradingDay = "Globex18ET";
+			string dayText = RegimeGate.TradingDayText(ETradingDayKey.Globex18ET);
+			if (dayText == null) refuse("trading-day key has no hash spelling");
+			HostConfig.tradingDay = dayText;
 			m_core = new A263Core(HostConfig);
 			m_terc = new AtrTercileTracker(RegimeConfig.atrPctLookback, RegimeConfig.K);
 			m_cfgHash = RegimeGate.Hash(RegimeConfig, RegimeGateConfig, HostConfig);
@@ -118,9 +123,41 @@ namespace PowerLanguage.Strategy
 			m_counts = new RegimeGateCounts();
 		}
 
+		/// <summary>M6h N2. REGGATE is the ES trial. Any other root logs Error, then throws. MES would be a new pre-registration.</summary>
+		void requireEsOnly()
+		{
+			InstrumentProfile p = InstrumentProfileOf(1);
+			string root = p != null && !string.IsNullOrEmpty(p.root) ? p.root : _MtfMath.SymbolRoot(Bars.Info.Name);
+			if (root == "ES") return;
+			string name = p != null && !string.IsNullOrEmpty(p.name) ? p.name : Bars.Info.Name;
+			refuse("cannot run on " + (name ?? "") + " (root " + (string.IsNullOrEmpty(root) ? "?" : root) + "): ES only (N2). MES would be a new trial with its own pre-registration");
+		}
+
+		/// <summary>M6h S3. The frozen 09:30–16:00 ET windows must sit inside the chart sessions. Profiles off is the existing off switch.</summary>
+		void requireReggateWindow()
+		{
+			if (m_windowChecked) return;
+			InstrumentProfile p = InstrumentProfileOf(1);
+			if (p == null) { m_windowChecked = true; return; }
+			if (p.sessions == null || p.barZone == null) return;
+			m_windowChecked = true;
+			TimeZoneInfo et = TimeZoneInfo.FindSystemTimeZoneById(Et);
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, p.name, msg);
+			_MtfMath.Session[] etSessions = InstrumentSessions.ToExchange(p.sessions, p.barZone, et, Bars.Time[0], p.Subject("REGGATE"), err);
+			InstrumentSessions.RequireGate0Rth(etSessions, p.Subject("REGGATE"), err);
+		}
+
+		void refuse(string why)
+		{
+			string msg = "M-INSTR: REGGATE " + why + ".";
+			traceAlways(ETraceLevel.Error, Bars.Info.Name, msg);
+			throw new InvalidOperationException(msg);
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
+			requireReggateWindow();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime et = ToZone(Bars.Time[0], Et);
 			_DailyContext daily = DailyContext;

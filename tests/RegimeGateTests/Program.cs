@@ -239,6 +239,8 @@ static class Program
 		Check(RegimeGate.Hash(rc2, gc, new A263Config { atrRestartOnRoll = true }) != u && !new A263Config().atrRestartOnRoll, "hash sensitive to host.atrRestartOnRoll (default false = ATR carried across rolls)");
 		Check(new A263Config().rollDatesDigest == "fdd63bd8f179a8d4" && new A263Config().rollDetection == "Table" && new A263Config().tradingDay == "Globex18ET",
 			"A263Config roll defaults = the Table / Globex build (digest also pinned in EventTests)");
+		Check(RegimeGate.TradingDayText(ETradingDayKey.Globex18ET) == "Globex18ET" && new A263Config().tradingDay == RegimeGate.TradingDayText(ETradingDayKey.Globex18ET),
+			"M6h trading-day hash spelling is Globex18ET");
 		// ruling 5: the hash is over the NAMED prereg field list, not field order or record length
 		var fields = RegimeGate.CanonFields(rc2, gc, new A263Config());
 		var extra = new Dictionary<string, string>(fields); extra["zz.appended"] = "1"; extra["host.futureField"] = "x"; extra["aa.first"] = "2";

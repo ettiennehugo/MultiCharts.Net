@@ -24,6 +24,9 @@ namespace PowerLanguage.Function
 
 	public enum ERegimeGateArm { U = 0, G = 1, A = 2 }
 
+	/// <summary>M6h. The only trading-day key this host hashes is Globex18ET. The spelling is the switch, not enum ToString.</summary>
+	public enum ETradingDayKey { Globex18ET = 0 }
+
 	/// <summary>Gate configuration (no [Input]); set in code. Default arm U.</summary>
 	public sealed class RegimeGateConfig
 	{
@@ -112,6 +115,16 @@ namespace PowerLanguage.Function
 		public const ulong PlaceboSeed = 20261022;          // prereg §4.1
 		public const int ArmAFitSessions = 100000;          // prereg §2.3: never fitted -> AtrTercile fallback every day
 		public const string Version = "A263-RG-2";
+
+		/// <summary>M6h. Hash text for <paramref name="key"/>. Globex18ET is the pinned spelling. An unknown value returns null; the host logs Error, then throws.</summary>
+		public static string TradingDayText(ETradingDayKey key)
+		{
+			switch (key)
+			{
+				case ETradingDayKey.Globex18ET: return "Globex18ET";
+				default: return null;
+			}
+		}
 
 		/// <summary>Prereg §2.1 / §2.3: enabled, publish off; arm A forces fitSessions = minSessions = 100000. Nothing else changes.</summary>
 		public static void ApplyArm(RegimeGateConfig g, RegimeConfig r)
