@@ -6089,7 +6089,7 @@ Turning `ownContract` off does not drop the shared rows. Missing roll facts do n
 `EOwnContractSource` (`InstrumentRules.OwnSource`, set on the engine by the host before the first `Step` or `Classify`):
 
 - Profiles off (`InstrumentConfig.enabled == false`), no profile, or an ES/MES/NQ/MNQ quarterly shape → `EquityIndex`. Dates are the static `EventRules` quarter.
-- Any other profile that has roll facts → `Profile`. Dates are that preset. CL/GC/ZN/6E stay on `NyseStandIn`.
+- Any other profile that has roll facts → `Profile`. Dates are that preset. CL is `CmeEnergy`, GC `CmeMetals`, ZN `CmeRates`, 6E `CmeFx` (M8, 2016–2026). A weekday that is not a full close counts. `NyseStandIn` is no longer the preset.
 - Profiles on and no roll facts (a stock such as AAPL, or a future with no preset such as 6B) → `Unavailable`. The equity-index quarter is not copied in.
 
 `EOwnContractStatus` (`OwnStatus()`, also `EventDay.ownContract`):
@@ -6102,7 +6102,7 @@ Turning `ownContract` off does not drop the shared rows. Missing roll facts do n
 
 Explicit queries throw when status is not `Evaluated`: `ContractRollDate`, `ContractExpiryDate`, `IsRollWeek`, `SessionsToExpiry`, and `InSpan(RollWeek)`. The host logs one Error line and throws `InstrumentException` with reason `unknown-field:roll`. No facts: action `add a preset row / cost for <root>`. Control off or Calendar not selected (and the source is not the no-facts case): action `set EventConfig.ownContract and include Calendar in EventConfig.classes`. If the host callback is unset, the engine still writes its Error sink and throws `InvalidOperationException` with the same reason text.
 
-`SessionsToExpiry` on a bound profile whose calendar is not `CmeEquityIndex` (CL/GC/ZN/6E `NyseStandIn`) still refuses reason `calendar` after the query is allowed, and does not count sessions. That refusal is not a substitute for the no-facts throw. `_EventCalendarTest` mode 0 calls `SessionsToExpiry` at Info once per trading day, so that smoke run stops on those roots and on a no-facts symbol. `stepEvent` does not call it. Modes 1 and 2 do not call it.
+`SessionsToExpiry` on `CmeRates`, `CmeFx`, `CmeEnergy` or `CmeMetals` counts weekdays that are not full closes, for dates in 2016–2026. A date outside that table, and a profile still on `NyseStandIn`, refuses reason `calendar` after the query is allowed and does not count. That refusal is not a substitute for the no-facts throw. `_EventCalendarTest` mode 0 calls `SessionsToExpiry` at Info once per trading day. On ES/NQ it counts. On a root whose calendar is outside the verified table it stops. `stepEvent` does not call it. Modes 1 and 2 do not call it. 2026-11-26, 2026-11-27 and 2026-12-24 are provisional. Pause detection is not in this calendar.
 
 **Year cache.** `ownSource`, `ownContract`, `sharedCalendar`, and `classes` are read when a year is first built. The year cache is not rebuilt. Set them before the first `Step` or `Classify` (the host does this in `StartCalc`, after `Configure`, before the engine is published). Changing them later leaves the already-built years as they were.
 
@@ -6139,7 +6139,7 @@ A bound profile's RollWeek span ends at the midnight after the expiry date (the 
 | `EventsOn(day, mask = All)`, `EventsOnExPost`, `EventsInRange` | Events of a day or range (ExPost = with hindsight, for research only). |
 | `Classify(day)`, `Classify(day, asOfUtc)`, `ClassifyExPost(day)` | The day's `EventDay` summary as known at its session open (or at a chosen instant, or with hindsight). |
 | `OwnStatus()`, `EventDay.ownContract` | `Evaluated`, `Unavailable`, or `NotSelected`. `Step`/`Classify` use this and do not throw. |
-| `ContractRollDate(day)`, `ContractExpiryDate(day)`, `IsRollWeek(day)`, `SessionsToExpiry(day)`, `InSpan(RollWeek, utc)` | Explicit own-contract queries. Throw `unknown-field:roll` (Error line, then `InstrumentException`) when status is not `Evaluated`. `SessionsToExpiry` on NyseStandIn then refuses `calendar` and does not count. |
+| `ContractRollDate(day)`, `ContractExpiryDate(day)`, `IsRollWeek(day)`, `SessionsToExpiry(day)`, `InSpan(RollWeek, utc)` | Explicit own-contract queries. Throw `unknown-field:roll` (Error line, then `InstrumentException`) when status is not `Evaluated`. `SessionsToExpiry` on NyseStandIn, or on a product-calendar date outside 2016–2026, refuses `calendar` and does not count. Inside the table it counts non-closed weekdays. |
 | `IsRollDay()`, `LastT1Instant(out et)` | A splice was seen today. Latest T1 release at or before now. |
 | `RuleRollDate(day)` (static) | Equity-index roll only. Not the bound instrument. `ContractRollDate` is the own-instrument query. |
 | `ToEt`, `TradingDayOf`, `SessionOpenUtc` | Time conversions. |

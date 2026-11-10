@@ -146,6 +146,131 @@ namespace PowerLanguage.Function
 				int month = (h + l - 7 * m + 114) / 31, day = ((h + l - 7 * m + 114) % 31) + 1;
 				return new DateTime(year, month, day);
 			}
+
+			/// <summary>
+			/// M8 product-group rows for 2016-2026 (128 dates). Equity production days stay on <see cref="Get"/>;
+			/// Rates, Fx, Energy and Metals use this table. Times in the tokens are CT; the Day struct stores ET (CT+1h),
+			/// the same convention as HolidayHaltEt. Confidence: A archived CME, S secondary, I inferred.
+			/// The per-row source_url column was not in the file delivered to this workspace. The status, time and
+			/// confidence letters are Analyst's table (SHA-256 86ba5eddbec800186918319f927e656d51e378e90a975e39d612b3f2ce2522aa).
+			/// Class sources: A = CME holiday-calendar archives and notices (Wayback copies of cmegroup.com 2019/2021 zips,
+			/// 2022 MLK xls, Thanksgiving 2023 PDF, SER-8289, SER-9499R, the 2025 day-of-mourning PDF, Good Friday 2026 settlement PDF).
+			/// S = IQFeed, Ironbeam, Paragon, helloweekends, marketcalendars. I = the 2022+ pattern on dates CME had not published.
+			/// 2026-11-26, 2026-11-27 and 2026-12-24 are provisional.
+			/// </summary>
+			public static class Product
+			{
+				public enum EGroup { Equity = 0, Rates = 1, Fx = 2, Energy = 3, Metals = 4 }
+				public const int FirstYear = 2016, LastYear = 2026;
+				public const string TableSha256 = "86ba5eddbec800186918319f927e656d51e378e90a975e39d612b3f2ce2522aa";
+				public static readonly string Table = "16-01-01 NY A C C C C C;16-01-18 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;16-02-15 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;16-03-25 GF A C C C C C;16-05-30 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;16-07-04 J4 A H12:00 H12:00 H12:00 H12:00 H12:00;16-09-05 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;16-11-24 TG A H12:00 H12:00 H12:00 H12:00 H12:00;16-11-25 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;16-12-26 XMo A C C C C C;17-01-02 NYo A C C C C C;17-01-16 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;17-02-20 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;17-04-14 GF A C C C C C;17-05-29 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;17-07-03 J3 A E12:15 N N N N;17-07-04 J4 A H12:00 H12:00 H12:00 H12:00 H12:00;17-09-04 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;17-11-23 TG A H12:00 H12:00 H12:00 H12:00 H12:00;17-11-24 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;17-12-25 XM A C C C C C;18-01-01 NY A C C C C C;18-01-15 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;18-02-19 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;18-03-30 GF A C C C C C;18-05-28 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;18-07-03 J3 A E12:15 N N N N;18-07-04 J4 A H12:00 H12:00 H12:00 H12:00 H12:00;18-09-03 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;18-11-22 TG A H12:00 H12:00 H12:00 H12:00 H12:00;18-11-23 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;18-12-05 BUSH A A08:30 C N N N;18-12-24 XE A E12:15 E12:15 E12:15 E12:45 E12:45;18-12-25 XM A C C C C C;19-01-01 NY A C C C C C;19-01-21 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;19-02-18 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;19-04-19 GF A C C C C C;19-05-27 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;19-07-03 J3 A E12:15 N N N N;19-07-04 J4 A H12:00 H12:00 H12:00 H12:00 H12:00;19-09-02 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;19-11-28 TG A H12:00 H12:00 H12:00 H12:00 H12:00;19-11-29 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;19-12-24 XE A E12:15 E12:15 E12:15 E12:45 E12:45;19-12-25 XM A C C C C C;20-01-01 NY A C C C C C;20-01-20 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;20-02-17 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;20-04-10 GF A C C C C C;20-05-25 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;20-07-03 J4o A F12:00 F12:00 F12:00 F12:00 F12:00;20-09-07 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;20-11-26 TG A H12:00 H12:00 H12:00 H12:00 H12:00;20-11-27 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;20-12-24 XE A E12:15 E12:15 E12:15 E12:45 E12:45;20-12-25 XM A C C C C C;21-01-01 NY A C C C C C;21-01-18 MLK A H12:00 H12:00 H12:00 H12:00 H12:00;21-02-15 PRES A H12:00 H12:00 H12:00 H12:00 H12:00;21-04-02 GF A E08:15 E10:15 E10:15 C C;21-05-31 MEM A H12:00 H12:00 H12:00 H12:00 H12:00;21-07-05 J4o A H12:00 H12:00 H12:00 H12:00 H12:00;21-09-06 LAB A H12:00 H12:00 H12:00 H12:00 H12:00;21-11-25 TG A H12:00 H12:00 H12:00 H12:00 H12:00;21-11-26 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;21-12-24 XMo A C C C C C;22-01-17 MLK A H12:00 H12:00 X H13:30 H13:30;22-02-21 PRES A H12:00 H12:00 X H13:30 H13:30;22-04-15 GF A C C C C C;22-05-30 MEM A H12:00 H12:00 X H13:30 H13:30;22-06-20 JTo A H12:00 H12:00 X H13:30 H13:30;22-07-04 J4 A H12:00 H12:00 X H13:30 H13:30;22-09-05 LAB A H12:00 H12:00 X H13:30 H13:30;22-11-24 TG A H12:00 H12:00 X H13:30 H13:30;22-11-25 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;22-12-26 XMo A C C C C C;23-01-02 NYo A C C C C C;23-01-16 MLK I H12:00 H12:00 X H13:30 H13:30;23-02-20 PRES A H12:00 H12:00 X H13:30 H13:30;23-04-07 GF S E08:15 E10:15 E10:15 C C;23-05-29 MEM A H12:00 H12:00 X H13:30 H13:30;23-06-19 JT A H12:00 H12:00 X H13:30 H13:30;23-07-03 J3 A E12:15 N N N N;23-07-04 J4 A H12:00 H12:00 X H13:30 H13:30;23-09-04 LAB A H12:00 H12:00 X H13:30 H13:30;23-11-23 TG A H12:00 H12:00 X H13:30 H13:30;23-11-24 TG+1 A E12:15 E12:15 E12:15 E12:45 E12:45;23-12-25 XM A C C C C C;24-01-01 NY A C C C C C;24-01-15 MLK S H12:00 H12:00 X H13:30 H13:30;24-02-19 PRES I H12:00 H12:00 X H13:30 H13:30;24-03-29 GF S C C C C C;24-05-27 MEM I H12:00 H12:00 X H13:30 H13:30;24-06-19 JT I H12:00 H12:00 X H13:30 H13:30;24-07-03 J3 I E12:15 N N N N;24-07-04 J4 I H12:00 H12:00 X H13:30 H13:30;24-09-02 LAB I H12:00 H12:00 X H13:30 H13:30;24-11-28 TG S H12:00 H12:00 X H13:30 H13:30;24-11-29 TG+1 S E12:15 E12:15 E13:45 E13:45 E13:45;24-12-24 XE S E12:15 E12:15 E12:45 E12:45 E12:45;24-12-25 XM S C C C C C;25-01-01 NY S C C C C C;25-01-09 CARTER A A08:30 E12:15 N N N;25-01-20 MLK I H12:00 H12:00 X H13:30 H13:30;25-02-17 PRES I H12:00 H12:00 X H13:30 H13:30;25-04-18 GF S C C C C C;25-05-26 MEM S H12:00 H12:00 X H13:30 H13:30;25-06-19 JT S H12:00 H12:00 X H13:30 H13:30;25-07-03 J3 S E12:15 N N N N;25-07-04 J4 S F12:00 F12:00 F12:00 F12:00 F12:00;25-09-01 LAB I H12:00 H12:00 X H13:30 H13:30;25-11-27 TG S H12:00 H12:00 X H13:30 H13:30;25-11-28 TG+1 S E12:15 E12:15 E13:45 E13:45 E13:45;25-12-24 XE S E12:15 E12:15 E12:45 E12:45 E12:45;25-12-25 XM S C C C C C;26-01-01 NY S C C C C C;26-01-19 MLK S H12:00 H12:00 X H13:30 H13:30;26-02-16 PRES S H12:00 H12:00 X H13:30 H13:30;26-04-03 GF S E08:15 E10:15 E10:15 C C;26-05-25 MEM S H12:00 H12:00 X H13:30 H13:30;26-06-19 JT S F12:00 F12:00 F12:00 F12:00 F12:00;26-07-03 J4o S F12:00 F12:00 F12:00 F12:00 F12:00;26-09-07 LAB S H12:00 H12:00 X H13:30 H13:30;26-11-26 TG S H12:00 H12:00 X H13:30 H13:30;26-11-27 TG+1 S E12:15 E12:15 E13:45 E13:45 E13:45;26-12-24 XE I E12:15 E12:15 E12:45 E12:45 E12:45;26-12-25 XM S C C C C C";
+
+				static System.Collections.Generic.Dictionary<int, string[]> s_codes;
+				static System.Collections.Generic.Dictionary<int, char> s_conf;
+				static System.Collections.Generic.Dictionary<int, string> s_holiday;
+
+				public static bool Covers(DateTime d) { return d.Year >= FirstYear && d.Year <= LastYear; }
+				public static int Rows { get { Ensure(); return s_codes.Count; } }
+
+				public static char Confidence(DateTime d)
+				{
+					Ensure();
+					char c;
+					return s_conf.TryGetValue(Key(d), out c) ? c : '\0';
+				}
+
+				public static bool Provisional(DateTime d)
+				{
+					return d == new DateTime(2026, 11, 26) || d == new DateTime(2026, 11, 27) || d == new DateTime(2026, 12, 24);
+				}
+
+				/// <summary>Raw token for the group (C, H12:00, E12:15, F12:00, A08:30, N, X), or N when the date is not a listed holiday.</summary>
+				public static string Code(DateTime d, EGroup g)
+				{
+					Ensure();
+					string[] codes;
+					if (!s_codes.TryGetValue(Key(d), out codes)) return "N";
+					return codes[(int)g];
+				}
+
+				public static Day Of(DateTime d, EGroup g)
+				{
+					Ensure();
+					int key = Key(d);
+					string[] codes;
+					if (!s_codes.TryGetValue(key, out codes)) return new Day();
+					string name = s_holiday[key];
+					if (Provisional(d)) name = name + " (provisional)";
+					return FromToken(codes[(int)g], name);
+				}
+
+				public static bool IsBusinessDay(DateTime d, EGroup g)
+				{
+					if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) return false;
+					return !Of(d, g).Closed;
+				}
+
+				static int Key(DateTime d) { return d.Year * 10000 + d.Month * 100 + d.Day; }
+
+				static Day FromToken(string token, string name)
+				{
+					if (token == "C") return closed(name);
+					if (token == "N" || token == "X") return new Day();
+					int hh = int.Parse(token.Substring(1, 2), System.Globalization.CultureInfo.InvariantCulture);
+					int mm = int.Parse(token.Substring(4, 2), System.Globalization.CultureInfo.InvariantCulture);
+					var et = new TimeSpan(hh + 1, mm, 0);
+					if (token[0] == 'E') return new Day { HaltEt = et, RthCloseEt = et, Name = name };
+					string label = token[0] == 'F' ? name + " (close, shut until Sunday)" : name;
+					return new Day { NoRth = true, HaltEt = et, Name = label };
+				}
+
+				static void Ensure()
+				{
+					if (s_codes != null) return;
+					s_codes = new System.Collections.Generic.Dictionary<int, string[]>();
+					s_conf = new System.Collections.Generic.Dictionary<int, char>();
+					s_holiday = new System.Collections.Generic.Dictionary<int, string>();
+					foreach (string line in Table.Split(';'))
+					{
+						string[] p = line.Split(' ');
+						string[] ymd = p[0].Split('-');
+						int y = 2000 + int.Parse(ymd[0], System.Globalization.CultureInfo.InvariantCulture);
+						int m = int.Parse(ymd[1], System.Globalization.CultureInfo.InvariantCulture);
+						int day = int.Parse(ymd[2], System.Globalization.CultureInfo.InvariantCulture);
+						int key = y * 10000 + m * 100 + day;
+						s_codes[key] = new[] { p[3], p[4], p[5], p[6], p[7] };
+						s_conf[key] = p[2][0];
+						s_holiday[key] = HolidayName(p[1]);
+					}
+				}
+
+				static string HolidayName(string code)
+				{
+					switch (code)
+					{
+						case "NY": return "New Year's Day";
+						case "NYo": return "New Year's Day (observed)";
+						case "MLK": return "Martin Luther King Jr. Day";
+						case "PRES": return "Presidents Day";
+						case "GF": return "Good Friday";
+						case "MEM": return "Memorial Day";
+						case "JT": return "Juneteenth";
+						case "JTo": return "Juneteenth (observed)";
+						case "J3": return "Independence Day eve";
+						case "J4": return "Independence Day";
+						case "J4o": return "Independence Day (observed)";
+						case "LAB": return "Labor Day";
+						case "TG": return "Thanksgiving";
+						case "TG+1": return "Day after Thanksgiving";
+						case "XE": return "Christmas Eve";
+						case "XM": return "Christmas";
+						case "XMo": return "Christmas (observed)";
+						case "BUSH": return "Day of mourning (Bush)";
+						case "CARTER": return "Day of mourning (Carter)";
+						default: return code;
+					}
+				}
+			}
 		}
 		// </calendar-rules cme>
 
