@@ -1078,9 +1078,23 @@ static class Program
 		Check(_RollDetector.DatesDigest(dates) == "fdd63bd8f179a8d4", "M6f roll digest pin");
 	}
 
+	static void M7Floor()
+	{
+		Check(!new InstrumentConfig().applyCostFloor, "M7 floor off by default");
+		var subj = new InstrumentSubject("COST", "@ES", EAssetClass.Future, "ES", "test");
+		Check(CostModel.FloorTicks(1700, 0.25, 50, subj, null) == 14 && CostModel.FloorTicks(250, 0.25, 5, subj, null) == 20, "M7 ES 14 and MES 20 stay");
+		Check(CostModel.WidenedStop(100, 99, 3.5) == 96.5, "M7 a 4-tick stop widens to 14 ticks");
+		Check(CostModel.WidenedStop(100, 90, 3.5) == 90, "M7 a stop already past the floor stays");
+		Check(CostModel.WidenedStop(100, 101, 3.5) == 103.5, "M7 a short stop widens away from entry");
+		var g = Globex9();
+		var es = InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null).WithSessions(g, g, FB, null);
+		var mes = InstrumentProfile.Build(In("@MES", EAssetClass.Future, "MES", 25, 100, 5), null, null).WithSessions(g, g, FB, null);
+		Check(es.costFloorTicks == 14 && mes.costFloorTicks == 20 && es.ProfileHash() == "020deca78d6392b7", "M7 profile floors and ES pin " + es.ProfileHash());
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly, M6fCluster })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly, M6fCluster, M7Floor })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}

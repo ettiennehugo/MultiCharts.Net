@@ -408,6 +408,13 @@ namespace PowerLanguage.Function
 			long b = (long)r, a = checked(roundTripCents * 10);
 			return checked((int)((a + b - 1) / b));
 		}
+
+		/// <summary>M7. Stop price at least floorDistance away from entry, on the structural stop's side. A floor inside the structural stop leaves the stop where it is.</summary>
+		public static double WidenedStop(double entry, double stop, double floorDistance)
+		{
+			double use = Math.Max(Math.Abs(entry - stop), floorDistance > 0 ? floorDistance : 0);
+			return stop < entry ? entry - use : entry + use;
+		}
 	}
 
 	/// <summary>§5.3 InstrumentConfig (protected on _CustomSignal; no inputs). PR-M4 D1: costs keyed by CostKey(class, root).</summary>
