@@ -84,6 +84,7 @@ static class Program
 			Check(Run(new _RollDetector { series = true, gapTicks = 13 }, s2, 0.25).Count == 0, "S4 series: gapTicks threshold respected");
 		}
 		FixI();
+		CalibFit();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -154,6 +155,8 @@ static class Program
 				"_CustomSignal.isIntradayResolution: typed switch, Day/Week/Month/Quarter/Year -> false, everything else intraday");
 			// Analyst 1 N1: the splice line is journaled at ETraceLevel.Journal (kills Journal -> Info)
 			Check(Regex.IsMatch(src, @"if\s*\(\s*traceOn\(ETraceLevel\.Journal\)\s*\)\s*trace\(ETraceLevel\.Journal,\s*\$""VPF-4 roll splice detected"), "_CustomSignal roll splice line at ETraceLevel.Journal");
+			Check(src.Contains("m_rollDet.gapTicks = RollGapTicks") && src.Contains("applyRollGapCalibration = false")
+				&& src.Contains("CFG ROLL gap calibrated("), "M9 host keeps the literal gap assignment, the apply switch off, and the one Info line");
 		}
 		// diagnostics: gap / prior close / open of the Series bar
 		{
@@ -336,5 +339,46 @@ static class Program
 		Check(new _RollDetector().gapTicks == 8 && inWin == lv.Count && below == 0 && atFloor == lv.Count,
 			$"gap floor: every splice day in the window ({inWin}/{lv.Count}); 7 ticks rejected ({below} accepted), 8 ticks accepted ({atFloor})");
 		Check(smallAccepted == 0 && extraAccepted == 0 && kept3.SequenceEqual(liveExpect), $"negative replay: 1-tick and extra same-contract gaps rejected, the 30 splices kept (small {smallAccepted}, extra {extraAccepted}, kept {kept3.Count})");
+	}
+
+	// M9: c from the median Wilder ATR(20) on series b (the same Intraday path as fix-i (b)). Not applied to the detector.
+	static void CalibFit()
+	{
+		Check(!new RollGapCalibrator().Apply && RollGapCalibrator.InUseTicks == 8 && RollGapCalibrator.AtrLength == 20, "M9 calibrator defaults: apply off, in-use 8, ATR length 20");
+		Check(RollGapCalibrator.Ticks(2.0, 0.25) == (int)Math.Round(RollGapCalibrator.C * 2.0 / 0.25, MidpointRounding.AwayFromZero), "M9 Ticks is round-half-away-from-zero(c × atr / tick)");
+		Check(RollGapCalibrator.Ticks(double.NaN, 0.25) < 0 && RollGapCalibrator.Ticks(1, 0) < 0, "M9 Ticks refuses a missing ATR or a non-positive tick");
+		Check((int)Math.Round(1.5, MidpointRounding.AwayFromZero) == 2 && (int)Math.Round(2.5, MidpointRounding.AwayFromZero) == 3, "M9 rounding half away from zero (1.5 → 2, 2.5 → 3)");
+
+		var spliceDays = new HashSet<DateTime>();
+		for (int y = 2016; y <= 2024; y++) for (int m = 3; m <= 12; m += 3)
+		{
+			DateTime e = _RollDetector.ThirdFriday(y, m); if (e < new DateTime(2016, 11, 1)) continue;
+			spliceDays.Add(MondayOf(RuleRoll(e)));
+		}
+		var b = Intraday(new DateTime(2016, 10, 30, 18, 0, 0), new DateTime(2024, 12, 31), 4.0, 1.5, d => spliceDays.Contains(d) ? 12 : 0, true);
+		var cal = new RollGapCalibrator();
+		var atrs = new List<double>(); int seen = 0;
+		foreach (var bar in b)
+		{
+			cal.AddBar(bar.day, Math.Max(bar.o, bar.c), Math.Min(bar.o, bar.c), bar.c);
+			if (cal.TrCount >= RollGapCalibrator.AtrLength && cal.TrCount != seen) { atrs.Add(cal.Atr); seen = cal.TrCount; }
+		}
+		cal.Flush();
+		if (cal.TrCount >= RollGapCalibrator.AtrLength && cal.TrCount != seen) atrs.Add(cal.Atr);
+		atrs.Sort();
+		int n = atrs.Count;
+		double median = n == 0 ? double.NaN : atrs[n / 2];
+		double fitted = 8 * 0.25 / median;
+		int n8 = 0, n7 = 0, n9 = 0, n10 = 0, nOther = 0;
+		foreach (double a in atrs)
+		{
+			int t = (int)Math.Round(fitted * a / 0.25, MidpointRounding.AwayFromZero);
+			if (t == 8) n8++; else if (t == 7) n7++; else if (t == 9) n9++; else if (t == 10) n10++; else nOther++;
+		}
+		int medTicks = RollGapCalibrator.Ticks(median, 0.25);
+		Check(n == 2112 && n8 == 1737 && n7 == 2 && n9 == 305 && n10 == 68 && nOther == 0, "M9 series b: 2112 ATR days, 1737 round to 8 (7/9/10 are 2/305/68)");
+		Check(fitted == RollGapCalibrator.C && medTicks == 8, "M9 C is 8 × 0.25 / the upper central ATR, and that day rounds to 8");
+		var det = new _RollDetector { series = true };
+		Check(det.gapTicks == 8 && !cal.Apply, "M9 series b does not change the detector gap (still 8, apply off)");
 	}
 }
