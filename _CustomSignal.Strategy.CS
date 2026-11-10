@@ -3401,6 +3401,8 @@ namespace PowerLanguage.Strategy
 				return 0;
 			}
 			double distance = Math.Abs(entry - stop);
+			if (InstrumentConfig.applyCostFloor && double.IsNaN(widenedStop))
+				widenedStop = CostModel.WidenedStop(entry, stop, costFloorDistance(bars));
 			if (limits.minStopTicks > 0 && distance < limits.minStopTicks * tickSize() - tickSize() * 1e-6)
 			{
 				trace(ETraceLevel.Info, $"sizeForRisk - 0: stop distance {distance / tickSize():0.##} ticks < minStopTicks({limits.minStopTicks})");
@@ -3413,7 +3415,7 @@ namespace PowerLanguage.Strategy
 			int maxQtyCapped = qty;
 			if (limits.maxNotionalFraction > 0)
 			{
-				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * bpv;
+				double unit = limits.unitNotional > 0 ? limits.unitNotional : entry * notionalBpv(bars, bpv);
 				qty = capByNotional(qty, unit, limits.maxNotionalFraction);
 				if (qty <= 0) { trace(ETraceLevel.Info, $"sizeForRisk - 0: notional cap unit({unit}) fraction({limits.maxNotionalFraction})"); return 0; }
 			}
@@ -3437,6 +3439,39 @@ namespace PowerLanguage.Strategy
 			}
 			if (qty > 0 && willArm) portfolioArm(entry > stop ? 1 : -1, entry, stop, qty, widenedStop);   // M-PORT: the code size of the pending entry
 			return qty;
+		}
+
+		/// <summary>M7. Default notional uses the profile big point value. No profile, or a non-positive value, keeps Bars.Info.BigPointValue. An explicit SizingLimits.unitNotional still wins.</summary>
+		double notionalBpv(IInstrument bars, double infoBpv)
+		{
+			InstrumentProfile p = profileFor(bars);
+			return p != null && p.bigPointValue > 0 && !double.IsInfinity(p.bigPointValue) ? p.bigPointValue : infoBpv;
+		}
+
+		/// <summary>M7. Opt-in only. Unknown floor: Error line, then S5. ES is 14 ticks, MES is 20.</summary>
+		double costFloorDistance(IInstrument bars)
+		{
+			InstrumentProfile p = profileFor(bars);
+			string root = p != null && !string.IsNullOrEmpty(p.root) ? p.root : "?";
+			if (p == null || !p.cost.known || p.costFloorTicks < 1)
+				InstrumentError.Fail(msg => traceAlways(ETraceLevel.Error, p == null ? null : p.name, msg),
+					p == null ? new InstrumentSubject("COST", bars == null ? "" : bars.Info.Name, EAssetClass.Future, root, "") : p.Subject("COST"),
+					InstrumentReason.UnknownField("cost"), "applyCostFloor", "add a preset row / cost for " + root);
+			return p.costFloorTicks * tickSize();
+		}
+
+		InstrumentProfile profileFor(IInstrument bars)
+		{
+			if (bars == null) return null;
+			for (int ds = 1; ds <= MaxDataStream; ds++)
+			{
+				if (!IsExist(ds)) continue;
+				IInstrument b;
+				try { b = BarsOfData(ds); } catch { continue; }
+				if (b != bars) continue;
+				return InstrumentProfileOf(ds);
+			}
+			return null;
 		}
 
 		/// <summary>
