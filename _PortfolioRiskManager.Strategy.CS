@@ -108,7 +108,7 @@ namespace PowerLanguage.Strategy
 				ps.AllowEntries = x.allowEntries;
 				ps.AllowEntriesLong = x.allowEntries && x.allowLong;
 				ps.AllowEntriesShort = x.allowEntries && x.allowShort;
-				ps.EntryContracts = x.entryContracts;   // always explicit: 0 would mean the Strategy Properties size
+				ps.EntryContracts = x.entryContracts;   // always explicit and never 0: Check 7 L2 (2026-11-10) the default is -1 (code size) and 0 blocks every entry
 				if (x.forceClose) ps.ForceClosePosition();
 				if (x.pause && !ps.Paused) { ps.Paused = true; Output.WriteLine($"PORT paused {views[i].id}#{ps.MyIndex} (flat)"); }
 				ps.Status = x.status;
