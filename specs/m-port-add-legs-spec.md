@@ -1,12 +1,12 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
-date: 2026-11-10 (ET); draft r8 2026-11-11 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Draft r6: the r5 per-instrument cap (`MaxInstrumentRiskPct`) was dropped by the owner 2026-11-11 10:52 ET; `ClusterCapPct` covers it (§7). Draft r7: Q12 owner-approved 2026-11-11 11:09 ET (heat cap auto-raised to a higher `ClusterCapPct`); Q13 open (total cap). Draft r8: Q13 owner-approved 2026-11-11 13:29 ET: the effective total risk cap is also raised to a higher `ClusterCapPct` (config field + Info line replace the 'binds first' Warning; T-P39). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+date: 2026-11-10 (ET); draft r9 2026-11-11 (ET)
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Draft r6: the r5 per-instrument cap (`MaxInstrumentRiskPct`) was dropped by the owner 2026-11-11 10:52 ET; `ClusterCapPct` covers it (§7). Draft r7: Q12 owner-approved 2026-11-11 11:09 ET (heat cap auto-raised to a higher `ClusterCapPct`); Q13 open (total cap). Draft r8: Q13 owner-approved 2026-11-11 13:29 ET: the effective total risk cap is also raised to a higher `ClusterCapPct` (config field + Info line replace the 'binds first' Warning; T-P39). Draft r9: Check 7A native results recorded 2026-11-11 (§9.2; A1–A7 pass, A0 pass on a scratch MM except the enum sweep, A8 proxy pass on ES; Q9 partly closed); no rule changed. Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
 
-# M-PORT add legs (DRAFT r8, proposed rev 2.8)
+# M-PORT add legs (DRAFT r9, proposed rev 2.8)
 
 ## 0. Why, and scope
 
@@ -159,14 +159,14 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
 - **`EntryContracts` semantics for an add leg** (Check 7 L2 verified the base semantics):
   - **−1**: CodeSize. The add fills the strategy's coded add qty (`AddContracts`). The MM writes −1, as for every CodeSize entry.
   - **0**: never written. It blocks every entry (L2).
-  - **> 0**: RiskParity / VolTarget. The MM writes `nAdd` on the step it approves the add. Because `EntryContracts > 0` applies to **every** entry order of the strategy (m-port-spec §6), a strategy may have **one** pending entry order per bar when it publishes an add (its initial entry is already filled). That is a publisher rule for `portfolioArmAdd`, and it must be checked natively (§9 A2).
-  - On the following steps, deny-all writes −1 again. Any resting add order is re-sent each bar (m-port-spec §6), so it is re-approved or denied each step.
-- **MC Position Limits.** The PT strategy's Strategy Properties → Position Limits must allow ≥ 1 + `maxAddsPerPosition` entries in the same direction. The exact option name must be checked in the installed build (VERIFY, §9 A1). Otherwise MC drops the add after the MM approved it. The existing `fillCheckEvals` Warning is extended to adds (§6) so this is visible.
+  - **> 0**: RiskParity / VolTarget. The MM writes `nAdd` on the step it approves the add. Because `EntryContracts > 0` applies to **every** entry order of the strategy (m-port-spec §6), a strategy may have **one** pending entry order per bar when it publishes an add (its initial entry is already filled). That is a publisher rule for `portfolioArmAdd`. **Native check A2 (2026-11-11):** confirmed: with `EntryContracts = 4` on the add step the add filled 4 and the initial stayed 1, and a second entry sent on the same step also filled 4 (Check 7A).
+  - On the following steps, deny-all writes −1 again. Any resting add order is re-sent each bar (m-port-spec §6), so it is re-approved or denied each step. **Native check A3 (2026-11-11):** a resting add stop fills with the `EntryContracts` of the step that sent the filling order (2 on send 1, 3 on a later send), so re-arming every bar is required and sufficient.
+- **MC Position Limits.** The PT strategy's Strategy Properties → Position Limits must allow ≥ 1 + `maxAddsPerPosition` entries in the same direction. Otherwise MC drops the add after the MM approved it. **Native check A1 (2026-11-11), installed PT wording with N = 3:** checkbox *"Allow up to 3 entry orders in the same direction as the currently held position:"* with radio *"when the order is generated by a different entry order"* or *"regardless of the entry that generated the order"*. Unchecked: no add fills. Checked + "different entry order": an add with its own order name (`<ID>LA1`) fills; re-sending the initial entry's order name does not. "regardless of the entry …": the same-name add fills too. Per-leg names (overview §7.7) therefore work with "different entry order"; set N ≥ 1 + `maxAddsPerPosition`. The existing `fillCheckEvals` Warning is extended to adds (§6) so this is visible.
 
 ## 5. T1 split, partial exits and reversals
 
 - **T1 split (strategy side, unchanged).** T1 and the split rule use the **initial** contracts only: 2 contracts ⇒ 1 + 1 (overview §7.2, §7.7). Adds join the runner and leave with it.
-  - The strategy names exits `From Entry` per leg so a T1 exit never sells add contracts (VERIFY natively, §9 A4).
+  - The strategy names exits `From Entry` per leg so a T1 exit never sells add contracts. **Native check A4 (2026-11-11):** in PT, `OrderExit.FromEntry(initial)` qty 1 took 3 → 2 and closed only the initial leg; `FromEntry(add)` closed only the add leg. Same as on charts.
   - The MM is indifferent. It sees only |pos| and `pm.riskOpen`, and after T1 fills both shrink.
   - Under `ScaleWithInitial`, `nInitial` is the approved initial n, not the post-T1 position.
 - **Partial exit (T1 or any scale-out).**
@@ -174,11 +174,11 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
   - The add count is kept.
   - A later add is checked against the smaller current `riskOpen` (`rel`) and the smaller |pos| in `RiskAfter`.
 - **Reversal while adds are open.**
-  - It stays a rev 2.5 reversal: `rel` = the whole position's `pm.riskOpen`, all legs. MC's opposite entry closes every leg (VERIFY, §9 A6).
+  - It stays a rev 2.5 reversal: `rel` = the whole position's `pm.riskOpen`, all legs. MC's opposite entry closes every leg. **Native check A6 (2026-11-11):** long 2 + add 1, then `SellShort` 1 ⇒ one fill 3 → −1 that closed both legs.
   - The R stream closes the trade at the flip as the sum of its segments (§3a). R(original) is journalled.
   - The add count, `nInitial` and `qtyCodeInitial` reset.
   - A reversal is never an add, and an add is never a reversal (§2.1 point 1).
-- **Kill / daily flatten.** `ForceClosePosition` closes all legs, at the close of bar T (L3). `Paused` only once flat (L4). Unchanged.
+- **Kill / daily flatten.** `ForceClosePosition` closes all legs, at the close of bar T (L3; **native check A7 2026-11-11** with an add open: both legs closed at T's close). `Paused` only once flat (L4). Unchanged.
 
 ## 6. Gates for an add and logging
 
@@ -247,8 +247,8 @@ public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _Port
   - `_PortfolioRiskManager_ScaledBook` inherits the Input.
   - The other add settings stay config/JSON. They are tuning, not an on/off policy: `maxAddsPerPosition`, and `addSizing` (typed enum `EAddSizing`, by name).
 - **Dialog and sweeps.**
-  - `AddPolicy` appears in the Portfolio Trader money-management signal's Format dialog, next to `TotalRiskCapPct` (VERIFY the label on the MiniPC, Check 7A A0).
-  - **Whether the MC optimizer can sweep an enum `[Input]` is still unverified.** This is the same open check as PR #117 overview §9 ("Verify enum inputs on the MiniPC": named members in the Format dialog and Portfolio Trader; whether the optimizer can sweep them).
+  - `AddPolicy` appears in the Portfolio Trader money-management signal's Format dialog, next to `TotalRiskCapPct`. **Native check A0 (2026-11-11, on a scratch MM with the same Input types):** the typed enum Input shows its named members (`Refuse` / `AllowWithinCap`) and switching it changed the run (Refuse: add refused, max position 1; AllowWithinCap: 2). Re-check the label on the implementation build.
+  - **Whether the MC optimizer can sweep an enum `[Input]` is still unverified** (not tried in Check 7A A0). This is the same open check as PR #117 overview §9 ("Verify enum inputs on the MiniPC": named members in the Format dialog and Portfolio Trader; whether the optimizer can sweep them).
   - If sweeps are not supported, compare `Refuse` against `AllowWithinCap` as two saved backtests.
 **`ClusterCapPct` is an `[Input]` that overrides the profile cluster cap (**Owner-approved 2026-11-11 10:14 ET** (Ettienne chose: *"Yes, add ClusterCapPct as an Input that overrides the profile"*)).**
 
@@ -279,7 +279,7 @@ public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _Port
 - **Default ⇒ no behaviour change:** with `ClusterCapPct = 0` the effective cap equals today's, so every decision is unchanged. G0 and DVP D9a are chart runs where M-PORT is inert, so their hashes are unchanged. The one new Info line is the only PT journal difference (§8).
 - m-port-spec §0 must then say "three `[Input]`s" (`TotalRiskCapPct`, `AddPolicy`, `ClusterCapPct`) in rev 2.8.
 
-- **Saved portfolios.** Adding an Input to a compiled signal may reset or re-order its saved inputs in existing `.pws` portfolios (VERIFY, A0). After the update, re-check that `TotalRiskCapPct` kept its value.
+- **Saved portfolios.** Adding an Input to a compiled signal may reset or re-order its saved inputs in existing `.pws` portfolios. **Native check A0 (2026-11-11, scratch MM):** a `.pws` saved with `TotalRiskCapPct = 7` kept 7 after two Inputs (`AddPolicy`, `ClusterCapPct`) were added and the signal recompiled. After the real update, still re-check that `TotalRiskCapPct` kept its value in Ettienne's saved portfolios.
 
 ```csharp
 public enum EAddSizing { ScaleWithInitial, CodeQty }       // default ScaleWithInitial (ignored under CodeSize)
@@ -417,6 +417,31 @@ Book 1M, Starter unless stated, ES BPV 50.
 | A7 | `ForceClosePosition` with adds open | Long 2 + add 1, MM force-closes | All legs flat at the close of bar T (as L3) | Kill path must close per leg |
 | A8 | R re-base and `ADD-BLOCKED` in a real run | Long 2 + add 1 on `@ES`, stopped at the raised stop. Second run with a ddSteps override that puts stage 1 on before the add | One `R rebase` and one `trade R` line, with R(rebased) ≈ the segment sum. Second run: one `ADD-BLOCKED reason=ddStep` Warning and no add fill | Fix the fill detection or the dedupe key |
 
+**Results 2026-11-11 (MiniPC, MC .NET64 16.0, backtest, `@ES` + `@NQ` 1 min, 2024-11-18 window; full lines in `specs/live-check-sheet.md` Check 7A).**
+
+- The signal used is the scratch pair `_TestM118PortAdd` / `_TestM118MM` (not committed), with `AddPolicy = AllowWithinCap` for A1–A8.
+- A1–A7 test only MultiCharts behaviour, so their answers are final.
+- A0 is answered on the scratch MM.
+- A8 is a proxy: the scratch MM applies §3a/§6 to real PT fills. **Re-run A0 and A8 on the implementation build.**
+
+| # | Result |
+|---|---|
+| A0 | **Pass (scratch MM)**: named enum members shown; `TotalRiskCapPct` 7 kept after the new Inputs; Refuse 1 vs AllowWithinCap 2. **Optimizer enum sweep not tried.** The real `PORT config clusterCap=… source=…` line is still to check |
+| A1 | **Pass**: unchecked 1; "different entry order" 2 with a new order name, 1 with the same name; "regardless of the entry …" 2. Wording in §4 |
+| A2 | **Pass**: 1 → 5 (add 4, initial 1); with a second same-step entry 1 → 9 (both 4) |
+| A3 | **Pass**: fill qty = the MM value on the sending step (3 from send 2; 2 from send 1) |
+| A4 | **Pass**: `From Entry` sells only the named leg (3 → 2) |
+| A5 | **Pass**: the MM sees `openLots`, `AvgEntryPrice` and `pm.pos` updated on the same step the strategy first sees the add; avg is qty-weighted. No extra delay is needed |
+| A6 | **Pass**: one reversal 3 → −1 closes both legs |
+| A7 | **Pass**: both legs flat at the close of bar T |
+| A8 | **Pass on `@ES`, proxy; re-run on the implementation build.** a: one `R rebase`, one `trade R`, R(rebased) = the segment sum (0.38 + −1.00); b: one `ADD-BLOCKED reason=ddStep` Warning for 10 blocked sends, no add fill. `@NQ` was stopped out before the add in both runs (not exercised) |
+
+**Observation (A8-a, no rule changed).**
+
+- The add filled at 5906.75. `px` (the close at the fill sample) was 5905.75, and the raised stop 5905.5.
+- So R1 = $37.50 (1 tick × 3 contracts). The stop-out was −1.00 R1, and R(rebased) was −0.63 for a trade that made +$37.50 (R(original) +0.19).
+- That is §3a as written; it is listed for Ettienne.
+
 Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-spec §9 (A0–A8). Paper / live sharing (L6) and the roll (L9) are not affected.
 
 ## 10. Build steps (for the implementation PR, after approval)
@@ -459,8 +484,10 @@ Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-sp
 - ~~**Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): yes; line, counting and dedupe in §6, test T-P40.
 - ~~**Q12 `ClusterCapPct` above the heat cap (owner 10:52 ET follow-up):** should a `ClusterCapPct` above `heatCap` be **accepted** (and, if so, should heat be raised to match, or clamped/warned), or should `heatCap` get its own Input so heat is raised alongside? PROPOSED today: Warning + fall back to the profile cluster cap (§7). Note `TotalRiskCapPct` must also be ≥ the cluster cap.~~ **Owner-approved 2026-11-11 11:09 ET** (Ettienne chose: *"Raise the overall open-risk cap automatically to match a higher cluster cap"*): the effective heat cap is raised to the cluster cap for the run (§7).
 - ~~**Q13 Total cap with a large cluster cap:** should `TotalRiskCapPct` also auto-raise when `ClusterCapPct` exceeds it, or stay as set (today: unchanged, with a Warning that the total cap binds first)? Not decided.~~ **Closed.** **Owner-approved 2026-11-11 13:29 ET** (Ettienne: *"Yes, raise the TotalRiskCapPct as well."*): the effective total risk cap is raised to match (§7).
-- **Q9 (native checks, not owner questions):**
-  - the MC Position Limits option name and behaviour in PT (A1);
-  - whether `From Entry` exits behave in PT as on charts (A4);
-  - whether the optimizer can sweep the `AddPolicy` enum, and whether saved inputs survive the new Input (A0).
+- **Q9 (native checks, not owner questions).** Check 7A ran 2026-11-11 (§9.2):
+  - ~~the MC Position Limits option name and behaviour in PT (A1)~~ **Answered (A1):** wording and behaviour in §4.
+  - ~~whether `From Entry` exits behave in PT as on charts (A4)~~ **Answered (A4):** yes.
+  - whether saved inputs survive the new Input (A0): **answered on a scratch MM** (kept); re-check on the implementation build.
+  - whether the optimizer can sweep the `AddPolicy` enum (A0): **still open**, not tried.
+  - A0 `PORT config` line and A8 (R re-base / `ADD-BLOCKED`): **still open** until re-run on the implementation build (the A8 proxy passed on `@ES`).
 - ~~**Q10** PR #117 overview §7.7 says "R for reporting stays the initial position's R" on charts. Should the chart side re-base too, so chart and Portfolio Trader R agree? PROPOSED: yes, as a separate edit on PR #117.~~ **Closed 2026-11-11**: already owner-approved 2026-11-10 22:35 ET (answer 2) and applied in PR #117 overview rev 1.6 §7.7 (chart-side R re-base).
