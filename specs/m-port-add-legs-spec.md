@@ -1,12 +1,12 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
-date: 2026-11-10 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+date: 2026-11-10 (ET); draft r3 2026-11-11 (ET)
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
 
-# M-PORT add legs (DRAFT, proposed rev 2.8)
+# M-PORT add legs (DRAFT r3, proposed rev 2.8)
 
 ## 0. Why, and scope
 
@@ -14,7 +14,7 @@ related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-c
   - Answer 1 → §7: `AddPolicy` is an `[Input]`.
   - Answer 2 → §3a: R is re-based after an add.
   - Answer 3 → §6: adds are blocked under any throttle, with a Warning.
-  - Answer 4 (the cluster cap, Q7) has been explained to him and is still open (PROPOSED).
+  - Answer 4 (the cluster cap, Q7) was explained to him; **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*). → §3 check 3.
 - **Owner decisions this builds on.**
   - 2026-11-10 22:06 ET (strategy specs, PR #117): *"you can allow adding to positions, for strategies where that make sense make it a clear Input parameter and allow adding."*
   - 2026-11-10 22:16 ET: *"Yes, spec the Portfolio risk manager change as a separate PR."*
@@ -96,7 +96,7 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
 - **Checks, in order** (gates as §5.2, then the caps; skip only, never resize):
   1. **Per-position budget:** `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
   2. **Heat:** `heat − rel + riskAfter > heatCap × book` ⇒ `"heat cap"`.
-  3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster").
+  3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster"). **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*): the post-add cluster risk must stay within the profile's cluster cap (Starter 0.75% of book); on a breach the add is **skipped, never resized**, and the skip line gives the reason (`PORT Info: skip <id>#<i> cluster cap: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> cluster $<sum> cap $<cap>`, §6).
   4. **Total risk cap:** `_PortRiskCap.Breaks(total − rel, riskAfter, cap)` ⇒ `"total risk cap"`.
   5. If allowed: `heat = heat − rel + riskAfter`, same for `clHeat[c]` and `total`. `open` and `clCount` do **not** change, because an add is not a new position (same as a reversal).
 - **RiskParity at 0.5% applies to the initial entry only.** An add does not get a fresh `riskPerTrade` budget. Its size comes from §4, and its risk is bounded only by the post-add caps above. Real risk per position is therefore 0.5% (initial, structural) up to 1% (per-position budget).
@@ -297,6 +297,7 @@ Book 1M, Starter unless stated, ES BPV 50.
 - **T-P31 caps with release:**
   - Heat: the position's `rel` is released, then riskAfter counted. Another strategy's open risk still counts.
   - Cluster: always checked (own position occupies it). An ES add with NQ open, EQIDX over 7 500 ⇒ `"cluster cap"`.
+  - **Cluster cap refuses an add on its own (owner-approved 10:13 ET):** Starter profile (cluster cap 0.75% = 7 500 on a 1M book; per-position 1% and heat/total caps set high enough not to bind), ES alone, no NQ open; an add whose riskAfter puts EQIDX at 7 501 ⇒ skipped with reason `"cluster cap"`, `EntryContracts` = 0 for that add step, `nAdd` unchanged (never resized), the position and its stop unchanged, one `PORT Info: skip … cluster cap …` line with `cluster $7501 cap $7500`. At exactly 7 500 ⇒ allowed (the check is `>`).
   - Total cap with a lowered `TotalRiskCapPct`.
 - **T-P32 `maxAddsPerPosition`:**
   - Fills counted from |pos| growth. The third add with max 2 ⇒ `"max adds"`.
@@ -400,7 +401,7 @@ Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-sp
 - **Former Q4 (throttles):** block the add, never scale it, with an `ADD-BLOCKED` Warning (§6).
 
 **Still open:**
-- **Q7, cluster cap.** It was explained to Ettienne after 22:35 ET ("4. Explain this to me"); his decision is pending. Starter 0.75% will usually deny an ES add while NQ is open, and an ES add alone once the ES position carries more than about 0.75% after the add. Options: accept it as "one position per merged cluster", or let an add be checked only against the per-position 1%. PROPOSED: accept; the cluster cap applies.
+- ~~**Q7, cluster cap.** It was explained to Ettienne after 22:35 ET ("4. Explain this to me"); his decision is pending. Starter 0.75% will usually deny an ES add while NQ is open, and an ES add alone once the ES position carries more than about 0.75% after the add. Options: accept it as "one position per merged cluster", or let an add be checked only against the per-position 1%. PROPOSED: accept; the cluster cap applies.~~ **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*).
 - **Q2** Per-position budget = `maxTradeRisk` (1%, the same number as the chart rule), or a separate `addPositionRiskCap` ≤ 1%? PROPOSED: reuse `maxTradeRisk`. The 22:35 answer 2 settles how the post-add risk is measured (at the moved stop, §3), not this cap level.
 - **Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.
 - **Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?
