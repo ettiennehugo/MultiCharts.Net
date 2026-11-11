@@ -1,7 +1,7 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
 date: 2026-11-10 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Not approved for implementation. Everything not quoted from the owner is PROPOSED."
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
@@ -10,6 +10,11 @@ related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-c
 
 ## 0. Why, and scope
 
+- **Owner answers 2026-11-10 22:35 ET** (verbatim): *"1. An Input on the risk manager. 2. No, the stop in general would move for the second entry so the risk calculation should be adjusted. 3. Adds should be blocked, issuing a warning log entry why it was blocked. 4. Explain this to me"*.
+  - Answer 1 → §7: `AddPolicy` is an `[Input]`.
+  - Answer 2 → §3a: R is re-based after an add.
+  - Answer 3 → §6: adds are blocked under any throttle, with a Warning.
+  - Answer 4 (the cluster cap, Q7) has been explained to him and is still open (PROPOSED).
 - **Owner decisions this builds on.**
   - 2026-11-10 22:06 ET (strategy specs, PR #117): *"you can allow adding to positions, for strategies where that make sense make it a clear Input parameter and allow adding."*
   - 2026-11-10 22:16 ET: *"Yes, spec the Portfolio risk manager change as a separate PR."*
@@ -59,7 +64,7 @@ A view `s` is an **add candidate** when **all** of these hold:
 2. `s.state ∈ {Long, Short}` matching `sign(position)`, or `Armed`. Accept both so the L814 case is covered; `Halted` and `Exiting` never qualify.
 3. `pm.add ≥ 1`: the publisher declares this pending entry an add leg, and gives its ordinal (§2.2). A same-direction arm **without** `pm.add` keeps today's refusal (`"Long"`/`"Short"`/`"in position"`, silent). An old publisher or a strategy bug therefore cannot pyramid by accident.
 4. `pm.armStamp == pm.stamp`: the add was armed on the publisher's current bar, so it is not a leftover (§2.2). It is not stale (`staleBars`), and every pre-loop rule applies (ver, currency, paused/killed).
-5. The `addPolicy` config (§7) is `AllowWithinCap`. With `Refuse`, points 1–4 are not evaluated and L813/L814 run exactly as today.
+5. The `AddPolicy` `[Input]` (§7) is `AllowWithinCap`. With `Refuse`, points 1–4 are not evaluated and L813/L814 run exactly as today.
 
 ### 2.2 Publisher keys and a separate arm call (PROPOSED)
 These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.R$w` and `pm.regimeP`, and readers pull by name. Same-build deploy, as for rev 2.
@@ -95,9 +100,47 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
   4. **Total risk cap:** `_PortRiskCap.Breaks(total − rel, riskAfter, cap)` ⇒ `"total risk cap"`.
   5. If allowed: `heat = heat − rel + riskAfter`, same for `clHeat[c]` and `total`. `open` and `clCount` do **not** change, because an add is not a new position (same as a reversal).
 - **RiskParity at 0.5% applies to the initial entry only.** An add does not get a fresh `riskPerTrade` budget. Its size comes from §4, and its risk is bounded only by the post-add caps above. Real risk per position is therefore 0.5% (initial, structural) up to 1% (per-position budget).
-- **R units.** The kill / session / weekly R stream keeps the **initial** 1R as its unit (`riskAtOpen` = `pm.R$ × |position at open|`, `_PortMM` L963–967, unchanged). Adds raise the $ at risk but not the R denominator, so a stop-out after adds can record more than −1R.
-  - This is the strategy's own convention ("R for reporting stays the initial position's R", overview §7.7).
-  - PROPOSED, open question Q3.
+- **R units:** see §3a. R is re-based on the post-add position (**Owner-approved 2026-11-10 22:35 ET**).
+
+### 3a. R re-base after an add (**Owner-approved 2026-11-10 22:35 ET**)
+
+Ettienne: *"the stop in general would move for the second entry so the risk calculation should be adjusted."* After an add, 1R becomes the risk of the **adjusted** position: all contracts, at the stop the add set. A stop-out after adds is then measured against that new 1R, so it is about −1R, not −2R or worse, in the kill (§5.4 4), session (4a) and weekly (4b) counts.
+
+- **When.** On the **add fill**, detected by the MM in `updateKills` (`_PortMM` L942–970) at the first evaluation where |`pm.pos`| has grown in the same sign while an approved add (`pm.add` ≥ 1) was pending.
+  - Fills inside one evaluation are seen once: the existing sampling limit, rev 2.4.
+  - If the position both grows and shrinks between two samples, the MM sees only the net change. A net growth counts as an add fill; a net shrink counts as a partial exit.
+  - The re-base never happens on the arm, the approval, or a fill that is not an add.
+- **New 1R.** `R1 = max(0, side × (px − stopNew)) × bpv × |posNew|`:
+  - `px` = new key `pm.px` = `Bars.Close[0]` at the fill sample;
+  - `stopNew` = the whole-position stop after the add: `pm.addStop` from the approval, which the strategy also sets via `portfolioStop`;
+  - `posNew` = the new |`pm.pos`|.
+  - This is the "full post-add risk": what `pm.riskOpen` shows right after the fill, without `RiskOpen`'s break-even zeroing, so it stays positive whenever the stop is below the price (long).
+  - If `R1 ≤ 0` or NaN (stop at or through the price, bad BPV), the MM does **not** re-base. The current segment carries on with its old 1R, and a `PORT Warning` names the reason.
+- **Trade R as segments.**
+  - A trade is split at each re-base into segments: 0 is the initial position, 1 runs after add 1, 2 after add 2.
+  - Segment j has its own 1R (`R0` = `riskAtOpen` as today = `pm.R$ × |position at open|`; `Rj` from the rule above) and its P&L, `pnl` at its end minus `pnl` at its start. The MM's `pnl` is closed + open (`pm.pnl`), so a re-base marks the open position to market.
+  - **Trade R** = Σ_j (segment P&L_j / R_j). This one number goes into the kill queue, the session-loss count (with the `scratchR` band) and the weekly sum, so everything downstream is unchanged.
+  - Example: initial long reaches +1.2R, then the add, then a stop-out at the raised stop. That gives R = +1.2 + (about −1.0) ≈ +0.2R, not −1.8R in initial units.
+  - The R stream needs no other change.
+- **Partial exits.**
+  - A partial exit (T1, any scale-out) **before** an add realises its P&L inside segment 0, measured in R0.
+  - A partial exit **after** an add realises its P&L inside the current segment, measured in that segment's Rj. The segment's 1R is **not** shrunk when contracts leave: R is frozen per segment, as the initial R is today.
+  - A partial exit never starts a segment and never closes the trade (rev 2.4 rule).
+  - Example: 2 contracts, T1 one contract at +1R0 in segment 0, then add 1, then a stop-out in segment 1 ⇒ R = (T1 P&L + open P&L of the runner at the add) / R0 + segment-1 P&L / R1.
+- **Reversal and flat.**
+  - The trade closes as today (position → 0, or a sign flip at a reversal), summing every segment.
+  - The new trade after a flip starts with a new segment 0.
+  - A reversal never re-bases.
+- **Original R kept for audit.** The MM also keeps **R(original)** = total trade P&L / R0, today's single-denominator number. It is journalled only, never used by any throttle.
+- **Publisher side.**
+  - `pm.openR` keeps the strategy's own unit.
+  - After an add fill, the strategy's `portfolioStop(addStop)` call and a new `portfolioRebaseR()` step (in `portfolioArmAdd`'s fill path) set `m_portRDollar` so that `pm.openR` uses `R1 / |posNew|`. Chart and Portfolio Trader then report the same re-based R.
+  - **Consequence for PR #117 overview §7.7:** its line "R for reporting stays the initial position's R" conflicts with this answer. It needs the same re-base on the chart side. That is a separate edit on PR #117, not made here.
+- **Journal lines (Info):**
+  - On re-base: `PORT Info: R rebase <id>#<i> leg <k> at <bar time>: pos <old> -> <new> avg <avgPx> stop <stopOld> -> <stopNew> px <px> 1R $<R_prev> -> $<R1> segR(prev) <x.xx> tradeR(rebased) <y.yy> tradeR(original) <z.zz>`.
+  - On trade close, only when the trade had ≥ 1 re-base: `PORT Info: trade R <id>#<i> closed at <bar time>: R(rebased) <r> R(original 1R) <r0> segments <n> [<segR_0> @ $<R0>, <segR_1> @ $<R1>, …]`.
+  - The existing `PORT kill …`, `session stop` and `weekly …` lines quote R(rebased). They append `(original <r0>)` only when the trade had a re-base, so every line for a trade without adds is byte-identical.
+  - Skipped re-base: `PORT Warning: R rebase skipped <id>#<i> leg <k>: 1R $<R1> not positive (px <px> stop <stopNew>) - segment keeps 1R $<R_prev>`.
 
 ## 4. Add size, `MaxAdds` and `EntryContracts`
 
@@ -123,12 +166,12 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
   - The MM is indifferent. It sees only |pos| and `pm.riskOpen`, and after T1 fills both shrink.
   - Under `ScaleWithInitial`, `nInitial` is the approved initial n, not the post-T1 position.
 - **Partial exit (T1 or any scale-out).**
-  - It is not a closed trade (rev 2.4 R-stream rule, unchanged).
+  - It is not a closed trade (rev 2.4 R-stream rule, unchanged). Its P&L counts in the current R segment (§3a).
   - The add count is kept.
   - A later add is checked against the smaller current `riskOpen` (`rel`) and the smaller |pos| in `RiskAfter`.
 - **Reversal while adds are open.**
   - It stays a rev 2.5 reversal: `rel` = the whole position's `pm.riskOpen`, all legs. MC's opposite entry closes every leg (VERIFY, §9 A6).
-  - The R stream closes the trade at the flip in initial-1R units.
+  - The R stream closes the trade at the flip as the sum of its segments (§3a). R(original) is journalled.
   - The add count, `nInitial` and `qtyCodeInitial` reset.
   - A reversal is never an add, and an add is never a reversal (§2.1 point 1).
 - **Kill / daily flatten.** `ForceClosePosition` closes all legs, at the close of bar T (L3). `Paused` only once flat (L4). Unchanged.
@@ -138,38 +181,81 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
 **Gate order (proposed).** An add passes the same per-strategy gates as an initial entry, in the §5.2 order:
 1. daily stop / dd mult 0, kill, session stop (4a), weekly observe (4b);
 2. **`maxPositions` not checked** (not a new position);
-3. **throttle:** any multiplier < 1 (ddSteps stage or weekly halve) ⇒ skip `"throttle: no adds"`, under every sizing mode. PROPOSED, Q4. The reason: no pyramiding while the book or the strategy is being cut back. A multiplier < 1 does **not** shrink `nAdd`.
+3. **Throttle (**Owner-approved 2026-11-10 22:35 ET**: *"Adds should be blocked, issuing a warning log entry why it was blocked"*).**
+   - Whenever the combined throttle multiplier `m = ddMult × sMult` is < 1, the add is **blocked**, never scaled down. That covers a ddSteps stage, the weekly halve, both together, and the 0 cases (daily stop, dd stage 0, session stop, weekly observe).
+   - It applies under every sizing mode, CodeSize included.
+   - The block is written at **Warning** (below), not through the Info skip line.
+   - The book or strategy loss gates (daily stop, kill, session stop, weekly observe) keep their usual reason for **initial** entries. For an add, the same condition produces the `ADD-BLOCKED` Warning.
 4. `"max adds"`, then sizing (§4), then the caps (§3).
 
-**Journal lines** (all Info, through the existing deduped `skip()`, re-logged when the reason changes or clears):
+**`ADD-BLOCKED` Warning (throttles only).**
+- Format: `PORT Warning: ADD-BLOCKED reason=<ddStep|weeklyHalve|ddStep+weeklyHalve|dailyStop|ddStop|sessionStop|weeklyObserve> mult=<m> strat=<id>#<i> side=<long|short> leg=<k>/<max> dd=<dd%> ddStage=<s> weekR=<r> pos=<pos> n=<nAdd or qtyCode>`.
+  - Example: `PORT Warning: ADD-BLOCKED reason=ddStep mult=0.5 strat=YV-11@ES#0 side=long leg=1/2 dd=3.4% ddStage=1 weekR=-0.8 pos=2 n=1`.
+  - `Status` shows `ADD-BLOCKED <reason>`.
+- **Why Warning, against the skip-logging rule.**
+  - m-port-spec §5.4 says every skipped entry is logged at **Info**. This line is an explicit owner exception (22:35 ET), like the existing Warning exceptions (bad `BigPointValue`, `fillCheckEvals`).
+  - Every other add skip stays Info (caps, max adds, identity). Initial-entry throttle skips stay Info.
+- **How often it fires.** It uses the same per-strategy dedupe as `skip()` (`m_skipLogged`, `_PortMM` L745–752), with the key `ADD-BLOCKED|<reason>|<mult>|<leg>`. So it is written:
+  - once when a pending add is first blocked;
+  - again only when the reason, the multiplier or the leg changes, or after the block clears (an allowed or withdrawn add) and a new add is blocked.
+  - A strategy re-sending the same add every bar under the same throttle gives **one** line, not one per bar. The number of lines is bounded by the number of distinct add attempts.
+  - `PORT observe` does not ride on this line; the weekly-observe state appears as `reason=weeklyObserve`.
+
+**Journal lines** (Info unless stated, through the existing deduped `skip()`, re-logged when the reason changes or clears):
 - Allowed: `PORT Info: add <id>#<i> leg <k>/<max> <long|short> allowed: pos <pos> n <nAdd> avg <avgPx> -> <avgNew> stop <old> -> <addStop> riskOpen $<rel> after $<riskAfter> delta $<Δ> heat $<heat> cap $<heatCap> cluster $<cl> cap $<clCap> total $<total> cap $<totalCap>`.
 - Skips: `PORT Info: skip <id>#<i> <reason>: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> <cap name> $<sum> cap $<cap>`. Reasons:
   - `add per-position budget`, `heat cap`, `cluster cap`, `total risk cap`, `max adds`;
-  - `throttle: no adds`, `size < minContracts`;
+  - `size < minContracts` (throttle blocks are the `ADD-BLOCKED` Warning above, not an Info skip);
   - `add: no addStop`, `add: no avgPx`, `add: stale arm` (`armStamp != stamp`).
 - Fill: `PORT Info: add filled <id>#<i> leg <k> pos <old> -> <new>`. Unfilled: the `fillCheckEvals` Warning gains an add form, `… add leg <k> approved (qty <n>) but position did not grow after <k> MM evaluations - check Strategy Properties Position Limits (same-direction entries) and PT 'Max % Capital at Risk per Position' >= 1%`.
 - `Status`: `… n=<nAdd> … add <k>/<max>` while an add is pending or allowed. With `Refuse`, `Status` is unchanged.
-- `RUN` line: append `adds(<policy> max <maxAddsPerPosition> size <addSizing>)` **only when `addPolicy != Refuse`**, so the `Refuse` RUN line is byte-identical (§8).
+- `RUN` line: append `adds(<AddPolicy> max <maxAddsPerPosition> size <addSizing>)` **only when `AddPolicy != Refuse`**, so the `Refuse` RUN line is byte-identical (§8).
 - With `Refuse`, a same-direction arm keeps today's silent refusal (`"Long"`/`"Short"`/`"in position"`). No new line is printed.
 
 ## 7. Configuration (typed enums, programme rule 9)
 
-These are `PortMmConfig` fields plus JSON keys, like every other MM setting (m-port-spec §0: the MM's only `[Input]` is `TotalRiskCapPct`). They are not `[Input]`s, because a PT run that wants adds sets them in the JSON file or in a subclass `Config`. Whether `AddPolicy` should instead be a second `[Input]` exception is open question Q1.
+**`AddPolicy` is an `[Input]` on the risk manager (**Owner-approved 2026-11-10 22:35 ET**: *"An Input on the risk manager."*).**
+
+- **What the MM reads today.**
+  - `_PortfolioRiskManager` has exactly one `[Input]`, `TotalRiskCapPct` (`_PortfolioRiskManager.Strategy.CS` L24–28; m-port-spec §0, "an explicit exception Ettienne asked for").
+  - Every other setting comes from `PortMmConfig`: the profile defaults (`Profile` / `Config` protected virtuals), then the optional `ConfigPath` JSON (`StartCalc` L44–64).
+  - The Input is folded in **after** config resolution: `cfg = cfg.Copy(); cfg.totalRiskCap = _PortRiskCap.Fraction(TotalRiskCapPct, …)` (L59).
+- **`AddPolicy` follows the same pattern**, as the second MM `[Input]` exception (owner-approved). m-port-spec §0 must say "two `[Input]`s" in rev 2.8.
 
 ```csharp
-public enum EAddPolicy { Refuse, AllowWithinCap }          // default Refuse: behaviour unchanged
-public enum EAddSizing { ScaleWithInitial, CodeQty }       // default ScaleWithInitial (ignored under CodeSize)
-public enum EAddThrottle { DenyWhenThrottled }             // one member now; room for a later ScaleWithMult (Q4)
-// PortMmConfig
-public EAddPolicy addPolicy = EAddPolicy.Refuse;
-public int maxAddsPerPosition = 2;                         // 0..4; 0 with AllowWithinCap = adds refused, journalled as "max adds"
-public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
-public EAddThrottle addThrottle = EAddThrottle.DenyWhenThrottled;
+public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _PortMM.Function.CS, next to EPortProfile
+// _PortfolioRiskManager
+/// <summary>Same-direction add legs (specs/m-port-add-legs-spec.md): Refuse (default) = rev 2.7 behaviour, adds refused;
+/// AllowWithinCap = an add is approved only if the position's risk after the add fits every cap. Never scales an add.</summary>
+[Input] public EAddPolicy AddPolicy { get; set; }
+// ctor: AddPolicy = EAddPolicy.Refuse;
+// StartCalc, after Resolve and next to totalRiskCap:  cfg.addPolicy = AddPolicy;
 ```
 
-- **JSON:** `"addPolicy": "AllowWithinCap"`, `"maxAddsPerPosition": 2`, `"addSizing": "CodeQty"`, `"addThrottle": "DenyWhenThrottled"`. Enum values are parsed by member name, case-insensitive, via `Enum.TryParse` with an `IsDefined` check. Integer codes are rejected (rule 9: no int codes). An unknown name logs a Warning and keeps the field default.
+- **Interaction with config.**
+  - `PortMmConfig.addPolicy` is the field the pure `_PortMM` reads, so the tests can set it. It is **set only from the Input**.
+  - It is **not** a JSON key. A `"addPolicy"` key in a JSON file logs `PORT Warning: PortMmConfig: addPolicy is the AddPolicy [Input] on the risk manager; JSON value ignored` and is ignored. A subclass `Config` value is likewise overwritten by the Input.
+  - The RUN line prints the effective value (§6).
+  - `_PortfolioRiskManager_ScaledBook` inherits the Input.
+  - The other add settings stay config/JSON. They are tuning, not an on/off policy: `maxAddsPerPosition`, and `addSizing` (typed enum `EAddSizing`, by name).
+- **Dialog and sweeps.**
+  - `AddPolicy` appears in the Portfolio Trader money-management signal's Format dialog, next to `TotalRiskCapPct` (VERIFY the label on the MiniPC, Check 7A A0).
+  - **Whether the MC optimizer can sweep an enum `[Input]` is still unverified.** This is the same open check as PR #117 overview §9 ("Verify enum inputs on the MiniPC": named members in the Format dialog and Portfolio Trader; whether the optimizer can sweep them).
+  - If sweeps are not supported, compare `Refuse` against `AllowWithinCap` as two saved backtests.
+- **Saved portfolios.** Adding an Input to a compiled signal may reset or re-order its saved inputs in existing `.pws` portfolios (VERIFY, A0). After the update, re-check that `TotalRiskCapPct` kept its value.
+
+```csharp
+public enum EAddSizing { ScaleWithInitial, CodeQty }       // default ScaleWithInitial (ignored under CodeSize)
+// PortMmConfig
+public EAddPolicy addPolicy = EAddPolicy.Refuse;           // set from the AddPolicy [Input] only (not JSON)
+public int maxAddsPerPosition = 2;                         // 0..4; 0 with AllowWithinCap = adds refused, journalled as "max adds"
+public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
+```
+
+- **JSON:** `"maxAddsPerPosition": 2`, `"addSizing": "CodeQty"`. Enum values are parsed by member name, case-insensitive, via `Enum.TryParse` with an `IsDefined` check. Integer codes are rejected (rule 9: no int codes). An unknown name logs a Warning and keeps the field default.
+- There is no throttle option: the owner decided to block (§6), so the earlier `EAddThrottle` draft enum is dropped.
 - **Validate():** `0 ≤ maxAddsPerPosition ≤ 4`.
-- **Both profiles** get `Refuse`. Starter and ScaledBook differ only in their caps, which already bound the adds.
+- **Both profiles** default to `Refuse` (the Input default). Starter and ScaledBook differ only in their caps, which already bound the adds.
 - **Samples:** the two sample JSON files are **not** changed. Their hash stays the same, and a missing key means `Refuse`.
 
 ## 8. Backward compatibility and regression gates
@@ -177,10 +263,12 @@ public EAddThrottle addThrottle = EAddThrottle.DenyWhenThrottled;
 - **Default `Refuse` ⇒ no behaviour change.**
   - The candidate filter keeps L813/L814 verbatim on the `Refuse` branch.
   - No new journal line, Status text or RUN text.
+  - The R stream is unchanged for trades without an add fill: one segment, so R(rebased) = R(original) and every existing kill / session / weekly line is byte-identical.
+  - The new `AddPolicy` Input defaults to `Refuse`. The `TotalRiskCapPct` value in saved portfolios must survive the signal update (A0).
   - `PortDecision` values are unchanged: `entryContracts` −1 for every in-position strategy, `allowEntries` false.
 - **Publisher keys are additive.**
   - `pm.ver` stays 1.
-  - `pm.add` = 0, `pm.armStamp` and `pm.avgPx` are written but unread under `Refuse`.
+  - `pm.add` = 0, `pm.armStamp`, `pm.avgPx` and `pm.px` are written but unread under `Refuse`.
   - The old `portfolioArm` path is unchanged, apart from also writing `pm.armStamp`.
   - The `m_portStop` hazard (§1) stays as it is for `portfolioArm`. Only `portfolioArmAdd` avoids it.
 - **Regression gates (all must pass before merge):**
@@ -192,7 +280,7 @@ public EAddThrottle addThrottle = EAddThrottle.DenyWhenThrottled;
 
 ## 9. Tests
 
-### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P36, PROPOSED)
+### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P38, PROPOSED)
 Book 1M, Starter unless stated, ES BPV 50.
 - **T-P28 policy off:**
   - `Refuse` with a same-direction arm with `pm.add` = 1 ⇒ refused `"Long"` / `"in position"`, silent, `entryContracts` −1. Identical decisions to a run without the new keys.
@@ -221,7 +309,9 @@ Book 1M, Starter unless stated, ES BPV 50.
   - Never 0 written.
 - **T-P34 gates:**
   - Daily stop, kill, session stop, weekly observe deny with their usual reasons.
-  - ddSteps stage 1 or weekly halve ⇒ `"throttle: no adds"` (also under CodeSize).
+  - Throttle multiplier < 1 ⇒ add blocked, never scaled down, with the exact `ADD-BLOCKED` Warning text. Cover: ddSteps stage 1 (`reason=ddStep mult=0.5`), weekly halve (`weeklyHalve`), both together (`ddStep+weeklyHalve mult=0.25`), daily stop, session stop, weekly observe. Under CodeSize too.
+  - The same blocked add re-sent for 10 evaluations ⇒ exactly **one** Warning. A change of mult (0.5 → 0.25) or of leg ⇒ one more. Clear then block again ⇒ one more.
+  - An initial entry under the same throttle keeps its existing Info skip text (no Warning).
   - `maxPositions` full ⇒ the add is still allowed (not a new position).
 - **T-P35 identity:**
   - Stale arm (`armStamp != stamp`) ⇒ `"add: stale arm"`.
@@ -230,22 +320,40 @@ Book 1M, Starter unless stated, ES BPV 50.
   - An opposite side with `pm.add` = 1 ⇒ treated as a reversal (4c), `pm.add` ignored.
   - `Halted` ⇒ never an add.
 - **T-P36 config:**
-  - JSON enum names parse case-insensitively. `"addPolicy": 1` (int) rejected with a Warning.
+  - `addSizing` JSON names parse case-insensitively; `"addSizing": 1` (int) is rejected with a Warning.
+  - `"addPolicy"` in JSON ⇒ the "JSON value ignored" Warning; the effective policy = the Input value.
+  - The `AddPolicy` Input sets `cfg.addPolicy` after Resolve (also over a subclass Config and after a `config=fallback`).
   - Unknown name ⇒ default.
   - `maxAddsPerPosition` 5 ⇒ Validate fails ⇒ `ForProfile` fallback (`config=fallback`).
   - RUN line unchanged under `Refuse`; `adds(...)` appended otherwise.
   - Publisher pure helpers: `_PortAdd.RiskAfter` long/short, at/after break-even, bad BPV ⇒ NaN ⇒ refused.
+- **T-P37 R re-base** (book 1M, ES BPV 50):
+  - Long 2 @ 5000, stop 4995 ⇒ R0 = 500. At price 5005 (+1R0 open, `pnl` +500), add 1 fills with `stopNew` 5001 ⇒ R1 = (5005 − 5001) × 50 × 3 = 600.
+  - Stop-out at 5001: segment-1 P&L = (5001 − 5005) × 50 × 3 = −600 ⇒ trade R = +1.0 + (−1.0) = **0.0**.
+  - R(original): total P&L = (5001 − 5000) × 2 × 50 + (5001 − 5005) × 1 × 50 = 100 − 200 = −100 ⇒ −100 / 500 = **−0.2**.
+  - Check: kill queue, session count and weekly sum receive 0.0, not −0.2. Both values appear in the `trade R` line.
+  - The re-base fires on the fill evaluation only, not on the arm or approval evaluations.
+  - Two adds ⇒ three segments.
+  - `R1 ≤ 0` ⇒ no re-base + Warning.
+  - Reversal ⇒ no re-base; the trade closes summing its segments.
+  - A trade without adds ⇒ identical R and identical lines to rev 2.7.
+- **T-P38 partial exits with re-base:**
+  - T1 one contract at +1R0 before the add ⇒ its P&L stays in segment 0.
+  - A T1 after the add ⇒ in segment 1, at R1 (not shrunk).
+  - A partial exit never starts a segment or closes the trade.
+  - A net-shrink sample is not an add fill; a net-grow sample with an approved add is.
 
 ### 9.2 Native MiniPC checks (Check 7 style, new "Check 7A", backtest only, data ≤ 2024)
-- **Signal.** A throw-away signal `_TestPortAdd : PortfolioSignalObject`, not derived from `_CustomSignal` (as `_TestPortArm`), with input `Test` typed `public enum EAddCheck { A1, A2, A3, A4, A5, A6, A7 }` (rule 9; `_TestPortArm` still uses a string).
+- **Signal.** A throw-away signal `_TestPortAdd : PortfolioSignalObject`, not derived from `_CustomSignal` (as `_TestPortArm`), with input `Test` typed `public enum EAddCheck { A0, A1, A2, A3, A4, A5, A6, A7, A8 }` (rule 9; `_TestPortArm` still uses a string).
 - **Setup** as Check 7:
   - `@ES` 1m + `@NQ` 1m, dxFeed.
   - PT Exposure / Max % capital at risk 100% / 100%.
-  - The MM under test is the implementation build with `"addPolicy": "AllowWithinCap"`.
+  - The MM under test is the implementation build with the `AddPolicy` Input = `AllowWithinCap`.
   - Every line is prefixed `P5b Ax` and journals `ARM#i FILL` and `ARM#i STAMP` like `_TestPortArm`.
 
 | # | Question | How | Pass | If not |
 |---|---|---|---|---|
+| A0 | `AddPolicy` Input in the PT money-management signal's Format dialog; does an existing `.pws` keep `TotalRiskCapPct` after the update; can the optimizer sweep `AddPolicy`? | Open an existing portfolio after compiling; read both Inputs; try an optimization over `AddPolicy` | Named members `Refuse` / `AllowWithinCap` shown; `TotalRiskCapPct` unchanged; sweep result recorded either way | Re-enter `TotalRiskCapPct`; if there is no enum sweep, use two saved backtests |
 | A1 | Does PT fill a same-direction add, and which Strategy Properties Position Limits option allows it? | Buy 1 at bar 10, buy 1 more ("LA1") at bar 20. Run with the limit set to 1 entry, then to "allow up to N entry orders in the same direction" with N = 3 | No add fill with limit 1. With N = 3 the position goes 1 → 2. Record the exact option name | Adds cannot run in PT; keep `AddMode = None` |
 | A2 | `EntryContracts > 0` on the add step sizes only the add | MM writes 4 on the add step, −1 otherwise | Add fills 4 and the initial stays 1. If the strategy also sends a second entry the same bar, both get 4 (documents the one-pending-entry rule) | Use CodeSize for adds (§4) |
 | A3 | A resting add stop order, re-sent each bar, is sized by the `EntryContracts` of its fill step | Add stop above market for 5 bars; MM writes 2, 3, 3, 3, 3 | Fill qty = that step's value | Publisher must re-arm every bar (already the rule) |
@@ -253,32 +361,50 @@ Book 1M, Starter unless stated, ES BPV 50.
 | A5 | `CurrentPosition`, `PositionSide`, `AvgEntryPrice` and `pm.pos` after an add, on the same step the MM reads | Journal them each bar | Updated on the fill bar's next MM step; avg = qty-weighted | Delay the add-fill counter by one step |
 | A6 | Reversal with adds open | Long 2 + add 1, then `SellShort` 1 | All 3 longs closed, short 1 opened; one reversal | Reversal `rel` must sum legs by fills |
 | A7 | `ForceClosePosition` with adds open | Long 2 + add 1, MM force-closes | All legs flat at the close of bar T (as L3) | Kill path must close per leg |
+| A8 | R re-base and `ADD-BLOCKED` in a real run | Long 2 + add 1 on `@ES`, stopped at the raised stop. Second run with a ddSteps override that puts stage 1 on before the add | One `R rebase` and one `trade R` line, with R(rebased) ≈ the segment sum. Second run: one `ADD-BLOCKED reason=ddStep` Warning and no add fill | Fix the fill detection or the dedupe key |
 
-Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-spec §9 (A1–A7). Paper / live sharing (L6) and the roll (L9) are not affected.
+Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-spec §9 (A0–A8). Paper / live sharing (L6) and the roll (L9) are not affected.
 
 ## 10. Build steps (for the implementation PR, after approval)
 1. `_PortMM.Function.CS`:
-   - the enums and fields from §7, plus their JSON parse;
+   - `EAddPolicy`, `EAddSizing` and the fields from §7, plus the JSON parse (`addSizing`, `maxAddsPerPosition`; an `addPolicy` key ⇒ the ignored Warning);
+   - R segments in `KillTracker` / `updateKills` (§3a), and the `R rebase` / `trade R` lines;
+   - the `ADD-BLOCKED` Warning with its dedupe key (§6);
    - `_PortAdd` (pure: `RiskAfter`, fill counter);
    - the add branch in `Decide` next to the reversal branch: `isAdd(s)`, the gates, the caps with release (§3);
    - add fill tracking in `checkFills`;
    - the journal lines.
-2. `_PortfolioRiskManager.view`: read `pm.add`, `pm.addStop`, `pm.avgPx`, `pm.bpv`, `pm.armStamp` into new `PortStratView` fields.
+2. `_PortfolioRiskManager`:
+   - `[Input] public EAddPolicy AddPolicy` (default `Refuse`), copied into `cfg.addPolicy` in `StartCalc` next to `totalRiskCap` (L59);
+   - `view` reads `pm.add`, `pm.addStop`, `pm.avgPx`, `pm.px`, `pm.bpv`, `pm.armStamp` into new `PortStratView` fields.
 3. `_CustomSignal`:
    - `portfolioArmAdd`;
-   - `pm.add` reset with `pm.side` (L1796), `pm.avgPx`, `pm.bpv`, `pm.armStamp`;
+   - `pm.add` reset with `pm.side` (L1796), `pm.avgPx`, `pm.px`, `pm.bpv`, `pm.armStamp`;
+   - the `pm.openR` re-base on an add fill (§3a);
    - the warning for a same-direction `portfolioArm`.
    - No `[Input]`.
 4. Tests §9.1. Then the regression gates §8 (G0, D9a, PortMMTests, `Refuse` PT replay). Then Check 7A §9.2.
-5. Specs: m-port-spec rev 2.8 (§3 keys, §5.2 pseudo-code, §5.4 4d "Add legs", §6, §9 A1–A7, §11). Overview §7.7 on PR #117: lift "PT runs use `AddMode = None`" once A1–A7 pass and the owner approves.
+5. Specs:
+   - m-port-spec rev 2.8: §0 (two `[Input]`s), §3 keys, §5.2 pseudo-code, §5.4 4d "Add legs", the R-stream re-base and the Warning exception in the skip-logging rule, §6, §9 A0–A8, §11.
+   - Overview §7.7 on PR #117:
+     - lift "PT runs use `AddMode = None`" once A0–A8 pass and the owner approves;
+     - align its chart-side "R stays the initial position's R" with §3a.
 
-## 11. Open questions (owner or Analyst)
-- **Q1** Where does `addPolicy` live? Config/JSON (this draft, consistent with §0), or a second MM `[Input]` (typed `EAddPolicy`) so it shows in the PT dialog and can be swept? PROPOSED: config.
-- **Q2** Per-position budget = `maxTradeRisk` (1%, the same number as the chart rule), or a separate `addPositionRiskCap` ≤ 1%? PROPOSED: reuse `maxTradeRisk`.
-- **Q3** R units after adds: keep the initial 1R (this draft; a full stop-out after adds can be < −1R and counts more heavily in kill / session / weekly R), or re-base `riskAtOpen` to the post-add risk? PROPOSED: initial 1R, with the post-add risk journalled.
-- **Q4** Under a multiplier < 1 (ddSteps stage, weekly halve): deny adds (this draft), or allow with `nAdd × mult`? PROPOSED: deny.
+## 11. Owner answers and open questions
+
+**Resolved, owner-approved 2026-11-10 22:35 ET** (verbatim: *"1. An Input on the risk manager. 2. No, the stop in general would move for the second entry so the risk calculation should be adjusted. 3. Adds should be blocked, issuing a warning log entry why it was blocked. 4. Explain this to me"*):
+- **Former Q1 (where the policy lives):** an `[Input]` on the risk manager, `AddPolicy` of type `EAddPolicy { Refuse, AllowWithinCap }`, default `Refuse` (§7).
+- **Former Q3 (R units after adds):** re-base on the adjusted position at the add fill, by segments, with R(original) journalled for audit (§3a).
+- **Former Q4 (throttles):** block the add, never scale it, with an `ADD-BLOCKED` Warning (§6).
+
+**Still open:**
+- **Q7, cluster cap.** It was explained to Ettienne after 22:35 ET ("4. Explain this to me"); his decision is pending. Starter 0.75% will usually deny an ES add while NQ is open, and an ES add alone once the ES position carries more than about 0.75% after the add. Options: accept it as "one position per merged cluster", or let an add be checked only against the per-position 1%. PROPOSED: accept; the cluster cap applies.
+- **Q2** Per-position budget = `maxTradeRisk` (1%, the same number as the chart rule), or a separate `addPositionRiskCap` ≤ 1%? PROPOSED: reuse `maxTradeRisk`. The 22:35 answer 2 settles how the post-add risk is measured (at the moved stop, §3), not this cap level.
 - **Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.
 - **Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?
-- **Q7** Cluster cap: Starter 0.75% will usually deny an ES add while NQ is open, and an ES add alone once the ES position carries more than about 0.75% after the add. Accept as "one position per merged cluster", or let an add be checked only against the per-position 1%? PROPOSED: accept, the cluster cap applies.
-- **Q8** Should `fillCheckEvals` also warn on an approved add that never fills (VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept)?
-- **Q9** The MC Position Limits option name and behaviour in PT (A1) are unverified, and so is whether `From Entry` exits behave in PT as on charts (A4).
+- **Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.
+- **Q9 (native checks, not owner questions):**
+  - the MC Position Limits option name and behaviour in PT (A1);
+  - whether `From Entry` exits behave in PT as on charts (A4);
+  - whether the optimizer can sweep the `AddPolicy` enum, and whether saved inputs survive the new Input (A0).
+- **Q10** PR #117 overview §7.7 says "R for reporting stays the initial position's R" on charts. Should the chart side re-base too, so chart and Portfolio Trader R agree? PROPOSED: yes, as a separate edit on PR #117.
