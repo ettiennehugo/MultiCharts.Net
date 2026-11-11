@@ -139,6 +139,7 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
 - **Journal lines (Info):**
   - On re-base: `PORT Info: R rebase <id>#<i> leg <k> at <bar time>: pos <old> -> <new> avg <avgPx> stop <stopOld> -> <stopNew> px <px> 1R $<R_prev> -> $<R1> segR(prev) <x.xx> tradeR(rebased) <y.yy> tradeR(original) <z.zz>`.
   - On trade close, only when the trade had ≥ 1 re-base: `PORT Info: trade R <id>#<i> closed at <bar time>: R(rebased) <r> R(original 1R) <r0> segments <n> [<segR_0> @ $<R0>, <segR_1> @ $<R1>, …]`.
+  - **Planned vs actual risk % (owner request 2026-11-11 09:19 ET; definitions in PR #119 `specs/generic-exit-manager-spec.md` §5.3):** the PORT close line also carries `plannedRiskPct`, `actualRiskPct` and `actualToPlanned`. They are read from optional publisher keys `pm.riskPctPlan` / `pm.riskPctAct`, written by the strategy on the close bar (additive, `pm.ver` unchanged). The MM never computes MAE.
   - The existing `PORT kill …`, `session stop` and `weekly …` lines quote R(rebased). They append `(original <r0>)` only when the trade had a re-base, so every line for a trade without adds is byte-identical.
   - Skipped re-base: `PORT Warning: R rebase skipped <id>#<i> leg <k>: 1R $<R1> not positive (px <px> stop <stopNew>) - segment keeps 1R $<R_prev>`.
 
