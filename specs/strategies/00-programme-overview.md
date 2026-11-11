@@ -226,8 +226,8 @@ After items 4–9, management updates (BE, trail, T1 re-send) are computed for t
     - **Where re-based R is used:**
       - trade reporting in R and the `R` field of the exit log;
       - the trader's-equation and R-based acceptance stats;
-      - `AddMinR` for the next add, measured from the current average entry in the current segment's 1R per contract (PROPOSED).
-      - Stop and target rules keep their own spec definitions, which are based on the initial R and its trigger levels. PROPOSED: unchanged by the re-base.
+      - `AddMinR` for the next add, measured from the current average entry in the current segment's 1R per contract (**Owner-approved 2026-11-11 08:58 ET** (Ettienne: *"These rules are fine, you can add them. We might change some of the mechanics later on as required."*; the mechanics may be revised later)).
+      - Stop and target rules keep their own spec definitions, which are based on the initial R and its trigger levels. They are unchanged by the re-base (**Owner-approved 2026-11-11 08:58 ET** (Ettienne: *"These rules are fine, you can add them. We might change some of the mechanics later on as required."*; the mechanics may be revised later)).
     - **Audit logs:** on each re-base, `<ID> REBASE leg() pos(a->b) stop(old->new) px() R0() R1() segR()`. The exit log carries both `R()` (re-based) and `Rorig()` (total P&L ÷ initial R). Trades without an add have one segment, so `R` = `Rorig`, and their logs are unchanged apart from the `Rorig()` field.
   - **MultiCharts setting:** Strategy Properties → Position Limits must allow up to 1 + `MaxAdds` entry orders in the same direction. Coder verifies the exact option name in the installed build.
   - **Portfolio Trader / MM:** the current MM refuses a same-direction entry while in a position (`_PortMM.Function.CS` "in position"; m-port-spec rev 2.5 §5.4: "same-direction adds stay out"). `EntryContracts > 0` would also apply to every entry order, including adds (m-port-spec: "strategies that pyramid must use CodeSize mode or publish `pm.qtyCode` per leg").
