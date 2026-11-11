@@ -2,6 +2,8 @@
 
 **For:** Ettienne Hugo · **Prepared by:** Grok Bot · **Date:** Tuesday 10 Nov 2026 (America/New_York, EST) · **Branch:** `feat/strategy-specs-batch1` (PR #117, draft)
 
+**Update 2026-11-11 (ET), short-side review** (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*): YV-11's short and YV-12's long are now written out rule by rule; the cited variants (SP-09 `EDrawMode`, PS-24, PS-18, A2-49) state both sides. Shared conventions: Prog §7.9 (PR #117 overview rev 1.7). No owner-approved item changed in meaning.
+
 **Request (Ettienne, 21:38–21:41 ET):** *"Please watch this video and add it for strategy testing if we do not have anything similar documented"*, and for the others *"Also watch and document this video if we don't have something similar"*.
 
 **What this is.** Four videos, checked against the catalogue (`specs/trading-idea-catalogue.md` v2.7), the 2026-11-08 additions, `specs/strategies/` (PR #117) and the planning notes.
@@ -57,7 +59,7 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   - **Target:** the daily 200 SMA as a ceiling, otherwise "the next leg". Adds to winners and raises the stop to the new low. No scale-out, break-even or time exit.
   - **Stay out:** a flat 20 SMA; over-extension (a large gap from the 20 SMA, or a slope much steeper than 45°); the first pullback or breakout after an over-extension.
   - **Filters:** a clear catalyst (all examples are large gaps, LASE +30%, DKS −20%). No volume minimum.
-- **Mechanical translation (MultiCharts .NET; long shown, short mirrors).** Every number below is **PROPOSED**, because the video gives none.
+- **Mechanical translation (MultiCharts .NET; long shown, the short is written out after the exits table).** Every number below is **PROPOSED**, because the video gives none.
   1. **Streams:** Data1 = 1m. The signal timeframe is a strategy-local aggregation of Data1, or Data2/Data3 series (2m, 5m, 15m).
      - `TfSchedule = Fixed` (primary): one signal TF, `SignalTfMinutes` = 5. 5m is in two of his three windows.
      - `TfSchedule = ByTimeOfDay` (variant): 2m from 09:45 to 12:00, then 5m to 15:30. His 1m 09:30–10:00 slot overlaps the catalogue's 09:30–09:45 no-entry window (§2.1), so by default it starts at 09:45; with `OpenWindow = From0931` it runs 1m from 09:31 to 10:00.
@@ -89,6 +91,23 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   | Time | Flat by 15:55 ET; early close −5 min. No overnight | Prog §7.6 |
   | Invalidation | A signal-TF close below SMA20 → exit at market next bar (trend broken; PROPOSED) | Inferred |
   | News | Entry blackout −2/+10; `NewsExitMinutes` per Prog §7.6 | Prog §7.6 |
+- **Short side, rule by rule** (the video says "Short is the mirror" but states no short stop or numbers, so every short rule is **PROPOSED (mirror)**, same numbers as the long; Prog §7.9; `side = −1` in every log line; order names `YV11SE`, `YV11SS`, `YV11ST1`, `YV11SX`, adds `YV11SA1`/`YV11SA2`):
+  | Item | Short rule |
+  |---|---|
+  | Daily bias | Prior daily close **below** `Sma200` (`DailyBias` switches it off for both sides). |
+  | Trend state | EMA9 **<** SMA20; close **<** SMA20; slope gate: slope **≤ −`SlopeMinAtr`** × ATR14 per bar. |
+  | Over-extension veto | Skip if (SMA20 − close) > `ExtMaxAtr` × ATR14, or slope **< −`SlopeMaxAtr`** × ATR14. `FirstPullbackVeto`: the first pullback after an over-extended bar is skipped, and so is a new **low** made before price re-entered the zone once. |
+  | Catalyst (`GapAtr`) | RTH open **≤ prior RTH close − `GapMinAtr` × ATR20d** (gap **down**; "in the trade direction"). `PriorDayEvent` is side-blind. |
+  | Zone and trigger | Zone = [EMA9, SMA20] (EMA9 is the lower line for a short). Trigger bar: closed signal-TF bar with **high ≥ EMA9** and **close ≤ SMA20**. `DojiOrTail`: doji (same test), or **upper** wick ≥ 0.50 × range with the close in the **lower** half. |
+  | Entry | **Sell-stop** at the trigger bar **low − 1 tick**, valid `TriggerBars` (2); a newer trigger replaces it. Window, `OpenWindow`, `TfSchedule` and `MaxEntriesPerDay` (per direction) as the long. |
+  | Initial stop | Trigger-bar **high** (or the base high = highest high since the zone was entered) **+ 1 tick**, widened **upward** to the cost floor; > 1% equity → skip. |
+  | Target | `DailySma200ThenTrail`: if the daily 200 SMA is **below** entry and ≥ 1 R away, a buy-to-cover limit at **Sma200 + 2 ticks** for half (the 200 SMA as a **floor**); otherwise no fixed target. `FixedR`: entry − `TargetR` × R. |
+  | Trailing | Stop to each new confirmed signal-TF **lower high** (`EPivotLabel.LH`) **+ 1 tick**, one-way down (min), capped one tick above the last close. |
+  | Adds (`OnNewPullback`, owner-approved mechanics mirrored) | Each new qualified short trigger while the position is open and the last close **≤ average entry − `AddMinR` × R** arms a sell-stop add; `RaiseToAddLow` for a short **lowers** the whole-position stop to that trigger bar's **high + 1 tick**, never raised; R re-base with `side = −1`; the same 1% open-risk skip. |
+  | Invalidation | A signal-TF close **above** SMA20 → market exit next bar. |
+  | Time / news | Side-blind. |
+  | Stocks arm | Shorts need borrow and are hit by SEC Rule 201 after a 10% fall (pool design item 7), so the stock arm starts long-only; futures shorts have no such limit. The S1 scan's short version uses `ta_gap_d3` and `ta_sma20_pb`/`ta_sma200_pb` (price below) (**PROPOSED**; the FinViz tokens should be checked on the site). |
+  | Asymmetry | ES/NQ trend-following longs ride the drift; shorts on gap-down days are fewer and faster. Long and short results are reported separately (Prog §7.9 item 8). |
 - **Variant inputs (typed enums / bools; default = primary):**
   ```csharp
   public enum ETfSchedule { Fixed, ByTimeOfDay }                 // default Fixed (SignalTfMinutes 5)
@@ -133,7 +152,7 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   - **Short (setup 1):** it opens near support and runs into the D1 resistance; a wick candle forms. Short on the break of the wick candle's low. Stop above the wick high. Stop to break-even as it moves. Target the other side of the range.
   - **Long (setup 2):** a hard slide into D1 support and a hard lower wick. Long on the break above the prior candle. Stop below the low. T1 at VWAP, then hold for the other end of the range.
   - **Holding time:** scalps are held 5–30 minutes.
-- **Mechanical translation (futures; short at PDH shown, long at PDL mirrors).** All numbers **PROPOSED**.
+- **Mechanical translation (futures; short at PDH shown, the long at PDL is written out after the exits table).** All numbers **PROPOSED**.
   1. **Levels:** PDH/PDL = the prior RTH (09:30–16:00 ET) high/low (F-SESS). Intraday battle lines are discretionary, so batch 1 uses only PDH/PDL.
   2. **"Day 2" filter** (`Day2Filter`, enum; the futures proxy is **Owner-approved 2026-11-10 22:06 ET**: *"Yes, that sounds reasonable."*):
      - `RangeExpansion` (primary): the prior RTH range ≥ `Day2RangeAtr` (1.5) × the 20-day median RTH range, or |prior close − prior open| ≥ 1.0 × ATR20d;
@@ -159,6 +178,18 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   | Time stop | `TimeStopMinutes` (30): exit at market at entry + 30 minutes ("5–30 minutes") | Video |
   | Session | Flat by 15:55; early close −5 min | Prog §7.6 |
   | News | Blackout −2/+10; `NewsExitMinutes` | Prog §7.6 |
+- **Long side at PDL, rule by rule** (the video's setup 2, BABA, is a long, so the long entry, stop and VWAP-then-other-side exits are **sourced**; the numbers are the same **PROPOSED** values as the short; Prog §7.9; `side = +1`; order names `YV12LE`, `YV12LS`, `YV12LT1`, `YV12LT`, `YV12LX`; the short uses `YV12SE`, `YV12SS`, `YV12ST1`, `YV12ST`, `YV12SX`):
+  | Item | Long rule |
+  |---|---|
+  | Level and open location | PDL. No long if the RTH open ≤ PDL + 0.10 × prior range (step 3). |
+  | Day-2 filter | Side-blind: `RangeExpansion` / `PriorDayEvent` as approved. The prior day's direction (red/green body) is logged as a stratifier, not a filter (**PROPOSED**; the video does not tie the side to the candle colour). |
+  | Wick candle | Its **low** reaches **PDL + `LevelTolAtr`** × ATR14 (low ≤ that); its low is no more than 0.5 × ATR14 **below** PDL; **lower** wick ≥ 0.50 × range; closes in the **top** 25%; range ≥ 1.0 × ATR14. |
+  | Entry | Buy-stop at the wick bar **high + 1 tick**, valid 3 bars. Window and `OpenWindow` as the short. One attempt per level per day (PDH and PDL are separate levels). |
+  | Initial stop | Wick **low − 1 tick**, floored **downward** (entry − cost floor); > 1% equity → skip. |
+  | Target | `OtherSide`: **PDH − 2 ticks**, whole position. `VwapThenOtherSide` (the BABA long's stated exits): half at session VWAP if it lies between entry and PDH, runner to PDH − 2 ticks. Skip if the target is < 1 R after the floor. |
+  | Break-even (owner-approved `BreakEvenAt1R`) | When a closed bar's **high ≥ entry + 1 R**, stop → entry + 0 ticks. **Short:** when a closed bar's **low ≤ entry − 1 R**, stop → **entry − 0 ticks** (never raised). |
+  | Time stop / session / news | Side-blind (30 minutes; flat 15:55; blackout). |
+  | Short-specific notes (PDH short) | The fade of PDH on a Day-2 up day is against the prior day's move and the index drift; stats split long / short (Prog §7.9 item 8). The stated SMB short (AMD) was in the first minutes, so the short leans on `OpenWindow = From0931` more than the long. |
 - **Variant inputs:**
   ```csharp
   public enum EDay2Filter { RangeExpansion, PriorDayEvent, Off }   // default RangeExpansion
@@ -192,6 +223,8 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
 | 4. Hitchhiker Scalp (NVDA, 2m, after about 10:00–10:30) [ts: VERIFY] | opens above yesterday's high and holds; later fails below the level and VWAP, then a wick candle and a reclaim of the level; long on the reclaim; stop below the wick low; targets unstated | **PS-18** (stop-sweep buy on the first close back above the swept level); also YV-08 (SFP reclaim) | PS-18 variant **`Level = PriorRthHigh`** with **`Context = OpenAboveAndHold`**: the RTH open is above PDH and ≥ 30 minutes are spent above it. After 10:00, a dip below PDH and below VWAP, then a lower-wick candle, then a 2m/5m close back above PDH → buy next bar. Stop at the wick low − 1 tick, floored. Target unstated: 1.5 R or the session high (PROPOSED). The shape filter and delta condition are off in this variant |
 | 5. Backside Trade (RKLB, 2m, after 12:00) [ts: VERIFY] | an early run to resistance fails repeatedly, then a tight afternoon range forms; short on the break of the range lows; target VWAP, "a lot of times leak below"; stop unstated | **A2-49** (midday support/resistance and afternoon breakout, Kaufman) | A2-49 variant **`Context = MorningFailures`** with **`Target = Vwap`**: needs ≥ 2 failed tests of the morning high (each a high within 0.1 × ATR5 of it, then a close ≥ 0.5 × ATR5 below) before 12:00. The 12:00–13:30 range must be ≤ 0.6 × its own 20-day median. Sell-stop at the range low − 1 tick; stop at the range high + 1 tick (unstated, PROPOSED); T1 = VWAP for half, runner trailed for the "leak below" |
 
+**Both sides of the cited variants (PROPOSED mirrors where the video shows one side):** PS-24 `WickRetest` short = 2 closes below PDL − δ, a pullback to PDL ± 0.10 × ATR5 that prints an **upper**-wick candle (close in the bottom 25%), sell-stop at its low − 1 tick, stop at the wick high + 1 tick. PS-18 `OpenAboveAndHold` short mirror = `OpenBelowAndHold`: open below PDL and ≥ 30 min below it, after 10:00 a rally above PDL and VWAP, an upper-wick candle, then a close back below PDL → sell next bar, stop at the wick high + 1 tick. A2-49 `MorningFailures` is stated as a short (failed tests of the morning **high**, break of the afternoon range **low**, target VWAP); its long mirror = ≥ 2 failed tests of the morning **low**, buy-stop at the range high + 1 tick, stop at the range low − 1 tick, T1 = VWAP for half. Each entry's own spec decides whether both sides are registered.
+
 These are recorded as variant notes on the existing entries in the catalogue. Their typed inputs (e.g. `public enum ELevel { OvernightExtreme, PriorRthExtreme }`, `public enum EEntry { CloseBeyond, HigherLow, WickRetest }` on PS-24) are decided when that entry is specified. All three need data ≤ 2024 only (1m, W-M).
 
 ### SMB "4 Things" (video B): reviewed, no strategy
@@ -210,7 +243,7 @@ Holden's four points are process: (1) read price action top-down for uniformity 
   - stop at the sweep high; target the London lows; single full exit;
   - example ESU2024, Tue 10 Sep 2024, about +10 pts.
   - Discretionary pieces ("obvious equal", "strong displacement") are already frozen numerically in SP-09.
-- **One cited variant proposed for SP-09:** the video takes the **London low itself** as the target. SP-09 allows a session extreme only as one side of an equal pair. Proposed input: `public enum EDrawMode { EqualPair, SessionExtreme }`, default `EqualPair` (SP-09's frozen primary); `SessionExtreme` lets the London low (03:00–08:30 ET, SP-09's assumption; the video does not state the hours) or the prior RTH low be the target alone. It needs the Globex ETH template (Rev 2.7 §E5).
+- **One cited variant proposed for SP-09:** the video takes the **London low itself** as the target. SP-09 allows a session extreme only as one side of an equal pair. Proposed input: `public enum EDrawMode { EqualPair, SessionExtreme }`, default `EqualPair` (SP-09's frozen primary); `SessionExtreme` lets the London low (03:00–08:30 ET, SP-09's assumption; the video does not state the hours) or the prior RTH low be the target alone. It needs the Globex ETH template (Rev 2.7 §E5). **Both sides (PROPOSED mirror; the video shows a short):** a short draws to sell-side liquidity, so `SessionExtreme` targets the **London low** or the prior RTH **low**; a long draws to buy-side liquidity, the **London high** or the prior RTH **high**. Every other SP-09 rule keeps SP-09's own frozen long/short definitions.
 - **Data / holdout flag for the 15s arm (Arm S):**
   - 15s bars need trade ticks. The catalogue says NQ ticks start 1 Jul 2024, and the @ES bid/ask notes say dxFeed ES ticks start about 2024-10-27. These two need reconciling.
   - With tests capped at 31 Dec 2024, Arm S has at most about 125 NQ sessions, or about 45 ES sessions. That is below SP-09's own 250-session W-T block, so **Arm S cannot be tested honestly before the holdout**.
@@ -296,6 +329,7 @@ Still open:
 7. **Tick history:** OK to do a read-only QuoteManager check of the first @ES/@NQ trade-tick date before any 15s work?
 8. **Timestamps:** add the [ts: VERIFY] timestamps on a re-watch?
 9. **PT adds:** OK to plan an M-PORT change (its own PR) so the MM can approve same-direction add legs within the risk caps? Until then adds are chart-only.
+10. **Short side (2026-11-11):** accept the PROPOSED YV-11 short mirror (gap-down catalyst, price below SMA200 daily bias, 200 SMA as a floor target) and the YV-12 Day-2 rule being side-blind (prior-day colour only logged)?
 
 ## Sources
 - The four YouTube videos above (URLs as listed); findings relayed 2026-11-10.

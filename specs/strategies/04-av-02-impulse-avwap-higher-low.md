@@ -1,5 +1,7 @@
 # AV-02 · Impulse-origin AVWAP higher-low continuation — implementation spec
 
+**Rev 1.6 (draft), 11 Nov 2026 (EST)** — short side (swing-high anchor) written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
+
 **Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
 
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
@@ -24,7 +26,7 @@
 
 **VERIFY before coding (Coder):** `AvwapLimits.backfillBars` is documented as "PRICEACTION strength + 1" (fractal pivots). A zigzag low can confirm many bars after its extreme. Confirm that `_AvwapManager` back-fills from the extreme bar for `EPivotMode.AtrZigZag` pivots. If it does not, compute the anchor AVWAP in the strategy from a price-volume ring starting at the pivot's `extremeBar` (the AVWAP is computed from the anchor bar forward but used only from confirmation; Cat. §2.2), and keep M-AVWAP only for its P2 twin.
 
-## 4. Entry rules (long; short mirrors from a confirmed swing high)
+## 4. Entry rules (long shown; the short side from a confirmed swing high is written out in §5a)
 1. **Anchor:** the newest confirmed zigzag pivot low (impulse ≥ 3 × ATR). The anchor AVWAP is usable from `UsableFrom` (confirmation). A newer confirmed zigzag low replaces it (`replaceSameType`). Anchors are invalidated at a roll.
 2. **Impulse high** H = the highest high from the anchor bar up to the current bar, tracked until the pullback starts.
 3. **First pullback:** after confirmation, the first bar whose low enters the touch zone [AVWAP − `TouchLowerSigma` × σ, AVWAP + 0.5 σ] (default lower edge 0.25 σ; Cat. AV-02 rule line). Only the first such pullback per anchor is traded. The pullback fails, and the anchor is done, if a 15m close < AVWAP − 1 σ or any low < the anchor low occurs before a trigger.
@@ -48,6 +50,25 @@
 | **Orders and fills** | Buy-stop entry; stop `AV02LS`; T1 `AV02LT1`; market exits `AV02LX`. Magnifier 1m; stop-first. | Prog §4, §7.1 |
 | **MM interaction** | Prog §7.5; arm every bar the stop is pending. `PortfolioFamily = "AV"`. | |
 | **Same-bar precedence** | MM force-close → stop → T1 → news exit → FlatBy → anchor-low invalidation → AVWAP-loss close → trail update. | Prog §7.4 |
+
+### 5a. Short side, rule by rule (from a confirmed swing high)
+Source status: the catalogue states "short mirrors from a confirmed swing high" without short numbers; Shannon is not available (Prog §11 item 5). The numeric short rules below are **PROPOSED (mirror; source long-only)**, same numbers as the long. Owner-approved add mechanics keep their meaning, mirrored. Conventions: Prog §7.9. `side = −1` in every log line.
+| Item | Short rule |
+|---|---|
+| Anchor | The newest confirmed zigzag pivot **high** with a down impulse ≥ 3 × ATR; its AVWAP usable from confirmation; a newer confirmed zigzag high replaces it; invalidated at a roll. Long and short anchors are tracked independently (one of each may exist). |
+| Impulse low | L = the **lowest low** from the anchor bar to the current bar, tracked until the pullback starts. |
+| First pullback | The first bar whose **high** enters the zone **[AVWAP − 0.5 σ, AVWAP + `TouchLowerSigma` × σ]** (`TouchLowerSigma` is the far-side edge: below AVWAP for longs, **above** for shorts; default 0.25 σ). Fails, anchor done, on a 15m close **> AVWAP + 1 σ** or any **high > the anchor high** before a trigger. |
+| Trigger and entry | A fractal pivot **high** (role `"lh"`) confirmed with **`EPivotLabel.LH`** and price **< anchor high**; **sell-stop** `AV02SE` = confirming bar **low − 1 tick**. Order life and window (09:45–15:00 ET) as the long. |
+| Initial stop | **max(LH + 1 tick, AVWAP + 1 σ)** at the trigger bar, i.e. the farther of the two, widened **upward** to entry + cost floor; > 1% equity → skip; frozen. `AV02SS`. |
+| Targets | `ImpulseHigh` mode, short: T1 = impulse **low** L (frozen at the trigger), buy-to-cover limit `AV02ST1`, ⌊q/2⌋, runner trailed. If entry ≤ L at fill, T1 is skipped and the whole position trails (**PROPOSED**). The member keeps its name `ImpulseHigh` (= "the impulse extreme"). `Trail` mode as the long. |
+| Break-even | None. |
+| Trailing (EX-04) | After T1 or at **low ≤ entry − 1 R** (Trail mode): stop = **min(stop, anchor AVWAP + 2 ticks)** each closed bar, capped one tick above the last close; market exit on the first 15m close **> AVWAP + 2 ticks**. |
+| Invalidation | Before T1: a 15m close **above the anchor high** → `AV02SX`. After the trail activates: the AVWAP-reclaim close above. |
+| Adds (`OnNewPullback`) | A new confirmed 15m **LH** that holds **below AVWAP − 0.25 σ** (sell-stop below it) while last close **≤ average entry − `AddMinR` × R**; whole-position stop **lowered** to that **LH + 1 tick**, never raised; R re-base with `side = −1`; `AV02SA1`, `AV02SA2`. |
+| Re-entry | One trade per anchor; at most one trade per instrument per day across both sides (**PROPOSED**, as the long). |
+| Time / session / news / holiday / roll | Side-blind; exits `AV02SX`. |
+| MFE / MAE / risk %, reports | Prog §7.9 items 2 and 8. |
+| Short-specific notes | A swing-high anchor after a sell-off is often followed by fast short-covering rallies through AVWAP; the 1 σ far-side stop and the "high > anchor high" fail rule bound this. |
 
 ## 6. Sizing, risk and M-PORT
 As PS-02 §6. `Contracts` 2 (owner, 2026-11-10). Future %-risk sizing: Prog §7.8.
@@ -125,6 +146,8 @@ Trigger: after a confirmed ≥ 3 ATR impulse from a 15m low, the first pullback 
 4. Entry cut-off 15:00 ET and flatten at the 15:45 bar; anchor expiry 5 sessions; one trade per day.
 5. Anchor-low invalidation before T1.
 6. Prog §10 batch-wide items.
+7. **Short side (rev 1.6, §5a):** accept the PROPOSED swing-high mirror with identical numbers (3 × ATR impulse, touch zone with the 0.25 σ edge above AVWAP, 1 σ stop, anchor-high invalidation)?
+8. One trade per instrument per day across both sides (a long and a short anchor can both be live on one day)? PROPOSED: yes, the first fill uses the day.
 
 ## 15. Sources
 Cat. AV-02 (+ DV-12), §0 item 3, §2.1, §2.2, §2.6, EX-04; Shannon, *Maximum Trading Gains with Anchored VWAP* (practitioner, via Cat. v1 AV family prior); final-synthesis (Tickfloor 50% retracement benchmark via R1); engines manual §4.7 (M-AVWAP), §4.8 (PRICEACTION), §5.23; Strategy-planning Page (item 4).

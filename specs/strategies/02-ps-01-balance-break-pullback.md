@@ -1,5 +1,7 @@
 # PS-01 · Accepted balance break → first-pullback higher low (ABB-HL) — implementation spec
 
+**Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle checks of Keller B1 Ch 3.3 and Keller B4 §2.4/§8.4 applied (Kindle locations; quotes read from page images, may differ slightly). The stop now goes through the balance POC; the target is a scale-out at 1 W with a runner. Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #2. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Sibling: [01-ps-02-balance-break-close.md](01-ps-02-balance-break-close.md) (*PS-02 spec*). Catalogue: § PS-01. Target file: `sandbox/_PS_01_BalanceBreakPullback.Strategy.CS`, class `_PS_01_BalanceBreakPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
@@ -18,7 +20,7 @@
 ## 3. Engines
 As PS-02 §3, minus the entropy veto (PS-01 has none) and M-DAILY. Plus PRICEACTION used for the **entry** (layer-0 confirmed pivot low labelled `EPivotLabel.HL`, Futures preset, `dataStream = 1`). PS-01 shares PS-02's break/acceptance detector: same composite, δ, V, window and acceptance counter, so both specs produce the identical event cohort for a given n and acceptance count.
 
-## 4. Entry rules (long; short mirrors with LH)
+## 4. Entry rules (long shown; the short side, with LH pivots, is written out in §5a)
 1. **Daily setup:** `IsBalanced(1, n, 0.6)` at the prior close; W > 0; **V ≥ +1 for longs (≤ −1 for shorts): the value-migration alignment filter, default** (Cat. PS-01; Keller B4 §8.4 Rule 4 and steps 7–8; existing `ValueMigrationScore`).
 2. **Break and acceptance:** between 09:45 and 14:30 ET, `AcceptCloses` consecutive closed 5m bars with close > comp.vah + δ, δ = max(2 ticks, 0.10 × ATR5). This sets `side = +1` and records the acceptance time. The count and δ stay **PROPOSED** (Keller gives qualitative criteria only; checked: not specified in Keller B1 Ch 3.3). The optional `AcceptFlowCheck` (developing POC ≥ comp.poc and ≥ 25% of RTH volume beyond the edge, off by default) is shared with PS-02 §4 step 4, so both hosts keep the same cohort.
 3. **Hold zone:** hold = comp.vah − 0.25 × W. If any later 5m bar's **low** < hold before entry, the setup is cancelled (`SKIP pullback-too-deep`), as in Example 26.
@@ -43,6 +45,25 @@ As PS-02 §3, minus the entropy veto (PS-01 has none) and M-DAILY. Plus PRICEACT
 | **Orders and fills** | Entry buy-stop (fills at the trigger + MC slippage, or at the open if the bar gaps through). Stop `PS01LS`, T1 limit `PS01LT1` and runner destination limit `PS01LT` (trade-through), market exits `PS01LX`. Re-sent every bar. Magnifier 1m; stop-first on unresolved bars. | Prog §4, §7.1 |
 | **MM interaction** | As PS-02 §5. The entry is a pending stop, so `sizeForRisk`/`portfolioArm` is called on **every bar** the stop is pending (manual §5.23: the base clears `pm.side` on bars where you did not arm). | Prog §7.5 |
 | **Same-bar precedence** | MM force-close → stop → target → news exit → FlatBy/early close → invalidation (close-based) → BE update for next bar. If the invalidation close and the BE trigger happen on one bar, the invalidation exit wins. | Prog §7.4 |
+
+### 5a. Short side, rule by rule
+Source status: as PS-02 §5a, the short is a **sourced mirror** of the two-sided catalogue/Keller B4 rule with the same numbers; Keller B1 Ch 3.3's retest entry is written long-side, so its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
+| Item | Short rule |
+|---|---|
+| Daily setup | Same balance tests; **V ≤ −1**. |
+| Break and acceptance | `AcceptCloses` consecutive closed 5m bars with close **< comp.val − δ** (09:45–14:30 ET) → `side = −1`. Optional `AcceptFlowCheck` mirrored (dev POC ≤ comp.poc, ≥ 25% of RTH volume below comp.val), shared with PS-02 §5a. |
+| Hold zone | hold = **comp.val + 0.25 × W**. Any later 5m bar's **high > hold** before entry cancels the setup (`SKIP pullback-too-deep`). |
+| Trigger | After acceptance, the first layer-0 pivot **high** confirmed on this bar (`NewPivotHigh`) with **`label == EPivotLabel.LH`**. Planned entry = that confirming bar's **low − 1 tick**: a **sell-stop** `PS01SE` (below the market; fills on the trade down to it, or at the open on a gap down). |
+| Order life | As the long; a newer confirmed LH (still below hold) replaces the trigger and stop. |
+| Initial stop | `BalancePoc` (primary): **comp.poc + `StopBufferTicks`**. `HlPivot` variant: the trigger **LH pivot + 1 tick** (the member name stays `HlPivot`; for a short it means the trigger pivot). Floored **upward** to entry + cost floor; > 1% equity → skip. `PS01SS`. |
+| Targets | T1 = **comp.val − 1.0 × W**, buy-to-cover limit `PS01ST1`, ⌊q/2⌋. Runner limit `PS01ST` at the nearer, below T1, of the next composite HVN's **high** edge and the nearest naked POC, **+ 2 ticks**. `NextHvn` variant: whole position at the next composite HVN below + 2 ticks (its high edge). |
+| Break-even | When a closed bar's **low ≤ entry − 1 R**, stop → **entry − 0 ticks** from the next bar (never raised). |
+| Trailing | Runner after T1 (or whole position in `TrailEx05`): latest confirmed 5m **LH** after entry **+ 1 tick**, stop = **min(stop, candidate)**, capped one tick above the last close. |
+| Failed-break exit | `FailCloses` closed 5m bar(s) with close **> comp.val + δ** → `PS01SX`, `INVALIDATION`, from the fill. |
+| News / holiday / roll / session | Side-blind (Prog §7.9 item 6). A working **sell-stop** is cancelled once the news window is reached. |
+| Adds / re-entry | None; one attempt per instrument per day for both sides together. |
+| MFE / MAE / risk %, reports | Prog §7.9 items 2 and 8 (MAE at bar highs; long / short / combined tables; K-DR by side). |
+| Short-specific notes | Intraday only. A pullback after a downside break is often a sharp short-covering rally; the hold zone (0.25 W back inside) bounds it the same way. |
 
 ## 6. Sizing, risk and M-PORT
 As PS-02 §6 (`PortfolioFamily = "PS"`). `Contracts` = 2 (owner, 2026-11-10): contract 1 at T1 (1 W), contract 2 runs to the nearest destination or the trail. Future %-risk sizing: Prog §7.8.
@@ -124,6 +145,7 @@ Trigger: after a 2-close acceptance above the balanced composite (V ≥ +1), the
 2. Break-even offset 0 ticks (Keller: not stated).
 3. ~~POC stop primary and scale-out with runner~~: owner-approved 2026-11-10 20:31 ET. Still open: POC stop buffer 1 tick; destination offset 2 ticks.
 4. Prog §10 batch-wide items.
+5. **Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (hold 0.25 W, `StopBufferTicks` 1, BE at 1 R, `FailCloses` 1)? PROPOSED: yes, results split by side.
 
 ## 15. Sources
 Cat. PS-01, PS-02, EX-01, EX-05, EX-10, §2.1–2.3; Keller Book 1 Ch 3.3 (Kindle Loc ~951–959); Keller Book 4 §2.4 (Loc ~721–838), §8.3, §8.4 Rules 2 and 4, steps 7–9; final-synthesis Spec 1 and §6.6; engines manual §3.26 (Example 26), §4.8, §5.23; Strategy-planning Page.

@@ -1,5 +1,7 @@
 # PS-02 · Balance break at acceptance close — implementation spec
 
+**Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No long rule changed.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle checks of Keller B1 Ch 3.3 and Keller B4 §2.4/§8.4 applied (Kindle locations; quotes read from page images, may differ slightly). Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #1. Shared rules: [00-programme-overview.md](00-programme-overview.md) (cited as *Prog §x*). Catalogue: `specs/trading-idea-catalogue.md` § PS-02 and merged A2-41. Target file: `sandbox/_PS_02_BalanceBreakClose.Strategy.CS`, class `_PS_02_BalanceBreakClose`. Stage: sandbox. Acceptance policy: `catalogue-default`.
@@ -48,7 +50,7 @@
 | Sizing / portfolio | `sizeForRisk(…, widenedStop)`, `portfolioArm`, `portfolioStop`; `PortfolioFamily = "PS"` | base; PT only |
 | Journal / events | `journalArm`, `logSignal`, `trace(ETraceLevel.Journal, …)` | `TraceLevel` |
 
-## 4. Entry rules (long; short mirrors)
+## 4. Entry rules (long shown; the short side is written out in §5a)
 Evaluated on closed 5m bars only.
 1. **Daily setup (at the first bar of each Globex trading day, from completed sessions only):** `comp = Composite(1, n)` exists; `IsBalanced(1, n, 0.6)` is true; W = comp.vah − comp.val > 0; V = `ValueMigrationScore(1, n, 0.10, 20, false)`; if `EntropyFilter` is on, require `Hnorm ≤ 0.93`. A day that fails is logged `SKIP no-balance|entropy|no-composite` once.
 2. **δ** = max(2 ticks, 0.10 × ATR5) (Cat. §2.1). *Note: Example 27 uses a flat 2 ticks; the spec follows the catalogue.*
@@ -81,6 +83,27 @@ Evaluated on closed 5m bars only.
 | **Orders and fills** | Entry `MarketNextBar` (fills at the next bar's open + 1 tick slippage per MC settings). Stop `PS02LS` resting; T1 limit `PS02LT1` fills on trade-through; FlatBy/time exit `PS02LX` `MarketNextBar`. Stop and T1 are re-sent on every closed bar while in the position. Bar Magnifier 1-minute; stop-first on unresolved bars (Prog §4). | Example 27; Cat. §2.1 |
 | **MM interaction (PT)** | The MM may deny or size the entry (`EntryContracts`: −1 = coded size, 0 = blocked, > 0 = MM size). The split uses the filled position. The MM may `ForceClosePosition` (fills at the bar-T close); after that the strategy logs `FLAT-BY-MM` and the day is done. The MM never moves the stop or target. `Paused` is only set when flat and blocks all fills. | Prog §7.5; Check 7 |
 | **Same-bar precedence** | Prog §7.4: MM force-close → stop → T1/target → news exit → FlatBy/early close → failed-break exit → time. A trail update is computed only after these and applies from the next bar. | Prog §7.4 |
+
+### 5a. Short side, rule by rule
+Source status: the catalogue mechanism is two-sided ("traps the responsive sellers at the top of the range (or buyers at the bottom)") and Keller B4 §8.4 Rule 4 is direction-neutral ("enter on the break aligned with migration"), so the short is a **sourced mirror** with the same numbers as the long. Keller B1 Ch 3.3's wording is long-side ("buying the first tick beyond VAH"); its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
+| Item | Short rule |
+|---|---|
+| Daily setup | Same balance, composite and entropy tests (side-blind). **V ≤ −1** (value migrating down). |
+| Acceptance | `AcceptCloses` consecutive closed 5m bars with close **< comp.val − δ**; the counter resets on any close ≥ comp.val − δ. Same δ and window. |
+| Acceptance flow check (optional) | Developing RTH POC **≤ comp.poc**, and RTH volume traded **below comp.val** since the open ≥ `VolBeyondPct` of RTH volume so far. |
+| Stratifiers | `lvnBeyond` / `hvnBeyond` = a composite LVN / HVN within 0.5 W **below** comp.val. |
+| Entry | `MarketNextBar` **SellShort** `PS02SE` at the next bar's open. One attempt per instrument per day for both sides together (a long attempt uses the day). |
+| Initial stop | **comp.val + `StopWidthW` × W** (back inside the composite), `PS02SS` (buy-to-cover stop). Widened **upward** to entry + cost floor (ES 14, NQ 19, CL 15, 6E 18 ticks) if closer. BookSpec: comp.val + 0.30 W, skip rules unchanged. Risk > 1% equity → skip. |
+| T1 | Buy-to-cover limit `PS02ST1` at **comp.val − `TargetW` × W** (1.0 W below the broken edge, measured from the edge). Split and `SingleLotMode` as the long. |
+| Runner target (`NearestDestination`) | The nearer, **below** T1, of the next composite HVN's **high** edge and the nearest naked POC, **+ 2 ticks**, `PS02ST`. |
+| Break-even | Primary none. BookSpec: after T1, runner stop → **entry − 0 ticks**. |
+| Trailing (EX-05) | After T1: on each confirmed layer-0 pivot **high** labelled **`EPivotLabel.LH`** whose extreme is after the entry bar, candidate = pivot price **+ 1 tick**; stop = **min(stop, candidate)**, capped one tick above the last close (Prog §7.3). BookSpec: **lowest** 30m close since entry **+ 0.5 W**, plus a hard exit on a 30m close back **above comp.val** (inside the VA). |
+| Failed-break exit | `FailCloses` consecutive closed 5m bars with close **> comp.val + δ** → `PS02SX`, reason `INVALIDATION` (owner-approved rule, mirrored). |
+| Time / session / news / holiday / roll | Identical to the long (side-blind, Prog §7.9 item 6); exits use `PS02SX`. |
+| Adds | None (as the long). |
+| MFE / MAE / risk % | Adverse = price up: MAE marked at bar highs, MFE at bar lows; magnitudes ≥ 0 (Prog §7.9 item 2). |
+| Reports | K-DR already tests longs and shorts separately; every table splits long / short / combined (Prog §7.9 item 8). |
+| Short-specific notes | Intraday only, so no overnight gap risk. Downside breaks in ES/NQ are often faster (higher volatility) than upside breaks; δ and the stop are ATR/W-scaled, so no extra rule. The opposite-edge reversal future variant would, for a failed short, go long towards VAH. |
 
 ## 6. Sizing, risk and M-PORT integration
 - **Chart (research):** fixed `Contracts` = 2 (owner, 2026-11-10). Skip, never resize, if `Contracts × |entry − widenedStop| × BigPointValue > MaxRiskPct% × equityAvailable()` (Cat. §2.1; manual §5.13).
@@ -183,7 +206,8 @@ Header §4 walkthrough — Trigger: two 5m closes beyond the 3-session balanced 
 1. BookSpec overnight 3-day runner: leave out of batch 1 (intraday-only arm)?
 2. ~~Failed-break exit on in the primary~~: owner-approved 2026-11-10 20:31 ET. Still open: `FailCloses` = 2.
 3. `AcceptCloses` 2 and δ (Keller: qualitative only); the acceptance flow check thresholds (dev POC ≥ comp POC; 25% volume beyond the edge) as an ablation; runner destination offset of 2 ticks.
-4. Prog §10 batch-wide items (holdout scope, `NewsExitMinutes` default, trim rounding, early close, odd lots, data history).
+4. **Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (same `AcceptCloses`, δ, `StopWidthW`, `FailCloses`), or register side-specific values? PROPOSED: identical numbers, results split by side.
+5. Prog §10 batch-wide items (holdout scope, `NewsExitMinutes` default, trim rounding, early close, odd lots, data history).
 
 ## 15. Sources
 Cat. PS-02, A2-41, §2.1–2.3, §2.6, EX-03, EX-05, EX-10; Keller, *Volume Profile & Order Flow: The Complete Institutional Reference* (Book 1) Ch 3.3 (Kindle Loc ~951–959); Keller, *Empirical Volume Profile & Order Flow* (Book 4) §2.4 (Loc ~721–838), §8.3, §8.4 Rules 2 and 4, daily steps 7–9 (Kindle, checked 2026-11-10; also `kindle-notes/keller-b4-*.md`); final-synthesis Spec 1A and §6.6; engines manual §3.27 (Example 27), §4.8, §4.16, §5.12–5.14; M-INSTR §9 (M7), M8, M9; live-check-sheet Check 7; Strategy-planning Page (order, acceptance, costs).

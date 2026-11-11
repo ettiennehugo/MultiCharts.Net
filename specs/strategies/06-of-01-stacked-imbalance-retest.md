@@ -1,5 +1,7 @@
 # OF-01 · Stacked-imbalance origin: first retest continuation — implementation spec
 
+**Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side (selling stacks) written out rule by rule in new §5a; explicit `Side` input added (default `Both`, as the other batch-1 specs) (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.3 (draft), 10 Nov 2026 (EST).** Rev 1.3 replaces the unsourced variant B (HigherLow) with **variant K (Keller 6.3)**, from Keller B1 Ch 6.3 (Kindle Loc ~1896; quotes read from page images, may differ slightly). It adds the zone-age and escaped-balance options and logs R/MFE/MAE. Rev 1.2 refines the rules from Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*, as read by Ettienne in the Kindle reader. Page numbers are the reader's labels, ±2. The holdout is owner-approved (18 months, OF-01 only). Where the book differs from rev 1.1, the book is followed by default ("per Dale p.X"), and the rev 1.1 rule survives only as a named variant where useful. Rev 1.1: 2 contracts, news exit, costs. Batch 1, build order #6. **Data-gated** on bid/ask tick availability only (§10).
@@ -63,7 +65,7 @@ Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*).
 | Roll | `RollDetection = ERollDetection.Table`; `rollOn(1)` clears zones; no entry on `IsRollWindow` days |
 | Cost floor, sizing, journal, controls | M-INSTR M7 floor (ES 14 ticks); `sizeForRisk`; `journalArm`, `logSignal`; `ControlArm` for K-SH and K-FL |
 
-## 4. Entry rules (long shown; short mirrors with selling stacks = resistance, tested from below)
+## 4. Entry rules (long shown; the short side, selling stacks = resistance tested from below, is written out in §5a)
 1. **Zone (per Dale pp.74–76):** on each closed zone-TF (30m) bar, every **separate** run of ≥ 3 consecutive buying imbalances is a zone [lo, hi] = the run's lowest and highest imbalance price. **Several runs in one bar = several zones, each tested independently** (**PROPOSED – owner to confirm**; the book does not say first, last or strongest). Optional catalogue filter `CloseTopFrac` (zone bar closes in its upper 30%): **not from Dale, default off** (variant `Cat-CloseTop`).
 2. **Zone life (per Dale "until tested"):** a zone lives until its first test, a roll, or `ZoneMaxSessions` sessions (**5, PROPOSED**, to bound memory; Dale states no expiry). It does not expire at the session end. **Freshness option (Keller 6.3):** `ZoneMaxAgeMinutes` (clock minutes from the zone bar's close to the test bar). The default is 0 = off for the Dale primary; variant K registers **180** (Keller: "a stack from 3 hours ago is stale"; the exact cut is **PROPOSED**, checked: not specified in Keller B1 Ch 6.3). Prior-session zones are always older than 180 minutes, so this replaces rev 1.2's `Keller-SameSession` variant. Only RTH zone bars create zones (**PROPOSED**).
 3. **Move away (per Dale p.76):** the zone is armed once `MinAwayBars` (default 1, range 1–2) complete zone-TF bars after the zone bar have their **low above zone hi**: whole footprints above it. This replaces rev 1.1's "≥ 1 × ATR5".
@@ -112,6 +114,32 @@ Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*).
 | **MM interaction** | Prog §7.5 and the Check 7 facts: `ForceClosePosition` fills at the bar-T close; `Paused` blocks all fills; `EntryContracts` −1 = coded size, 0 blocks entries, > 0 = MM size. The MM never moves stops or targets. `PortfolioFamily = "OF"`. | Check 7 |
 | **Same-bar precedence** | (1) MM force-close → (2) stop, including a trailed stop → (3) T1 limit → (4) news exit → (5) warning **exit** (`FLOW-WARN`) → (6) FlatBy / early close → (7) roll → then, still open and no market exit sent: (8) warning **freeze** check → (9) trail update (skipped if frozen) → (10) zone cancel / arm / test bookkeeping for other zones. | Prog §7.4 |
 
+### 5a. Short side, rule by rule (selling stacks = resistance, tested from below)
+Source status: the spec heading has always said "short mirrors with selling stacks", but the Dale pages checked by Ettienne (pp.74–76, 124–136) were applied in their long form, and Keller B1 Ch 6.3 is direction-neutral ("stack", "origin"). The numeric short rules below are **PROPOSED (mirror; source long-only as applied)**, same numbers as the long, until the Dale pages are re-read for the selling case (§14). Conventions: Prog §7.9. `side = −1` in every log line. Engine support: `_OrderFlow.Side.Sell`, sell-side `DiagonalImbalances` / `StackedImbalances`, and `Absorption(ago, Side.Sell)` (bids absorbing at the bar low) all exist on `main`.
+| Item | Short rule |
+|---|---|
+| Zone | On each closed zone-TF bar, every separate run of ≥ `MinStack` consecutive **selling** imbalances (bid side, diagonal) is a zone [lo, hi]. Several runs = several zones. `CloseTopFrac` mirror: the zone bar closes in its **lower** 30% (variant `Cat-CloseTop`, off). |
+| Zone life / freshness | Identical (side-blind). |
+| Move away | Armed once `MinAwayBars` complete zone-TF bars after the zone bar have their **high below zone lo** (whole footprints below). |
+| Context (`OneWayMove`) | The zone-TF close **fell** ≥ `ContextAtr` × ATR14(zone TF) over `ContextBars` bars ending at the zone bar. |
+| Escaped-balance filter | A selling zone qualifies only if **zone hi ≤ VAL** of `Composite(1, 3)` (escaped below value), or it overlaps an LVN node of the composite or the developing RTH profile; otherwise `mid-value`, spent. |
+| First test | The first Data1 bar after arming whose **high ≥ zone lo** is the test ("tested from below"); only that test may trade; the zone is spent after it. |
+| Entry (primary) | A **sell limit `OF01SE` at zone lo** (the near edge, **above** the market), working from the arming bar's close. Fills on trade-through only: a print ≥ 1 tick above zone lo (Prog §7.9 item 4). Stop band and R:R checked against planned entry = zone lo. |
+| Variant K | Qualified stack mirrored (row volume ≥ 70th pct; drive from zone lo **down** to its extreme ≥ 1 × ATR5). Opposing stack = a qualified **buying** stack before the trigger → spent (`opposing-stack`). Trigger within `KAggressionBars` of the test: a closed bar that holds **≤ zone hi** and prints a fresh **selling** diagonal imbalance or has `BarDelta` **< 0** after a **positive**-delta pullback bar → **SellShort** market next bar. Size rule: full size only if the VW-01 classifier says **trend-down** day (VW-01 §5a); else q = 1. |
+| Initial stop | **zone hi + `StopBufferTicks`**; `BehindHvn`: above the **high** edge of the HVN that contains or sits just **above** the zone. d = stop − entry. Stop band, `StopOutOfBandMode` and the cost floor identical. `OF01SS`. |
+| Target (contract 1) | `DaleHvn`: the nearest HVN **below** the entry in `Composite(1, TargetProfileSessions)` whose **high** edge is < entry − 1 tick; T1 = that HVN's **high + `TargetOffsetTicks`** ("a little before the heavy volume"), buy-to-cover limit `OF01ST1`. None below → skip `no-hvn`. `FixedR`: entry − `TargetR` × d. Variant K: T1 = the **lowest low** between the zone bar and the test **+ 1 tick**; runner to the nearer, below, of the naked POC and the next HVN's high edge, + `TargetOffsetTicks`. |
+| Minimum R:R | RR = **(entry − T1) / d**; < `MinRR` → skip. |
+| Contract split | Identical. |
+| Break-even | None. |
+| Trailing (aggression trail) | On each closed 5m bar with a new **selling** imbalance at a price **below** the current stop and **below** entry (run if ≥ 3): candidate = the imbalance's (run's) **highest** price **+ `TrailBufferTicks`**; stop = **min(stop, candidate)**, capped one tick above the last close. Variant K rungs: each new qualified selling stack's **hi + buffer**. |
+| Warning: freeze | `Absorption(1, _OrderFlow.Side.Sell)` = 1 for the previous bar (**limit buyers absorbing at the low**), or a price/delta divergence (bar **low < lowest low since entry** while `BarDelta` **> 0**) → freeze the trail. |
+| Warning: exit | A stacked **buying** imbalance (≥ 3) **and** `BarDelta` **> 0** on a closed 5m bar → `OF01SX`, `FLOW-WARN`. |
+| Cancel before fill | A closed bar with close **> zone hi + 1 tick** cancels the zone and the working sell limit. |
+| Window / session / news / holiday / roll | Identical; "at most one filled trade per side per session" already counts sides separately. |
+| Adds | None. |
+| MFE / MAE / risk %, reports | Prog §7.9 items 2 and 8; buying-stack and selling-stack zones reported separately. |
+| Short-specific notes | Bid-side footprint quality is the same feed (dxFeed bid/ask, verified window ≥ 2024-10-28), so no side-specific data rule. Selling stacks at the end of a liquidation leg are often exhaustion, not initiative; the context and escape filters are the stratifiers that show it. |
+
 ## 6. Sizing, risk and M-PORT
 As PS-02 §6. `Contracts` = 2 (owner, 2026-11-10): contract 1 at T1 before the HVN, contract 2 trailed with aggression. Risk per contract = d (after the band and floor). The 1%-equity skip budget uses d. Future %-risk sizing: Prog §7.8.
 
@@ -122,6 +150,7 @@ As PS-02 §6. `Contracts` = 2 (owner, 2026-11-10): contract 1 at T1 before the H
 Header §17 describes each input with Purpose, Default, Units, Range, Effect, Interactions, and Fixed/Tuned.
 | Input | Type | Default | Units | Range | Fixed/Tuned | Purpose / effect |
 |---|---|---|---|---|---|---|
+| `Side` | enum `ESide { Both, LongOnly, ShortOnly }` | Both | — | enum | Fixed | Direction filter (rev 1.5; shared enum, Prog §3 rule 9 and §7.9 item 1). Buying-stack zones are long, selling-stack zones short |
 | `ImbalanceRatio` | double | 3.0 | Ask/Bid diagonal (3.0 = 300%) | ≥ 3.0 (engine floor) | Fixed (per Dale p.74–76) | Imbalance threshold |
 | `MinStack` | int | 3 | consecutive imbalances | 3–5 | Fixed (per Dale p.74–76) | Stack length |
 | `ZoneTfMinutes` | int | 30 | minutes | {5, 30} (else Error) | Fixed (per Dale; 5 = fallback b) | Footprint TF for zones |
@@ -264,6 +293,7 @@ Prog §6 + the K-SH kill, on the §10 split (validation Mar–Apr 2025). `catalo
 6. Context-filter definition (1.5 × ATR over 4 zone bars). Entry window 09:45–15:00 and one trade per side per session. Your `_StackedImblContLELX` rules as a later variant?
 7. Chart layout: 5m Data1 with 30m aggregation (§2). Variant K numbers: 180-minute freshness cut, `VolFloorPct` 70, travel ≥ 1 × ATR5, 3 aggression bars, market entry, scalp = 1 contract exiting at T1 on non-trend days, composite of 3 sessions for the escape filter.
 8. Prog §10 batch-wide items.
+9. **Short side (rev 1.5, §5a):** accept the PROPOSED selling-stack mirror with identical numbers, or first re-read Dale pp.74–76 / 124–136 for the selling case? Also confirm the new explicit `Side` input (default `Both`).
 
 ## 15. Sources
 - Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*, Kindle reader page labels (±2), read by Ettienne 2026-11-10:
