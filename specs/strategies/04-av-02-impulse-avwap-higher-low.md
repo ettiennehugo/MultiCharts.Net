@@ -46,7 +46,7 @@
 | **Time stop / max hold** | Intraday arm: flat at the close of the 15:45 ET bar (`FlatHHMM` = 1545 on 15m bars, so the `MarketNextBar` exit fills at 15:45, before 15:55). Early close: last bar ending ≥ 5 min before the close. No overnight. | Cat. §2.1; **PROPOSED** bar-alignment |
 | **Invalidation** | Before T1: a 15m close below the anchor low → market exit (the impulse origin is gone). **PROPOSED – owner to confirm** (usually at or beyond the stop, so rarely binding). After the trail activates: the AVWAP-loss close. | Cat. AV-02 "fails when"; EX-04 |
 | **Adds** | `AddMode` (`EAddMode`, default **None**: the catalogue and the notes do not add; Shannon not available). With `OnNewPullback`: a new confirmed 15m HL that holds above the impulse AVWAP + 0.25σ (buy-stop above it) while the position is open and the last close is ≥ average entry + `AddMinR` × R (the current 1R, re-based on each add fill: Prog §7.7, PR #118 §3a, owner-approved 22:35 ET); `AddContracts` 1 per add, at most `MaxAdds` (2); the stop for the whole position is raised per `AddStopMode` (default `RaiseToAddLow` = that HL − 1 tick, one-way). Adds join the runner. An add that fails the open-risk check is skipped (`SKIP add-risk`). Chart only until M-PORT supports adds (Prog §7.7). **Owner-approved 2026-11-10 22:06 ET** | Prog §7.7 |
-| **Re-entry** | One trade per anchor. A new trade needs a new confirmed anchor. Trades per day are set by `TradesPerDay` (`ETradesPerDay`, **Owner-approved 2026-11-11 09:52 ET**, answer 6: *"Make it an input setting using an enum"*): `OnePerInstrument` (the first fill of either side ends the day), `OnePerSide` (at most one long and one short per day), `Unlimited` (only the one-per-anchor rule). Default `OnePerInstrument` (**PROPOSED** default). Always one open position at a time. | Cat. AV-02 "first pullback" |
+| **Re-entry** | One trade per anchor. A new trade needs a new confirmed anchor. Trades per day are set by `TradesPerDay` (`ETradesPerDay`, **Owner-approved 2026-11-11 09:52 ET**, answer 6: *"Make it an input setting using an enum"*): `OnePerInstrument` (the first fill of either side ends the day), `OnePerSide` (at most one long and one short per day), `Unlimited` (only the one-per-anchor rule). Default `OnePerInstrument` (**Owner-approved 2026-11-11 10:08 ET** (Ettienne: *"1. Yes   2. Yes   3. Yes   4. Yes"*), answer 2). Always one open position at a time. | Cat. AV-02 "first pullback" |
 | **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `AV02LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
 | **Holiday / roll** | Prog §7.6. A roll invalidates all anchors (M-AVWAP); no entries on the roll-window day. | Manual §4.7 |
 | **Orders and fills** | Buy-stop entry; stop `AV02LS`; T1 `AV02LT1`; market exits `AV02LX`. Magnifier 1m; stop-first. | Prog §4, §7.1 |
@@ -93,7 +93,7 @@ Prog §7.6.
 | `AddMode` | enum `EAddMode { None, OnNewPullback }` | None | — | enum | Fixed per registration | Allow adds (Prog §7.7) |
 | `MaxAdds` / `AddContracts` / `AddMinR` | int / int / double | 2 / 1 / 1.0 | adds / contracts / R | 0–4 / 1–5 / 0.5–3 | Fixed (**PROPOSED**) | Add limits and the in-profit gate |
 | `AddStopMode` | enum `EAddStopMode { RaiseToAddLow, KeepCurrent }` | RaiseToAddLow | — | enum | Fixed | Stop handling on an add fill |
-| `TradesPerDay` | enum `ETradesPerDay { OnePerInstrument, OnePerSide, Unlimited }` | OnePerInstrument (**PROPOSED** default) | — | enum | Fixed per registration | Daily trade cap (**Owner-approved 2026-11-11 09:52 ET**) |
+| `TradesPerDay` | enum `ETradesPerDay { OnePerInstrument, OnePerSide, Unlimited }` | OnePerInstrument (owner-approved 2026-11-11 10:08 ET) | — | enum | Fixed per registration | Daily trade cap (**Owner-approved 2026-11-11 09:52 ET**) |
 | `AnchorMaxAgeSessions` | int | 5 | sessions | 1–10 | Fixed (**PROPOSED**) | Anchor expiry |
 | `EntryStartHHMM` 945, `EntryEndHHMM` 1500, `FlatHHMM` 1545, `SingleLotMode`, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
@@ -108,7 +108,7 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 | Target structure | `TargetMode` | enum `ETargetMode` | `ImpulseHigh`, `Trail` | `ImpulseHigh` | *Sweep axis.* ImpulseHigh = half at the impulse high, runner on the AVWAP trail; Trail = no fixed target, trail activates at +1 R | Cat. AV-02 |
 | Adds | `AddMode` (with `MaxAdds`, `AddContracts`, `AddMinR`, `AddStopMode`) | enum `EAddMode`; int; int; double; enum `EAddStopMode` | `None`, `OnNewPullback`; 0–4; ≥ 1; R; `RaiseToAddLow`, `KeepCurrent` | `None` / 2 / 1 / 1.0 / `RaiseToAddLow` | Adds to a winner on the spec's own trigger; raises the whole-position stop | Prog §7.7; owner 22:06 ET |
 | Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
-| Daily trade cap | `TradesPerDay` | enum `ETradesPerDay` | `OnePerInstrument`, `OnePerSide`, `Unlimited` | `OnePerInstrument` (**PROPOSED** default) | How many fills per instrument per day, across or per side | **Owner-approved 2026-11-11 09:52 ET** |
+| Daily trade cap | `TradesPerDay` | enum `ETradesPerDay` | `OnePerInstrument`, `OnePerSide`, `Unlimited` | `OnePerInstrument` (owner-approved 2026-11-11 10:08 ET) | How many fills per instrument per day, across or per side | **Owner-approved 2026-11-11 09:52 ET** |
 
 **Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
 
@@ -118,7 +118,7 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 public enum EAddMode { None, OnNewPullback }              // default None (source does not add)
 public enum EAddStopMode { RaiseToAddLow, KeepCurrent }     // default RaiseToAddLow
 public enum ETargetMode { ImpulseHigh, Trail }       // default ImpulseHigh
-public enum ETradesPerDay { OnePerInstrument, OnePerSide, Unlimited } // default OnePerInstrument (PROPOSED)
+public enum ETradesPerDay { OnePerInstrument, OnePerSide, Unlimited } // default OnePerInstrument (owner-approved 2026-11-11 10:08 ET)
 ```
 
 **Future variants (not built in batch 1, no input yet):** (1) the **60m/daily swing arm** (Page build item 4; §10), a separate registration, proposed `Arm` of type `public enum EArm { Intraday15m, Swing60m }` (default Intraday15m); (2) the **DV-12 blind-limit touch arm** (Dale), later. The numeric touch-edge sweep (`TouchLowerSigma`) stays a parameter.
@@ -168,7 +168,7 @@ Trigger: after a confirmed ≥ 3 ATR impulse from a 15m low, the first pullback 
 5. Anchor-low invalidation before T1.
 6. Prog §10 batch-wide items.
 7. ~~**Short side (rev 1.6, §5a):** accept the PROPOSED swing-high mirror with identical numbers (3 × ATR impulse, touch zone with the 0.25 σ edge above AVWAP, 1 σ stop, anchor-high invalidation)?~~ **Owner-approved 2026-11-11 09:52 ET**: accepted for now; testing must confirm the short trades.
-8. ~~One trade per instrument per day across both sides (a long and a short anchor can both be live on one day)? PROPOSED: yes, the first fill uses the day.~~ **Owner-approved 2026-11-11 09:52 ET**: typed-enum input `TradesPerDay`, default `OnePerInstrument` (PROPOSED default).
+8. ~~One trade per instrument per day across both sides (a long and a short anchor can both be live on one day)? PROPOSED: yes, the first fill uses the day.~~ **Owner-approved 2026-11-11 09:52 ET**: typed-enum input `TradesPerDay`, default `OnePerInstrument` (**Owner-approved 2026-11-11 10:08 ET** (Ettienne: *"1. Yes   2. Yes   3. Yes   4. Yes"*)).
 
 ## 15. Sources
 Cat. AV-02 (+ DV-12), §0 item 3, §2.1, §2.2, §2.6, EX-04; Shannon, *Maximum Trading Gains with Anchored VWAP* (practitioner, via Cat. v1 AV family prior); final-synthesis (Tickfloor 50% retracement benchmark via R1); engines manual §4.7 (M-AVWAP), §4.8 (PRICEACTION), §5.23; Strategy-planning Page (item 4).

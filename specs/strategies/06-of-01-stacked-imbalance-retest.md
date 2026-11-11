@@ -154,7 +154,7 @@ As PS-02 §6. `Contracts` = 2 (owner, 2026-11-10): contract 1 at T1 before the H
 Header §17 describes each input with Purpose, Default, Units, Range, Effect, Interactions, and Fixed/Tuned.
 | Input | Type | Default | Units | Range | Fixed/Tuned | Purpose / effect |
 |---|---|---|---|---|---|---|
-| `Side` | enum `ESide { Both, LongOnly, ShortOnly }` | Both | — | enum | Fixed | Direction filter (rev 1.5; shared enum, Prog §3 rule 9 and §7.9 item 1). Buying-stack zones are long, selling-stack zones short |
+| `Side` | enum `ESide { Both, LongOnly, ShortOnly }` | Both (owner-approved 2026-11-11 10:08 ET) | — | enum | Fixed | Direction filter (rev 1.5; shared enum, Prog §3 rule 9 and §7.9 item 1). Buying-stack zones are long, selling-stack zones short |
 | `ImbalanceRatio` | double | 3.0 | Ask/Bid diagonal (3.0 = 300%) | ≥ 3.0 (engine floor) | Fixed (per Dale p.74–76) | Imbalance threshold |
 | `MinStack` | int | 3 | consecutive imbalances | 3–5 | Fixed (per Dale p.74–76) | Stack length |
 | `ZoneTfMinutes` | int | 30 | minutes | {5, 30} (else Error) | Fixed (per Dale; 5 = fallback b) | Footprint TF for zones |
@@ -317,7 +317,7 @@ Prog §6 + the K-SH kill, on the §10 split (validation Mar–Apr 2025). `catalo
 7. Chart layout: 5m Data1 with 30m aggregation (§2). Variant K numbers: 180-minute freshness cut, `VolFloorPct` 70, travel ≥ 1 × ATR5, 3 aggression bars, market entry, scalp = 1 contract exiting at T1 on non-trend days, composite of 3 sessions for the escape filter.
 8. Prog §10 batch-wide items.
 9. ~~**Short side (rev 1.5, §5a):** accept the PROPOSED selling-stack mirror with identical numbers, or first re-read Dale pp.74–76 / 124–136 for the selling case? Also confirm the new explicit `Side` input (default `Both`).~~ **Owner-approved 2026-11-11 09:52 ET**: the selling-stack mirror is accepted for now; testing must confirm the short trades (§5a note, §10). Separate short values (§8.2).
-10. The explicit `Side` input (default `Both`, rev 1.5) was not covered by the 09:52 ET answers: confirm it (it is also how a flagged losing side is switched off, Prog §6 item 12)?
+10. ~~The explicit `Side` input (default `Both`, rev 1.5) was not covered by the 09:52 ET answers: confirm it (it is also how a flagged losing side is switched off, Prog §6 item 12)?~~ **Owner-approved 2026-11-11 10:08 ET** (Ettienne: *"1. Yes   2. Yes   3. Yes   4. Yes"*), answer 4: `Side` input, default `Both`.
 
 ## 15. Sources
 - Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*, Kindle reader page labels (±2), read by Ettienne 2026-11-10:
