@@ -22,7 +22,8 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
 - Every true variant is selectable via Inputs, and the default is the primary (rule 8).
 - Multi-value inputs are typed C# enums with named members, and on/off switches are bools (rule 9).
 - Costs and floors per Prog §4 (ES $17.00 round trip, 14-tick floor; NQ $9.48, 19 ticks; CL $14.72, 15 ticks; 6E $11.17, 18 ticks). GC has no confirmed cost row yet.
-- No adds (Prog §7.7) unless Ettienne approves an exception.
+- Adds are allowed where they make sense, as clear inputs (Prog §7.7 rev 1.5; **Owner-approved 2026-11-10 22:06 ET**: *"you can allow adding to positions, for strategies where that make sense make it a clear Input parameter and allow adding"*).
+- **ES and NQ futures are the primary test vehicles for now** (**Owner-approved 2026-11-10 22:06 ET**: *"For now we can try and stick to ES and NQ"*). The stock arms below are documented as scans plus a pool-backtest design, and are not built yet.
 
 ## Video verdicts
 
@@ -59,7 +60,7 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
 - **Mechanical translation (MultiCharts .NET; long shown, short mirrors).** Every number below is **PROPOSED**, because the video gives none.
   1. **Streams:** Data1 = 1m. The signal timeframe is a strategy-local aggregation of Data1, or Data2/Data3 series (2m, 5m, 15m).
      - `TfSchedule = Fixed` (primary): one signal TF, `SignalTfMinutes` = 5. 5m is in two of his three windows.
-     - `TfSchedule = ByTimeOfDay` (variant): 2m from 09:45 to 12:00, then 5m to 15:30. His 1m 09:30–10:00 slot sits inside the catalogue's 09:30–09:45 no-entry window (§2.1), so it starts at 09:45.
+     - `TfSchedule = ByTimeOfDay` (variant): 2m from 09:45 to 12:00, then 5m to 15:30. His 1m 09:30–10:00 slot overlaps the catalogue's 09:30–09:45 no-entry window (§2.1), so by default it starts at 09:45; with `OpenWindow = From0931` it runs 1m from 09:31 to 10:00.
   2. **Daily bias:** M-DAILY (`NeedsDaily = true`, `DailyConfig.smaLength = 200`). A long needs the prior daily close above `Sma200`, because the daily plan is long-side. `DailyBias` (bool) switches this off.
   3. **Trend state on the signal TF:**
      - EMA9 > SMA20;
@@ -76,14 +77,14 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
      - `DojiOrTail` (primary): |close − open| ≤ 0.10 × range, or lower wick ≥ 0.50 × range with the close in the upper half;
      - `PriorBarHigh`: any bar that meets the zone test.
      - **Entry:** buy-stop at the trigger bar high + 1 tick, valid `TriggerBars` (2) bars. A newer trigger bar replaces it.
-  7. **Window:** 09:45–15:30 ET. No entries during the M-EVENT blackout. At most one open position, and at most `MaxEntriesPerDay` (2) per direction.
+  7. **Window:** 09:45–15:30 ET by default. `OpenWindow = From0931` starts at 09:31 instead: the first closed 1m bar can arm an order, and with `TfSchedule = ByTimeOfDay` the signal TF from 09:31 to 10:00 is 1m, as in the video (**Owner-approved 2026-11-10 22:06 ET**; source of the 09:30–09:45 block in Prog §7.6a). No entries during the M-EVENT blackout. At most one open position, and at most `MaxEntriesPerDay` (2) per direction.
 - **Trade management and exits:**
   | Item | Rule | Source |
   |---|---|---|
   | Initial stop | Trigger-bar low (or the base low = lowest low since the zone was entered) − 1 tick, floored at the cost floor. Skip if the widened risk is > 1% of equity | Video; Prog §4 |
   | Target | `TargetMode = DailySma200ThenTrail` (primary): if the daily 200 SMA is above entry and ≥ 1 R away, a limit at Sma200 − 2 ticks for half; otherwise no fixed target. Runner: "next leg", trailed | Video ("200 SMA ceiling", "next leg") |
   | Trailing | Stop to each new confirmed signal-TF higher low (PRICEACTION `EPivotLabel.HL`) − 1 tick, one-way ("raises the stop to the new low") | Video |
-  | Adds | `AllowAdds` (bool), default **false** (house rule Prog §7.7). When true: add 1 contract on each new qualified trigger in the trade direction, max `MaxAdds` (2), with one stop for the whole position at the latest pullback low. This is the presenter's practice and needs Ettienne's approval as an exception | Video; Prog §7.7 |
+  | Adds | `AddMode` (`EAddMode`), **default `OnNewPullback`**, because adds are part of Malyarovich's method (LASE: "added twice" and raised the stop). Each new qualified trigger (step 6) in the trade direction while the position is open, with the last close ≥ average entry + `AddMinR` (1.0, PROPOSED) × R, arms a buy-stop add of `AddContracts` (1), up to `MaxAdds` (2). `AddStopMode = RaiseToAddLow`: the whole position's stop moves to that trigger bar's low − 1 tick, one-way. Adds join the runner (T1 at the 200 SMA uses the initial 2 contracts only). Skip an add if the total open risk would be > 1% of equity. `AddMode = None` is the no-adds comparison and the PT setting until M-PORT supports adds. **Owner-approved 2026-11-10 22:06 ET** | Video; Prog §7.7 |
   | Break-even / scale | None (the video has none). The half at the 200 SMA is the only partial | Video |
   | Time | Flat by 15:55 ET; early close −5 min. No overnight | Prog §7.6 |
   | Invalidation | A signal-TF close below SMA20 → exit at market next bar (trend broken; PROPOSED) | Inferred |
@@ -94,13 +95,17 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   public enum ETrigger { DojiOrTail, PriorBarHigh }              // default DojiOrTail
   public enum ETargetMode { DailySma200ThenTrail, TrailOnly, FixedR } // default DailySma200ThenTrail; FixedR uses TargetR 2.0 (PROPOSED)
   public enum ECatalystFilter { GapAtr, PriorDayEvent, Off }     // default GapAtr
-  // bools: DailyBias (true), SlopeFilter (true), ExtensionVeto (true), FirstPullbackVeto (true), AllowAdds (false)
+  public enum EAddMode { None, OnNewPullback }                  // default OnNewPullback here (source method adds)
+  public enum EAddStopMode { RaiseToAddLow, KeepCurrent }         // default RaiseToAddLow
+  public enum EOpenWindow { Block0930to0945, From0931 }          // default Block0930to0945 (Prog §7.6a)
+  // ints/doubles: MaxAdds (2), AddContracts (1), AddMinR (1.0)
+  // bools: DailyBias (true), SlopeFilter (true), ExtensionVeto (true), FirstPullbackVeto (true)
   // shared: ESide, ESingleLotMode, EControlArm, EAcceptancePolicy (Prog §3 rule 9)
   ```
   Swept numbers stay parameters: `SlopeMinAtr` {0.05, 0.10}, `ExtMaxAtr` {1.5, 2.5} → 4 configs (PROPOSED), with the primary (0.10, 2.0) read first. `SignalTfMinutes` is fixed at 5, and 2m is the schedule variant.
 - **Instruments, timeframe, data:**
   - **Futures first:** ES, NQ, then CL, GC, 6E. 1m bars, W-M, development Jul 2016–2022, validation 2023–2024. Data ≤ 31 Dec 2024. No ticks needed. ETH bars are not needed.
-  - **Stocks (later arm):** a fixed list with a mechanical gap filter. The catalyst and "in play" selection cannot be scanned in MultiCharts, so it is replaced by a list chosen before any run plus a rule.
+  - **Stocks (later arm; scans S1 and the pool design below):** a fixed list with a mechanical gap filter. The catalyst and "in play" selection cannot be scanned in MultiCharts, so it is replaced by a list chosen before any run plus a rule.
     - Proposed list (PROPOSED): SPY, QQQ, IWM, AAPL, AMD, NVDA, TSLA, META, AMZN, AVGO, SHOP.
     - Rule: trade a name only on days when its RTH open gaps ≥ 3% from the prior close, or the prior day's range is ≥ 2 × ATR20d.
     - Needs: dxFeed stock 1m history (VERIFY the start per symbol), a stock cost row (none in M-INSTR yet; `EAssetClass.Stock` and share sizing exist), and the NYSE calendar.
@@ -130,7 +135,7 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   - **Holding time:** scalps are held 5–30 minutes.
 - **Mechanical translation (futures; short at PDH shown, long at PDL mirrors).** All numbers **PROPOSED**.
   1. **Levels:** PDH/PDL = the prior RTH (09:30–16:00 ET) high/low (F-SESS). Intraday battle lines are discretionary, so batch 1 uses only PDH/PDL.
-  2. **"Day 2" filter** (`Day2Filter`, enum):
+  2. **"Day 2" filter** (`Day2Filter`, enum; the futures proxy is **Owner-approved 2026-11-10 22:06 ET**: *"Yes, that sounds reasonable."*):
      - `RangeExpansion` (primary): the prior RTH range ≥ `Day2RangeAtr` (1.5) × the 20-day median RTH range, or |prior close − prior open| ≥ 1.0 × ATR20d;
      - `PriorDayEvent`: a tier-1 M-EVENT release on the prior day;
      - `Off`.
@@ -143,13 +148,14 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
      - it closes in the bottom 25% of its range;
      - its range ≥ 1.0 × ATR14 ("distinct").
   5. **Entry:** sell-stop at the wick-candle low − 1 tick, valid 3 bars (follow-through). For the long, a buy-stop at the wick bar high + 1 tick ("break above the prior candle").
-  6. **Window:** 09:45–11:30 ET ("near the open", PROPOSED). The AMD example was in the first minutes, inside the catalogue's 09:30–09:45 no-entry window; the `EntryWindow = FullRth` variant runs to 15:30. One attempt per level per day.
+  6. **Window:** 09:45–11:30 ET ("near the open", PROPOSED). The AMD example was in the first minutes, inside the catalogue's 09:30–09:45 no-entry window, so `OpenWindow = From0931` starts at 09:31 (**Owner-approved 2026-11-10 22:06 ET**). `EntryWindow = FullRth` runs to 15:30. One attempt per level per day.
 - **Trade management and exits:**
   | Item | Rule | Source |
   |---|---|---|
   | Initial stop | Wick high + 1 tick, floored (ES 14 ticks, NQ 19, CL 15, 6E 18); skip if > 1% of equity | Video |
   | Target | `TargetMode = OtherSide` (primary): the other side of the prior range (PDL + 2 ticks for a short), whole position. Variant `VwapThenOtherSide`: half at session VWAP (if it lies between entry and the target), the runner to the other side (the BABA long's stated exits). Skip if the target is < 1 R after the floor | Video |
-  | Break-even | `StopManagement = BreakEvenAt1R` (primary, the stated "stop to break-even as it moves"; the trigger is +1 R on a closed bar, PROPOSED). Variant `NoBreakEven`, per the SMB "4 Things" advice (move the stop only on a new edge). The two SMB videos disagree, so the ablation is worth running | Video C; Video B |
+  | Break-even | `StopManagement = BreakEvenAt1R` (primary, the stated "stop to break-even as it moves"; the trigger is +1 R on a closed bar; **Owner-approved 2026-11-10 22:06 ET**: *"Yes, that sounds good."*). Variant `NoBreakEven`, per the SMB "4 Things" advice (move the stop only on a new edge). The two SMB videos disagree, so the ablation is worth running | Video C; Video B |
+  | Adds | None and no add input: a 5–30 minute scalp to a fixed level, where adds are not natural (Prog §7.7) | — |
   | Time stop | `TimeStopMinutes` (30): exit at market at entry + 30 minutes ("5–30 minutes") | Video |
   | Session | Flat by 15:55; early close −5 min | Prog §7.6 |
   | News | Blackout −2/+10; `NewsExitMinutes` | Prog §7.6 |
@@ -159,7 +165,8 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   public enum ESignalTf { M5, M1 }                                // default M5 (1m = the AMD example; cost-floor sensitive)
   public enum ETargetMode { OtherSide, VwapThenOtherSide }        // default OtherSide
   public enum EStopManagement { BreakEvenAt1R, NoBreakEven }      // default BreakEvenAt1R
-  public enum EEntryWindow { OpenWindow, FullRth }                // default OpenWindow (09:45–11:30)
+  public enum EEntryWindow { Morning, FullRth }                   // default Morning (to 11:30)
+  public enum EOpenWindow { Block0930to0945, From0931 }          // default Block0930to0945 (Prog §7.6a)
   // bools: OpenLocationFilter (true)
   // shared: ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
   ```
@@ -211,20 +218,89 @@ Holden's four points are process: (1) read price action top-down for uniformity 
   - Before proposing 15s at all, do a **read-only QuoteManager check** of the first trade-tick date for @ES and @NQ. That check was not done here.
   - The example day (10 Sep 2024) is before the ES tick start, so it can only be replayed on 1m.
 
-## Open questions for Ettienne
+## Stock scans (for TC2000 / FinViz) and a predetermined-pool backtest design
 
-1. **YV-11 adds:** the presenter pyramids (adds twice and raises the stop). Batch rules forbid adds (Prog §7.7). Keep `AllowAdds = false` as the primary, with adds as a variant that needs your OK?
-2. **Futures vs stocks:** test YV-11 and YV-12 on ES/NQ first (proposed)? Or do you want the stock arm too, which needs a fixed list (proposed: SPY, QQQ, IWM, AAPL, AMD, NVDA, TSLA, META, AMZN, AVGO, SHOP), dxFeed stock 1m history checks and stock cost rows?
-3. **"Day 2" / catalyst proxy:** prior-day range ≥ 1.5 × the 20-day median, or a tier-1 event the prior day. Is that acceptable for futures?
-4. **Opening-minutes entries:** both SMB and Malyarovich trade 09:30–10:00 on 1–2m bars. The catalogue blocks entries 09:30–09:45. Keep the block (proposed), or allow a variant that starts at 09:31?
-5. **YV-12 break-even:** the Market Memory video moves the stop to break-even; the "4 Things" video says don't. Primary = break-even at +1 R as stated, with `NoBreakEven` as the ablation?
-6. **SP-09:** add the `EDrawMode` variant (London low as a standalone target)? Which London hours: 03:00–08:30 ET (SP-09's assumption)?
-7. **Tick history:** OK to do a read-only QuoteManager check of the first @ES/@NQ trade-tick date before any 15s work? With the ≤ 2024 cap, Arm S is likely untestable.
-8. **Timestamps:** the relayed findings carry no timestamps; they are marked [ts: VERIFY]. Add them on a re-watch?
+**Owner (2026-11-10 22:06 ET):** *"Multicharts can scan stocks but it is pretty slow, document the required scan so I can use it in something like TC2000 or FinViz and we can work out how we can potentially backtest a pool of predetermined stocks (e.g. S&P500 or Russel2000) and build the acan criteria in as an entry filter. For now we can try and stick to ES and NQ."* The ES/NQ futures versions of YV-11 and YV-12 stay primary.
+
+**Confidence.**
+- The FinViz filter names and values below were read from the FinViz screener page's own option list on 2026-11-10. Each value is shown as `filter=value`, the URL form, e.g. `https://finviz.com/screener.ashx?v=111&f=ta_gap_u3,sh_relvol_o2,...`. Each filter is a fixed menu; custom ranges need the "Custom" option.
+- TC2000 PCF formulas use the standard PCF symbols (`C O H L V`, `C1`/`H1`/`L1`/`O1` = 1 bar ago, `AVGC20` = 20-bar SMA of close, `XAVGC9` = 9-bar EMA of close, `AVGV50` = 50-bar average volume). Items marked **VERIFY** were not checked in a TC2000 install: bar-offset syntax on averages (`.1`), and the volume unit (some TC2000 versions express PCF volume in hundreds of shares).
+- **Timing:** run the daily scans after the close (for the next session) or pre-market. FinViz's "Gap" and "Change from Open" need today's open, so they are valid only after 09:30. Pre-market, FinViz "Change" still shows the last session's change (VERIFY), which is exactly the Day-1 move a Day-2 scan needs.
+
+### Scan S1: YV-11 (Malyarovich), gap-and-trend names, run at or just after the open
+| Criterion | FinViz filter (name → value) | TC2000 PCF (daily) | Notes |
+|---|---|---|---|
+| Catalyst gap ≥ 3% (long) / ≤ −3% (short) | Gap → `ta_gap_u3` (Up 3%) / `ta_gap_d3` (Down 3%) | Long `O >= C1 * 1.03`; short `O <= C1 * 0.97` | All his examples were large gaps (LASE +30%, DKS −20%); the 3% floor is PROPOSED. Use 5% (`ta_gap_u5`) for a stricter list |
+| Relative volume | Relative Volume → `sh_relvol_o2` (Over 2) | `V >= 2 * AVGV50` (intraday partial volume: VERIFY TC2000's live-bar behaviour) | Not in the video (no volume minimum), but needed to find "in play" names; PROPOSED |
+| Liquidity floor | Average Volume → `sh_avgvol_o1000` (Over 1M) | `AVGV50 >= 1000000` (VERIFY the unit) | PROPOSED |
+| Price floor | Price $ → `sh_price_o10` (Over $10) | `C1 >= 10` | PROPOSED; excludes sub-$10 names with wide spreads |
+| Daily trend / MA alignment (long) | 20-Day SMA → `ta_sma20_pa` (Price above SMA20); 200-Day SMA → `ta_sma200_pa` (Price above SMA200); 20-Day SMA → `ta_sma20_sa50` (SMA20 above SMA50) is optional | `C1 > AVGC20 AND XAVGC9 > AVGC20 AND AVGC20 > AVGC20.5` (the `.5` offset for "rising over 5 days" needs VERIFY) | Shorts mirror: `ta_sma20_pb`, `ta_sma200_pb`, `C1 < AVGC20 AND XAVGC9 < AVGC20 AND AVGC20 < AVGC20.5` |
+| Not over-extended | 20-Day SMA → avoid `ta_sma20_pa20` (Price 20% above SMA20); there is no direct "≤ x% above" option except Custom | `C1 <= AVGC20 * 1.15` | His "big gap from the 20 SMA" veto; 15% is PROPOSED |
+| Universe | Index → `idx_sp500` (S&P 500) or `idx_rut` (RUSSELL 2000); Market Cap. → `cap_smallover` (+Small, over $300mln) | Watchlist = the index list | Optional; keeps the scan inside a pool that can be backtested (below) |
+
+### Scan S2: YV-12 (SMB Market Memory, "Day 2"), run after the close of Day 1 or pre-market Day 2
+| Criterion | FinViz filter (name → value) | TC2000 PCF (on Day 2, so Day 1 = offset 1) | Notes |
+|---|---|---|---|
+| Big Day-1 move | Change → `ta_change_u4` (Up 4%) or `ta_change_d4` (Down 4%), run after the Day-1 close | `ABS(C1 - C2) >= 0.04 * C2` (or run on Day 1: `ABS(C - C1) >= 0.04 * C1`) | Mechanical stand-in for "big red/green daily candle"; 4% PROPOSED |
+| Big Day-1 candle body / range | Average True Range → for scale only (`ta_averagetruerange_o1` = ATR over $1) | Range ≥ 1.5 × 20-day average range: `(H1 - L1) >= 1.5 * (AVGH20.1 - AVGL20.1)`. Body ≥ 60% of range: `ABS(C1 - O1) >= 0.6 * (H1 - L1)` | The mean of (H − L) equals AVGH − AVGL, so the identity is exact. The `.1` offset needs VERIFY. Same 1.5 × rule as the approved futures proxy |
+| Catalyst | Earnings Date → `earningsdate_yesterdayafter` (Yesterday After Market Close) / `earningsdate_todaybefore` (Today Before Market Open) on Day 1; Latest News filter (`news_date`, options not read: VERIFY) | Not available in PCF (use TC2000's earnings/news columns: VERIFY) | Optional. A technical range break counts as a catalyst in the video, so the move filter alone is acceptable |
+| Relative volume on Day 1 | Relative Volume → `sh_relvol_o2` (Over 2), run after the Day-1 close | `V1 >= 2 * AVGV50.1` (VERIFY offsets) | PROPOSED |
+| Liquidity / price | `sh_avgvol_o1000`, `sh_price_o10` | `AVGV50 >= 1000000`, `C1 >= 10` | PROPOSED |
+| Open-location rule (Day 2, at 09:30) | Gap → `ta_gap_d0`/`ta_gap_u0` only tells the direction; use Custom or check manually | Long setups need `O < H1` and short setups `O > L1` ("don't buy at/above yesterday's high") | This is the entry-time rule (YV-12 step 3), not a list filter |
+
+**Example FinViz URLs** (the parameter string is the screener's own format; untested as saved screens):
+- S1 long: `https://finviz.com/screener.ashx?v=111&f=ta_gap_u3,sh_relvol_o2,sh_avgvol_o1000,sh_price_o10,ta_sma20_pa,ta_sma200_pa`
+- S2 Day-2 up-movers (run after the Day-1 close): `https://finviz.com/screener.ashx?v=111&f=ta_change_u4,sh_relvol_o2,sh_avgvol_o1000,sh_price_o10`
+
+### Backtesting a predetermined pool in MultiCharts, with the scan as an entry filter (design note, not built)
+1. **Idea.** The scan is not run as a separate step. Each strategy evaluates the scan rules itself, on its own symbol's daily bars, and trades only on days that pass. That is the "scan as an entry filter". The pool is fixed before any run (S&P 500 or Russell 2000 constituents), so there is no look-ahead in symbol selection.
+2. **Portfolio Trader layout.**
+   - One PT row per symbol: Data1 = 1m or 5m bars; daily bars via M-DAILY (`NeedsDaily = true`) for the gap, prior range, body, relative volume (`V` vs a 50-day average) and the daily SMAs.
+   - The entry filter reads only completed daily bars plus today's RTH open (09:30 bar), so it is look-ahead-free.
+   - The MM (M-PORT) caps the number of simultaneous positions and the sector or cluster risk.
+3. **Data volume.**
+   - 1m: about 390 bars × 252 days × 8 years ≈ 0.8M bars per symbol. That is about 0.4 billion bars for 500 symbols and about 1.6 billion for 2,000.
+   - That is heavy for PT memory and run time. Options:
+     - (a) 5m bars (÷5);
+     - (b) chunks of about 50 symbols per run, with the MM run per chunk and an offline aggregate (MM caps across chunks are then approximate; label it);
+     - (c) a daily-only pre-pass that counts the qualifying (symbol, date) pairs first, to size the job.
+   - Check the dxFeed stock 1m history start per symbol first (VERIFY), and keep everything ≤ 31 Dec 2024 (holdout).
+4. **Survivorship bias.**
+   - Today's constituents exclude names that were dropped, merged or delisted, so a pool of current members flatters results.
+   - The fix is **point-in-time membership**: a table of (symbol, joined, left), used as an extra entry filter (trade a symbol only on dates it was a member). Sources need checking: S&P DJI index-change announcements; FTSE Russell's June reconstitution lists.
+   - Delisted symbols may be missing from dxFeed altogether (VERIFY). Any gap that remains is reported as residual survivorship bias.
+5. **Corporate actions.**
+   - Gap and prior-close tests need split-adjusted prices. Check how dxFeed and MultiCharts adjust stock history (VERIFY).
+   - Dividends create small ex-date gaps. Exclude ex-dates from the gap filter, or accept the small error.
+6. **Stock cost model needed.** M-INSTR has `EAssetClass.Stock` and share sizing, but no stock cost rows, and its floor logic is per contract. Required:
+   - commission per share (IBKR fixed about $0.005/share, $1 minimum, 1% maximum; VERIFY the owner's plan);
+   - SEC fee on sells and FINRA TAF;
+   - slippage of 1 tick ($0.01) plus half the spread, which matters for small caps;
+   - a cost floor expressed in R per share.
+
+   This is an M-INSTR change in its own PR.
+7. **Shorting constraints.** Borrow availability and hard-to-borrow fees, plus the SEC Rule 201 short-sale restriction (triggered after a 10% drop), which affects Day-2 shorts like DKS. These cannot be reconstructed historically from bars, so start long-only, or flag short results as optimistic.
+8. **Order.** (1) ES/NQ futures versions (primary, now). (2) A small fixed list (the 11 names in YV-11) as a pipeline test. (3) S&P 500 with point-in-time membership. (4) Russell 2000 last (most data, worst liquidity and survivorship).
+
+## Owner answers (2026-11-10 22:06 ET) and remaining questions
+
+Resolved, **owner-approved 2026-11-10 22:06 ET**:
+1. **Adds:** allowed where they make sense, as a clear input. YV-11 defaults to `AddMode = OnNewPullback` (source method). VW-01, AV-02 and AV-01 got add inputs (default `None`). Prog §7.7.
+2. **Stocks:** ES/NQ stay primary for now. The scans are documented below for TC2000/FinViz, with a design note for backtesting a predetermined pool.
+3. **Day-2 futures proxy:** approved as written (prior RTH range ≥ 1.5 × the 20-day median, or |body| ≥ 1 × ATR20d; or a tier-1 release the prior day).
+4. **09:31 variant:** `OpenWindow = From0931` on YV-11 and YV-12. Ettienne asked why the catalogue blocks the open. Source, reason and exact range (09:30–09:45, not 10:00) are in Prog §7.6a.
+5. **YV-12:** break-even at +1 R is primary; `NoBreakEven` is the comparison arm.
+
+Still open:
+6. **SP-09:** add the `EDrawMode` variant (London low as a standalone target)? Which London hours (03:00–08:30 ET assumed)?
+7. **Tick history:** OK to do a read-only QuoteManager check of the first @ES/@NQ trade-tick date before any 15s work?
+8. **Timestamps:** add the [ts: VERIFY] timestamps on a re-watch?
+9. **PT adds:** OK to plan an M-PORT change (its own PR) so the MM can approve same-direction add legs within the risk caps? Until then adds are chart-only.
 
 ## Sources
 - The four YouTube videos above (URLs as listed); findings relayed 2026-11-10.
 - `specs/trading-idea-catalogue.md` v2.7: §2.0, §2.1, §3.6 family prior, PS-03, PS-07, PS-18, PS-24, SP-05, SP-08, SP-09, A2-49, A2-58, A2-73, DV-02, DV-15, YV-07, YV-08, MT-06, EX family.
 - `specs/video-ideas-2026-11-08-additions.md` (SP-09 judgement calls 7–9).
-- `specs/strategies/00-programme-overview.md` rev 1.4: §3 rules 8–9, §4 costs, §5.1 holdout, §7.6–7.7.
+- `specs/strategies/00-programme-overview.md` rev 1.5: §3 rules 8–9, §4 costs, §5.1 holdout, §7.6, §7.6a (open block), §7.7 (adds).
+- `specs/m-port-spec.md` rev 2.5 §5.4 and `_PortMM.Function.CS` (same-direction adds refused as "in position").
 - `_InstrumentProfile.Function.CS` (`EAssetClass.Stock`, share sizing, no stock cost row).

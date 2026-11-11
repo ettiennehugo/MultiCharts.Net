@@ -1937,6 +1937,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Evidence:** **D** · Lit: Book.
 - **Why include it:** The 15-minute open blackout is applied everywhere. It should be tested once rather than assumed.
 - **Rules:** the blackout ∈ {5, 15, 30} min as a layer on PS-07, PS-24, MT-01.
+- **Owner note (2026-11-10 22:06 ET):** Ettienne asked why the open is blocked and asked for a variant that starts at 09:31. The §2.1 block covers **09:30–09:45** (from final-synthesis §4.0; reason: opening noise, Keller B2 15.7 "do nothing 0–5 min", plus the 2-tick opening slippage assumption). Entries that trade the open (YV-11, YV-12 in `specs/video-ideas-2026-11-10-additions.md`) now expose `public enum EOpenWindow { Block0930to0945, From0931 }`, default `Block0930to0945`. This entry's {5, 15, 30} test should add a 1-minute arm (09:31) when it is run.
 - **Needs:** F-TM.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** layer ablation. **Kill:** n/a; choose the value that does not hurt and keep it fixed across all ideas (pre-registered).

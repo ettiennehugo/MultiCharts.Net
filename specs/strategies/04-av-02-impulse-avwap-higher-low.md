@@ -1,5 +1,7 @@
 # AV-02 · Impulse-origin AVWAP higher-low continuation — implementation spec
 
+**Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope; Prog rev 1.1). Batch 1, build order #4. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-02 (merged DV-12 touch arm). Target file: `sandbox/_AV_02_ImpulseAvwapHigherLow.Strategy.CS`, class `_AV_02_ImpulseAvwapHigherLow`. Stage: sandbox. Acceptance policy: `catalogue-default`.
@@ -39,7 +41,7 @@
 | **Trailing (EX-04 on the impulse AVWAP)** | Activation: after T1 fills (ImpulseHigh) or at +1 R (Trail mode, **PROPOSED**). Rule: stop = max(stop, anchor AVWAP − 2 ticks) each closed bar (one-way), and exit at market on the first 15m close < AVWAP − 2 ticks. | Cat. EX-04 |
 | **Time stop / max hold** | Intraday arm: flat at the close of the 15:45 ET bar (`FlatHHMM` = 1545 on 15m bars, so the `MarketNextBar` exit fills at 15:45, before 15:55). Early close: last bar ending ≥ 5 min before the close. No overnight. | Cat. §2.1; **PROPOSED** bar-alignment |
 | **Invalidation** | Before T1: a 15m close below the anchor low → market exit (the impulse origin is gone). **PROPOSED – owner to confirm** (usually at or beyond the stop, so rarely binding). After the trail activates: the AVWAP-loss close. | Cat. AV-02 "fails when"; EX-04 |
-| **Adds** | None. | Prog §7.7 |
+| **Adds** | `AddMode` (`EAddMode`, default **None**: the catalogue and the notes do not add; Shannon not available). With `OnNewPullback`: a new confirmed 15m HL that holds above the impulse AVWAP + 0.25σ (buy-stop above it) while the position is open and the last close is ≥ average entry + `AddMinR` × R; `AddContracts` 1 per add, at most `MaxAdds` (2); the stop for the whole position is raised per `AddStopMode` (default `RaiseToAddLow` = that HL − 1 tick, one-way). Adds join the runner. An add that fails the open-risk check is skipped (`SKIP add-risk`). Chart only until M-PORT supports adds (Prog §7.7). **Owner-approved 2026-11-10 22:06 ET** | Prog §7.7 |
 | **Re-entry** | One trade per anchor. A new trade needs a new confirmed anchor. At most one trade per instrument per day (**PROPOSED – owner to confirm**). | Cat. AV-02 "first pullback" |
 | **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `AV02LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
 | **Holiday / roll** | Prog §7.6. A roll invalidates all anchors (M-AVWAP); no entries on the roll-window day. | Manual §4.7 |
@@ -63,6 +65,9 @@ Prog §7.6.
 | `TargetMode` | enum `ETargetMode { ImpulseHigh, Trail }` | ImpulseHigh | — | enum | Tuned | Target arm |
 | `StopSigma` | double | 1.0 | σ | fixed | Fixed | AVWAP − kσ stop leg |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | Trail offset |
+| `AddMode` | enum `EAddMode { None, OnNewPullback }` | None | — | enum | Fixed per registration | Allow adds (Prog §7.7) |
+| `MaxAdds` / `AddContracts` / `AddMinR` | int / int / double | 2 / 1 / 1.0 | adds / contracts / R | 0–4 / 1–5 / 0.5–3 | Fixed (**PROPOSED**) | Add limits and the in-profit gate |
+| `AddStopMode` | enum `EAddStopMode { RaiseToAddLow, KeepCurrent }` | RaiseToAddLow | — | enum | Fixed | Stop handling on an add fill |
 | `AnchorMaxAgeSessions` | int | 5 | sessions | 1–10 | Fixed (**PROPOSED**) | Anchor expiry |
 | `EntryStartHHMM` 945, `EntryEndHHMM` 1500, `FlatHHMM` 1545, `SingleLotMode`, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
@@ -75,6 +80,7 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 | Variant | Input | Type | Values | Default (primary) | What it changes | Source |
 |---|---|---|---|---|---|---|
 | Target structure | `TargetMode` | enum `ETargetMode` | `ImpulseHigh`, `Trail` | `ImpulseHigh` | *Sweep axis.* ImpulseHigh = half at the impulse high, runner on the AVWAP trail; Trail = no fixed target, trail activates at +1 R | Cat. AV-02 |
+| Adds | `AddMode` (with `MaxAdds`, `AddContracts`, `AddMinR`, `AddStopMode`) | enum `EAddMode`; int; int; double; enum `EAddStopMode` | `None`, `OnNewPullback`; 0–4; ≥ 1; R; `RaiseToAddLow`, `KeepCurrent` | `None` / 2 / 1 / 1.0 / `RaiseToAddLow` | Adds to a winner on the spec's own trigger; raises the whole-position stop | Prog §7.7; owner 22:06 ET |
 | Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
 
 **Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
@@ -82,6 +88,8 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 ```csharp
 // Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
 // ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EAddMode { None, OnNewPullback }              // default None (source does not add)
+public enum EAddStopMode { RaiseToAddLow, KeepCurrent }     // default RaiseToAddLow
 public enum ETargetMode { ImpulseHigh, Trail }       // default ImpulseHigh
 ```
 

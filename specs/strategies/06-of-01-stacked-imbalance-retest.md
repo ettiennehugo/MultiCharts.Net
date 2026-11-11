@@ -103,7 +103,7 @@ Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*).
 | **Session end** | Flat at 15:55 ET (`FlatBy`); early close: flatten at close − 5 min, entry cut-off close − 60 min (Prog §7.6). Never overnight. Zones may carry over to later sessions (§4 step 2), positions never do. | Ex 38; Prog §7.6 |
 | **Invalidation before fill** | Close < zone lo − 1 tick cancels the zone (§4 step 8). | Keller 6.3 |
 | **Variant K exits** | Stop as the primary; T1 at the drive extreme − 1 tick; runner to the nearer of naked POC / next HVN edge; trail on chained-origin rungs instead of single imbalances; non-trend day: the whole position exits at T1. Details in §4 step 7. | Keller B1 Ch 6.3 |
-| **Adds / pyramiding** | None. Dale's new imbalances move the stop; they never add size. | Prog §7.7 |
+| **Adds / pyramiding** | None. Dale's new imbalances move the stop; they never add size. No add input: this is a single break/retest or first-test setup, so adds are not natural here (Prog §7.7, rev 1.5). | Prog §7.7 |
 | **Re-entry after a stop** | Never on that zone (per Dale p.76, first test only). Another zone may trade, subject to the session cap. | per Dale p.76 |
 | **News (M-EVENT)** | Entry blackout −2/+10 min (tier-1). `NewsExitMinutes` (default 0 = off, **PROPOSED**): when > 0, at the last 5m close before release − N, flatten (`NEWS`). A working limit is not re-sent and the zone is spent. | Prog §7.6 |
 | **Holiday** | No trading on full closes; early close as above. | Prog §7.6 |

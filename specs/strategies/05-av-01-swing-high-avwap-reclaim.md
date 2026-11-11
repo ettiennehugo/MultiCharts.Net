@@ -1,5 +1,7 @@
 # AV-01 · Swing-high AVWAP reclaim (swing sleeve) — implementation spec
 
+**Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope, big-winner rule; Prog rev 1.1). Batch 1, build order #5. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-01. Target file: `sandbox/_AV_01_SwingHighAvwapReclaim.Strategy.CS`, class `_AV_01_SwingHighAvwapReclaim`. Stage: sandbox. Acceptance policy: **`big-winner-trend`** (owner, 2026-11-10 19:44 ET: "yes, use the big-winner rule"), predeclared in the header before any result is read.
@@ -46,7 +48,7 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 | **Time stop / max hold** | Max hold `MaxHoldSessions` = 20 trading sessions (≈ one month, the owner's soft limit): market exit at the RTH close bar (15:45 ET 15m bar) of session 20. **PROPOSED – owner to confirm** (the catalogue states no time stop; the Page says each swing consumer needs an explicit maximum hold). | Owner horizon; Page decisions item 1 |
 | **Overnight / weekend** | Allowed. Overnight and weekend gap risk is accepted: a stop gapped through fills at the next bar's open (MC behaviour) and is reported as gap slippage. Overnight margin is checked in the run sheet. | Cat. AV-01 "holds overnight (swing) → gap risk" |
 | **Invalidation** | A **60m close below the original swing-high AVWAP − δ60** before T1 → market exit (the reclaim failed). **PROPOSED – owner to confirm.** | Mechanism in Cat. AV-01 |
-| **Adds** | None. | Prog §7.7 |
+| **Adds** | `AddMode` (`EAddMode`, default **None**: the catalogue and the notes do not add; Shannon not available). With `OnNewPullback`: a new confirmed 15m HL above the new impulse AVWAP (buy-stop above it; adds are placed only inside the entry window and are then held with the swing position) while the position is open and the last close is ≥ average entry + `AddMinR` × R; `AddContracts` 1 per add, at most `MaxAdds` (2); the stop for the whole position is raised per `AddStopMode` (default `RaiseToAddLow` = that HL − 1 tick, one-way). Adds join the runner. An add that fails the open-risk check is skipped (`SKIP add-risk`). Chart only until M-PORT supports adds (Prog §7.7). **Owner-approved 2026-11-10 22:06 ET** | Prog §7.7 |
 | **Re-entry** | One trade per anchor/reclaim. After a stop-out, a new trade needs a new reclaim (a new ≥ 10-bar spell below the AVWAP and a new close above). | Cat. AV-01 |
 | **News** | Entry blackout: no entry orders in `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm**). When > 0, at the last closed **15m** bar before release − N (`0 < MinutesTo(EEventTier.T1) < N + 15`, Prog §7.6) the whole swing position is flattened with `AV01LX`, reason `NEWS`, and entries stay blocked until release + 10 min. This applies overnight too (e.g. an 08:30 release is exited from the 08:15 bar close when N = 5). A `NEWS` exit ends that reclaim; a new trade needs a new reclaim. Note: with N > 0 a 20-session swing will usually be cut by a tier-1 release (several per month), which changes the strategy's character, so a non-zero value is a separate registered trial. When ≤ 0 the position holds through news with its stop. | Owner 2026-11-10; Prog §7.6 |
 | **Holiday** | Full-close days: no bars; the position is held. Early close: no new entry orders after the cut-off; the position is held over the early close. ES/NQ `_CmeHolidays`; CL/GC/ZN M8 tables (2016–2026; outside that range S4 refuses in-advance use, so runs stay inside it). | Prog §7.6; M-INSTR M8 |
@@ -73,6 +75,9 @@ See §5 rows; Prog §7.6.
 | `MaxHoldSessions` | int | 20 | sessions | 5–30 | Fixed (**PROPOSED**) | Time stop |
 | `RollFlattenSessions` | int | 1 | sessions before roll | 1–3 | Fixed (**PROPOSED**) | Roll exit lead |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | Trail offset |
+| `AddMode` | enum `EAddMode { None, OnNewPullback }` | None | — | enum | Fixed per registration | Allow adds (Prog §7.7) |
+| `MaxAdds` / `AddContracts` / `AddMinR` | int / int / double | 2 / 1 / 1.0 | adds / contracts / R | 0–4 / 1–5 / 0.5–3 | Fixed (**PROPOSED**) | Add limits and the in-profit gate |
+| `AddStopMode` | enum `EAddStopMode { RaiseToAddLow, KeepCurrent }` | RaiseToAddLow | — | enum | Fixed | Stop handling on an add fill |
 | `NewsExitMinutes` | int | 0 | minutes before a tier-1 release | 0–120; ≤ 0 = disabled | Fixed (**PROPOSED** default) | Flatten the swing position and block entries N minutes before scheduled high-impact news (Prog §7.6) |
 | `EntryStartHHMM` 945, `EntryEndHHMM` 1530, `SingleLotMode`, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy` (**default `BigWinnerTrend`** here), `MaxSingleTradeNetProfitPct` (logged only), `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
@@ -87,6 +92,7 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 | Reclaim timeframe | `SignalTf` | enum `ESignalTf` | `H60`, `M15` | `H60` | *Sweep axis.* Timeframe of the reclaim close and the HL trigger | Cat. AV-01 |
 | Target structure | `TargetMode` | enum `ETargetMode` | `SwingHigh`, `Trail` | `SwingHigh` | *Sweep axis.* SwingHigh = half at the anchor swing high, runner on the 60m trail; Trail = no fixed target | Cat. AV-01 |
 | Daily regime filter | `TrendFilter` | enum `ETrendFilter` | `Sma50`, `Tsmom` | `Sma50` (**PROPOSED** choice) | Above the 50-day SMA, or time-series momentum, as the long-only regime gate | Cat. AV-01 |
+| Adds | `AddMode` (with `MaxAdds`, `AddContracts`, `AddMinR`, `AddStopMode`) | enum `EAddMode`; int; int; double; enum `EAddStopMode` | `None`, `OnNewPullback`; 0–4; ≥ 1; R; `RaiseToAddLow`, `KeepCurrent` | `None` / 2 / 1 / 1.0 / `RaiseToAddLow` | Adds to a winner on the spec's own trigger; raises the whole-position stop | Prog §7.7; owner 22:06 ET |
 | Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
 
 **Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
@@ -94,6 +100,8 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 ```csharp
 // Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
 // ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EAddMode { None, OnNewPullback }              // default None (source does not add)
+public enum EAddStopMode { RaiseToAddLow, KeepCurrent }     // default RaiseToAddLow
 public enum ESignalTf { H60, M15 }                   // default H60
 public enum ETargetMode { SwingHigh, Trail }         // default SwingHigh
 public enum ETrendFilter { Sma50, Tsmom }            // default Sma50

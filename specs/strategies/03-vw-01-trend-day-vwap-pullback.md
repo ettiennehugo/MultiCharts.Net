@@ -1,5 +1,7 @@
 # VW-01 · Trend-day first VWAP pullback — implementation spec
 
+**Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
+
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
 
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle check of Keller B1 Ch 4.3 (VWAP Setup 1, Loc ~1307–1358) and Dale VP Setup #2 applied (Kindle locations / pages; quotes read from page images, may differ slightly). Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #3. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § VW-01; definitions §2.2 (trend day, HL entry). Target file: `sandbox/_VW_01_TrendDayVwapPullback.Strategy.CS`, class `_VW_01_TrendDayVwapPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
@@ -63,7 +65,7 @@
 | **Trailing (EX-04 on RTH VWAP)** | Activation: after T1 fills (SessionHigh mode), or once a closed bar's high ≥ entry + 1 R (Trail mode, **PROPOSED – owner to confirm**). Rule: stop = max(stop, VWAP − 2 ticks), updated each closed bar (one-way, Prog §7.3); **plus** exit at market on the first 5m close < VWAP − 2 ticks. | Cat. EX-04 (A2-03 primary arm form, session-VWAP arm) |
 | **Time stop / max hold** | Intraday. FlatBy 15:55 ET; early close: close − 5 min. No overnight. | Cat. §2.1 |
 | **Invalidation: day changes type** | `AcceptAcrossExit` (default on; Keller Ch 4.3: "accepts across VWAP and builds volume there… exit, don't average"): `AcceptAcrossCloses` = 2 consecutive 5m closes below VWAP, each with volume ≥ the median 5m RTH volume so far today → `VW01LX` market next bar, reason `INVALIDATION`, and the day is declassified. The numbers (2 closes, median volume) are **PROPOSED** (checked: not specified in Keller B1 Ch 4.3). Applies before T1; after the trail activates, the tighter VWAP-loss close (above) usually fires first. No averaging down, ever (Prog §7.7). | Keller B1 Ch 4.3; Cat. VW-01; EX-04 |
-| **Adds** | None. | Prog §7.7 |
+| **Adds** | `AddMode` (`EAddMode`, default **None**: Keller and the catalogue do not add; Keller's "exit, don't average" forbids adding to a loser). With `OnNewPullback`: a new VWAP touch episode after T1 prints a confirmed 5m HL (buy-stop above it) while the position is open and the last close is ≥ average entry + `AddMinR` × R; `AddContracts` 1 per add, at most `MaxAdds` (2); the stop for the whole position is raised per `AddStopMode` (default `RaiseToAddLow` = that HL − 1 tick, one-way). Adds join the runner. An add that fails the open-risk check is skipped (`SKIP add-risk`). Chart only until M-PORT supports adds (Prog §7.7). **Owner-approved 2026-11-10 22:06 ET** | Prog §7.7 |
 | **Re-entry** | One trade per day in every `TouchMode`. `FirstOrSecond` moves to episode 2 only if episode 1 produced no fill. No re-entry after any fill. | Keller B1 Ch 4.3; Cat. VW-01 sweep |
 | **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `VW01LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
 | **Holiday / roll** | As Prog §7.6. Classification still runs on a blackout or news-window bar, but no entry is armed. | Prog §7.6 |
@@ -95,6 +97,9 @@ RTH 09:30–16:00 ET VWAP; Prog §7.6.
 | `MaxClosesThroughVwap` | int | 1 | closes | fixed | Fixed (Cat. §2.2) | One-sidedness since 09:45 |
 | `EpisodeMaxBars` | int | 6 | 5m bars | 3–12 | Fixed (**PROPOSED**) | Touch episode length |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | VWAP trail offset |
+| `AddMode` | enum `EAddMode { None, OnNewPullback }` | None | — | enum | Fixed per registration | Allow adds (Prog §7.7) |
+| `MaxAdds` / `AddContracts` / `AddMinR` | int / int / double | 2 / 1 / 1.0 | adds / contracts / R | 0–4 / 1–5 / 0.5–3 | Fixed (**PROPOSED**) | Add limits and the in-profit gate |
+| `AddStopMode` | enum `EAddStopMode { RaiseToAddLow, KeepCurrent }` | RaiseToAddLow | — | enum | Fixed | Stop handling on an add fill |
 | `SingleLotMode`, `EntryEndHHMM` 1530, `FlatHHMM` 1555, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01, touch axis now {FirstOrSecond, FirstOnly}, **Owner-approved 2026-11-10 20:31 ET** (Ettienne: *"These changes are fine"*); `SecondOnly` stays selectable but is not swept). Primary: 10:30, FirstOrSecond, SessionHigh.
@@ -110,6 +115,7 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 | LVN touch skip | `LvnSkip` | bool | true / false | true | false = trade touches even when VWAP sits in a developing LVN | Keller B1 Ch 4.3 |
 | Day-changes-type exit | `AcceptAcrossExit` (closes `AcceptAcrossCloses`) | bool | true / false | true | false = no accept-across exit and classification never lapses (rev 1.1 sticky rule) | Keller B1 Ch 4.3 |
 | VWAP anchor | `VwapAnchor` | enum `EVwapAnchor` | `RthLocal`, `ChartSession` | `RthLocal` (**PROPOSED**) | Which VWAP/σ series the rules use | §2; Keller Ch 4.3 (not specified) |
+| Adds | `AddMode` (with `MaxAdds`, `AddContracts`, `AddMinR`, `AddStopMode`) | enum `EAddMode`; int; int; double; enum `EAddStopMode` | `None`, `OnNewPullback`; 0–4; ≥ 1; R; `RaiseToAddLow`, `KeepCurrent` | `None` / 2 / 1 / 1.0 / `RaiseToAddLow` | Adds to a winner on the spec's own trigger; raises the whole-position stop | Prog §7.7; owner 22:06 ET |
 | Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
 
 **Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
@@ -117,6 +123,8 @@ A variant is an alternative rule, not a different value of a swept number (Prog 
 ```csharp
 // Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
 // ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EAddMode { None, OnNewPullback }              // default None (source does not add)
+public enum EAddStopMode { RaiseToAddLow, KeepCurrent }     // default RaiseToAddLow
 public enum ETouchMode { FirstOrSecond, FirstOnly, SecondOnly } // default FirstOrSecond
 public enum ETargetMode { SessionHigh, Trail }       // default SessionHigh
 public enum EVwapAnchor { RthLocal, ChartSession }    // default RthLocal
