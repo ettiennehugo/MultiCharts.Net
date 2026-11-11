@@ -1,12 +1,12 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
-date: 2026-11-10 (ET); draft r3 2026-11-11 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+date: 2026-11-10 (ET); draft r4 2026-11-11 (ET)
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
 
-# M-PORT add legs (DRAFT r3, proposed rev 2.8)
+# M-PORT add legs (DRAFT r4, proposed rev 2.8)
 
 ## 0. Why, and scope
 
@@ -14,6 +14,7 @@ related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-c
   - Answer 1 → §7: `AddPolicy` is an `[Input]`.
   - Answer 2 → §3a: R is re-based after an add.
   - Answer 3 → §6: adds are blocked under any throttle, with a Warning.
+  - 10:28 ET answers: **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*) → Q2 §3 check 1, Q5 §4 `addSizing`, Q6 §4 `maxAddsPerPosition`, Q8 §6 add fill-check Warning.
   - Cluster-cap override: **Owner-approved 2026-11-11 10:14 ET** (Ettienne chose: *"Yes, add ClusterCapPct as an Input that overrides the profile"*). → §7 `ClusterCapPct`.
   - Answer 4 (the cluster cap, Q7) was explained to him; **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*). → §3 check 3.
 - **Owner decisions this builds on.**
@@ -95,7 +96,7 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
   - Widened: when the publisher sends `widenedAddStop` (cost floor), use it as `addStop` for every cap (P1 rule: caps use the widened risk).
 - **Released risk.** `rel = s.riskOpen` (the position's `pm.riskOpen` now). Then `Δ = riskAfter − rel`, which may be ≤ 0 when the tightened stop (raised for a long, lowered for a short) more than pays for the add.
 - **Checks, in order** (gates as §5.2, then the caps; skip only, never resize):
-  1. **Per-position budget:** `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
+  1. **Per-position budget** (**Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 1): `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. `riskAfter` is the **whole post-add position** (all contracts, initial + earlier adds + this add) priced to the **new whole-position stop the add sets** (`pm.addStop`, i.e. the raised stop for a long / lowered stop for a short; with `KeepCurrent`, the current stop) — never to the original initial stop and never on the add leg alone. Widened (`widenedAddStop`) when sent. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
   2. **Heat:** `heat − rel + riskAfter > heatCap × book` ⇒ `"heat cap"`.
   3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster"). **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*): the post-add cluster risk must stay within the profile's cluster cap (Starter 0.75% of book); on a breach the add is **skipped, never resized**, and the skip line gives the reason (`PORT Info: skip <id>#<i> cluster cap: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> cluster $<sum> cap $<cap>`, §6). The cap is `cfg.clusterCap` after the `ClusterCapPct` Input override (§7).
   4. **Total risk cap:** `_PortRiskCap.Breaks(total − rel, riskAfter, cap)` ⇒ `"total risk cap"`.
@@ -148,9 +149,9 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
 
 - **Who owns `MaxAdds`.**
   - The **strategy** owns the method: `AddMode`, `MaxAdds`, `AddContracts`, `AddMinR` and `AddStopMode` are its `[Input]`s, and it never arms add k > `MaxAdds`.
-  - The **MM** enforces a book-level backstop, `maxAddsPerPosition` (config, default 2, PROPOSED, range 0–4). It counts add **fills** per position from the view: |pos| grows in the same sign between two evaluations while `pm.add ≥ 1` was approved. The count resets when the position goes flat or flips. Partial exits do **not** reset it, so a position can never take more than `maxAddsPerPosition` add fills.
+  - The **MM** enforces a book-level backstop, `maxAddsPerPosition` (config, default 2 for Starter and ScaledBook, **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 3; range 0–4). It counts add **fills** per position from the view: |pos| grows in the same sign between two evaluations while `pm.add ≥ 1` was approved. The count resets when the position goes flat or flips. Partial exits do **not** reset it, so a position can never take more than `maxAddsPerPosition` add fills.
   - Add k > backstop ⇒ skip `"max adds"`. If `pm.add` disagrees with the MM's own count, the MM count wins and one Warning per position is logged.
-- **Add size** (`addSizing`, PROPOSED, typed enum `EAddSizing`):
+- **Add size** (`addSizing`, typed enum `EAddSizing`; default `ScaleWithInitial` **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 2):
   - `ScaleWithInitial` (default under RiskParity / VolTarget): `nAdd = floor(nInitial × qtyAdd / qtyCodeInitial)`. Here `nInitial` is the contracts the MM approved for the initial entry, remembered per position, and `qtyCodeInitial` is the publisher's code qty at that arm. Example: initial `qtyCode` 2 → n 20, `AddContracts` 1 ⇒ nAdd 10. `nAdd < minContracts` ⇒ skip `"size < minContracts"`.
   - `CodeQty`: `nAdd = qtyAdd` as published.
   - Under `CodeSize` sizing, the strategy's own qty applies (`EntryContracts = −1`), whatever `addSizing` says.
@@ -209,7 +210,11 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
   - `add per-position budget`, `heat cap`, `cluster cap`, `total risk cap`, `max adds`;
   - `size < minContracts` (throttle blocks are the `ADD-BLOCKED` Warning above, not an Info skip);
   - `add: no addStop`, `add: no avgPx`, `add: stale arm` (`armStamp != stamp`).
-- Fill: `PORT Info: add filled <id>#<i> leg <k> pos <old> -> <new>`. Unfilled: the `fillCheckEvals` Warning gains an add form, `… add leg <k> approved (qty <n>) but position did not grow after <k> MM evaluations - check Strategy Properties Position Limits (same-direction entries) and PT 'Max % Capital at Risk per Position' >= 1%`.
+- Fill: `PORT Info: add filled <id>#<i> leg <k> pos <old> -> <new>`. Unfilled (**Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 4): the `fillCheckEvals` Warning gains an add form:
+  - Line: `PORT Warning: <id>#<i> add leg <k>/<max> <long|short> approved (qty <n>) but position did not grow after <evals> MM evaluations - check Strategy Properties Position Limits (same-direction entries) and PT 'Max % Capital at Risk per Position' >= 1%`.
+  - Counting: an evaluation counts only while the add stays approved **and** should have filled: a market add, or a resting add whose entry e (§3) has been traded through (last close ≥ e for a long buy-stop, ≤ e for a short sell-stop). A resting add stop that price never reaches is not counted, so it cannot false-alarm. The count resets when the add fills, is denied or is withdrawn (`pm.add` = 0).
+  - Trigger: count ≥ `fillCheckEvals` (existing config, default 3; 0 = off).
+  - Dedupe: **once per (strategy, position, add leg)**: a key of strategy index + position serial (reset on flat/flip) + leg k, held in the same kind of set as the existing `m_fillWarned`. A second leg or a new position can warn again; the same leg never repeats. The existing initial-entry fill Warning is unchanged.
 - `Status`: `… n=<nAdd> … add <k>/<max>` while an add is pending or allowed. With `Refuse`, `Status` is unchanged.
 - `RUN` line: append `adds(<AddPolicy> max <maxAddsPerPosition> size <addSizing>)` **only when `AddPolicy != Refuse`**, so the `Refuse` RUN line is byte-identical (§8).
 - With `Refuse`, a same-direction arm keeps today's silent refusal (`"Long"`/`"Short"`/`"in position"`). No new line is printed.
@@ -306,7 +311,7 @@ public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
 
 ## 9. Tests
 
-### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P39, PROPOSED)
+### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P40, PROPOSED)
 Book 1M, Starter unless stated, ES BPV 50.
 - **T-P28 policy off:**
   - `Refuse` with a same-direction arm with `pm.add` = 1 ⇒ refused `"Long"` / `"in position"`, silent, `entryContracts` −1. Identical decisions to a run without the new keys.
@@ -319,18 +324,19 @@ Book 1M, Starter unless stated, ES BPV 50.
   - riskAfter 10 000 ⇒ allowed (boundary, `>` not `≥`).
   - 10 001 ⇒ `"add per-position budget"`, n never cut.
   - The add leg alone under 1% but the position over it ⇒ denied.
+  - **New stop, not the original (owner 10:28 ET):** book 1M (cap 10 000), long 2 @ 5000, initial stop 4970, price 5040, add 1 @ 5040 with `addStop` 5000 ⇒ riskAfter = (5040 − 5000) × 50 × 3 = 6 000 ⇒ **allowed**. Measured to the original stop 4970 it would be 10 500 and refused, so the test asserts the MM uses the new stop. Same add with `addStop` 4973 ⇒ 67 × 150 = 10 050 ⇒ `"add per-position budget"`. Short mirror: short 2 @ 5000, stop 5030, add @ 4960 with `addStop` 5000 ⇒ 6 000 ⇒ allowed.
 - **T-P31 caps with release:**
   - Heat: the position's `rel` is released, then riskAfter counted. Another strategy's open risk still counts.
   - Cluster: always checked (own position occupies it). An ES add with NQ open, EQIDX over 7 500 ⇒ `"cluster cap"`.
   - **Cluster cap refuses an add on its own (owner-approved 10:13 ET):** Starter profile (cluster cap 0.75% = 7 500 on a 1M book; per-position 1% and heat/total caps set high enough not to bind), ES alone, no NQ open; an add whose riskAfter puts EQIDX at 7 501 ⇒ skipped with reason `"cluster cap"`, the add is denied on that step (deny-all: `allowEntries = false`, `EntryContracts` stays −1; 0 is never written, §4), `nAdd` unchanged (never resized), the position and its stop unchanged, one `PORT Info: skip … cluster cap …` line with `cluster $7501 cap $7500`. At exactly 7 500 ⇒ allowed (the check is `>`).
   - Total cap with a lowered `TotalRiskCapPct`.
 - **T-P32 `maxAddsPerPosition`:**
-  - Fills counted from |pos| growth. The third add with max 2 ⇒ `"max adds"`.
+  - Fills counted from |pos| growth. The third add with max 2 (owner-approved default for Starter) ⇒ `"max adds"`.
   - Partial exit keeps the count. Flat / flip resets it.
   - `pm.add` mismatch ⇒ MM count wins + one Warning.
   - 0 ⇒ every add `"max adds"`.
 - **T-P33 sizing:**
-  - `ScaleWithInitial`: initial qtyCode 2 → n 20, add qtyCode 1 ⇒ nAdd 10.
+  - `ScaleWithInitial` (owner-approved default): initial qtyCode 2 → n 20, add qtyCode 1 ⇒ nAdd 10.
   - nAdd < minContracts ⇒ skip.
   - CodeSize ⇒ −1.
   - Never 0 written.
@@ -370,6 +376,7 @@ Book 1M, Starter unless stated, ES BPV 50.
   - A T1 after the add ⇒ in segment 1, at R1 (not shrunk).
   - A partial exit never starts a segment or closes the trade.
   - A net-shrink sample is not an add fill; a net-grow sample with an approved add is.
+- **T-P40 add fill-check Warning (owner 10:28 ET):** `fillCheckEvals` 3. (a) Approved market add, position does not grow for 3 evaluations ⇒ one `PORT Warning: … add leg 1/2 … approved (qty n) but position did not grow after 3 MM evaluations …`; a 4th and 5th evaluation ⇒ no repeat. (b) Resting long add buy-stop above a price that never reaches it, 10 evaluations ⇒ no Warning. (c) Price closes through the stop on 3 evaluations without a fill ⇒ one Warning. (d) Leg 2 of the same position, and leg 1 of a new position after flat, can each warn once. (e) `fillCheckEvals` 0 ⇒ never. (f) The add fills on evaluation 2 ⇒ no Warning, count reset.
 - **T-P39 `ClusterCapPct` override (owner-approved 10:14 ET):** Starter profile (cluster cap 0.75%), book 1M.
   - `ClusterCapPct = 0` ⇒ effective cap 0.0075, `source=profile`; decisions identical to today.
   - JSON `"clusterCap": 0.01` and `ClusterCapPct = 0` ⇒ 0.01, `source=profile`.
@@ -434,12 +441,12 @@ Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-sp
 
 **Still open:**
 - ~~**Q7, cluster cap.** It was explained to Ettienne after 22:35 ET ("4. Explain this to me"); his decision is pending. Starter 0.75% will usually deny an ES add while NQ is open, and an ES add alone once the ES position carries more than about 0.75% after the add. Options: accept it as "one position per merged cluster", or let an add be checked only against the per-position 1%. PROPOSED: accept; the cluster cap applies.~~ **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*).
-- **Q2** Per-position budget = `maxTradeRisk` (1%, the same number as the chart rule), or a separate `addPositionRiskCap` ≤ 1%? PROPOSED: reuse `maxTradeRisk`. The 22:35 answer 2 settles how the post-add risk is measured (at the moved stop, §3), not this cap level.
-- **Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.
-- **Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?
-- **Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.
+- ~~**Q2** Per-position budget = `maxTradeRisk` (1%, the same number as the chart rule), or a separate `addPositionRiskCap` ≤ 1%? PROPOSED: reuse `maxTradeRisk`. The 22:35 answer 2 settles how the post-add risk is measured (at the moved stop, §3), not this cap level.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): 1% of the account (`maxTradeRisk`), measured on the whole post-add position to the **new** stop level (§3 check 1).
+- ~~**Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): `ScaleWithInitial`.
+- ~~**Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): default 2 for Starter (and ScaledBook).
+- ~~**Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): yes; line, counting and dedupe in §6, test T-P40.
 - **Q9 (native checks, not owner questions):**
   - the MC Position Limits option name and behaviour in PT (A1);
   - whether `From Entry` exits behave in PT as on charts (A4);
   - whether the optimizer can sweep the `AddPolicy` enum, and whether saved inputs survive the new Input (A0).
-- **Q10** PR #117 overview §7.7 says "R for reporting stays the initial position's R" on charts. Should the chart side re-base too, so chart and Portfolio Trader R agree? PROPOSED: yes, as a separate edit on PR #117.
+- ~~**Q10** PR #117 overview §7.7 says "R for reporting stays the initial position's R" on charts. Should the chart side re-base too, so chart and Portfolio Trader R agree? PROPOSED: yes, as a separate edit on PR #117.~~ **Closed 2026-11-11**: already owner-approved 2026-11-10 22:35 ET (answer 2) and applied in PR #117 overview rev 1.6 §7.7 (chart-side R re-base).
