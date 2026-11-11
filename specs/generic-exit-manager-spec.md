@@ -1,13 +1,13 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.3 PROPOSAL, 2026-11-11 (ET); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately)"
+rev: "0.5 PROPOSAL, 2026-11-11 (ET); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
 status: "PROPOSAL, docs only, no code. Owner-approved 2026-11-11 09:16 ET: option C, the baseline values, the wrapper in Portfolio Trader, and the over-budget rule. Not yet approved for implementation as a whole. Everything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.4 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.5 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
@@ -127,16 +127,16 @@ All prices are rounded to the tick. "R" is the initial 1R: |entry − initial st
 ```csharp
 public enum EInitialStop { EntryProvided, AtrMultiple, FixedTicks, SignalBarExtreme, SwingExtreme, Percent }
 ```
-| Member | Rule (long; short mirrors) | Inputs |
-|---|---|---|
-| `EntryProvided` (embedded default) | The entry's own structural stop: the one passed to `sizeForRisk` / `portfolioArm` | — |
-| `AtrMultiple` (wrapper default) | entry − `StopAtrMult` × ATR(`StopAtrLength`) on Data1, ATR from closed bars | `StopAtrMult` (double, 1.5), `StopAtrLength` (int, 14) |
-| `FixedTicks` | entry − `StopTicks` × tick | `StopTicks` (int, 0 = off ⇒ invalid with this mode) |
-| `SignalBarExtreme` | low of the bar before the fill − 1 tick (`_ExitHalfRiskHalfRoll`'s R) | — |
-| `SwingExtreme` | lowest low of the last `StopSwingBars` closed bars − 1 tick | `StopSwingBars` (int, 5) |
-| `Percent` | entry × (1 − `StopPct`/100) (`_StopsAndTargets`-compatible) | `StopPct` (double) |
+| Member | Long stop | Short stop | Inputs |
+|---|---|---|---|
+| `EntryProvided` (embedded default) | the entry's own structural stop (the one passed to `sizeForRisk` / `portfolioArm`) | same | — |
+| `AtrMultiple` (wrapper default) | entry − `StopAtrMult` × ATR(`StopAtrLength`) | entry + `StopAtrMult` × ATR(`StopAtrLength`) | `StopAtrMult` (double, 1.5), `StopAtrLength` (int, 14); ATR on Data1 from closed bars |
+| `FixedTicks` | entry − `StopTicks` × tick | entry + `StopTicks` × tick | `StopTicks` (int, 0 = off ⇒ invalid with this mode) |
+| `SignalBarExtreme` | low of the bar before the fill − 1 tick | high of the bar before the fill + 1 tick | — (`_ExitHalfRiskHalfRoll`'s R) |
+| `SwingExtreme` | lowest low of the last `StopSwingBars` closed bars − 1 tick | highest high of the last `StopSwingBars` closed bars + 1 tick | `StopSwingBars` (int, 5) |
+| `Percent` | entry × (1 − `StopPct`/100) | entry × (1 + `StopPct`/100) | `StopPct` (double); `_StopsAndTargets`-compatible |
 
-- **Floor:** the stop is always at least the M-INSTR cost floor (ES 14, NQ 19 ticks), via `CostModel.WidenedStop`.
+- **Floor:** the stop's distance from entry is always at least the M-INSTR cost floor (ES 14, NQ 19 ticks), via `CostModel.WidenedStop`. A long stop is never above entry − floor; a short stop is never below entry + floor.
 - **Embedded:** a trade whose widened risk is > 1% of equity is skipped by `sizeForRisk` before entry (P1).
 - **Wrapper:** it cannot skip an entry it did not make. When the derived risk exceeds the 1% budget, it **keeps the position open, manages it normally**, and logs one Warning (**Owner-approved 2026-11-11 09:16 ET**: *"4. Keep the position open and log the warning."*). Exact line and dedupe in §5.2.
 
@@ -149,7 +149,7 @@ public enum ESingleLotMode { ExitAtT1, RunnerOnly }   // existing name and defau
 public enum ETriggerUnit { RMultiple, PercentOfEntry, Ticks, Points, CurrencyPerContract }   // default RMultiple
 ```
 
-**`ETriggerUnit` measures a profit distance d from the initial position's average entry price, in the trade direction** (long: level = entry + d; short mirrors):
+**`ETriggerUnit` measures a profit distance d from the initial position's average entry price, in the trade direction** (long: level = entry + d; short: level = entry − d):
 - `RMultiple` (default): d = value × initial R per contract, in price. With the 08:58 ET ruling, triggers use the **initial-entry** R.
 - `PercentOfEntry`: d = entry × value / 100. Example: 0.5 ⇒ 0.5% of entry.
 - `Ticks`: d = value × tick.
@@ -192,31 +192,38 @@ public enum EBreakEven { AfterT1, AtTrigger, Off }
 |---|---|---|---|
 | `BreakEven` | `EBreakEven` | `AfterT1` | when the stop moves to break-even |
 | `BreakEvenUnit` | `ETriggerUnit` | `RMultiple` | unit of `BreakEvenValue` (used by `AtTrigger`) |
-| `BreakEvenValue` | double | 1.0 | trigger distance from entry; a **closed** bar must reach entry + d |
-| `BreakEvenOffsetTicks` | int, ≥ 0 | 1 | the new stop = entry + offset ticks (long), so the BE stop covers about a tick of cost; 0 = exactly entry |
+| `BreakEvenValue` | double | 1.0 | trigger distance from entry; a **closed** bar must reach it (long: close ≥ entry + d; short: close ≤ entry − d) |
+| `BreakEvenOffsetTicks` | int, ≥ 0 | 1 | the new stop = entry + offset ticks (long) or entry − offset ticks (short), so the BE stop covers about a tick of cost; 0 = exactly entry |
 
-- `AfterT1` (default): when T1 fills, stop = entry + `BreakEvenOffsetTicks`. If `T1ScalePct` = 0 or `TargetMode` ≠ `ScaleOutThenRunner`, `AfterT1` falls back to `AtTrigger` with the same unit and value; this is logged once per run at Info.
-- `AtTrigger`: on the first closed bar at or beyond entry + d (d from `BreakEvenUnit` / `BreakEvenValue`), the stop moves to entry + offset from the next bar.
+- `AfterT1` (default): when T1 fills, stop = entry + `BreakEvenOffsetTicks` × tick (long) or entry − `BreakEvenOffsetTicks` × tick (short). If `T1ScalePct` = 0 or `TargetMode` ≠ `ScaleOutThenRunner`, `AfterT1` falls back to `AtTrigger` with the same unit and value; this is logged once per run at Info.
+- `AtTrigger`: on the first closed bar at or beyond the trigger (long: close ≥ entry + d; short: close ≤ entry − d; d from `BreakEvenUnit` / `BreakEvenValue`), the stop moves to the break-even level above from the next bar.
 - `Off`: no break-even move.
 - "Entry" is the **initial** position's average entry price. After an add, break-even still refers to the initial entry (stop/target triggers stay on the initial-entry R, owner-approved 08:58 ET), and the add's own stop raise (`AddStopMode`) can only tighten further.
-- One-way (§7.3): break-even never lowers a stop that is already higher (for example after an add raise).
+- One-way (§7.3): break-even never loosens a stop that is already tighter, for example after an add raise. Long: never lower a stop that is already higher. Short: never raise a stop that is already lower.
 
 ### 4.4 Trailing stop (runner)
 ```csharp
 public enum ETrailMode { Chandelier, Atr, BarExtreme, Ema, RollLevel, None }
 public enum ETrailStart { AfterT1, AtR, Immediately }
 ```
-| Member | Candidate stop (long) | Inputs |
-|---|---|---|
-| `Chandelier` (default) | highest high since entry − `TrailAtrMult` × ATR(`TrailAtrLength`) | `TrailAtrMult` 3.0, `TrailAtrLength` 22 |
-| `Atr` | last close − `TrailAtrMult` × ATR | same |
-| `BarExtreme` | lowest low of the last `TrailBars` closed bars − 1 tick | `TrailBars` (int, 2) |
-| `Ema` | EMA(`TrailEmaLength`) of closes − 1 tick | `TrailEmaLength` (int, 20) |
-| `RollLevel` | `_ExitHalfRiskHalfRoll`: entry-bar low − 1 tick, then the prior day's low − 1 tick (needs a daily series, M-DAILY) | — |
-| `None` | no trail | — |
+**Both directions** (**Owner-approved 2026-11-11 09:34 ET** (Ettienne: *"I see in the question above you asked "Runner: trails 3 × ATR(22) below the highest high, and only ever moves up."  note that we want that to trail also down for short moves."*)). The runner trails **below the highest high for longs** and **above the lowest low for shorts**. A long trail only ever moves **up**; a short trail only ever moves **down**.
 
-- `TrailStart` default `AfterT1`; `AtR` uses `TrailStartR` (double, 1.0) on the initial R.
-- One-way, capped one tick below the last close. Through the market ⇒ market exit, `TRAIL-THROUGH` (§7.3).
+| Member | Candidate stop, long | Candidate stop, short | Inputs |
+|---|---|---|---|
+| `Chandelier` (default) | highest high since entry − `TrailAtrMult` × ATR(`TrailAtrLength`) | lowest low since entry + `TrailAtrMult` × ATR(`TrailAtrLength`) | `TrailAtrMult` 3.0, `TrailAtrLength` 22 |
+| `Atr` | last close − `TrailAtrMult` × ATR | last close + `TrailAtrMult` × ATR | same |
+| `BarExtreme` | lowest low of the last `TrailBars` closed bars − 1 tick | highest high of the last `TrailBars` closed bars + 1 tick | `TrailBars` (int, 2) |
+| `Ema` | EMA(`TrailEmaLength`) of closes − 1 tick | EMA(`TrailEmaLength`) of closes + 1 tick | `TrailEmaLength` (int, 20) |
+| `RollLevel` | `_ExitHalfRiskHalfRoll`: entry-bar low − 1 tick, then the prior day's low − 1 tick | mirror: entry-bar high + 1 tick, then the prior day's high + 1 tick | — (needs a daily series, M-DAILY) |
+| `None` | no trail | no trail | — |
+
+- "Since entry" means from the entry fill bar through the last **closed** bar; ATR and EMA are on Data1 closed bars.
+- `TrailStart` default `AfterT1`. `AtR` uses `TrailStartR` (double, 1.0) on the initial R: long close ≥ entry + `TrailStartR` × R, short close ≤ entry − `TrailStartR` × R.
+- **One-way, both sides** (§7.3). The candidate is computed at the bar close and sent from the next bar.
+  - **Long:** `newStop = max(oldStop, candidate)`, capped at one tick **below** the last close.
+  - **Short:** `newStop = min(oldStop, candidate)`, capped at one tick **above** the last close.
+  - A candidate at or through the market (long ≥ last close, short ≤ last close) ⇒ market exit next bar, reason `TRAIL-THROUGH` (§7.3).
+- The trail never loosens a break-even or add-raise stop (same one-way rule).
 
 ### 4.5 Time stop
 - `TimeStopBars` (int, 0 = off) uses CS-7 `TimeStopBars` (the oldest open entry decides).
@@ -413,7 +420,7 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
 | Initial stop | Embedded: `EntryProvided`. Wrapper: `AtrMultiple` 1.5 × ATR(14) on Data1, floored at the cost floor (ES 14 / NQ 19 ticks) |
 | T1 | `T1Unit` `RMultiple`, `T1Value` 1.0, `T1ScalePct` 50 ⇒ ⌊q/2⌋ at +1.0R (initial R), `OrderExit.Total`; q = 1 ⇒ `ExitAtT1` |
 | Break-even | `AfterT1`, `BreakEvenOffsetTicks` 1 (entry + 1 tick); `BreakEvenUnit` `RMultiple` / `BreakEvenValue` 1.0 used only by `AtTrigger` |
-| Runner trail | `Chandelier` 3.0 × ATR(22) on Data1, from T1 (`AfterT1`), one-way |
+| Runner trail | `Chandelier` 3.0 × ATR(22) on Data1, from T1 (`AfterT1`): **below the highest high for longs / above the lowest low for shorts, one-way** (long only moves up, short only moves down; owner-approved 09:34 ET) |
 | Final target | none (`FinalTargetR` 0) |
 | Time stop | off |
 | Session | intraday `FlatBy` 15:55 ET (early close: close − 5 min); swing ideas `HoldOvernight` with `ERollExit.FlattenBeforeSplice` |
