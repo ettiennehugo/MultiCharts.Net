@@ -1,5 +1,7 @@
 # OF-01 · Stacked-imbalance origin: first retest continuation — implementation spec
 
+**Rev 1.6 (draft), 11 Nov 2026 (EST)** — owner short-side answers applied (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): own-mirror short accepted pending test confirmation (§5a note, §10, §12); Long/Short input pairs (§8.2); T1-SKIPPED rule (Prog §7.2a).
+
 **Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side (selling stacks) written out rule by rule in new §5a; explicit `Side` input added (default `Both`, as the other batch-1 specs) (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
 
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
@@ -116,6 +118,8 @@ Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*).
 
 ### 5a. Short side, rule by rule (selling stacks = resistance, tested from below)
 Source status: the spec heading has always said "short mirrors with selling stacks", but the Dale pages checked by Ettienne (pp.74–76, 124–136) were applied in their long form, and Keller B1 Ch 6.3 is direction-neutral ("stack", "origin"). The numeric short rules below are **PROPOSED (mirror; source long-only as applied)**, same numbers as the long, until the Dale pages are re-read for the selling case (§14). Conventions: Prog §7.9. `side = −1` in every log line. Engine support: `_OrderFlow.Side.Sell`, sell-side `DiagonalImbalances` / `StackedImbalances`, and `Absorption(ago, Side.Sell)` (bids absorbing at the bar low) all exist on `main`.
+**Short side unconfirmed** (**Owner-approved 2026-11-11 09:52 ET**, answer 3: *"Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades."*): these own-mirror short rules are accepted for now. The implemented signal must say so in its header and short branch, and testing must confirm the short trades (Prog §7.9 item 11; §10 and §12 below).
+
 | Item | Short rule |
 |---|---|
 | Zone | On each closed zone-TF bar, every separate run of ≥ `MinStack` consecutive **selling** imbalances (bid side, diagonal) is a zone [lo, hi]. Several runs = several zones. `CloseTopFrac` mirror: the zone bar closes in its **lower** 30% (variant `Cat-CloseTop`, off). |
@@ -221,6 +225,22 @@ public enum EContextMode { Off, OneWayMove }         // default Off
 
 **Future variants (not built in batch 1, no input yet):** (1) the unfinished-business target stretch (Dale p.83; no engine helper on main); (2) the owner shell `_StackedImblContLELX` rules (stop entry after a holding close, mid-zone limit on the 2nd/3rd test; §14 item 6); (3) Keller's poor-extreme target (no engine helper).
 
+### 8.2 Long / Short input pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4: *"Get their own values."*; Prog §7.9 item 12)
+Each input below is replaced by a Long/Short pair. Wherever §4, §5, §5a, §8 or §8.1 name the single input, longs read the `…Long` member and shorts the `…Short` member. Short defaults equal the long defaults at first (**PROPOSED**), so the first run is symmetric; sweeps run per side (Prog §7.9 item 12, optimizer note). Inputs not listed stay single (side-blind). `MinStack` stays ≥ 3 on both sides (Dale).
+| Single input (replaced) | Pair | Type | Default long / short | Range |
+|---|---|---|---|---|
+| `MinStack` | `MinStackLong` / `MinStackShort` | int | 3 / 3 | as the single input it replaces |
+| `MinAwayBars` | `MinAwayBarsLong` / `MinAwayBarsShort` | int | 1 / 1 | as the single input it replaces |
+| `ContextAtr` | `ContextAtrLong` / `ContextAtrShort` | double | 1.5 / 1.5 | as the single input it replaces |
+| `StopBufferTicks` | `StopBufferTicksLong` / `StopBufferTicksShort` | int | 1 / 1 | as the single input it replaces |
+| `StopMinAtrPct` | `StopMinAtrPctLong` / `StopMinAtrPctShort` | double | 10 / 10 | as the single input it replaces |
+| `StopMaxAtrPct` | `StopMaxAtrPctLong` / `StopMaxAtrPctShort` | double | 20 / 20 | as the single input it replaces |
+| `TargetOffsetTicks` | `TargetOffsetTicksLong` / `TargetOffsetTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `MinRR` | `MinRRLong` / `MinRRShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `TargetR` | `TargetRLong` / `TargetRShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `TrailBufferTicks` | `TrailBufferTicksLong` / `TrailBufferTicksShort` | int | 1 / 1 | as the single input it replaces |
+| `KAggressionBars` | `KAggressionBarsLong` / `KAggressionBarsShort` | int | 3 / 3 | as the single input it replaces |
+
 ## 9. Logging
 Prefix `OF-01`.
 - `OF-01 ZONE t() tf(30) side() lo() hi() levels(n) ratio() bar(<zone bar time>) quality() context(<off|ok|fail>)`; one line per separate run.
@@ -253,6 +273,7 @@ Prefix `OF-01`.
   - Report results per quality tier, per regime (trend vs balance day, Keller), and with vs without `ContextMode`.
 - **Kill:** result ≤ the shuffled placebo.
 - **Costs and floors:** Prog §4 ($17.00 ES, $9.48 NQ). Tick magnifier inside the verified tick window.
+- **Short-side confirmation (Prog §7.9 item 11, owner-approved 09:52 ET):** the smoke run must produce short fills; review the first 20 short trades (or all if fewer) bar by bar against §5a (setup, trigger, order type and price, stop, T1, trail, exit reason); record `short-confirmed(<date>, n=<k>)` in the run sheet before any development read.
 
 ## 11. Acceptance criteria
 Prog §6 + the K-SH kill, on the §10 split (validation Mar–Apr 2025). `catalogue-default`. Below the sample minimums, the verdict is "no evaluation" or "inconclusive".
@@ -275,6 +296,8 @@ Prog §6 + the K-SH kill, on the §10 split (validation Mar–Apr 2025). `catalo
   - precedence
 - [ ] `NewsExitMinutes` rule (Prog §7.6).
 - [ ] Native compile and smoke run on a verified bid/ask day before the cut (To ≤ 04/30/2025; never on or after 05/01/2025).
+- [ ] Header and short-branch comment `// SHORT SIDE UNCONFIRMED — testing must confirm short-side trades (Prog §7.9 item 11)` until the 20-trade short review is recorded.
+- [ ] Long/Short input pairs per §8.2 (short defaults = long defaults); `T1-SKIPPED` rule and Info line (Prog §7.2a) where the spec has a T1.
 
 ## 13. Header mapping
 - **Trigger:** a 30m footprint shows ≥ 3 stacked 300% buying imbalances. After at least one whole 30m bar trades above the zone, buy with a limit at the zone top on the first return. One try per zone.
@@ -293,7 +316,8 @@ Prog §6 + the K-SH kill, on the §10 split (validation Mar–Apr 2025). `catalo
 6. Context-filter definition (1.5 × ATR over 4 zone bars). Entry window 09:45–15:00 and one trade per side per session. Your `_StackedImblContLELX` rules as a later variant?
 7. Chart layout: 5m Data1 with 30m aggregation (§2). Variant K numbers: 180-minute freshness cut, `VolFloorPct` 70, travel ≥ 1 × ATR5, 3 aggression bars, market entry, scalp = 1 contract exiting at T1 on non-trend days, composite of 3 sessions for the escape filter.
 8. Prog §10 batch-wide items.
-9. **Short side (rev 1.5, §5a):** accept the PROPOSED selling-stack mirror with identical numbers, or first re-read Dale pp.74–76 / 124–136 for the selling case? Also confirm the new explicit `Side` input (default `Both`).
+9. ~~**Short side (rev 1.5, §5a):** accept the PROPOSED selling-stack mirror with identical numbers, or first re-read Dale pp.74–76 / 124–136 for the selling case? Also confirm the new explicit `Side` input (default `Both`).~~ **Owner-approved 2026-11-11 09:52 ET**: the selling-stack mirror is accepted for now; testing must confirm the short trades (§5a note, §10). Separate short values (§8.2).
+10. The explicit `Side` input (default `Both`, rev 1.5) was not covered by the 09:52 ET answers: confirm it (it is also how a flagged losing side is switched off, Prog §6 item 12)?
 
 ## 15. Sources
 - Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*, Kindle reader page labels (±2), read by Ettienne 2026-11-10:

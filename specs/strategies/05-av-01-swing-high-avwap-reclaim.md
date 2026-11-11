@@ -1,5 +1,7 @@
 # AV-01 · Swing-high AVWAP reclaim (swing sleeve) — implementation spec
 
+**Rev 1.7 (draft), 11 Nov 2026 (EST)** — owner short-side answers applied (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): short arm approved, `Side` default `Both`, big-winner rule on the short arm too (answer 2); own-mirror short rules pending test confirmation (answer 3); Long/Short input pairs (§8.2); T1-SKIPPED rule (Prog §7.2a).
+
 **Rev 1.6 (draft), 11 Nov 2026 (EST)** — PROPOSED short mirror (swing-low AVWAP loss) written out in new §5a, gated by `Side` default `LongOnly` (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
 
 **Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
@@ -31,7 +33,7 @@
 | Session, news, roll, cost floor, sizing, journal | As PS-02 §3 |
 
 ## 4. Entry rules (long only in the catalogue; a PROPOSED short mirror is in §5a)
-The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to confirm:** batch 1 implements **long only** (`Side` default `LongOnly`), with the K-DR drift check reported; the short mirror (swing-low AVWAP loss) is written out in §5a as a new registered entry, off until approved.
+The catalogue writes AV-01 long-side ("buy strength"). Batch 1 implements **both sides** (`Side` default `Both`; **Owner-approved 2026-11-11 09:52 ET**, answer 2: *"Yes, and big-winner rule applies to it."*): the long as the catalogue describes it, and the short mirror (swing-low AVWAP loss) written out in §5a. The K-DR drift check is reported per side.
 1. **Anchor:** the newest confirmed 60m zigzag swing high (reversal ≥ `AnchorK` × ATR on 60m); AVWAP usable from confirmation.
 2. **Filter:** at the prior completed daily close, close > SMA50 (or the chosen alternative).
 3. **Reclaim signal:** after ≥ 10 consecutive closed 60m bars with close below the anchor AVWAP, a 60m close above AVWAP + δ60, with δ60 = max(2 ticks, 0.10 × ATR14(60m)) (**PROPOSED – owner to confirm** δ60, by analogy with Cat. §2.1 δ). `SignalTf = M15` (sweep arm): the same on 15m closes (≥ 10 bars below on 15m).
@@ -44,7 +46,7 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 |---|---|---|
 | **Initial stop** | HL − 1 tick (Shannon). **Minimum:** the larger of the swing cost floor 0.3 × ATR20d and the instrument cost floor (ES 14, NQ 19 ticks), measured from the planned entry. **Maximum:** none; widened risk > 1% equity → skip. Frozen at entry; works 24h on the Globex chart. | Cat. AV-01 ("floored at the swing cost floor (≥ 0.3 × ATR20d)"); Cat. §2.1 |
 | **Targets** | `TargetMode = SwingHigh` (primary): T1 = the anchor swing-high price + 0 (retest), limit `AV01LT1`. q ≥ 2: ⌊q/2⌋ at T1, runner trailed. q = 1: `SingleLotMode` (default ExitAtT1). `TargetMode = Trail`: no fixed target. | Cat. AV-01 ("swing high + 0 (retest), then trail EX-04"; sweep {swing high, trail}). Half-and-trail reading **PROPOSED – owner to confirm** |
-| **Minimum reward** | None in the catalogue; b journaled. If entry ≥ T1 at fill (gap through the swing high), T1 is skipped and the whole position goes to the trail (**PROPOSED – owner to confirm**). | |
+| **Minimum reward** | None in the catalogue; b journaled. If entry ≥ T1 at fill (gap through the swing high), T1 is skipped and the whole position goes to the trail, with the Info line `AV01 Info: T1-SKIPPED …` (Prog §7.2a, **Owner-approved 2026-11-11 09:52 ET**: *"Yes, trail the whole position, log an info message."*). | |
 | **Break-even** | None specified; not added. | Cat. AV-01 |
 | **Trailing (EX-04 on the new impulse AVWAP)** | Anchor = the entry HL bar. Activation: after T1 (SwingHigh) or at +1 R (Trail, **PROPOSED**). Rule: stop = max(stop, newAVWAP − 2 ticks) at each closed **60m** bar, and exit at market on the first 60m close < newAVWAP − 2 ticks. Using the 60m close rather than EX-04's 5m close for a swing hold is **PROPOSED – owner to confirm**. | Cat. AV-01; EX-04 |
 | **Time stop / max hold** | Max hold `MaxHoldSessions` = 20 trading sessions (≈ one month, the owner's soft limit): market exit at the RTH close bar (15:45 ET 15m bar) of session 20. **PROPOSED – owner to confirm** (the catalogue states no time stop; the Page says each swing consumer needs an explicit maximum hold). | Owner horizon; Page decisions item 1 |
@@ -59,10 +61,12 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 | **MM interaction** | Prog §7.5. In PT the MM's daily-loss flatten (`ForceClosePosition`, fills at the bar-T close) can close a swing position intraday; the strategy then logs `FLAT-BY-MM` and does not re-enter that anchor. `PortfolioFamily = "AV"`. | Check 7 |
 | **Same-bar precedence** | MM force-close → stop → T1 → news exit → roll flatten → max-hold exit → invalidation (60m close) → AVWAP-trail close → trail update. | Prog §7.4 |
 
-### 5a. Short side: PROPOSED mirror (swing-low AVWAP loss), off by default
-**Status: PROPOSED – owner to confirm.** The catalogue and Shannon describe AV-01 long only ("buy strength after a pullback that recovers above a swing-high AVWAP"). Rev 1.6 adds a short mirror so the short scenario is fully specified, but it is gated by **`Side` (`ESide`), default `LongOnly`** for AV-01 until Ettienne approves it (§14 Q9). With `LongOnly`, short setups are still logged (`logSignal(…, taken = false)`, `SKIP side-off`), so their event study exists without trading them. If approved, `ShortOnly` / `Both` is a **new registered arm** with its own controls, not a change to the long primary. Conventions: Prog §7.9. `side = −1` in every log line.
+### 5a. Short side: swing-low AVWAP loss (approved arm, rules unconfirmed until tested)
+**Status: short arm approved** (**Owner-approved 2026-11-11 09:52 ET**, answer 2: *"Yes, and big-winner rule applies to it."*). The catalogue and Shannon describe AV-01 long only ("buy strength after a pullback that recovers above a swing-high AVWAP"); the short rules below are our own mirror (rev 1.6), accepted for now and unconfirmed until testing confirms the short trades (note below). `Side` (`ESide`) default is now **`Both`**. The short arm is registered alongside the long with its own controls; the losing-side rule (Prog §6 item 12) applies. **Acceptance:** `big-winner-trend` applies to the short arm too (§11). Conventions: Prog §7.9. `side = −1` in every log line.
 - **Mechanism (mirror, PROPOSED).** Everyone who sold since the last significant swing low is under water while price is above that swing-low AVWAP, so they cover on dips. When price loses and holds below it, that demand is gone; the longs from the low are now under water and sell rallies, so a rally that fails below the AVWAP is the entry.
-| Item | Short rule (PROPOSED) |
+**Short side unconfirmed** (**Owner-approved 2026-11-11 09:52 ET**, answer 3: *"Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades."*): these own-mirror short rules are accepted for now. The implemented signal must say so in its header and short branch, and testing must confirm the short trades (Prog §7.9 item 11; §10 and §12 below).
+
+| Item | Short rule (own mirror; values from the `…Short` inputs, §8.2) |
 |---|---|
 | Anchor | The newest confirmed 60m zigzag swing **low** (reversal ≥ `AnchorK` × ATR on 60m); AVWAP usable from confirmation. Long and short anchors are tracked independently. |
 | Daily filter | At the prior completed daily close, close **< SMA50** (`Sma50`), or TSMOM **< 0** (`Tsmom`). |
@@ -71,7 +75,7 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 | Setup cancel | A 60m close back **above AVWAP + δ60** before the fill; a new signal needs a fresh ≥ 10-bar spell above. |
 | Window | As the long (orders sent 09:45–15:30 ET RTH bars; not on roll-window days, `EventBlackout`, or within `RollFlattenSessions` of the roll). |
 | Initial stop | **LH + 1 tick** (above the recent lower high), widened **upward** to at least entry + max(`SwingFloorAtr20d` × ATR20d, instrument floor); > 1% equity → skip; frozen; works 24h. `AV01SS`. |
-| T1 | `SwingHigh` mode, short: T1 = the anchor swing-**low** price − 0 (retest), buy-to-cover limit `AV01ST1`, ⌊q/2⌋; the member name `SwingHigh` means "the anchor swing extreme". If entry ≤ T1 at fill (gap through the swing low), T1 is skipped and the whole position trails. `Trail` mode as the long. |
+| T1 | `SwingHigh` mode, short: T1 = the anchor swing-**low** price − 0 (retest), buy-to-cover limit `AV01ST1`, ⌊q/2⌋; the member name `SwingHigh` means "the anchor swing extreme". If entry ≤ T1 at fill (gap through the swing low), T1 is skipped and the whole position goes to the trail, with the Info line `AV01 Info: T1-SKIPPED …` (Prog §7.2a, **Owner-approved 2026-11-11 09:52 ET**: *"Yes, trail the whole position, log an info message."*). `Trail` mode as the long. |
 | Break-even | None. |
 | Trailing (EX-04, new impulse AVWAP) | Anchor = the entry LH bar. After T1 or at **low ≤ entry − 1 R** (Trail mode): stop = **min(stop, newAVWAP + 2 ticks)** at each closed **60m** bar, capped one tick above the last close; market exit on the first 60m close **> newAVWAP + 2 ticks**. |
 | Invalidation | Before T1: a 60m close **above the original swing-low AVWAP + δ60** → `AV01SX`. |
@@ -79,7 +83,7 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 | Adds (`OnNewPullback`) | A new confirmed 15m **LH below the new impulse AVWAP** (sell-stop below it; inside the entry window) while last close **≤ average entry − `AddMinR` × R**; whole-position stop **lowered** to that **LH + 1 tick**, never raised; R re-base with `side = −1`; `AV01SA1`, `AV01SA2`. |
 | Re-entry | One trade per anchor/loss; after a stop-out a new trade needs a new ≥ 10-bar spell above and a new close below. |
 | MFE / MAE / risk %, reports | Prog §7.9 items 2 and 8; short results are never pooled with the long primary in its acceptance verdict. |
-| Short-specific risks | (a) **Overnight gap-up / squeeze risk:** the only batch-1 swing short. A stop gapped through fills at the next bar's open (MC) and is journaled as gap slippage; the `actualToPlanned` > 1.00 / > 1.10 counts are reported by side. CME overnight price limits and downside-only RTH circuit breakers do not cap a rally (**VERIFY** the current CME rules before any run). (b) **Drift:** ES/NQ drift up over 20-session horizons, so the short arm faces a structural headwind; K-DR and the controls (K-FL-anchor, K-SMA) are run on the short arm separately. (c) The big-winner policy (`big-winner-trend`) is predeclared for the long primary; whether it also applies to the short arm is §14 Q9. |
+| Short-specific risks | (a) **Overnight gap-up / squeeze risk:** the only batch-1 swing short. A stop gapped through fills at the next bar's open (MC) and is journaled as gap slippage; the `actualToPlanned` > 1.00 / > 1.10 counts are reported by side. CME overnight price limits and downside-only RTH circuit breakers do not cap a rally (**VERIFY** the current CME rules before any run). (b) **Drift:** ES/NQ drift up over 20-session horizons, so the short arm faces a structural headwind; K-DR and the controls (K-FL-anchor, K-SMA) are run on the short arm separately. (c) The big-winner policy (`big-winner-trend`) applies to both arms (owner-approved 09:52 ET). |
 
 ## 6. Sizing, risk and M-PORT
 As PS-02 §6. `Contracts` 2 (owner, 2026-11-10). Future %-risk sizing: Prog §7.8. Overnight margin per contract must fit the research equity; if not, the run is "not assessable" (Page acceptance note).
@@ -90,7 +94,7 @@ See §5 rows; Prog §7.6.
 ## 8. Native inputs (header §17)
 | Input | Type | Default | Units | Range | Fixed/Tuned | Purpose |
 |---|---|---|---|---|---|---|
-| `Side` | enum `ESide { Both, LongOnly, ShortOnly }` | **LongOnly** (**PROPOSED** until the §5a short is approved) | — | enum | Fixed per registration | LongOnly = catalogue long primary; ShortOnly / Both = the §5a short arm (new registered trial) |
+| `Side` | enum `ESide { Both, LongOnly, ShortOnly }` | **Both** (owner-approved 2026-11-11 09:52 ET) | — | enum | Fixed per registration | Both = long + the §5a short arm; LongOnly / ShortOnly restrict (e.g. a flagged losing side, Prog §6 item 12) |
 | `AnchorK` | double | 3.0 | × ATR(60m) | {2.0, 3.0} | Tuned | Swing significance |
 | `SignalTf` | enum `ESignalTf { H60, M15 }` | H60 | — | enum | Tuned | Reclaim close timeframe |
 | `TargetMode` | enum `ETargetMode { SwingHigh, Trail }` | SwingHigh | — | enum | Tuned | Target arm |
@@ -134,6 +138,16 @@ public enum ETrendFilter { Sma50, Tsmom }            // default Sma50
 
 **Future variants (not built in batch 1, no input yet):** none recorded. Shannon is not available in the owner's Kindle library, so no book variant was added. `AnchorK` stays a swept parameter.
 
+### 8.2 Long / Short input pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4: *"Get their own values."*; Prog §7.9 item 12)
+Each input below is replaced by a Long/Short pair. Wherever §4, §5, §5a, §8 or §8.1 name the single input, longs read the `…Long` member and shorts the `…Short` member. Short defaults equal the long defaults at first (**PROPOSED**), so the first run is symmetric; sweeps run per side (Prog §7.9 item 12, optimizer note). Inputs not listed stay single (side-blind).
+| Single input (replaced) | Pair | Type | Default long / short | Range |
+|---|---|---|---|---|
+| `AnchorK` | `AnchorKLong` / `AnchorKShort` | double | 3.0 / 3.0 | as the single input it replaces |
+| `BarsBelowMin` | `BarsBelowMinLong` / `BarsAboveMinShort` | int | 10 / 10 | as the single input it replaces |
+| `SwingFloorAtr20d` | `SwingFloorAtr20dLong` / `SwingFloorAtr20dShort` | double | 0.3 / 0.3 | as the single input it replaces |
+| `TrailOffsetTicks` | `TrailOffsetTicksLong` / `TrailOffsetTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `AddMinR` | `AddMinRLong` / `AddMinRShort` | double | 1.0 / 1.0 | as the single input it replaces |
+
 ## 9. Logging
 Prefix `AV-01`. `AV-01 ANCHOR tag() high() usable()`; `AV-01 RECLAIM t() barsBelow() avwap() delta60() filter(sma50|tsmom value)`; `AV-01 HOLD day(n)` once per session while open (MFE/MAE so far); exit reasons add `MAXHOLD`, `ROLL`, `INVALIDATION`. Skip reasons: `filter-off`, `no-anchor`, `reclaim-cancel`, `roll-lead`, `event-blackout`, `risk-budget`, `margin`. `logSignal("AV01", …)` on every reclaim + HL, with ctx carrying the fake-anchor and SMA control values.
 
@@ -143,9 +157,10 @@ Prefix `AV-01`. `AV-01 ANCHOR tag() high() usable()`; `AV-01 RECLAIM t() barsBel
 - **Gates:** G0-a, G0-b; G0-c roll handling (multi-session anchors); G0-d for the AVWAP level arm.
 - **Low frequency:** the catalogue estimates 1–3 trades per month per instrument (an estimate). If validation has < 100 trades the verdict is **inconclusive**; do not relax filters.
 - Report overnight gap slippage separately from regular slippage.
+- **Short-side confirmation (Prog §7.9 item 11, owner-approved 09:52 ET):** the smoke run must produce short fills; review the first 20 short trades (or all if fewer) bar by bar against §5a (setup, trigger, order type and price, stop, T1, trail, exit reason); record `short-confirmed(<date>, n=<k>)` in the run sheet before any development read.
 
 ## 11. Acceptance criteria
-Prog §6 + the AV-01 kill, under **`big-winner-trend`** (header standard, Acceptance policy):
+Prog §6 + the AV-01 kill, under **`big-winner-trend`** (header standard, Acceptance policy), for the long arm **and the short arm** (**Owner-approved 2026-11-11 09:52 ET**, answer 2: *"Yes, and big-winner rule applies to it."*), each also judged per side (Prog §6 item 12):
 - The 10% largest-winner cap is **not** applied.
 - **Trader's equation:** cost-adjusted expectancy E = P(win) × average win − P(loss) × average loss (net of $17.00 ES / $9.48 NQ round trips, in R and $) must be > 0.
 - **Top-1% trim:** E must stay > 0 after removing the largest 1% of **winning** trades (K = max(1, ⌈1% × winners⌉), rounding per Prog §10); report both E values.
@@ -156,18 +171,20 @@ Prog §6 + the AV-01 kill, under **`big-winner-trend`** (header standard, Accept
 - [ ] Data2 60m setup and closed-bar reads (M-MTF), PRICEACTION zigzag on Data2, M-AVWAP on Data2 (VERIFY back-fill).
 - [ ] `NeedsDaily = true`, `DailyConfig.smaLength = 50`; filter = `DailyContext.PrevClose > DailyContext.Sma200` (SMA50), NaN → skip `filter-warmup`.
 - [ ] Reclaim state machine (bars-below counter, cancel), 15m HL trigger.
-- [ ] `Side` input (default `LongOnly`); the §5a short mirror (swing-low anchor, bars-above counter, 15m LH trigger, `AV01S*` orders) built behind it and logged as `SKIP side-off` while off.
+- [ ] `Side` input (default `Both`); the §5a short arm (swing-low anchor, bars-above counter, 15m LH trigger, `AV01S*` orders); a side switched off logs `SKIP side-off`.
 - [ ] Stop with the swing floor; T1; new-impulse AVWAP trail on 60m closes; max hold; roll flatten via the roll table; holiday/early-close handling.
 - [ ] Off-MC tests: bars-below counter, roll-lead calculation from the table, max-hold counting across weekends and holidays, precedence.
 - [ ] `NewsExitMinutes` rule on 15m bars, including overnight releases (Prog §7.6).
 - [ ] Header §18 (Acceptance policy): `big-winner-trend` predeclared, with the big-winner premise written out (few large trend winners).
 - [ ] Native compile + smoke (To ≤ 12/31/2024; check that no position crosses a roll).
+- [ ] Header and short-branch comment `// SHORT SIDE UNCONFIRMED — testing must confirm short-side trades (Prog §7.9 item 11)` until the 20-trade short review is recorded.
+- [ ] Long/Short input pairs per §8.2 (short defaults = long defaults); `T1-SKIPPED` rule and Info line (Prog §7.2a) where the spec has a T1.
 
 ## 13. Header mapping
 Trigger: in a daily uptrend (close > SMA50), after ≥ 10 60m closes below the AVWAP of the last 3-ATR swing high, a 60m close back above it; then the first 15m HL above the AVWAP → buy-stop above the HL bar. Management: stop 1 tick under the HL (at least 0.3 × ATR20d); half off at the swing high; runner trailed at the new impulse AVWAP − 2 ticks on 60m closes. Exit: stop, T1/trail, a 60m close back below the swing-high AVWAP, 20 sessions, or the session before a roll.
 
 ## 14. Open questions for Ettienne
-1. Long only in batch 1? (Rev 1.6: yes by default, `Side = LongOnly`; the short mirror is Q9.)
+1. ~~Long only in batch 1? (Rev 1.6 had `Side = LongOnly`.)~~ **Owner-approved 2026-11-11 09:52 ET**: both sides; `Side` default `Both`.
 2. Trend filter: SMA50 via `DailyConfig.smaLength = 50` (primary) or TSMOM > 0?
 3. δ60 = max(2 ticks, 0.10 × ATR14(60m)).
 4. Max hold 20 sessions; flatten 1 session before each roll.
@@ -175,7 +192,7 @@ Trigger: in a daily uptrend (close > SMA50), after ≥ 10 60m closes below the A
 6. Trail on 60m closes; Trail arm activates at +1 R; skip T1 if the fill gaps beyond it.
 7. Hold over early closes, holidays and weekends (news: `NewsExitMinutes` default 0).
 8. Prog §10 batch-wide items.
-9. **AV-01 short mirror (rev 1.6, §5a, PROPOSED):** approve the swing-low AVWAP loss short (rally fails below it, stop above the recent lower high) as a registered arm? Until then `Side` = `LongOnly`. If approved: same numbers as the long (AnchorK 3, δ60, 10 bars above, 20-session max hold), and does `big-winner-trend` apply to the short arm too, or `catalogue-default`?
+9. ~~**AV-01 short mirror (rev 1.6, §5a, PROPOSED):** approve the swing-low AVWAP loss short (rally fails below it, stop above the recent lower high) as a registered arm? Until then `Side` = `LongOnly`. If approved: same numbers as the long (AnchorK 3, δ60, 10 bars above, 20-session max hold), and does `big-winner-trend` apply to the short arm too, or `catalogue-default`?~~ **Owner-approved 2026-11-11 09:52 ET**: approved; `big-winner-trend` applies to the short arm; separate short values (§8.2) with short defaults = long defaults at first.
 
 ## 15. Sources
 Cat. AV-01, §0 item 3, §2.1–2.3, §2.6, EX-04, RG-06; Shannon, *Maximum Trading Gains with Anchored VWAP*; Cat. v1 AV family prior (no controlled futures study, searched 20 Oct 2026); engines manual §4.3 (M-DAILY), §4.7, §4.8, §4.12 (M-MTF), §4.13 (rolls), §5.23; M-INSTR M8/M9; Strategy-planning Page (item 5; horizon decision).

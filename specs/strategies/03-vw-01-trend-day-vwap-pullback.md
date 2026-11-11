@@ -1,5 +1,7 @@
 # VW-01 · Trend-day first VWAP pullback — implementation spec
 
+**Rev 1.7 (draft), 11 Nov 2026 (EST)** — owner short-side answers applied (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): own-mirror short accepted pending test confirmation (§5a note, §10, §12); Long/Short input pairs (§8.2); T1 already passed at fill ⇒ skip T1, trail all, Info line (Prog §7.2a).
+
 **Rev 1.6 (draft), 11 Nov 2026 (EST)** — short side (down trend day) written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
 
 **Rev 1.5 (draft), 10 Nov 2026 (EST)** — add inputs (`AddMode` etc., default None) per Prog §7.7, owner-approved 22:06 ET.
@@ -61,7 +63,7 @@
 | Item | Rule | Source |
 |---|---|---|
 | **Initial stop** | Keller: "stop modestly beyond (through the value building on the far side)". VWAP − 1 σ is the proxy for the far-side value, so the stop is the farther of (VWAP − 1 σ at the trigger bar) and (HL − 1 tick), then floored. The 1 σ count stays **PROPOSED** (checked: not specified in Keller B1 Ch 4.3). Floored at the cost floor from the planned entry (ES 14 ticks, NQ 19). **Max:** none; widened risk > 1% equity → skip. The stop price is frozen at entry (it does not follow VWAP). | Cat. VW-01; Keller B1 Ch 4.3; Cat. §2.1 |
-| **Targets** | `TargetMode = SessionHigh` (primary): T1 = the RTH session high at the moment of entry (frozen), limit `VW01LT1`. With q ≥ 2, ⌊q/2⌋ exit at T1 and the runner is trailed (EX-04 below). With q = 1, `SingleLotMode` (default ExitAtT1). `TargetMode = Trail` (sweep arm): no fixed target; the whole position is trailed. | Cat. VW-01 ("session high, then trail"; sweep {session high, trail}); Keller Ch 4.3 "target new extremes" supports the session high plus a runner going for new extremes. The half-and-trail split is **PROPOSED – owner to confirm** (checked: not specified in Keller B1 Ch 4.3, trailing not stated) |
+| **Targets** | `TargetMode = SessionHigh` (primary): T1 = the RTH session high at the moment of entry (frozen), limit `VW01LT1`. With q ≥ 2, ⌊q/2⌋ exit at T1 and the runner is trailed (EX-04 below). With q = 1, `SingleLotMode` (default ExitAtT1). If the fill is already at or above T1, T1 is skipped and the whole position trails, with the Info line `VW01 Info: T1-SKIPPED …` (Prog §7.2a, **Owner-approved 2026-11-11 09:52 ET**: *"Yes, trail the whole position, log an info message."*). `TargetMode = Trail` (sweep arm): no fixed target; the whole position is trailed. | Cat. VW-01 ("session high, then trail"; sweep {session high, trail}); Keller Ch 4.3 "target new extremes" supports the session high plus a runner going for new extremes. The half-and-trail split is **PROPOSED – owner to confirm** (checked: not specified in Keller B1 Ch 4.3, trailing not stated) |
 | **Minimum reward** | None (the catalogue sets none); b = (T1 − entry) / R is journaled so the E(b) report (EX-08) can show it. | Cat. VW-01; EX-08 |
 | **Break-even** | None specified. Do not add. | Cat. VW-01 |
 | **Trailing (EX-04 on RTH VWAP)** | Activation: after T1 fills (SessionHigh mode), or once a closed bar's high ≥ entry + 1 R (Trail mode, **PROPOSED – owner to confirm**). Rule: stop = max(stop, VWAP − 2 ticks), updated each closed bar (one-way, Prog §7.3); **plus** exit at market on the first 5m close < VWAP − 2 ticks. | Cat. EX-04 (A2-03 primary arm form, session-VWAP arm) |
@@ -77,13 +79,15 @@
 
 ### 5a. Short side, rule by rule (down trend day)
 Source status: the catalogue says "short mirrors on a down trend day" but writes only the long numbers; the Keller B1 Ch 4.3 check (rev 1.3) was read for the long case. The numeric short rules below are **PROPOSED (mirror; source long-only)**, with the same numbers as the long. The owner-approved items (touch sweep `FirstOrSecond`, accept-across declassification, adds default `None` and the add mechanics) keep their meaning and are applied to the short by mirroring only. Conventions: Prog §7.9. `side = −1` in every log line.
+**Short side unconfirmed** (**Owner-approved 2026-11-11 09:52 ET**, answer 3: *"Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades."*): these own-mirror short rules are accepted for now. The implemented signal must say so in its header and short branch, and testing must confirm the short trades (Prog §7.9 item 11; §10 and §12 below).
+
 | Item | Short rule |
 |---|---|
 | Classification (from C) | **Trend-down day** when all three hold: (a) since 09:45, at most one 5m close **above** RTH VWAP; (b) VWAP slope over the last 30 min **< −0.15 × ATR5** per bar; (c) developing RTH POC now − developing POC at IB completion **≤ −0.5 × ATR5**. A day can be classified up or down, never both: the first classification wins for the session. An accept-across event declassifies it. |
 | Touch episode | First 5m bar whose **high ≥ VWAP − 0.25 σ** starts an episode. Ends on the sell-stop fill, a 5m close **> VWAP + 1 σ** (failed) or `EpisodeMaxBars`. A new episode needs a bar whose **high < VWAP − 0.25 σ** in between. `TouchMode` and the LVN skip (VWAP inside a developing LVN) are side-blind. ("VWAP touch from below" = the rally up to VWAP.) |
 | Trigger and entry | A layer-0 pivot **high** confirmed with **`EPivotLabel.LH`**; **sell-stop** `VW01SE` = confirming bar **low − 1 tick**. Order life as the long (to 15:30 ET or a failed episode). |
 | Initial stop | The **farther** (higher) of **VWAP + 1 σ** at the trigger bar and **LH + 1 tick**, widened **upward** to entry + cost floor; > 1% equity → skip. Frozen at entry. `VW01SS`. |
-| Targets | `SessionHigh` mode, short: T1 = the **RTH session low** at the moment of entry (frozen), buy-to-cover limit `VW01ST1`; ⌊q/2⌋ there, runner trailed. If entry ≤ that low (no room), T1 is skipped and the whole position trails (**PROPOSED**). `Trail` mode as the long. The enum member keeps its name `SessionHigh` (= "the session extreme in the trade direction"). |
+| Targets | `SessionHigh` mode, short: T1 = the **RTH session low** at the moment of entry (frozen), buy-to-cover limit `VW01ST1`; ⌊q/2⌋ there, runner trailed. If entry ≤ that low at the fill, T1 is skipped and the whole position trails, with the Info line `VW01 Info: T1-SKIPPED …` (Prog §7.2a, **Owner-approved 2026-11-11 09:52 ET**: *"Yes, trail the whole position, log an info message."*). `Trail` mode as the long. The enum member keeps its name `SessionHigh` (= "the session extreme in the trade direction"). |
 | Break-even | None (as the long). |
 | Trailing (EX-04) | Activation after T1, or once a closed bar's **low ≤ entry − 1 R** (Trail mode, PROPOSED). Stop = **min(stop, VWAP + 2 ticks)** each closed bar, capped one tick above the last close; plus market exit on the first 5m close **> VWAP + 2 ticks**. |
 | Invalidation (day changes type) | `AcceptAcrossCloses` = 2 consecutive 5m closes **above** VWAP, each with volume ≥ the median 5m RTH volume so far → `VW01SX`, `INVALIDATION`, day declassified. No averaging up, ever. |
@@ -151,6 +155,20 @@ public enum EVwapAnchor { RthLocal, ChartSession }    // default RthLocal
 
 **Future variants (not built in batch 1, no input yet):** Dale VP Setup #2 cluster pullback (limit at the heaviest cluster level, stop in the LVN beyond) is catalogue **PS-12 / DV-04** (Example 34), a separate strategy, not a VW-01 input. The volume-shuffled VWAP and distance-matched SMA are controls (`ControlArm`), not variants.
 
+### 8.2 Long / Short input pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4: *"Get their own values."*; Prog §7.9 item 12)
+Each input below is replaced by a Long/Short pair. Wherever §4, §5, §5a, §8 or §8.1 name the single input, longs read the `…Long` member and shorts the `…Short` member. Short defaults equal the long defaults at first (**PROPOSED**), so the first run is symmetric; sweeps run per side (Prog §7.9 item 12, optimizer note). Inputs not listed stay single (side-blind).
+| Single input (replaced) | Pair | Type | Default long / short | Range |
+|---|---|---|---|---|
+| `TouchBandSigma` | `TouchBandSigmaLong` / `TouchBandSigmaShort` | double | 0.25 / 0.25 | as the single input it replaces |
+| `StopSigma` | `StopSigmaLong` / `StopSigmaShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `SlopeAtrPerBar` | `SlopeAtrPerBarLong` / `SlopeAtrPerBarShort` | double | 0.15 / 0.15 | as the single input it replaces |
+| `PocMigrationAtr` | `PocMigrationAtrLong` / `PocMigrationAtrShort` | double | 0.5 / 0.5 | as the single input it replaces |
+| `MaxClosesThroughVwap` | `MaxClosesThroughVwapLong` / `MaxClosesThroughVwapShort` | int | 1 / 1 | as the single input it replaces |
+| `EpisodeMaxBars` | `EpisodeMaxBarsLong` / `EpisodeMaxBarsShort` | int | 6 / 6 | as the single input it replaces |
+| `AcceptAcrossCloses` | `AcceptAcrossClosesLong` / `AcceptAcrossClosesShort` | int | 2 / 2 | as the single input it replaces |
+| `TrailOffsetTicks` | `TrailOffsetTicksLong` / `TrailOffsetTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `AddMinR` | `AddMinRLong` / `AddMinRShort` | double | 1.0 / 1.0 | as the single input it replaces |
+
 ## 9. Logging
 Prefix `VW-01`. `VW-01 CLASSIFY <date> side() t() closesThrough() slope() pocMig() atr5()` once per day when it classifies (and `VW-01 NOCLASS <date>` at 15:30 for unclassified days, so trend-day frequency is measurable). Episode lines `VW-01 TOUCH n() t() vwap() sigma()`. Exit lines carry R, MFE and MAE (Prog §8). Extra fields: `stopPctDailyAtr` (Dale band; = R / M-DAILY `Atr20d`, `NeedsDaily = true`), `declassified` and `accept-across` lines. Skip reasons: `lvn-touch`, `declassified`, `no-trend-day`, `episode-failed`, `episode-timeout`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`. `logSignal("VW01", …)` on every armed HL, with ctx carrying the P2-VWAP and SMA control values at the same bar.
 
@@ -159,6 +177,7 @@ Prefix `VW-01`. `VW-01 CLASSIFY <date> side() t() closesThrough() slope() pocMig
 - **Controls (Cat. VW-01, mandatory):** (a) **volume-shuffled VWAP**: the same rules run on a VWAP whose bar volumes are permuted within the session so far (seeded, deterministic; like M-AVWAP's P2 twin); (b) **distance-matched SMA**: an SMA whose length is chosen so its average distance from price over the development period equals VWAP's. The length is frozen before any performance read. (c) K-RT on classified trend days only. Run controls as separate `ControlArm` runs or as logged shadow events. **Kill:** real VWAP ≤ either fake VWAP.
 - **Gates:** G0-a, G0-b (the VW-08 VWAP canary suite must be ≈ 0 or negative before VW-01 is read). Not a prior-session level, so G0-d does not apply.
 - Report trend-day frequency per year (the catalogue estimates 2–5 trades per month per instrument; this is a catalogue estimate, not data).
+- **Short-side confirmation (Prog §7.9 item 11, owner-approved 09:52 ET):** the smoke run must produce short fills; review the first 20 short trades (or all if fewer) bar by bar against §5a (setup, trigger, order type and price, stop, T1, trail, exit reason); record `short-confirmed(<date>, n=<k>)` in the run sheet before any development read.
 
 ## 11. Acceptance criteria
 Prog §6 + the VW-01 kill. `catalogue-default`.
@@ -171,6 +190,8 @@ Prog §6 + the VW-01 kill. `catalogue-default`.
 - [ ] Off-MC tests: classifier edge cases (exactly one close through), episode reset, trail monotonicity.
 - [ ] `NewsExitMinutes` input and rule (Prog §7.6; PS-02 §12), with off-MC tests for the window edge (`MinutesTo` = N + B is not reached, N + B − ε is).
 - [ ] Native compile + smoke as PS-02.
+- [ ] Header and short-branch comment `// SHORT SIDE UNCONFIRMED — testing must confirm short-side trades (Prog §7.9 item 11)` until the 20-trade short review is recorded.
+- [ ] Long/Short input pairs per §8.2 (short defaults = long defaults); `T1-SKIPPED` rule and Info line (Prog §7.2a) where the spec has a T1.
 
 ## 13. Header mapping
 Trigger: after 10:30 ET on a day classified as a trend day (one-sided VWAP, VWAP slope > 0.15 ATR5/bar, POC migrated ≥ 0.5 ATR5), the first (or, if that one does not fill, the second) pullback to VWAP + 0.25 σ, not inside a developing LVN, that prints a confirmed 5m HL → buy-stop above it. Management: stop at the farther of VWAP − 1 σ and HL − 1 tick (floored); half off at the session high; runner trailed at VWAP − 2 ticks. Exit: stop, T1, 2 high-volume 5m closes below VWAP (the day changed type), a 5m close below VWAP − 2 ticks after T1, or flat 15:55 ET.
@@ -181,8 +202,8 @@ Trigger: after 10:30 ET on a day classified as a trend day (one-sided VWAP, VWAP
 3. Touch episode limit of 6 bars; order valid until 15:30; touch band 0.25 σ; stop at 1 σ; accept-across rule (2 closes, ≥ median volume). (Touch sweep {FirstOrSecond, FirstOnly}: owner-approved 2026-11-10 20:31 ET.)
 4. "Session high, then trail" read as half at the session high, runner trailed on VWAP; Trail arm activates at +1 R.
 5. Prog §10 batch-wide items.
-6. **Short side (rev 1.6, §5a):** accept the PROPOSED down-trend-day mirror with identical numbers (one close above VWAP, slope < −0.15 ATR5, POC shift ≤ −0.5 ATR5, touch band, 1 σ stop, 2-close accept-across)? Keller Ch 4.3 should be checked for an explicit down-trend wording.
-7. If T1 (session low) is already at or above a short's entry (or the session high at or below a long's entry), skip T1 and trail the whole position? PROPOSED: yes.
+6. ~~**Short side (rev 1.6, §5a):** accept the PROPOSED down-trend-day mirror with identical numbers (one close above VWAP, slope < −0.15 ATR5, POC shift ≤ −0.5 ATR5, touch band, 1 σ stop, 2-close accept-across)? Keller Ch 4.3 should be checked for an explicit down-trend wording.~~ **Owner-approved 2026-11-11 09:52 ET**: accepted for now; testing must confirm the short trades (§5a note, §10).
+7. ~~If T1 (session low) is already at or above a short's entry (or the session high at or below a long's entry), skip T1 and trail the whole position? PROPOSED: yes.~~ **Owner-approved 2026-11-11 09:52 ET**: skip T1, trail the whole position, Info line (Prog §7.2a).
 
 ## 15. Sources
 Cat. VW-01, §0 items 2 (Telonics, RipBacktest), §2.2, EX-04, EX-08, VW-08; Keller, *Volume Profile & Order Flow: The Complete Institutional Reference* (Book 1) Ch 4.3 VWAP Setup 1 and Drill 4.3 (Kindle Loc ~1307–1358; also `kindle-notes/keller-b1-parts3-4.md`); Dale, *Volume Profile: The Insider's Guide to Trading*, Setup #2 Trend pp. 81–89 and pp. 98/100; Cat. PS-12 / DV-04 and engines manual §3.38 (Example 34); engines manual §5.1, §5.10, §4.7 (σ definition and P2 twin), §4.8; Strategy-planning Page (build order item 3).

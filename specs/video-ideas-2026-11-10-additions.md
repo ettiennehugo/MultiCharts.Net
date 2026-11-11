@@ -2,6 +2,8 @@
 
 **For:** Ettienne Hugo · **Prepared by:** Grok Bot · **Date:** Tuesday 10 Nov 2026 (America/New_York, EST) · **Branch:** `feat/strategy-specs-batch1` (PR #117, draft)
 
+**Update 2026-11-11 09:52 ET, owner short-side answers** (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): YV-11 own-mirror short accepted pending test confirmation; Long/Short input pairs on YV-11 and YV-12; T1 already passed at the fill ⇒ skip T1, trail all, Info line (Prog §7.2a); YV-12 Day-2 filter stays side-blind, with a note that the short may need its own filter later.
+
 **Update 2026-11-11 (ET), short-side review** (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*): YV-11's short and YV-12's long are now written out rule by rule; the cited variants (SP-09 `EDrawMode`, PS-24, PS-18, A2-49) state both sides. Shared conventions: Prog §7.9 (PR #117 overview rev 1.7). No owner-approved item changed in meaning.
 
 **Request (Ettienne, 21:38–21:41 ET):** *"Please watch this video and add it for strategy testing if we do not have anything similar documented"*, and for the others *"Also watch and document this video if we don't have something similar"*.
@@ -92,6 +94,7 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   | Invalidation | A signal-TF close below SMA20 → exit at market next bar (trend broken; PROPOSED) | Inferred |
   | News | Entry blackout −2/+10; `NewsExitMinutes` per Prog §7.6 | Prog §7.6 |
 - **Short side, rule by rule** (the video says "Short is the mirror" but states no short stop or numbers, so every short rule is **PROPOSED (mirror)**, same numbers as the long; Prog §7.9; `side = −1` in every log line; order names `YV11SE`, `YV11SS`, `YV11ST1`, `YV11SX`, adds `YV11SA1`/`YV11SA2`):
+  **Short side unconfirmed** (**Owner-approved 2026-11-11 09:52 ET**, answer 3): accepted for now; the implemented signal's header and short branch carry `// SHORT SIDE UNCONFIRMED — testing must confirm short-side trades (Prog §7.9 item 11)`, and the 20-short-trade review (Prog §7.9 item 11) is run before any development read. Short values come from the `…Short` inputs (pairs below).
   | Item | Short rule |
   |---|---|
   | Daily bias | Prior daily close **below** `Sma200` (`DailyBias` switches it off for both sides). |
@@ -118,6 +121,9 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   public enum EAddStopMode { RaiseToAddLow, KeepCurrent }         // default RaiseToAddLow
   public enum EOpenWindow { Block0930to0945, From0931 }          // default Block0930to0945 (Prog §7.6a)
   // ints/doubles: MaxAdds (2), AddContracts (1), AddMinR (1.0)
+  // Long/Short pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4 "Get their own values."; Prog §7.9 item 12), short default = long default (PROPOSED):
+  //   SlopeMinAtrLong/Short 0.10, SlopeMaxAtrLong/Short 0.40, ExtMaxAtrLong/Short 2.0, GapMinAtrLong/Short 0.5,
+  //   TargetRLong/Short 2.0, TriggerBarsLong/Short 2, AddMinRLong/Short 1.0. Sweeps run per side.
   // bools: DailyBias (true), SlopeFilter (true), ExtensionVeto (true), FirstPullbackVeto (true)
   // shared: ESide, ESingleLotMode, EControlArm, EAcceptancePolicy (Prog §3 rule 9)
   ```
@@ -182,11 +188,11 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   | Item | Long rule |
   |---|---|
   | Level and open location | PDL. No long if the RTH open ≤ PDL + 0.10 × prior range (step 3). |
-  | Day-2 filter | Side-blind: `RangeExpansion` / `PriorDayEvent` as approved. The prior day's direction (red/green body) is logged as a stratifier, not a filter (**PROPOSED**; the video does not tie the side to the candle colour). |
+  | Day-2 filter | Side-blind: `RangeExpansion` / `PriorDayEvent` as approved, the same for both sides (**Owner-approved 2026-11-11 09:52 ET**, answer 7: *"Yes keep it the same - we might have to change it later on for the short side so make a note of that."*). The prior day's direction (red/green body) is logged as a stratifier. **Note:** the short side may need its own Day-2 filter later (e.g. tied to the prior day's direction); that would be a new registered variant, decided from the per-side results. |
   | Wick candle | Its **low** reaches **PDL + `LevelTolAtr`** × ATR14 (low ≤ that); its low is no more than 0.5 × ATR14 **below** PDL; **lower** wick ≥ 0.50 × range; closes in the **top** 25%; range ≥ 1.0 × ATR14. |
   | Entry | Buy-stop at the wick bar **high + 1 tick**, valid 3 bars. Window and `OpenWindow` as the short. One attempt per level per day (PDH and PDL are separate levels). |
   | Initial stop | Wick **low − 1 tick**, floored **downward** (entry − cost floor); > 1% equity → skip. |
-  | Target | `OtherSide`: **PDH − 2 ticks**, whole position. `VwapThenOtherSide` (the BABA long's stated exits): half at session VWAP if it lies between entry and PDH, runner to PDH − 2 ticks. Skip if the target is < 1 R after the floor. |
+  | Target | `OtherSide`: **PDH − 2 ticks**, whole position. If the fill is already past the target or VWAP T1, that target is skipped and the position is trailed / held for the next target, with `YV12 Info: T1-SKIPPED …` (Prog §7.2a). `VwapThenOtherSide` (the BABA long's stated exits): half at session VWAP if it lies between entry and PDH, runner to PDH − 2 ticks. Skip if the target is < 1 R after the floor. |
   | Break-even (owner-approved `BreakEvenAt1R`) | When a closed bar's **high ≥ entry + 1 R**, stop → entry + 0 ticks. **Short:** when a closed bar's **low ≤ entry − 1 R**, stop → **entry − 0 ticks** (never raised). |
   | Time stop / session / news | Side-blind (30 minutes; flat 15:55; blackout). |
   | Short-specific notes (PDH short) | The fade of PDH on a Day-2 up day is against the prior day's move and the index drift; stats split long / short (Prog §7.9 item 8). The stated SMB short (AMD) was in the first minutes, so the short leans on `OpenWindow = From0931` more than the long. |
@@ -199,6 +205,10 @@ This file is a candidates list, not batch-1 specs. Nothing here has been run.
   public enum EEntryWindow { Morning, FullRth }                   // default Morning (to 11:30)
   public enum EOpenWindow { Block0930to0945, From0931 }          // default Block0930to0945 (Prog §7.6a)
   // bools: OpenLocationFilter (true)
+  // Long/Short pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4; Prog §7.9 item 12), short default = long default (PROPOSED):
+  //   LevelTolAtrLong/Short 0.10 (step 4 level tolerance), MaxOvershootAtrLong/Short 0.5 (max beyond the level),
+  //   WickMinFracLong/Short 0.50, CloseZoneFracLong/Short 0.25, MinRangeAtrLong/Short 1.0,
+  //   TargetOffsetTicksLong/Short 2, BreakEvenRLong/Short 1.0. Day2RangeAtr stays single (side-blind filter).
   // shared: ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
   ```
   Swept numbers: `LevelTolAtr` {0.10, 0.25} × `Day2RangeAtr` {1.25, 1.5} → 4 configs (PROPOSED).
@@ -329,7 +339,7 @@ Still open:
 7. **Tick history:** OK to do a read-only QuoteManager check of the first @ES/@NQ trade-tick date before any 15s work?
 8. **Timestamps:** add the [ts: VERIFY] timestamps on a re-watch?
 9. **PT adds:** OK to plan an M-PORT change (its own PR) so the MM can approve same-direction add legs within the risk caps? Until then adds are chart-only.
-10. **Short side (2026-11-11):** accept the PROPOSED YV-11 short mirror (gap-down catalyst, price below SMA200 daily bias, 200 SMA as a floor target) and the YV-12 Day-2 rule being side-blind (prior-day colour only logged)?
+10. ~~**Short side (2026-11-11):** accept the PROPOSED YV-11 short mirror (gap-down catalyst, price below SMA200 daily bias, 200 SMA as a floor target) and the YV-12 Day-2 rule being side-blind (prior-day colour only logged)?~~ **Owner-approved 2026-11-11 09:52 ET**: YV-11 short accepted pending test confirmation; YV-12 Day-2 filter side-blind for now (short may need its own later).
 
 ## Sources
 - The four YouTube videos above (URLs as listed); findings relayed 2026-11-10.

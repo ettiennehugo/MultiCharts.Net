@@ -1,5 +1,7 @@
 # PS-02 · Balance break at acceptance close — implementation spec
 
+**Rev 1.6 (draft), 11 Nov 2026 (EST)** — owner short-side answers applied (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): Long/Short input pairs (§8.2); T1-SKIPPED rule (Prog §7.2a); losing-side rule (Prog §6 item 12).
+
 **Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No long rule changed.
 
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
@@ -85,7 +87,7 @@ Evaluated on closed 5m bars only.
 | **Same-bar precedence** | Prog §7.4: MM force-close → stop → T1/target → news exit → FlatBy/early close → failed-break exit → time. A trail update is computed only after these and applies from the next bar. | Prog §7.4 |
 
 ### 5a. Short side, rule by rule
-Source status: the catalogue mechanism is two-sided ("traps the responsive sellers at the top of the range (or buyers at the bottom)") and Keller B4 §8.4 Rule 4 is direction-neutral ("enter on the break aligned with migration"), so the short is a **sourced mirror** with the same numbers as the long. Keller B1 Ch 3.3's wording is long-side ("buying the first tick beyond VAH"); its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
+Short values come from the `…Short` inputs (§8.2). Source status: the catalogue mechanism is two-sided ("traps the responsive sellers at the top of the range (or buyers at the bottom)") and Keller B4 §8.4 Rule 4 is direction-neutral ("enter on the break aligned with migration"), so the short is a **sourced mirror** with the same numbers as the long. Keller B1 Ch 3.3's wording is long-side ("buying the first tick beyond VAH"); its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
 | Item | Short rule |
 |---|---|
 | Daily setup | Same balance, composite and entropy tests (side-blind). **V ≤ −1** (value migrating down). |
@@ -170,6 +172,17 @@ public enum ERunnerTarget { TrailOnly, NearestDestination } // default TrailOnly
 
 **Future variants (not built in batch 1, no input yet):** (1) **opposite-edge reversal** after a failed break (Keller 3.3, "frequently rotates to the opposite edge"), proposed name `FailedBreakReverse` (bool, default false); (2) the BookSpec overnight 3-day runner (§14 item 1).
 
+### 8.2 Long / Short input pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4: *"Get their own values."*; Prog §7.9 item 12)
+Each input below is replaced by a Long/Short pair. Wherever §4, §5, §5a, §8 or §8.1 name the single input, longs read the `…Long` member and shorts the `…Short` member. Short defaults equal the long defaults at first (**PROPOSED**), so the first run is symmetric; sweeps run per side (Prog §7.9 item 12, optimizer note). Inputs not listed stay single (side-blind).
+| Single input (replaced) | Pair | Type | Default long / short | Range |
+|---|---|---|---|---|
+| `AcceptCloses` | `AcceptClosesLong` / `AcceptClosesShort` | int | 2 / 2 | as the single input it replaces |
+| `DeltaMinTicks` | `DeltaMinTicksLong` / `DeltaMinTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `StopWidthW` | `StopWidthWLong` / `StopWidthWShort` | double | 0.25 / 0.25 | as the single input it replaces |
+| `TargetW` | `TargetWLong` / `TargetWShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `FailCloses` | `FailClosesLong` / `FailClosesShort` | int | 2 / 2 | as the single input it replaces |
+| `VolBeyondPct` | `VolBeyondPctLong` / `VolBeyondPctShort` | double | 25 / 25 | as the single input it replaces |
+
 ## 9. Logging and journal lines
 Prog §8, with ID prefix `PS-02`. Setup fields: `W`, `vah`, `val`, `V`, `Hnorm`, `delta`, `acceptCount`. Exit lines carry R, MFE and MAE (Prog §8; Keller B4 §8.4 step 9). Stratifier fields `lvnBeyond`, `hvnBeyond`, `devPocVsCompPoc`, `volBeyondPct` on every accepted break. Skip reasons: `accept-flow` (when the check is on), `no-composite`, `no-balance`, `entropy`, `v-against`, `outside-window`, `event-blackout`, `roll-window`, `roll-warmup`, `risk-budget`, `noise` (BookSpec), `too-wide` (BookSpec), `mm-denied` (PT; read from the MM status if available, else inferred as no fill). `logSignal("PS02", side, close, stop, ctx, taken)` on every accepted break, including skipped ones.
 
@@ -198,6 +211,7 @@ Prog §6 defaults, plus the Cat. PS-02 kill and the A2-41 kill for BookSpec. Pol
 - [ ] Depends on the shared cost-row item (Prog §9 item 1) for NQ/CL/6E floors.
 - [ ] Off-MC tests: acceptance counter, split rule (q = 1, 2, 3), precedence table, trail monotonicity.
 - [ ] Native: temporary `Compile Include`, compile, smoke chart (To ≤ 12/31/2024), remove include; `git diff -- PLStudies.csproj` empty.
+- [ ] Long/Short input pairs per §8.2 (short defaults = long defaults); `T1-SKIPPED` rule and Info line (Prog §7.2a) where the spec has a T1.
 
 ## 13. Header mapping
 Header §4 walkthrough — Trigger: two 5m closes beyond the 3-session balanced composite edge + δ, V aligned, 09:45–14:30 ET → buy next bar open. Management: stop 0.25 W inside the composite (floored); half off at 1.0 W beyond the edge; runner trailed under each new confirmed 5m HL. Exit: stop, T1/trail, 2 closes back inside the old value (failed break), or flat 15:55 ET.
@@ -206,7 +220,7 @@ Header §4 walkthrough — Trigger: two 5m closes beyond the 3-session balanced 
 1. BookSpec overnight 3-day runner: leave out of batch 1 (intraday-only arm)?
 2. ~~Failed-break exit on in the primary~~: owner-approved 2026-11-10 20:31 ET. Still open: `FailCloses` = 2.
 3. `AcceptCloses` 2 and δ (Keller: qualitative only); the acceptance flow check thresholds (dev POC ≥ comp POC; 25% volume beyond the edge) as an ablation; runner destination offset of 2 ticks.
-4. **Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (same `AcceptCloses`, δ, `StopWidthW`, `FailCloses`), or register side-specific values? PROPOSED: identical numbers, results split by side.
+4. ~~**Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (same `AcceptCloses`, δ, `StopWidthW`, `FailCloses`), or register side-specific values? PROPOSED: identical numbers, results split by side.~~ **Owner-approved 2026-11-11 09:52 ET**: separate Long/Short values (§8.2), short defaults = long defaults at first.
 5. Prog §10 batch-wide items (holdout scope, `NewsExitMinutes` default, trim rounding, early close, odd lots, data history).
 
 ## 15. Sources

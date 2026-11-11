@@ -1,5 +1,7 @@
 # PS-01 · Accepted balance break → first-pullback higher low (ABB-HL) — implementation spec
 
+**Rev 1.6 (draft), 11 Nov 2026 (EST)** — owner short-side answers applied (Ettienne 2026-11-11 09:52 ET: *"1. Yes, flag it and don't trade it.  2. Yes, and big-winner rule applies to it.  3. Accept them for now and we can clarify them using testing - note that in the signals that testing needs to confirm the short side trades. 4. Get their own values.  5. Yes, trail the whole position, log an info message.  6. Make it an input setting using an enum  7. Yes keep it the same - we might have to change it later on for the short side so make a note of that."*): Long/Short input pairs (§8.2); T1-SKIPPED rule (Prog §7.2a); losing-side rule (Prog §6 item 12).
+
 **Rev 1.5 (draft), 11 Nov 2026 (EST)** — short side written out rule by rule in new §5a (Ettienne 2026-11-11 09:36 ET: *"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's."*); conventions in Prog §7.9. No owner-approved rule changed in meaning.
 
 **Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
@@ -47,7 +49,7 @@ As PS-02 §3, minus the entropy veto (PS-01 has none) and M-DAILY. Plus PRICEACT
 | **Same-bar precedence** | MM force-close → stop → target → news exit → FlatBy/early close → invalidation (close-based) → BE update for next bar. If the invalidation close and the BE trigger happen on one bar, the invalidation exit wins. | Prog §7.4 |
 
 ### 5a. Short side, rule by rule
-Source status: as PS-02 §5a, the short is a **sourced mirror** of the two-sided catalogue/Keller B4 rule with the same numbers; Keller B1 Ch 3.3's retest entry is written long-side, so its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
+Short values come from the `…Short` inputs (§8.2). Source status: as PS-02 §5a, the short is a **sourced mirror** of the two-sided catalogue/Keller B4 rule with the same numbers; Keller B1 Ch 3.3's retest entry is written long-side, so its short reading is the mirror. Conventions: Prog §7.9. `side = −1` in every log line.
 | Item | Short rule |
 |---|---|
 | Daily setup | Same balance tests; **V ≤ −1**. |
@@ -115,6 +117,20 @@ public enum ERunnerTarget { TrailOnly, NearestDestination } // same declaration 
 
 **Future variants (not built in batch 1, no input yet):** (1) **opposite-edge reversal** after a failed break (Keller 3.3), proposed `FailedBreakReverse` (bool, default false); (2) Keller's resting **limit at the held edge** instead of the HL buy-stop, proposed `EntryMode` of type `public enum EEntryMode { HlBuyStop, EdgeLimit }` (default HlBuyStop); (3) Trader Oxygen YV-01 rules, not yet checked.
 
+### 8.2 Long / Short input pairs (**Owner-approved 2026-11-11 09:52 ET**, answer 4: *"Get their own values."*; Prog §7.9 item 12)
+Each input below is replaced by a Long/Short pair. Wherever §4, §5, §5a, §8 or §8.1 name the single input, longs read the `…Long` member and shorts the `…Short` member. Short defaults equal the long defaults at first (**PROPOSED**), so the first run is symmetric; sweeps run per side (Prog §7.9 item 12, optimizer note). Inputs not listed stay single (side-blind).
+| Single input (replaced) | Pair | Type | Default long / short | Range |
+|---|---|---|---|---|
+| `AcceptCloses` | `AcceptClosesLong` / `AcceptClosesShort` | int | 2 / 2 | as the single input it replaces |
+| `DeltaMinTicks` | `DeltaMinTicksLong` / `DeltaMinTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `HoldW` | `HoldWLong` / `HoldWShort` | double | 0.25 / 0.25 | as the single input it replaces |
+| `StopBufferTicks` | `StopBufferTicksLong` / `StopBufferTicksShort` | int | 1 / 1 | as the single input it replaces |
+| `TargetW` | `TargetWLong` / `TargetWShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `DestOffsetTicks` | `DestOffsetTicksLong` / `DestOffsetTicksShort` | int | 2 / 2 | as the single input it replaces |
+| `BreakEvenR` | `BreakEvenRLong` / `BreakEvenRShort` | double | 1.0 / 1.0 | as the single input it replaces |
+| `FailCloses` | `FailClosesLong` / `FailClosesShort` | int | 1 / 1 | as the single input it replaces |
+| `VolBeyondPct` | `VolBeyondPctLong` / `VolBeyondPctShort` | double | 25 / 25 | as the single input it replaces |
+
 ## 9. Logging
 Prog §8, prefix `PS-01`. Setup fields: `W, vah, val, V, delta, acceptTime`; trigger fields `hlPrice, hlConfirmTime, trigger`. Exit lines carry R, MFE and MAE (Prog §8; Keller B4 §8.4 step 9). Skip reasons: as PS-02 plus `pullback-too-deep`, `trigger-expired`, `no-hl`. `logSignal("PS01", …)` for every accepted break (taken or not) **and** a second tag `PS01-HL` for every armed trigger, so the event study can compare PS-01 vs PS-02 on identical events.
 
@@ -136,6 +152,7 @@ Prog §6 + the Cat. PS-01 kill. `catalogue-default`.
 - [ ] Off-MC tests: hold-zone cancel, trigger replacement, BE, invalidation precedence.
 - [ ] `NewsExitMinutes` input and rule (Prog §7.6; PS-02 §12), with off-MC tests for the window edge (`MinutesTo` = N + B is not reached, N + B − ε is).
 - [ ] Native compile and smoke run as PS-02.
+- [ ] Long/Short input pairs per §8.2 (short defaults = long defaults); `T1-SKIPPED` rule and Info line (Prog §7.2a) where the spec has a T1.
 
 ## 13. Header mapping
 Trigger: after a 2-close acceptance above the balanced composite (V ≥ +1), the first confirmed 5m HL that stays above VAH − 0.25 W → buy-stop 1 tick above the HL's confirming bar. Management: stop 1 tick through the balance POC (floored); BE at +1 R; half off at VAH + 1 W; runner to the next composite HVN or naked POC, trailed under new HLs. Exit: stop, targets, a 5m close back below VAH − δ, or flat 15:55 ET.
@@ -145,7 +162,7 @@ Trigger: after a 2-close acceptance above the balanced composite (V ≥ +1), the
 2. Break-even offset 0 ticks (Keller: not stated).
 3. ~~POC stop primary and scale-out with runner~~: owner-approved 2026-11-10 20:31 ET. Still open: POC stop buffer 1 tick; destination offset 2 ticks.
 4. Prog §10 batch-wide items.
-5. **Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (hold 0.25 W, `StopBufferTicks` 1, BE at 1 R, `FailCloses` 1)? PROPOSED: yes, results split by side.
+5. ~~**Short side (rev 1.5, §5a):** accept the mirrored short with identical numbers (hold 0.25 W, `StopBufferTicks` 1, BE at 1 R, `FailCloses` 1)? PROPOSED: yes, results split by side.~~ **Owner-approved 2026-11-11 09:52 ET**: separate Long/Short values (§8.2), short defaults = long defaults at first.
 
 ## 15. Sources
 Cat. PS-01, PS-02, EX-01, EX-05, EX-10, §2.1–2.3; Keller Book 1 Ch 3.3 (Kindle Loc ~951–959); Keller Book 4 §2.4 (Loc ~721–838), §8.3, §8.4 Rules 2 and 4, steps 7–9; final-synthesis Spec 1 and §6.6; engines manual §3.26 (Example 26), §4.8, §5.23; Strategy-planning Page.
