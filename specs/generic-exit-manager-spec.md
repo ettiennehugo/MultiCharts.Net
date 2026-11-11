@@ -1,13 +1,13 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.5 PROPOSAL, 2026-11-11 (ET); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
+rev: "0.6 PROPOSAL, 2026-11-11 (ET); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
 status: "PROPOSAL, docs only, no code. Owner-approved 2026-11-11 09:16 ET: option C, the baseline values, the wrapper in Portfolio Trader, and the over-budget rule. Not yet approved for implementation as a whole. Everything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.5 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.6 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
@@ -180,6 +180,8 @@ public enum ETriggerUnit { RMultiple, PercentOfEntry, Ticks, Points, CurrencyPer
 - `None`: no target; exits come only from the stop, trail and clock.
 
 T1 and the split use the **initial** contracts only. Adds join the runner (PR #117 §7.7).
+
+**T1 already passed at the fill** (**Owner-approved 2026-11-11 09:52 ET**, Ettienne: *"Yes, trail the whole position, log an info message."*; same rule as PR #117 overview §7.2a). If the entry fill is at or beyond the T1 level (long: fill ≥ T1; short: fill ≤ T1), the engine sends no T1 order, treats the whole position as the runner (the §4.4 trail is active from the fill, as if T1 had filled), keeps `FinalTargetR` if it is still beyond the fill, and logs once: `<ID> Info: T1-SKIPPED side(<±1>) fill(<px>) t1(<px>) past(<ticks>) qty(<q>) action(trail-all)`. The journal row gets `t1Skipped = 1`. In `SingleTarget` mode a target already passed at the fill is handled the same way (no limit, trail all).
 
 ### 4.3 Break-even
 **Configurable trigger and offset (**Owner-approved 2026-11-11 09:16 ET**, answer 2).**
