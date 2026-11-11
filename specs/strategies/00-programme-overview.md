@@ -268,6 +268,7 @@ Ettienne, 2026-11-10: *"ultimately I'd like to use dynamic position sizing based
   - `<ID> T1 qty() px()` · `<ID> BE stop()` · `<ID> TRAIL stop() basis()`
   - `<ID> EXIT reason(<STOP|TARGET|T1+RUNNER|INVALIDATION|TIME|FLATBY|EARLYCLOSE|NEWS|ROLL|FLAT-BY-MM|TRAIL-THROUGH|FLOW-WARN>) px() R() mfe() mae()`. MFE and MAE are in R, per position, from F-JRNL (manual §5.13). Every spec logs them, per Keller B4 §8.4 step 9 ("record R, MFE and MAE for every trade")
   - `<ID> NEWS-EXIT …` and `<ID> SKIP news-window …` (§7.6)
+  - **Planned vs actual risk % on every closed trade** (owner request 2026-11-11 09:19 ET: *"we essentially have a projected risk percentage when we start out (e.g. 1%) but once the market has moved it may or may not have moved against us by a certain percentage so we want to log that as the actual risk percentage"*). The `EXIT` line and the CS-1 journal row also carry `plannedRiskPct`, `plannedRiskPctPeak`, `actualRiskPct` (whole-trade MAE $ ÷ equity at entry), `actualToPlanned` (MAE in initial R) and `realizedPnlPct`. The definitions and the reporting rules (actualRiskPct distribution; count of trades above the planned risk) are in PR #119, `specs/generic-exit-manager-spec.md` §5.3. They are computed in the `_CustomSignal` base, so every strategy logs them.
 - These strings are journal text, not MC API members (§3 rule 5 concerns enums and API members).
 
 ## 9. Implementation order for Coder
