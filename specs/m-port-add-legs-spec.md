@@ -1,12 +1,12 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
-date: 2026-11-10 (ET); draft r6 2026-11-11 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Draft r6: the r5 per-instrument cap (`MaxInstrumentRiskPct`) was dropped by the owner 2026-11-11 10:52 ET; `ClusterCapPct` covers it (§7, Q12). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+date: 2026-11-10 (ET); draft r7 2026-11-11 (ET)
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Draft r6: the r5 per-instrument cap (`MaxInstrumentRiskPct`) was dropped by the owner 2026-11-11 10:52 ET; `ClusterCapPct` covers it (§7). Draft r7: Q12 owner-approved 2026-11-11 11:09 ET (heat cap auto-raised to a higher `ClusterCapPct`); Q13 open (total cap). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
 
-# M-PORT add legs (DRAFT r6, proposed rev 2.8)
+# M-PORT add legs (DRAFT r7, proposed rev 2.8)
 
 ## 0. Why, and scope
 
@@ -260,15 +260,20 @@ public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _Port
 // ctor: ClusterCapPct = 0;
 // StartCalc, after Resolve, next to totalRiskCap and addPolicy:
 //   string src = "profile";
-//   if (ClusterCapPct > 0 && ClusterCapPct / 100 <= cfg.heatCap) { cfg.clusterCap = ClusterCapPct / 100; src = "input"; }
-//   else if (ClusterCapPct != 0) Warning (below), src stays "profile";
-//   Info: "PORT config clusterCap=<cfg.clusterCap> source=<input|profile>"
+//   string heatSrc = "profile";
+//   if (ClusterCapPct > 0 && ClusterCapPct <= 100) {
+//     cfg.clusterCap = ClusterCapPct / 100; src = "input";
+//     if (cfg.clusterCap > cfg.heatCap) { cfg.heatCap = cfg.clusterCap; heatSrc = "raised-to-clusterCap"; Info (below); }
+//     if (cfg.clusterCap > cfg.totalRiskCap) Warning (below);   // total cap NOT changed (Q13)
+//   } else if (ClusterCapPct != 0) Warning (out of range), src stays "profile";
+//   Info: "PORT config clusterCap=<cfg.clusterCap> source=<input|profile> heatCap=<cfg.heatCap> source=<profile|raised-to-clusterCap>"
 ```
 
 - **Sentinel:** `0` (the default) = use the cluster cap resolved from the profile (Starter 0.75%, ScaledBook 2%), a subclass `Config`, or the `ConfigPath` JSON `clusterCap` key, exactly as today. `> 0` = that percentage of book, e.g. `0.75` = 0.75%.
 - **Precedence:** when `ClusterCapPct > 0`, it overrides **any** JSON `clusterCap` and any subclass `Config` value (same "folded in after config resolution" pattern as `TotalRiskCapPct`, L59). The JSON key is still parsed and validated, but the Input wins.
-- **Range (PROPOSED handling):** valid when 0 < `ClusterCapPct` / 100 ≤ `heatCap` (the existing `Validate()` rule `0 < clusterCap ≤ heatCap`). A negative value, or one above `heatCap`, logs `PORT Warning: ClusterCapPct(<x>) out of range (0 < pct/100 <= heatCap <h>): using the profile value <c>` and keeps the profile value (source=profile).
-- **Large cluster caps need heat/total raised too (PROPOSED rule, Q12).** Under the rule above, a `ClusterCapPct` above the profile's `heatCap` (Starter 1.5%, ScaledBook 4%) logs the out-of-range Warning and **falls back to the profile cluster cap**. So a cluster cap such as 8% (the owner's 10:52 ET example) only takes effect if `heatCap` is also ≥ 8% (today only via the `ConfigPath` JSON `heatCap` key or a subclass `Config`; there is no heat Input). The total cap `TotalRiskCapPct` (default 10%) must also be ≥ the cluster cap or it binds first. Even when accepted, a cluster cap above `heatCap` could never bind, because cluster risk ≤ heat.
+- **Range:** valid when 0 < `ClusterCapPct` ≤ 100. A negative value or one above 100 logs `PORT Warning: ClusterCapPct(<x>) out of range (0 < pct <= 100): using the profile value <c>` and keeps the profile value (source=profile) (**PROPOSED** handling, unchanged).
+- **A cluster cap above the heat cap raises the heat cap** (**Owner-approved 2026-11-11 11:09 ET** (Ettienne chose: *"Raise the overall open-risk cap automatically to match a higher cluster cap"*); replaces the r6 PROPOSED warn-and-fall-back rule, Q12). When `ClusterCapPct` / 100 > the effective `heatCap` (profile, subclass or JSON value), the effective `heatCap` for that run is set **equal to the cluster cap**, so the `Validate()` rule `clusterCap ≤ heatCap` still holds and the cluster cap can bind. It is logged in the config line (`heatCap=<x> source=raised-to-clusterCap`) plus one Info line: `PORT Info: heatCap raised from <old> to <new> to match ClusterCapPct(<pct>)`. Otherwise (cluster cap ≤ heat) the profile/JSON `heatCap` is unchanged (`source=profile`). Example: Starter (heat 1.5%) with `ClusterCapPct = 8` ⇒ cluster 8%, heat 8%.
+- **The total cap is not changed (Q13).** `TotalRiskCapPct` (default 10%) is left as set; it must still be ≥ the cluster cap, or it binds first. If `ClusterCapPct` > `TotalRiskCapPct`, one `PORT Warning: ClusterCapPct(<pct>) > TotalRiskCapPct(<t>): the total risk cap will bind first` is logged; the run continues with both values.
 - **Applies to new entries and adds:** the override replaces `cfg.clusterCap`, which feeds the existing new-entry cluster check (`clusterCapD`, `_PortMM` L843/L889, including P2 (c): a lone entry in an empty cluster is still not checked) and the add check in §3 check 3. No separate add cap.
 - **Config-time log:** one Info line at `StartCalc`, every run: `PORT config clusterCap=<fraction> source=<input|profile>` (`profile` covers profile defaults, subclass `Config` and JSON). The existing config dump (`clusterCap(<x>)` in the RUN/CFG text) shows the effective value.
 - **Default ⇒ no behaviour change:** with `ClusterCapPct = 0` the effective cap equals today's, so every decision is unchanged. G0 and DVP D9a are chart runs where M-PORT is inert, so their hashes are unchanged. The one new Info line is the only PT journal difference (§8).
@@ -384,7 +389,10 @@ Book 1M, Starter unless stated, ES BPV 50.
   - JSON `"clusterCap": 0.01` and `ClusterCapPct = 0` ⇒ 0.01, `source=profile`.
   - JSON `"clusterCap": 0.01` and `ClusterCapPct = 1.5` ⇒ 0.015, `source=input` (Input overrides JSON).
   - `ClusterCapPct = 1.5`: a **new entry** (ES, NQ open in EQIDX at 8 000) that the profile cap refuses (`"cluster cap"`) is allowed up to 15 000; an **add** with EQIDX after the add at 12 000 is allowed, at 15 001 ⇒ skipped `"cluster cap"`, never resized.
-  - `ClusterCapPct = −1` or > `heatCap` × 100 ⇒ the out-of-range Warning, effective cap = profile value, `source=profile`.
+  - `ClusterCapPct = −1` or `= 150` ⇒ the out-of-range Warning, effective cap = profile value, `source=profile`; heat unchanged.
+  - **Heat auto-raise (owner-approved 11:09 ET):** Starter (heat 1.5%), `ClusterCapPct = 8` ⇒ clusterCap 0.08, heatCap 0.08, config line `heatCap=0.08 source=raised-to-clusterCap` and one `heatCap raised from 0.015 to 0.08` Info line; `Validate()` passes. A new entry that the old 1.5% heat would refuse but that fits 8% is allowed; an add taking EQIDX to 80 001 ⇒ `"cluster cap"`.
+  - `ClusterCapPct = 1.0` (≤ heat 1.5%) ⇒ heatCap stays 0.015, `source=profile`, no raise line. JSON `heatCap` 0.10 with `ClusterCapPct = 8` ⇒ heat stays 0.10 (no raise).
+  - `ClusterCapPct = 12` with `TotalRiskCapPct = 10` ⇒ heat raised to 0.12, total cap stays 0.10, one `the total risk cap will bind first` Warning; an entry that fits 12% but breaks 10% total ⇒ `"total risk cap"`.
   - The `PORT config clusterCap=<x> source=<input|profile>` line is written once per run in every case.
 
 ### 9.2 Native MiniPC checks (Check 7 style, new "Check 7A", backtest only, data ≤ 2024)
@@ -447,7 +455,8 @@ Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-sp
 - ~~**Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): `ScaleWithInitial`.
 - ~~**Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): default 2 for Starter (and ScaledBook).
 - ~~**Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): yes; line, counting and dedupe in §6, test T-P40.
-- **Q12 `ClusterCapPct` above the heat cap (owner 10:52 ET follow-up):** should a `ClusterCapPct` above `heatCap` be **accepted** (and, if so, should heat be raised to match, or clamped/warned), or should `heatCap` get its own Input so heat is raised alongside? PROPOSED today: Warning + fall back to the profile cluster cap (§7). Note `TotalRiskCapPct` must also be ≥ the cluster cap.
+- ~~**Q12 `ClusterCapPct` above the heat cap (owner 10:52 ET follow-up):** should a `ClusterCapPct` above `heatCap` be **accepted** (and, if so, should heat be raised to match, or clamped/warned), or should `heatCap` get its own Input so heat is raised alongside? PROPOSED today: Warning + fall back to the profile cluster cap (§7). Note `TotalRiskCapPct` must also be ≥ the cluster cap.~~ **Owner-approved 2026-11-11 11:09 ET** (Ettienne chose: *"Raise the overall open-risk cap automatically to match a higher cluster cap"*): the effective heat cap is raised to the cluster cap for the run (§7).
+- **Q13 Total cap with a large cluster cap:** should `TotalRiskCapPct` also auto-raise when `ClusterCapPct` exceeds it, or stay as set (today: unchanged, with a Warning that the total cap binds first)? Not decided.
 - **Q9 (native checks, not owner questions):**
   - the MC Position Limits option name and behaviour in PT (A1);
   - whether `From Entry` exits behave in PT as on charts (A4);
