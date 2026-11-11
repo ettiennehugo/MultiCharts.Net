@@ -1,5 +1,7 @@
 # AV-01 · Swing-high AVWAP reclaim (swing sleeve) — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope, big-winner rule; Prog rev 1.1). Batch 1, build order #5. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-01. Target file: `sandbox/_AV_01_SwingHighAvwapReclaim.Strategy.CS`, class `_AV_01_SwingHighAvwapReclaim`. Stage: sandbox. Acceptance policy: **`big-winner-trend`** (owner, 2026-11-10 19:44 ET: "yes, use the big-winner rule"), predeclared in the header before any result is read.
 
 ## 1. Purpose and edge (with sources)
@@ -75,6 +77,29 @@ See §5 rows; Prog §7.6.
 | `EntryStartHHMM` 945, `EntryEndHHMM` 1530, `SingleLotMode`, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy` (**default `BigWinnerTrend`** here), `MaxSingleTradeNetProfitPct` (logged only), `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 2 × 2 = 8 (Cat. AV-01). Primary: k = 3, 60m signal, SwingHigh.
+
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Reclaim timeframe | `SignalTf` | enum `ESignalTf` | `H60`, `M15` | `H60` | *Sweep axis.* Timeframe of the reclaim close and the HL trigger | Cat. AV-01 |
+| Target structure | `TargetMode` | enum `ETargetMode` | `SwingHigh`, `Trail` | `SwingHigh` | *Sweep axis.* SwingHigh = half at the anchor swing high, runner on the 60m trail; Trail = no fixed target | Cat. AV-01 |
+| Daily regime filter | `TrendFilter` | enum `ETrendFilter` | `Sma50`, `Tsmom` | `Sma50` (**PROPOSED** choice) | Above the 50-day SMA, or time-series momentum, as the long-only regime gate | Cat. AV-01 |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum ESignalTf { H60, M15 }                   // default H60
+public enum ETargetMode { SwingHigh, Trail }         // default SwingHigh
+public enum ETrendFilter { Sma50, Tsmom }            // default Sma50
+```
+
+**Future variants (not built in batch 1, no input yet):** none recorded. Shannon is not available in the owner's Kindle library, so no book variant was added. `AnchorK` stays a swept parameter.
 
 ## 9. Logging
 Prefix `AV-01`. `AV-01 ANCHOR tag() high() usable()`; `AV-01 RECLAIM t() barsBelow() avwap() delta60() filter(sma50|tsmom value)`; `AV-01 HOLD day(n)` once per session while open (MFE/MAE so far); exit reasons add `MAXHOLD`, `ROLL`, `INVALIDATION`. Skip reasons: `filter-off`, `no-anchor`, `reclaim-cancel`, `roll-lead`, `event-blackout`, `risk-budget`, `margin`. `logSignal("AV01", …)` on every reclaim + HL, with ctx carrying the fake-anchor and SMA control values.

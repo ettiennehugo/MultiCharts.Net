@@ -1,5 +1,7 @@
 # VW-01 · Trend-day first VWAP pullback — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle check of Keller B1 Ch 4.3 (VWAP Setup 1, Loc ~1307–1358) and Dale VP Setup #2 applied (Kindle locations / pages; quotes read from page images, may differ slightly). Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #3. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § VW-01; definitions §2.2 (trend day, HL entry). Target file: `sandbox/_VW_01_TrendDayVwapPullback.Strategy.CS`, class `_VW_01_TrendDayVwapPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
@@ -23,7 +25,7 @@
 ## 2. Instruments and timeframes
 @ES, then @NQ; CL/GC later (Cat. VW-01). Data1 = @ES 5-minute, dxFeed continuous unadjusted, 24h Globex template. Classification and HL on 5m. Warm-up: 20 sessions (ATR5 and engines); trading days start after the first full RTH session.
 
-**RTH VWAP (important).** The F-VWAP `Session` slot resets at the chart session start (18:00 ET on a Globex chart, manual §5.10), but the catalogue's trend-day definition is RTH-anchored ("since 09:45"). **PROPOSED – owner to confirm** (Keller says VWAP is cumulative from the session open but does not say RTH or full session; checked: not specified in Keller B1 Ch 4.3): the strategy keeps a local RTH VWAP accumulator. It resets on the first RTH bar (09:30 ET bar), accumulates typical price (H + L + C) / 3 × volume per closed 5m bar, and computes σ as the volume-weighted standard deviation of typical price (the same definition as M-AVWAP σ, Cat. §2.2). Alternative: run Data1 on a day-session (RTH) template and use the `Session` slot; Coder documents which one is used in the CFG line. The same accumulator also produces the two control series (§10).
+**RTH VWAP (important).** The F-VWAP `Session` slot resets at the chart session start (18:00 ET on a Globex chart, manual §5.10), but the catalogue's trend-day definition is RTH-anchored ("since 09:45"). **PROPOSED – owner to confirm** (Keller says VWAP is cumulative from the session open but does not say RTH or full session; checked: not specified in Keller B1 Ch 4.3): the strategy keeps a local RTH VWAP accumulator. It resets on the first RTH bar (09:30 ET bar), accumulates typical price (H + L + C) / 3 × volume per closed 5m bar, and computes σ as the volume-weighted standard deviation of typical price (the same definition as M-AVWAP σ, Cat. §2.2). Alternative: run Data1 on a day-session (RTH) template and use the `Session` slot; Selected by `VwapAnchor` (§8.1) and written in the CFG line. The same accumulator also produces the two control series (§10).
 
 ## 3. Engines
 | Need | Engine / member |
@@ -84,6 +86,7 @@ RTH 09:30–16:00 ET VWAP; Prog §7.6.
 | `LvnSkip` | bool | true | — | on/off | Fixed (Keller Ch 4.3) | Skip touches where VWAP sits in a developing LVN |
 | `AcceptAcrossExit` | bool | true | — | on/off | Fixed (Keller Ch 4.3) | Exit and declassify when price accepts across VWAP |
 | `AcceptAcrossCloses` | int | 2 | 5m closes | 1–4 | Fixed (**PROPOSED**) | Closes across VWAP with ≥ median volume |
+| `VwapAnchor` | enum `EVwapAnchor { RthLocal, ChartSession }` | RthLocal | — | enum | Fixed (**PROPOSED**) | RTH accumulator (§2) or the F-VWAP `Session` slot (with an RTH session template) |
 | `TargetMode` | enum `ETargetMode { SessionHigh, Trail }` | SessionHigh | — | enum | Tuned | Target arm |
 | `TouchBandSigma` | double | 0.25 | σ | fixed | Fixed | Touch zone above VWAP |
 | `StopSigma` | double | 1.0 | σ | fixed | Fixed | VWAP − kσ structural stop |
@@ -94,7 +97,32 @@ RTH 09:30–16:00 ET VWAP; Prog §7.6.
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | VWAP trail offset |
 | `SingleLotMode`, `EntryEndHHMM` 1530, `FlatHHMM` 1555, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
-Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01, touch axis now {FirstOrSecond, FirstOnly}; `SecondOnly` stays available but is not swept, owner to confirm). Primary: 10:30, FirstOrSecond, SessionHigh.
+Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01, touch axis now {FirstOrSecond, FirstOnly}, **Owner-approved 2026-11-10 20:31 ET** (Ettienne: *"These changes are fine"*); `SecondOnly` stays selectable but is not swept). Primary: 10:30, FirstOrSecond, SessionHigh.
+
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Touch selection | `TouchMode` | enum `ETouchMode` | `FirstOrSecond`, `FirstOnly`, `SecondOnly` | `FirstOrSecond` | *Sweep axis* {0, 1}, owner-approved 20:31 ET. Which VWAP touch episode may trade; one trade per day in all modes | Keller B1 Ch 4.3; Cat. VW-01 |
+| Target structure | `TargetMode` | enum `ETargetMode` | `SessionHigh`, `Trail` | `SessionHigh` | *Sweep axis.* Trail = no fixed target, EX-04 trail activates at +1 R | Cat. VW-01; Keller Ch 4.3 |
+| LVN touch skip | `LvnSkip` | bool | true / false | true | false = trade touches even when VWAP sits in a developing LVN | Keller B1 Ch 4.3 |
+| Day-changes-type exit | `AcceptAcrossExit` (closes `AcceptAcrossCloses`) | bool | true / false | true | false = no accept-across exit and classification never lapses (rev 1.1 sticky rule) | Keller B1 Ch 4.3 |
+| VWAP anchor | `VwapAnchor` | enum `EVwapAnchor` | `RthLocal`, `ChartSession` | `RthLocal` (**PROPOSED**) | Which VWAP/σ series the rules use | §2; Keller Ch 4.3 (not specified) |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum ETouchMode { FirstOrSecond, FirstOnly, SecondOnly } // default FirstOrSecond
+public enum ETargetMode { SessionHigh, Trail }       // default SessionHigh
+public enum EVwapAnchor { RthLocal, ChartSession }    // default RthLocal
+```
+
+**Future variants (not built in batch 1, no input yet):** Dale VP Setup #2 cluster pullback (limit at the heaviest cluster level, stop in the LVN beyond) is catalogue **PS-12 / DV-04** (Example 34), a separate strategy, not a VW-01 input. The volume-shuffled VWAP and distance-matched SMA are controls (`ControlArm`), not variants.
 
 ## 9. Logging
 Prefix `VW-01`. `VW-01 CLASSIFY <date> side() t() closesThrough() slope() pocMig() atr5()` once per day when it classifies (and `VW-01 NOCLASS <date>` at 15:30 for unclassified days, so trend-day frequency is measurable). Episode lines `VW-01 TOUCH n() t() vwap() sigma()`. Exit lines carry R, MFE and MAE (Prog §8). Extra fields: `stopPctDailyAtr` (Dale band; = R / M-DAILY `Atr20d`, `NeedsDaily = true`), `declassified` and `accept-across` lines. Skip reasons: `lvn-touch`, `declassified`, `no-trend-day`, `episode-failed`, `episode-timeout`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`. `logSignal("VW01", …)` on every armed HL, with ctx carrying the P2-VWAP and SMA control values at the same bar.
@@ -123,7 +151,7 @@ Trigger: after 10:30 ET on a day classified as a trend day (one-sided VWAP, VWAP
 ## 14. Open questions for Ettienne
 1. RTH VWAP via a local accumulator (proposed) or an RTH session template? (Keller: not specified.)
 2. Classification sweep {10:30, 11:00}: 11:00 is outside Keller's 30–60 minute window. Swap to {10:00, 10:30}?
-3. Touch episode limit of 6 bars; order valid until 15:30; touch band 0.25 σ; stop at 1 σ; accept-across rule (2 closes, ≥ median volume); dropping `SecondOnly` from the sweep.
+3. Touch episode limit of 6 bars; order valid until 15:30; touch band 0.25 σ; stop at 1 σ; accept-across rule (2 closes, ≥ median volume). (Touch sweep {FirstOrSecond, FirstOnly}: owner-approved 2026-11-10 20:31 ET.)
 4. "Session high, then trail" read as half at the session high, runner trailed on VWAP; Trail arm activates at +1 R.
 5. Prog §10 batch-wide items.
 

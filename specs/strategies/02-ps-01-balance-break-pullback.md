@@ -1,5 +1,7 @@
 # PS-01 · Accepted balance break → first-pullback higher low (ABB-HL) — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle checks of Keller B1 Ch 3.3 and Keller B4 §2.4/§8.4 applied (Kindle locations; quotes read from page images, may differ slightly). The stop now goes through the balance POC; the target is a scale-out at 1 W with a runner. Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #2. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Sibling: [01-ps-02-balance-break-close.md](01-ps-02-balance-break-close.md) (*PS-02 spec*). Catalogue: § PS-01. Target file: `sandbox/_PS_01_BalanceBreakPullback.Strategy.CS`, class `_PS_01_BalanceBreakPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
@@ -28,8 +30,8 @@ As PS-02 §3, minus the entropy veto (PS-01 has none) and M-DAILY. Plus PRICEACT
 | Item | Rule | Source |
 |---|---|---|
 | **Initial stop** | `StopMode = BalancePoc` (**primary**, per Keller B1 Ch 3.3: "tighter stop through the balance POC"): stop = comp.poc − `StopBufferTicks` (1, **PROPOSED**; checked: not specified in Keller B1). Variant `StopMode = HlPivot` (Cat. PS-01 / Example 26): HL pivot − 1 tick, kept as a registered comparison because it is the catalogue host's stop. **Minimum:** the cost floor from the planned entry (ES 14 ticks, NQ 19, CL 15, 6E 18; widened by M7). **Maximum:** none; a widened risk > 1% equity skips the trade. The POC stop is usually wider than the HL stop, so more trades may hit the risk-budget skip; that count is reported. | Keller B1 Ch 3.3; Cat. PS-01; Example 26; Cat. §2.1 |
-| **Targets** | `TargetMode = BalanceWidth` (primary): **T1 = comp.vah + 1.0 × W** for ⌊q/2⌋ contracts (`PS01LT1`; Keller 3.3 measured objective). The **runner** gets a limit at the **nearest destination** beyond T1: the nearer of the next composite HVN low edge (Keller 3.3 "next composite HVN") and the nearest naked POC (Keller B4 Rule 2), minus 2 ticks (offset **PROPOSED**), order `PS01LT`. If neither exists, the runner has no limit. After T1 the runner is also trailed (EX-05, Prog §7.3) until the destination, the stop or the flatten. q = 1: `SingleLotMode = ExitAtT1` (owner-accepted). Sweep variants kept: `NextHvn` (whole position at the next composite HVN − 2 ticks, EX-01) and `TrailEx05` (no fixed target). | Keller B1 Ch 3.3; Keller B4 §2.4, §8.4 Rule 4 and steps 7–8; Cat. PS-01 sweep |
-| **Scale-out** | At T1, ⌊q/2⌋ off (test size 2 → 1 + 1); the runner as above. This replaces rev 1.1's single full exit at 1 W, which Keller B4 §2.4 says "truncates the part of the distribution that pays for the failures". **Registration note:** the catalogue's PS-01 primary is a full exit at 1 W, so this changes the registered host (owner to confirm). | Keller B4 §2.4; Prog §7.2 |
+| **Targets** | `TargetMode = BalanceWidth` (primary): **T1 = comp.vah + 1.0 × W** for ⌊q/2⌋ contracts (`PS01LT1`; Keller 3.3 measured objective). The **runner** gets a limit at the **nearest destination** beyond T1 (`RunnerTarget = NearestDestination`; `TrailOnly` drops the limit): the nearer of the next composite HVN low edge (Keller 3.3 "next composite HVN") and the nearest naked POC (Keller B4 Rule 2), minus 2 ticks (offset **PROPOSED**), order `PS01LT`. If neither exists, the runner has no limit. After T1 the runner is also trailed (EX-05, Prog §7.3) until the destination, the stop or the flatten. q = 1: `SingleLotMode = ExitAtT1` (owner-accepted). Sweep variants kept: `NextHvn` (whole position at the next composite HVN − 2 ticks, EX-01) and `TrailEx05` (no fixed target). | Keller B1 Ch 3.3; Keller B4 §2.4, §8.4 Rule 4 and steps 7–8; Cat. PS-01 sweep |
+| **Scale-out** | At T1, ⌊q/2⌋ off (test size 2 → 1 + 1); the runner as above. This replaces rev 1.1's single full exit at 1 W, which Keller B4 §2.4 says "truncates the part of the distribution that pays for the failures". **Registration change, **Owner-approved 2026-11-10 20:31 ET** (Ettienne: *"These changes are fine"*):** the catalogue's PS-01 primary was a full exit at 1 W; the POC stop and the scale-out with a runner are now the primary. | Keller B4 §2.4; Prog §7.2 |
 | **Break-even** | When a closed bar's high ≥ entry + 1 R (R = \|entry − widened stop\|), stop → entry + 0 ticks from the next bar. Offset 0 is the catalogue's "break-even"; **PROPOSED – owner to confirm** offset 0 (checked: not specified in Keller B1 Ch 3.3). | Cat. PS-01; Example 26 |
 | **Trailing** | Runner only, after T1: EX-05, candidate = latest confirmed 5m HL after entry − 1 tick, one-way (Prog §7.3); Keller 3.3 trend day: "trail, don't fade your own position". `TrailEx05` variant: the same trail on the whole position from the fill. | Keller B1 Ch 3.3; Cat. PS-01 sweep; EX-05 |
 | **Time stop / max hold** | Intraday. FlatBy 15:55 ET; early close: close − 5 min. No overnight or weekend holds. | Cat. §2.1 |
@@ -58,6 +60,7 @@ As PS-02 §7 and Prog §7.6.
 | `TargetW` | double | 1.0 | × W | fixed | Fixed (Keller B4 §8.4) | T1 distance |
 | `StopMode` | enum `EStopMode { BalancePoc, HlPivot }` | BalancePoc | — | enum | Fixed per registration | Keller retest stop vs catalogue HL stop |
 | `StopBufferTicks` | int | 1 | ticks | 0–4 | Fixed (**PROPOSED**) | Distance through the POC |
+| `RunnerTarget` | enum `ERunnerTarget { TrailOnly, NearestDestination }` | NearestDestination | — | enum | Fixed per registration | Runner limit at the nearest destination, or trail only (BalanceWidth mode) |
 | `DestOffsetTicks` | int | 2 | ticks | 0–8 | Fixed (**PROPOSED**) | Runner limit before the destination |
 | `FailCloses` | int | 1 | 5m closes | 1–3 | Fixed (Cat. PS-01) | Failed-break exit |
 | `AcceptFlowCheck` / `VolBeyondPct` | bool / double | false / 25 | — / % | as PS-02 | Fixed (ablation) | Shared with PS-02 |
@@ -66,6 +69,30 @@ As PS-02 §7 and Prog §7.6.
 | `BalanceOverlapPct`, `DeltaMinTicks`, `EntryStartHHMM` 945, `EntryEndHHMM` 1430, `FlatHHMM` 1555, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct` 0.5, `MaxRiskPct` 1.0, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct` 10, `OutlierRemovalPct` 1 | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 3 × 3 = 18 configs (Cat. PS-01). Primary frozen: n = 3, acceptance 2, BalanceWidth (now scale + runner), `StopMode` BalancePoc. The `HlPivot` stop runs as one extra pre-registered comparison on the primary cell only (it is not multiplied into the sweep).
+
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Stop placement | `StopMode` | enum `EStopMode` | `BalancePoc`, `HlPivot` | `BalancePoc` (owner-approved 20:31 ET) | HlPivot = HL pivot − 1 tick (catalogue / Example 26) instead of comp.poc − `StopBufferTicks` | Keller B1 Ch 3.3; Cat. PS-01 |
+| Target structure | `TargetMode` | enum `ETargetMode` | `BalanceWidth`, `NextHvn`, `TrailEx05` | `BalanceWidth` (half at 1 W + runner, owner-approved) | *Sweep axis.* NextHvn = whole position at the next composite HVN − 2 ticks; TrailEx05 = no fixed target, EX-05 trail from the fill | Cat. PS-01 sweep; EX-01; EX-05 |
+| Runner limit | `RunnerTarget` | enum `ERunnerTarget` | `TrailOnly`, `NearestDestination` | `NearestDestination` | Same input name as PS-02, but a different default: in BalanceWidth mode the runner keeps or drops the destination limit; the trail always applies | Keller B1 Ch 3.3; Keller B4 §8.4 |
+| Acceptance flow check | `AcceptFlowCheck` (threshold `VolBeyondPct`) | bool | true / false | false | As PS-02 §8.1 (shared cohort) | Keller B1 Ch 3.3 |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EStopMode { BalancePoc, HlPivot }          // default BalancePoc
+public enum ETargetMode { BalanceWidth, NextHvn, TrailEx05 } // default BalanceWidth
+public enum ERunnerTarget { TrailOnly, NearestDestination } // same declaration as PS-02; default NearestDestination here
+```
+
+**Future variants (not built in batch 1, no input yet):** (1) **opposite-edge reversal** after a failed break (Keller 3.3), proposed `FailedBreakReverse` (bool, default false); (2) Keller's resting **limit at the held edge** instead of the HL buy-stop, proposed `EntryMode` of type `public enum EEntryMode { HlBuyStop, EdgeLimit }` (default HlBuyStop); (3) Trader Oxygen YV-01 rules, not yet checked.
 
 ## 9. Logging
 Prog §8, prefix `PS-01`. Setup fields: `W, vah, val, V, delta, acceptTime`; trigger fields `hlPrice, hlConfirmTime, trigger`. Exit lines carry R, MFE and MAE (Prog §8; Keller B4 §8.4 step 9). Skip reasons: as PS-02 plus `pullback-too-deep`, `trigger-expired`, `no-hl`. `logSignal("PS01", …)` for every accepted break (taken or not) **and** a second tag `PS01-HL` for every armed trigger, so the event study can compare PS-01 vs PS-02 on identical events.
@@ -95,7 +122,7 @@ Trigger: after a 2-close acceptance above the balanced composite (V ≥ +1), the
 ## 14. Open questions for Ettienne
 1. Buy-stop life: valid until 14:30 ET with newer-HL replacement (Example 26), or a fixed 2-bar expiry (final-synthesis)?
 2. Break-even offset 0 ticks (Keller: not stated).
-3. Keller-based changes to the registered PS-01 host: POC stop primary (HL stop kept as a comparison), and scale-out at 1 W with a runner instead of a single full exit. POC stop buffer 1 tick; destination offset 2 ticks.
+3. ~~POC stop primary and scale-out with runner~~: owner-approved 2026-11-10 20:31 ET. Still open: POC stop buffer 1 tick; destination offset 2 ticks.
 4. Prog §10 batch-wide items.
 
 ## 15. Sources

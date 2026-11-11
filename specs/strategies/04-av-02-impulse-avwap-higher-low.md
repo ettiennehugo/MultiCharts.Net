@@ -1,5 +1,7 @@
 # AV-02 · Impulse-origin AVWAP higher-low continuation — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope; Prog rev 1.1). Batch 1, build order #4. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-02 (merged DV-12 touch arm). Target file: `sandbox/_AV_02_ImpulseAvwapHigherLow.Strategy.CS`, class `_AV_02_ImpulseAvwapHigherLow`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
@@ -65,6 +67,25 @@ Prog §7.6.
 | `EntryStartHHMM` 945, `EntryEndHHMM` 1500, `FlatHHMM` 1545, `SingleLotMode`, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Batch-1 sweep = `TouchLowerSigma` {0.25, 0.5} × `TargetMode` {ImpulseHigh, Trail} = 4. The catalogue's third axis (anchor TF {15m, 60m}) becomes the separately registered 60m swing arm (Page), so the catalogue total of 8 is preserved across the two arms. The reading of the catalogue's "±0.25σ / ±0.5σ" sweep as the zone's lower edge is **PROPOSED – owner to confirm**.
+
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Target structure | `TargetMode` | enum `ETargetMode` | `ImpulseHigh`, `Trail` | `ImpulseHigh` | *Sweep axis.* ImpulseHigh = half at the impulse high, runner on the AVWAP trail; Trail = no fixed target, trail activates at +1 R | Cat. AV-02 |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum ETargetMode { ImpulseHigh, Trail }       // default ImpulseHigh
+```
+
+**Future variants (not built in batch 1, no input yet):** (1) the **60m/daily swing arm** (Page build item 4; §10), a separate registration, proposed `Arm` of type `public enum EArm { Intraday15m, Swing60m }` (default Intraday15m); (2) the **DV-12 blind-limit touch arm** (Dale), later. The numeric touch-edge sweep (`TouchLowerSigma`) stays a parameter.
 
 ## 9. Logging
 Prefix `AV-02`. `AV-02 ANCHOR tag(<_Avwap.Tag>) low() extremeTime() usable() atr()`; `AV-02 PULLBACK t() low() avwap() sigma()`; `AV-02 FAIL reason(close<avwap-1s|below-anchor)`. Skip reasons: `no-anchor`, `pullback-failed`, `no-hl`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`, `daily-limit`. `logSignal("AV02", …)` on every trigger, ctx with the P2 AVWAP, the SMA(bars since anchor) and the 50% retracement price of anchor→H.

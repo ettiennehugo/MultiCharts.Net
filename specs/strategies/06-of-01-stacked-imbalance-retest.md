@@ -1,5 +1,7 @@
 # OF-01 · Stacked-imbalance origin: first retest continuation — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.3 (draft), 10 Nov 2026 (EST).** Rev 1.3 replaces the unsourced variant B (HigherLow) with **variant K (Keller 6.3)**, from Keller B1 Ch 6.3 (Kindle Loc ~1896; quotes read from page images, may differ slightly). It adds the zone-age and escaped-balance options and logs R/MFE/MAE. Rev 1.2 refines the rules from Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*, as read by Ettienne in the Kindle reader. Page numbers are the reader's labels, ±2. The holdout is owner-approved (18 months, OF-01 only). Where the book differs from rev 1.1, the book is followed by default ("per Dale p.X"), and the rev 1.1 rule survives only as a named variant where useful. Rev 1.1: 2 contracts, news exit, costs. Batch 1, build order #6. **Data-gated** on bid/ask tick availability only (§10).
 
 Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § OF-01. Reference code: manual Example 38 (`_Ex38StackedImbalanceRetest`; limit arm, 1 R target, placeholders). Owner shell: `_StackedImblContLELX.Strategy.CS` (header text only, empty methods). Target file: `sandbox/_OF_01_StackedImbalanceRetest.Strategy.CS`, class `_OF_01_StackedImbalanceRetest`. Stage: sandbox. Acceptance policy: `catalogue-default`.
@@ -66,14 +68,14 @@ Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*).
 2. **Zone life (per Dale "until tested"):** a zone lives until its first test, a roll, or `ZoneMaxSessions` sessions (**5, PROPOSED**, to bound memory; Dale states no expiry). It does not expire at the session end. **Freshness option (Keller 6.3):** `ZoneMaxAgeMinutes` (clock minutes from the zone bar's close to the test bar). The default is 0 = off for the Dale primary; variant K registers **180** (Keller: "a stack from 3 hours ago is stale"; the exact cut is **PROPOSED**, checked: not specified in Keller B1 Ch 6.3). Prior-session zones are always older than 180 minutes, so this replaces rev 1.2's `Keller-SameSession` variant. Only RTH zone bars create zones (**PROPOSED**).
 3. **Move away (per Dale p.76):** the zone is armed once `MinAwayBars` (default 1, range 1–2) complete zone-TF bars after the zone bar have their **low above zone hi**: whole footprints above it. This replaces rev 1.1's "≥ 1 × ATR5".
 4. **Context filter (optional, PROPOSED definition; Dale: "within a trend or before a trend begins… a strong one-way move suffices"):** `ContextMode { Off, OneWayMove }`, default **Off**. With `OneWayMove`, the zone counts only if the zone-TF close rose ≥ `ContextAtr` (1.5, PROPOSED) × ATR14(zone TF) over the `ContextBars` (4, PROPOSED) zone-TF bars ending at the zone bar. Results are stratified by trend vs balance day either way (Keller 6.3).
-   - **Escaped-balance filter option (Keller 6.3):** `EscapeFilter { Off, BalanceEdgeOrLvn }`. With `BalanceEdgeOrLvn`, a buying zone qualifies only if zone lo ≥ VAH of `Composite(1, 3)` (escaped above value), or the zone overlaps an LVN node of `Composite(1, 3).lvns` or the developing RTH profile `DevelopingExtra(1).lvns`. Otherwise it is "mid-value" and is logged and spent (`mid-value`). Shorts mirror at VAL. The default is Off for the Dale primary (Dale does not require it); variant K registers it on. The composite length of 3 and the overlap test are **PROPOSED** (checked: not specified in Keller B1 Ch 6.3).
+   - **Escaped-balance filter option (Keller 6.3):** `EscapeFilter` (bool). When true, a buying zone qualifies only if zone lo ≥ VAH of `Composite(1, 3)` (escaped above value), or the zone overlaps an LVN node of `Composite(1, 3).lvns` or the developing RTH profile `DevelopingExtra(1).lvns`. Otherwise it is "mid-value" and is logged and spent (`mid-value`). Shorts mirror at VAL. The default is Off for the Dale primary (Dale does not require it); variant K registers it true. The composite length of 3 and the overlap test are **PROPOSED** (checked: not specified in Keller B1 Ch 6.3).
 5. **First test only (per Dale p.76):** the first Data1 bar after arming whose low ≤ zone hi is the test. Only that test may trade. "Don't attempt to trade one trading level more than once." After it, the zone is spent whether or not an order filled. A test during ETH or another no-entry time also spends the zone (**PROPOSED**).
 6. **Entry, primary (per Dale p.76):** a buy **limit `OF01LE` at zone hi** (the near edge), working from the arming bar's close while the zone is armed and the window is open. There is no higher-low or aggression trigger. Fills on trade-through only (Prog §4). Before sending, the stop band (§5) and the R:R skip (§5) are checked against the planned entry = zone hi; a failing zone is logged and spent.
 7. **Variant K (`EntryMode = KellerRenewed`, Keller B1 Ch 6.3).** This replaces rev 1.2's unsourced variant B (HigherLow), which is withdrawn. It is a separately registered variant, never the primary.
    - **Qualified stack:** ≥ 3 imbalances as in step 1, plus Keller's "real volume" and "real travel" (numbers **PROPOSED**, checked: not specified in Keller B1 Ch 6.3):
      - real volume: `VolFloorPct` = 70 (each stacked level's volume ≥ the 70th percentile of row volumes in the zone bar; the existing catalogue filter);
      - real travel: the drive from zone hi to its extreme before the test is ≥ 1 × ATR5 (rev 1.1's move-away rule).
-   - **Registered filters:** `ZoneMaxAgeMinutes` 180, `EscapeFilter = BalanceEdgeOrLvn` (steps 2 and 4).
+   - **Registered filters:** `ZoneMaxAgeMinutes` 180, `EscapeFilter = true` (steps 2 and 4).
    - **Pullback quality:** if a qualified **selling** stack (≥ 3) prints on any Data1 bar between arming and the trigger, the zone is spent (`opposing-stack`, Keller: "stand down"). A fading opposing delta on the pullback (sum of `BarDelta` on the pullback bars shrinking toward 0) is logged as a stratifier, not required.
    - **Trigger (renewed same-side aggression):** after the first test (first retest only), and within `KAggressionBars` (3, **PROPOSED**) Data1 5m bars of it, the first closed bar that holds ≥ zone lo and either prints a fresh buying diagonal imbalance (`DiagonalImbalances`, buy side) or has `BarDelta` > 0 after a negative-delta pullback bar (delta reasserting). Entry `OF01LE` is market next bar (order type **PROPOSED**, checked: not specified in Keller B1 Ch 6.3). With no trigger, the zone is spent.
    - **Stop:** zone lo − `StopBufferTicks` (beyond the origin's far side; Keller and Dale agree). The Dale stop band (§5) still applies.
@@ -122,7 +124,7 @@ Header §17 describes each input with Purpose, Default, Units, Range, Effect, In
 |---|---|---|---|---|---|---|
 | `ImbalanceRatio` | double | 3.0 | Ask/Bid diagonal (3.0 = 300%) | ≥ 3.0 (engine floor) | Fixed (per Dale p.74–76) | Imbalance threshold |
 | `MinStack` | int | 3 | consecutive imbalances | 3–5 | Fixed (per Dale p.74–76) | Stack length |
-| `ZoneTfMinutes` | int | 30 | minutes | {5, 30} | Fixed (per Dale; 5 = fallback b) | Footprint TF for zones |
+| `ZoneTfMinutes` | int | 30 | minutes | {5, 30} (else Error) | Fixed (per Dale; 5 = fallback b) | Footprint TF for zones |
 | `MinAwayBars` | int | 1 | zone-TF bars | 1–2 | Tuned (per Dale p.76) | Whole footprints away before the test |
 | `ZoneMaxSessions` | int | 5 | sessions | 1–10 | Fixed (**PROPOSED**) | Zone life bound (Dale: until tested) |
 | `ContextMode` | enum `EContextMode { Off, OneWayMove }` | Off | — | enum | Fixed (**PROPOSED** definition) | Optional trend context (Dale) |
@@ -130,7 +132,7 @@ Header §17 describes each input with Purpose, Default, Units, Range, Effect, In
 | `EntryMode` | enum `EEntryMode { ZoneLimit, KellerRenewed }` | ZoneLimit | — | enum | Fixed per registration | Primary per Dale; KellerRenewed = variant K (Keller B1 Ch 6.3) |
 | `KAggressionBars` | int | 3 | 5m bars | 1–6 | Fixed (**PROPOSED**) | Variant K: bars after the test to see renewed aggression |
 | `ZoneMaxAgeMinutes` | int | 0 | minutes (0 = off) | 0 or 60–360 | Fixed (variant K registers 180, Keller 6.3; cut **PROPOSED**) | Freshness: zones older than this at the test are spent |
-| `EscapeFilter` | enum `EEscapeFilter { Off, BalanceEdgeOrLvn }` | Off | — | enum | Fixed (variant K registers BalanceEdgeOrLvn, Keller 6.3) | Zone must have escaped value or sit in an LVN |
+| `EscapeFilter` | bool | false | — | on/off | Fixed (variant K registers true, Keller 6.3) | Zone must have escaped value or sit in an LVN |
 | `StopBasis` | enum `EStopBasis { ZoneEdge, BehindHvn }` | ZoneEdge | — | enum | Fixed | Stop beyond the zone or behind heavy volume (Dale p.136) |
 | `StopBufferTicks` | int | 1 | ticks | 0–4 | Fixed (**PROPOSED**) | Beyond the far edge |
 | `DailyAtrLength` | int | 14 | daily bars | 10–20 | Fixed (**PROPOSED**) | `DailyConfig.atrLength` for the band |
@@ -153,8 +155,42 @@ Header §17 describes each input with Purpose, Default, Units, Range, Effect, In
 - Rev 1.1 registered ratio {3:1, 4:1} × entry {limit, HL}. Dale fixes ratio = 300% and the direct limit entry.
 - The proposed sweep is `MinAwayBars` {1, 2} × `StopOutOfBandMode` {Skip, ClampFixed} = **4**, both from Dale's own stated ranges.
 - Primary cell (1, Skip) is frozen before any read.
-- Variant K (Keller 6.3) and the FixedR target are separate registrations, outside the 4. Variant K is one registered cell: `ZoneMaxAgeMinutes` 180, `EscapeFilter` on, `VolFloorPct` 70, `KAggressionBars` 3.
+- Variant K (Keller 6.3) and the FixedR target are separate registrations, outside the 4. Variant K is one registered cell: `ZoneMaxAgeMinutes` 180, `EscapeFilter` true, `VolFloorPct` 70, `KAggressionBars` 3.
 - Replacing the catalogue's registered sweep needs the owner's OK.
+
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Entry rule set | `EntryMode` | enum `EEntryMode` | `ZoneLimit`, `KellerRenewed` | `ZoneLimit` (Dale) | KellerRenewed = **variant K** (§4 step 7): real-volume/travel qualification, opposing-stack stand-down, renewed-aggression trigger (`KAggressionBars`), market entry, trend-day sizing, drive-extreme T1, nPOC/HVN runner, chained-origin trail. These Keller rules form one rule set, so they share one selector. The registered variant K cell also sets `ZoneMaxAgeMinutes` 180, `EscapeFilter` true, `VolFloorPct` 70 | Keller B1 Ch 6.3; Dale p.76 |
+| Freshness | `ZoneMaxAgeMinutes` | int | 0 = off, 60–360 | 0 | Zones older than N minutes at the test are spent (replaces rev 1.2's `Keller-SameSession`) | Keller B1 Ch 6.3 |
+| Escaped-balance filter | `EscapeFilter` | bool | true / false | false | Zone must sit beyond the 3-session composite VA edge or in an LVN | Keller B1 Ch 6.3 |
+| Target rule | `TargetMode` | enum `ETargetMode` | `DaleHvn`, `FixedR` | `DaleHvn` | FixedR = `TargetR` R target (catalogue / Example 38) instead of just before the next HVN | Dale pp.124–128; Cat. OF-01 |
+| Stop basis | `StopBasis` | enum `EStopBasis` | `ZoneEdge`, `BehindHvn` | `ZoneEdge` | Stop behind the heavy-volume node instead of beyond the zone | Dale p.136 |
+| Out-of-band stop | `StopOutOfBandMode` | enum `EStopBandMode` | `Skip`, `ClampFixed` | `Skip` | *Sweep axis.* Skip the trade, or clamp the stop to the nearest 10/20% band edge | Dale p.136 |
+| Trend context | `ContextMode` | enum `EContextMode` | `Off`, `OneWayMove` | `Off` | Zone counts only after a one-way move (`ContextAtr`, `ContextBars`) | Dale pp.74–76 |
+| Warning exit / freeze | `WarnExit`, `WarnFreeze` | bool | true / false each | true / true | false removes the sell-stack exit, or the trail freeze on absorption/divergence | Dale pp.129–131 |
+| Zone footprint TF | `ZoneTfMinutes` | int | 30, 5 | 30 | 5 = fallback (b): zones from native 5m footprints. Fallback (a), a 30m Data1 chart, is a chart layout, not an input | Dale pp.74–76; §2 |
+| Close-location filter | `CloseTopFrac` | double | 0 = off, 0.30 | 0 | Zone bar must close in its upper 30% (not from Dale) | Cat. OF-01 |
+| Volume floor | `VolFloorPct` | double | 0 = off, 70 | 0 | Each stacked level ≥ the 70th percentile of row volume (not from Dale; on in variant K) | Cat. OF-01; Keller 6.3 |
+| Time stop | `TimeStopBars` | int | 0 = off, 1–24 | 0 | Exit after N 5m bars (no book source) | — |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EEntryMode { ZoneLimit, KellerRenewed }   // default ZoneLimit (Dale)
+public enum ETargetMode { DaleHvn, FixedR }          // default DaleHvn
+public enum EStopBasis { ZoneEdge, BehindHvn }       // default ZoneEdge
+public enum EStopBandMode { Skip, ClampFixed }       // default Skip
+public enum EContextMode { Off, OneWayMove }         // default Off
+```
+
+**Future variants (not built in batch 1, no input yet):** (1) the unfinished-business target stretch (Dale p.83; no engine helper on main); (2) the owner shell `_StackedImblContLELX` rules (stop entry after a holding close, mid-zone limit on the 2nd/3rd test; §14 item 6); (3) Keller's poor-extreme target (no engine helper).
 
 ## 9. Logging
 Prefix `OF-01`.

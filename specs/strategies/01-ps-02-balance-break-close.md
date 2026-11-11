@@ -1,5 +1,7 @@
 # PS-02 · Balance break at acceptance close — implementation spec
 
+**Rev 1.4 (draft), 10 Nov 2026 (EST)** — §8.1 Variants added: every true variation is selectable via Inputs, default = primary (owner, 20:31 ET). Multi-value inputs are typed C# enums, not ints or strings (owner, 20:34 ET; Prog §3 rules 8–9).
+
 **Rev 1.3 (draft), 10 Nov 2026 (EST)** — Kindle checks of Keller B1 Ch 3.3 and Keller B4 §2.4/§8.4 applied (Kindle locations; quotes read from page images, may differ slightly). Rev 1.1: costs, 2 contracts, news exit, holdout. Batch 1, build order #1. Shared rules: [00-programme-overview.md](00-programme-overview.md) (cited as *Prog §x*). Catalogue: `specs/trading-idea-catalogue.md` § PS-02 and merged A2-41. Target file: `sandbox/_PS_02_BalanceBreakClose.Strategy.CS`, class `_PS_02_BalanceBreakClose`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
@@ -70,7 +72,7 @@ Evaluated on closed 5m bars only.
 | **Break-even** | **None in Primary** (the catalogue does not specify it; do not add). BookSpec: after T1, runner stop → entry + 0 ticks (A2-41). | Cat. PS-02; A2-41 |
 | **Trailing (runner)** | EX-05: activates when T1 has filled. On each closed 5m bar, if PRICEACTION confirmed a new layer-0 pivot low labelled `EPivotLabel.HL` whose extreme is after the entry bar, candidate = pivot price − 1 tick; stop = max(stop, candidate) (Prog §7.3). It trails only at confirmed HLs (no fixed distance). BookSpec instead: highest 30m close since entry − 0.5 W, plus a hard exit on a 30m close back inside the composite VA. | Cat. EX-05; A2-41 |
 | **Time stop / max hold** | Intraday only. FlatBy 15:55 ET (`mustFlatten()` → `PS02LX`). Early-close day: flatten at RTH close − 5 min. No overnight, no weekend. | Cat. §2.1; Prog §7.6 |
-| **Invalidation: failed-break exit** | `FailedBreakExit` (default **on**, per Keller 3.3: a break accepted back inside value means "the setup inverts"). `FailCloses` (2, **PROPOSED**, mirroring `AcceptCloses`; checked: not specified in Keller B1) consecutive closed 5m bars with close < comp.vah − δ → `PS02LX` market next bar, reason `INVALIDATION`. Applies before and after T1. **Registration note:** the catalogue lists the EX-10 acceptance-failure exit as a separate later module, so turning it on in the primary changes the registered host (owner to confirm). The opposite-edge reversal ("frequently rotates to the opposite edge") is a **future variant**, not batch 1. | Keller B1 Ch 3.3; Cat. EX-10 |
+| **Invalidation: failed-break exit** | `FailedBreakExit` (default **on**, per Keller 3.3: a break accepted back inside value means "the setup inverts"). `FailCloses` (2, **PROPOSED**, mirroring `AcceptCloses`; checked: not specified in Keller B1) consecutive closed 5m bars with close < comp.vah − δ → `PS02LX` market next bar, reason `INVALIDATION`. Applies before and after T1. **Registration change, **Owner-approved 2026-11-10 20:31 ET** (Ettienne: *"These changes are fine"*):** the catalogue listed the EX-10 acceptance-failure exit as a separate later module; it is now on in the primary. `FailedBreakExit = false` reproduces the catalogue's original host. The opposite-edge reversal ("frequently rotates to the opposite edge") is a **future variant**, not batch 1. | Keller B1 Ch 3.3; Cat. EX-10 |
 | **Adds / pyramiding** | Not allowed. | Prog §7.7 |
 | **Re-entry after a stop** | Not allowed: one attempt per instrument per day. | Example 27; Cat. §2.1 one live position |
 | **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `PS02LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
@@ -121,6 +123,30 @@ All `[Input]` properties. "Tuned" means research-tuned within the registered cat
 
 Tuned numeric parameters = `AcceptCloses`, `StopWidthW`, plus the on/off `EntropyFilter` = the catalogue's 8-config sweep.
 
+### 8.1 Variants (true variations, all selectable via Inputs; default = primary)
+
+A variant is an alternative rule, not a different value of a swept number (Prog §3 rules 8–9). Every variant below is a native `[Input]`. A true on/off switch is a `bool`. Every multi-value choice is a **typed C# enum** declared below, with named members only: no integer codes, no strings. The default is always the primary rule, and it is set in the constructor, never by member order. Enum `[Input]`s are already used by compiled repo studies (`_CustomSignal.TraceLevel` and others, Prog §3 rule 9). Whether the chart and Portfolio Trader optimizers can sweep an enum input is **not yet verified**; Coder checks it on the MiniPC (Prog §9). Inputs marked *sweep axis* are also part of the registered sweep. Controls (`ControlArm`) and the offline evaluator setting (`AcceptancePolicy`) are not trading variants and are not listed.
+
+| Variant | Input | Type | Values | Default (primary) | What it changes | Source |
+|---|---|---|---|---|---|---|
+| Book geometry | `Variant` | enum `EVariant` | `Primary`, `BookSpec` | `Primary` | A2-41 book geometry (noise/too-wide skips, 0.30 W stop, its own 8-config sweep) | Cat. A2-41; Keller B4 §2.4 |
+| Failed-break exit | `FailedBreakExit` | bool | true / false | true (owner-approved 20:31 ET) | false = catalogue original host with no EX-10 exit; closes counted by `FailCloses` | Keller B1 Ch 3.3; Cat. EX-10 |
+| Acceptance flow check | `AcceptFlowCheck` (threshold `VolBeyondPct`) | bool | true / false | false | Adds developing-POC ≥ comp.poc and volume-beyond-edge ≥ `VolBeyondPct` to acceptance | Keller B1 Ch 3.3; final-synthesis Spec 1 |
+| Runner limit | `RunnerTarget` | enum `ERunnerTarget` | `TrailOnly`, `NearestDestination` | `TrailOnly` | Adds a runner limit at the nearer of the next composite HVN and the nearest naked POC, − 2 ticks; the trail stays | Keller B4 §8.4 steps 7–8; Cat. PS-02 |
+| Entropy veto | `EntropyFilter` | bool | true / false | true | *Sweep axis.* Skips composites with Hnorm > `MaxEntropy` | Cat. PS-02; Keller B4 §8.4 |
+| Single-contract handling | `SingleLotMode` | enum `ESingleLotMode` | `ExitAtT1`, `RunnerOnly` | `ExitAtT1` | When q = 1: exit at T1, or hold the single contract as a runner | Owner 2026-11-10; Prog §7.2 |
+
+**Enum declarations** (nested `public enum` types in the strategy class; the input property uses the enum type, e.g. `[Input] public EStopMode StopMode { get; set; }`):
+
+```csharp
+// Shared enums (Prog §3 rule 9), declared identically in every batch-1 file:
+// ESide, ESingleLotMode, EControlArm, EAcceptancePolicy
+public enum EVariant { Primary, BookSpec }            // default Primary
+public enum ERunnerTarget { TrailOnly, NearestDestination } // default TrailOnly here
+```
+
+**Future variants (not built in batch 1, no input yet):** (1) **opposite-edge reversal** after a failed break (Keller 3.3, "frequently rotates to the opposite edge"), proposed name `FailedBreakReverse` (bool, default false); (2) the BookSpec overnight 3-day runner (§14 item 1).
+
 ## 9. Logging and journal lines
 Prog §8, with ID prefix `PS-02`. Setup fields: `W`, `vah`, `val`, `V`, `Hnorm`, `delta`, `acceptCount`. Exit lines carry R, MFE and MAE (Prog §8; Keller B4 §8.4 step 9). Stratifier fields `lvnBeyond`, `hvnBeyond`, `devPocVsCompPoc`, `volBeyondPct` on every accepted break. Skip reasons: `accept-flow` (when the check is on), `no-composite`, `no-balance`, `entropy`, `v-against`, `outside-window`, `event-blackout`, `roll-window`, `roll-warmup`, `risk-budget`, `noise` (BookSpec), `too-wide` (BookSpec), `mm-denied` (PT; read from the MM status if available, else inferred as no fill). `logSignal("PS02", side, close, stop, ctx, taken)` on every accepted break, including skipped ones.
 
@@ -155,7 +181,7 @@ Header §4 walkthrough — Trigger: two 5m closes beyond the 3-session balanced 
 
 ## 14. Open questions for Ettienne
 1. BookSpec overnight 3-day runner: leave out of batch 1 (intraday-only arm)?
-2. Failed-break exit on by default (Keller 3.3), which changes the catalogue's registered primary (EX-10 was a later module); `FailCloses` = 2.
+2. ~~Failed-break exit on in the primary~~: owner-approved 2026-11-10 20:31 ET. Still open: `FailCloses` = 2.
 3. `AcceptCloses` 2 and δ (Keller: qualitative only); the acceptance flow check thresholds (dev POC ≥ comp POC; 25% volume beyond the edge) as an ablation; runner destination offset of 2 ticks.
 4. Prog §10 batch-wide items (holdout scope, `NewsExitMinutes` default, trim rounding, early close, odd lots, data history).
 
