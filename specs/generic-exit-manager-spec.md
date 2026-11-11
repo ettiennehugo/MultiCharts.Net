@@ -1,19 +1,27 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.6 PROPOSAL, 2026-11-11 (ET); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
-status: "PROPOSAL, docs only, no code. Owner-approved 2026-11-11 09:16 ET: option C, the baseline values, the wrapper in Portfolio Trader, and the over-budget rule. Not yet approved for implementation as a whole. Everything else not quoted from the owner is PROPOSED."
+rev: "0.7 PROPOSAL, 2026-11-11 (ET); rev 0.7 = owner answers 18:18–18:21 ET to Q4, Q5, Q6, Q8, Q9 and the final-target / trail-start unit question (§4.1, §4.2, §4.4, §4.9, §6, §8, §9); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
+status: "PROPOSAL, docs only, no code. Every owner question is answered (09:16, 09:33, 09:34, 09:52 and 18:18–18:21 ET). Still open: the E1–E8 MiniPC checks (§7) and the PROPOSED rule for timeframes not in the ControlExitBars list (§4.9). Not yet approved for implementation as a whole. Anything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.6 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.7 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
 - 2 → §4.2, §4.3, §6: baseline values approved; the first target and break-even are configurable, with a typed trigger unit.
 - 3 → §5.1: the wrapper works in Portfolio Trader now.
 - 4 → §4.1, §5.2: an over-budget trade stays open and logs a Warning.
+
+**Owner answers, 2026-11-11 18:18–18:21 ET (verbatim):** *"Q4 yes, but set ControlExitBars per timeframe"*; *"Q5: 1m 30, 5m 12, 15m 8, 60m 6, daily 5"*; *"Q6: AtrMultiple default, SignalBarExtreme selectable"*; *"Q8: mark the legacy exit studies superseded once GX exists"*; *"Q9: move batch-1 onto the engine once it passes, with a re-check per strategy"*; and on the final-target / trail-start unit: *"Yes, the final target and trail start both get ETriggerUnit"*.
+- Q4 → §4.9, §6: every entry-only idea also runs a `FixedBars` control arm with a per-timeframe bar count, and reports CS-8 forward MFE/MAE.
+- Q5 → §4.9: `ControlExitBars` defaults per bar timeframe, as five native int Inputs.
+- Q6 → §4.1, §6: wrapper default stop `AtrMultiple`; `SignalBarExtreme` selectable.
+- Q8 → §1.1, §8: the legacy exit studies are marked superseded once GX exists; nothing is deleted.
+- Q9 → §8: GX-5 is a planned milestone: batch 1 moves onto the engine after the E-checks pass, with a per-strategy equivalence re-check.
+- Units → §4.2, §4.4: the final target and the trail start get `ETriggerUnit` Inputs; defaults keep today's behaviour.
 
 ## 0. Request and scope
 
@@ -31,6 +39,8 @@ The exit layer must not become a hidden optimiser: its defaults are fixed before
 ## 1. Survey: what exists
 
 ### 1.1 Exit studies already in the repo (root, compiled)
+**Superseded once GX exists** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q8: mark the legacy exit studies superseded once GX exists"*): `_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit` and `_ExitHalfRiskHalfRoll` get a header note and a docs entry marking them superseded by GX when GX-3 is merged (§8). They stay compiled and unchanged otherwise; **nothing is deleted**.
+
 | File | What it does | Notes for GX |
 |---|---|---|
 | `_StopsAndTargets.Strategy.CS` (86 lines) | Exit-only `SignalObject`. Inputs: `OrderMode` (MC's `ESpecOrdersMode`: PerContract / PerPosition), `StopLossPct`, `BreakEvenPct`, `TrailingStopActivationPct`, `TrailingStopPct`, `TargetPct`. Uses MC built-in special orders (`GenerateStopLoss`, `GenerateBreakEven`, `GeneratePercentTrailing`, `GenerateProfitTarget`) | Percent of entry price only, no R, no journal. Source has a TODO for break-even and a price-extreme trail. It is evidence that an exit-only signal on the chart can manage another signal's position |
@@ -130,9 +140,9 @@ public enum EInitialStop { EntryProvided, AtrMultiple, FixedTicks, SignalBarExtr
 | Member | Long stop | Short stop | Inputs |
 |---|---|---|---|
 | `EntryProvided` (embedded default) | the entry's own structural stop (the one passed to `sizeForRisk` / `portfolioArm`) | same | — |
-| `AtrMultiple` (wrapper default) | entry − `StopAtrMult` × ATR(`StopAtrLength`) | entry + `StopAtrMult` × ATR(`StopAtrLength`) | `StopAtrMult` (double, 1.5), `StopAtrLength` (int, 14); ATR on Data1 from closed bars |
+| `AtrMultiple` (wrapper default; **Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q6: AtrMultiple default, SignalBarExtreme selectable"*) | entry − `StopAtrMult` × ATR(`StopAtrLength`) | entry + `StopAtrMult` × ATR(`StopAtrLength`) | `StopAtrMult` (double, 1.5), `StopAtrLength` (int, 14); ATR on Data1 from closed bars |
 | `FixedTicks` | entry − `StopTicks` × tick | entry + `StopTicks` × tick | `StopTicks` (int, 0 = off ⇒ invalid with this mode) |
-| `SignalBarExtreme` | low of the bar before the fill − 1 tick | high of the bar before the fill + 1 tick | — (`_ExitHalfRiskHalfRoll`'s R) |
+| `SignalBarExtreme` (selectable, owner-approved 18:18–18:21 ET) | low of the bar before the fill − 1 tick | high of the bar before the fill + 1 tick | — (`_ExitHalfRiskHalfRoll`'s R) |
 | `SwingExtreme` | lowest low of the last `StopSwingBars` closed bars − 1 tick | highest high of the last `StopSwingBars` closed bars + 1 tick | `StopSwingBars` (int, 5) |
 | `Percent` | entry × (1 − `StopPct`/100) | entry × (1 + `StopPct`/100) | `StopPct` (double); `_StopsAndTargets`-compatible |
 
@@ -164,7 +174,8 @@ public enum ETriggerUnit { RMultiple, PercentOfEntry, Ticks, Points, CurrencyPer
 | `T1Unit` | `ETriggerUnit` | `RMultiple` | unit of `T1Value` |
 | `T1Value` | double | 1.0 | first-target distance in `T1Unit` (baseline +1R) |
 | `T1ScalePct` | int, 0–100 | 50 | percent of the **initial** position closed at T1 |
-| `FinalTargetR` | double | 0 (off) | optional runner limit, in initial R (unit kept as R in rev 0.2) |
+| `FinalTargetUnit` | `ETriggerUnit` | `RMultiple` | unit of `FinalTargetValue` (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Yes, the final target and trail start both get ETriggerUnit"*) |
+| `FinalTargetValue` | double | 0 (off) | optional final (runner) target distance from entry in `FinalTargetUnit`; long level = entry + d, short level = entry − d (replaces rev 0.6's `FinalTargetR`; with the defaults it is the same rule) |
 | `SingleLotMode` | `ESingleLotMode` | `ExitAtT1` | q = 1 rule |
 
 **T1 quantity**, with q = the initial position's contracts:
@@ -175,13 +186,13 @@ public enum ETriggerUnit { RMultiple, PercentOfEntry, Ticks, Points, CurrencyPer
 - Orders: limit `<ID>LT1`, `OrderExit.Total` (F3).
 
 **Modes:**
-- `ScaleOutThenRunner` (default): T1 as above. The runner is managed by §4.4/§4.5. `FinalTargetR` > 0 adds a runner limit `<ID>LT`.
-- `SingleTarget`: the whole position at `FinalTargetR` (must be > 0). `T1*` inputs are ignored.
+- `ScaleOutThenRunner` (default): T1 as above. The runner is managed by §4.4/§4.5. `FinalTargetValue` > 0 adds a runner limit `<ID>LT` (short: `<ID>ST`, a buy-to-cover limit below the entry, PR #117 §7.1).
+- `SingleTarget`: the whole position at the final target (`FinalTargetValue` must be > 0). `T1*` inputs are ignored.
 - `None`: no target; exits come only from the stop, trail and clock.
 
 T1 and the split use the **initial** contracts only. Adds join the runner (PR #117 §7.7).
 
-**T1 already passed at the fill** (**Owner-approved 2026-11-11 09:52 ET**, Ettienne: *"Yes, trail the whole position, log an info message."*; same rule as PR #117 overview §7.2a). If the entry fill is at or beyond the T1 level (long: fill ≥ T1; short: fill ≤ T1), the engine sends no T1 order, treats the whole position as the runner (the §4.4 trail is active from the fill, as if T1 had filled), keeps `FinalTargetR` if it is still beyond the fill, and logs once: `<ID> Info: T1-SKIPPED side(<±1>) fill(<px>) t1(<px>) past(<ticks>) qty(<q>) action(trail-all)`. The journal row gets `t1Skipped = 1`. In `SingleTarget` mode a target already passed at the fill is handled the same way (no limit, trail all).
+**T1 already passed at the fill** (**Owner-approved 2026-11-11 09:52 ET**, Ettienne: *"Yes, trail the whole position, log an info message."*; same rule as PR #117 overview §7.2a). If the entry fill is at or beyond the T1 level (long: fill ≥ T1; short: fill ≤ T1), the engine sends no T1 order, treats the whole position as the runner (the §4.4 trail is active from the fill, as if T1 had filled), keeps the final target if it is still beyond the fill, and logs once: `<ID> Info: T1-SKIPPED side(<±1>) fill(<px>) t1(<px>) past(<ticks>) qty(<q>) action(trail-all)`. The journal row gets `t1Skipped = 1`. In `SingleTarget` mode a target already passed at the fill is handled the same way (no limit, trail all).
 
 ### 4.3 Break-even
 **Configurable trigger and offset (**Owner-approved 2026-11-11 09:16 ET**, answer 2).**
@@ -206,7 +217,7 @@ public enum EBreakEven { AfterT1, AtTrigger, Off }
 ### 4.4 Trailing stop (runner)
 ```csharp
 public enum ETrailMode { Chandelier, Atr, BarExtreme, Ema, RollLevel, None }
-public enum ETrailStart { AfterT1, AtR, Immediately }
+public enum ETrailStart { AfterT1, AtTrigger, Immediately }   // rev 0.7: AtR renamed AtTrigger (unit now an Input)
 ```
 **Both directions** (**Owner-approved 2026-11-11 09:34 ET** (Ettienne: *"I see in the question above you asked "Runner: trails 3 × ATR(22) below the highest high, and only ever moves up."  note that we want that to trail also down for short moves."*)). The runner trails **below the highest high for longs** and **above the lowest low for shorts**. A long trail only ever moves **up**; a short trail only ever moves **down**.
 
@@ -220,7 +231,7 @@ public enum ETrailStart { AfterT1, AtR, Immediately }
 | `None` | no trail | no trail | — |
 
 - "Since entry" means from the entry fill bar through the last **closed** bar; ATR and EMA are on Data1 closed bars.
-- `TrailStart` default `AfterT1`. `AtR` uses `TrailStartR` (double, 1.0) on the initial R: long close ≥ entry + `TrailStartR` × R, short close ≤ entry − `TrailStartR` × R.
+- `TrailStart` default `AfterT1`. `AtTrigger` starts the trail on the first **closed** bar at or beyond d from the initial entry, with d from `TrailStartUnit` (`ETriggerUnit`, default `RMultiple`) and `TrailStartValue` (double, default 1.0) (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Yes, the final target and trail start both get ETriggerUnit"*; replaces rev 0.6's `TrailStartR`, same default behaviour = +1R): **long** close ≥ entry + d; **short** close ≤ entry − d. `Immediately` starts at the fill.
 - **One-way, both sides** (§7.3). The candidate is computed at the bar close and sent from the next bar.
   - **Long:** `newStop = max(oldStop, candidate)`, capped at one tick **below** the last close.
   - **Short:** `newStop = min(oldStop, candidate)`, capped at one tick **above** the last close.
@@ -255,14 +266,27 @@ public enum ERollExit { FlattenBeforeSplice, Ignore }
 ```csharp
 public enum EExitControl { None, FixedBars, RandomBars }
 ```
-- `FixedBars`: exit after `ControlExitBars` (int, 10) bars whatever happens, with the initial stop still resting as a disaster stop.
-- `RandomBars`: a seeded uniform 1…`ControlExitBars` (seed = the run seed, journalled).
-- These carry over `_ExitStatic`'s entry-test idea. The exit layer gives three looks at the same entry:
+- `FixedBars`: exit at market after N closed bars whatever happens (`<ID>LX` / `<ID>SX`, reason `CONTROL`), with the initial stop still resting as a disaster stop. Same rule for longs and shorts.
+- `RandomBars`: a seeded uniform 1…N (seed = the run seed, journalled).
+- **N per bar timeframe** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q4 yes, but set ControlExitBars per timeframe"*; *"Q5: 1m 30, 5m 12, 15m 8, 60m 6, daily 5"*). Five native int Inputs, each overridable (0 = control off for that timeframe):
+
+| Input | Data1 timeframe | Default N | ≈ holding time |
+|---|---|---|---|
+| `ControlExitBarsM1` | 1 minute | 30 | 30 min |
+| `ControlExitBarsM5` | 5 minutes | 12 | 1 h |
+| `ControlExitBarsM15` | 15 minutes | 8 | 2 h |
+| `ControlExitBarsH1` | 60 minutes | 6 | 6 h |
+| `ControlExitBarsD1` | daily | 5 | 1 week |
+
+  Individual int Inputs, not an enum or table, because each is a count the owner may override separately and plain int Inputs are this spec's convention for counts (`TrailBars`, `StopSwingBars`, `TimeStopBars`), and typed enums are kept for named choices.
+- **Other timeframes (PROPOSED – owner to confirm):** N = the value for the **nearest listed timeframe at or below** the chart's (Data1) bar size: 2–4 min ⇒ the 1m value; 10 min ⇒ 5m; 30 min ⇒ 15m; 120/240 min ⇒ 60m; weekly/monthly ⇒ daily. Below 1 minute (seconds, ticks) and non-time bars (volume, range, Renko) have no listed timeframe at or below: they use the 1m value and log one Warning `<ID> Warning: CONTROL-BARS no listed timeframe at or below <resolution>: using ControlExitBarsM1`. The timeframe is read once at `StartCalc` from `Bars.Info.Resolution` (type and size; E1 records the values). The resolved N is journalled once: `<ID> Info: CONTROL-BARS tf(<resolution>) mapped(<M1|M5|M15|H1|D1>) bars(<N>)`.
+- **Every entry-only idea runs a control arm** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q4 yes, but set ControlExitBars per timeframe"*): besides the baseline package, each entry-only idea is run once with `ExitControl = FixedBars` (N as above), and reports CS-8 forward MFE/MAE for the same signals. That gives three looks at the same entry:
   1. CS-8 forward MFE/MAE, with no exit at all;
-  2. a dumb exit (`FixedBars` / `RandomBars`);
+  2. the dumb exit (`FixedBars`; `RandomBars` optional);
   3. the baseline package.
-  An entry edge should show in all three.
-- Default `None`.
+  An entry edge should show in all three. The control arm is a separate registered run, not a sweep.
+- These carry over `_ExitStatic`'s entry-test idea.
+- `ExitControl` default `None` (the baseline arm).
 
 ### 4.10 Same-bar precedence (fixed, not an Input)
 PR #117 overview §7.4, unchanged:
@@ -278,13 +302,13 @@ PR #117 overview §7.4, unchanged:
 
 After 4–9: break-even, trail and T1 re-send for the next bar, only if still in a position and no market exit was sent.
 
-### 4.11 Wrapper Input list (`_GenericExit`, about 31)
+### 4.11 Wrapper Input list (`_GenericExit`, about 37)
 - **Stop:** `InitialStop`, `StopAtrMult`, `StopAtrLength`, `StopTicks`, `StopSwingBars`, `StopPct`.
-- **Targets:** `TargetMode`, `T1Unit`, `T1Value`, `T1ScalePct`, `FinalTargetR`, `SingleLotMode`.
+- **Targets:** `TargetMode`, `T1Unit`, `T1Value`, `T1ScalePct`, `FinalTargetUnit`, `FinalTargetValue`, `SingleLotMode`.
 - **Break-even:** `BreakEven`, `BreakEvenUnit`, `BreakEvenValue`, `BreakEvenOffsetTicks`.
-- **Trail:** `TrailMode`, `TrailStart`, `TrailStartR`, `TrailAtrMult`, `TrailAtrLength`, `TrailBars`, `TrailEmaLength`.
+- **Trail:** `TrailMode`, `TrailStart`, `TrailStartUnit`, `TrailStartValue`, `TrailAtrMult`, `TrailAtrLength`, `TrailBars`, `TrailEmaLength`.
 - **Clock and events:** `TimeStopBars`, `TimeStopMinutes`, `SessionExit`, `FlatByHHMM`, `MaxHoldDays`, `NewsExitMinutes`, `RollExit`.
-- **Adds and control:** `AddStopMode` (`EAddStopMode`, from PR #117 §7.7), `ExitControl`, `ControlExitBars`.
+- **Adds and control:** `AddStopMode` (`EAddStopMode`, from PR #117 §7.7), `ExitControl`, `ControlExitBarsM1`, `ControlExitBarsM5`, `ControlExitBarsM15`, `ControlExitBarsH1`, `ControlExitBarsD1`.
 
 Each gets a header §17 block. Mode-specific inputs are ignored when their mode is off (Interactions line). The embedded engine has no Inputs of its own: the host declares the ones its spec varies.
 
@@ -419,37 +443,42 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
 | Component | Baseline |
 |---|---|
 | Size | 2 contracts (PR #117 §7.2), so the scale-out is exercised |
-| Initial stop | Embedded: `EntryProvided`. Wrapper: `AtrMultiple` 1.5 × ATR(14) on Data1, floored at the cost floor (ES 14 / NQ 19 ticks) |
+| Initial stop | Embedded: `EntryProvided`. Wrapper: `AtrMultiple` 1.5 × ATR(14) on Data1 (owner-approved default 18:18–18:21 ET; `SignalBarExtreme` selectable), floored at the cost floor (ES 14 / NQ 19 ticks) |
 | T1 | `T1Unit` `RMultiple`, `T1Value` 1.0, `T1ScalePct` 50 ⇒ ⌊q/2⌋ at +1.0R (initial R), `OrderExit.Total`; q = 1 ⇒ `ExitAtT1` |
 | Break-even | `AfterT1`, `BreakEvenOffsetTicks` 1 (entry + 1 tick); `BreakEvenUnit` `RMultiple` / `BreakEvenValue` 1.0 used only by `AtTrigger` |
-| Runner trail | `Chandelier` 3.0 × ATR(22) on Data1, from T1 (`AfterT1`): **below the highest high for longs / above the lowest low for shorts, one-way** (long only moves up, short only moves down; owner-approved 09:34 ET) |
-| Final target | none (`FinalTargetR` 0) |
+| Runner trail | `Chandelier` 3.0 × ATR(22) on Data1, from T1 (`AfterT1`; `TrailStartUnit` `RMultiple` / `TrailStartValue` 1.0 used only by `AtTrigger`): **below the highest high for longs / above the lowest low for shorts, one-way** (long only moves up, short only moves down; owner-approved 09:34 ET) |
+| Final target | none (`FinalTargetUnit` `RMultiple`, `FinalTargetValue` 0) |
 | Time stop | off |
 | Session | intraday `FlatBy` 15:55 ET (early close: close − 5 min); swing ideas `HoldOvernight` with `ERollExit.FlattenBeforeSplice` |
 | News exit | `NewsExitMinutes` 0 (matches PR #117's PROPOSED default) |
 | Adds | as the entry decides; `AddStopMode` `RaiseToAddLow`; R re-based on the add fill |
-| Control | `None`. Each entry-only idea also runs `FixedBars` 10 as its control arm (PROPOSED, Q4) |
+| Control | `None` in the baseline arm. Each entry-only idea also runs a `FixedBars` control arm with N per timeframe (1m 30, 5m 12, 15m 8, 60m 6, daily 5) and reports CS-8 forward MFE/MAE (owner-approved 18:18–18:21 ET, Q4/Q5; other timeframes PROPOSED, §4.9) |
 | Precedence | §4.10 |
 | Costs and fills | Batch-1 settings (PR #117 §4): commissions and slippage as approved, 2 ticks of open slippage, closed-bar orders, no IOG |
 
 ## 7. Native checks for the MiniPC (backtest only, data ≤ 31 Dec 2024, temporary sandbox studies, no csproj commit)
 | # | Question | How | Pass |
 |---|---|---|---|
-| E1 | Can an exit-only signal on the same chart manage another signal's position, and what does it see on the fill bar? | `_TestGxEntry` (buys 2 on bar 100) + `_TestGxExit` (journals `PositionSide`, `CurrentPosition.OpenTrades`, `AvgEntryPrice` each bar; sends `Sell 1 Total` at bar 105, `Sell FromAll` at bar 110) | Exit fills as sent; values visible from the fill bar's close; journal recorded |
+| E1 | Can an exit-only signal on the same chart manage another signal's position, and what does it see on the fill bar? | `_TestGxEntry` (buys 2 on bar 100) + `_TestGxExit` (journals `PositionSide`, `CurrentPosition.OpenTrades`, `AvgEntryPrice` each bar, and `Bars.Info.Resolution` (type, size) once on 1m, 5m, 15m, 60m, daily and one 2m chart; sends `Sell 1 Total` at bar 105, `Sell FromAll` at bar 110) | Exit fills as sent; values visible from the fill bar's close; journal recorded; resolution values recorded for the §4.9 timeframe mapping |
 | E2 | Fill-bar protection | Same pair on a bar where price trades through the stop inside the fill bar. Runs: (a) wrapper explicit stop, (b) wrapper `GenerateStopLoss`, (c) entry sends its stop with the entry | (c) and maybe (b) stop out on the fill bar; (a) does not. Record (b) either way |
 | E3 | Two exits on one bar from two signals; Format Signals order | Two exit signals both `MarketNextBar` on bar 105 | One fill, no overshoot; record which order name fills |
 | E4 | PT: two signals per strategy (**verification item; the wrapper is already specified for PT, §5.1**) | Entry + wrapper in one PT strategy, MM on. Journal `Signals.Length`, `Signals[0]` name, each signal's own index, `MyPortfolioData` reference identity from both signals (L6-style `sameRef`), the calc order of the two signals in one step, the MM's `riskAtOpen` against the wrapper's fill R, and that `EntryContracts` / `AllowEntries` do not affect the wrapper's exits | Shared dictionary, list-order calc, MM R = wrapper R. Otherwise use the §5.1 item 6 fallback |
 | E5 | Repeated partials | `Sell 1 Total` twice with one order object, with and without `ExitFromOneEntryOnce.FillAndKillExitOrder` | Behaviour recorded; GX uses separate order objects if needed |
 | E6 | Pyramiding setting label | Strategy Properties dialog | Exact label of "Allow up to XXX entry orders in the same direction" recorded (shared with PR #118 A1) |
-| E7 | Enum Inputs in the Format dialog and the optimiser | One enum Input | Named members shown; sweep supported or not (shared with PR #117 overview §9) |
+| E7 | Enum Inputs in the Format dialog and the optimiser | One enum Input (e.g. `ETriggerUnit` as `FinalTargetUnit`) | Named members shown; sweep supported or not (shared with PR #117 overview §9) |
 | E8 | IOG per signal | Wrapper IOG on, entry off | Confirms per-signal; GX rule "IOG off" stays |
 
 ## 8. Implementation plan (after approval; separate PRs)
-1. **GX-1:** `_ExitEngine` (pure C# in a `.Function.CS` file): state machine, enums, precedence, R segments; `tests/ExitEngineTests` (`dotnet run`, like `tests/PortMMTests`). No MC dependency.
+1. **GX-1:** `_ExitEngine` (pure C# in a `.Function.CS` file): state machine, enums, precedence, R segments; `tests/ExitEngineTests` (`dotnet run`, like `tests/PortMMTests`). No MC dependency. Off-MC tests include (rev 0.7):
+   - `ETriggerUnit` levels for T1, break-even, the final target and the trail start, long and short (long entry + d, short entry − d; each unit; rounding away from the entry; value ≤ 0 with the feature on ⇒ Error, feature off);
+   - defaults reproduce rev 0.6: `FinalTargetValue` 0 ⇒ no final target; `TrailStart = AtTrigger` with `RMultiple` 1.0 ⇒ starts at +1R (long) / −1R (short);
+   - control-bar mapping: 1, 5, 15, 60 min and daily ⇒ 30/12/8/6/5; 2 ⇒ 30, 10 ⇒ 12, 30 ⇒ 8, 240 ⇒ 6, weekly ⇒ 5; seconds / tick / range bars ⇒ 30 + Warning; an Input override (e.g. `ControlExitBarsM5` = 20) wins; 0 ⇒ control off;
+   - `FixedBars` exits after exactly N closed bars, long and short, with the disaster stop still active; `RandomBars` reproducible for a seed;
+   - `InitialStop` default `AtrMultiple`; `SignalBarExtreme` long/short levels.
 2. **GX-2:** `_CustomSignal` integration as a protected helper: `exitPlan(...)` at entry, `exitBar()` each bar, `portfolioStop` hooks, CS-1 columns. No new base `[Input]`.
-3. **GX-3:** `_GenericExit` wrapper in `sandbox/` (header §17 for every Input), chart **and** Portfolio Trader (§5.1); E4 is run before any PT result is used.
+3. **GX-3:** `_GenericExit` wrapper in `sandbox/` (header §17 for every Input), chart **and** Portfolio Trader (§5.1); E4 is run before any PT result is used. **Legacy exits superseded** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q8: mark the legacy exit studies superseded once GX exists"*): in the same PR, `_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit` and `_ExitHalfRiskHalfRoll` get a header note `// SUPERSEDED by GX (_ExitEngine / _GenericExit, specs/generic-exit-manager-spec.md); kept for reproducibility, not deleted`, and `docs/engines-manual.md` lists them as superseded. No code in them changes and none is deleted.
 4. **GX-4:** native checks E1–E8, recorded in `specs/live-check-sheet.md`.
-5. **GX-5 (optional):** batch-1 specs adopt the engine instead of hand-coding §7. Results must match their hand-coded versions trade-for-trade on ≤ 2024 data.
+5. **GX-5 (planned milestone):** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q9: move batch-1 onto the engine once it passes, with a re-check per strategy"*) once GX-1–GX-4 are done and the E1–E8 checks pass, batch 1 moves onto the engine instead of hand-coding §7, **one strategy at a time**. Each move has its own equivalence re-check: the engine version must match the hand-coded version trade-for-trade on ≤ 2024 data (same entries, exit bars, prices, exit reasons and R, long and short), with any difference explained and fixed before the hand-coded path is retired. A strategy that does not match stays hand-coded until it does.
 
 Regression: G0, D9a and the existing suites unchanged, because GX is inert unless a strategy calls it.
 
@@ -466,9 +495,14 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 - (2) The base is the strategy's own equity only, on charts and in Portfolio Trader; the book and broker bases are removed.
 - (3) 1.00 = exceeded plan, and > 1.10 is reported separately.
 
+**Resolved, owner-approved 2026-11-11 18:18–18:21 ET:**
+- ~~**Q4** Should every entry-only idea also run a control exit (`FixedBars` 10 and/or `RandomBars`) and report CS-8 forward MFE/MAE, as the three-way entry test in §4.9? PROPOSED: yes, `FixedBars` 10.~~ *"Q4 yes, but set ControlExitBars per timeframe"* → §4.9, §6: every entry-only idea runs a `FixedBars` control arm with N per timeframe and reports CS-8 forward MFE/MAE.
+- ~~**Q5** What value should `FixedBars` / `ControlExitBars` take per timeframe (10 bars on 5m ≈ 50 minutes)?~~ *"Q5: 1m 30, 5m 12, 15m 8, 60m 6, daily 5"* → §4.9: five int Inputs `ControlExitBarsM1/M5/M15/H1/D1` = 30/12/8/6/5. Other timeframes: nearest listed at or below (PROPOSED, still open).
+- ~~**Q6** Should the wrapper's default stop be `AtrMultiple`, or `SignalBarExtreme` (as `_ExitHalfRiskHalfRoll`)?~~ *"Q6: AtrMultiple default, SignalBarExtreme selectable"* → §4.1, §6.
+- ~~**Q8** Keep the legacy exit studies (`_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit`, `_ExitHalfRiskHalfRoll`) unchanged (PROPOSED), or mark them superseded once GX exists? Nothing is deleted by this spec.~~ *"Q8: mark the legacy exit studies superseded once GX exists"* → §1.1, §8 GX-3: header note and docs entry; nothing deleted.
+- ~~**Q9** Should batch-1 specs later move onto the engine (GX-5), or stay hand-coded?~~ *"Q9: move batch-1 onto the engine once it passes, with a re-check per strategy"* → §8 GX-5: after the E-checks pass, one strategy at a time, each with an equivalence re-check.
+- **Final-target and trail-start units:** *"Yes, the final target and trail start both get ETriggerUnit"* → §4.2 `FinalTargetUnit` / `FinalTargetValue`, §4.4 `TrailStartUnit` / `TrailStartValue` (`ETriggerUnit`, default `RMultiple`; defaults keep rev 0.6 behaviour; shorts mirror explicitly).
+
 **Still open:**
-- **Q4** Should every entry-only idea also run a control exit (`FixedBars` 10 and/or `RandomBars`) and report CS-8 forward MFE/MAE, as the three-way entry test in §4.9? PROPOSED: yes, `FixedBars` 10.
-- **Q5** What value should `FixedBars` / `ControlExitBars` take per timeframe (10 bars on 5m ≈ 50 minutes)?
-- **Q6** Should the wrapper's default stop be `AtrMultiple`, or `SignalBarExtreme` (as `_ExitHalfRiskHalfRoll`)?
-- **Q8** Keep the legacy exit studies (`_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit`, `_ExitHalfRiskHalfRoll`) unchanged (PROPOSED), or mark them superseded once GX exists? Nothing is deleted by this spec.
-- **Q9** Should batch-1 specs later move onto the engine (GX-5), or stay hand-coded?
+- The E1–E8 native MiniPC checks (§7).
+- The PROPOSED rule for timeframes not in the `ControlExitBars` list (nearest listed timeframe at or below; sub-minute and non-time bars use the 1m value with a Warning, §4.9) – owner to confirm.
