@@ -1,7 +1,7 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
 date: 2026-11-10 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
@@ -72,7 +72,7 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
 | Key | Type | Written | Meaning |
 |---|---|---|---|
 | `pm.add` | int | every bar | 0 = no add pending (the default, reset in `portfolioBar` with `pm.side`); k ≥ 1 = the pending entry is the k-th add of the open position |
-| `pm.addStop` | double | with `pm.add` | the **whole-position** stop after the add fills: `RaiseToAddLow` = add structural low − 1 tick (long), `KeepCurrent` = the current active stop. NaN ⇒ the MM refuses ("add: no addStop") |
+| `pm.addStop` | double | with `pm.add` | the **whole-position** stop after the add fills: `RaiseToAddLow` = add structural low − 1 tick (long; the stop is raised) or add structural **high + 1 tick (short; the stop is lowered)**, `KeepCurrent` = the current active stop. NaN ⇒ the MM refuses ("add: no addStop") |
 | `pm.avgPx` | double | every bar | `StrategyInfo.AvgEntryPrice` while in a position (NaN when flat); needed for the risk after the add (§3) |
 | `pm.bpv` | double | StartCalc | `Bars.Info.BigPointValue`, so the pure `_PortMM` can price the risk after the add without an `IStrategy` |
 | `pm.armStamp` | DateTime | with every arm (initial, reversal, add) | `Bars.Time[0]` at the arm. The MM requires `armStamp == stamp` for an add (an "ARM stamp" in the spirit of `_TestPortArm`'s `ARM#i STAMP` journal) |
@@ -92,7 +92,7 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
   - `avgNew = (avgPx × |pos| + e × nAdd) / (|pos| + nAdd)`.
   - `riskAfter = _PortArm.RiskOpen(sign × (|pos| + nAdd), avgNew, e, addStop, bpv)`. That is the **same formula** the publisher uses for `pm.riskOpen` (`_PortMM` L473–478): |price − stop| × BPV × |pos|, priced at the add's entry `e`. It is 0 when `addStop` is at or beyond the new break-even `avgNew`, and never negative. So the post-add number the MM tests is what `pm.riskOpen` will publish right after the fill.
   - Widened: when the publisher sends `widenedAddStop` (cost floor), use it as `addStop` for every cap (P1 rule: caps use the widened risk).
-- **Released risk.** `rel = s.riskOpen` (the position's `pm.riskOpen` now). Then `Δ = riskAfter − rel`, which may be ≤ 0 when the raised stop more than pays for the add.
+- **Released risk.** `rel = s.riskOpen` (the position's `pm.riskOpen` now). Then `Δ = riskAfter − rel`, which may be ≤ 0 when the tightened stop (raised for a long, lowered for a short) more than pays for the add.
 - **Checks, in order** (gates as §5.2, then the caps; skip only, never resize):
   1. **Per-position budget:** `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
   2. **Heat:** `heat − rel + riskAfter > heatCap × book` ⇒ `"heat cap"`.
@@ -114,7 +114,7 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
   - `px` = new key `pm.px` = `Bars.Close[0]` at the fill sample;
   - `stopNew` = the whole-position stop after the add: `pm.addStop` from the approval, which the strategy also sets via `portfolioStop`;
   - `posNew` = the new |`pm.pos`|.
-  - This is the "full post-add risk": what `pm.riskOpen` shows right after the fill, without `RiskOpen`'s break-even zeroing, so it stays positive whenever the stop is below the price (long).
+  - This is the "full post-add risk": what `pm.riskOpen` shows right after the fill, without `RiskOpen`'s break-even zeroing, so it stays positive whenever the stop is below the price (long) or above it (short): `side` = −1 gives `R1 = max(0, stopNew − px) × bpv × |posNew|` for a short.
   - If `R1 ≤ 0` or NaN (stop at or through the price, bad BPV), the MM does **not** re-base. The current segment carries on with its old 1R, and a `PORT Warning` names the reason.
 - **Trade R as segments.**
   - A trade is split at each re-base into segments: 0 is the initial position, 1 runs after add 1, 2 after add 2.
@@ -338,6 +338,7 @@ Book 1M, Starter unless stated, ES BPV 50.
   - `R1 ≤ 0` ⇒ no re-base + Warning.
   - Reversal ⇒ no re-base; the trade closes summing its segments.
   - A trade without adds ⇒ identical R and identical lines to rev 2.7.
+  - **Short mirror:** short 2 @ 5000, stop 5005 ⇒ R0 = 500. At 4995 (+1R0 open), add 1 fills with `stopNew` 4999 (the add's lower high + 1 tick, stop lowered) ⇒ R1 = max(0, −1 × (4995 − 4999)) × 50 × 3 = 600. Stop-out at 4999 ⇒ segment-1 P&L = −600 ⇒ trade R = **0.0**; R(original) = (100 − 200) / 500 = **−0.2**. A short `stopNew` ≤ `px` ⇒ `R1 ≤ 0` ⇒ no re-base + Warning.
 - **T-P38 partial exits with re-base:**
   - T1 one contract at +1R0 before the add ⇒ its P&L stays in segment 0.
   - A T1 after the add ⇒ in segment 1, at R1 (not shrunk).
