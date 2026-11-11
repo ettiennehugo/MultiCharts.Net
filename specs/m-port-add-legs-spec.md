@@ -1,7 +1,7 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
 date: 2026-11-10 (ET); draft r3 2026-11-11 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
@@ -14,6 +14,7 @@ related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-c
   - Answer 1 → §7: `AddPolicy` is an `[Input]`.
   - Answer 2 → §3a: R is re-based after an add.
   - Answer 3 → §6: adds are blocked under any throttle, with a Warning.
+  - Cluster-cap override: **Owner-approved 2026-11-11 10:14 ET** (Ettienne chose: *"Yes, add ClusterCapPct as an Input that overrides the profile"*). → §7 `ClusterCapPct`.
   - Answer 4 (the cluster cap, Q7) was explained to him; **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*). → §3 check 3.
 - **Owner decisions this builds on.**
   - 2026-11-10 22:06 ET (strategy specs, PR #117): *"you can allow adding to positions, for strategies where that make sense make it a clear Input parameter and allow adding."*
@@ -96,7 +97,7 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
 - **Checks, in order** (gates as §5.2, then the caps; skip only, never resize):
   1. **Per-position budget:** `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
   2. **Heat:** `heat − rel + riskAfter > heatCap × book` ⇒ `"heat cap"`.
-  3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster"). **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*): the post-add cluster risk must stay within the profile's cluster cap (Starter 0.75% of book); on a breach the add is **skipped, never resized**, and the skip line gives the reason (`PORT Info: skip <id>#<i> cluster cap: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> cluster $<sum> cap $<cap>`, §6).
+  3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster"). **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*): the post-add cluster risk must stay within the profile's cluster cap (Starter 0.75% of book); on a breach the add is **skipped, never resized**, and the skip line gives the reason (`PORT Info: skip <id>#<i> cluster cap: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> cluster $<sum> cap $<cap>`, §6). The cap is `cfg.clusterCap` after the `ClusterCapPct` Input override (§7).
   4. **Total risk cap:** `_PortRiskCap.Breaks(total − rel, riskAfter, cap)` ⇒ `"total risk cap"`.
   5. If allowed: `heat = heat − rel + riskAfter`, same for `clHeat[c]` and `total`. `open` and `clCount` do **not** change, because an add is not a new position (same as a reversal).
 - **RiskParity at 0.5% applies to the initial entry only.** An add does not get a fresh `riskPerTrade` budget. Its size comes from §4, and its risk is bounded only by the post-add caps above. Real risk per position is therefore 0.5% (initial, structural) up to 1% (per-position budget).
@@ -243,6 +244,29 @@ public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _Port
   - `AddPolicy` appears in the Portfolio Trader money-management signal's Format dialog, next to `TotalRiskCapPct` (VERIFY the label on the MiniPC, Check 7A A0).
   - **Whether the MC optimizer can sweep an enum `[Input]` is still unverified.** This is the same open check as PR #117 overview §9 ("Verify enum inputs on the MiniPC": named members in the Format dialog and Portfolio Trader; whether the optimizer can sweep them).
   - If sweeps are not supported, compare `Refuse` against `AllowWithinCap` as two saved backtests.
+**`ClusterCapPct` is an `[Input]` that overrides the profile cluster cap (**Owner-approved 2026-11-11 10:14 ET** (Ettienne chose: *"Yes, add ClusterCapPct as an Input that overrides the profile"*)).**
+
+```csharp
+// _PortfolioRiskManager
+/// <summary>Cluster risk cap in % of book. 0 (default) = use the profile / Config / JSON clusterCap; > 0 overrides it.
+/// Applies to new entries and to add legs alike.</summary>
+[Input] public double ClusterCapPct { get; set; }
+// ctor: ClusterCapPct = 0;
+// StartCalc, after Resolve, next to totalRiskCap and addPolicy:
+//   string src = "profile";
+//   if (ClusterCapPct > 0 && ClusterCapPct / 100 <= cfg.heatCap) { cfg.clusterCap = ClusterCapPct / 100; src = "input"; }
+//   else if (ClusterCapPct != 0) Warning (below), src stays "profile";
+//   Info: "PORT config clusterCap=<cfg.clusterCap> source=<input|profile>"
+```
+
+- **Sentinel:** `0` (the default) = use the cluster cap resolved from the profile (Starter 0.75%, ScaledBook 2%), a subclass `Config`, or the `ConfigPath` JSON `clusterCap` key, exactly as today. `> 0` = that percentage of book, e.g. `0.75` = 0.75%.
+- **Precedence:** when `ClusterCapPct > 0`, it overrides **any** JSON `clusterCap` and any subclass `Config` value (same "folded in after config resolution" pattern as `TotalRiskCapPct`, L59). The JSON key is still parsed and validated, but the Input wins.
+- **Range (PROPOSED handling):** valid when 0 < `ClusterCapPct` / 100 ≤ `heatCap` (the existing `Validate()` rule `0 < clusterCap ≤ heatCap`). A negative value, or one above `heatCap`, logs `PORT Warning: ClusterCapPct(<x>) out of range (0 < pct/100 <= heatCap <h>): using the profile value <c>` and keeps the profile value (source=profile).
+- **Applies to new entries and adds:** the override replaces `cfg.clusterCap`, which feeds the existing new-entry cluster check (`clusterCapD`, `_PortMM` L843/L889, including P2 (c): a lone entry in an empty cluster is still not checked) and the add check in §3 check 3. No separate add cap.
+- **Config-time log:** one Info line at `StartCalc`, every run: `PORT config clusterCap=<fraction> source=<input|profile>` (`profile` covers profile defaults, subclass `Config` and JSON). The existing config dump (`clusterCap(<x>)` in the RUN/CFG text) shows the effective value.
+- **Default ⇒ no behaviour change:** with `ClusterCapPct = 0` the effective cap equals today's, so every decision is unchanged. G0 and DVP D9a are chart runs where M-PORT is inert, so their hashes are unchanged. The one new Info line is the only PT journal difference (§8).
+- m-port-spec §0 must then say "three `[Input]`s" (`TotalRiskCapPct`, `AddPolicy`, `ClusterCapPct`) in rev 2.8.
+
 - **Saved portfolios.** Adding an Input to a compiled signal may reset or re-order its saved inputs in existing `.pws` portfolios (VERIFY, A0). After the update, re-check that `TotalRiskCapPct` kept its value.
 
 ```csharp
@@ -265,6 +289,7 @@ public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
   - The candidate filter keeps L813/L814 verbatim on the `Refuse` branch.
   - No new journal line, Status text or RUN text.
   - The R stream is unchanged for trades without an add fill: one segment, so R(rebased) = R(original) and every existing kill / session / weekly line is byte-identical.
+  - The new `ClusterCapPct` Input defaults to 0 (= profile value), so caps and decisions are unchanged; its `PORT config clusterCap=… source=profile` Info line is the one new PT journal line, even under `Refuse`.
   - The new `AddPolicy` Input defaults to `Refuse`. The `TotalRiskCapPct` value in saved portfolios must survive the signal update (A0).
   - `PortDecision` values are unchanged: `entryContracts` −1 for every in-position strategy, `allowEntries` false.
 - **Publisher keys are additive.**
@@ -281,7 +306,7 @@ public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
 
 ## 9. Tests
 
-### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P38, PROPOSED)
+### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P39, PROPOSED)
 Book 1M, Starter unless stated, ES BPV 50.
 - **T-P28 policy off:**
   - `Refuse` with a same-direction arm with `pm.add` = 1 ⇒ refused `"Long"` / `"in position"`, silent, `entryContracts` −1. Identical decisions to a run without the new keys.
@@ -297,7 +322,7 @@ Book 1M, Starter unless stated, ES BPV 50.
 - **T-P31 caps with release:**
   - Heat: the position's `rel` is released, then riskAfter counted. Another strategy's open risk still counts.
   - Cluster: always checked (own position occupies it). An ES add with NQ open, EQIDX over 7 500 ⇒ `"cluster cap"`.
-  - **Cluster cap refuses an add on its own (owner-approved 10:13 ET):** Starter profile (cluster cap 0.75% = 7 500 on a 1M book; per-position 1% and heat/total caps set high enough not to bind), ES alone, no NQ open; an add whose riskAfter puts EQIDX at 7 501 ⇒ skipped with reason `"cluster cap"`, `EntryContracts` = 0 for that add step, `nAdd` unchanged (never resized), the position and its stop unchanged, one `PORT Info: skip … cluster cap …` line with `cluster $7501 cap $7500`. At exactly 7 500 ⇒ allowed (the check is `>`).
+  - **Cluster cap refuses an add on its own (owner-approved 10:13 ET):** Starter profile (cluster cap 0.75% = 7 500 on a 1M book; per-position 1% and heat/total caps set high enough not to bind), ES alone, no NQ open; an add whose riskAfter puts EQIDX at 7 501 ⇒ skipped with reason `"cluster cap"`, the add is denied on that step (deny-all: `allowEntries = false`, `EntryContracts` stays −1; 0 is never written, §4), `nAdd` unchanged (never resized), the position and its stop unchanged, one `PORT Info: skip … cluster cap …` line with `cluster $7501 cap $7500`. At exactly 7 500 ⇒ allowed (the check is `>`).
   - Total cap with a lowered `TotalRiskCapPct`.
 - **T-P32 `maxAddsPerPosition`:**
   - Fills counted from |pos| growth. The third add with max 2 ⇒ `"max adds"`.
@@ -345,6 +370,13 @@ Book 1M, Starter unless stated, ES BPV 50.
   - A T1 after the add ⇒ in segment 1, at R1 (not shrunk).
   - A partial exit never starts a segment or closes the trade.
   - A net-shrink sample is not an add fill; a net-grow sample with an approved add is.
+- **T-P39 `ClusterCapPct` override (owner-approved 10:14 ET):** Starter profile (cluster cap 0.75%), book 1M.
+  - `ClusterCapPct = 0` ⇒ effective cap 0.0075, `source=profile`; decisions identical to today.
+  - JSON `"clusterCap": 0.01` and `ClusterCapPct = 0` ⇒ 0.01, `source=profile`.
+  - JSON `"clusterCap": 0.01` and `ClusterCapPct = 1.5` ⇒ 0.015, `source=input` (Input overrides JSON).
+  - `ClusterCapPct = 1.5`: a **new entry** (ES, NQ open in EQIDX at 8 000) that the profile cap refuses (`"cluster cap"`) is allowed up to 15 000; an **add** with EQIDX after the add at 12 000 is allowed, at 15 001 ⇒ skipped `"cluster cap"`, never resized.
+  - `ClusterCapPct = −1` or > `heatCap` × 100 ⇒ the out-of-range Warning, effective cap = profile value, `source=profile`.
+  - The `PORT config clusterCap=<x> source=<input|profile>` line is written once per run in every case.
 
 ### 9.2 Native MiniPC checks (Check 7 style, new "Check 7A", backtest only, data ≤ 2024)
 - **Signal.** A throw-away signal `_TestPortAdd : PortfolioSignalObject`, not derived from `_CustomSignal` (as `_TestPortArm`), with input `Test` typed `public enum EAddCheck { A0, A1, A2, A3, A4, A5, A6, A7, A8 }` (rule 9; `_TestPortArm` still uses a string).
@@ -356,7 +388,7 @@ Book 1M, Starter unless stated, ES BPV 50.
 
 | # | Question | How | Pass | If not |
 |---|---|---|---|---|
-| A0 | `AddPolicy` Input in the PT money-management signal's Format dialog; does an existing `.pws` keep `TotalRiskCapPct` after the update; can the optimizer sweep `AddPolicy`? | Open an existing portfolio after compiling; read both Inputs; try an optimization over `AddPolicy` | Named members `Refuse` / `AllowWithinCap` shown; `TotalRiskCapPct` unchanged; sweep result recorded either way | Re-enter `TotalRiskCapPct`; if there is no enum sweep, use two saved backtests |
+| A0 | `AddPolicy` and `ClusterCapPct` Inputs in the PT money-management signal's Format dialog (and the `PORT config clusterCap=… source=…` line); does an existing `.pws` keep `TotalRiskCapPct` after the update; can the optimizer sweep `AddPolicy`? | Open an existing portfolio after compiling; read both Inputs; try an optimization over `AddPolicy` | Named members `Refuse` / `AllowWithinCap` shown; `TotalRiskCapPct` unchanged; sweep result recorded either way | Re-enter `TotalRiskCapPct`; if there is no enum sweep, use two saved backtests |
 | A1 | Does PT fill a same-direction add, and which Strategy Properties Position Limits option allows it? | Buy 1 at bar 10, buy 1 more ("LA1") at bar 20. Run with the limit set to 1 entry, then to "allow up to N entry orders in the same direction" with N = 3 | No add fill with limit 1. With N = 3 the position goes 1 → 2. Record the exact option name | Adds cannot run in PT; keep `AddMode = None` |
 | A2 | `EntryContracts > 0` on the add step sizes only the add | MM writes 4 on the add step, −1 otherwise | Add fills 4 and the initial stays 1. If the strategy also sends a second entry the same bar, both get 4 (documents the one-pending-entry rule) | Use CodeSize for adds (§4) |
 | A3 | A resting add stop order, re-sent each bar, is sized by the `EntryContracts` of its fill step | Add stop above market for 5 bars; MM writes 2, 3, 3, 3, 3 | Fill qty = that step's value | Publisher must re-arm every bar (already the rule) |
