@@ -1,6 +1,6 @@
 # AV-02 · Impulse-origin AVWAP higher-low continuation — implementation spec
 
-**Rev 1.0 (draft), 10 Nov 2026 (EST).** Batch 1, build order #4. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-02 (merged DV-12 touch arm). Target file: `sandbox/_AV_02_ImpulseAvwapHigherLow.Strategy.CS`, class `_AV_02_ImpulseAvwapHigherLow`. Stage: sandbox. Acceptance policy: `catalogue-default`.
+**Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope; Prog rev 1.1). Batch 1, build order #4. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-02 (merged DV-12 touch arm). Target file: `sandbox/_AV_02_ImpulseAvwapHigherLow.Strategy.CS`, class `_AV_02_ImpulseAvwapHigherLow`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
 - **Mechanism.** After an impulse leg from a significant low, the AVWAP anchored at that low is the impulse buyers' average cost. The first pullback toward it, if it holds with a higher low, shows them defending; late shorts who sold the pullback are trapped (Cat. AV-02; Shannon: AVWAPs from significant lows act as support).
@@ -39,13 +39,14 @@
 | **Invalidation** | Before T1: a 15m close below the anchor low → market exit (the impulse origin is gone). **PROPOSED – owner to confirm** (usually at or beyond the stop, so rarely binding). After the trail activates: the AVWAP-loss close. | Cat. AV-02 "fails when"; EX-04 |
 | **Adds** | None. | Prog §7.7 |
 | **Re-entry** | One trade per anchor. A new trade needs a new confirmed anchor. At most one trade per instrument per day (**PROPOSED – owner to confirm**). | Cat. AV-02 "first pullback" |
-| **News / holiday / roll** | Prog §7.6. A roll invalidates all anchors (M-AVWAP); no entries on the roll-window day. | Manual §4.7 |
+| **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `AV02LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
+| **Holiday / roll** | Prog §7.6. A roll invalidates all anchors (M-AVWAP); no entries on the roll-window day. | Manual §4.7 |
 | **Orders and fills** | Buy-stop entry; stop `AV02LS`; T1 `AV02LT1`; market exits `AV02LX`. Magnifier 1m; stop-first. | Prog §4, §7.1 |
 | **MM interaction** | Prog §7.5; arm every bar the stop is pending. `PortfolioFamily = "AV"`. | |
-| **Same-bar precedence** | MM force-close → stop → T1 → FlatBy → anchor-low invalidation → AVWAP-loss close → trail update. | Prog §7.4 |
+| **Same-bar precedence** | MM force-close → stop → T1 → news exit → FlatBy → anchor-low invalidation → AVWAP-loss close → trail update. | Prog §7.4 |
 
 ## 6. Sizing, risk and M-PORT
-As PS-02 §6. `Contracts` 2 (**PROPOSED**).
+As PS-02 §6. `Contracts` 2 (owner, 2026-11-10). Future %-risk sizing: Prog §7.8.
 
 ## 7. Session, news, holiday and roll handling
 Prog §7.6.
@@ -61,7 +62,7 @@ Prog §7.6.
 | `StopSigma` | double | 1.0 | σ | fixed | Fixed | AVWAP − kσ stop leg |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | Trail offset |
 | `AnchorMaxAgeSessions` | int | 5 | sessions | 1–10 | Fixed (**PROPOSED**) | Anchor expiry |
-| `EntryStartHHMM` 945, `EntryEndHHMM` 1500, `FlatHHMM` 1545, `SingleLotMode`, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
+| `EntryStartHHMM` 945, `EntryEndHHMM` 1500, `FlatHHMM` 1545, `SingleLotMode`, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Batch-1 sweep = `TouchLowerSigma` {0.25, 0.5} × `TargetMode` {ImpulseHigh, Trail} = 4. The catalogue's third axis (anchor TF {15m, 60m}) becomes the separately registered 60m swing arm (Page), so the catalogue total of 8 is preserved across the two arms. The reading of the catalogue's "±0.25σ / ±0.5σ" sweep as the zone's lower edge is **PROPOSED – owner to confirm**.
 
@@ -69,7 +70,7 @@ Batch-1 sweep = `TouchLowerSigma` {0.25, 0.5} × `TargetMode` {ImpulseHigh, Trai
 Prefix `AV-02`. `AV-02 ANCHOR tag(<_Avwap.Tag>) low() extremeTime() usable() atr()`; `AV-02 PULLBACK t() low() avwap() sigma()`; `AV-02 FAIL reason(close<avwap-1s|below-anchor)`. Skip reasons: `no-anchor`, `pullback-failed`, `no-hl`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`, `daily-limit`. `logSignal("AV02", …)` on every trigger, ctx with the P2 AVWAP, the SMA(bars since anchor) and the 50% retracement price of anchor→H.
 
 ## 10. Test plan
-- Windows and costs: Prog §4–5. G0-a, G0-b. G0-d applies to the AVWAP level arm (Cat. §2.6 "AV level arms").
+- Windows and costs: Prog §4–5; validation ends at the §5.1 cut (default data ≤ 31 Dec 2024 for this strategy). G0-a, G0-b. G0-d applies to the AVWAP level arm (Cat. §2.6 "AV level arms").
 - **Controls (Cat. AV-02):** K-FL-anchor (AVWAP anchored at a random bar 20–60 bars before confirmation); K-SMA (SMA of length = bars since anchor); **50% retracement benchmark**: the identical HL rule with the touch zone at the 50% retracement of anchor → H (Tickfloor). Also M-AVWAP P2 (volume-shuffled) as a logged shadow. **Kill:** not better than the 50% retracement (Cat.); also the K-FL/K-SMA comparisons (Cat. §0: each AVWAP idea must beat a fake anchor and a plain SMA).
 - **Later swing arm (separate registration, not batch 1):** Data1 60m, anchors from 60m zigzag lows (3 × ATR60), HL on 60m, overnight holding with AV-01's swing rules (max hold, roll flatten, weekend), K-FL-anchor at ±0.5 ATR20d. Needs owner sign-off before coding.
 
@@ -82,6 +83,7 @@ Prog §6 + the AV-02 kill. `catalogue-default`.
 - [ ] Pullback state machine per anchor; trigger; stop/target/trail; 15m flatten alignment.
 - [ ] Control shadows (P2, SMA, 50% retracement) in the event log.
 - [ ] Off-MC tests: anchor replacement, first-pullback-only, failure conditions, trail monotonicity.
+- [ ] `NewsExitMinutes` input and rule (Prog §7.6; PS-02 §12), with off-MC tests for the window edge (`MinutesTo` = N + B is not reached, N + B − ε is).
 - [ ] Native compile + smoke.
 
 ## 13. Header mapping

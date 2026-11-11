@@ -1,6 +1,6 @@
 # VW-01 · Trend-day first VWAP pullback — implementation spec
 
-**Rev 1.0 (draft), 10 Nov 2026 (EST).** Batch 1, build order #3. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § VW-01; definitions §2.2 (trend day, HL entry). Target file: `sandbox/_VW_01_TrendDayVwapPullback.Strategy.CS`, class `_VW_01_TrendDayVwapPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
+**Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope; Prog rev 1.1). Batch 1, build order #3. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § VW-01; definitions §2.2 (trend day, HL entry). Target file: `sandbox/_VW_01_TrendDayVwapPullback.Strategy.CS`, class `_VW_01_TrendDayVwapPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
 - **Mechanism.** On a day already classified as a trend day, session VWAP is the benchmark execution algorithms are measured against. Buy-side algorithms that are behind schedule buy at or below VWAP, and day traders who faded the trend cover there (Cat. VW-01). Keller B1 Part IV, setup 1: on a trend day, take the first or second VWAP touch, stop modestly beyond, target new extremes. Keller's day-type meter: repeated crossings or a flat VWAP mean balance; a one-sided sloping VWAP means trend.
@@ -44,13 +44,14 @@
 | **Invalidation** | Before T1, nothing beyond the stop (a close below VWAP − 1 σ is at or through the stop anyway). After the trail activates, the VWAP-loss close (above) is the invalidation. | Cat. VW-01; EX-04 |
 | **Adds** | None. | Prog §7.7 |
 | **Re-entry** | `TouchNumber = 1`: one trade per day. `TouchNumber = 2` trades only the second episode, also one trade. No re-entry after a stop. | Cat. VW-01 sweep |
-| **News / holiday / roll** | As Prog §7.6. Classification still runs on a blackout bar, but no entry is armed during the blackout. | Prog §7.6 |
+| **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `VW01LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 |
+| **Holiday / roll** | As Prog §7.6. Classification still runs on a blackout or news-window bar, but no entry is armed. | Prog §7.6 |
 | **Orders and fills** | Buy-stop entry; stop `VW01LS`; T1 limit `VW01LT1` (trade-through); market exits `VW01LX`. Magnifier 1m; stop-first on unresolved bars. | Prog §4, §7.1 |
 | **MM interaction** | As PS-01 (pending stop: arm every bar). `PortfolioFamily = "VW"`. | Prog §7.5 |
-| **Same-bar precedence** | MM force-close → stop → T1 → FlatBy → VWAP-loss close → trail update. | Prog §7.4 |
+| **Same-bar precedence** | MM force-close → stop → T1 → news exit → FlatBy → VWAP-loss close → trail update. | Prog §7.4 |
 
 ## 6. Sizing, risk and M-PORT
-As PS-02 §6. Default `Contracts` = 2 so the T1 + runner path is exercised (**PROPOSED – owner to confirm**).
+As PS-02 §6. `Contracts` = 2 (owner, 2026-11-10), so the T1 + runner path is exercised. Future %-risk sizing: Prog §7.8.
 
 ## 7. Session, news, holiday and roll handling
 RTH 09:30–16:00 ET VWAP; Prog §7.6.
@@ -69,7 +70,7 @@ RTH 09:30–16:00 ET VWAP; Prog §7.6.
 | `MaxClosesThroughVwap` | int | 1 | closes | fixed | Fixed (Cat. §2.2) | One-sidedness since 09:45 |
 | `EpisodeMaxBars` | int | 6 | 5m bars | 3–12 | Fixed (**PROPOSED**) | Touch episode length |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | VWAP trail offset |
-| `SingleLotMode`, `EntryEndHHMM` 1530, `FlatHHMM` 1555, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
+| `SingleLotMode`, `EntryEndHHMM` 1530, `FlatHHMM` 1555, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01). Primary: 10:30, touch 1, SessionHigh.
 
@@ -77,7 +78,7 @@ Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01). Primary: 10:30, touch 1, Sessio
 Prefix `VW-01`. `VW-01 CLASSIFY <date> side() t() closesThrough() slope() pocMig() atr5()` once per day when it classifies (and `VW-01 NOCLASS <date>` at 15:30 for unclassified days, so trend-day frequency is measurable). Episode lines `VW-01 TOUCH n() t() vwap() sigma()`. Skip reasons: `no-trend-day`, `episode-failed`, `episode-timeout`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`. `logSignal("VW01", …)` on every armed HL, with ctx carrying the P2-VWAP and SMA control values at the same bar.
 
 ## 10. Test plan
-- Windows and costs: Prog §4–5.
+- Windows and costs: Prog §4–5; validation ends at the §5.1 cut (default data ≤ 31 Dec 2024 for this strategy).
 - **Controls (Cat. VW-01, mandatory):** (a) **volume-shuffled VWAP**: the same rules run on a VWAP whose bar volumes are permuted within the session so far (seeded, deterministic; like M-AVWAP's P2 twin); (b) **distance-matched SMA**: an SMA whose length is chosen so its average distance from price over the development period equals VWAP's. The length is frozen before any performance read. (c) K-RT on classified trend days only. Run controls as separate `ControlArm` runs or as logged shadow events. **Kill:** real VWAP ≤ either fake VWAP.
 - **Gates:** G0-a, G0-b (the VW-08 VWAP canary suite must be ≈ 0 or negative before VW-01 is read). Not a prior-session level, so G0-d does not apply.
 - Report trend-day frequency per year (the catalogue estimates 2–5 trades per month per instrument; this is a catalogue estimate, not data).
@@ -91,6 +92,7 @@ Prog §6 + the VW-01 kill. `catalogue-default`.
 - [ ] Stop = farther of VWAP − 1σ and HL − 1 tick, floored; T1 at the frozen session high; EX-04 trail.
 - [ ] Early-close/event/roll handling; one trade per day.
 - [ ] Off-MC tests: classifier edge cases (exactly one close through), episode reset, trail monotonicity.
+- [ ] `NewsExitMinutes` input and rule (Prog §7.6; PS-02 §12), with off-MC tests for the window edge (`MinutesTo` = N + B is not reached, N + B − ε is).
 - [ ] Native compile + smoke as PS-02.
 
 ## 13. Header mapping

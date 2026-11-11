@@ -1,6 +1,6 @@
 # AV-01 · Swing-high AVWAP reclaim (swing sleeve) — implementation spec
 
-**Rev 1.0 (draft), 10 Nov 2026 (EST).** Batch 1, build order #5. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-01. Target file: `sandbox/_AV_01_SwingHighAvwapReclaim.Strategy.CS`, class `_AV_01_SwingHighAvwapReclaim`. Stage: sandbox. Acceptance policy: `catalogue-default` (**candidate for `big-winner-trend`; must be decided before the first run — PROPOSED – owner to confirm**).
+**Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope, big-winner rule; Prog rev 1.1). Batch 1, build order #5. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Catalogue: § AV-01. Target file: `sandbox/_AV_01_SwingHighAvwapReclaim.Strategy.CS`, class `_AV_01_SwingHighAvwapReclaim`. Stage: sandbox. Acceptance policy: **`big-winner-trend`** (owner, 2026-11-10 19:44 ET: "yes, use the big-winner rule"), predeclared in the header before any result is read.
 
 ## 1. Purpose and edge (with sources)
 - **Mechanism.** Everyone who bought since the last significant swing high is under water while price is below that swing-high AVWAP, so they sell rallies to get out at break-even. When price reclaims and holds above it, that supply has been absorbed; the cohort is back in profit and the shorts from the high are under water (Cat. AV-01). Shannon: buy strength after a pullback that recovers above a swing-high AVWAP; stop below the most recent higher low.
@@ -46,15 +46,15 @@ The catalogue writes AV-01 long-side ("buy strength"). **PROPOSED – owner to c
 | **Invalidation** | A **60m close below the original swing-high AVWAP − δ60** before T1 → market exit (the reclaim failed). **PROPOSED – owner to confirm.** | Mechanism in Cat. AV-01 |
 | **Adds** | None. | Prog §7.7 |
 | **Re-entry** | One trade per anchor/reclaim. After a stop-out, a new trade needs a new reclaim (a new ≥ 10-bar spell below the AVWAP and a new close above). | Cat. AV-01 |
-| **News** | Entries blocked in `EventBlackout`; an open swing position holds through news with its stop (**PROPOSED**). | Prog §7.6 |
+| **News** | Entry blackout: no entry orders in `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm**). When > 0, at the last closed **15m** bar before release − N (`0 < MinutesTo(EEventTier.T1) < N + 15`, Prog §7.6) the whole swing position is flattened with `AV01LX`, reason `NEWS`, and entries stay blocked until release + 10 min. This applies overnight too (e.g. an 08:30 release is exited from the 08:15 bar close when N = 5). A `NEWS` exit ends that reclaim; a new trade needs a new reclaim. Note: with N > 0 a 20-session swing will usually be cut by a tier-1 release (several per month), which changes the strategy's character, so a non-zero value is a separate registered trial. When ≤ 0 the position holds through news with its stop. | Owner 2026-11-10; Prog §7.6 |
 | **Holiday** | Full-close days: no bars; the position is held. Early close: no new entry orders after the cut-off; the position is held over the early close. ES/NQ `_CmeHolidays`; CL/GC/ZN M8 tables (2016–2026; outside that range S4 refuses in-advance use, so runs stay inside it). | Prog §7.6; M-INSTR M8 |
 | **Roll** | Unadjusted continuous data: a position held across the splice would book the roll gap as P&L. So: **flatten at the 15:45 ET bar of the last session before the roll date** (`RollFlattenSessions` = 1) and block new entries from 1 session before the roll; anchors are dropped at the splice (M-AVWAP invalidate-on-roll). ES/NQ roll dates from `RollDetection = ERollDetection.Table` (PR #116 Globex-day keying); M9 leaves detection at the literal 8-point gap. The roll exit is journaled `ROLL`. **PROPOSED – owner to confirm** the 1-session lead. | Cat. AV-01 data line; manual §4.7, §4.13 |
 | **Orders and fills** | Buy-stop entry; stop `AV01LS` (24h); T1 `AV01LT1` (trade-through); market exits `AV01LX`. Bar Magnifier 1m on Data1. | Prog §4, §7.1 |
 | **MM interaction** | Prog §7.5. In PT the MM's daily-loss flatten (`ForceClosePosition`, fills at the bar-T close) can close a swing position intraday; the strategy then logs `FLAT-BY-MM` and does not re-enter that anchor. `PortfolioFamily = "AV"`. | Check 7 |
-| **Same-bar precedence** | MM force-close → stop → T1 → roll flatten → max-hold exit → invalidation (60m close) → AVWAP-trail close → trail update. | Prog §7.4 |
+| **Same-bar precedence** | MM force-close → stop → T1 → news exit → roll flatten → max-hold exit → invalidation (60m close) → AVWAP-trail close → trail update. | Prog §7.4 |
 
 ## 6. Sizing, risk and M-PORT
-As PS-02 §6. `Contracts` 2 (**PROPOSED**). Overnight margin per contract must fit the research equity; if not, the run is "not assessable" (Page acceptance note).
+As PS-02 §6. `Contracts` 2 (owner, 2026-11-10). Future %-risk sizing: Prog §7.8. Overnight margin per contract must fit the research equity; if not, the run is "not assessable" (Page acceptance note).
 
 ## 7. Session, news, holiday and roll handling
 See §5 rows; Prog §7.6.
@@ -71,7 +71,8 @@ See §5 rows; Prog §7.6.
 | `MaxHoldSessions` | int | 20 | sessions | 5–30 | Fixed (**PROPOSED**) | Time stop |
 | `RollFlattenSessions` | int | 1 | sessions before roll | 1–3 | Fixed (**PROPOSED**) | Roll exit lead |
 | `TrailOffsetTicks` | int | 2 | ticks | fixed | Fixed (EX-04) | Trail offset |
-| `EntryStartHHMM` 945, `EntryEndHHMM` 1530, `SingleLotMode`, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct`, `OutlierRemovalPct` | as PS-02 §8 | | | | | |
+| `NewsExitMinutes` | int | 0 | minutes before a tier-1 release | 0–120; ≤ 0 = disabled | Fixed (**PROPOSED** default) | Flatten the swing position and block entries N minutes before scheduled high-impact news (Prog §7.6) |
+| `EntryStartHHMM` 945, `EntryEndHHMM` 1530, `SingleLotMode`, `Contracts` 2, `RiskFractionPct`, `MaxRiskPct`, `ControlArm`, `AcceptancePolicy` (**default `BigWinnerTrend`** here), `MaxSingleTradeNetProfitPct` (logged only), `OutlierRemovalPct` | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 2 × 2 = 8 (Cat. AV-01). Primary: k = 3, 60m signal, SwingHigh.
 
@@ -79,14 +80,19 @@ Registered sweep = 2 × 2 × 2 = 8 (Cat. AV-01). Primary: k = 3, 60m signal, Swi
 Prefix `AV-01`. `AV-01 ANCHOR tag() high() usable()`; `AV-01 RECLAIM t() barsBelow() avwap() delta60() filter(sma50|tsmom value)`; `AV-01 HOLD day(n)` once per session while open (MFE/MAE so far); exit reasons add `MAXHOLD`, `ROLL`, `INVALIDATION`. Skip reasons: `filter-off`, `no-anchor`, `reclaim-cancel`, `roll-lead`, `event-blackout`, `risk-budget`, `margin`. `logSignal("AV01", …)` on every reclaim + HL, with ctx carrying the fake-anchor and SMA control values.
 
 ## 10. Test plan
-- **Windows:** W-M (60m/15m built from 1-minute): development 2016–2022 with yearly anchored folds; validation 2023–2024. The daily filter needs ≥ 50 prior days. Holdout sealed.
+- **Windows:** W-M (60m/15m built from 1-minute): development 2016–2022 with yearly anchored folds; validation 2023 → the §5.1 holdout cut (default for this strategy: data ≤ 31 Dec 2024; with `HoldoutScope = AllStrategies` and 18 months, to 2025-04-30). The daily filter needs ≥ 50 prior days. Holdout sealed.
 - **Controls (Cat. AV-01):** K-FL-anchor (AVWAP anchored at a random bar 20–60 bars before confirmation); K-SMA (SMA of length = bars since anchor); K-FL ±0.5 ATR20d for swing ideas (Cat. §2.3). **Kill:** real anchor ≤ either fake.
 - **Gates:** G0-a, G0-b; G0-c roll handling (multi-session anchors); G0-d for the AVWAP level arm.
 - **Low frequency:** the catalogue estimates 1–3 trades per month per instrument (an estimate). If validation has < 100 trades the verdict is **inconclusive**; do not relax filters.
 - Report overnight gap slippage separately from regular slippage.
 
 ## 11. Acceptance criteria
-Prog §6 + the AV-01 kill. If the owner predeclares `big-winner-trend` before the first run, the 10% largest-trade cap is waived; the top-1% trim stress and expectancy reporting still apply (header standard).
+Prog §6 + the AV-01 kill, under **`big-winner-trend`** (header standard, Acceptance policy):
+- The 10% largest-winner cap is **not** applied.
+- **Trader's equation:** cost-adjusted expectancy E = P(win) × average win − P(loss) × average loss (net of $17.00 ES / $9.48 NQ round trips, in R and $) must be > 0.
+- **Top-1% trim:** E must stay > 0 after removing the largest 1% of **winning** trades (K = max(1, ⌈1% × winners⌉), rounding per Prog §10); report both E values.
+- Every other gate in Prog §6 still applies (net PF ≥ 1.20, samples, drawdown, folds, no year > 50% of net, costs, controls).
+- `AcceptancePolicy` input default = `BigWinnerTrend`; `MaxSingleTradeNetProfitPct` is logged but not used as a gate.
 
 ## 12. Implementation checklist
 - [ ] Data2 60m setup and closed-bar reads (M-MTF), PRICEACTION zigzag on Data2, M-AVWAP on Data2 (VERIFY back-fill).
@@ -94,21 +100,22 @@ Prog §6 + the AV-01 kill. If the owner predeclares `big-winner-trend` before th
 - [ ] Reclaim state machine (bars-below counter, cancel), 15m HL trigger.
 - [ ] Stop with the swing floor; T1; new-impulse AVWAP trail on 60m closes; max hold; roll flatten via the roll table; holiday/early-close handling.
 - [ ] Off-MC tests: bars-below counter, roll-lead calculation from the table, max-hold counting across weekends and holidays, precedence.
-- [ ] Native compile + smoke (To ≤ 12/31/2024; check that no position crosses a roll).
+- [ ] `NewsExitMinutes` rule on 15m bars, including overnight releases (Prog §7.6).
+- [ ] Header §18 (Acceptance policy): `big-winner-trend` predeclared, with the big-winner premise written out (few large trend winners).
+- [ ] Native compile + smoke (To date before the §5.1 cut, ≤ 12/31/2024 by default; check that no position crosses a roll).
 
 ## 13. Header mapping
 Trigger: in a daily uptrend (close > SMA50), after ≥ 10 60m closes below the AVWAP of the last 3-ATR swing high, a 60m close back above it; then the first 15m HL above the AVWAP → buy-stop above the HL bar. Management: stop 1 tick under the HL (at least 0.3 × ATR20d); half off at the swing high; runner trailed at the new impulse AVWAP − 2 ticks on 60m closes. Exit: stop, T1/trail, a 60m close back below the swing-high AVWAP, 20 sessions, or the session before a roll.
 
 ## 14. Open questions for Ettienne
-1. Predeclare `big-winner-trend` for AV-01?
-2. Long only in batch 1?
-3. Trend filter: SMA50 via `DailyConfig.smaLength = 50` (primary) or TSMOM > 0?
-4. δ60 = max(2 ticks, 0.10 × ATR14(60m)).
-5. Max hold 20 sessions; flatten 1 session before each roll.
-6. Reclaim-failure invalidation (60m close back below AVWAP − δ60) and setup cancel.
-7. Trail on 60m closes; Trail arm activates at +1 R; skip T1 if the fill gaps beyond it.
-8. Hold through news and over early closes, holidays and weekends.
-9. Prog §10 batch-wide items.
+1. Long only in batch 1?
+2. Trend filter: SMA50 via `DailyConfig.smaLength = 50` (primary) or TSMOM > 0?
+3. δ60 = max(2 ticks, 0.10 × ATR14(60m)).
+4. Max hold 20 sessions; flatten 1 session before each roll.
+5. Reclaim-failure invalidation (60m close back below AVWAP − δ60) and setup cancel.
+6. Trail on 60m closes; Trail arm activates at +1 R; skip T1 if the fill gaps beyond it.
+7. Hold over early closes, holidays and weekends (news: `NewsExitMinutes` default 0).
+8. Prog §10 batch-wide items.
 
 ## 15. Sources
 Cat. AV-01, §0 item 3, §2.1–2.3, §2.6, EX-04, RG-06; Shannon, *Maximum Trading Gains with Anchored VWAP*; Cat. v1 AV family prior (no controlled futures study, searched 20 Oct 2026); engines manual §4.3 (M-DAILY), §4.7, §4.8, §4.12 (M-MTF), §4.13 (rolls), §5.23; M-INSTR M8/M9; Strategy-planning Page (item 5; horizon decision).

@@ -1,8 +1,8 @@
 # Strategy specs, batch 1: programme overview and shared rules
 
-**Rev 1.0 (draft), Tuesday 10 Nov 2026, America/New_York (EST).** Prepared by Analyst (Grok Bot) for Coder. Requested by Ettienne, 19:12 ET: *"Yes, please write them up. Refer to the relevant books/sources if necessary to refine the specs."* Extra requirement, 19:14 ET: *"Also be cognizant of any trade management and exit rules relevant to the strategies and please create clarity around those aspects as well in the spec."*
+**Rev 1.1 (draft), Tuesday 10 Nov 2026, America/New_York (EST).** Rev 1.1 applies Ettienne's answers of 19:44 ET (PR #117): *"1. $17 and yes, add costs for NQ, CL and 6E as well. 2. use 2 contracts, yes you can exit everything on the first target - ultimately I'd like to use dynamic position sizing based on percentage risk of the account. 3. re-scope the holdout period to be about 18 months or even 12 months. 4. yes, use the big-winner rule. 5. give a parameter for the number of minutes to exit before news (as integers in terms of minutes) and disable it when 0 or negative."* Rev 1.0: Prepared by Analyst (Grok Bot) for Coder. Requested by Ettienne, 19:12 ET: *"Yes, please write them up. Refer to the relevant books/sources if necessary to refine the specs."* Extra requirement, 19:14 ET: *"Also be cognizant of any trade management and exit rules relevant to the strategies and please create clarity around those aspects as well in the spec."*
 
-**Status:** documentation only. No strategy is implemented, run or validated by this document. Every number below is a predeclared rule or a source figure. None is a measured result on CME data. The 2025–2026 holdout has not been opened and must not be opened while building or tuning (§5).
+**Status:** documentation only. No strategy is implemented, run or validated by this document. Every number below is a predeclared rule or a source figure. None is a measured result on CME data. The holdout (§5, as re-scoped in rev 1.1) has not been opened and must not be opened while building or tuning.
 
 **Marking convention.** Anything not backed by the catalogue, a cited book or document, an owner decision or existing engine behaviour is marked **PROPOSED – owner to confirm**. Every such item is listed again in the spec's *Open questions* section and in §10 below.
 
@@ -16,8 +16,8 @@ Batch 1 follows the first six rows of the owner-approved build order on the *Str
 | 2 | [02-ps-01-balance-break-pullback.md](02-ps-01-balance-break-pullback.md) | PS-01 | Same break cohort as PS-02, but enter on the first confirmed higher low that holds above the old edge | Buildable; shares PS-02's event code |
 | 3 | [03-vw-01-trend-day-vwap-pullback.md](03-vw-01-trend-day-vwap-pullback.md) | VW-01 | On a classified trend day (≥ 10:30 ET), buy the first VWAP ± 0.25 σ pullback that prints a 5m higher low | Buildable; RTH VWAP must be built (see spec) |
 | 4 | [04-av-02-impulse-avwap-higher-low.md](04-av-02-impulse-avwap-higher-low.md) | AV-02 (+ DV-12 touch arm, later) | After a ≥ 3 ATR impulse from a confirmed low, buy the first higher low that holds at the impulse AVWAP | Buildable; M-AVWAP + PRICEACTION exist |
-| 5 | [05-av-01-swing-high-avwap-reclaim.md](05-av-01-swing-high-avwap-reclaim.md) | AV-01 | Swing sleeve: after price reclaims the AVWAP from the last significant swing high, buy the first 15m higher low; hold days to weeks | Buildable; needs a 50-day SMA filter source |
-| 6 | [06-of-01-stacked-imbalance-retest.md](06-of-01-stacked-imbalance-retest.md) | OF-01 | First retest of a ≥ 3 stacked buy-imbalance zone on genuine bid/ask footprints | **Data-gated**: needs verified MC-BidAsk ticks; see the ≤ 2024 conflict in that spec |
+| 5 | [05-av-01-swing-high-avwap-reclaim.md](05-av-01-swing-high-avwap-reclaim.md) | AV-01 | Swing sleeve: after price reclaims the AVWAP from the last significant swing high, buy the first 15m higher low; hold days to weeks | Buildable; 50-day SMA via `DailyConfig.smaLength = 50`; acceptance `big-winner-trend` (owner, 2026-11-10) |
+| 6 | [06-of-01-stacked-imbalance-retest.md](06-of-01-stacked-imbalance-retest.md) | OF-01 | First retest of a ≥ 3 stacked buy-imbalance zone on genuine bid/ask footprints | **Data-gated**: needs verified MC-BidAsk ticks, @ES from 2024-10-28 to the §5.1 cut (holdout re-scope) |
 
 Each spec follows the same 15 sections: purpose and edge; instruments and timeframes; engines; entry rules; **trade management and exits**; sizing, risk and M-PORT; session, news, holiday and roll handling; native inputs; logging and journal lines; test plan; acceptance criteria; implementation checklist; source-file header mapping; open questions; sources.
 
@@ -30,6 +30,7 @@ Internal (repo `ettiennehugo/MultiCharts.Net`, `main` @ `47ffda2`):
 - `specs/m-port-spec.md` rev 2.7 and `specs/live-check-sheet.md` (Check 7, verified 2026-11-10).
 - `specs/m-instr-spec.md` rev 2.5.13 (§5.3 `InstrumentConfig`, §9 sizing and cost floor = PR-M7, PR-M8 CME product holiday calendars, PR-M9 roll-gap calibrator).
 - `final-synthesis.md` (Spec 1/1A, §4.0 common definitions, §6.6 ablation ladder, §6.7 splits). Analyst workspace copy; not in the repo.
+- Catalogue YV-01/02/04/07 and OF-09 data lines (@ES bid/ask from 2024-10-28); `_PortMM.Function.CS` / `_PortfolioRiskManager.Strategy.CS` (sizing modes, `EntryContracts`); `_EventCalendar.Function.CS` (`MinutesTo`, blackout semantics); `_InstrumentProfile.Function.CS` (`CostKey`, `costs`, `costSource`) — rev 1.1.
 - *Strategy-planning phase* Page (8 Nov 2026): build order, testing protocol, costs, acceptance defaults, profit-concentration contract, lifecycle, recorded decisions.
 
 Books and external sources (via the analyst's Kindle notes; page/location as in those notes):
@@ -55,37 +56,52 @@ No new web search was needed for batch 1. The catalogue already carries the exte
 
 | Root | Round trip used in research | Status | Cost-floor ticks (cost ≤ 0.10 R) |
 |---|---|---|---|
-| ES | $17.00 (`InstrumentConfig` default `Future:ES` 1700 cents) | Owner-confirmed 2026-11-01 (Cat. §2.1, v2.6a). **Convention open** (Page): $17.00 = commission + one total tick; per-side tick = $29.50 | 14 |
+| ES | $17.00 = cost key `Future:ES` 1700 cents (already the `InstrumentConfig.costs` default) | Owner-confirmed 2026-11-01; convention confirmed 2026-11-10: $17.00 is the whole round trip (commission + one total tick), not $29.50 | 14 |
 | MES | $2.50 (`Future:MES` 250) | Owner-confirmed 2026-11-01 | 20 |
-| NQ | $9.48 | Provisional (owner list) | 19 |
-| MNQ | $1.72 | Provisional | 35 |
-| CL | $14.72 | Confirmed (owner list; not provisional) | 15 |
-| 6E | $11.17 | Provisional | 18 (= ⌈1117 × 10 / 625⌉, M-INSTR §9 formula) |
+| NQ | $9.48 = `Future:NQ` 948 (to add, §9) | Provisional figure, accepted by the owner 2026-11-10 | 19 |
+| MNQ | $1.72 | Provisional; not added (the owner named NQ, CL and 6E) | 35 |
+| CL | $14.72 = `Future:CL` 1472 (to add, §9) | Confirmed | 15 |
+| 6E | $11.17 = `Future:6E` 1117 (to add, §9) | Provisional figure, accepted by the owner 2026-11-10 | 18 (= ⌈1117 × 10 / 625⌉, M-INSTR §9 formula) |
 | GC / ZN | $15.02 / $18.945 | Provisional; not in batch 1 markets except as later replications | 16 / 13 |
 
 - The non-ES totals already include one tick of slippage (Page). Do not add that tick twice.
-- **Cost floor (Cat. §2.1, decided 2026-10-23):** stop distance = max(structural stop, cost floor). The trade is skipped and logged only if the widened stop breaches the per-trade risk budget (1% of equity). Size is never shrunk to fit a wider stop. In code this is M7: set `InstrumentConfig.applyCostFloor = true` in `Create()` for the primary arm and pass the widened stop to `sizeForRisk(…, widenedStop)` / `portfolioArm(…, widenedStop)`. NQ, MNQ, CL and 6E need cost rows added to `InstrumentConfig.costs` (cents, `CostKey(EAssetClass.Future, root)`) before their floor is known. Otherwise M7 refuses with `unknown-field:cost`. **PROPOSED – owner to confirm:** add the provisional rows above as research rows with `costSource` naming them provisional.
-- **MultiCharts costs:** Commission = the round trip above minus the included slippage tick; Slippage = 1 tick per side in MC's Strategy Properties. **PROPOSED – owner to confirm** how to split the ES $17.00 between commission and slippage (Page open sign-off).
+- **Cost floor (Cat. §2.1, decided 2026-10-23):** stop distance = max(structural stop, cost floor). The trade is skipped and logged only if the widened stop breaches the per-trade risk budget (1% of equity). Size is never shrunk to fit a wider stop. In code this is M7: set `InstrumentConfig.applyCostFloor = true` in `Create()` for the primary arm and pass the widened stop to `sizeForRisk(…, widenedStop)` / `portfolioArm(…, widenedStop)`. NQ, CL and 6E get cost rows in `InstrumentConfig.costs` (owner, 2026-11-10; Coder checklist §9 item 1). Until those rows exist, M7 refuses on those roots with `unknown-field:cost`.
+- **MultiCharts costs:** every round trip above already contains one tick of slippage in total. In MC Strategy Properties, set Commission per contract per side = (round trip − one tick) / 2 and Slippage per contract per side = half a tick. ES: commission $2.25 per side, slippage $6.25 per side ($4.50 + $12.50 = $17.00). NQ: $2.24 + $2.50; CL: $2.36 + $5.00; 6E: $2.46 + $3.125. This is arithmetic on the confirmed convention, not a new figure. The offline evaluator uses the same totals.
 - **Fills in backtest:** Bar Magnifier on, at 1-minute detail on 5m/15m charts (W-M), tick detail only inside the verified tick window. Label every result with the detail used. Limits fill only on trade-through (Cat. §2.1). Where a bar touches both stop and target and the magnifier cannot resolve the order, evaluation assumes **stop first**: the offline trade-list check re-scores those trades as stop-outs. Report the count.
 - **Stresses (Page proposal):** +1 adverse tick per executed side, and separately 2× total cost, on the same trade list. Catalogue §2.1 also requires 2 ticks at the open and around news, plus a 1% tail of 4 R losses. These are offline post-processing on the journal unless MC can model them natively. Say which in the run sheet.
 
 ## 5. Test windows (frozen before any performance read)
 
-- **Owner constraint:** tests use data up to 31 Dec 2024 only. Every chart and Portfolio Trader *To* date is **12/31/2024 or earlier**. 2025–2026 is the sealed holdout. Do not view, screenshot or report 2025–2026 prices or results.
-- **W-M (1-minute data):** development = first verified full month in Jun/Jul 2016 → 31 Dec 2022, with anchored yearly walk-forward inside it (train 2016–2018 → test 2019; train → 2019, test 2020; → 2021; → 2022). Validation = 1 Jan 2023 → 31 Dec 2024. Holdout = 2025 → last complete session, run once, later, under a separate owner sign-off.
-- **W-D (daily):** development 2000–2015, validation 2016–2024 (AV-01's daily filter only).
-- **W-T (ticks):** 250/125/125 sessions per the catalogue. **Conflict:** the tick window starts about Jul 2024, so only about 125 sessions fall on or before 31 Dec 2024. See the OF-01 spec.
+### 5.1 Holdout definition (rev 1.1, owner 2026-11-10 19:44 ET; scope to be confirmed, §10)
+The holdout is a **rolling** window: the most recent `HoldoutMonths` months of data, rounded down to the first day of a month. `HoldoutMonths` = **18** (allowed minimum 12, per the owner's "about 18 months or even 12 months").
+
+- **Cut date** = first day of the month containing (run date − `HoldoutMonths` months). As of 2026-11-10: 18 months → cut **2025-05-01**, so the last usable day for development and validation is **2025-04-30**. With 12 months the cut would be 2025-11-01.
+- **Fixed per run.** Every run sheet and the strategy's `CFG` journal line record `holdoutCut(<yyyy-mm-dd>)` and `holdoutMonths(<n>)`. The chart and Portfolio Trader *To* date must be strictly before that cut. A test series (development → validation of one strategy) keeps the cut it started with, even if later runs happen after the window has rolled. A new cut means a new, logged test series.
+- **Scope switch, default = order-flow only.** One setting decides which strategies use the re-scoped cut:
+
+| Setting | Default (until Ettienne confirms) | Alternative |
+|---|---|---|
+| `HoldoutScope` | `OrderFlowOnly`: the rolling cut applies to tick/order-flow strategies (batch 1: OF-01 only). All other strategies keep the old fixed cut **2025-01-01** (data ≤ 31 Dec 2024). | `AllStrategies`: every strategy uses the rolling cut. |
+| `HoldoutMonths` | 18 | 12 |
+
+Flipping the default means changing this table only. Each spec's test plan refers to "the §5.1 cut" and names its default date, so nothing else needs editing. These are protocol settings for the run sheet and the offline evaluator, not MultiCharts inputs.
+- **Never** view, screenshot or report prices or results on or after the applicable cut. The holdout is run once, later, under a separate owner sign-off.
+
+### 5.2 Windows
+- **W-M (1-minute data, non-order-flow strategies, default scope):** development = first verified full month in Jun/Jul 2016 → 31 Dec 2022, with anchored yearly walk-forward inside it (train 2016–2018 → test 2019; train → 2019, test 2020; → 2021; → 2022). Validation = 1 Jan 2023 → 31 Dec 2024. Holdout = 2025-01-01 onward. If `HoldoutScope` becomes `AllStrategies`, validation extends to the day before the §5.1 cut (to 2025-04-30 with 18 months), and the holdout starts at the cut.
+- **W-D (daily):** development 2000–2015, validation 2016–2024 (AV-01's daily filter only); same extension rule.
+- **W-T (ticks, order-flow strategies):** from the first verified **bid/ask** session to the day before the §5.1 cut. The catalogue says ticks start about Jul 2024, but its YV/OF-09 data notes record **@ES bid/ask only from 2024-10-28**. So the span is about 28 Oct 2024 → 30 Apr 2025 (about 6 months, about 125 sessions) at 18 months, or → 31 Oct 2025 (about 12 months) at 12 months. The split is in the OF-01 spec.
 - **Coverage caveat (Page):** @ES minute history is reported to start 26 Dec 2022 on the MiniPC. The older download is unverified. Until 2016–2022 is present and flushed in QuoteManager, runs are **engineering smoke tests**, not development or acceptance evidence.
 - **Trial budget (owner-approved, 8 Nov 2026, 5:56 PM EST):** test the unchanged catalogue host first. Then add only pre-registered ablations, one component at a time. Use at most the catalogue's registered sweep per spec, recorded in a shared trial ledger. Proposal on the Page: at most three research-tuned numeric parameters per new spec. Holm family {PS-01, PS-02, DV-02, A2-31, PS-25}, m = 5, α = 0.05, fixed.
 
 ## 6. Acceptance criteria (shared defaults)
 
-Applied separately to validation (2023–2024) now, and to holdout later. Owner-approved items are marked; the rest are Page proposals the owner accepted as defaults ("Defaults accepted; not achieved results").
+Applied separately to validation (§5.2) now, and to the holdout later. Owner-approved items are marked; the rest are Page proposals the owner accepted as defaults ("Defaults accepted; not achieved results").
 
 1. **Catalogue kill text** for the ID, plus Cat. §2.3 standard kill (Gate 3, ≥ 150 development events; 30–149 inconclusive; < 30 no evaluation). Where both speak, the stricter applies.
 2. **Net edge:** net PF ≥ 1.20 and positive expectancy after costs.
 3. **Profit concentration (owner-approved, 8 Nov 2026):** largest winning trade ≤ `MaxSingleTradeNetProfitPct` (default 10%) of total net profit after costs; *and* net profit stays positive after removing the top `OutlierRemovalPct` (default 1%) of winning trades. Report original and trimmed expectancy. K = max(1, ⌈1% × number of winning trades⌉) — **PROPOSED – owner to confirm** this rounding before any run (the header standard requires it frozen). Trade unit = one parent position including all partial exits.
-4. **Big-winner exception (owner, 8 Nov 2026):** only a file whose header predeclares `big-winner-trend` *before* any result skips the 10% cap. It is judged on cost-adjusted expectancy (trader's equation) and must still stay positive after removing the top 1% of winners. In batch 1 all six specs default to `catalogue-default`. AV-01 is flagged as a candidate for `big-winner-trend` (**PROPOSED – owner to confirm before its first run**).
+4. **Big-winner exception (owner, 8 Nov 2026):** only a file whose header predeclares `big-winner-trend` *before* any result skips the 10% cap. It is judged on cost-adjusted expectancy (trader's equation) and must still stay positive after removing the top 1% of winners. **AV-01 uses `big-winner-trend`** (owner, 2026-11-10: "yes, use the big-winner rule"); it is predeclared in its header before any result. The other five batch-1 specs use `catalogue-default`.
 5. **Samples:** ≥ 100 validation trades and ≥ 50 holdout trades per strategy/instrument. Fewer = inconclusive, never relaxed.
 6. **Drawdown:** closed-trade DD ≤ 20 R per strategy; open-equity DD reported.
 7. **Across time:** ≥ 70% of evaluable walk-forward folds net positive; no single year > 50% of net profit.
@@ -111,9 +127,9 @@ Each spec has its own dedicated **Trade management and exits** section with the 
 
 ### 7.2 Contract split and the 1-contract case
 - Partial scale-outs use the **actual open position** (`StrategyInfo.MarketPosition`, absolute value), not the coded size. The MM may have changed the size (§7.5).
-- q ≥ 2: T1 qty = ⌊q / 2⌋; runner = q − ⌊q / 2⌋ (the runner gets the odd contract). **PROPOSED – owner to confirm** (the catalogue says "50%" without an odd-lot rule).
-- q = 1: the spec's `SingleLotMode` input decides, default `ExitAtT1` = the whole position exits at T1, matching the Page's note that one lot exits entirely at +1 R in `_ExitHalfRiskHalfRoll`. The alternative `RunnerOnly` skips T1 and manages the single lot as the runner. Changing it is a new trial. **PROPOSED – owner to confirm** the default.
-- Research default size is 2 contracts on charts, so the scale-out rule is exercised. The Page notes that a genuine half-exit study needs ≥ 2 lots. **PROPOSED – owner to confirm** 2 ES/NQ versus micros.
+- q ≥ 2: T1 qty = ⌊q / 2⌋; runner = q − ⌊q / 2⌋ (the runner gets the odd contract). With the fixed 2-contract test size this is 1 + 1. The odd-lot case only arises when the MM or a future %-risk size (§7.8) gives an odd q. **PROPOSED – owner to confirm** (the catalogue says "50%" without an odd-lot rule).
+- q = 1: the spec's `SingleLotMode` input decides, default `ExitAtT1` = the whole position exits at T1, matching the Page's note that one lot exits entirely at +1 R in `_ExitHalfRiskHalfRoll`. The alternative `RunnerOnly` skips T1 and manages the single lot as the runner. Changing it is a new trial. Default accepted by the owner (2026-11-10: "yes you can exit everything on the first target").
+- Test size is **2 contracts** on charts (owner, 2026-11-10: "use 2 contracts"), full-size ES/NQ (CL/6E later), so the scale-out rule is exercised. The Page notes that a genuine half-exit study needs ≥ 2 lots.
 
 ### 7.3 Stops are one-way
 A stop update (break-even, trail) is computed on the bar close. It is sent from the next bar and accepted only if it tightens: long `newStop = max(oldStop, candidate)`. A trail candidate is also capped one tick below the last close for a long, so it cannot be placed through the market. If the candidate would be at or through the market, the strategy sends the market exit instead and logs `TRAIL-THROUGH`.
@@ -123,7 +139,7 @@ When several exit conditions fire on the same bar, the order below decides which
 1. **MM `ForceClosePosition`** (daily-loss flatten or kill). Fills at the **close of the same bar T** (Check 7). The strategy does not fight it: on the next bar it sees itself flat and logs `FLAT-BY-MM`.
 2. **Protective stop** (resting from the previous bar), intrabar.
 3. **Target limit**, intrabar. If 2 and 3 are both touched in one bar and the magnifier cannot order them, evaluation scores it as stop first (§4).
-4. Event flatten (`EventFlattenNow`, only where the spec enables it).
+4. **News exit** (`NewsExitMinutes` > 0 and a tier-1 release is within reach, §7.6). Reason `NEWS`.
 5. Session-end flatten (`FlatBy` / early-close flatten via `mustFlatten()`).
 6. Roll flatten (swing positions before a splice).
 7. Invalidation (acceptance failure, VWAP loss, zone violation).
@@ -142,7 +158,20 @@ After items 4–9, management updates (BE, trail, T1 re-send) are computed for t
 ### 7.6 Sessions, news, holidays, rolls (shared)
 - **RTH clock:** ES/NQ value logic uses 09:30–16:00 ET. No new intraday entries 09:30–09:45 (except opening ideas), none after 15:30 unless the spec says earlier; flat by 15:55 (Cat. §2.1).
 - **Early-close days:** from `_CmeHolidays` (ES/NQ) or the M8 product calendars (`CmeEnergy` for CL, `CmeFx` for 6E; 2016–2026 table). On an early close, the flatten time becomes `RthCloseEt − 5 min` and the entry cut-off becomes `RthCloseEt − 60 min` (the same pattern as `_VW_05_LateDayVwap`). Full-close days have no session. **PROPOSED – owner to confirm** the 60-minute entry cut-off on early-close days.
-- **News:** M-EVENT `EventBlackout` blocks new entries from −2 to +10 minutes around tier-1 releases (Cat. §2.1; RG-07). Open positions keep their stop and are **not** flattened by default (`EventFlattenNow` unused) — **PROPOSED – owner to confirm**. Coverage: EV-4.6b leaves 80 GDP/PCE holes in 2016–2024. **PROPOSED – owner to confirm** `EventConfig.allowPartialCoverage = true`, so missing rows do not block 15–18% of days. The journal records `evtCoverage` per entry either way.
+- **News: entry blackout (unchanged).** M-EVENT `EventBlackout` blocks new entries from −2 to +10 minutes around tier-1 releases (Cat. §2.1; RG-07): `EventConfig.enabled = true`, `blackoutTier = EEventTier.T1`, `blackoutPreMin = 2`, `blackoutPostMin = 10`, `blackoutFlatten = false`. Coverage: EV-4.6b leaves 80 GDP/PCE holes in 2016–2024. **PROPOSED – owner to confirm** `EventConfig.allowPartialCoverage = true`, so missing rows do not block 15–18% of days. The journal records `evtCoverage` per entry either way.
+- **News: pre-release exit, `NewsExitMinutes` (owner, 2026-11-10).** Every batch-1 strategy has this native input, because they all otherwise hold open positions through scheduled news.
+  - **Type and units:** `int`, minutes before a scheduled **tier-1** (high-impact) release (`EEventTier.T1`, macro classes, the same tier as the blackout). Range 0–120 for research.
+  - **Default 0 = disabled** (**PROPOSED – owner to confirm** the default). Any value ≤ 0 disables the feature, and behaviour is then exactly the hold-through rule above.
+  - **When > 0, at each closed bar t:** `m = EventCalendar.MinutesTo(EEventTier.T1)` (minutes from this bar's close to the next tier-1 release; NaN when none or outside coverage). With `B` = the Data1 bar length in minutes, the window is **reached** when `0 < m < NewsExitMinutes + B`, i.e. the next bar would end inside the last N minutes before the release. The market exit then fills at the next bar's open, at or before release − N. On 5m bars with N = 5 and an 08:30 release, the exit is sent at the 08:25 close and fills at 08:25.
+  - **Effects when reached:**
+    - an open position is flattened with `<ID>LX`, reason `NEWS`;
+    - working entry orders are not re-sent, and no new entry is armed;
+    - entries stay blocked until the existing post-release blackout ends (release + 10 minutes);
+    - after that the spec's normal re-entry rule applies. A `NEWS` exit counts as the setup's attempt (no re-entry on the same setup instance, §7.7).
+  - **Why not `EventFlattenNow`:** M-EVENT's blackout tests whether the *current* bar overlaps the window, so its flatten fires one bar late on a closed-bar strategy. The strategy computes the rule above with `MinutesTo`. It needs `EventConfig.enabled = true`, which every batch-1 strategy already sets for the blackout.
+  - **Coverage holes:** when `MinutesTo` is NaN because a day is a coverage hole, no news exit fires. That entry is already journaled with `evtCoverage`.
+  - **Precedence:** item 4 in §7.4, after the MM force-close, stop and target, and before the session-end flatten.
+  - **Journal:** `<ID> NEWS-EXIT t() event(<kind> <release ET>) minutesTo() lead(<N>) pos() px()` when flattening, and `<ID> SKIP news-window: event(<kind> <release ET>) minutesTo()` for a blocked entry.
 - **Rolls:** `RollDetection = ERollDetection.Table` for ES/NQ (PR #116 keys the table roll by the Globex day on calendar-keyed charts; M9's calibrator is log-only and ES detection stays at the literal 8-point gap). Multi-session levels (composites, swing anchors) reset at the splice. The strategy may not enter on a roll-window day (`IsRollWindow`). Intraday strategies are flat every day, so no position crosses a splice. Swing positions (AV-01) are flattened at the close of the last session before the splice (§7.4 item 6), because the continuous series is **unadjusted** and a held position would book the roll gap as fake P&L. CL and 6E roll rules come from their M-INSTR presets; their vendor-splice equivalence is still VERIFY (M9), so CL/6E runs are labelled provisional.
 - **Overnight / weekend:** intraday strategies never hold. Only AV-01 (and AV-02's later swing arm) holds overnight and over weekends. Each has its own max hold.
 
@@ -151,10 +180,27 @@ After items 4–9, management updates (BE, trail, T1 re-send) are computed for t
 - No reversals (an opposite signal while in a position is ignored and logged).
 - Re-entry after a stop-out follows each spec. The default is **no re-entry on the same setup instance** (one attempt per setup), which matches the Example 26/27 `m_done` behaviour.
 
+### 7.8 FUTURE: dynamic position sizing by % account risk (not a batch-1 test setting)
+Ettienne, 2026-11-10: *"ultimately I'd like to use dynamic position sizing based on percentage risk of the account."*
+
+**What already exists (checked on `main` @ 47ffda2):**
+- **M-PORT supports it in Portfolio Trader.** `_PortMM.Function.CS` `PortMmConfig.sizing = EPortSizing.RiskParity` is the default. `_PortMath.Size` computes contracts = ⌊mult × `riskPerTrade` × book equity / R$⌋. The Starter profile uses `riskPerTrade` 0.005 and the hard cap `maxTradeRisk` 0.01. Here R$ is the strategy's armed risk per contract from `sizeForRisk` / `portfolioArm` (widened stop). `_PortfolioRiskManager` writes the result to `EntryContracts`.
+- **`EntryContracts` semantics (Check 7, 2026-11-10):** −1 = the strategy's coded size; 0 blocks every entry; > 0 = the MM's size. Under `EPortSizing.CodeSize` the MM returns −1 and skips, rather than scales, an entry when a throttle multiplier is below 1 (T-P13). `PortMmConfig` has no inputs; the profile is changed by a `_PortfolioRiskManager` subclass overriding `Config` (as `_PortfolioRiskManager_ScaledBook` does).
+- **On a chart,** the base `sizeForRisk(Bars, entry, stop, riskFraction, limits, widenedStop)` already returns units ≈ equity × riskFraction / (|entry − stop| × BPV).
+
+**Batch 1:**
+- Chart tests use fixed `Contracts` = 2 (owner).
+- Portfolio Trader runs use M-PORT's existing RiskParity sizing through the existing `sizeForRisk` / `portfolioArm` calls. No new sizing code is written in batch 1.
+
+**Later (needs a separate owner go-ahead):** a native input `SizingMode` (enum `ESizingMode { FixedContracts, PercentRisk }`, default FixedContracts) on chart runs.
+- `PercentRisk` uses `sizeForRisk(…, RiskFractionPct / 100, limits, widenedStop)`, with `limits.maxQty` as a hard cap.
+- The odd-lot split rule (§7.2) and `SingleLotMode` then matter whenever q is odd or 1.
+- Changing the sizing mode is a new trial. It needs R-based (not $-based) comparison across runs.
+
 ## 8. Logging contract (shared)
 
 - `TraceLevel = ETraceLevel.Journal` for research runs. That writes `MCJournal_<runId>.csv` (trades) and `MCEvents_<runId>.csv` (signals).
-- **RUN line** (base) carries every `[Input]` value. The strategy adds one Info line at the first `CalcBar`: `<ID> CFG v(<rulesVersion>) policy(<AcceptancePolicy>) maxTradePct(<x>) outlierPct(<y>) costFloor(<on|off>) floorTicks(<n>) roll(<mode>) evtCoverage(<partial|strict>) detail(<1m|tick>)`.
+- **RUN line** (base) carries every `[Input]` value. The strategy adds one Info line at the first `CalcBar`: `<ID> CFG v(<rulesVersion>) policy(<AcceptancePolicy>) maxTradePct(<x>) outlierPct(<y>) costFloor(<on|off>) floorTicks(<n>) roll(<mode>) evtCoverage(<partial|strict>) newsExitMin(<n|off>) holdoutCut(<yyyy-mm-dd>) holdoutMonths(<n>) detail(<1m|tick>)`.
 - `journalArm(<order name>, plannedEntry, initialStop(widened), firstTarget, ctx)` next to the entry `Send`, with ctx including the setup's key levels.
 - `logSignal(<tag>, dir, price, stop, ctx, taken)` for **every qualifying setup, traded or skipped**. This is the F-EVT event-study and control harness.
 - Lines, all `ETraceLevel.Journal`, prefix = catalogue ID:
@@ -162,26 +208,54 @@ After items 4–9, management updates (BE, trail, T1 re-send) are computed for t
   - `<ID> ARM side() entry() stop() widenedStop() target() qty() R$()`
   - `<ID> SKIP <reason>: <detail>` (reasons are fixed strings per spec)
   - `<ID> T1 qty() px()` · `<ID> BE stop()` · `<ID> TRAIL stop() basis()`
-  - `<ID> EXIT reason(<STOP|TARGET|T1+RUNNER|INVALIDATION|TIME|FLATBY|EARLYCLOSE|EVENT|ROLL|FLAT-BY-MM|TRAIL-THROUGH>) px() R()`
+  - `<ID> EXIT reason(<STOP|TARGET|T1+RUNNER|INVALIDATION|TIME|FLATBY|EARLYCLOSE|NEWS|ROLL|FLAT-BY-MM|TRAIL-THROUGH>) px() R()`
+  - `<ID> NEWS-EXIT …` and `<ID> SKIP news-window …` (§7.6)
 - These strings are journal text, not MC API members (§3 rule 5 concerns enums and API members).
 
 ## 9. Implementation order for Coder
 
-1. Shared: decide (with the owner) the open items in §10 that block code (cost rows, 1-lot mode, ES cost split). Read the PR #103 header template.
+1. Shared, before any strategy code:
+   - [ ] **Cost rows** (owner, 2026-11-10). In `_InstrumentProfile.Function.CS`, `InstrumentConfig.costs` defaults (currently `{ CostKey(EAssetClass.Future, "ES"), 1700 }, { CostKey(EAssetClass.Future, "MES"), 250 }`), add the rows below in the same format:
+     - `{ CostKey(EAssetClass.Future, "NQ"), 948 }`, provisional, accepted
+     - `{ CostKey(EAssetClass.Future, "CL"), 1472 }`, confirmed
+     - `{ CostKey(EAssetClass.Future, "6E"), 1117 }`, provisional, accepted
+
+     The key format is `<Class>:<ROOT>`, e.g. `Future:NQ`, validated by `ValidCostKey`. Then:
+     - Update the single `costSource` string to name the 2026-11-10 decision and mark NQ/6E as provisional (e.g. `"Ettienne 2026-10-31 (ES/MES); 2026-11-10 NQ 948 prov., CL 1472, 6E 1117 prov."`).
+     - Extend the M7 off-MC tests with the floors NQ 19, CL 15 and 6E 18 ticks.
+     - Note that the Canon/config hash changes. This goes in its own small PR on a feature branch. It is an engine-default change, so no strategy edits are needed.
+   - [ ] Read the PR #103 header template.
 2. PS-02 first (simplest profile host), then PS-01 reusing the same break detector (factor the break/acceptance state machine into a private nested class inside each file, or into one sandbox helper if Coder prefers; no new root engine without owner sign-off).
 3. VW-01, AV-02, AV-01.
-4. OF-01 only after the tick-corpus question is answered.
+4. OF-01 after the @ES/@NQ bid/ask corpus (from 2024-10-28 to the cut) is verified in QuoteManager (OF-01 §10).
 5. For each: off-MC unit tests where logic is MC-free (state machine, split rule, precedence), native compile on the MiniPC via one temporary `Compile Include`, chart run (smoke, then development), journal diff of two identical runs, then Portfolio Trader one-row reconciliation.
 
 ## 10. Open questions for Ettienne (batch-wide)
 
-1. ES round-trip convention: keep $17.00 (one total tick), or $29.50 (one tick per side)? And how to split it into MC Commission and Slippage.
-2. Add the provisional NQ/MNQ/6E costs (and confirmed CL) to `InstrumentConfig.costs`, so the M7 cost floor works on those roots?
-3. Research size: 2 ES/NQ contracts on charts (so scale-outs are real), or micros?
-4. Odd-lot split (runner gets the extra contract) and 1-contract default `ExitAtT1`.
-5. Top-1% trim rounding: K = max(1, ⌈1% × winning trades⌉)?
-6. Entry cut-off 60 min before an early close, flatten 5 min before.
-7. News: hold open positions through tier-1 releases (no event flatten)? And allow partial event-calendar coverage?
-8. AV-01: predeclare `big-winner-trend` before its first run?
-9. OF-01: how to test under the ≤ 2024 rule when only about 125 tick sessions exist before 2025 (see that spec).
-10. Older @ES/@NQ minute history (2016–2022): is it downloaded and flushed? Until then everything is a smoke test.
+Resolved 2026-11-10 19:44 ET and removed: ES $17.00 convention; NQ/CL/6E cost rows; 2-contract test size; single contract exits everything at T1; AV-01 `big-winner-trend`; news exit as an integer-minutes parameter; OF-01 test window (holdout re-scope).
+
+1. **Holdout re-scope (§5.1):** does the rolling holdout apply to **all strategies** or only to **order-flow/tick strategies**? And is it **18 or 12 months**? The specs default to 18 months, OF-01 only. Note that @ES bid/ask starts 2024-10-28, so 18 months leaves OF-01 about 6 months of order-flow data (likely too few trades for a verdict), and 12 months leaves about 12 months. Every other strategy keeps the ≤ 2024 cut until you confirm.
+2. `NewsExitMinutes` default 0 (disabled) for all six, tier-1 releases only; and `EventConfig.allowPartialCoverage = true`?
+3. Top-1% trim rounding: K = max(1, ⌈1% × winning trades⌉)?
+4. Entry cut-off 60 min before an early close, flatten 5 min before.
+5. Odd-lot split (runner gets the odd contract) for MM-sized or future %-risk positions.
+6. Older @ES/@NQ minute history (2016–2022): is it downloaded and flushed? Until then everything is a smoke test.
+
+## 11. PROPOSED rules to check against the books and videos (separate review)
+
+Not done in this pass: no browser or Kindle reader was used. Each item names the source to open, the topic, and the rule to confirm or replace. Page and location references are from the analyst's Kindle notes in `kindle-notes/`, where known.
+
+| # | Spec rule (PROPOSED) | Source to check | What to look for |
+|---|---|---|---|
+| 1 | PS-02 stop 0.25 W back inside; half at 1.0 W, runner trailed under confirmed 5m HLs; no break-even | Keller Book 4 §8.4 (rules) and §2.4 (break travel); Keller Book 1 card 3.3 ("escape is not entry; accept or retest") | Does Keller say how the runner is managed after one width (trail basis, BE)? Does he give a stop rule other than "back inside"? |
+| 2 | PS-02/PS-01 acceptance = 2 closes beyond edge + δ (δ = max(2 ticks, 0.10 × ATR5)) | Keller Book 1 Part III (acceptance/retest cards); Dale *Volume Profile* Setup #2 Trend (notes pp.~134–160) | A defined acceptance count or buffer |
+| 3 | PS-01 buy-stop life (to 14:30 vs 2 bars), BE at +1 R with 0 offset, invalidation on a 5m close back below VAH − δ | Keller Book 1 card 3.3 (retest entry); Trader Oxygen video YV-01 (https://youtu.be/jmX_ReJxFm8, partial at ≈1:1.5, final 1:2.5; timestamps in Cat. YV-01) | Pullback entry trigger life, BE timing, failed-retest exit |
+| 4 | VW-01 touch-episode limit 6 bars; stop at the farther of VWAP − 1σ and HL − 1 tick; half at the frozen session high, runner trailed at VWAP − 2 ticks; sticky trend-day classification at 10:30 | Keller Book 1 Part IV, VWAP setup 1 (first/second VWAP touch on a trend day; "stop modestly beyond"; "target new extremes") | Whether a second touch is allowed; exact stop distance; whether the target is the high or a trail |
+| 5 | AV-02 touch zone [AVWAP − 0.25σ, + 0.5σ]; anchor-low invalidation; 15:00 ET entry cut-off; 5-session anchor expiry | Shannon, *Maximum Trading Gains with Anchored VWAP* (impulse/swing-low anchors, "higher low at the AVWAP") | Shannon's own invalidation (close below the anchor low?), entry trigger, target |
+| 6 | AV-01: reclaim δ60 = max(2 ticks, 0.10 × ATR14(60m)); ≥ 10 bars below first; 60m-close trail on the new impulse AVWAP; max hold 20 sessions; long only | Shannon (swing-high AVWAP reclaim, "stop below the most recent higher low", trailing on a new anchor) | Reclaim confirmation rule, how long a position is held, when the anchor is changed |
+| 7 | OF-01 "move away ≥ 1 ATR5" vs Dale's "≥ 1–2 whole footprints (30 min)"; first-retest definition; zone = lowest stacked run | Dale *Order Flow: Trading Setups*, Setup #4 Stacked Imbalances p.76 and examples pp.80–82 | Which run is the zone when there are several; what counts as the retest (touch vs trade-through); 5m vs 30m footprints |
+| 8 | OF-01 stop zone lo − 1 tick, skip if > 0.20 × ATR20d; 1 R target, second half to the excursion high; no trail | Dale, "Stop Loss with Order Flow" (pp.131–137: "stop within 10–20% of daily ATR, else skip"); "Take Profit – Trailing" p.129 (trail only while imbalances continue); Keller Book 1 card 6.3 (stop through the origin; targets: stack extreme, then the next reference) | Whether 10% or 20% applies; whether Dale's trail should be the runner rule |
+| 9 | OF-01 HL arm ("renewed same-side aggression") and the same-session expiry | Keller Book 1 card 6.3; Trader Oxygen YV-01 failed-seller 1m trigger (Cat. YV-01 / OF-09) | A concrete aggression trigger to replace the price-only HL |
+| 10 | OF-01 70th-percentile volume floor and the minimum flow quality | Keller Book 1 card 6.3 ("qualified stack"); Dale p.43 (imbalance definitions) and p.76 (software settings: trigger 300%, cluster size 3) | Whether a volume floor is defined at all, and how |
+| 11 | `NewsExitMinutes` default 0 and the −2/+10 entry blackout | No book source found in the notes. Check the video write-ups (catalogue YV-01…YV-09 section and `specs/video-ideas-2026-11-08-additions.md`; the 2026-11-01 write-up is referenced by the catalogue but not in `specs/` on this branch) for any presenter rule on exiting before news | A stated lead time (e.g. 5 or 15 minutes) |
+| 12 | Early-close entry cut-off 60 min / flatten 5 min; odd-lot split | No source in the notes; owner preference | — |

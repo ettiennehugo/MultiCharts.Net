@@ -1,6 +1,6 @@
 # PS-01 · Accepted balance break → first-pullback higher low (ABB-HL) — implementation spec
 
-**Rev 1.0 (draft), 10 Nov 2026 (EST).** Batch 1, build order #2. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Sibling: [01-ps-02-balance-break-close.md](01-ps-02-balance-break-close.md) (*PS-02 spec*). Catalogue: § PS-01. Target file: `sandbox/_PS_01_BalanceBreakPullback.Strategy.CS`, class `_PS_01_BalanceBreakPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
+**Rev 1.1 (draft), 10 Nov 2026 (EST)** — owner answers of 19:44 ET applied (costs, 2 contracts, news exit, holdout scope; Prog rev 1.1). Batch 1, build order #2. Shared rules: [00-programme-overview.md](00-programme-overview.md) (*Prog §x*). Sibling: [01-ps-02-balance-break-close.md](01-ps-02-balance-break-close.md) (*PS-02 spec*). Catalogue: § PS-01. Target file: `sandbox/_PS_01_BalanceBreakPullback.Strategy.CS`, class `_PS_01_BalanceBreakPullback`. Stage: sandbox. Acceptance policy: `catalogue-default`.
 
 ## 1. Purpose and edge (with sources)
 - **Mechanism.** Same trapped participants as PS-02. Waiting for the first pullback that holds above the old edge and prints a higher low lets the market show that the old balance edge has become support (Cat. PS-01). Keller B1 card 3.3: "escape is not entry; accept or retest." Keller B4 §8.3: "every behaviour that performs well waits."
@@ -33,13 +33,14 @@ As PS-02 §3, minus the entropy veto (PS-01 has none) and M-DAILY. Plus PRICEACT
 | **Invalidation** | Hard invalidation: a closed 5m bar with close < comp.vah − δ → `PS01LX` market next bar (the acceptance failed). Applies from the fill. | Cat. PS-01; EX-10 |
 | **Adds** | None. | Prog §7.7 |
 | **Re-entry after a stop** | None: one attempt per day per instrument. | Example 26 |
-| **News / holiday / roll** | As PS-02 §5: entries blocked in `EventBlackout`; hold through news with the stop (**PROPOSED**); early-close cut-off (**PROPOSED**); no entry on roll-window days; composite rebuilt after a splice. | Prog §7.6 |
+| **News** | Entry blackout: no entry while `EventBlackout` (−2/+10 min, tier-1). **News exit:** `NewsExitMinutes` (int minutes; default 0 = off, **PROPOSED – owner to confirm** the default). When > 0, at the last bar close before release − N (rule `0 < MinutesTo(EEventTier.T1) < N + bar minutes`, Prog §7.6) the strategy flattens with `PS01LX`, reason `NEWS`, stops arming entries until release + 10 min, and the setup's attempt is used. When ≤ 0, an open trade holds through the release with its stop. | Owner 2026-11-10; Cat. §2.1; Prog §7.6 | 
+| **Holiday / roll** | As PS-02 §5: early-close cut-off (**PROPOSED**); no entry on roll-window days; composite rebuilt after a splice. A working buy-stop is cancelled (not re-sent) once the news window is reached. | Prog §7.6 |
 | **Orders and fills** | Entry buy-stop (fills at the trigger + MC slippage, or at the open if the bar gaps through). Stop `PS01LS`, target limit `PS01LT` (trade-through), market exits `PS01LX`. Re-sent every bar. Magnifier 1m; stop-first on unresolved bars. | Prog §4, §7.1 |
 | **MM interaction** | As PS-02 §5. The entry is a pending stop, so `sizeForRisk`/`portfolioArm` is called on **every bar** the stop is pending (manual §5.23: the base clears `pm.side` on bars where you did not arm). | Prog §7.5 |
-| **Same-bar precedence** | MM force-close → stop → target → FlatBy/early close → invalidation (close-based) → BE update for next bar. If the invalidation close and the BE trigger happen on one bar, the invalidation exit wins. | Prog §7.4 |
+| **Same-bar precedence** | MM force-close → stop → target → news exit → FlatBy/early close → invalidation (close-based) → BE update for next bar. If the invalidation close and the BE trigger happen on one bar, the invalidation exit wins. | Prog §7.4 |
 
 ## 6. Sizing, risk and M-PORT
-As PS-02 §6 (`PortfolioFamily = "PS"`). Default `Contracts` = 1 is enough here because there is no partial. **PROPOSED – owner to confirm** (use 2 if PS-01 and PS-02 must share identical size for the comparison; R-based comparison makes size irrelevant, so 1 is proposed).
+As PS-02 §6 (`PortfolioFamily = "PS"`). `Contracts` = 2 (owner, 2026-11-10: test with 2 contracts). PS-01 has a single target, so both contracts exit together at the target, stop or invalidation. Future %-risk sizing: Prog §7.8.
 
 ## 7. Session, news, holiday and roll handling
 As PS-02 §7 and Prog §7.6.
@@ -54,7 +55,7 @@ As PS-02 §7 and Prog §7.6.
 | `TargetW` | double | 1.0 | × W | fixed | Fixed | BalanceWidth distance |
 | `HoldW` | double | 0.25 | × W | fixed | Fixed | Depth the pullback may reach below the edge |
 | `BreakEvenR` | double | 1.0 | R | fixed (0 = off is a new trial) | Fixed | BE trigger |
-| `BalanceOverlapPct`, `DeltaMinTicks`, `EntryStartHHMM` 945, `EntryEndHHMM` 1430, `FlatHHMM` 1555, `Contracts` 1, `RiskFractionPct` 0.5, `MaxRiskPct` 1.0, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct` 10, `OutlierRemovalPct` 1 | as PS-02 §8 | | | | | |
+| `BalanceOverlapPct`, `DeltaMinTicks`, `EntryStartHHMM` 945, `EntryEndHHMM` 1430, `FlatHHMM` 1555, `Contracts` 2, `NewsExitMinutes` 0, `RiskFractionPct` 0.5, `MaxRiskPct` 1.0, `ControlArm`, `AcceptancePolicy`, `MaxSingleTradeNetProfitPct` 10, `OutlierRemovalPct` 1 | as PS-02 §8 | | | | | |
 
 Registered sweep = 2 × 3 × 3 = 18 configs (Cat. PS-01). Primary frozen: n = 3, acceptance 2, BalanceWidth.
 
@@ -76,6 +77,7 @@ Prog §6 + the Cat. PS-01 kill. `catalogue-default`.
 - [ ] Stop = HL − 1 tick, floored; BE at +1 R; invalidation close; FlatBy.
 - [ ] `TargetMode` branches: BalanceWidth limit; NextHvn = first composite HVN above entry (F-HVN on the composite) − 2 ticks, skip if < 0.75 R away (EX-01 rule); TrailEx05.
 - [ ] Off-MC tests: hold-zone cancel, trigger replacement, BE, invalidation precedence.
+- [ ] `NewsExitMinutes` input and rule (Prog §7.6; PS-02 §12), with off-MC tests for the window edge (`MinutesTo` = N + B is not reached, N + B − ε is).
 - [ ] Native compile and smoke run as PS-02.
 
 ## 13. Header mapping
@@ -84,7 +86,6 @@ Trigger: after a 2-close acceptance above the balanced composite (V ≥ +1), the
 ## 14. Open questions for Ettienne
 1. Buy-stop life: valid until 14:30 ET with newer-HL replacement (Example 26), or a fixed 2-bar expiry (final-synthesis)?
 2. Break-even offset 0 ticks.
-3. `Contracts` 1 for PS-01 (no partial).
 4. Prog §10 batch-wide items.
 
 ## 15. Sources
