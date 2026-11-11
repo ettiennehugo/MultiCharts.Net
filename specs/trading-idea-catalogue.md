@@ -107,7 +107,7 @@ The merge audit found that v1 had silently replaced Analyst 2's windows with its
 ### 2.1 Sessions, timing, costs (from final-synthesis §4.0)
 
 - **Value** is computed from RTH 09:30–16:00 ET (ES/NQ/ZN). **Levels** may also use full-session (ETH) extremes. CL uses the 09:00–14:30 pit session and GC 08:20–13:30 when "pit value" is specified.
-- **Intraday ideas:** no entries 09:30–09:45 unless the idea is an opening idea; no new entries after 15:30; flat by 15:55; news blackout −2/+10 min around tier-1 releases; one live position per instrument; ES and NQ count as **one** correlated position.
+- **Intraday ideas:** no entries 09:30–09:45 unless the idea is an opening idea (**Owner-approved 2026-11-10 22:17 ET:** *"we can keep Keller's advice for now but lets keep it as an option if it makes sense for the strategy to do"*. The default stays blocked; opening ideas such as YV-11 and YV-12 offer `EOpenWindow { Block0930to0945, From0931 }`, default `Block0930to0945`; see `specs/strategies/00-programme-overview.md` §7.6a); no new entries after 15:30; flat by 15:55; news blackout −2/+10 min around tier-1 releases; one live position per instrument; ES and NQ count as **one** correlated position.
 - **Fills (simulated on dxFeed data; Bar Magnifier 1-tick inside W-T, 1-minute before it; label which):** stops and market orders slip 1 tick (2 ticks at the open and around news); limits fill only on trade-through; stop-first when a bar touches both stop and target; a 1% tail of 4 R losses is injected; a 2× cost stress test is mandatory.
 - **Cost floor:** the minimum stop that keeps costs ≤ 0.10 R is MES 20 ticks, MNQ 35, ES 14, NQ 19, CL 15, GC 16, ZN 13 (IBKR round trip + 1 tick: **ES $17 and MES $2.50 per contract, confirmed by Ettienne 2026-11-01** (v2.6a; MES = $0.25 IBKR commission + $0.35 CME exchange fee + ≈$0.02 regulatory fee per side, plus one $1.25 tick of slippage = 2 MES ticks; ES $17 = 1.36 ES ticks; previously MES $2.47, ES $16.98); MNQ $1.72, NQ $9.48, CL $14.72, GC $15.02, ZN $18.95 remain the R6 figures, unconfirmed). The MES and ES floors are unchanged by the confirmed figures ($2.50 / (0.10 × $1.25) = 20 ticks; $17 / (0.10 × $12.50) = 13.6 → 14 ticks). **Every idea's stop distance is max(structural stop, cost floor):** a structural stop shorter than the floor is **widened** to the floor. The trade is then **skipped (and logged) only if that widened stop breaches the per-trade risk budget** ≤ 1% of equity (decided 2026-10-23; PF-04's 0.5% is not the default for this rule); position size is never shrunk to fit a wider stop.
 - **Units:** ATR5 = ATR(14) on 5-minute bars; ATR20d = 20-day daily ATR; δ (proximity) = max(2 ticks, 0.10 × ATR5).
@@ -913,6 +913,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** K-SH on the delta condition; the sweep fade **S7 canary** (expected ≈ 0) without the shape filter. **Kill:** no lift over the canary.
 - **See also (v2.7):** SP-09 is another sweep-fade (clock window + FVG). The Telonics 49.9% vs 50.0% prior cited here applies to it. This entry's rules are unchanged.
+- **Cited variant (2026-11-10, SMB Market Memory Model setup 4 "Hitchhiker Scalp", https://youtu.be/y_ujkIcs6so):** level = the **prior RTH high**. Context: the RTH open is above it and holds for ≥ 30 min. After 10:00, a dip below the level and VWAP, then a wick candle and a close back above the level → long; stop at the wick low − 1 tick, floored; target unstated (1.5 R or the session high, PROPOSED). No P-shape or delta filter. Details in `specs/video-ideas-2026-11-10-additions.md`. The Telonics sweep-fade null applies.
 
 #### PS-19 · Poor high/low run-through (not repair-as-magnet)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -1003,6 +1004,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Needs:** F-SESS (ETH high/low), F-PROF.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** K-FL (fake ON extremes), plus the same rule at the prior RTH high (Keller says the ON extreme should be better). **Kill:** ON ≤ RTH-extreme version.
+- **Cited variant (2026-11-10, SMB Market Memory Model setup 3 "Breakout Pullback", https://youtu.be/y_ujkIcs6so):** level = the **prior RTH high/low** instead of the ON extreme. This entry's Test already runs the prior-RTH-high rule as a comparison; the video adds the retest entry. After acceptance beyond it, the entry is on the pullback to the level with a wick candle (buy-stop at the wick high + 1 tick, stop at the wick low − 1 tick, floored). Targets unstated, so the b sweep applies. Proposed typed inputs `ELevel { OvernightExtreme, PriorRthExtreme }`, `EEntry { CloseBeyond, HigherLow, WickRetest }`. Details in `specs/video-ideas-2026-11-10-additions.md`. The primary is unchanged.
 
 #### PS-25 (= KD-01) · Accept-beyond-rail continuation on detrended rails (rails as targets) — Keller B5 primary
 - **Implementation status (v2.4):** **Spec'd** — `specs/m-dvp-spec.md` §10.4 consumer row; engine on main ([#32](https://github.com/ettiennehugo/MultiCharts.Net/pull/32), [#36](https://github.com/ettiennehugo/MultiCharts.Net/pull/36), [#39](https://github.com/ettiennehugo/MultiCharts.Net/pull/39), [#40](https://github.com/ettiennehugo/MultiCharts.Net/pull/40), [#41](https://github.com/ettiennehugo/MultiCharts.Net/pull/41), [#58](https://github.com/ettiennehugo/MultiCharts.Net/pull/58)); consumer not coded; waits on PR-D9.
@@ -1840,6 +1842,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
   - https://www.youtube.com/watch?v=83d144f2e0k
   - YV-07 (§3.19); `_FvgDetector.Function.CS` (VP-5); M-SWING `equalFactor` / `isEqual` (`_PriceActionEngine.Function.CS`)
   - Telonics sweep-fade null, as cited on PS-18 (49.9% vs 50.0%)
+- **Video re-check (2026-11-10):** the video was re-checked against the 2026-11-10 viewing notes, and they match this entry. Proposed cited variant `public enum EDrawMode { EqualPair, SessionExtreme }` (default `EqualPair`): the video uses the London low itself as the target (London hours not stated in the video). **Data / holdout flag:** with tests capped at 31 Dec 2024, Arm S (15s, trade ticks) has at most about 125 NQ / 45 ES sessions. It is therefore not testable before the holdout. Arm M (1m) is the proxy. Verify the first trade-tick date read-only in QuoteManager first. Details in `specs/video-ideas-2026-11-10-additions.md`.
 
 ### 3.7 Family TS: Time-of-day and session effects (7)
 
@@ -1934,6 +1937,7 @@ These four Analyst 2 entries are **infrastructure and gates, not trade ideas**. 
 - **Evidence:** **D** · Lit: Book.
 - **Why include it:** The 15-minute open blackout is applied everywhere. It should be tested once rather than assumed.
 - **Rules:** the blackout ∈ {5, 15, 30} min as a layer on PS-07, PS-24, MT-01.
+- **Owner note (2026-11-10 22:06 ET):** Ettienne asked why the open is blocked and asked for a variant that starts at 09:31. The §2.1 block covers **09:30–09:45** (from final-synthesis §4.0; reason: opening noise, Keller B2 15.7 "do nothing 0–5 min", plus the 2-tick opening slippage assumption). Entries that trade the open (YV-11, YV-12 in `specs/video-ideas-2026-11-10-additions.md`) now expose `public enum EOpenWindow { Block0930to0945, From0931 }`, default `Block0930to0945`. This entry's {5, 15, 30} test should add a 1-minute arm (09:31) when it is run.
 - **Needs:** F-TM.
 - **Readiness (as of merge):** Buildable now on the merged base.
 - **Test:** layer ablation. **Kill:** n/a; choose the value that does not hurt and keep it fixed across all ideas (pre-registered).
@@ -2147,6 +2151,8 @@ Regime filters never trade. Each is a **layer** tested on host events through th
 - **Test · Kill:** ablation inside PS-25 and on host H1 (PS-01); accepted only if it helps both. Also pre-register the book's missing experiment on ES: refit every window at degree 1, 2, 3 and compare forward coverage *within the same windows*.
 
 ### 3.10 Family EX: Exit and management modules (13)
+
+> **General note (2026-11-10, SMB Capital, *Trading Became Easy After I did These 4 Things*, https://youtu.be/Yl8-N3DznAo; process video, no strategy added):** move the stop only when a new edge appears (a new confirmed HL, initiative print or accepted level), not to break-even just because the trade is working. Where a host has a plain break-even rule, a structure-only / `NoBreakEven` arm is the natural ablation. This is a note; no registered exit changes.
 
 Exits are selected **inside** each slot through the `ExitModule` input. **Data window:** each exit inherits its host's window (W-M), except the flow-based parts of EX-11 and EX-12, which are W-T only. The **E(b) sweep (EX-08) runs on every surviving idea** and tells you whether the edge is fast-decaying (best at b ≤ 1, scale-outs help) or persistent (best with trails).
 
@@ -3015,6 +3021,7 @@ Source: `/workspace/trading-ideas-analyst2.md` **Rev 6** (79 ideas A2-01…A2-79
   - **Test window:** M (ES 2017–2026 is fully out of the book's sample, since the book ends in 2011). NQ, YM and RTY serve as cross-market OOS (M10).
   - **Tests:** (1) Exact replication at the core, gross, then net (M4). (2) Arm decomposition SR vs BO vs Both. (3) The surface across all 18 combinations: % profitable, mean − 1 SD (M6). (4) Random-entry control: same clock, same holding period, random side.
   - **Kill:** net $/contract at the core ≤ 0 in validation; **or** fewer than 70% of the 18 combinations profitable net; **or** NQ loses net while ES wins (M10); **or** generic criteria.
+- **Cited variant (2026-11-10, SMB Market Memory Model setup 5 "Backside Trade", https://youtu.be/y_ujkIcs6so):** context = ≥ 2 failed tests of the morning high before 12:00, then a tight 12:00–13:30 range. Sell-stop under the range low; stop at the range high (unstated, PROPOSED); T1 = session VWAP, runner for the "leak below". Details in `specs/video-ideas-2026-11-10-additions.md`.
 
 #### A2-50 · Same-slot relative-volume opening regime gate (module)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -4046,6 +4053,7 @@ Source: `/workspace/trading-ideas-dale-video.md` (transcripts of 63 strategy vid
   - Replicate his EUR/USD number on 6E in W-M as a pipeline sanity check, then ES/NQ.
   - **Kill:** < break-even net at ≥ 150 events, or the gate gives no lift over the ungated version.
 - **Books:** **Agree:** a trend filter on pullbacks (RG-06/VW-01 logic) and the cheapest to test. **Priority 4.**
+- **See also (2026-11-10):** **YV-11** (Malyarovich 9 EMA / 20 SMA zone pullback with a slope gate and an over-extension veto), a candidate in `specs/video-ideas-2026-11-10-additions.md`. It is related but not a duplicate: two-MA zone, wick/doji trigger, daily-200-SMA ceiling. Run both on the same days. This entry's rules are unchanged.
 
 #### DV-16 · Order-flow confirmation at a pre-defined level (layer)
 - **Implementation status (v2.4):** **Not started** — catalogue entry only; no entry-specific code or build spec.
@@ -4556,6 +4564,8 @@ Source: R7 `volatility-leveraged-etf-research.md` §4. Daily-reset drag: L_t/L_0
 
 ### 3.19 Family YV: ideas from YouTube videos, 2026-11-01 (YV-01…YV-10; new v2.6)
 
+> **2026-11-10 candidates (not yet merged; counts unchanged):** **YV-11** (Malyarovich 9 EMA / 20 SMA zone pullback) and **YV-12** (SMB prior-day high/low range rejection) are in `specs/video-ideas-2026-11-10-additions.md`, with cited variant notes on PS-24, PS-18, A2-49 and SP-09.
+
 Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-11-01/<id>.txt`, frames in `video-ideas-2026-11-01/frames/<id>/`; full write-up `specs/video-ideas-2026-11-01-additions.md`). All rules and numbers are as stated by the presenters (timestamps [mm:ss]); every statistic is a **presenter claim**, untested (grade **E**). Anything marked *catalogue proposal* or *catalogue assumption* is the drafter's, not the video's. Ideas already covered (Tom Vorwald VP video: PS-03/A2-42, PS-16/PS-22, PS-01/DV-02, A2-43, PS-02/PS-15; GEX = A2-36; weekly POC magnet = MT-02/EX-02; Turtle DD = A2-71) got no new entry — see Appendix A.8. Data constraints applied: @ES bid/ask from 2024-10-28 only; dxFeed 1m from 2016-12-29, ticks from ≈2024-10-27; VX/VIX do not resolve on dxFeed; costs ES $17 / MES $2.50 per round trip (v2.6a), 1% risk, 14-tick stop floor.
 
 #### YV-01 · 30m balance/VA break → 5m big-trade confirmation → 1m failed-seller pullback entry (Trader Oxygen)
@@ -4693,6 +4703,7 @@ Source: 8 YouTube videos reviewed 2026-11-01 (transcripts in `video-ideas-2026-1
 - **What to look for (frames, `video-ideas-2026-11-01/frames/`):** TradingView-style light chart, ES 5m: 9:30 line, red 'FVG' box, green 'Macro' box, and a dark-red 'London Session Lows' line below (01_0255). · 5m price returns up into the red FVG (02_0635). · 15s: price pierces the prior highs into the 5m FVG, then a small 'FVG' label below the wick (03_0720); circled entry at the 15s FVG with a magnet icon marking the target at the equal lows (04_0835). · Measure tool from entry to the lows shows ≈9.75 pts (05_0850) — **adds to speech** ('10 points'). Frames: `83d144f2e0k/01_0255_ES-5m-0930-drop-London-low-FVG-macro.jpg`, `83d144f2e0k/04_0835_ES-15s-short-entry-at-FVG.jpg`, `83d144f2e0k/05_0850_ES-15s-target-hit-measure-9.75pts.jpg`.
 - **Test:** vs the same entry outside macro windows (time placebo) and vs a 5m-FVG-only entry. **Kill:** no lift over the outside-window placebo.
 - **Buildable specification (v2.7):** SP-09 (1m/5m arm on W-M, 15s arm on W-T). This extract is unchanged.
+- **See also (2026-11-10):** the video was re-checked; there is no new ID. Notes and the proposed `EDrawMode` variant are on SP-09 and in `specs/video-ideas-2026-11-10-additions.md`.
 
 #### YV-08 · Daily sweep strategy: 1h SFP of a prior-day/Asia/pre-NY swing → 5m FVG entry, candle-2 stop, 1:3 or opposing liquidity
 - **Implementation status (v2.6):** **Not started** — catalogue entry only; no entry-specific code or build spec.
