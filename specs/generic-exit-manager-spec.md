@@ -1,13 +1,13 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.7 PROPOSAL, 2026-11-11 (ET); rev 0.7 = owner answers 18:18–18:21 ET to Q4, Q5, Q6, Q8, Q9 and the final-target / trail-start unit question (§4.1, §4.2, §4.4, §4.9, §6, §8, §9); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
-status: "PROPOSAL, docs only, no code. Every owner question is answered (09:16, 09:33, 09:34, 09:52 and 18:18–18:21 ET). Still open: the E1–E8 MiniPC checks (§7) and the PROPOSED rule for timeframes not in the ControlExitBars list (§4.9). Not yet approved for implementation as a whole. Anything else not quoted from the owner is PROPOSED."
+rev: "0.8 PROPOSAL, 2026-11-11 (ET); rev 0.8 = owner approval 18:54 ET of the §4.9 other-timeframe rule and the ETrailStart.AtTrigger rename (§4.4, §4.9, §6, §9); rev 0.7 = owner answers 18:18–18:21 ET to Q4, Q5, Q6, Q8, Q9 and the final-target / trail-start unit question (§4.1, §4.2, §4.4, §4.9, §6, §8, §9); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
+status: "PROPOSAL, docs only, no code. Every owner question is answered (09:16, 09:33, 09:34, 09:52, 18:18–18:21 and 18:54 ET). Still open: only the E1–E8 MiniPC checks (§7). Not yet approved for implementation as a whole. Anything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.7 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.8 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
@@ -22,6 +22,10 @@ holdout: "No price data on or after 2025-01-01 is viewed or reported by anything
 - Q8 → §1.1, §8: the legacy exit studies are marked superseded once GX exists; nothing is deleted.
 - Q9 → §8: GX-5 is a planned milestone: batch 1 moves onto the engine after the E-checks pass, with a per-strategy equivalence re-check.
 - Units → §4.2, §4.4: the final target and the trail start get `ETriggerUnit` Inputs; defaults keep today's behaviour.
+
+**Owner answer, 2026-11-11 18:54 ET (verbatim):** *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*.
+- → §4.9: the other-timeframe rule (nearest listed timeframe at or below) is approved.
+- → §4.4: the `ETrailStart.AtR` → `AtTrigger` rename is approved.
 
 ## 0. Request and scope
 
@@ -217,7 +221,7 @@ public enum EBreakEven { AfterT1, AtTrigger, Off }
 ### 4.4 Trailing stop (runner)
 ```csharp
 public enum ETrailMode { Chandelier, Atr, BarExtreme, Ema, RollLevel, None }
-public enum ETrailStart { AfterT1, AtTrigger, Immediately }   // rev 0.7: AtR renamed AtTrigger (unit now an Input)
+public enum ETrailStart { AfterT1, AtTrigger, Immediately }   // rev 0.7: AtR renamed AtTrigger (unit now an Input); rename owner-approved 18:54 ET
 ```
 **Both directions** (**Owner-approved 2026-11-11 09:34 ET** (Ettienne: *"I see in the question above you asked "Runner: trails 3 × ATR(22) below the highest high, and only ever moves up."  note that we want that to trail also down for short moves."*)). The runner trails **below the highest high for longs** and **above the lowest low for shorts**. A long trail only ever moves **up**; a short trail only ever moves **down**.
 
@@ -231,7 +235,7 @@ public enum ETrailStart { AfterT1, AtTrigger, Immediately }   // rev 0.7: AtR re
 | `None` | no trail | no trail | — |
 
 - "Since entry" means from the entry fill bar through the last **closed** bar; ATR and EMA are on Data1 closed bars.
-- `TrailStart` default `AfterT1`. `AtTrigger` starts the trail on the first **closed** bar at or beyond d from the initial entry, with d from `TrailStartUnit` (`ETriggerUnit`, default `RMultiple`) and `TrailStartValue` (double, default 1.0) (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Yes, the final target and trail start both get ETriggerUnit"*; replaces rev 0.6's `TrailStartR`, same default behaviour = +1R): **long** close ≥ entry + d; **short** close ≤ entry − d. `Immediately` starts at the fill.
+- `TrailStart` default `AfterT1`. `AtTrigger` starts the trail on the first **closed** bar at or beyond d from the initial entry, with d from `TrailStartUnit` (`ETriggerUnit`, default `RMultiple`) and `TrailStartValue` (double, default 1.0) (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Yes, the final target and trail start both get ETriggerUnit"*; replaces rev 0.6's `TrailStartR`, same default behaviour = +1R): **long** close ≥ entry + d; **short** close ≤ entry − d. `Immediately` starts at the fill. **Rename `AtR` → `AtTrigger`:** **Owner-approved 2026-11-11 18:54 ET**, Ettienne: *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*.
 - **One-way, both sides** (§7.3). The candidate is computed at the bar close and sent from the next bar.
   - **Long:** `newStop = max(oldStop, candidate)`, capped at one tick **below** the last close.
   - **Short:** `newStop = min(oldStop, candidate)`, capped at one tick **above** the last close.
@@ -279,7 +283,7 @@ public enum EExitControl { None, FixedBars, RandomBars }
 | `ControlExitBarsD1` | daily | 5 | 1 week |
 
   Individual int Inputs, not an enum or table, because each is a count the owner may override separately and plain int Inputs are this spec's convention for counts (`TrailBars`, `StopSwingBars`, `TimeStopBars`), and typed enums are kept for named choices.
-- **Other timeframes (PROPOSED – owner to confirm):** N = the value for the **nearest listed timeframe at or below** the chart's (Data1) bar size: 2–4 min ⇒ the 1m value; 10 min ⇒ 5m; 30 min ⇒ 15m; 120/240 min ⇒ 60m; weekly/monthly ⇒ daily. Below 1 minute (seconds, ticks) and non-time bars (volume, range, Renko) have no listed timeframe at or below: they use the 1m value and log one Warning `<ID> Warning: CONTROL-BARS no listed timeframe at or below <resolution>: using ControlExitBarsM1`. The timeframe is read once at `StartCalc` from `Bars.Info.Resolution` (type and size; E1 records the values). The resolved N is journalled once: `<ID> Info: CONTROL-BARS tf(<resolution>) mapped(<M1|M5|M15|H1|D1>) bars(<N>)`.
+- **Other timeframes** (**Owner-approved 2026-11-11 18:54 ET**, Ettienne: *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*): N = the value for the **nearest listed timeframe at or below** the chart's (Data1) bar size: 2–4 min ⇒ the 1m value; 10 min ⇒ 5m; 30 min ⇒ 15m; 120/240 min ⇒ 60m; weekly/monthly ⇒ daily. Below 1 minute (seconds, ticks) and non-time bars (volume, range, Renko) have no listed timeframe at or below: they use the 1m value and log one Warning `<ID> Warning: CONTROL-BARS no listed timeframe at or below <resolution>: using ControlExitBarsM1`. The timeframe is read once at `StartCalc` from `Bars.Info.Resolution` (type and size; E1 records the values). The resolved N is journalled once: `<ID> Info: CONTROL-BARS tf(<resolution>) mapped(<M1|M5|M15|H1|D1>) bars(<N>)`.
 - **Every entry-only idea runs a control arm** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q4 yes, but set ControlExitBars per timeframe"*): besides the baseline package, each entry-only idea is run once with `ExitControl = FixedBars` (N as above), and reports CS-8 forward MFE/MAE for the same signals. That gives three looks at the same entry:
   1. CS-8 forward MFE/MAE, with no exit at all;
   2. the dumb exit (`FixedBars`; `RandomBars` optional);
@@ -452,7 +456,7 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
 | Session | intraday `FlatBy` 15:55 ET (early close: close − 5 min); swing ideas `HoldOvernight` with `ERollExit.FlattenBeforeSplice` |
 | News exit | `NewsExitMinutes` 0 (matches PR #117's PROPOSED default) |
 | Adds | as the entry decides; `AddStopMode` `RaiseToAddLow`; R re-based on the add fill |
-| Control | `None` in the baseline arm. Each entry-only idea also runs a `FixedBars` control arm with N per timeframe (1m 30, 5m 12, 15m 8, 60m 6, daily 5) and reports CS-8 forward MFE/MAE (owner-approved 18:18–18:21 ET, Q4/Q5; other timeframes PROPOSED, §4.9) |
+| Control | `None` in the baseline arm. Each entry-only idea also runs a `FixedBars` control arm with N per timeframe (1m 30, 5m 12, 15m 8, 60m 6, daily 5) and reports CS-8 forward MFE/MAE (owner-approved 18:18–18:21 ET, Q4/Q5; other timeframes: nearest listed at or below, owner-approved 18:54 ET, §4.9) |
 | Precedence | §4.10 |
 | Costs and fills | Batch-1 settings (PR #117 §4): commissions and slippage as approved, 2 ticks of open slippage, closed-bar orders, no IOG |
 
@@ -497,12 +501,15 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 
 **Resolved, owner-approved 2026-11-11 18:18–18:21 ET:**
 - ~~**Q4** Should every entry-only idea also run a control exit (`FixedBars` 10 and/or `RandomBars`) and report CS-8 forward MFE/MAE, as the three-way entry test in §4.9? PROPOSED: yes, `FixedBars` 10.~~ *"Q4 yes, but set ControlExitBars per timeframe"* → §4.9, §6: every entry-only idea runs a `FixedBars` control arm with N per timeframe and reports CS-8 forward MFE/MAE.
-- ~~**Q5** What value should `FixedBars` / `ControlExitBars` take per timeframe (10 bars on 5m ≈ 50 minutes)?~~ *"Q5: 1m 30, 5m 12, 15m 8, 60m 6, daily 5"* → §4.9: five int Inputs `ControlExitBarsM1/M5/M15/H1/D1` = 30/12/8/6/5. Other timeframes: nearest listed at or below (PROPOSED, still open).
+- ~~**Q5** What value should `FixedBars` / `ControlExitBars` take per timeframe (10 bars on 5m ≈ 50 minutes)?~~ *"Q5: 1m 30, 5m 12, 15m 8, 60m 6, daily 5"* → §4.9: five int Inputs `ControlExitBarsM1/M5/M15/H1/D1` = 30/12/8/6/5. Other timeframes: nearest listed at or below (**Owner-approved 2026-11-11 18:54 ET**, Ettienne: *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*).
 - ~~**Q6** Should the wrapper's default stop be `AtrMultiple`, or `SignalBarExtreme` (as `_ExitHalfRiskHalfRoll`)?~~ *"Q6: AtrMultiple default, SignalBarExtreme selectable"* → §4.1, §6.
 - ~~**Q8** Keep the legacy exit studies (`_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit`, `_ExitHalfRiskHalfRoll`) unchanged (PROPOSED), or mark them superseded once GX exists? Nothing is deleted by this spec.~~ *"Q8: mark the legacy exit studies superseded once GX exists"* → §1.1, §8 GX-3: header note and docs entry; nothing deleted.
 - ~~**Q9** Should batch-1 specs later move onto the engine (GX-5), or stay hand-coded?~~ *"Q9: move batch-1 onto the engine once it passes, with a re-check per strategy"* → §8 GX-5: after the E-checks pass, one strategy at a time, each with an equivalence re-check.
 - **Final-target and trail-start units:** *"Yes, the final target and trail start both get ETriggerUnit"* → §4.2 `FinalTargetUnit` / `FinalTargetValue`, §4.4 `TrailStartUnit` / `TrailStartValue` (`ETriggerUnit`, default `RMultiple`; defaults keep rev 0.6 behaviour; shorts mirror explicitly).
 
+**Resolved, owner-approved 2026-11-11 18:54 ET** (*"Yes to both the nearest-timeframe rule and the AtTrigger rename"*):
+- The rule for timeframes not in the `ControlExitBars` list (nearest listed timeframe at or below; sub-minute and non-time bars use the 1m value with a Warning, §4.9).
+- The `ETrailStart.AtR` → `AtTrigger` rename (§4.4).
+
 **Still open:**
 - The E1–E8 native MiniPC checks (§7).
-- The PROPOSED rule for timeframes not in the `ControlExitBars` list (nearest listed timeframe at or below; sub-minute and non-time bars use the 1m value with a Warning, §4.9) – owner to confirm.
