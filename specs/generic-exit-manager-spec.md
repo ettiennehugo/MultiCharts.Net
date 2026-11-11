@@ -1,13 +1,13 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.2 PROPOSAL, 2026-11-11 (ET); rev 0.2 = owner answers of 09:16 ET"
+rev: "0.3 PROPOSAL, 2026-11-11 (ET); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3)"
 status: "PROPOSAL, docs only, no code. Owner-approved 2026-11-11 09:16 ET: option C, the baseline values, the wrapper in Portfolio Trader, and the over-budget rule. Not yet approved for implementation as a whole. Everything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.2 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.3 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
@@ -333,13 +333,67 @@ The wrapper runs in PT as the **second signal** of the same PT strategy (one row
   - the CS-1 journal row for the trade gets `riskFlag = OVER-BUDGET`.
 - This is a Warning, not the Info skip line, because nothing is skipped: the trade went on and exceeded the rule.
 
+### 5.3 Planned vs actual risk % on every closed trade (owner request, 2026-11-11 09:19 ET)
+**Owner (verbatim):** *"Another thing we'd like to log when a trade is closed is the actual risk percentage given the market's movement. So we essentially have a projected risk percentage when we start out (e.g. 1%) but once the market has moved it may or may not have moved against us by a certain percentage so we want to log that as the actual risk percentage."*
+
+**Scope.** It applies to **every** strategy, not only GX: the fields are computed in the `_CustomSignal` CS-1 journal (the base), so every `_CustomSignal` strategy logs them, and both the GX engine and the wrapper use the same code. The cross-reference is in PR #117 overview §8. The requirement is owner-requested; the definition choices below are **PROPOSED** unless stated.
+
+**Fields per closed trade:**
+| Field | Definition | Unit / rounding |
+|---|---|---|
+| `equityAtEntry` | See "Equity base" below | $, 2 dp |
+| `plannedRiskDollars` | Initial stop risk at the entry fill: \|entry fill − initial **widened** stop\| × BPV × initial contracts (the CS-1 `riskDollars`, the same 1R the trade is sized and skipped on). Excludes commission | $, 2 dp |
+| `plannedRiskPct` | `plannedRiskDollars / equityAtEntry × 100`, e.g. 1.000 | percent, 3 dp |
+| `plannedRiskPctPeak` | The largest planned risk over the trade: max over segments of the segment 1R $ (the post-add risk at the raised stop, §5 / PR #117 §7.7) ÷ `equityAtEntry` × 100. Equals `plannedRiskPct` for a trade with no add | percent, 3 dp |
+| `maeDollars` | **Worst adverse excursion of the whole trade, from the entry fill to the exit:** min over the trade's bars of (realised P&L of this trade's partial exits so far + open P&L of all open contracts, incl. adds, marked at the bar's adverse extreme). Floored at 0: a trade that never went below its entry P&L has MAE 0. Reported as a positive number | $, 2 dp |
+| `actualRiskPct` | `maeDollars / equityAtEntry × 100`: how far the market actually moved against the position, as % of the account at entry | percent, 3 dp |
+| `actualToPlanned` | `actualRiskPct / plannedRiskPct` = `maeDollars / plannedRiskDollars` = MAE in **initial** R. 1.00 = the full planned risk was used, > 1 = stop slippage, a gap through the stop, or risk added by adds | ratio, 2 dp |
+| `maeOpenDollars` | Secondary: the worst open-only excursion of the contracts still open (ignores realised partials) | $, 2 dp |
+| `realizedPnlPct` | The trade's net P&L (MC trade objects, after MC commission and slippage settings) ÷ `equityAtEntry` × 100, signed | percent, 3 dp |
+
+**Definitions (PROPOSED):**
+- **Equity base.**
+  - **Chart:** strategy equity at the entry fill bar, `InitialCapital + NetProfit` (closed P&L only; the strategy is flat before the entry, so there is no open P&L). This is the same base as `sizeForRisk`'s 1% skip in backtests. When `sizeForRisk` used broker `equityAvailable` (real time), that value is logged as the base instead, and the base is named in `equityBase` (`strategy` | `broker`).
+  - **Portfolio Trader:** the MM **book** at the entry step (initial capital + Σ strategy P&L, `_PortMM.Book`, read back from `CommonPortfolioData`; the same base as `maxTradeRisk` and the heat cap), `equityBase = book`. The strategy-equity version is also logged as `plannedRiskPctStrat` / `actualRiskPctStrat`, so chart and PT runs can be compared.
+  - Equity is frozen at entry: later P&L does not change the denominators.
+- **Intrabar MAE.** It is marked at each bar's adverse extreme (long: `Low`, short: `High`) on the bar series the trade runs on (Data1).
+  - Limitation: the order of ticks inside a bar is unknown. On the **entry** bar the whole bar counts after the fill. With a stop or limit fill mid-bar, part of the bar may precede the fill, so MAE is conservative (possibly overstated).
+  - On the **exit** bar the extreme is capped at the exit fill price, because the position no longer exists beyond the fill.
+  - Bar Magnifier (charts only) and tick data narrow this; PT has no magnifier, so PT MAE is bar-resolution. Logged as `maeScope` (`bar` | `magnifier`).
+  - MC's own `MaxDrawDown` (the current CS-1 `maeDollars`) is kept in its column for comparison. The new value is `maeTradeDollars` if the existing column name must stay unchanged (Coder chooses at implementation; both names are documented).
+- **Adds.** MAE is computed on the **cumulative** position: every open contract, including adds from their fill onward, against its own fill price. The adverse move is therefore measured in $, not per contract.
+  - `plannedRiskPct` stays the initial planned risk, so a trade with adds can show `actualToPlanned` > 1 without any slippage. `plannedRiskPctPeak` and `addCount` let reporting separate this.
+  - The re-based R (`rMultiple`) is unchanged by this section.
+- **Scale-outs.** The primary `maeDollars` includes realised P&L from partial exits, so after T1 the locked-in profit offsets later adverse moves: it is "how much of the account the trade as a whole was down at worst". `maeOpenDollars` reports the remaining-contracts view.
+- **Costs and slippage.** MAE uses actual fill prices, so entry slippage is included. Commissions are **excluded** from MAE and planned risk (they are price-excursion measures) and **included** in `realizedPnlPct`.
+- **Signs.** `plannedRiskPct`, `actualRiskPct`, `maeDollars` and `actualToPlanned` are ≥ 0 (adverse = positive). `realizedPnlPct` is signed (loss < 0).
+- **Rounding.** Computed in double; rounded only when written (CSV: percents 3 dp, ratios 2 dp, $ 2 dp; invariant culture, `.` decimal). Percent fields are in percent units (1.000 = 1%), not fractions.
+- **Undefined values.** `plannedRiskDollars` ≤ 0 or NaN (no stop known) ⇒ `plannedRiskPct`, `actualToPlanned` = empty, and `riskFlag` gets `NO-PLANNED-RISK`. `equityAtEntry` ≤ 0 ⇒ every percent empty.
+
+**Close log line** (Journal level; prefix `EXIT` on charts, `PORT` in Portfolio Trader):
+`EXIT CLOSE <id> side=<long|short> qty=<initial>+<adds> reason=<exit reason> R=<rebased> Rorig=<r> plannedRiskPct=<x.xxx> plannedRiskPctPeak=<x.xxx> actualRiskPct=<y.yyy> actualToPlanned=<z.zz> realizedPnlPct=<±w.www> mae=$<m> maeScope=<bar|magnifier> equityBase=<strategy|broker|book> equity=$<e>`
+
+In PR #117 strategies, these fields are appended to the existing `<ID> EXIT reason() px() R() mfe() mae()` line.
+
+**Journal columns** (CS-1 `MCJournal_<runId>.csv`, appended at the end so existing readers keep working): `equityAtEntry, equityBase, plannedRiskDollars, plannedRiskPct, plannedRiskPctPeak, maeTradeDollars, maeOpenDollars, actualRiskPct, actualToPlanned, realizedPnlPct, maeScope, addCount`.
+
+**Reporting (per run):**
+- the distribution of `actualRiskPct` (histogram plus 50/90/99th percentiles) next to `plannedRiskPct`;
+- the distribution of `actualToPlanned`;
+- the **count and share of trades with `actualToPlanned` > 1.00**, i.e. where the market went further against the trade than the planned stop. Split into:
+  - (a) trades without adds: stop slippage or a gap through the stop;
+  - (b) trades with adds: compared against `plannedRiskPctPeak`.
+  Also the count > 1.10 and the worst trade (date, size, reason);
+- `realizedPnlPct` beside it, so a deep MAE that recovered is visible.
+
 - **Journal and reporting.** CS-1 journal row per trade (existing columns). GX adds:
   - `exitReason` (the §4.10 reason: `STOP`, `T1`, `TARGET`, `BE-STOP`, `TRAIL`, `TRAIL-THROUGH`, `NEWS`, `FLATBY`, `ROLL`, `TIME`, `CONTROL`, `FLAT-BY-MM`);
   - `rMultiple` (re-based) and `rOrig`;
   - `mfeR` / `maeR` on the initial R (MC `MaxRunUp`/`MaxDrawDown` ÷ initial risk, existing);
   - `segments`;
   - `gxPackage` (a hash of the effective GX settings, so a run can be matched to its exit package);
-  - `riskFlag` (`OVER-BUDGET` or empty, §5.2).
+  - `riskFlag` (`OVER-BUDGET`, `NO-PLANNED-RISK` or empty, §5.2, §5.3);
+  - the planned-versus-actual risk columns of §5.3.
 - **Per-run summary:** expectancy in R, the R distribution by exit reason, MFE/MAE scatter in R (an MFE histogram for winners and losers, where the T1/trail levels sit), and the CS-8 forward MFE/MAE for the same signals.
 - **Acceptance:** the programme's usual criteria (PR #117 overview §6), unchanged.
 
@@ -392,6 +446,10 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 - **Q7:** an over-budget wrapper trade stays open, is managed normally, and logs one Warning per trade (§5.2).
 
 **Still open:**
+- **Q10 (from the 09:19 ET request, §5.3)**
+  - Should `actualRiskPct` use the whole-trade MAE including realised scale-out P&L (PROPOSED), or the remaining-contracts view (`maeOpenDollars`)?
+  - In Portfolio Trader, should the base be the MM book (PROPOSED) or the strategy's own equity?
+  - Is the "exceeded planned" threshold 1.00, with 1.10 also reported (PROPOSED)?
 - **Q4** Should every entry-only idea also run a control exit (`FixedBars` 10 and/or `RandomBars`) and report CS-8 forward MFE/MAE, as the three-way entry test in §4.9? PROPOSED: yes, `FixedBars` 10.
 - **Q5** What value should `FixedBars` / `ControlExitBars` take per timeframe (10 bars on 5m ≈ 50 minutes)?
 - **Q6** Should the wrapper's default stop be `AtrMultiple`, or `SignalBarExtreme` (as `_ExitHalfRiskHalfRoll`)?
