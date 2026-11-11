@@ -80,7 +80,7 @@ Registered sweep = 2 × 2 × 2 = 8 (Cat. AV-01). Primary: k = 3, 60m signal, Swi
 Prefix `AV-01`. `AV-01 ANCHOR tag() high() usable()`; `AV-01 RECLAIM t() barsBelow() avwap() delta60() filter(sma50|tsmom value)`; `AV-01 HOLD day(n)` once per session while open (MFE/MAE so far); exit reasons add `MAXHOLD`, `ROLL`, `INVALIDATION`. Skip reasons: `filter-off`, `no-anchor`, `reclaim-cancel`, `roll-lead`, `event-blackout`, `risk-budget`, `margin`. `logSignal("AV01", …)` on every reclaim + HL, with ctx carrying the fake-anchor and SMA control values.
 
 ## 10. Test plan
-- **Windows:** W-M (60m/15m built from 1-minute): development 2016–2022 with yearly anchored folds; validation 2023 → the §5.1 holdout cut (default for this strategy: data ≤ 31 Dec 2024; with `HoldoutScope = AllStrategies` and 18 months, to 2025-04-30). The daily filter needs ≥ 50 prior days. Holdout sealed.
+- **Windows:** W-M (60m/15m built from 1-minute): development 2016–2022 with yearly anchored folds; validation 2023 → 31 Dec 2024 (fixed cut 2025-01-01, Prog §5.1, owner-approved). The daily filter needs ≥ 50 prior days. Holdout sealed.
 - **Controls (Cat. AV-01):** K-FL-anchor (AVWAP anchored at a random bar 20–60 bars before confirmation); K-SMA (SMA of length = bars since anchor); K-FL ±0.5 ATR20d for swing ideas (Cat. §2.3). **Kill:** real anchor ≤ either fake.
 - **Gates:** G0-a, G0-b; G0-c roll handling (multi-session anchors); G0-d for the AVWAP level arm.
 - **Low frequency:** the catalogue estimates 1–3 trades per month per instrument (an estimate). If validation has < 100 trades the verdict is **inconclusive**; do not relax filters.
@@ -102,7 +102,7 @@ Prog §6 + the AV-01 kill, under **`big-winner-trend`** (header standard, Accept
 - [ ] Off-MC tests: bars-below counter, roll-lead calculation from the table, max-hold counting across weekends and holidays, precedence.
 - [ ] `NewsExitMinutes` rule on 15m bars, including overnight releases (Prog §7.6).
 - [ ] Header §18 (Acceptance policy): `big-winner-trend` predeclared, with the big-winner premise written out (few large trend winners).
-- [ ] Native compile + smoke (To date before the §5.1 cut, ≤ 12/31/2024 by default; check that no position crosses a roll).
+- [ ] Native compile + smoke (To ≤ 12/31/2024; check that no position crosses a roll).
 
 ## 13. Header mapping
 Trigger: in a daily uptrend (close > SMA50), after ≥ 10 60m closes below the AVWAP of the last 3-ATR swing high, a 60m close back above it; then the first 15m HL above the AVWAP → buy-stop above the HL bar. Management: stop 1 tick under the HL (at least 0.3 × ATR20d); half off at the swing high; runner trailed at the new impulse AVWAP − 2 ticks on 60m closes. Exit: stop, T1/trail, a 60m close back below the swing-high AVWAP, 20 sessions, or the session before a roll.

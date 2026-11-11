@@ -70,7 +70,7 @@ Batch-1 sweep = `TouchLowerSigma` {0.25, 0.5} × `TargetMode` {ImpulseHigh, Trai
 Prefix `AV-02`. `AV-02 ANCHOR tag(<_Avwap.Tag>) low() extremeTime() usable() atr()`; `AV-02 PULLBACK t() low() avwap() sigma()`; `AV-02 FAIL reason(close<avwap-1s|below-anchor)`. Skip reasons: `no-anchor`, `pullback-failed`, `no-hl`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`, `daily-limit`. `logSignal("AV02", …)` on every trigger, ctx with the P2 AVWAP, the SMA(bars since anchor) and the 50% retracement price of anchor→H.
 
 ## 10. Test plan
-- Windows and costs: Prog §4–5; validation ends at the §5.1 cut (default data ≤ 31 Dec 2024 for this strategy). G0-a, G0-b. G0-d applies to the AVWAP level arm (Cat. §2.6 "AV level arms").
+- Windows and costs: Prog §4–5; validation ends 31 Dec 2024 (fixed cut 2025-01-01, Prog §5.1, owner-approved). G0-a, G0-b. G0-d applies to the AVWAP level arm (Cat. §2.6 "AV level arms").
 - **Controls (Cat. AV-02):** K-FL-anchor (AVWAP anchored at a random bar 20–60 bars before confirmation); K-SMA (SMA of length = bars since anchor); **50% retracement benchmark**: the identical HL rule with the touch zone at the 50% retracement of anchor → H (Tickfloor). Also M-AVWAP P2 (volume-shuffled) as a logged shadow. **Kill:** not better than the 50% retracement (Cat.); also the K-FL/K-SMA comparisons (Cat. §0: each AVWAP idea must beat a fake anchor and a plain SMA).
 - **Later swing arm (separate registration, not batch 1):** Data1 60m, anchors from 60m zigzag lows (3 × ATR60), HL on 60m, overnight holding with AV-01's swing rules (max hold, roll flatten, weekend), K-FL-anchor at ±0.5 ATR20d. Needs owner sign-off before coding.
 

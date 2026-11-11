@@ -78,7 +78,7 @@ Registered sweep = 2 × 2 × 2 = 8 (Cat. VW-01). Primary: 10:30, touch 1, Sessio
 Prefix `VW-01`. `VW-01 CLASSIFY <date> side() t() closesThrough() slope() pocMig() atr5()` once per day when it classifies (and `VW-01 NOCLASS <date>` at 15:30 for unclassified days, so trend-day frequency is measurable). Episode lines `VW-01 TOUCH n() t() vwap() sigma()`. Skip reasons: `no-trend-day`, `episode-failed`, `episode-timeout`, `event-blackout`, `roll-window`, `risk-budget`, `after-cutoff`. `logSignal("VW01", …)` on every armed HL, with ctx carrying the P2-VWAP and SMA control values at the same bar.
 
 ## 10. Test plan
-- Windows and costs: Prog §4–5; validation ends at the §5.1 cut (default data ≤ 31 Dec 2024 for this strategy).
+- Windows and costs: Prog §4–5; validation ends 31 Dec 2024 (fixed cut 2025-01-01, Prog §5.1, owner-approved).
 - **Controls (Cat. VW-01, mandatory):** (a) **volume-shuffled VWAP**: the same rules run on a VWAP whose bar volumes are permuted within the session so far (seeded, deterministic; like M-AVWAP's P2 twin); (b) **distance-matched SMA**: an SMA whose length is chosen so its average distance from price over the development period equals VWAP's. The length is frozen before any performance read. (c) K-RT on classified trend days only. Run controls as separate `ControlArm` runs or as logged shadow events. **Kill:** real VWAP ≤ either fake VWAP.
 - **Gates:** G0-a, G0-b (the VW-08 VWAP canary suite must be ≈ 0 or negative before VW-01 is read). Not a prior-session level, so G0-d does not apply.
 - Report trend-day frequency per year (the catalogue estimates 2–5 trades per month per instrument; this is a catalogue estimate, not data).

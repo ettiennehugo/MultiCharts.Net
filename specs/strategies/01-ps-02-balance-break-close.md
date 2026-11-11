@@ -100,7 +100,7 @@ Tuned numeric parameters = `AcceptCloses`, `StopWidthW`, plus the on/off `Entrop
 Prog §8, with ID prefix `PS-02`. Setup fields: `W`, `vah`, `val`, `V`, `Hnorm`, `delta`, `acceptCount`. Skip reasons: `no-composite`, `no-balance`, `entropy`, `v-against`, `outside-window`, `event-blackout`, `roll-window`, `roll-warmup`, `risk-budget`, `noise` (BookSpec), `too-wide` (BookSpec), `mm-denied` (PT; read from the MM status if available, else inferred as no fill). `logSignal("PS02", side, close, stop, ctx, taken)` on every accepted break, including skipped ones.
 
 ## 10. Test plan
-- **Windows:** Prog §5.2. W-M development Jun/Jul 2016–2022 with anchored yearly folds; validation 2023 → the §5.1 holdout cut (Prog §5.1; default for this strategy, `HoldoutScope = OrderFlowOnly`: data ≤ 31 Dec 2024, cut 2025-01-01; if Ettienne chooses `AllStrategies`, validation runs to the day before the rolling cut, 2025-04-30 at 18 months); holdout sealed. Smoke tests only until the 2016–2022 minute history is verified.
+- **Windows:** Prog §5.2. W-M development Jun/Jul 2016–2022 with anchored yearly folds; validation 2023 → 31 Dec 2024 (fixed cut 2025-01-01, Prog §5.1, owner-approved); holdout sealed. Smoke tests only until the 2016–2022 minute history is verified.
 - **Configs:** catalogue sweep: `AcceptCloses` ∈ {1, 2} × `StopWidthW` ∈ {0.25, 0.5} × `EntropyFilter` ∈ {on, off} = 8. BookSpec: A2-41's own 2×2×2 = 8, as a separate registered variant. Primary cell frozen before any read: (2, 0.25, on).
 - **Controls:** K-FL (fake composite boxes of equal W shifted ±0.5 W and ±0.5/1/2 ATR5), K-DR (longs and shorts separately), K-RT (random-time, same bracket). Cat. PS-02 kill: mean R ≤ 0 at the 1.0 W target, or the result depends on the entropy filter alone.
 - **Base-rate replication (A2-41 test 1):** P(reach 1.0 W) and median travel in W on CME for every accepted break, compared with FX 0.566 / 1.17.
@@ -122,7 +122,7 @@ Prog §6 defaults, plus the Cat. PS-02 kill and the A2-41 kill for BookSpec. Pol
 - [ ] Early-close and event checks; `NewsExitMinutes` rule via `EventCalendar.MinutesTo(EEventTier.T1)` (Prog §7.6) with `NEWS-EXIT` / `SKIP news-window` lines; roll warm-up counter.
 - [ ] Depends on the shared cost-row item (Prog §9 item 1) for NQ/CL/6E floors.
 - [ ] Off-MC tests: acceptance counter, split rule (q = 1, 2, 3), precedence table, trail monotonicity.
-- [ ] Native: temporary `Compile Include`, compile, smoke chart (To date before the §5.1 cut: ≤ 12/31/2024 by default), remove include; `git diff -- PLStudies.csproj` empty.
+- [ ] Native: temporary `Compile Include`, compile, smoke chart (To ≤ 12/31/2024), remove include; `git diff -- PLStudies.csproj` empty.
 
 ## 13. Header mapping
 Header §4 walkthrough — Trigger: two 5m closes beyond the 3-session balanced composite edge + δ, V aligned, 09:45–14:30 ET → buy next bar open. Management: stop 0.25 W inside the composite (floored); half off at 1.0 W beyond the edge; runner trailed under each new confirmed 5m HL. Exit: stop, T1/trail, or flat 15:55 ET.

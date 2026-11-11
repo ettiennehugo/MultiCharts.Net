@@ -1,6 +1,6 @@
 # Strategy specs, batch 1: programme overview and shared rules
 
-**Rev 1.1 (draft), Tuesday 10 Nov 2026, America/New_York (EST).** Rev 1.1 applies Ettienne's answers of 19:44 ET (PR #117): *"1. $17 and yes, add costs for NQ, CL and 6E as well. 2. use 2 contracts, yes you can exit everything on the first target - ultimately I'd like to use dynamic position sizing based on percentage risk of the account. 3. re-scope the holdout period to be about 18 months or even 12 months. 4. yes, use the big-winner rule. 5. give a parameter for the number of minutes to exit before news (as integers in terms of minutes) and disable it when 0 or negative."* Rev 1.0: Prepared by Analyst (Grok Bot) for Coder. Requested by Ettienne, 19:12 ET: *"Yes, please write them up. Refer to the relevant books/sources if necessary to refine the specs."* Extra requirement, 19:14 ET: *"Also be cognizant of any trade management and exit rules relevant to the strategies and please create clarity around those aspects as well in the spec."*
+**Rev 1.2 (draft), Tuesday 10 Nov 2026, America/New_York (EST).** Rev 1.2: holdout scope confirmed by Ettienne at 19:53 ET (*"18 months for OF-01 only is fine."*), and OF-01 refined from Trader Dale's book. Rev 1.1 applied Ettienne's answers of 19:44 ET (PR #117): *"1. $17 and yes, add costs for NQ, CL and 6E as well. 2. use 2 contracts, yes you can exit everything on the first target - ultimately I'd like to use dynamic position sizing based on percentage risk of the account. 3. re-scope the holdout period to be about 18 months or even 12 months. 4. yes, use the big-winner rule. 5. give a parameter for the number of minutes to exit before news (as integers in terms of minutes) and disable it when 0 or negative."* Rev 1.0: Prepared by Analyst (Grok Bot) for Coder. Requested by Ettienne, 19:12 ET: *"Yes, please write them up. Refer to the relevant books/sources if necessary to refine the specs."* Extra requirement, 19:14 ET: *"Also be cognizant of any trade management and exit rules relevant to the strategies and please create clarity around those aspects as well in the spec."*
 
 **Status:** documentation only. No strategy is implemented, run or validated by this document. Every number below is a predeclared rule or a source figure. None is a measured result on CME data. The holdout (§5, as re-scoped in rev 1.1) has not been opened and must not be opened while building or tuning.
 
@@ -17,7 +17,7 @@ Batch 1 follows the first six rows of the owner-approved build order on the *Str
 | 3 | [03-vw-01-trend-day-vwap-pullback.md](03-vw-01-trend-day-vwap-pullback.md) | VW-01 | On a classified trend day (≥ 10:30 ET), buy the first VWAP ± 0.25 σ pullback that prints a 5m higher low | Buildable; RTH VWAP must be built (see spec) |
 | 4 | [04-av-02-impulse-avwap-higher-low.md](04-av-02-impulse-avwap-higher-low.md) | AV-02 (+ DV-12 touch arm, later) | After a ≥ 3 ATR impulse from a confirmed low, buy the first higher low that holds at the impulse AVWAP | Buildable; M-AVWAP + PRICEACTION exist |
 | 5 | [05-av-01-swing-high-avwap-reclaim.md](05-av-01-swing-high-avwap-reclaim.md) | AV-01 | Swing sleeve: after price reclaims the AVWAP from the last significant swing high, buy the first 15m higher low; hold days to weeks | Buildable; 50-day SMA via `DailyConfig.smaLength = 50`; acceptance `big-winner-trend` (owner, 2026-11-10) |
-| 6 | [06-of-01-stacked-imbalance-retest.md](06-of-01-stacked-imbalance-retest.md) | OF-01 | First retest of a ≥ 3 stacked buy-imbalance zone on genuine bid/ask footprints | **Data-gated**: needs verified MC-BidAsk ticks, @ES from 2024-10-28 to the §5.1 cut (holdout re-scope) |
+| 6 | [06-of-01-stacked-imbalance-retest.md](06-of-01-stacked-imbalance-retest.md) | OF-01 | Per Trader Dale: first test of a ≥ 3 stacked 300% imbalance zone on 30m footprints, limit at the zone edge, target before the next HVN, 5m aggression trail | **Data-gated**: needs verified MC-BidAsk ticks, @ES from 2024-10-28 to the §5.1 cut (holdout re-scope) |
 
 Each spec follows the same 15 sections: purpose and edge; instruments and timeframes; engines; entry rules; **trade management and exits**; sizing, risk and M-PORT; session, news, holiday and roll handling; native inputs; logging and journal lines; test plan; acceptance criteria; implementation checklist; source-file header mapping; open questions; sources.
 
@@ -36,7 +36,7 @@ Internal (repo `ettiennehugo/MultiCharts.Net`, `main` @ `47ffda2`):
 Books and external sources (via the analyst's Kindle notes; page/location as in those notes):
 - Keller, Book 4 (empirical volume-profile study, FX/crypto 1-minute): §2.4 "a balance break travels its width just over half the time" (FX 214/378 = 56.6%, median 1.17 W; crypto 59.1%, 1.20 W); §8.3 confirmation vs prediction excursions (median MFE/MAE 10.5 vs 0.70); §8.4 rules (trade with value migration, balance break is the only end-to-end spec, scale at one width and run the rest, skip entropy > 0.93). Notes: `kindle-notes/keller-b4-empirical.md`, `keller-b4-parts-2-7-analyst2.md`.
 - Keller, Book 1: card 3.3 ("escape is not entry; accept or retest"); Part IV VWAP setup 1 (trend-day first/second VWAP touch, stop modestly beyond, target new extremes); card 6.3 (stacked imbalances). Notes: `kindle-notes/keller-b1-parts3-4.md`.
-- Trader Dale, *Order Flow* e-book: Setup #4 Stacked Imbalances (p. 76: ≥ 300% diagonal, ≥ 3 stacked, price moves away, **first test only**). Notes: `kindle-notes/dale-orderflow-pp13-128.md`.
+- Trader Dale, *ORDER FLOW: Trading Setups (The Insider's Guide To Trading)*: Setup #4 Stacked Imbalances (pp.74–76), take profit (pp.124–128), trailing (pp.129–131), stop loss (p.136). Read by Ettienne in the Kindle reader on 2026-11-10 (page labels ±2); earlier analyst notes: `kindle-notes/dale-orderflow-pp13-128.md`.
 - Brian Shannon, *Maximum Trading Gains with Anchored VWAP* (anchors at significant swings; buy strength after a pullback that recovers a swing-high AVWAP; stop under the most recent higher low). Practitioner, grade E (Cat. §0 item 3).
 - Telonics (Oct 2026) and RipBacktest (Oct 2026) VWAP null results; Telonics AVWAP bounce rates 51.14% / 52.37% (as cited in Cat. §0 items 2–3). These are the null results VW-01, AV-01 and AV-02 must beat.
 
@@ -72,25 +72,25 @@ No new web search was needed for batch 1. The catalogue already carries the exte
 
 ## 5. Test windows (frozen before any performance read)
 
-### 5.1 Holdout definition (rev 1.1, owner 2026-11-10 19:44 ET; scope to be confirmed, §10)
-The holdout is a **rolling** window: the most recent `HoldoutMonths` months of data, rounded down to the first day of a month. `HoldoutMonths` = **18** (allowed minimum 12, per the owner's "about 18 months or even 12 months").
+### 5.1 Holdout definition (owner-approved)
+Owner decisions:
+- 2026-11-10 19:44 ET: *"re-scope the holdout period to be about 18 months or even 12 months."*
+- 2026-11-10 19:53 ET: *"18 months for OF-01 only is fine."*
 
-- **Cut date** = first day of the month containing (run date − `HoldoutMonths` months). As of 2026-11-10: 18 months → cut **2025-05-01**, so the last usable day for development and validation is **2025-04-30**. With 12 months the cut would be 2025-11-01.
-- **Fixed per run.** Every run sheet and the strategy's `CFG` journal line record `holdoutCut(<yyyy-mm-dd>)` and `holdoutMonths(<n>)`. The chart and Portfolio Trader *To* date must be strictly before that cut. A test series (development → validation of one strategy) keeps the cut it started with, even if later runs happen after the window has rolled. A new cut means a new, logged test series.
-- **Scope switch, default = order-flow only.** One setting decides which strategies use the re-scoped cut:
+| Setting | Value (owner-approved 2026-11-10) |
+|---|---|
+| `HoldoutScope` | `OrderFlowOnly`: the rolling cut applies to OF-01 (the only order-flow strategy in batch 1). All other strategies keep the fixed cut **2025-01-01**: tests use data up to 31 Dec 2024 only. |
+| `HoldoutMonths` | 18, applied to OF-01 |
 
-| Setting | Default (until Ettienne confirms) | Alternative |
-|---|---|---|
-| `HoldoutScope` | `OrderFlowOnly`: the rolling cut applies to tick/order-flow strategies (batch 1: OF-01 only). All other strategies keep the old fixed cut **2025-01-01** (data ≤ 31 Dec 2024). | `AllStrategies`: every strategy uses the rolling cut. |
-| `HoldoutMonths` | 18 | 12 |
-
-Flipping the default means changing this table only. Each spec's test plan refers to "the §5.1 cut" and names its default date, so nothing else needs editing. These are protocol settings for the run sheet and the offline evaluator, not MultiCharts inputs.
+- **OF-01 rolling cut** = the first day of the month containing (run date − 18 months). As of 2026-11-10 the cut is **2025-05-01**, so OF-01's last usable day is **2025-04-30**.
+- **Fixed per run.** Every run sheet and every strategy's `CFG` journal line record `holdoutCut(<yyyy-mm-dd>)` and `holdoutMonths(<n>)` (`n/a` for fixed-cut strategies). The chart and Portfolio Trader *To* date must be strictly before the cut. A test series (development → validation of one strategy) keeps the cut it started with, even if later runs happen after the window has rolled. A new cut means a new, logged test series.
+- These are protocol settings for the run sheet and the offline evaluator, not MultiCharts inputs.
 - **Never** view, screenshot or report prices or results on or after the applicable cut. The holdout is run once, later, under a separate owner sign-off.
 
 ### 5.2 Windows
-- **W-M (1-minute data, non-order-flow strategies, default scope):** development = first verified full month in Jun/Jul 2016 → 31 Dec 2022, with anchored yearly walk-forward inside it (train 2016–2018 → test 2019; train → 2019, test 2020; → 2021; → 2022). Validation = 1 Jan 2023 → 31 Dec 2024. Holdout = 2025-01-01 onward. If `HoldoutScope` becomes `AllStrategies`, validation extends to the day before the §5.1 cut (to 2025-04-30 with 18 months), and the holdout starts at the cut.
-- **W-D (daily):** development 2000–2015, validation 2016–2024 (AV-01's daily filter only); same extension rule.
-- **W-T (ticks, order-flow strategies):** from the first verified **bid/ask** session to the day before the §5.1 cut. The catalogue says ticks start about Jul 2024, but its YV/OF-09 data notes record **@ES bid/ask only from 2024-10-28**. So the span is about 28 Oct 2024 → 30 Apr 2025 (about 6 months, about 125 sessions) at 18 months, or → 31 Oct 2025 (about 12 months) at 12 months. The split is in the OF-01 spec.
+- **W-M (1-minute data, all non-order-flow strategies):** development = first verified full month in Jun/Jul 2016 → 31 Dec 2022, with anchored yearly walk-forward inside it (train 2016–2018 → test 2019; train → 2019, test 2020; → 2021; → 2022). Validation = 1 Jan 2023 → 31 Dec 2024. Holdout = 2025-01-01 onward.
+- **W-D (daily):** development 2000–2015, validation 2016–2024 (AV-01's daily filter only).
+- **W-T (ticks, order-flow strategies):** from the first verified **bid/ask** session to the day before the §5.1 cut. The catalogue says ticks start about Jul 2024, but its YV/OF-09 data notes record **@ES bid/ask only from 2024-10-28**. So the OF-01 span is about 28 Oct 2024 → 30 Apr 2025 (about 6 months, about 125 sessions). The split is in the OF-01 spec.
 - **Coverage caveat (Page):** @ES minute history is reported to start 26 Dec 2022 on the MiniPC. The older download is unverified. Until 2016–2022 is present and flushed in QuoteManager, runs are **engineering smoke tests**, not development or acceptance evidence.
 - **Trial budget (owner-approved, 8 Nov 2026, 5:56 PM EST):** test the unchanged catalogue host first. Then add only pre-registered ablations, one component at a time. Use at most the catalogue's registered sweep per spec, recorded in a shared trial ledger. Proposal on the Page: at most three research-tuned numeric parameters per new spec. Holm family {PS-01, PS-02, DV-02, A2-31, PS-25}, m = 5, α = 0.05, fixed.
 
@@ -142,7 +142,7 @@ When several exit conditions fire on the same bar, the order below decides which
 4. **News exit** (`NewsExitMinutes` > 0 and a tier-1 release is within reach, §7.6). Reason `NEWS`.
 5. Session-end flatten (`FlatBy` / early-close flatten via `mustFlatten()`).
 6. Roll flatten (swing positions before a splice).
-7. Invalidation (acceptance failure, VWAP loss, zone violation).
+7. Invalidation (acceptance failure, VWAP loss, zone violation, OF-01 flow-warning exit `FLOW-WARN`).
 8. Time stop / max hold.
 9. Stagnation exit (only if a spec enables it).
 After items 4–9, management updates (BE, trail, T1 re-send) are computed for the next bar only if the position is still open and no market exit was sent.
@@ -208,7 +208,7 @@ Ettienne, 2026-11-10: *"ultimately I'd like to use dynamic position sizing based
   - `<ID> ARM side() entry() stop() widenedStop() target() qty() R$()`
   - `<ID> SKIP <reason>: <detail>` (reasons are fixed strings per spec)
   - `<ID> T1 qty() px()` · `<ID> BE stop()` · `<ID> TRAIL stop() basis()`
-  - `<ID> EXIT reason(<STOP|TARGET|T1+RUNNER|INVALIDATION|TIME|FLATBY|EARLYCLOSE|NEWS|ROLL|FLAT-BY-MM|TRAIL-THROUGH>) px() R()`
+  - `<ID> EXIT reason(<STOP|TARGET|T1+RUNNER|INVALIDATION|TIME|FLATBY|EARLYCLOSE|NEWS|ROLL|FLAT-BY-MM|TRAIL-THROUGH|FLOW-WARN>) px() R()`
   - `<ID> NEWS-EXIT …` and `<ID> SKIP news-window …` (§7.6)
 - These strings are journal text, not MC API members (§3 rule 5 concerns enums and API members).
 
@@ -232,14 +232,17 @@ Ettienne, 2026-11-10: *"ultimately I'd like to use dynamic position sizing based
 
 ## 10. Open questions for Ettienne (batch-wide)
 
-Resolved 2026-11-10 19:44 ET and removed: ES $17.00 convention; NQ/CL/6E cost rows; 2-contract test size; single contract exits everything at T1; AV-01 `big-winner-trend`; news exit as an integer-minutes parameter; OF-01 test window (holdout re-scope).
+Resolved 2026-11-10 19:44 and 19:53 ET and removed: ES $17.00 convention; NQ/CL/6E cost rows; 2-contract test size; single contract exits everything at T1; AV-01 `big-winner-trend`; news exit as an integer-minutes parameter; OF-01 test window (holdout re-scope).
 
-1. **Holdout re-scope (§5.1):** does the rolling holdout apply to **all strategies** or only to **order-flow/tick strategies**? And is it **18 or 12 months**? The specs default to 18 months, OF-01 only. Note that @ES bid/ask starts 2024-10-28, so 18 months leaves OF-01 about 6 months of order-flow data (likely too few trades for a verdict), and 12 months leaves about 12 months. Every other strategy keeps the ≤ 2024 cut until you confirm.
-2. `NewsExitMinutes` default 0 (disabled) for all six, tier-1 releases only; and `EventConfig.allowPartialCoverage = true`?
-3. Top-1% trim rounding: K = max(1, ⌈1% × winning trades⌉)?
-4. Entry cut-off 60 min before an early close, flatten 5 min before.
-5. Odd-lot split (runner gets the odd contract) for MM-sized or future %-risk positions.
-6. Older @ES/@NQ minute history (2016–2022): is it downloaded and flushed? Until then everything is a smoke test.
+- **[RESOLVED 2026-11-10 19:53 ET, owner-approved]** Holdout: 18 months, OF-01 only; all other strategies stay ≤ 2024 (§5.1).
+
+Still open:
+
+1. `NewsExitMinutes` default 0 (disabled) for all six, tier-1 releases only; and `EventConfig.allowPartialCoverage = true`?
+2. Top-1% trim rounding: K = max(1, ⌈1% × winning trades⌉)?
+3. Entry cut-off 60 min before an early close, flatten 5 min before.
+4. Odd-lot split (runner gets the odd contract) for MM-sized or future %-risk positions.
+5. Older @ES/@NQ minute history (2016–2022): is it downloaded and flushed? Until then everything is a smoke test.
 
 ## 11. PROPOSED rules to check against the books and videos (separate review)
 
@@ -253,9 +256,9 @@ Not done in this pass: no browser or Kindle reader was used. Each item names the
 | 4 | VW-01 touch-episode limit 6 bars; stop at the farther of VWAP − 1σ and HL − 1 tick; half at the frozen session high, runner trailed at VWAP − 2 ticks; sticky trend-day classification at 10:30 | Keller Book 1 Part IV, VWAP setup 1 (first/second VWAP touch on a trend day; "stop modestly beyond"; "target new extremes") | Whether a second touch is allowed; exact stop distance; whether the target is the high or a trail |
 | 5 | AV-02 touch zone [AVWAP − 0.25σ, + 0.5σ]; anchor-low invalidation; 15:00 ET entry cut-off; 5-session anchor expiry | Shannon, *Maximum Trading Gains with Anchored VWAP* (impulse/swing-low anchors, "higher low at the AVWAP") | Shannon's own invalidation (close below the anchor low?), entry trigger, target |
 | 6 | AV-01: reclaim δ60 = max(2 ticks, 0.10 × ATR14(60m)); ≥ 10 bars below first; 60m-close trail on the new impulse AVWAP; max hold 20 sessions; long only | Shannon (swing-high AVWAP reclaim, "stop below the most recent higher low", trailing on a new anchor) | Reclaim confirmation rule, how long a position is held, when the anchor is changed |
-| 7 | OF-01 "move away ≥ 1 ATR5" vs Dale's "≥ 1–2 whole footprints (30 min)"; first-retest definition; zone = lowest stacked run | Dale *Order Flow: Trading Setups*, Setup #4 Stacked Imbalances p.76 and examples pp.80–82 | Which run is the zone when there are several; what counts as the retest (touch vs trade-through); 5m vs 30m footprints |
-| 8 | OF-01 stop zone lo − 1 tick, skip if > 0.20 × ATR20d; 1 R target, second half to the excursion high; no trail | Dale, "Stop Loss with Order Flow" (pp.131–137: "stop within 10–20% of daily ATR, else skip"); "Take Profit – Trailing" p.129 (trail only while imbalances continue); Keller Book 1 card 6.3 (stop through the origin; targets: stack extreme, then the next reference) | Whether 10% or 20% applies; whether Dale's trail should be the runner rule |
-| 9 | OF-01 HL arm ("renewed same-side aggression") and the same-session expiry | Keller Book 1 card 6.3; Trader Oxygen YV-01 failed-seller 1m trigger (Cat. YV-01 / OF-09) | A concrete aggression trigger to replace the price-only HL |
-| 10 | OF-01 70th-percentile volume floor and the minimum flow quality | Keller Book 1 card 6.3 ("qualified stack"); Dale p.43 (imbalance definitions) and p.76 (software settings: trigger 300%, cluster size 3) | Whether a volume floor is defined at all, and how |
+| 7 | ~~OF-01 move-away, first test, zone definition~~ | **Checked against Dale by Ettienne, 2026-11-10** (pp.74–76) | Applied in OF-01 rev 1.2: `MinAwayBars` 1–2 on 30m footprints; first test only; the whole stacked cluster is the zone. Still PROPOSED: several separate stacks = separate zones |
+| 8 | ~~OF-01 stop, band, targets, trail~~ | **Checked against Dale** (p.136; pp.124–128; pp.129–131) | Applied: stop beyond the zone; 10–20% daily-ATR band with Skip/ClampFixed; target just before the next HVN with a `MinRR` skip; aggression trail and warning signs. Still PROPOSED: ATR length, clamp value, HVN profile/offset, `MinRR` value, exact trail-move and warning-exit rules. **Unread:** SL examples 1–4 (p.137) and the second option in Tip #2 |
+| 9 | ~~OF-01 entry trigger~~ | **Checked against Dale** (p.76) | Applied: direct limit at the zone edge is primary; the higher-low trigger is variant B, not from Dale |
+| 10 | ~~OF-01 volume floor and flow quality~~ | **Checked against Dale** (pp.74–76, "Minimal Imbalance Volume" 0; Trades Filter = visual only) | Applied: no volume floor (engine minimum `minVol` 1); P70 floor and close-location are optional, "not from Dale". Bid/ask data validity (quality ≤ High) stays as a data rule |
 | 11 | `NewsExitMinutes` default 0 and the −2/+10 entry blackout | No book source found in the notes. Check the video write-ups (catalogue YV-01…YV-09 section and `specs/video-ideas-2026-11-08-additions.md`; the 2026-11-01 write-up is referenced by the catalogue but not in `specs/` on this branch) for any presenter rule on exiting before news | A stated lead time (e.g. 5 or 15 minutes) |
 | 12 | Early-close entry cut-off 60 min / flatten 5 min; odd-lot split | No source in the notes; owner preference | — |
