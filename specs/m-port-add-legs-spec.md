@@ -1,12 +1,12 @@
 ---
 title: "M-PORT add legs: let the portfolio risk manager approve same-direction adds within the risk caps (DRAFT spec, proposed rev 2.8)"
-date: 2026-11-10 (ET); draft r5 2026-11-11 (ET)
-status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Draft r5: per-instrument open-risk cap `MaxInstrumentRiskPct` [Input] (owner request 2026-11-11 10:30 ET; §3 check 3b, §7; default 0 = off PROPOSED, Q11). Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
+date: 2026-11-10 (ET); draft r4 2026-11-11 (ET)
+status: "DRAFT, docs only, no code. Requested by Ettienne Hugo 2026-11-10 22:16 ET: \"Yes, spec the Portfolio risk manager change as a separate PR.\" Owner answers 2026-11-10 22:35 ET applied (AddPolicy as an Input; R re-based after an add; adds blocked under a throttle with a Warning). 2026-11-11 short-side check (Ettienne 09:36 ET: \"Please review the strategies thoroughly and make sure that where shorts are involved, we have clarity around handling the short scenario's.\"): short adds stated explicitly in §2.2/§3/§3a and T-P37; no rule changed. Draft r3: cluster cap applies to adds, owner-approved 2026-11-11 10:13 ET (§3 check 3, Q7 closed); `ClusterCapPct` [Input] overriding the profile cluster cap, owner-approved 2026-11-11 10:14 ET (§7). Draft r4: Q2/Q5/Q6/Q8 answered 2026-11-11 10:28 ET (per-position 1% at the new stop, `ScaleWithInitial`, `maxAddsPerPosition` 2, add fill-check Warning); Q10 closed. Not approved for implementation as a whole. Everything not quoted from the owner is PROPOSED."
 code_refs: "line refs are against origin/main @ 47ffda2 (2026-11-10, merge of PR #116, Check 7 findings)"
 related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-check-sheet.md Check 7 (L1–L9); PR #117 specs/strategies/00-programme-overview.md §7.7 (strategy-side add inputs)"
 ---
 
-# M-PORT add legs (DRAFT r5, proposed rev 2.8)
+# M-PORT add legs (DRAFT r4, proposed rev 2.8)
 
 ## 0. Why, and scope
 
@@ -14,7 +14,6 @@ related: "specs/m-port-spec.md rev 2.7 (§5.2, §5.4 4c, §6, §9); specs/live-c
   - Answer 1 → §7: `AddPolicy` is an `[Input]`.
   - Answer 2 → §3a: R is re-based after an add.
   - Answer 3 → §6: adds are blocked under any throttle, with a Warning.
-  - Per-instrument cap: owner request (Ettienne 2026-11-11 10:30 ET: *"Allow a maximum account percentage per position per instrument - e.g. 8% total of the account can be risked at a time on a specific instrument (this would include initial risk and adds)."*) → §3 check 3b and §7 `MaxInstrumentRiskPct` (default PROPOSED, Q11).
   - 10:28 ET answers: **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*) → Q2 §3 check 1, Q5 §4 `addSizing`, Q6 §4 `maxAddsPerPosition`, Q8 §6 add fill-check Warning.
   - Cluster-cap override: **Owner-approved 2026-11-11 10:14 ET** (Ettienne chose: *"Yes, add ClusterCapPct as an Input that overrides the profile"*). → §7 `ClusterCapPct`.
   - Answer 4 (the cluster cap, Q7) was explained to him; **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*). → §3 check 3.
@@ -100,7 +99,6 @@ These are additive optional keys, so **`pm.ver` stays 1**: the same rule as `pm.
   1. **Per-position budget** (**Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 1): `riskAfter > maxTradeRisk (0.01) × book` ⇒ skip `"add per-position budget"`. `riskAfter` is the **whole post-add position** (all contracts, initial + earlier adds + this add) priced to the **new whole-position stop the add sets** (`pm.addStop`, i.e. the raised stop for a long / lowered stop for a short; with `KeepCurrent`, the current stop) — never to the original initial stop and never on the add leg alone. Widened (`widenedAddStop`) when sent. This is the owner rule "total open risk of the position ≤ 1% of equity" (overview §7.7, chart side). It is the add analogue of the "per-trade budget"; the add leg alone is never tested against 1%.
   2. **Heat:** `heat − rel + riskAfter > heatCap × book` ⇒ `"heat cap"`.
   3. **Cluster:** the cluster is occupied by the position itself, so the cluster cap is **always** checked for an add: `clHeat[c] − rel + riskAfter > clusterCap × book` ⇒ `"cluster cap"`. Under Starter (0.75%), an ES add with NQ open in the merged EQIDX cluster will usually be denied. That is intended ("one position per merged cluster"). **Owner-approved 2026-11-11 10:13 ET** (Ettienne chose the option *"Apply the cluster cap to adds"*): the post-add cluster risk must stay within the profile's cluster cap (Starter 0.75% of book); on a breach the add is **skipped, never resized**, and the skip line gives the reason (`PORT Info: skip <id>#<i> cluster cap: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> cluster $<sum> cap $<cap>`, §6). The cap is `cfg.clusterCap` after the `ClusterCapPct` Input override (§7).
-  3b. **Instrument cap** (owner request, Ettienne 2026-11-11 10:30 ET: *"Allow a maximum account percentage per position per instrument - e.g. 8% total of the account can be risked at a time on a specific instrument (this would include initial risk and adds)."*; only when `MaxInstrumentRiskPct > 0`, §7): `instRisk[k] − rel + riskAfter > instrumentCap × book` ⇒ `"instrument cap"`. `instRisk[k]` = Σ `pm.riskOpen` of **every** strategy/position in the portfolio on instrument k (initial contracts and adds, each priced to its own current stop, widened as published), so the position's own `rel` is released and its post-add risk counted, as in checks 2–3. Skipped, never resized.
   4. **Total risk cap:** `_PortRiskCap.Breaks(total − rel, riskAfter, cap)` ⇒ `"total risk cap"`.
   5. If allowed: `heat = heat − rel + riskAfter`, same for `clHeat[c]` and `total`. `open` and `clCount` do **not** change, because an add is not a new position (same as a reversal).
 - **RiskParity at 0.5% applies to the initial entry only.** An add does not get a fresh `riskPerTrade` budget. Its size comes from §4, and its risk is bounded only by the post-add caps above. Real risk per position is therefore 0.5% (initial, structural) up to 1% (per-position budget).
@@ -209,7 +207,7 @@ Ettienne: *"the stop in general would move for the second entry so the risk calc
 **Journal lines** (Info unless stated, through the existing deduped `skip()`, re-logged when the reason changes or clears):
 - Allowed: `PORT Info: add <id>#<i> leg <k>/<max> <long|short> allowed: pos <pos> n <nAdd> avg <avgPx> -> <avgNew> stop <old> -> <addStop> riskOpen $<rel> after $<riskAfter> delta $<Δ> heat $<heat> cap $<heatCap> cluster $<cl> cap $<clCap> total $<total> cap $<totalCap>`.
 - Skips: `PORT Info: skip <id>#<i> <reason>: leg <k>/<max> n <nAdd> riskOpen $<rel> after $<riskAfter> <cap name> $<sum> cap $<cap>`. Reasons:
-  - `add per-position budget`, `heat cap`, `cluster cap`, `instrument cap`, `total risk cap`, `max adds`;
+  - `add per-position budget`, `heat cap`, `cluster cap`, `total risk cap`, `max adds`;
   - `size < minContracts` (throttle blocks are the `ADD-BLOCKED` Warning above, not an Info skip);
   - `add: no addStop`, `add: no avgPx`, `add: stale arm` (`armStamp != stamp`).
 - Fill: `PORT Info: add filled <id>#<i> leg <k> pos <old> -> <new>`. Unfilled (**Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*), answer 4): the `fillCheckEvals` Warning gains an add form:
@@ -272,31 +270,7 @@ public enum EAddPolicy { Refuse, AllowWithinCap }          // top-level in _Port
 - **Applies to new entries and adds:** the override replaces `cfg.clusterCap`, which feeds the existing new-entry cluster check (`clusterCapD`, `_PortMM` L843/L889, including P2 (c): a lone entry in an empty cluster is still not checked) and the add check in §3 check 3. No separate add cap.
 - **Config-time log:** one Info line at `StartCalc`, every run: `PORT config clusterCap=<fraction> source=<input|profile>` (`profile` covers profile defaults, subclass `Config` and JSON). The existing config dump (`clusterCap(<x>)` in the RUN/CFG text) shows the effective value.
 - **Default ⇒ no behaviour change:** with `ClusterCapPct = 0` the effective cap equals today's, so every decision is unchanged. G0 and DVP D9a are chart runs where M-PORT is inert, so their hashes are unchanged. The one new Info line is the only PT journal difference (§8).
-- m-port-spec §0 must then say "four `[Input]`s" (`TotalRiskCapPct`, `AddPolicy`, `ClusterCapPct`, `MaxInstrumentRiskPct`) in rev 2.8.
-
-**`MaxInstrumentRiskPct` is an `[Input]`: the most of the book that may be at risk on one instrument at a time** (owner request, Ettienne 2026-11-11 10:30 ET: *"Allow a maximum account percentage per position per instrument - e.g. 8% total of the account can be risked at a time on a specific instrument (this would include initial risk and adds)."*).
-
-```csharp
-// _PortfolioRiskManager
-/// <summary>Per-instrument open-risk cap in % of book (initial risk + adds, all strategies on that instrument). 0 = off.</summary>
-[Input] public double MaxInstrumentRiskPct { get; set; }
-// ctor: MaxInstrumentRiskPct = 0;   // PROPOSED default (off), Q11
-// StartCalc, after Resolve: cfg.instrumentCap = MaxInstrumentRiskPct > 0 ? MaxInstrumentRiskPct / 100 : 0;
-//   Info: "PORT config instrumentCap=<fraction|off> source=<input|off>"
-```
-
-- **Values:** `0` = off (no check, no change). `> 0` = that % of book equity, e.g. `8` = 8%. Out of range (< 0 or > 100) ⇒ `PORT Warning: MaxInstrumentRiskPct(<x>) out of range (0..100): check off` and the check stays off (**PROPOSED** handling). No JSON key and no profile value (an Input only, like `AddPolicy`); a JSON `instrumentCap` key would log the same "Input only; JSON value ignored" Warning.
-- **Instrument identity:** the strategy's instrument root, published once at `StartCalc` as a new optional key `pm.inst` (string, e.g. `ES`, from the M-INSTR root parse; additive, `pm.ver` stays 1). A strategy that does not publish it falls back to `sig.Bars.Info.Name` as read by the MM view. ES and MES are **different** instruments under this rule (separate roots; **PROPOSED**, Q11); the cluster cap is what groups them.
-- **Check:** `instRisk[k] + r > instrumentCap × book` for a new entry (r = its widened risk at its stop, as the existing caps use), and `instRisk[k] − rel + riskAfter > instrumentCap × book` for an add (§3 check 3b). `instRisk[k]` sums `pm.riskOpen` (widened, at each position's current stop, all legs) over **all** strategies whose instrument is k, plus any entries already approved earlier in the same evaluation. Breach ⇒ skipped, never resized; Info skip line `PORT Info: skip <id>#<i> instrument cap: <inst> risk $<r or riskAfter> instrument $<instRisk> room $<room> cap $<cap>` (deduped like every skip).
-- **Order:** new entries: after the cluster cap and before the total risk cap (same position as check 3b for adds). The first breached cap is the reason logged.
-- **Applies to new entries and adds alike**, and to reversals (the reversing position's `rel` is released, as for the other caps).
-- **How it interacts with the other caps:**
-  - **`maxTradeRisk` (1% per position, per trade or post-add):** a single position can never exceed 1%, so an instrument cap ≥ 1% only binds when **several strategies/positions** hold the same instrument at once (e.g. PS-02, VW-01 and YV-11 all long ES), or when a profile uses a larger per-trade budget. 8% would need at least 8 full-budget positions on one instrument.
-  - **Cluster cap / `ClusterCapPct`:** every instrument belongs to one cluster, so `instRisk[k] ≤ clHeat[cluster]` always. An instrument cap **≥ the cluster cap can never bind**; it is only effective when set below the cluster cap, or when the cluster cap is raised (`ClusterCapPct`) above it, or for an instrument alone in its own cluster with a cluster cap above it.
-  - **Heat / `TotalRiskCapPct`:** likewise `instRisk[k] ≤ heat ≤ heatCap` and `≤ total`, so a cap above `heatCap` or `TotalRiskCapPct` never binds.
-  - **With today's Starter caps** (maxTradeRisk 1%, cluster 0.75%, heat 1.5%, total 10%), the **cluster cap binds first for ES/NQ** (0.75%), so `MaxInstrumentRiskPct = 8` is inert under Starter; under ScaledBook (cluster 2%, heat 4%) it is also inert. It becomes the binding rule only in a profile whose cluster and heat caps are above 8%, or when set low (e.g. 0.5% to cap ES alone inside a 0.75% EQIDX cluster).
-  - When the Input is above the effective cluster or heat cap, the config line adds `inert(>=clusterCap|heatCap)` so the run sheet shows it does not bind.
-- **Default ⇒ no change:** `0` (off) leaves every decision unchanged; G0 and DVP D9a are chart runs (M-PORT inert), so their hashes are unchanged; the config Info line is a new PT journal line (§8).
+- m-port-spec §0 must then say "three `[Input]`s" (`TotalRiskCapPct`, `AddPolicy`, `ClusterCapPct`) in rev 2.8.
 
 - **Saved portfolios.** Adding an Input to a compiled signal may reset or re-order its saved inputs in existing `.pws` portfolios (VERIFY, A0). After the update, re-check that `TotalRiskCapPct` kept its value.
 
@@ -320,7 +294,6 @@ public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
   - The candidate filter keeps L813/L814 verbatim on the `Refuse` branch.
   - No new journal line, Status text or RUN text.
   - The R stream is unchanged for trades without an add fill: one segment, so R(rebased) = R(original) and every existing kill / session / weekly line is byte-identical.
-  - The new `MaxInstrumentRiskPct` Input defaults to 0 (off, PROPOSED), so no decision changes; its `PORT config instrumentCap=off source=off` Info line is a new PT journal line.
   - The new `ClusterCapPct` Input defaults to 0 (= profile value), so caps and decisions are unchanged; its `PORT config clusterCap=… source=profile` Info line is the one new PT journal line, even under `Refuse`.
   - The new `AddPolicy` Input defaults to `Refuse`. The `TotalRiskCapPct` value in saved portfolios must survive the signal update (A0).
   - `PortDecision` values are unchanged: `entryContracts` −1 for every in-position strategy, `allowEntries` false.
@@ -338,7 +311,7 @@ public EAddSizing addSizing = EAddSizing.ScaleWithInitial;
 
 ## 9. Tests
 
-### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P41, PROPOSED)
+### 9.1 Off-MC (`tests/PortMMTests`, new T-P28 … T-P40, PROPOSED)
 Book 1M, Starter unless stated, ES BPV 50.
 - **T-P28 policy off:**
   - `Refuse` with a same-direction arm with `pm.add` = 1 ⇒ refused `"Long"` / `"in position"`, silent, `entryContracts` −1. Identical decisions to a run without the new keys.
@@ -404,15 +377,6 @@ Book 1M, Starter unless stated, ES BPV 50.
   - A partial exit never starts a segment or closes the trade.
   - A net-shrink sample is not an add fill; a net-grow sample with an approved add is.
 - **T-P40 add fill-check Warning (owner 10:28 ET):** `fillCheckEvals` 3. (a) Approved market add, position does not grow for 3 evaluations ⇒ one `PORT Warning: … add leg 1/2 … approved (qty n) but position did not grow after 3 MM evaluations …`; a 4th and 5th evaluation ⇒ no repeat. (b) Resting long add buy-stop above a price that never reaches it, 10 evaluations ⇒ no Warning. (c) Price closes through the stop on 3 evaluations without a fill ⇒ one Warning. (d) Leg 2 of the same position, and leg 1 of a new position after flat, can each warn once. (e) `fillCheckEvals` 0 ⇒ never. (f) The add fills on evaluation 2 ⇒ no Warning, count reset.
-- **T-P41 `MaxInstrumentRiskPct` (owner request 10:30 ET):** book 1M; profile caps raised in the test config so only the instrument cap can bind (heat, cluster, total ≥ 20%), unless stated.
-  - `MaxInstrumentRiskPct = 0` ⇒ no check; decisions identical to today; config line `instrumentCap=off source=off`.
-  - `= 8` (cap 80 000): three ES strategies with open risk 30 000 + 25 000 + 20 000 (= 75 000, initial + adds): a new ES entry with r 5 000 ⇒ allowed (80 000, boundary `>`); r 5 001 ⇒ skipped `"instrument cap"`, never resized; Info line with `instrument $75000 room $5000 cap $80000`.
-  - An **add** on the 30 000 position with riskAfter 34 000 (rel 30 000 released) ⇒ 79 000 ⇒ allowed; riskAfter 35 001 ⇒ skipped `"instrument cap"`.
-  - NQ open risk 50 000 does not count against ES (per instrument); MES is a separate instrument from ES.
-  - A strategy without `pm.inst` falls back to the MM view's symbol name.
-  - Starter caps (cluster 0.75%, heat 1.5%) with `= 8` ⇒ the cluster cap refuses first (`"cluster cap"`); the config line shows `inert(>=clusterCap)`.
-  - `= 0.5` under Starter: ES alone at 4 000, new ES entry r 1 001 ⇒ `"instrument cap"` (5 001 > 5 000) while the cluster (7 500) still has room.
-  - `= −1` or `= 150` ⇒ the out-of-range Warning, check off.
 - **T-P39 `ClusterCapPct` override (owner-approved 10:14 ET):** Starter profile (cluster cap 0.75%), book 1M.
   - `ClusterCapPct = 0` ⇒ effective cap 0.0075, `source=profile`; decisions identical to today.
   - JSON `"clusterCap": 0.01` and `ClusterCapPct = 0` ⇒ 0.01, `source=profile`.
@@ -431,7 +395,7 @@ Book 1M, Starter unless stated, ES BPV 50.
 
 | # | Question | How | Pass | If not |
 |---|---|---|---|---|
-| A0 | `AddPolicy`, `ClusterCapPct` and `MaxInstrumentRiskPct` Inputs in the PT money-management signal's Format dialog (and the `PORT config clusterCap=… source=…` line); does an existing `.pws` keep `TotalRiskCapPct` after the update; can the optimizer sweep `AddPolicy`? | Open an existing portfolio after compiling; read both Inputs; try an optimization over `AddPolicy` | Named members `Refuse` / `AllowWithinCap` shown; `TotalRiskCapPct` unchanged; sweep result recorded either way | Re-enter `TotalRiskCapPct`; if there is no enum sweep, use two saved backtests |
+| A0 | `AddPolicy` and `ClusterCapPct` Inputs in the PT money-management signal's Format dialog (and the `PORT config clusterCap=… source=…` line); does an existing `.pws` keep `TotalRiskCapPct` after the update; can the optimizer sweep `AddPolicy`? | Open an existing portfolio after compiling; read both Inputs; try an optimization over `AddPolicy` | Named members `Refuse` / `AllowWithinCap` shown; `TotalRiskCapPct` unchanged; sweep result recorded either way | Re-enter `TotalRiskCapPct`; if there is no enum sweep, use two saved backtests |
 | A1 | Does PT fill a same-direction add, and which Strategy Properties Position Limits option allows it? | Buy 1 at bar 10, buy 1 more ("LA1") at bar 20. Run with the limit set to 1 entry, then to "allow up to N entry orders in the same direction" with N = 3 | No add fill with limit 1. With N = 3 the position goes 1 → 2. Record the exact option name | Adds cannot run in PT; keep `AddMode = None` |
 | A2 | `EntryContracts > 0` on the add step sizes only the add | MM writes 4 on the add step, −1 otherwise | Add fills 4 and the initial stays 1. If the strategy also sends a second entry the same bar, both get 4 (documents the one-pending-entry rule) | Use CodeSize for adds (§4) |
 | A3 | A resting add stop order, re-sent each bar, is sized by the `EntryContracts` of its fill step | Add stop above market for 5 bars; MM writes 2, 3, 3, 3, 3 | Fill qty = that step's value | Publisher must re-arm every bar (already the rule) |
@@ -481,7 +445,6 @@ Results are recorded in `specs/live-check-sheet.md` (new Check 7A) and m-port-sp
 - ~~**Q5** Add sizing under RiskParity: `ScaleWithInitial` (keeps the strategy's add ratio at book scale), or `CodeQty`? PROPOSED: `ScaleWithInitial`.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): `ScaleWithInitial`.
 - ~~**Q6** `maxAddsPerPosition` default 2, matching YV-11's `MaxAdds` 2 and the overview's 2 + 2 × 1 = 4? Any lower Starter value?~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): default 2 for Starter (and ScaledBook).
 - ~~**Q8** Should `fillCheckEvals` also warn on an approved add that never fills? VERIFY that it cannot false-alarm on a resting add stop that does not trigger; the "likely" wording is kept.~~ **Owner-approved 2026-11-11 10:28 ET** (Ettienne 2026-11-11 10:28 ET: *"1. 1% of the account based off the new stop-level.  2. Yes   3. Yes   4. Yes"*): yes; line, counting and dedupe in §6, test T-P40.
-- **Q11 `MaxInstrumentRiskPct` default and scope (PROPOSED):** default `0` = off (no behaviour change, G0/D9a unchanged), with 8 as the documented example? Instrument = root (ES and MES separate), or merge micro and full-size of the same index? Note that under Starter and ScaledBook an 8% cap never binds because the cluster cap (0.75% / 2%) binds first; is a lower value intended (e.g. ≤ the cluster cap)?
 - **Q9 (native checks, not owner questions):**
   - the MC Position Limits option name and behaviour in PT (A1);
   - whether `From Entry` exits behave in PT as on charts (A4);
