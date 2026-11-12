@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using PowerLanguage.Function;
 
 // Off-MC tests for the GX engine in _GenericExit.Strategy.CS (specs/generic-exit-manager-spec.md rev 1.1 §8.3).
@@ -46,6 +47,7 @@ static class Program
 		ConsecutivePositions();
 		FillBarT1Resumes();
 		WrapperProtectedT1();
+		RecalcClearsGx();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -843,6 +845,45 @@ static class Program
 		Check(off.Opens == 2 && off.Journals == 1, "a later position trades and journals");
 	}
 
+	static string HostTrades(GxRunMemory s, int bars)
+	{
+		int wait = s.Wait;
+		bool next = s.NextLong;
+		var sb = new StringBuilder();
+		for (int bar = 0; bar < bars; bar++)
+		{
+			wait++;
+			if (wait < 30) continue;
+			wait = 0;
+			sb.Append(next ? 'L' : 'S');
+			next = !next;
+		}
+		return sb.ToString();
+	}
+
+	static void RecalcClearsGx()
+	{
+		var fresh = new GxRunMemory();
+		string trades = HostTrades(fresh, 120);
+		var again = new GxRunMemory();
+		again.Used = again.PlacesT1 = again.PlanLive = again.JournalGx = true;
+		again.PlanSource = "plan";
+		again.ExitReason = "T1";
+		again.Package = "906176546f6158f5";
+		again.Equity = 13725;
+		again.PlannedRisk = 162.50;
+		again.Gate.BeginPosition(new DateTime(2024, 11, 18, 18, 20, 0));
+		again.Wait = 12;
+		again.NextLong = false;
+		Check(HostTrades(again, 120) != trades, "leftover wait and side change the next run's entries");
+		Check(again.JournalSource() == "plan" && again.JournalEquity() == "13725.00" && again.Package == "906176546f6158f5", "without a reset the journal keeps the embedded run");
+		again.Reset();
+		Check(HostTrades(again, 120) == trades, "after StartCalc the second run matches a fresh instance");
+		Check(again.JournalSource() == "" && again.JournalReason("GXST1") == "" && again.JournalReason("GXLX") == "" && again.JournalEquity() == "" && again.JournalRisk() == "" && again.Package == "" && !again.Gate.EngineOpen, "the second run's GX journal fields are blank");
+		var other = new GxRunMemory();
+		Check(HostTrades(other, 120) == trades && other.JournalSource() == "", "a new instance matches the reset instance");
+	}
+
 	static void ExitReasonMap()
 	{
 		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
@@ -894,6 +935,10 @@ static class Program
 		Check(src.IndexOf("gxSendExit(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrderFor(", StringComparison.Ordinal) >= 0, "a decided T1 or target is sent and resent");
 		Check(gx.IndexOf("m_life.OnBar(", StringComparison.Ordinal) >= 0 && gx.IndexOf("WrapperRun.ExitToSend(", StringComparison.Ordinal) >= 0 && gx.IndexOf("m_explicitNext", StringComparison.Ordinal) < 0, "wrapper manages before it sends a stop");
 		Check(src.IndexOf("if (m_gxPlacesT1)", StringComparison.Ordinal) >= 0, "a host that does not place T1 leaves gxExitReason and t1PlanSource empty");
+		Check(src.IndexOf("gxResetRun();", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos = null;", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPlacesT1 = false;", StringComparison.Ordinal) >= 0 && src.IndexOf("m_journalGx = false;", StringComparison.Ordinal) >= 0, "StartCalc clears the embedded session");
+		Check(gx.IndexOf("m_wrapPos = null;", StringComparison.Ordinal) >= 0 && gx.IndexOf("m_exitReason = \"\";", StringComparison.Ordinal) >= 0, "wrapper StartCalc drops the previous position");
+		Check(host.IndexOf("m_wait = 0;", StringComparison.Ordinal) >= 0 && host.IndexOf("m_nextLong = true;", StringComparison.Ordinal) >= 0, "host alternation restarts on recalculation");
+		Check(src.IndexOf("exitPlan(") >= 0 && File.ReadAllText(Path.Combine(root, "_TestGate0.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0 && File.ReadAllText(Path.Combine(root, "_DvpEngineTest.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0, "G0 and D9a do not call exitPlan");
 		Check(gx.IndexOf("[Input] public bool FillBarDisasterStop { get; set; }", StringComparison.Ordinal) >= 0 && src.IndexOf("inputs[{inputSnapshot()}]", StringComparison.Ordinal) >= 0, "FillBarDisasterStop is an Input on the RUN line");
 		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
 		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
