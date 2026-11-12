@@ -2398,7 +2398,7 @@ namespace PowerLanguage.Strategy
 			m_gxGate.OnFlat();
 			m_gx = null;
 			m_gxPos = null;
-			m_gxMkt = null;
+			m_gxMkt = default(ExitMarket);
 			GxMinutesToNews = double.NaN;
 			if (m_portOn)
 			{
