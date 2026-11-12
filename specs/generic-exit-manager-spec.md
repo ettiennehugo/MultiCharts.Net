@@ -1,13 +1,13 @@
 ---
 title: "Generic trade-management and exit layer (GX) for entry-only ideas — PROPOSAL"
-rev: "0.8 PROPOSAL, 2026-11-11 (ET); rev 0.8 = owner approval 18:54 ET of the §4.9 other-timeframe rule and the ETrailStart.AtTrigger rename (§4.4, §4.9, §6, §9); rev 0.7 = owner answers 18:18–18:21 ET to Q4, Q5, Q6, Q8, Q9 and the final-target / trail-start unit question (§4.1, §4.2, §4.4, §4.9, §6, §8, §9); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
-status: "PROPOSAL, docs only, no code. Every owner question is answered (09:16, 09:33, 09:34, 09:52, 18:18–18:21 and 18:54 ET). Still open: only the E1–E8 MiniPC checks (§7). Not yet approved for implementation as a whole. Anything else not quoted from the owner is PROPOSED."
+rev: "0.9 PROPOSAL, 2026-11-11 (ET); rev 0.9 = MiniPC E1–E8 native results recorded (scratch `_TestGx*`, §2, §3, §4.9, §5.1, §7, §8, §9); rev 0.8 = owner approval 18:54 ET of the §4.9 other-timeframe rule and the ETrailStart.AtTrigger rename (§4.4, §4.9, §6, §9); rev 0.7 = owner answers 18:18–18:21 ET to Q4, Q5, Q6, Q8, Q9 and the final-target / trail-start unit question (§4.1, §4.2, §4.4, §4.9, §6, §8, §9); rev 0.6 = T1 already passed at the fill ⇒ skip T1, trail all, Info line (owner 09:52 ET, §4.2); rev 0.2 = owner answers of 09:16 ET; rev 0.3 = planned vs actual risk % logging (owner request 09:19 ET, §5.3); rev 0.4 = Q10 answers 09:33 ET (whole-trade MAE, strategy equity only, 1.00 and 1.10 reported separately); rev 0.5 = short side explicit in every stop/target/BE/trail rule (owner 09:34 ET)"
+status: "PROPOSAL, docs only, no code. Every owner question is answered (09:16, 09:33, 09:34, 09:52, 18:18–18:21 and 18:54 ET). Native MiniPC checks E1–E8 recorded 2026-11-11 on scratch studies (§7). Still open: re-check E2, E4 and E7 on the implementation build; scratch `_TestGx*` cleanup awaits owner approval. Not yet approved for implementation as a whole. Anything else not quoted from the owner is PROPOSED."
 requested_by: "Ettienne Hugo, 2026-11-11 09:02 ET (verbatim below)"
 code_refs: "origin/main @ 47ffda2 (2026-11-10). Batch-1 framework references are to PR #117 (branch feat/strategy-specs-batch1, specs/strategies/00-programme-overview.md rev 1.6) and the M-PORT add-legs draft PR #118 (specs/m-port-add-legs-spec.md)."
 holdout: "No price data on or after 2025-01-01 is viewed or reported by anything in this spec. Native checks use data ≤ 31 Dec 2024."
 ---
 
-# Generic trade-management and exit layer (GX), rev 0.8 PROPOSAL
+# Generic trade-management and exit layer (GX), rev 0.9 PROPOSAL
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
 - 1 → §3: option C approved.
@@ -92,23 +92,23 @@ The exit layer must not become a hidden optimiser: its defaults are fixed before
 
 | # | Fact | Source / status |
 |---|---|---|
-| F1 | Several signals applied to **one chart** work as **one strategy**: signal A can enter and signal B can exit. Signals on different charts are independent | MC staff, forum *"Order handling in signal / multiple signals"* (viewtopic t=46258). The repo's exit-only studies (§1.1) rely on it. **Documented; confirm natively (E1)** |
+| F1 | Several signals applied to **one chart** work as **one strategy**: signal A can enter and signal B can exit. Signals on different charts are independent | MC staff, forum *"Order handling in signal / multiple signals"* (viewtopic t=46258). The repo's exit-only studies (§1.1) rely on it. **Confirmed natively (E1, 2026-11-11): the exit-only signal filled `GXX1T` then `GXXA` as sent, on 1m, 2m, 5m, 15m, 60m and daily** |
 | F2 | `OrderExit.FromEntry(IOrderObject)` can only tie an exit to an entry **created in the same signal**. A separate exit signal cannot name another signal's entry | Programming Guide v1.1 (2014-11-19), "OrderExit"; Help Center page *"Entry"*: *"An exit can only be tied to an entry within the same signal"*. **Documented** |
 | F3 | `OrderExit.FromAll` with a quantity closes **that quantity from each entry**. With an initial entry plus adds, "Sell 1 FromAll" can sell more than 1 contract. `OrderExit.Total` closes exactly the quantity given, oldest entry first | Programming Guide v1.1, "Exit types" worked example (buy1 5, buy2 1, buy3 2; Sell FromAll 2 sells 5). **Documented.** GX rule: partial exits use `OrderExit.Total`; full exits use `FromAll` with no quantity |
-| F4 | By default an exit can be applied to one entry only once. `[ExitFromOneEntryOnce(ExitFromOneEntryOnce.FillAndKillExitOrder)]` lets the same exit order be reused for repeated partials | Programming Guide v1.1. **Documented; GX needs it only if one order object is used for several scale-outs (E5)** |
-| F5 | Pyramiding requires Strategy Properties *"Allow up to XXX entry orders in the same direction…"* | Programming Guide v1.1, rule 4. This is likely the "Position Limits" option PR #118 A1 asks about. **Confirm the label in the installed build (E6)** |
-| F6 | `PositionSide`, `CurrentPosition` (`OpenTrades`, `MaxRunUp`, `MaxDrawDown`), `StrategyInfo.MarketPosition` and `StrategyInfo.AvgEntryPrice` describe the **strategy's** (all signals') position | Implied by F1 and used by `_ExitHalfRiskHalfRoll` and `_StopsAndTargets`. **Confirm what an exit signal sees on the entry-fill bar (E1)** |
-| F7 | **Fill-bar protection.** An entry signal can send its stop **with** the entry ("also protects the entry bar", engines manual v3.2 TS-01 example, `m_lxStp.Send(m_stop)` next to `m_le.Send`). A separate exit signal does not know a pending entry exists, so its explicit stop starts only after the fill bar has closed: engines manual v3.2 "the fill bar itself is unprotected", and `_Test10`'s pitfall note. MC's built-in `GenerateStopLoss` is applied by MC from the fill | Repo docs (engines manual v3.2 L739–741, L1056–1058; `_Test10` L108–109). **The built-in special-order behaviour on the fill bar is unverified natively (E2)** |
-| F8 | In PT, an `IPortfolioStrategy` has `Signals : IStrategy[]` (several signals per instrument). The MM reads `Signals[0]` (`_PortfolioRiskManager.view` L125) and the strategy's `PortfolioData`. `EntryContracts` applies to every **entry** order of the strategy; exits are never gated | m-port-spec §1, §6; `_PortfolioRiskManager.Strategy.CS` L111, L125. **Whether `MyPortfolioData` is one dictionary per strategy, shared by its signals, is unverified (E4)** |
-| F9 | IOG is unavailable in PT, and so is Bar Magnifier. On a chart, IOG is a per-signal setting | m-port-spec §4 item 4. **A chart exit signal with IOG on while the entry runs closed-bar would break chart/PT parity. GX forbids IOG (E8 confirms the setting is per signal)** |
+| F4 | By default an exit can be applied to one entry only once. `[ExitFromOneEntryOnce(ExitFromOneEntryOnce.FillAndKillExitOrder)]` lets the same exit order be reused for repeated partials | Programming Guide v1.1. **Confirmed natively (E5, 2026-11-11): the same order object sent twice in one trade does not fill twice (3→2, then 2→0 at the FromAll); with the FillAndKill attribute it does (3→2→1→0). GX uses separate order objects per partial. The attribute is per class, so in the embedded engine it would apply to every exit of the host signal** |
+| F5 | Pyramiding requires Strategy Properties *"Allow up to XXX entry orders in the same direction…"* | Programming Guide v1.1, rule 4. **Confirmed (E6, PASS by reference to PR #118 A1, 2026-11-11):** the installed label is *"Allow up to 3 entry orders in the same direction as the currently held position:"*, with the two radios in that check |
+| F6 | `PositionSide`, `CurrentPosition` (`OpenTrades`, `MaxRunUp`, `MaxDrawDown`), `StrategyInfo.MarketPosition` and `StrategyInfo.AvgEntryPrice` describe the **strategy's** (all signals') position | Implied by F1 and used by `_ExitHalfRiskHalfRoll` and `_StopsAndTargets`. **Confirmed natively (E1, 2026-11-11):** on the fill bar's close the exit signal sees `MarketPosition` = 2, `PositionSide` = 1 (long; the side, not the size), `OpenTrades` = 1, `AvgEntryPrice` = the fill, and the `GXLE` leg |
+| F7 | **Fill-bar protection.** An entry signal can send its stop **with** the entry ("also protects the entry bar", engines manual v3.2 TS-01 example, `m_lxStp.Send(m_stop)` next to `m_le.Send`). A separate exit signal does not know a pending entry exists, so its explicit stop starts only after the fill bar has closed: engines manual v3.2 "the fill bar itself is unprotected", and `_Test10`'s pitfall note. MC's built-in `GenerateStopLoss` protects the fill bar **only when it is called every bar, including while flat**. Called only while in a position (the `_StopsAndTargets` pattern), it behaves like an explicit wrapper stop and starts on the next bar | Repo docs (engines manual v3.2 L739–741, L1056–1058; `_Test10` L108–109). **Confirmed natively (E2, 2026-11-11, 20 trades, 1-tick stop):** (a) wrapper explicit stop, 0 of 15 fill-bar exits, stop from the next bar, net −$450; (d) `GenerateStopLoss` only in a position, same 0 of 15 and −$450, order name "Stop Loss"; (b) `GenerateStopLoss` every bar, 15 of 15 fill-bar exits named "Stop Loss" (the exit-only signal never sees those positions); (c) stop sent with the entry (`GXLSe`), 14 of 14 fill-bar exits (the through-count is 14 rather than 15 because that stop is the entry-bar close minus 1 tick, not the fill minus 1 tick). **A separate wrapper cannot protect the fill bar.** The fill-bar stop must come from the entry, or from `GenerateStopLoss` called every bar. Re-check the chosen mechanism on the implementation build |
+| F8 | In PT, an `IPortfolioStrategy` has `Signals : IStrategy[]` (several signals per instrument). The MM reads `Signals[0]` (`_PortfolioRiskManager.view` L125) and the strategy's `PortfolioData`. `EntryContracts` applies to every **entry** order of the strategy; exits are never gated | m-port-spec §1, §6; `_PortfolioRiskManager.Strategy.CS` L111, L125. **Confirmed natively (E4, 2026-11-11, scratch MM):** `MyPortfolioData` is one dictionary per strategy (`sameRef` True from both signals and the MM). `signals.Length` is 2 with the entry at `[0]` when listed first. The own index is readable at `StartCalc` via `PortfolioData` matching, but `Signals[i].Bars` throws `Unaccessible property(method): Bars` at `StartCalc`, so defer `Bars` reads to the first bar. Calc order equals list order. Deny-all (`AllowEntries = false`, `EntryContracts = 0`) leaves the wrapper's exits unchanged. Re-check with the real wrapper and `_PortfolioRiskManager` |
+| F9 | IOG is unavailable in PT, and so is Bar Magnifier. On a chart, IOG is a per-signal setting | m-port-spec §4 item 4. **Confirmed natively (E8, 2026-11-11):** with the exit IOG on and the entry off, the exit logged `calls(4) insideCalls(2)` and `iogEnabled(True)` every bar, the entry `calls(1) insideCalls(0)` and `iogEnabled(False)`. The exit filled intrabar at bar 105 (vs 106 in E1) and FromAll at bar 110 intrabar. The GX rule "IOG off" stays, because this would break chart/PT parity |
 
 **Consequences.**
 1. A stand-alone exit signal **works** on a chart and in PT as a second signal (F1, F8). But:
    - it cannot use `FromEntry` (F2);
    - it must use `Total` for partials (F3);
    - it does not know the entry's planned or structural stop, so it must derive R itself;
-   - it leaves the fill bar unprotected unless it uses MC's built-in stop (F7);
-   - in PT, the entry strategy's `pm.riskOpen` would not follow the exit signal's stop (F8) unless the exit signal publishes it. Rev 0.2 has the wrapper publish it (§5.1); E4 verifies.
+   - it leaves the fill bar unprotected unless it calls `GenerateStopLoss` every bar, including while flat (F7). Calling it only while in a position, or sending an explicit stop from the wrapper, starts the stop on the next bar;
+   - in PT, the entry strategy's `pm.riskOpen` would not follow the exit signal's stop (F8) unless the exit signal publishes it. The wrapper publishes it (§5.1); E4 confirmed the shared dictionary, list-order calc and `riskAtOpen` match on the scratch studies (re-check on the implementation build).
 2. An exit engine running **inside** the entry signal has none of these problems. It sends the stop with the entry, knows the structural and widened stops, calls `portfolioStop`, journals through CS-1, and can use `FromEntry` per leg.
 
 ## 3. Options compared
@@ -118,9 +118,9 @@ The exit layer must not become a hidden optimiser: its defaults are fixed before
 | Where the logic runs | A separate signal on the chart / PT strategy | 3–5 separate signals | Inside the entry signal (`_CustomSignal` helper class). The wrapper is a separate signal only for entries that cannot embed it |
 | Input count | About 28 on one dialog (§4.11) | About 6–9 each, but 4 dialogs and 4 "same strategy" set-ups per test | Embedded: 0 new Inputs by default (the host exposes the few it varies, header §17); wrapper: about 28, same as A |
 | Knows the entry's stop / R | No: derives R (F2, F7) | No | **Yes** (embedded); wrapper: derives R |
-| Fill-bar protection | Only through `GenerateStopLoss` (E2) | Same, in the stop module | **Yes**: the stop is sent with the entry |
-| Same-bar precedence (§7.4) | One place decides; one reason is journalled | **Not controllable**: each signal sends its own exit, and MC fills whichever triggers. Two close-based exits in one bar give two orders and an ambiguous reason. Ordering depends on the Format Signals list (E3) | One place decides (the engine) |
-| Optimiser sweeps | Fine, one dialog. Whether enum Inputs can be swept is the existing open check (PR #117 overview §9, E7) | Awkward: a sweep spans several signals | Embedded: the host exposes the exact Inputs a registered ablation needs. Wrapper: as A |
+| Fill-bar protection | Only through `GenerateStopLoss` called **every bar, including while flat** (E2). An explicit wrapper stop, or `GenerateStopLoss` only while in a position, starts on the next bar | Same, in the stop module | **Yes**: the stop is sent with the entry |
+| Same-bar precedence (§7.4) | One place decides; one reason is journalled | **Not controllable**: each signal sends its own exit, and MC fills whichever triggers. E3 (2026-11-11): no overshoot (2→0 at bar 106). FromAll+FromAll: only the first-listed signal's order fills (`GXXA` normally, `GXBA` when swapped). Total+Total: both fill, 1 each. FromAll+Total: FromAll takes 2. List order decides. Do not build B | One place decides (the engine) |
+| Optimiser sweeps | Fine for numeric Inputs, one dialog. **Enum Inputs cannot be swept** (E7, 2026-11-11): named members show in the Format Inputs dropdown, but the optimiser lists only numerics. The implementation should expose a numeric optimiser companion (or document the limitation). Re-check on the implementation build | Awkward: a sweep spans several signals | Embedded: the host exposes the exact Inputs a registered ablation needs. Wrapper: as A |
 | Testability off-MC | Possible if the logic sits in a pure class | Each module separately; the interactions are not | **Best**: one pure `_ExitEngine` state machine, unit-tested like `_PortMM` under `tests/`, fed by bar and fill events |
 | Portfolio Trader | Works as a second signal, but `pm.riskOpen` / `pm.openR` are wrong unless the exit publishes (E4) | Same, with more signals | **Embedded: full M-PORT compatibility** (`portfolioStop`, `portfolioArmAdd`, R re-base §5). Wrapper: PT-capable as the second signal, publishing the stop keys (§5.1, owner-approved 09:16 ET; verified by E4) |
 | Adds (PR #117 §7.7, PR #118) | Sees the position grow, so it can re-base R, but cannot see `pm.add` | Same | The engine owns the add path: `AddStopMode`, re-base, `portfolioArmAdd` |
@@ -283,7 +283,7 @@ public enum EExitControl { None, FixedBars, RandomBars }
 | `ControlExitBarsD1` | daily | 5 | 1 week |
 
   Individual int Inputs, not an enum or table, because each is a count the owner may override separately and plain int Inputs are this spec's convention for counts (`TrailBars`, `StopSwingBars`, `TimeStopBars`), and typed enums are kept for named choices.
-- **Other timeframes** (**Owner-approved 2026-11-11 18:54 ET**, Ettienne: *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*): N = the value for the **nearest listed timeframe at or below** the chart's (Data1) bar size: 2–4 min ⇒ the 1m value; 10 min ⇒ 5m; 30 min ⇒ 15m; 120/240 min ⇒ 60m; weekly/monthly ⇒ daily. Below 1 minute (seconds, ticks) and non-time bars (volume, range, Renko) have no listed timeframe at or below: they use the 1m value and log one Warning `<ID> Warning: CONTROL-BARS no listed timeframe at or below <resolution>: using ControlExitBarsM1`. The timeframe is read once at `StartCalc` from `Bars.Info.Resolution` (type and size; E1 records the values). The resolved N is journalled once: `<ID> Info: CONTROL-BARS tf(<resolution>) mapped(<M1|M5|M15|H1|D1>) bars(<N>)`.
+- **Other timeframes** (**Owner-approved 2026-11-11 18:54 ET**, Ettienne: *"Yes to both the nearest-timeframe rule and the AtTrigger rename"*): N = the value for the **nearest listed timeframe at or below** the chart's (Data1) bar size: 2–4 min ⇒ the 1m value; 10 min ⇒ 5m; 30 min ⇒ 15m; 120/240 min ⇒ 60m; weekly/monthly ⇒ daily. Below 1 minute (seconds, ticks) and non-time bars (volume, range, Renko) have no listed timeframe at or below: they use the 1m value and log one Warning `<ID> Warning: CONTROL-BARS no listed timeframe at or below <resolution>: using ControlExitBarsM1`. The timeframe is read once at `StartCalc` from `Bars.Info.Resolution` (type and size). **E1, 2026-11-11, `@ES`:** 1m is `Minute` size 1 duration `00:01:00` → M1/30; 2m is `Minute` size 2 duration `00:02:00` → M1/30; 5m is `Minute` size 5 duration `00:05:00` → M5/12; 15m is `Minute` size 15 duration `00:15:00` → M15/8; 60m is `Minute` size 60 duration `01:00:00` (not `Hour` 1) → H1/6; daily is `Day` size 1 duration `1.00:00:00` → D1/5. The scratch proxy mapped each of those to the §4.9 N. The resolved N is journalled once: `<ID> Info: CONTROL-BARS tf(<resolution>) mapped(<M1|M5|M15|H1|D1>) bars(<N>)`.
 - **Every entry-only idea runs a control arm** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q4 yes, but set ControlExitBars per timeframe"*): besides the baseline package, each entry-only idea is run once with `ExitControl = FixedBars` (N as above), and reports CS-8 forward MFE/MAE for the same signals. That gives three looks at the same entry:
   1. CS-8 forward MFE/MAE, with no exit at all;
   2. the dumb exit (`FixedBars`; `RandomBars` optional);
@@ -327,7 +327,7 @@ Each gets a header §17 block. Mode-specific inputs are ignored when their mode 
 - **Portfolio Trader.**
   - Embedded: the engine calls `portfolioStop(stop)` on every stop move (BE, trail, add raise) and on an add fill, so `pm.riskOpen` and `pm.openR` stay right, and it uses `portfolioArmAdd` (PR #118).
   - The MM never moves stops and never gates exits (PR #117 overview §7.5; m-port-spec §5.2 "Exits are never touched"). `ForceClosePosition` (fills at the close of bar T) is precedence 1.
-  - **Wrapper in PT:** supported now (§5.1). E4 stays as the verification item.
+  - **Wrapper in PT:** supported now (§5.1). E4 passed on the scratch studies; re-check on the implementation build.
 
 ### 5.1 `_GenericExit` in Portfolio Trader (**Owner-approved 2026-11-11 09:16 ET**: *"3. No, we can make the standalone strategy work in portfolio trader as well for now."*)
 The wrapper runs in PT as the **second signal** of the same PT strategy (one row per instrument), with the entry signal first. Facts used:
@@ -340,11 +340,11 @@ The wrapper runs in PT as the **second signal** of the same PT strategy (one row
    - the MM's `Signals[0]` reads (position sign, currency, `InitialCapital`) come from the entry, as today;
    - in each bar step the wrapper calculates **after** the entry, so its `pm.*` writes are the last ones the MM sees in that step.
 
-   The wrapper checks this at `StartCalc` (where it can read its own index, VERIFY in E4). If it is not after a `pm.ver` publisher, it logs `EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list` and stays inert, sending no exits.
+   The wrapper checks this at `StartCalc`. **E4, 2026-11-11:** the own index is readable at `StartCalc` via `PortfolioData` matching (ES 0, NQ 1; `mySignalIndexByName` / `ByRef` also worked). `Signals[i].Bars` throws `Unaccessible property(method): Bars` at `StartCalc`, so any `Bars` read is deferred to the first bar. If the wrapper is not after a `pm.ver` publisher, it logs `EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list` and stays inert, sending no exits. The swap run supports that Error rule: with the exit listed first, `followsEntry` was N, the exit saw the entry's previous-step data (`entryStepSeen` = bar−1, `entryCalculatedFirst` N), and the MM `lastWriter` was ENTRY (vs EXIT when the exit is listed second).
 2. **The entry must publish (M-PORT).** The MM denies any strategy without `pm.ver` ("no pm.ver"). In PT, the entry must therefore be a `_CustomSignal` publisher that arms its pending entry through `sizeForRisk` / `portfolioArm` with a **planned stop**.
    - To keep sizing and R consistent, the entry should compute that planned stop with the **same GX rule** the wrapper will use: a static `_ExitEngine.InitialStop(mode, …)` helper, the same function the wrapper calls.
    - An entry that cannot publish (a third-party or legacy `SignalObject`) runs in PT only **without** the MM signal. The wrapper then manages exits and journals R, but there is no book-level control. This limitation is logged once at `StartCalc`.
-3. **Who writes which key.** `PortfolioData` is one dictionary per PT strategy (**VERIFY E4**, L6-style `sameRef` from both signals).
+3. **Who writes which key.** `PortfolioData` is one dictionary per PT strategy (**confirmed E4, 2026-11-11**, L6-style `sameRef` True from both signals and from the MM).
 
    | Owner | Keys | When |
    |---|---|---|
@@ -358,8 +358,8 @@ The wrapper runs in PT as the **second signal** of the same PT strategy (one row
    - **The kill / session / weekly R stream** records `riskAtOpen = pm.R$ × |pos|` on the first evaluation with a position (`_PortMM` L963–967). By then the wrapper has re-written `pm.R$` from the **actual fill** and its own stop, so the MM's 1R equals the wrapper's 1R. The difference between planned and actual R is journalled: `EXIT Info: R fill <id> planned $<armR> actual $<fillR>`.
    - **Heat / cluster / total caps** use `pm.riskOpen`, which the wrapper keeps equal to its active stop (BE, trail, add raise).
    - **Adds and the R re-base** (PR #118 §3a) need PR #118 to be built. The wrapper owns the stop raise (`AddStopMode`) and publishes `pm.addStop` / `pm.px` on the add-fill bar. Until PR #118 lands, the MM refuses adds, so PT wrapper runs have no adds.
-5. **Exits are never gated.** `EntryContracts` and `AllowEntries*` apply only to entry orders, and the wrapper sends exits only. The MM's `ForceClosePosition` closes all legs (precedence 1). `Paused` is set only when flat (Check 7 L4).
-6. **Known limitation (documented).** If E4 shows that the signals of one strategy do **not** share one `PortfolioData`, or that the calc order is not the list order, the wrapper's keys never reach the MM. The fallback, proposed for that case only: the entry hosts the engine (option C embedded) for PT runs. E4 decides this before any PT result is used.
+5. **Exits are never gated.** `EntryContracts` and `AllowEntries*` apply only to entry orders, and the wrapper sends exits only. **E4-b, 2026-11-11:** deny-all (`AllowEntries = false`, `EntryContracts = 0`) left the exits identical to E4-a (0 diffs): NQ stopped at bar 104, ES T1 filled at bar 106 and FromAll at bar 116. The MM's `ForceClosePosition` closes all legs (precedence 1). `Paused` is set only when flat (Check 7 L4).
+6. **Known limitation (documented).** If the signals of one strategy do **not** share one `PortfolioData`, or the calc order is not the list order, the wrapper's keys never reach the MM. The fallback, proposed for that case only: the entry hosts the engine (option C embedded) for PT runs. **E4, 2026-11-11, did not trigger this:** `sameRef` was True, calc order was the list order, and `RISKATOPEN` matched on both rows (ES R$100 / `riskAtOpen` $200; NQ $40 / $80). Re-check with the real `_GenericExit` wrapper and `_PortfolioRiskManager` before any production PT result is used.
 
 ### 5.2 Over-budget trade in the wrapper (**Owner-approved 2026-11-11 09:16 ET**: *"4. Keep the position open and log the warning."*)
 - **Test**, on the first bar the wrapper sees the position: `riskDollars = |fill − initial (widened) stop| × BPV × |pos|` > `0.01 × equity`. Equity is `InitialCapital + NetProfit + OpenProfit`, the same base as `sizeForRisk`'s 1% skip. In PT the MM's own per-trade budget has already checked the armed risk, so this catches only fill-versus-plan differences or a non-publishing entry.
@@ -463,14 +463,74 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
 ## 7. Native checks for the MiniPC (backtest only, data ≤ 31 Dec 2024, temporary sandbox studies, no csproj commit)
 | # | Question | How | Pass |
 |---|---|---|---|
-| E1 | Can an exit-only signal on the same chart manage another signal's position, and what does it see on the fill bar? | `_TestGxEntry` (buys 2 on bar 100) + `_TestGxExit` (journals `PositionSide`, `CurrentPosition.OpenTrades`, `AvgEntryPrice` each bar, and `Bars.Info.Resolution` (type, size) once on 1m, 5m, 15m, 60m, daily and one 2m chart; sends `Sell 1 Total` at bar 105, `Sell FromAll` at bar 110) | Exit fills as sent; values visible from the fill bar's close; journal recorded; resolution values recorded for the §4.9 timeframe mapping |
-| E2 | Fill-bar protection | Same pair on a bar where price trades through the stop inside the fill bar. Runs: (a) wrapper explicit stop, (b) wrapper `GenerateStopLoss`, (c) entry sends its stop with the entry | (c) and maybe (b) stop out on the fill bar; (a) does not. Record (b) either way |
-| E3 | Two exits on one bar from two signals; Format Signals order | Two exit signals both `MarketNextBar` on bar 105 | One fill, no overshoot; record which order name fills |
-| E4 | PT: two signals per strategy (**verification item; the wrapper is already specified for PT, §5.1**) | Entry + wrapper in one PT strategy, MM on. Journal `Signals.Length`, `Signals[0]` name, each signal's own index, `MyPortfolioData` reference identity from both signals (L6-style `sameRef`), the calc order of the two signals in one step, the MM's `riskAtOpen` against the wrapper's fill R, and that `EntryContracts` / `AllowEntries` do not affect the wrapper's exits | Shared dictionary, list-order calc, MM R = wrapper R. Otherwise use the §5.1 item 6 fallback |
-| E5 | Repeated partials | `Sell 1 Total` twice with one order object, with and without `ExitFromOneEntryOnce.FillAndKillExitOrder` | Behaviour recorded; GX uses separate order objects if needed |
-| E6 | Pyramiding setting label | Strategy Properties dialog | Exact label of "Allow up to XXX entry orders in the same direction" recorded (shared with PR #118 A1) |
-| E7 | Enum Inputs in the Format dialog and the optimiser | One enum Input (e.g. `ETriggerUnit` as `FinalTargetUnit`) | Named members shown; sweep supported or not (shared with PR #117 overview §9) |
-| E8 | IOG per signal | Wrapper IOG on, entry off | Confirms per-signal; GX rule "IOG off" stays |
+| E1 | Can an exit-only signal on the same chart manage another signal's position, and what does it see on the fill bar? | `_TestGxEntry` (buys 2 on bar 100) + `_TestGxExit` (journals `PositionSide`, `CurrentPosition.OpenTrades`, `AvgEntryPrice` each bar, and `Bars.Info.Resolution` (type, size) once on 1m, 5m, 15m, 60m, daily and one 2m chart; sends `Sell 1 Total` at bar 105, `Sell FromAll` at bar 110) | **PASS, 2026-11-11.** Exit fills as sent on all six timeframes; values visible from the fill bar's close; resolution values recorded for the §4.9 mapping |
+| E2 | Fill-bar protection | Same pair on a bar where price trades through the stop inside the fill bar. Runs: (a) wrapper explicit stop, (b) wrapper `GenerateStopLoss` every bar, (c) entry sends its stop with the entry, (d) `GenerateStopLoss` only while in a position | **Recorded, 2026-11-11.** (c) and (b) stop out on the fill bar; (a) and (d) do not. A separate wrapper cannot protect the fill bar. Re-check the chosen mechanism on the implementation build |
+| E3 | Two exits on one bar from two signals; Format Signals order | Two exit signals both `MarketNextBar` on bar 105 (FromAll+FromAll, both list orders; Total+Total; FromAll+Total) | **PASS, 2026-11-11.** No overshoot. List order decides FromAll+FromAll; Total+Total both fill; FromAll takes 2 against Total |
+| E4 | PT: two signals per strategy (**verification item; the wrapper is already specified for PT, §5.1**) | Entry + wrapper in one PT strategy, MM on. Journal `Signals.Length`, `Signals[0]` name, each signal's own index, `MyPortfolioData` reference identity from both signals (L6-style `sameRef`), the calc order of the two signals in one step, the MM's `riskAtOpen` against the wrapper's fill R, and that `EntryContracts` / `AllowEntries` do not affect the wrapper's exits | **PASS, 2026-11-11, on the scratch studies.** Shared dictionary, list-order calc, MM R = wrapper R. Re-check with the real wrapper and `_PortfolioRiskManager` |
+| E5 | Repeated partials | `Sell 1 Total` twice with one order object, with and without `ExitFromOneEntryOnce.FillAndKillExitOrder` | **PASS, 2026-11-11.** Same object does not fill twice; FillAndKill does. GX uses separate order objects per partial |
+| E6 | Pyramiding setting label | Strategy Properties dialog | **PASS by reference** to PR #118 A1 (2026-11-11) |
+| E7 | Enum Inputs in the Format dialog and the optimiser | One enum Input (e.g. `ETriggerUnit` as `FinalTargetUnit`) | **Recorded, 2026-11-11.** Named members show in the Inputs dropdown. The optimiser lists only numeric Inputs, not enums. A numeric stand-in was used for the sweep. Re-check on the implementation build |
+| E8 | IOG per signal | Wrapper IOG on, entry off | **PASS, 2026-11-11.** Confirmed per-signal; GX rule "IOG off" stays |
+
+### 7.1 Results (MiniPC, 2026-11-11, backtest only, data in 2024)
+
+Scratch studies `_TestGxEntry`, `_TestGxExit`, `_TestGxExitB`, `_TestGxExitFK` and `_TestGxMM`, compiled with F7 only. Logs are on the MiniPC at `C:\Share\MultiCharts\TestGX\out\` (`E1-*-ES`, `E2-a`…`d`, `E3-*`, `E4-a` / `E4-b` / `E4-swap`, `E5-*`, `E7-RMultiple-ES`, `E7-opt`, `E8-ES`). Raw logs are not committed (they contain prices). All chart runs used dxFeed `@ES` 1 minute, 2024-11-18 → 2024-11-22, unless noted. E1 also ran 2m, 5m, 15m, 60m (2024-11-04 → 2024-11-22) and daily (2024-06-03 → 2024-11-22, `EntryBar` 40). E4 used Portfolio Trader workspace `TestGX E4 Backtest.pws` (`@ES` + `@NQ` 1 minute, MM `_TestGxMM`). No price values from the logs are recorded here; dollar P&L and trade counts are.
+
+**E1 — PASS** across 1m, 2m, 5m, 15m, 60m and daily. The exit-only signal managed the entry's position on every timeframe: `GXX1T` Sell 1 Total at rel 4 filled 2→1 on the next bar (bar 106; daily, with `EntryBar` 40, bar 46) and `GXXA` Sell FromAll at rel 9 filled 1→0 on the next bar (bar 111; daily bar 51). On the fill bar's close the exit saw `MarketPosition` 2, `PositionSide` 1 (long), `OpenTrades` 1, `AvgEntryPrice` equal to the fill, and the `GXLE` leg. Resolution values are in §4.9; all six match the control-bar mapping.
+
+**E2 — recorded (re-check the chosen fill-bar mechanism on the implementation build).** Twenty trades, 1-tick stop, `@ES` 1 minute.
+
+| Variant | Who protects | Through on the fill bar | Exited on the fill bar (of those through) | Net profit | Notes |
+|---|---|---|---|---|---|
+| a | Exit explicit stop `GXXS` from the first bar it sees the position | 15 | 0 of 15 | −$450 | Stop works from the next bar (17 `GXXS`, 3 time exits `GXXA`) |
+| b | Exit `GenerateStopLoss` every bar, flat or not (`PerContract`, 1 tick × BPV) | 15 | 15 of 15 | — | Order name "Stop Loss" (17 "Stop Loss", 3 `GXXA`). The exit-only signal never sees the 15 fill-bar exits (`FIRSTSEEN` count 5) |
+| c | Entry sends sell stop `GXLSe` with the entry | 14 | 14 of 14 | — | 17 `GXLSe`, 3 `GXXA`. Through-count is 14 rather than 15 because this stop is the entry-bar close minus 1 tick, not the fill minus 1 tick |
+| d | Exit `GenerateStopLoss` only while in a position (the `_StopsAndTargets` pattern) | 15 | 0 of 15 | −$450 | Same timing as (a); order name "Stop Loss" from the next bar |
+
+Implication: a separate wrapper cannot protect the fill bar. The fill-bar stop must come from the entry, or from built-in `GenerateStopLoss` called every bar.
+
+**E3 — PASS.** No overshoot: the position goes 2→0 at bar 106.
+
+- FromAll + FromAll: only the first-listed signal's order fills (`GXXA` with Exit then ExitB; `GXBA` when swapped). List order decides.
+- Total + Total: both fill, 1 each (`GXX1T` and `GXB1T`).
+- FromAll + Total: FromAll takes 2 (`GXXA`); the Total order does not fill.
+
+**E4 — PASS on the scratch studies** (`TestGX E4 Backtest.pws`, ES+NQ 1m, MM `_TestGxMM`; logs `E4-a`, `E4-b`, `E4-swap`). Re-check with the real `_GenericExit` and `_PortfolioRiskManager`.
+
+- `signals.Length` 2, with `[0]` `_TestGxEntry` when the entry is listed first.
+- Own index found via `PortfolioData` matching (ES 0, NQ 1). The index is readable at `StartCalc`, but `Signals[i].Bars` throws `Unaccessible property(method): Bars` at `StartCalc`, so defer that to the first bar.
+- `sameRef` True for both signals and the MM: one `MyPortfolioData` dictionary per strategy.
+- Calc order = list order, and the MM `lastWriter` is EXIT when the exit is listed second.
+- Swap: the exit reads the entry's previous-step data (`entryStepSeen` = bar−1, `entryCalculatedFirst` N) and the MM `lastWriter` is ENTRY. This supports the Error rule for a wrapper listed before the entry.
+- `RISKATOPEN` match: ES R$100 / `riskAtOpen` $200; NQ $40 / $80.
+- E4-b: deny-all (`AllowEntries = false`, `EntryContracts = 0`) leaves the exits identical to E4-a (0 diffs).
+- Swap fills are identical to E4-a. NQ stopped at bar 104 and ES T1 filled at bar 106 (FromAll at bar 116).
+
+**E5 — PASS (GX uses separate order objects per partial).**
+
+- a: the same order object sent twice in one bar does not fill twice (3→2, then 2→0 at bar 116).
+- b: the FillAndKill attribute gives 3→2→1→0 (second partial at bar 111, FromAll at bar 116).
+- The attribute is per class, so in the embedded engine it would apply to every exit of the host signal.
+
+**E6 — PASS by reference** to PR #118 A1 (2026-11-11): the installed Strategy Properties label is *"Allow up to 3 entry orders in the same direction as the currently held position:"*, with the two radios recorded there.
+
+**E7 — recorded (re-check on the implementation build).** The named `ETriggerUnit` stand-in members (`FinalTargetUnit`) show in the Inputs dropdown. RMultiple 2 gives a target at fill + 4 pts; the clean confirmation run (`E7-RMultiple-ES`) had 20 trades, net −$1,125, with 9 stop exits (`GXXS`) and 11 time exits (`GXXA`) and no target (`GXXT`) fills. The optimiser lists only numeric Inputs, not enums. A numeric stand-in `FinalTargetUnitIdx` (0…4, −1 = use the enum) was added to the scratch signal with Ettienne's approval (2026-11-11). Regular Exhaustive sweep, `FinalTargetValue` 2:
+
+| Idx | Unit | Net Profit | Trades |
+|---|---|---|---|
+| 0 | RMultiple | −1,125 | 20 |
+| 1 | PercentOfEntry | −1,125 | 20 |
+| 2 | Ticks | −675 | 20 |
+| 3 | Points | −150 | 20 |
+| 4 | CurrencyPerContract | −325 | 20 |
+
+`E7-opt.txt` confirms `effUnit` switched per iteration (the five `START` lines carry `idx` 0…4 and the matching `effUnit`). Idx 0 and 1 are identical because **neither target filled within the 10-bar window**: the 2R target is fill + 4 pts, and the 2% target is fill + about 118 pts; the two exit-fill sequences are the same bar-for-bar as each other and as the clean RMultiple run (9 stops, 11 time exits, 0 target fills). The tighter units (2 ticks, 2 points, $2 → 1 tick) did produce target fills and different nets. This is not evidence that the two units compute the same level.
+
+Spec implication: the implementation should expose a numeric optimiser companion for each `ETriggerUnit` Input (or document the enum limitation), and a re-check is needed on the implementation build.
+
+**E8 — PASS.** IOG is per signal. The exit with IOG on had `calls(4) insideCalls(2)` and `iogEnabled(True)` per bar; the entry had `calls(1) insideCalls(0)` and `iogEnabled(False)`. The exit filled intrabar at bar 105 (vs 106 in E1), and FromAll at bar 110 intrabar. The GX rule "IOG off" stays.
+
+**Still to do after this recording:** re-check E2, E4 and E7 on the implementation build (GX-3 / GX-4); scratch cleanup of the `_TestGx*` studies, workspaces and logs awaits Ettienne's approval. Leave the Check7 files alone.
 
 ## 8. Implementation plan (after approval; separate PRs)
 1. **GX-1:** `_ExitEngine` (pure C# in a `.Function.CS` file): state machine, enums, precedence, R segments; `tests/ExitEngineTests` (`dotnet run`, like `tests/PortMMTests`). No MC dependency. Off-MC tests include (rev 0.7):
@@ -481,7 +541,7 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
    - `InitialStop` default `AtrMultiple`; `SignalBarExtreme` long/short levels.
 2. **GX-2:** `_CustomSignal` integration as a protected helper: `exitPlan(...)` at entry, `exitBar()` each bar, `portfolioStop` hooks, CS-1 columns. No new base `[Input]`.
 3. **GX-3:** `_GenericExit` wrapper in `sandbox/` (header §17 for every Input), chart **and** Portfolio Trader (§5.1); E4 is run before any PT result is used. **Legacy exits superseded** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q8: mark the legacy exit studies superseded once GX exists"*): in the same PR, `_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit` and `_ExitHalfRiskHalfRoll` get a header note `// SUPERSEDED by GX (_ExitEngine / _GenericExit, specs/generic-exit-manager-spec.md); kept for reproducibility, not deleted`, and `docs/engines-manual.md` lists them as superseded. No code in them changes and none is deleted.
-4. **GX-4:** native checks E1–E8, recorded in `specs/live-check-sheet.md`.
+4. **GX-4:** native checks E1–E8, recorded in `specs/live-check-sheet.md`. The scratch-study run is already recorded in §7.1 (2026-11-11). Re-check E2 (the chosen fill-bar stop), E4 (real `_GenericExit` and `_PortfolioRiskManager`) and E7 (real `ETriggerUnit` Inputs, and the numeric optimiser companion) on the implementation build before treating those items as closed for production.
 5. **GX-5 (planned milestone):** (**Owner-approved 2026-11-11 18:18–18:21 ET**, *"Q9: move batch-1 onto the engine once it passes, with a re-check per strategy"*) once GX-1–GX-4 are done and the E1–E8 checks pass, batch 1 moves onto the engine instead of hand-coding §7, **one strategy at a time**. Each move has its own equivalence re-check: the engine version must match the hand-coded version trade-for-trade on ≤ 2024 data (same entries, exit bars, prices, exit reasons and R, long and short), with any difference explained and fixed before the hand-coded path is retired. A strategy that does not match stays hand-coded until it does.
 
 Regression: G0, D9a and the existing suites unchanged, because GX is inert unless a strategy calls it.
@@ -491,7 +551,7 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 **Resolved, owner-approved 2026-11-11 09:16 ET** (*"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*):
 - **Q1:** option C approved (shared engine plus one thin `_GenericExit` wrapper).
 - **Q2:** baseline values approved. The first target (unit, value, scale-out %) and break-even (unit, value, offset ticks) are Inputs with `ETriggerUnit` (§4.2, §4.3).
-- **Q3:** the wrapper works in Portfolio Trader now (§5.1). E4 is the verification item.
+- **Q3:** the wrapper works in Portfolio Trader now (§5.1). E4 passed on the scratch studies (2026-11-11, §7.1); re-check on the implementation build.
 - **Q7:** an over-budget wrapper trade stays open, is managed normally, and logs one Warning per trade (§5.2).
 
 **Q10 resolved, owner-approved 2026-11-11 09:33 ET (Ettienne, Q10: *"1. Yes.  2. Only the strategy's own equity.   3. Yes, report them separately."*)** (§5.3):
@@ -512,4 +572,5 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 - The `ETrailStart.AtR` → `AtTrigger` rename (§4.4).
 
 **Still open:**
-- The E1–E8 native MiniPC checks (§7).
+- Re-check E2 (the chosen fill-bar stop mechanism), E4 (real `_GenericExit` wrapper and `_PortfolioRiskManager`) and E7 (real `ETriggerUnit` Inputs, and the numeric optimiser companion) on the implementation build. The scratch-study results are in §7.1.
+- Cleanup of the scratch `_TestGx*` studies, workspaces and logs awaits Ettienne's approval. Leave the Check7 files alone.
