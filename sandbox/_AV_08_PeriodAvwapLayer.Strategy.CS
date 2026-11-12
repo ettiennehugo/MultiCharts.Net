@@ -1,36 +1,142 @@
-
-// **Features (direct).** F-ROLL (§5.7), F-CAL (§5.8), F-VWAP (§5.10), F-JRNL (§5.13), F-EVT (§5.14).
+// ## 1. Identity
+// Catalogue ID: AV-08
+// ID mapping: AV-08 → _AV_08_PeriodAvwapLayer.Strategy.CS (class _AV_08_PeriodAvwapLayer). PeriodAvwapLayer names the week and month VWAP layer.
+// Name: Period AVWAP layer
+// Header version: 1
+// Rules version: catalogue v2.7 long WTD+MTD layer, as implemented by docs/engines-manual.md §3.6 (example 3)
+// Study class: _AV_08_PeriodAvwapLayer
+// File: sandbox/_AV_08_PeriodAvwapLayer.Strategy.CS
+// Stage: sandbox
+// Owner approval: Not yet verified
 //
-// **Catalogue rules (AV-08).** 
-// A layer, not a strategy: `aboveWTD && aboveMTD` allows longs only, `belowWTD && belowMTD` allows shorts only. It is applied to host events
-// (PS-01, PS-07, MT-01, AV-02). Sweep: {WTD only, WTD+MTD, MTD+QTD}. Multi-day anchors reset at rolls.
+// ## 2. Provenance
+// Source: specs/trading-idea-catalogue.md, heading "AV-08 · Week-open / month-open / quarter-open AVWAP as regime layer". The code is engines-manual example 3.
+// Taken from the source: above the week VWAP and above the month VWAP allows a long. The layer is the filter. The host is not a catalogue rule.
+// Research assumption: the host is a close above the prior 20-bar high between 09:45 and 15:00, with a 16-tick stop, so the layer has events to filter. The short side, the WTD-only arm and the MTD+QTD arm are not coded. A week or month that contains a roll turns the layer off until the next period, because the Week and Month VWAP slots do not reset at a roll.
 //
-// **Chart.**
-//   @ES 1m, dxFeed unadjusted, 24h Globex template. The class derives from `_VolumeProfileFuturesBase` and sets the two VWAP slots on Data1 in
-//   `Create`: `Vwap1Type = EVwapType.Week`, `Vwap2Type = EVwapType.Month`. `StartCalc` throws if they are changed.
+// ## 3. Hypothesis
+// Mechanism: week and month VWAP say which side has been paying up this period. The catalogue uses that only as a filter on other hosts. A result on the illustrative host is not a test of AV-08.
+// Link: specs/trading-idea-catalogue.md, heading "AV-08 · Week-open / month-open / quarter-open AVWAP as regime layer"
 //
-// **Walk-through.**
-// - Only the **long** side of the layer is coded: `layerLong` = both slots active, close > WTD VWAP and close > MTD VWAP, and both periods 
-//   "clean".
-// - A period is clean only if no roll happened since the week start (Monday Globex date) or the month start, because the Week/Month VWAPs do
-//   **not** reset at a roll. RollDetection is Series.
-// - The host is a close above the prior 20-bar high between 09:45 and 15:00 ET, with a 16-tick stop (above the 14-tick cost floor), flat at
-//   15:55, or at `RthCloseEt` − 5 min on an early-close day (`flatAt`). **It is illustrative only, not a catalogue rule**: it exists so the
-//   layer has events to filter. The 16-tick stop is above the floor; 1 contract at $200 risk passes the 1% check only with equity ≥ $20,000,
-//   otherwise the signal is skipped and journaled.
-// - Host signals the layer blocks are logged with `logSignal(..., false)`, so the ablation (gated vs ungated) can be run from `MCEvents`
-//   without a second backtest.
+// ## 4. Trade walkthrough
+// Trigger: a 1-minute bar closes above the prior 20-bar high, inside 09:45–15:00 ET, and the close is above both the week VWAP and the month VWAP, and neither period contains a roll.
+// Management: the stop stays 16 ticks under the signal close. Nothing else moves it.
+// Exit: the stop, or a market flatten at 15:55 ET (or five minutes before an early close when that is earlier).
 //
-// **Pitfalls.**
-// - AV-08's test is a layer ablation on real hosts. Don't read anything into the illustrative host.
-// - The Week VWAP slot starts at the week's first bar; the catalogue's A2-07 merge anchors at Sunday 18:00. On a Globex chart those are the same bar.
-// - Not coded: the short side (`belowWTD && belowMTD`), the WTD-only arm and the MTD+QTD arm (`EVwapType.Quarter`).
-// - **Coding choice (labelled):** `wtdClean`/`mtdClean` switch the layer off for the rest of a week or month that holds a roll. The catalogue says multi-day anchors reset at rolls. The other reading is to re-anchor both VWAPs at `rollOn(1)`; it is not coded (Appendix F).
-
-// **Full strategy** — `_AV_08_PeriodAvwapLayer.Strategy.CS`:
-// Manual v4 example 3 - AV-08 week-open / month-open VWAP regime layer (aboveWTD && aboveMTD for longs only).
-// The host trigger below is ILLUSTRATIVE ONLY (not a catalogue rule): AV-08 is a layer for PS-01 / PS-07 / MT-01 / AV-02.
-// Chart: @ES 1m, dxFeed continuous UNADJUSTED, 24h CME Globex template.
+// ## 5. Timing
+// Signal evaluated: closed bar only, after base.CalcBar. The VWAP slots include that closed bar.
+// Order sent: MarketNextBar AV08LE. The stop is sent with it (AV08LS). The flat is MarketNextBar AV08LX.
+// Can fill: the next bar. The stop is working on the fill bar because it is sent with the entry.
+//
+// ## 6. Position and re-entry
+// Position: flat or one long. No scale-in and no short.
+// Re-entry: a later host bar can enter again after the position is flat. There is no one-trade-per-day cap.
+// Same session after a stop: yes, if a new host bar passes the layer.
+//
+// ## 7. Instruments
+// Typical: a layer on any host. This file is written for @ES so the layer can be journaled.
+// Validated: Not yet verified
+//
+// ## 8. Data
+// Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted.
+// Data2: Not applicable
+// Further series: Not applicable. Week and month VWAP are slots on Data1.
+// Warmup: 20 bars for the host high, plus a week and a month of VWAP before those slots are active.
+// Tests use data through 2024-12-31 only.
+//
+// ## 9. Entry and filters
+// All of these must be true: flat; clock inside 09:45–15:00 and before the flat; close above the prior 20 highs; both VWAP slots active; close above both; the week and the month have not contained a roll; the 16-tick stop fits the 1% budget.
+// Skip when: the layer is false (journaled with logSignal false); the budget fails.
+//
+// ## 10. Position sizing and risk
+// Size: 1 contract.
+// Risk limit: skipped when 1 × 16 ticks × BigPointValue exceeds 1% of equity. On ES that is $200, so equity under $20,000 skips every trade.
+// Size is never shrunk to fit a stop: yes.
+//
+// ## 11. Orders, execution, and costs
+// Entry order: MarketNextBar AV08LE.
+// Exit orders: Stop AV08LS; MarketNextBar AV08LX.
+// Fill assumption: next bar's open. The stop is sent on the signal bar.
+// Costs: the example assumes the ES research round trip of $17.00 ($2.25 commission and $6.25 slippage per side) set in MultiCharts, not in this file. Not yet verified
+//
+// ## 12. Trade management
+// While open: the stop is re-sent. The layer is not re-checked.
+//
+// ## 13. Exits
+// Hard stop: signal close minus 16 ticks.
+// Target: Not applicable
+// Time exit: 15:55 ET, earlier on a CME early close.
+// Invalidation: a roll makes the current week and month unclean, so later host bars do not enter.
+//
+// ## 14. Regimes
+// Suitable: a week and month with price above both period VWAPs and no roll inside either period.
+// Unsuitable: below either VWAP, a roll still inside the week or month, and the short side (not coded).
+//
+// ## 15. Dependencies
+// Base class: _VolumeProfileFuturesBase
+// Engines enabled: the base VWAP slots. No separate engine is switched on.
+// Engine settings enabled: RollDetection = Series. Vwap1Type = Week and Vwap2Type = Month on Data1, set in code. StartCalc throws if the dialog changes them. Vwap3Type = Disabled.
+//
+// ## 16. Pitfalls
+// Lookahead: the host high excludes the current bar (High[1] through High[20]). VWAP is the closed-bar slot.
+// Repaint: Not applicable
+// Survivorship: Not applicable
+// Rolls: the Week and Month slots do not reset at a roll. This file turns the layer off for the rest of that week and month. The other reading, re-anchor at the roll, is not coded.
+// Data quality: the week slot starts at the week's first bar. On a Globex chart that is Sunday 18:00, the same bar as the A2-07 anchor. Not yet verified on a chart.
+// Other: the host is illustrative. Do not read its trades as an AV-08 result. G0-d still applies to an AVWAP level when this layer is later put on a real host.
+//
+// ## 17. Parameters
+// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
+// Fixed example settings stay in the protected config class. They are not a sweep.
+// Input: none
+// Purpose: Not applicable
+// Default: Not applicable
+// Units: Not applicable
+// Range: Not applicable
+// Effect: Not applicable
+// Interactions: Not applicable
+// Fixed or research-tuned: Not applicable
+//
+// ## 18. Acceptance policy
+// Policy: catalogue-default
+// Predeclared before any result was read: yes, 2026-11-12. No result for this file has been read. The coded arm is the engines-manual example, not a fitted set.
+// catalogue-default: judge this file by its catalogue kill, catalogue §2.3, and the A2 generic kill when the idea is A2-origin. The stricter stated rule decides. This header does not change the catalogue.
+// big-winner-trend: Not applied
+// When 1% of winning trades is not a whole number, remove K = max(1, ceil(0.01 × the number of winning trades)). If there are no winning trades, remove none. This is the programme overview's proposed rounding, adopted here before any run.
+//
+// ## 19. Validation
+// Status: Not yet verified
+// Evidence: Not yet verified
+// Window used: a run, when one exists, uses data through 2024-12-31 only.
+// Holdout (W-M and W-D Jan 2025–Oct 2026; W-T last 125 sessions) stays unviewed. Do not put those results here.
+//
+// ## 20. Edge monitoring
+// A person reads this section. It does not place orders and it does not change parameters.
+// Expectancy: Not yet verified
+//   Formula: win_rate * avg_win - loss_rate * avg_loss, same cost model as section 11.
+// Observations: Not yet verified
+//   Catalogue M19 discusses sample error. A minimum count for this strategy is written here before incubation, or it stays Not yet verified.
+// Drift: Not yet verified
+//   Compare regime mix, fill versus system price, and costs with the tested profile. Numbers come from this strategy's own test, written down before incubation.
+// Warning: Not yet verified
+//   Warning means look. It is not an order.
+// Pause: Not yet verified
+//   Pause means stop new entries. Open positions keep the exits in section 13.
+// Review: Not yet verified
+//   Review means the owner looks before new entries resume.
+// Uncertainty: no run yet; the host is illustrative; one layer arm; the roll-off choice; the holdout still sealed.
+// No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
+//
+// ## 21. Log diagnostics
+// journalArm name: AV08LE
+// logSignal tag: AV-08
+// Skip / flatten lines: logSignal with the signal flag false when the layer blocks a host bar; "AV-08" plus "skip: risk budget" when the 16-tick stop is too wide for equity.
+// How to turn logging on: engines manual §1.5 (TraceLevel Journal). Do not paste that section.
+//
+// ## 22. Notes
+// Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
+// Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
+// Uncoded catalogue arms (short side, WTD only, MTD+QTD) and re-anchoring at the roll are an owner question, not this file.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -74,7 +180,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.StartCalc();
 			if (Vwap1Type != EVwapType.Week || Vwap2Type != EVwapType.Month || Vwap1DataStream != 1 || Vwap2DataStream != 1)
-				throw new ArgumentException("_Ex03PeriodAvwapLayer: needs Vwap1Type = Week and Vwap2Type = Month on Data1");
+				throw new ArgumentException("_AV_08_PeriodAvwapLayer: needs Vwap1Type = Week and Vwap2Type = Month on Data1");
 			m_lastRollDay = DateTime.MinValue; m_stop = double.NaN;
 		}
 

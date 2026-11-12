@@ -2,7 +2,7 @@
 
 **Status:** workflow and documentation. This file does not implement a strategy, does not validate one, and does not report a result. The Jan 2025–Oct 2026 holdout (and the tick-window holdout of the last 125 sessions) stays unviewed.
 
-**Applies to:** every new research strategy source file. Existing studies, including the files already in `sandbox/`, keep the headers they have until someone edits that file for another reason. Do not mass-rewrite them to match this standard.
+**Applies to:** every new research strategy source file. Existing studies keep the headers they have until someone edits that file for another reason. Do not mass-rewrite them to match this standard. The ten sandbox examples were given this header when those files were standardized.
 
 **Template:** [`sandbox/ResearchStrategyHeader.template.txt`](../sandbox/ResearchStrategyHeader.template.txt). Copy it to the top of the new strategy file. The template is comments only. It is not a study, and it stays out of every project file.
 
@@ -214,16 +214,9 @@ Incubation and selective tests may load the study in MultiCharts. Broker setup, 
 3. The header's Catalogue ID line keeps the hyphenated id, `A2-69`, and the file line shows `_A2_69_KaufmanThreeDay.Strategy.CS`.
 4. That class name is unique among root studies and among sandbox studies. One assembly compiles every included study, so two public classes with one name fail the build.
 5. The file stays in `sandbox/` through sandbox, selective-test, validated, and incubation.
-6. Only a `promoted` file moves to the repo root and receives a `Compile Include`. Files already in `sandbox/` are left on their current names.
+6. Only a `promoted` file moves to the repo root and receives a `Compile Include`. A sandbox file is not renamed as part of promotion. A file whose name cites the wrong catalogue ID is renamed to the ID it implements: `_TS_02_EuropeanOpenDrift.Strategy.CS` implemented TS-01 and is now `_TS_01_EuropeanOpenDrift.Strategy.CS`.
 
-Two files already in `sandbox/` use a class name that differs from the file stem. Leave them until that file is edited for another reason:
-
-| File | Public class |
-|---|---|
-| `sandbox/_A2_70_OpenFadeHvGate.Strategy.CS` | `_Ex17OpenFadeHvGate` |
-| `sandbox/_DV_15_EmaVwapPullback.Strategy.CS` | `_Ex20EmaVwapPullback` |
-
-New files do not get that exception. `tests/RepoLintTests` allows only those two mismatches.
+Every sandbox study's public class is the file stem. The two earlier mismatches were aligned when those files were standardized: `_A2_70_OpenFadeHvGate.Strategy.CS` no longer declares `_Ex17OpenFadeHvGate`, and `_DV_15_EmaVwapPullback.Strategy.CS` no longer declares `_Ex20EmaVwapPullback`. `tests/RepoLintTests` does not allow a new mismatch.
 
 ## How the project includes studies
 
@@ -283,6 +276,6 @@ Also not claimed here: that opening the Editor rescans folders and rewrites the 
 
 - **PR #102** (catalogue v2.8, Oliver Kell) was merged into the PR #101 feature branch after PR #101 had already merged to `main`. This standard is based on `main` at `f7f5ac6`, which contains PR #101 and does not contain the Kell files. They were not pulled in.
 - **Editor subfolder import** is unverified, as above. Until someone confirms it on the PowerLanguage Editor, a selective test may need the local root-copy workaround.
-- **Existing sandbox class names** `_Ex17OpenFadeHvGate` and `_Ex20EmaVwapPullback` stay as they are.
-- **Existing headers** on those sandbox files, and on root studies, are not migrated.
+- **Sandbox class names** match the file stem, including the two files that used to declare `_Ex17OpenFadeHvGate` and `_Ex20EmaVwapPullback`.
+- **Root-study headers** are not migrated by the sandbox standardization.
 - **No strategy was validated** by writing this standard.
