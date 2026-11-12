@@ -561,6 +561,7 @@
     <Compile Include="_LevelStudy.Function.CS" />
     <Compile Include="_PortfolioRiskManager.Strategy.CS" />
     <Compile Include="_PortMM.Function.CS" />
+    <Compile Include="_GenericExit.Strategy.CS" />
     <Compile Include="_Gate0.Function.CS" />
     <Compile Include="_BarLadder.Function.CS" />
     <Compile Include="_BarRing.Function.CS" />
