@@ -4309,9 +4309,7 @@ namespace PowerLanguage.Strategy
 			}
 			else if (!m_gxPos.Open)
 			{
-				bool market = m_gxExitReason != "STOP" && m_gxExitReason != "T1" && m_gxExitReason != "TARGET" && m_gxExitReason.Length > 0;
-				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
-				else if (m_gxExitReason == "STOP") { if (longSide) m_gxLS.Send(m_gxPos.Stop, lots); else m_gxSS.Send(m_gxPos.Stop, lots); }
+				gxSendExit(m_gxExitReason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
 				return;
 			}
 			var bar = new ExitBar();
@@ -4323,11 +4321,7 @@ namespace PowerLanguage.Strategy
 			if (m_portOn) portfolioStop(m_gxPos.Stop);
 			if (d.Reason != null)
 			{
-				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_gxPos.GapThroughStop;
-				if (market)
-				{
-					if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots);
-				}
+				gxSendExit(d.Reason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
 				if (!string.IsNullOrEmpty(d.Reason)) m_gxExitReason = d.Reason;
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
 				return;
@@ -4349,6 +4343,16 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Refresh ATR, EMA and the bar size the trail and the control-bar map read. Call before exitBar when they change.</summary>
 		protected void gxSetMarket(ExitMarket mkt) { m_gxMkt = mkt; }
+
+		/// <summary>Send the one decided exit and keep it alive. A T1 or target limit is sent, not dropped.</summary>
+		protected void gxSendExit(string reason, bool gapThrough, ExitPosition p, bool longSide, int lots)
+		{
+			ExitOrder o = ExitSession.OrderFor(reason, gapThrough, p, lots);
+			if (o.Kind == "market") { if (longSide) m_gxLX.Send(o.Qty); else m_gxSX.Send(o.Qty); }
+			else if (o.Kind == "stop") { if (longSide) m_gxLS.Send(o.Price, o.Qty); else m_gxSS.Send(o.Price, o.Qty); }
+			else if (o.Kind == "t1") { if (longSide) m_gxLT1.Send(o.Price, o.Qty); else m_gxST1.Send(o.Price, o.Qty); }
+			else if (o.Kind == "target") { if (longSide) m_gxLT.Send(o.Price, o.Qty); else m_gxST.Send(o.Price, o.Qty); }
+		}
 
 		protected int gxOpenLots(int pos)
 		{

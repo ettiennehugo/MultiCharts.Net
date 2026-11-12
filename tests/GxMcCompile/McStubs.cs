@@ -153,6 +153,7 @@ namespace PowerLanguage.Strategy
 		protected void gxAttachSession(ExitSession session, ExitPosition pos) { }
 		protected void gxSetPlan(double entry, double stop, string source) { }
 		protected void gxNoteExit(string reason) { }
+		protected void gxSendExit(string reason, bool gapThrough, ExitPosition p, bool longSide, int lots) { }
 		protected double exitPlan(bool longSide, double plannedEntry, double structuralStop, int qty, ExitMarket mkt, string entryOrderName) { return 0; }
 		protected void exitBar() { }
 	}

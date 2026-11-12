@@ -199,6 +199,14 @@ namespace PowerLanguage.Function
 		public bool TrailThrough;
 	}
 
+	/// <summary>The one exit order a decided reason must keep working until MC is flat. Kind is market, stop, t1, target, or empty.</summary>
+	public struct ExitOrder
+	{
+		public string Kind;
+		public double Price;
+		public int Qty;
+	}
+
 	/// <summary>
 	/// One engine open per MC position. Flat, or a different entry time, closes it.
 	/// The same entry time does not open again.
@@ -253,6 +261,39 @@ namespace PowerLanguage.Function
 			if (exitName.EndsWith("LS", StringComparison.Ordinal) || exitName.EndsWith("SS", StringComparison.Ordinal)) return "STOP";
 			if (exitName.EndsWith("LX", StringComparison.Ordinal) || exitName.EndsWith("SX", StringComparison.Ordinal)) return pendingMarket ?? "";
 			return pendingMarket ?? "";
+		}
+
+		/// <summary>Order to send for a decided exit. A T1 or target limit is included; a gap through the stop is a market exit.</summary>
+		public static ExitOrder OrderFor(string reason, bool gapThrough, ExitPosition p, int lots)
+		{
+			var o = new ExitOrder();
+			if (string.IsNullOrEmpty(reason) || p == null || lots < 1) return o;
+			if (gapThrough || (reason != "STOP" && reason != "T1" && reason != "TARGET"))
+			{
+				o.Kind = "market";
+				o.Qty = lots;
+				return o;
+			}
+			if (reason == "STOP")
+			{
+				o.Kind = "stop";
+				o.Price = p.Stop;
+				o.Qty = lots;
+				return o;
+			}
+			if (reason == "T1" && !double.IsNaN(p.T1Level))
+			{
+				int q = p.T1Qty > 0 && p.T1Qty < lots ? p.T1Qty : lots;
+				if (q > 0) { o.Kind = "t1"; o.Price = p.T1Level; o.Qty = q; }
+				return o;
+			}
+			if (reason == "TARGET" && !double.IsNaN(p.FinalLevel))
+			{
+				o.Kind = "target";
+				o.Price = p.FinalLevel;
+				o.Qty = lots;
+			}
+			return o;
 		}
 		public ExitEffective Effective;
 		public string Package;
@@ -1367,9 +1408,7 @@ namespace PowerLanguage.Strategy
 			int lots = OpenLots();
 			if (m_wrapPos != null && !m_wrapPos.Open)
 			{
-				bool market = m_exitReason.Length > 0 && m_exitReason != "STOP" && m_exitReason != "T1" && m_exitReason != "TARGET";
-				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
-				else if (m_exitReason == "STOP") { if (longSide) m_gxLS.Send(m_wrapPos.Stop, lots); else m_gxSS.Send(m_wrapPos.Stop, lots); }
+				gxSendExit(m_exitReason, m_wrapPos.GapThroughStop, m_wrapPos, longSide, lots);
 				return;
 			}
 			var bar = new ExitBar();
@@ -1381,10 +1420,9 @@ namespace PowerLanguage.Strategy
 			PublishOpen(m_wrapPos.Stop);
 			if (d.Reason != null)
 			{
-				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_wrapPos.GapThroughStop;
+				gxSendExit(d.Reason, m_wrapPos.GapThroughStop, m_wrapPos, longSide, lots);
 				gxNoteExit(d.Reason);
 				m_exitReason = d.Reason ?? "";
-				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
 				return;
 			}
