@@ -43,6 +43,7 @@ static class Program
 		OverBudget();
 		LogOnce();
 		ExitReasonMap();
+		ConsecutivePositions();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -415,6 +416,15 @@ static class Program
 			Check(es.Manage(ps, Quiet(lng, new DateTime(2024, 6, 3, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " 15:54 holds");
 			Check(es.Manage(ps, Quiet(lng, new DateTime(2024, 6, 3, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " FlatBy 15:55");
 
+			var eve = Eng();
+			var peven = new ExitPosition();
+			eve.Open(peven, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 17, 18, 0, 0), 0);
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 17, 18, 20, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " 18:20 is FLATBY under mustFlatten (no 17:00 cap)");
+			var night = Eng();
+			var pnight = new ExitPosition();
+			night.Open(pnight, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 18, 0, 0, 0), 0);
+			Check(night.Manage(pnight, Quiet(lng, new DateTime(2024, 11, 18, 0, 30, 0))).Reason == null, (lng ? "L" : "S") + " 00:30 is before FlatBy");
+
 			var ee = Eng();
 			var pe = new ExitPosition();
 			ee.Open(pe, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
@@ -722,6 +732,47 @@ static class Program
 		Check(emitted == 4, "four trades emit four warnings, not a replay of the earlier ones");
 	}
 
+	static void ConsecutivePositions()
+	{
+		var e = Eng(c => { c.Embedded = true; c.FinalTargetValue = 2; c.Id = "TH"; });
+		var start = e.DrainLog();
+		int starts = 0;
+		for (int s = 0; s < start.Count; s++) if (start[s].IndexOf("GX START", StringComparison.Ordinal) >= 0) starts++;
+		Check(starts == 1, "one START for the run");
+		DateTime[] fills = {
+			new DateTime(2024, 11, 17, 18, 20, 0),
+			new DateTime(2024, 11, 18, 10, 0, 0),
+			new DateTime(2024, 11, 18, 14, 0, 0)
+		};
+		var gate = new ExitOpenGate();
+		for (int i = 0; i < fills.Length; i++)
+		{
+			gate.OnFlat();
+			Check(!gate.EngineOpen, "flat closes session " + i.ToString(CultureInfo.InvariantCulture));
+			bool first = gate.BeginPosition(fills[i]);
+			bool again = gate.BeginPosition(fills[i]);
+			Check(first && !again, "position " + i.ToString(CultureInfo.InvariantCulture) + " opens once");
+			var p = new ExitPosition();
+			e.Open(p, true, 5000, 4990, 5000, 4990, 1, 0.25, 50, 10000, "THLE" + i.ToString(CultureInfo.InvariantCulture), fills[i], i);
+			Check(!double.IsNaN(p.T1Level) && p.T1Level > 5000, "T1 placed on position " + i.ToString(CultureInfo.InvariantCulture));
+			Check(!double.IsNaN(p.FinalLevel) && p.FinalLevel > p.T1Level, "target placed on position " + i.ToString(CultureInfo.InvariantCulture));
+			var lines = e.DrainLog();
+			int warnings = 0;
+			for (int k = 0; k < lines.Count; k++) if (lines[k].IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) warnings++;
+			Check(warnings == 1 && e.Log.Count == 0, "position " + i.ToString(CultureInfo.InvariantCulture) + " emits one over-budget line");
+			Check(!gate.BeginPosition(fills[i]), "a later bar of position " + i.ToString(CultureInfo.InvariantCulture) + " does not open");
+			if (fills[i].Hour < 15)
+			{
+				var d = e.Manage(p, Quiet(true, fills[i].AddMinutes(1)));
+				Check(d.Reason == null && d.SendT1 && d.T1Qty > 0, "daytime position " + i.ToString(CultureInfo.InvariantCulture) + " keeps T1 working");
+			}
+			p.Open = false;
+		}
+		var stale = new ExitOpenGate();
+		Check(stale.BeginPosition(fills[0]) && !stale.BeginPosition(fills[0]), "same entry time stays on the first session");
+		Check(stale.BeginPosition(fills[1]), "a new entry time opens even when flat was not observed");
+	}
+
 	static void ExitReasonMap()
 	{
 		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
@@ -768,7 +819,8 @@ static class Program
 		Check(gx.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && gx.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "wrapper has no entry order");
 		Check(csproj.IndexOf("_GX_00_TestHost", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox\\", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox/", StringComparison.Ordinal) < 0, "test host is not in PLStudies.csproj");
 		Check(host.IndexOf("class _GX_00_TestHost", StringComparison.Ordinal) >= 0 && host.IndexOf("EmbedEngine", StringComparison.Ordinal) >= 0, "test host file");
-		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxEngineOpen", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens each trade once");
+		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.OnFlat()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.BeginPosition(", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens once per position");
+		Check(src.IndexOf("m_gxPlacesT1", StringComparison.Ordinal) >= 0 && src.IndexOf("if (!m_gxPlacesT1) m_gxPlanSource = \"\";", StringComparison.Ordinal) >= 0, "a host that only publishes does not record t1PlanSource plan");
 		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
 		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
 		int n = 0;
