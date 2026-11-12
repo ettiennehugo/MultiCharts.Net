@@ -1715,8 +1715,8 @@ namespace PowerLanguage.Strategy
 		private ExitSession m_gx;
 		private ExitPosition m_gxPos;
 		private ExitMarket m_gxMkt;
-		private IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST;
-		private IOrderMarket m_gxLX, m_gxSX;
+		protected IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST;
+		protected IOrderMarket m_gxLX, m_gxSX;
 
 		private void startPortfolio()
 		{
@@ -4222,7 +4222,7 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private int gxFloorTicks()
+		protected int gxFloorTicks()
 		{
 			try
 			{
@@ -4325,7 +4325,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>Refresh ATR, EMA and the bar size the trail and the control-bar map read. Call before exitBar when they change.</summary>
 		protected void gxSetMarket(ExitMarket mkt) { m_gxMkt = mkt; }
 
-		private int gxOpenLots(int pos)
+		protected int gxOpenLots(int pos)
 		{
 			try { int n = this.CurrentPosition.OpenLots; if (n > 0) return n; } catch (Exception) { }
 			return Math.Abs(pos);

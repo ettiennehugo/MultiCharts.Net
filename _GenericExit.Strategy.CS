@@ -1001,16 +1001,394 @@ namespace PowerLanguage.Function
 namespace PowerLanguage.Strategy
 {
 	/// <summary>
-	/// GX-1 placeholder (specs/generic-exit-manager-spec.md rev 1.1 §8.1).
-	/// GX-3 replaces this body with the wrapper. No Inputs and no orders.
-	/// The shared engine is PowerLanguage.Function._ExitEngine in this file.
+	/// GX-3 wrapper (specs/generic-exit-manager-spec.md rev 1.1). Exit only: it never opens or reverses a position.
+	/// PortfolioPublish is false so it does not reset the entry's pm.* keys. The engine is PowerLanguage.Function._ExitEngine in this file.
 	/// </summary>
+	[IOGMode(IOGMode.Disabled)]
 	public class _GenericExit : _CustomSignal
 	{
-		public _GenericExit(object _ctx) : base(_ctx) { }
+		// ## 17. Parameters. One [Input] each. No description argument. Defaults are assigned in the constructor.
+		// Purpose: which initial stop. Default: AtrMultiple. Units: EInitialStop. Range: the six members. Effect: sets the stop distance or level. Interactions: InitialStopIdx overrides when 0..5. Fixed or research-tuned: research-tuned
+		[Input] public EInitialStop InitialStop { get; set; }
+		// Purpose: ATR multiple for AtrMultiple. Default: 1.5. Units: ATR. Range: > 0. Effect: wider multiple, wider stop. Interactions: StopAtrLength. Fixed or research-tuned: research-tuned
+		[Input] public double StopAtrMult { get; set; }
+		// Purpose: ATR length for the initial stop. Default: 14. Units: bars. Range: >= 1. Effect: longer length smooths the stop. Interactions: StopAtrMult. Fixed or research-tuned: research-tuned
+		[Input] public int StopAtrLength { get; set; }
+		// Purpose: tick distance for FixedTicks. Default: 0 (invalid until set). Units: ticks. Range: > 0 when that mode is on. Effect: fixed distance. Interactions: InitialStop. Fixed or research-tuned: research-tuned
+		[Input] public int StopTicks { get; set; }
+		// Purpose: swing lookback. Default: 5. Units: bars. Range: > 0 when SwingExtreme is on. Effect: further extreme, wider stop. Interactions: InitialStop. Fixed or research-tuned: research-tuned
+		[Input] public int StopSwingBars { get; set; }
+		// Purpose: percent stop. Default: 0 (invalid until set). Units: percent of price. Range: > 0 when Percent is on. Effect: larger percent, wider stop. Interactions: InitialStop. Fixed or research-tuned: research-tuned
+		[Input] public double StopPct { get; set; }
+		// Purpose: built-in disaster stop while flat. Default: true. Units: bool. Range: true or false. Effect: false leaves the fill bar unprotected. Interactions: none. Fixed or research-tuned: fixed
+		[Input] public bool FillBarDisasterStop { get; set; }
+		// Purpose: how targets are used. Default: ScaleOutThenRunner. Units: ETargetMode. Range: the three members. Effect: changes whether T1 exists. Interactions: T1ScalePct. Fixed or research-tuned: fixed
+		[Input] public ETargetMode TargetMode { get; set; }
+		// Purpose: unit of the first target. Default: RMultiple. Units: ETriggerUnit. Range: the five members. Effect: how T1Value is measured. Interactions: T1UnitIdx. Fixed or research-tuned: research-tuned
+		[Input] public ETriggerUnit T1Unit { get; set; }
+		// Purpose: first-target distance. Default: 1.0. Units: T1Unit. Range: > 0 when T1 is on. Effect: further target, less often filled. Interactions: T1Unit. Fixed or research-tuned: research-tuned
+		[Input] public double T1Value { get; set; }
+		// Purpose: percent of the initial position closed at T1. Default: 50. Units: percent. Range: 0..100. Effect: 0 skips T1, 100 closes the whole position. Interactions: SingleLotMode. Fixed or research-tuned: research-tuned
+		[Input] public int T1ScalePct { get; set; }
+		// Purpose: unit of the final target. Default: RMultiple. Units: ETriggerUnit. Range: the five members. Effect: how FinalTargetValue is measured. Interactions: FinalTargetUnitIdx. Fixed or research-tuned: research-tuned
+		[Input] public ETriggerUnit FinalTargetUnit { get; set; }
+		// Purpose: final-target distance. Default: 0 (off). Units: FinalTargetUnit. Range: 0 off, > 0 on. Effect: a positive value adds a runner limit. Interactions: FinalTargetUnit. Fixed or research-tuned: research-tuned
+		[Input] public double FinalTargetValue { get; set; }
+		// Purpose: what a one-lot position does at T1. Default: ExitAtT1. Units: ESingleLotMode. Range: the two members. Effect: RunnerOnly keeps the single lot. Interactions: T1ScalePct. Fixed or research-tuned: fixed
+		[Input] public ESingleLotMode SingleLotMode { get; set; }
+		// Purpose: when the stop moves to break-even. Default: AfterT1. Units: EBreakEven. Range: the three members. Effect: Off never moves. Interactions: BreakEvenIdx. Fixed or research-tuned: research-tuned
+		[Input] public EBreakEven BreakEven { get; set; }
+		// Purpose: unit of the break-even trigger. Default: RMultiple. Units: ETriggerUnit. Range: the five members. Effect: used by AtTrigger. Interactions: BreakEvenValue. Fixed or research-tuned: research-tuned
+		[Input] public ETriggerUnit BreakEvenUnit { get; set; }
+		// Purpose: break-even trigger distance. Default: 1.0. Units: BreakEvenUnit. Range: > 0 when AtTrigger is on. Effect: further trigger, later move. Interactions: BreakEven. Fixed or research-tuned: research-tuned
+		[Input] public double BreakEvenValue { get; set; }
+		// Purpose: ticks beyond entry for the break-even stop. Default: 1. Units: ticks. Range: >= 0. Effect: 0 sits on the entry. Interactions: BreakEven. Fixed or research-tuned: research-tuned
+		[Input] public int BreakEvenOffsetTicks { get; set; }
+		// Purpose: runner trail. Default: Chandelier. Units: ETrailMode. Range: the six members. Effect: None does not trail. Interactions: TrailModeIdx. Fixed or research-tuned: research-tuned
+		[Input] public ETrailMode TrailMode { get; set; }
+		// Purpose: when the trail starts. Default: AfterT1. Units: ETrailStart. Range: the three members. Effect: Immediately trails from the fill. Interactions: TrailStartIdx. Fixed or research-tuned: research-tuned
+		[Input] public ETrailStart TrailStart { get; set; }
+		// Purpose: unit of the trail-start trigger. Default: RMultiple. Units: ETriggerUnit. Range: the five members. Effect: used by AtTrigger. Interactions: TrailStartValue. Fixed or research-tuned: research-tuned
+		[Input] public ETriggerUnit TrailStartUnit { get; set; }
+		// Purpose: trail-start distance. Default: 1.0. Units: TrailStartUnit. Range: > 0 when AtTrigger is on. Effect: further trigger, later trail. Interactions: TrailStart. Fixed or research-tuned: research-tuned
+		[Input] public double TrailStartValue { get; set; }
+		// Purpose: trail ATR multiple. Default: 3.0. Units: ATR. Range: > 0. Effect: wider trail. Interactions: TrailAtrLength. Fixed or research-tuned: research-tuned
+		[Input] public double TrailAtrMult { get; set; }
+		// Purpose: trail ATR length. Default: 22. Units: bars. Range: >= 1. Effect: longer length smooths the trail. Interactions: TrailAtrMult. Fixed or research-tuned: research-tuned
+		[Input] public int TrailAtrLength { get; set; }
+		// Purpose: bars in the bar-extreme trail. Default: 2. Units: bars. Range: >= 1. Effect: more bars, wider extreme. Interactions: TrailMode. Fixed or research-tuned: research-tuned
+		[Input] public int TrailBars { get; set; }
+		// Purpose: EMA length for the EMA trail. Default: 20. Units: bars. Range: >= 1. Effect: longer EMA, slower trail. Interactions: TrailMode. Fixed or research-tuned: research-tuned
+		[Input] public int TrailEmaLength { get; set; }
+		// Purpose: time stop in closed bars. Default: 0 (off). Units: bars. Range: >= 0. Effect: exit after this many bars. Interactions: TimeStopMinutes. Fixed or research-tuned: research-tuned
+		[Input] public int TimeStopBars { get; set; }
+		// Purpose: time stop in minutes. Default: 0 (off). Units: minutes. Range: >= 0. Effect: exit after this many minutes. Interactions: TimeStopBars. Fixed or research-tuned: research-tuned
+		[Input] public int TimeStopMinutes { get; set; }
+		// Purpose: session flatten. Default: FlatBy. Units: ESessionExit. Range: the two members. Effect: HoldOvernight keeps the stop. Interactions: FlatByHHMM. Fixed or research-tuned: fixed
+		[Input] public ESessionExit SessionExit { get; set; }
+		// Purpose: flatten clock, ET. Default: 1555. Units: HHMM. Range: 0..2359. Effect: the bar at or after this time flattens. Interactions: SessionExit. Fixed or research-tuned: research-tuned
+		[Input] public int FlatByHHMM { get; set; }
+		// Purpose: maximum calendar days in a trade. Default: 0 (off). Units: days. Range: >= 0. Effect: exit on that day count. Interactions: SessionExit. Fixed or research-tuned: research-tuned
+		[Input] public int MaxHoldDays { get; set; }
+		// Purpose: news flatten window. Default: 0 (off). Units: minutes. Range: 0..120. Effect: flatten inside the window. Interactions: none. Fixed or research-tuned: research-tuned
+		[Input] public int NewsExitMinutes { get; set; }
+		// Purpose: roll flatten. Default: FlattenBeforeSplice. Units: ERollExit. Range: the two members. Effect: Ignore holds through the splice. Interactions: SessionExit. Fixed or research-tuned: fixed
+		[Input] public ERollExit RollExit { get; set; }
+		// Purpose: stop move on an add. Default: RaiseToAddLow. Units: EAddStopMode. Range: the two members. Effect: KeepCurrent leaves the stop. Interactions: none. Fixed or research-tuned: fixed
+		[Input] public EAddStopMode AddStopMode { get; set; }
+		// Purpose: control exit for entry tests. Default: None. Units: EExitControl. Range: the three members. Effect: FixedBars or RandomBars exits after N bars. Interactions: the five ControlExitBars inputs. Fixed or research-tuned: fixed
+		[Input] public EExitControl ExitControl { get; set; }
+		// Purpose: control-bar count on a 1-minute chart. Default: 30. Units: bars. Range: 0 off, else >= 1. Effect: holding time of the control arm. Interactions: ExitControl. Fixed or research-tuned: research-tuned
+		[Input] public int ControlExitBarsM1 { get; set; }
+		// Purpose: control-bar count on a 5-minute chart. Default: 12. Units: bars. Range: 0 off, else >= 1. Effect: holding time of the control arm. Interactions: ExitControl. Fixed or research-tuned: research-tuned
+		[Input] public int ControlExitBarsM5 { get; set; }
+		// Purpose: control-bar count on a 15-minute chart. Default: 8. Units: bars. Range: 0 off, else >= 1. Effect: holding time of the control arm. Interactions: ExitControl. Fixed or research-tuned: research-tuned
+		[Input] public int ControlExitBarsM15 { get; set; }
+		// Purpose: control-bar count on a 60-minute chart. Default: 6. Units: bars. Range: 0 off, else >= 1. Effect: holding time of the control arm. Interactions: ExitControl. Fixed or research-tuned: research-tuned
+		[Input] public int ControlExitBarsH1 { get; set; }
+		// Purpose: control-bar count on a daily chart. Default: 5. Units: bars. Range: 0 off, else >= 1. Effect: holding time of the control arm. Interactions: ExitControl. Fixed or research-tuned: research-tuned
+		[Input] public int ControlExitBarsD1 { get; set; }
+		// Purpose: optimiser index for InitialStop. Default: -1 (use the enum). Units: index. Range: -1..5. Effect: 0..5 selects the member. Interactions: InitialStop. Fixed or research-tuned: research-tuned
+		[Input] public int InitialStopIdx { get; set; }
+		// Purpose: optimiser index for T1Unit. Default: -1. Units: index. Range: -1..4. Effect: 0..4 selects the member. Interactions: T1Unit. Fixed or research-tuned: research-tuned
+		[Input] public int T1UnitIdx { get; set; }
+		// Purpose: optimiser index for FinalTargetUnit. Default: -1. Units: index. Range: -1..4. Effect: 0..4 selects the member. Interactions: FinalTargetUnit. Fixed or research-tuned: research-tuned
+		[Input] public int FinalTargetUnitIdx { get; set; }
+		// Purpose: optimiser index for BreakEven. Default: -1. Units: index. Range: -1..2. Effect: 0..2 selects the member. Interactions: BreakEven. Fixed or research-tuned: research-tuned
+		[Input] public int BreakEvenIdx { get; set; }
+		// Purpose: optimiser index for BreakEvenUnit. Default: -1. Units: index. Range: -1..4. Effect: 0..4 selects the member. Interactions: BreakEvenUnit. Fixed or research-tuned: research-tuned
+		[Input] public int BreakEvenUnitIdx { get; set; }
+		// Purpose: optimiser index for TrailMode. Default: -1. Units: index. Range: -1..5. Effect: 0..5 selects the member. Interactions: TrailMode. Fixed or research-tuned: research-tuned
+		[Input] public int TrailModeIdx { get; set; }
+		// Purpose: optimiser index for TrailStart. Default: -1. Units: index. Range: -1..2. Effect: 0..2 selects the member. Interactions: TrailStart. Fixed or research-tuned: research-tuned
+		[Input] public int TrailStartIdx { get; set; }
+		// Purpose: optimiser index for TrailStartUnit. Default: -1. Units: index. Range: -1..4. Effect: 0..4 selects the member. Interactions: TrailStartUnit. Fixed or research-tuned: research-tuned
+		[Input] public int TrailStartUnitIdx { get; set; }
+
+		private ExitSession m_wrap;
+		private ExitPosition m_wrapPos;
+		private ExitMarket m_mkt;
+		private bool m_inert, m_started, m_inTrade, m_explicitNext, m_wroteR, m_haveNet, m_wasFlat, m_havePx;
+		private double m_prevNet, m_disasterPx, m_disasterDl, m_prevClose, m_atrS, m_atrT, m_seedS, m_seedT, m_ema;
+		private int m_nS, m_nT;
+		private bool m_haveEma;
+
+		public _GenericExit(object _ctx) : base(_ctx)
+		{
+			InitialStop = EInitialStop.AtrMultiple; StopAtrMult = 1.5; StopAtrLength = 14; StopTicks = 0; StopSwingBars = 5; StopPct = 0; FillBarDisasterStop = true;
+			TargetMode = ETargetMode.ScaleOutThenRunner; T1Unit = ETriggerUnit.RMultiple; T1Value = 1.0; T1ScalePct = 50;
+			FinalTargetUnit = ETriggerUnit.RMultiple; FinalTargetValue = 0; SingleLotMode = ESingleLotMode.ExitAtT1;
+			BreakEven = EBreakEven.AfterT1; BreakEvenUnit = ETriggerUnit.RMultiple; BreakEvenValue = 1.0; BreakEvenOffsetTicks = 1;
+			TrailMode = ETrailMode.Chandelier; TrailStart = ETrailStart.AfterT1; TrailStartUnit = ETriggerUnit.RMultiple; TrailStartValue = 1.0;
+			TrailAtrMult = 3.0; TrailAtrLength = 22; TrailBars = 2; TrailEmaLength = 20;
+			TimeStopBars = 0; TimeStopMinutes = 0; SessionExit = ESessionExit.FlatBy; FlatByHHMM = 1555; MaxHoldDays = 0; NewsExitMinutes = 0;
+			RollExit = ERollExit.FlattenBeforeSplice; AddStopMode = EAddStopMode.RaiseToAddLow; ExitControl = EExitControl.None;
+			ControlExitBarsM1 = 30; ControlExitBarsM5 = 12; ControlExitBarsM15 = 8; ControlExitBarsH1 = 6; ControlExitBarsD1 = 5;
+			InitialStopIdx = -1; T1UnitIdx = -1; FinalTargetUnitIdx = -1; BreakEvenIdx = -1; BreakEvenUnitIdx = -1; TrailModeIdx = -1; TrailStartIdx = -1; TrailStartUnitIdx = -1;
+		}
+
+		protected override bool PortfolioPublish { get { return false; } }
+
+		protected override void Create()
+		{
+			base.Create();
+			GxOrderPrefix = "GX";
+			createGxOrders();
+		}
+
+		protected override void StartCalc()
+		{
+			base.StartCalc();
+			m_inert = false; m_started = false; m_inTrade = false; m_explicitNext = false; m_wroteR = false; m_haveNet = false; m_wasFlat = false; m_havePx = false; m_haveEma = false;
+			m_nS = m_nT = 0; m_atrS = m_atrT = m_seedS = m_seedT = 0; m_disasterPx = m_disasterDl = 0;
+			if (Environment.ApplicationCode == EApplicationCode.Portfolio)
+			{
+				bool follows = false;
+				try { follows = MyPortfolioData.ContainsKey(_PortKeys.Ver); } catch (Exception) { follows = false; }
+				if (!follows)
+				{
+					m_inert = true;
+					trace(ETraceLevel.Error, "EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list");
+				}
+			}
+			m_wrap = new ExitSession();
+			CopyConfig(m_wrap.Config);
+			m_wrap.Config.Embedded = false;
+			m_wrap.Config.Id = "GX";
+			m_wrap.Config.InPortfolio = Environment.ApplicationCode == EApplicationCode.Portfolio;
+		}
 
 		protected override void CalcBar()
 		{
+			base.CalcBar();
+			if (m_inert || m_wrap == null) return;
+			if (!m_started && Bars.Status == EBarState.Close)
+			{
+				m_mkt = Market();
+				m_wrap.Start(m_mkt);
+				m_started = true;
+				Emit(m_wrap.Log);
+			}
+			if (!m_started) return;
+			int pos = StrategyInfo.MarketPosition;
+			if (Bars.Status == EBarState.Close) UpdateSeries();
+			if (pos == 0)
+			{
+				if (m_inTrade) { m_inTrade = false; m_explicitNext = false; m_wroteR = false; if (m_wrapPos != null) m_wrapPos.Open = false; }
+				if (FillBarDisasterStop && m_disasterDl > 0)
+				{
+					CurSpecOrdersMode = ESpecOrdersMode.PerContract;
+					GenerateStopLoss(m_disasterDl);
+				}
+				NoteFlatStop();
+				m_wasFlat = true;
+				return;
+			}
+			m_wasFlat = false;
+			if (!m_inTrade) { OpenTrade(pos > 0); m_inTrade = true; m_explicitNext = true; return; }
+			if (m_explicitNext) { SendStop(pos > 0); m_explicitNext = false; }
+			ManageTrade(pos > 0);
+		}
+
+		private void CopyConfig(ExitConfig c)
+		{
+			c.InitialStop = InitialStop; c.StopAtrMult = StopAtrMult; c.StopAtrLength = StopAtrLength; c.StopTicks = StopTicks; c.StopSwingBars = StopSwingBars; c.StopPct = StopPct; c.FillBarDisasterStop = FillBarDisasterStop;
+			c.TargetMode = TargetMode; c.T1Unit = T1Unit; c.T1Value = T1Value; c.T1ScalePct = T1ScalePct; c.FinalTargetUnit = FinalTargetUnit; c.FinalTargetValue = FinalTargetValue; c.SingleLotMode = SingleLotMode;
+			c.BreakEven = BreakEven; c.BreakEvenUnit = BreakEvenUnit; c.BreakEvenValue = BreakEvenValue; c.BreakEvenOffsetTicks = BreakEvenOffsetTicks;
+			c.TrailMode = TrailMode; c.TrailStart = TrailStart; c.TrailStartUnit = TrailStartUnit; c.TrailStartValue = TrailStartValue; c.TrailAtrMult = TrailAtrMult; c.TrailAtrLength = TrailAtrLength; c.TrailBars = TrailBars; c.TrailEmaLength = TrailEmaLength;
+			c.TimeStopBars = TimeStopBars; c.TimeStopMinutes = TimeStopMinutes; c.SessionExit = SessionExit; c.FlatByHHMM = FlatByHHMM; c.MaxHoldDays = MaxHoldDays; c.NewsExitMinutes = NewsExitMinutes;
+			c.RollExit = RollExit; c.AddStopMode = AddStopMode; c.ExitControl = ExitControl;
+			c.ControlExitBarsM1 = ControlExitBarsM1; c.ControlExitBarsM5 = ControlExitBarsM5; c.ControlExitBarsM15 = ControlExitBarsM15; c.ControlExitBarsH1 = ControlExitBarsH1; c.ControlExitBarsD1 = ControlExitBarsD1;
+			c.InitialStopIdx = InitialStopIdx; c.T1UnitIdx = T1UnitIdx; c.FinalTargetUnitIdx = FinalTargetUnitIdx; c.BreakEvenIdx = BreakEvenIdx; c.BreakEvenUnitIdx = BreakEvenUnitIdx; c.TrailModeIdx = TrailModeIdx; c.TrailStartIdx = TrailStartIdx; c.TrailStartUnitIdx = TrailStartUnitIdx;
+		}
+
+		private ExitMarket Market()
+		{
+			var m = new ExitMarket();
+			m.Tick = tickSize();
+			try { m.Bpv = Bars.Info.BigPointValue; } catch (Exception) { m.Bpv = 1; }
+			m.FloorTicks = FloorTicks();
+			m.AtrStop = m_atrS; m.AtrTrail = m_atrT; m.Ema = m_ema;
+			m.SignalLow = Bars.Low[0]; m.SignalHigh = Bars.High[0]; m.SwingLow = Bars.Low[0]; m.SwingHigh = Bars.High[0];
+			Resolution r = Bars.Info.Resolution;
+			int size = (int)r.Size;
+			m.BarKind = EGxBarKind.Minute; m.BarMinutes = size; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " min";
+			switch (r.Type)
+			{
+				case EResolution.Second: m.BarKind = EGxBarKind.Second; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " sec"; break;
+				case EResolution.Minute: m.BarKind = EGxBarKind.Minute; m.BarMinutes = size; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " min"; break;
+				case EResolution.Hour: m.BarKind = EGxBarKind.Minute; m.BarMinutes = size * 60; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " hour"; break;
+				case EResolution.Day: m.BarKind = EGxBarKind.Day; m.BarMinutes = 1440; m.DailyOrLonger = true; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " day"; break;
+				case EResolution.Week: m.BarKind = EGxBarKind.Week; m.DailyOrLonger = true; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " week"; break;
+				case EResolution.Month: case EResolution.Quarter: case EResolution.Year: m.BarKind = EGxBarKind.Month; m.DailyOrLonger = true; m.ResolutionLabel = "long " + size.ToString(CultureInfo.InvariantCulture); break;
+				case EResolution.Tick: m.BarKind = EGxBarKind.Tick; m.ResolutionLabel = size.ToString(CultureInfo.InvariantCulture) + " tick"; break;
+				default: m.BarKind = EGxBarKind.Range; m.ResolutionLabel = "non-time " + size.ToString(CultureInfo.InvariantCulture); break;
+			}
+			return m;
+		}
+
+		private void UpdateSeries()
+		{
+			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
+			if (m_havePx)
+			{
+				double tr = Math.Max(h, m_prevClose) - Math.Min(l, m_prevClose);
+				Wilder(tr, StopAtrLength, ref m_atrS, ref m_nS, ref m_seedS);
+				Wilder(tr, TrailAtrLength, ref m_atrT, ref m_nT, ref m_seedT);
+			}
+			double k = 2.0 / (TrailEmaLength + 1.0);
+			m_ema = m_haveEma ? c * k + m_ema * (1.0 - k) : c;
+			m_haveEma = true; m_prevClose = c; m_havePx = true;
+			m_mkt = Market();
+			if (m_wrap != null)
+			{
+				m_disasterPx = m_wrap.DisasterDistance(c, m_mkt);
+				m_disasterDl = m_disasterPx * (m_mkt.Bpv > 0 ? m_mkt.Bpv : 0);
+			}
+		}
+
+		private static void Wilder(double tr, int len, ref double atr, ref int n, ref double seed)
+		{
+			if (len < 1) len = 1;
+			if (n < len) { seed += tr; n++; if (n == len) atr = seed / len; return; }
+			atr = (atr * (len - 1) + tr) / len;
+		}
+
+		private void NoteFlatStop()
+		{
+			double net = this.NetProfit;
+			if (m_haveNet && m_wasFlat && FillBarDisasterStop && net != m_prevNet && m_wrap != null)
+				m_wrap.NoteFillBarStop(true, true, m_prevNet, net, Bars.CurrentBar);
+			m_prevNet = net; m_haveNet = true;
+			if (m_wrap != null) Emit(m_wrap.Log);
+		}
+
+		private void OpenTrade(bool longSide)
+		{
+			if (m_wrapPos == null) m_wrapPos = new ExitPosition();
+			m_mkt = Market();
+			double fill = StrategyInfo.AvgEntryPrice;
+			int lots = OpenLots();
+			double pe, ps;
+			bool planned = ReadPlan(longSide, out pe, out ps);
+			if (!planned)
+			{
+				m_wrap.NotePlan(longSide, false, false, 0, 0, 0, 0, out pe, out ps);
+				pe = fill;
+				ps = m_wrap.InitialStop(longSide, fill, m_mkt);
+			}
+			else m_wrap.NotePlan(longSide, true, true, pe, ps, Bars.CurrentBar, Bars.CurrentBar, out pe, out ps);
+			EInitialStop mode = m_wrap.Effective.InitialStop;
+			bool level = mode == EInitialStop.SignalBarExtreme || mode == EInitialStop.SwingExtreme;
+			double live = level || !(m_disasterPx > 0) ? m_wrap.InitialStop(longSide, fill, m_mkt) : ExitSession.HandoverStop(longSide, fill, m_disasterPx);
+			double equity = this.InitialCapital + this.NetProfit;
+			m_wrap.Open(m_wrapPos, longSide, pe, ps, fill, live, lots, m_mkt.Tick, m_mkt.Bpv, equity, "", Bars.Time[0], 0);
+			double arm = Math.Abs(pe - ps) * m_mkt.Bpv * lots;
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill GX planned $" + arm.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + m_wrapPos.InitialRDollars.ToString("0.00", CultureInfo.InvariantCulture));
+			Emit(m_wrap.Log);
+			PublishOpen(live);
+		}
+
+		private bool ReadPlan(bool longSide, out double entry, out double stop)
+		{
+			entry = stop = double.NaN;
+			if (Environment.ApplicationCode != EApplicationCode.Portfolio) return false;
+			try
+			{
+				if (!MyPortfolioData.ContainsKey(_PortKeys.GxPlanEntry) || !MyPortfolioData.ContainsKey(_PortKeys.GxPlanStop)) return false;
+				object e = MyPortfolioData[_PortKeys.GxPlanEntry], s = MyPortfolioData[_PortKeys.GxPlanStop];
+				if (!(e is double) || !(s is double)) return false;
+				entry = (double)e; stop = (double)s;
+				return _ExitEngine.PlanKeysValid(longSide, true, true, entry, stop, Bars.CurrentBar, Bars.CurrentBar);
+			}
+			catch (Exception) { return false; }
+		}
+
+		private void ManageTrade(bool longSide)
+		{
+			int lots = OpenLots();
+			var bar = new ExitBar();
+			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
+			bar.Tick = m_mkt.Tick; bar.Bpv = m_mkt.Bpv; bar.AtrTrail = m_mkt.AtrTrail > 0 ? m_mkt.AtrTrail : m_atrT; bar.Ema = m_ema;
+			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_mkt.BarMinutes; bar.MinutesToNews = double.NaN;
+			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
+			ExitDecision d = m_wrap.Manage(m_wrapPos, bar);
+			PublishOpen(m_wrapPos.Stop);
+			if (d.Reason != null)
+			{
+				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_wrapPos.GapThroughStop;
+				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
+				return;
+			}
+			SendStop(longSide);
+			if (d.SendT1 && d.T1Qty > 0 && !double.IsNaN(m_wrapPos.T1Level))
+			{
+				int q = d.T1Qty < lots ? d.T1Qty : lots;
+				if (q > 0) { if (longSide) m_gxLT1.Send(m_wrapPos.T1Level, q); else m_gxST1.Send(m_wrapPos.T1Level, q); }
+			}
+			if (m_wrap.FinalOn && !m_wrapPos.FinalSkipped && !double.IsNaN(m_wrapPos.FinalLevel))
+			{
+				int qf = lots; if (qf > lots) qf = lots;
+				if (longSide) m_gxLT.Send(m_wrapPos.FinalLevel, qf); else m_gxST.Send(m_wrapPos.FinalLevel, qf);
+			}
+		}
+
+		private int OpenLots()
+		{
+			try { int n = this.CurrentPosition.OpenLots; if (n > 0) return n; } catch (Exception) { }
+			return Math.Abs(StrategyInfo.MarketPosition);
+		}
+
+		private int FloorTicks()
+		{
+			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) return p.costFloorTicks; } catch (Exception) { }
+			return 0;
+		}
+
+		private void SendStop(bool longSide)
+		{
+			int lots = OpenLots();
+			if (lots < 1 || m_wrapPos == null) return;
+			if (longSide) m_gxLS.Send(m_wrapPos.Stop, lots); else m_gxSS.Send(m_wrapPos.Stop, lots);
+		}
+
+		private void PublishOpen(double stop)
+		{
+			if (Environment.ApplicationCode != EApplicationCode.Portfolio || m_wrapPos == null) return;
+			try
+			{
+				MyPortfolioData[_PortKeys.GxStop] = stop;
+				MyPortfolioData[_PortKeys.GxOwner] = "GX";
+				MyPortfolioData[_PortKeys.RiskOpen] = Math.Abs(StrategyInfo.AvgEntryPrice - stop) * m_mkt.Bpv * Math.Abs(StrategyInfo.MarketPosition);
+				double r = m_wrapPos.InitialRDollars;
+				MyPortfolioData[_PortKeys.OpenR] = r > 0 ? this.CurrentPosition.OpenProfit / r : double.NaN;
+				if (!m_wroteR)
+				{
+					double per = m_wrapPos.Qty > 0 ? r / m_wrapPos.Qty : r;
+					MyPortfolioData[_PortKeys.RDollar] = per;
+					MyPortfolioData[_PortKeys.RDollarW] = per;
+					m_wroteR = true;
+				}
+			}
+			catch (Exception ex)
+			{
+				trace(ETraceLevel.Error, "EXIT Error: GX portfolio write failed - " + ex.Message);
+			}
+		}
+
+		private void Emit(System.Collections.Generic.List<string> log)
+		{
+			if (log == null) return;
+			for (int i = 0; i < log.Count; i++)
+			{
+				string line = log[i];
+				ETraceLevel lv = ETraceLevel.Info;
+				if (line.IndexOf(" Error:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Error;
+				else if (line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Warning;
+				if (traceOn(lv)) trace(lv, line);
+			}
+			log.Clear();
 		}
 	}
 }

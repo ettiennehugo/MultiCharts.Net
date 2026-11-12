@@ -42,6 +42,7 @@ static class Program
 		RiskFields();
 		OverBudget();
 		Gx2Source();
+		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -722,5 +723,25 @@ static class Program
 		Check(gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) >= 0
 			&& gxBody.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0
 			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "GX orders are exits");
+	}
+
+	static void Gx3Source()
+	{
+		string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+		string gx = File.ReadAllText(Path.Combine(root, "_GenericExit.Strategy.CS"));
+		string csproj = File.ReadAllText(Path.Combine(root, "PLStudies.csproj"));
+		string host = File.ReadAllText(Path.Combine(root, "sandbox", "_GX_00_TestHost.Strategy.CS"));
+		string[] inputs = { "InitialStop", "StopAtrMult", "StopAtrLength", "StopTicks", "StopSwingBars", "StopPct", "FillBarDisasterStop", "TargetMode", "T1Unit", "T1Value", "T1ScalePct", "FinalTargetUnit", "FinalTargetValue", "SingleLotMode", "BreakEven", "BreakEvenUnit", "BreakEvenValue", "BreakEvenOffsetTicks", "TrailMode", "TrailStart", "TrailStartUnit", "TrailStartValue", "TrailAtrMult", "TrailAtrLength", "TrailBars", "TrailEmaLength", "TimeStopBars", "TimeStopMinutes", "SessionExit", "FlatByHHMM", "MaxHoldDays", "NewsExitMinutes", "RollExit", "AddStopMode", "ExitControl", "ControlExitBarsM1", "ControlExitBarsM5", "ControlExitBarsM15", "ControlExitBarsH1", "ControlExitBarsD1", "InitialStopIdx", "T1UnitIdx", "FinalTargetUnitIdx", "BreakEvenIdx", "BreakEvenUnitIdx", "TrailModeIdx", "TrailStartIdx", "TrailStartUnitIdx" };
+		foreach (string name in inputs)
+			Check(gx.IndexOf("[Input] public ", StringComparison.Ordinal) >= 0 && gx.IndexOf(" " + name + " { get; set; }", StringComparison.Ordinal) >= 0, "wrapper input " + name);
+		Check(inputs.Length == 48, "48 inputs");
+		Check(gx.IndexOf("PortfolioPublish { get { return false; } }", StringComparison.Ordinal) >= 0, "wrapper does not publish pm.ver");
+		Check(gx.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && gx.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "wrapper has no entry order");
+		Check(csproj.IndexOf("_GX_00_TestHost", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox\\", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox/", StringComparison.Ordinal) < 0, "test host is not in PLStudies.csproj");
+		Check(host.IndexOf("class _GX_00_TestHost", StringComparison.Ordinal) >= 0 && host.IndexOf("EmbedEngine", StringComparison.Ordinal) >= 0, "test host file");
+		int n = 0;
+		foreach (string f in new[] { "_StopsAndTargets.Strategy.CS", "_Stops_And_Targets.Strategy.CS", "_ExitStatic.Strategy.CS", "_StpOrLim_Exit.Strategy.CS", "_ExitHalfRiskHalfRoll.Strategy.CS" })
+			if (File.ReadAllText(Path.Combine(root, f)).IndexOf("SUPERSEDED by GX", StringComparison.Ordinal) >= 0) n++;
+		Check(n == 5, "five legacy exit studies marked superseded");
 	}
 }
