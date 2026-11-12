@@ -3,197 +3,32 @@ using PowerLanguage.Function;
 
 namespace PowerLanguage.Strategy
 {
-	// ================================================================================================================
-	// _Test6 — A2-63 host (H2) + the pre-registered G-R regime gate (specs/regime-consumer-prereg.md rev 2, C1)
-	// ================================================================================================================
+	// =================================================================================================================
+	// _Test6: INERT test slot (specs/sandbox-test-protocol.md). No orders, no [Input]s besides the inherited TraceLevel.
+	// =================================================================================================================
 	//
-	// HOST CORE (catalogue A2-63, Analyst 2's pre-registered core, unchanged): long only; buy stop at O + 0.5 x ATR20d,
-	//   O = the 09:30 ET RTH open (open of the first bar closing after 09:30 ET); ATR20d = M-DAILY Atr20d (roll-gap removed via RollDetection = Table, see ROLLS),
-	//   over COMPLETED PRIOR sessions only (PrevDate < today, else no entry), latched at 09:30, never updated intraday, journaled; the stop works 09:30-15:30 ET; one entry per day; market exit at 15:55 ET;
-	//   no stop, no target, no filter; 1 contract. Exchange (ET) wall-clock times, so the windows hold through DST. CME early-close
-	//   days (_CmeHolidays.Rules RthCloseEt): exit on the first bar closing at or after the early close minus 5m; CME no-RTH days:
-	//   no entry. Known limitation: the stop works from the bar after the 09:30 latch bar (first-bar breakout missed).
-	//   Bar size: 5m per ruling 2 (the header journals the bar size; any other size is journaled as a deviation).
-	//   Rulings: specs/a2-63-rulings.md. Logic lives in _RegimeGate.Function.CS (A263Core, MC-free, unit-tested).
-	//
-	// GATE (RegimeGateConfig.arm, set IN CODE, no [Input]; prereg §8 step 1 - one build per arm, the config hash differs):
-	//   U (default) : ungated host; RegimeConfig.enabled = true for the journal only. Trades = the host core.
-	//   G           : skip the day's entry when the prior session's post-hysteresis HMM Label == 2 (filtered posteriors,
-	//                 usable iff Valid && !UsingFallback && AsOf < t).
-	//   A           : RegimeConfig.fitSessions = minSessions = 100000 so the engine publishes the RG-03 ATR tercile every day;
-	//                 skip tercile 2 (usable iff Valid && AsOf < t).
-	//   To build G or A: in the constructor below set RegimeGateConfig.arm = ERegimeGateArm.G (or .A), compile, run.
-	//   Every other RegimeConfig field stays at its default (prereg §2.1); changing one is a new trial.
-	//
-	// JOURNAL (TraceLevel = Journal): one REGGATE line per RTH session in EVERY arm, also on days with no entry signal:
-	//   REGGATE {date} arm() asOf() label() raw() pFilt() fb() usable() allow() atrT() wouldBlock() why() signal() cfg() seed()
-	//   + host fields O() atr20d() atrAsOf() atrOk() thr() exitAt() halfDay() noRth() and the arm's running counts nSess() nUsable()
-	//   nWarm() nInv() nFb() nBlock() nNoRth() (no-usable-regime days split warm-up / invalid label / ATR fallback, why(); CME no-RTH days; the last line holds the totals);
-	//   a REGGATE header line (canonical config + FNV-1a hash) on the first session, the engine's REGIME lines, and the
-	//   per-trade MCJournal context column with the session's REGGATE fields (arm, label, pFilt, cfg, seed, ...).
-	//
-	// SETUP: @ES 5m (dxFeed, not back-adjusted), CME Globex session, 1m Bar Magnifier, MC costs per prereg §5.3, data from the
-	//   first available bar. Dev runs end 2024-12-31 (prereg §8 step 3). Exclusions (roll ±1, half days, not-usable days) are
-	//   applied OFFLINE to all arms equally; the MC run trades them so G/A = U's trades minus the blocked days (§4.1 equivalence).
-	//
-	// ROLLS (educator review A2 7a / R1): RollDetection = Table, set in StartCalc (no [Input]). RollDates are filled from the Data1
-	//   profile (M5): every listed contract month of HostConfig.rollFromYear-rollToYear (2000-2035). On ES that preset is
-	//   EquityIndexCustomary, which is EventRules.RollDate (Thursday eight days before the third Friday; the Monday before it for
-	//   contracts expiring from EventRules.RollRuleMondayFrom = 2022-04-01, i.e. from ESM22, rolled Mon 2022-06-13). That is the rule
-	//   that generated tools/m-event/out/roll_splices_2016_2024.csv (tools/m-event/roll_splices.py, column rule_roll); tests/EventTests
-	//   checks the two agree for 2016-2024. Nothing reads the CSV at run time (an MC study has no repo path), and its observed_splice
-	//   column is still empty: the vendor's actual splice date is unverified (fill it from _EventCalendarTest Mode 2 EVROLL lines;
-	//   PR #46 review: a blocker before any dev run). NQ/MNQ share the ES rule and stay VERIFY against that splice. CL/GC/ZN/6E use
-	//   their preset roll on the NYSE stand-in calendar (not CME-verified; M8). N2 (REGGATE accepts ES only) is M6h, not this fill.
-	//   Series is NOT used. DAY KEY (PR #46 review Q3b): tradingDayKey = the Globex trading day (_CmeSessionClock.GlobexTradingDayEt,
-	//   ET >= 18:00 -> next date), so a splice at the 18:00 ET Globex open lands on the first bar of the roll day and the M-DAILY
-	//   roll offset is the real calendar spread. M-DAILY days / ATR20d are therefore Globex days (18:00-17:00 ET). The REGGATE header
-	//   journals roll(Table n dates from-to digest) dayKey(); RollDetection, the table years, the date digest and the day key are
-	//   RegimeGate hash fields (host.roll*, host.tradingDay); turning rolls on is a new build of every arm (prereg §8): the journal changes.
-	//
-	// IMPORT ORDER: _EventCalendar.Function.CS, _RollDetector.Function.CS, _CmeSessionClock.Function.CS, _RegimeEngine.Function.CS
-	//   (and its _Gmm/_Rng), _RegimeGate.Function.CS, _CustomSignal chain, this file.
-	// ================================================================================================================
+	// Slot status: free. The slot register (specs/sandbox-test-protocol.md §3.4) records which sandbox signal, if any, is loaded here.
+	// To load a signal: replace everything below the using lines with the sandbox file's body, rename its public class to _Test6
+	// (constructor included), keep the sandbox file as the source of truth, press F7 in the PowerLanguage Editor (never Ctrl+F7).
+	// To free the slot: copy the committed inert version of this file back over it (never git checkout in the MiniPC clone) and press F7.
+	// Never commit a loaded slot. Never commit Editor-generated PLStudies.csproj changes.
 	public class _Test6 : _CustomSignal
 	{
-		/// <summary>Gate arm and placebo seed (no [Input]). Default U.</summary>
-		protected RegimeGateConfig RegimeGateConfig { get; } = new RegimeGateConfig();
-		/// <summary>A2-63 core (pre-registered; do not change without a new pre-registration).</summary>
-		protected A263Config HostConfig { get; } = new A263Config();
-
-		private const string EntryName = "A263LE", ExitName = "A263LX";
-		private const string Et = "Eastern Standard Time";
-		private IOrderPriced m_le;
-		private IOrderMarket m_lx;
-		private A263Core m_core;
-		private AtrTercileTracker m_terc;
-		private string m_cfgHash;
-		private bool m_headerLogged, m_windowChecked;
-		private RegimeGateCounts m_counts;
-
-		public _Test6(object _ctx) : base(_ctx)
-		{
-			// RegimeGateConfig.arm = ERegimeGateArm.G;   // build G
-			// RegimeGateConfig.arm = ERegimeGateArm.A;   // build A
-		}
+		public _Test6(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
 		{
 			base.Create();
-			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, EntryName, EOrderAction.Buy));
-			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, ExitName, EOrderAction.Sell));
 		}
-
-		/// <summary>PR #46 review Q3(b): days are Globex trading days (ET >= 18:00 -> next date), the key Gate0 uses via
-		/// _VolumeProfileFuturesBase.GlobexDate. A roll spliced at the 18:00 ET Globex open then lands on the first bar of the roll
-		/// day, and the M-DAILY roll offset (_CustomSignal stepDaily: roll-bar open - PrevClose) is new-contract open minus the
-		/// old contract's last close instead of ~0.</summary>
-		protected override DateTime tradingDayKey(DateTime barTime) { return _CmeSessionClock.GlobexTradingDayEt(ToZone(barTime, Et)); }
 
 		protected override void StartCalc()
 		{
-			string err = RegimeGateConfig.Validate();
-			if (err != null) throw new ArgumentException(err);
-			RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig);   // before base.StartCalc: the engines are created there
-			NeedsDaily = true;
-			// educator review A2 7a / R1: roll detection ON, Table mode (tests/RollTests source-checks this line). Table years =
-			// HostConfig.rollFromYear-rollToYear are contract years. M5 fills them from the Data1 profile after base.StartCalc.
-			// ES EquityIndexCustomary dates equal EventRules.RollDate and fall inside the contract year, so the digest stays fdd63bd8f179a8d4.
-			RollDetection = ERollDetection.Table;
-			// PR #46 (DECIDED by Ettienne): carry ATR20d on from the roll-adjusted history; only the splice day's TR is skipped
-			HostConfig.atrRestartOnRoll = false;
-			DailyConfig.atrLength = HostConfig.atrLength;
-			DailyConfig.atrRestartOnRoll = HostConfig.atrRestartOnRoll;
 			base.StartCalc();
-			requireEsOnly();
-			if (RollDates.Count == 0)
-				fillProfileRollDates(HostConfig.rollFromYear, HostConfig.rollToYear, "ROLL");
-			// PR #46 review Q1: hash what actually runs. M6h: explicit spellings, not enum ToString.
-			string rollText = RollDetectionText(RollDetection);
-			if (rollText == null) refuse("roll detection " + (int)RollDetection + " has no hash spelling");
-			HostConfig.rollDetection = rollText;
-			HostConfig.rollDatesDigest = _RollDetector.DatesDigest(RollDates);
-			string dayText = RegimeGate.TradingDayText(ETradingDayKey.Globex18ET);
-			if (dayText == null) refuse("trading-day key has no hash spelling");
-			HostConfig.tradingDay = dayText;
-			m_core = new A263Core(HostConfig);
-			m_terc = new AtrTercileTracker(RegimeConfig.atrPctLookback, RegimeConfig.K);
-			m_cfgHash = RegimeGate.Hash(RegimeConfig, RegimeGateConfig, HostConfig);
-			m_headerLogged = false;
-			m_counts = new RegimeGateCounts();
-		}
-
-		/// <summary>M6h N2. REGGATE is the ES trial. Any other root logs Error, then throws. MES would be a new pre-registration.</summary>
-		void requireEsOnly()
-		{
-			InstrumentProfile p = InstrumentProfileOf(1);
-			string root = p != null && !string.IsNullOrEmpty(p.root) ? p.root : _MtfMath.SymbolRoot(Bars.Info.Name);
-			if (root == "ES") return;
-			string name = p != null && !string.IsNullOrEmpty(p.name) ? p.name : Bars.Info.Name;
-			refuse("cannot run on " + (name ?? "") + " (root " + (string.IsNullOrEmpty(root) ? "?" : root) + "): ES only (N2). MES would be a new trial with its own pre-registration");
-		}
-
-		/// <summary>M6h S3. The frozen 09:30–16:00 ET windows must sit inside the chart sessions. Profiles off is the existing off switch.</summary>
-		void requireReggateWindow()
-		{
-			if (m_windowChecked) return;
-			InstrumentProfile p = InstrumentProfileOf(1);
-			if (p == null) { m_windowChecked = true; return; }
-			if (p.sessions == null || p.barZone == null) return;
-			m_windowChecked = true;
-			TimeZoneInfo et = TimeZoneInfo.FindSystemTimeZoneById(Et);
-			Action<string> err = msg => traceAlways(ETraceLevel.Error, p.name, msg);
-			_MtfMath.Session[] etSessions = InstrumentSessions.ToExchange(p.sessions, p.barZone, et, Bars.Time[0], p.Subject("REGGATE"), err);
-			InstrumentSessions.RequireGate0Rth(etSessions, p.Subject("REGGATE"), err);
-		}
-
-		void refuse(string why)
-		{
-			string msg = "M-INSTR: REGGATE " + why + ".";
-			traceAlways(ETraceLevel.Error, Bars.Info.Name, msg);
-			throw new InvalidOperationException(msg);
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			requireReggateWindow();
-			if (Bars.Status != EBarState.Close) return;
-			DateTime et = ToZone(Bars.Time[0], Et);
-			_DailyContext daily = DailyContext;
-			if (daily != null) m_terc.AddDay(daily.PrevDate, daily.Atr20d);   // same day / value the engine got in stepRegime
-			bool isLong = StrategyInfo.MarketPosition > 0;
-
-			if (m_core.IsLatchBar(et))
-			{
-				// ruling 1: Wilder M-DAILY Atr20d over completed prior sessions only (PrevDate < today, else no entry that day)
-				double atr = daily != null ? daily.Atr20d : double.NaN;
-				DateTime atrAsOf = daily != null ? daily.PrevDate : DateTime.MinValue;
-				// ruling 2: CME early close -> exit on the first bar closing at or after the early close minus 5m; no-RTH days: no entry
-				_CmeHolidays.Rules.Day cme = _CmeHolidays.Rules.Get(et.Date);
-				RegimeGateDecision d = RegimeGate.Decide(RegimeGateConfig.arm, Regime, et.Date, m_terc.LastDate == atrAsOf ? m_terc.Tercile : -1);
-				m_counts.Add(d, cme.NoRth);
-				m_counts.AddAtr(double.IsNaN(atr), RollBars.Count > 0, cme.NoRth);   // rulings (h): post-roll ATR20d blackout days
-				m_core.Latch(et, Bars.Open[0], atr, atrAsOf, d.allow, cme.RthCloseEt, cme.NoRth);
-				if (journalOn())
-				{
-					if (!m_headerLogged)
-					{
-						m_headerLogged = true;
-						Resolution res = Bars.Info.Resolution;
-						bool fiveMin = res.Type == EResolution.Minute && res.Size == 5;
-						trace(ETraceLevel.Journal, $"REGGATE header version({RegimeGate.Version}) arm({RegimeGateConfig.arm}) cfg({m_cfgHash}) seed({RegimeGateConfig.placeboSeed}) " +
-							$"symbol({Bars.Info.Name}) bar({res.Type} {res.Size}) roll({RollDetection} {RollDates.Count} dates {HostConfig.rollFromYear}-{HostConfig.rollToYear} digest {HostConfig.rollDatesDigest}) dayKey({HostConfig.tradingDay}) barDeviation({(fiveMin ? 0 : 1)}) firstBar({Bars.Time[0]:yyyy-MM-dd HH:mm}) canon[{RegimeGate.Canon(RegimeConfig, RegimeGateConfig, HostConfig)}]");
-						if (!fiveMin) trace(ETraceLevel.Journal, $"REGGATE deviation bar size {res.Type} {res.Size} used instead of 5 Minute (ruling 2)");
-					}
-					trace(ETraceLevel.Journal, RegimeGate.Line(d, m_core.HasSignal, m_cfgHash, RegimeGateConfig.placeboSeed) + m_core.Suffix() + m_counts.Suffix());
-					if (d.allow && m_core.HasSignal) journalArm(EntryName, m_core.Threshold, double.NaN, double.NaN, RegimeGate.TradeFields(d, m_cfgHash, RegimeGateConfig.placeboSeed));
-				}
-			}
-
-			A263Action a = m_core.Step(et, isLong);
-			if (a.exit) m_lx.Send();
-			else if (a.sendStop) m_le.Send(a.stop, HostConfig.contracts);
 		}
 	}
 }

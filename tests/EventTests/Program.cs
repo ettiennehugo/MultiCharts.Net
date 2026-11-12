@@ -43,7 +43,7 @@ static class Program
 	static void Main()
 	{
 		Rules(); TimeAndDays(); Windows(); AsOf(); HalfDays(); Roll(); Csv(); NextPrev(); ConfigCanon(); EmptyTable(); SessionOpens(); BlackoutMacroOnly(); EiaRuleOnly(); FirstBarCoverage(); TableIntegrity(); RealData(); Pr27(); NoCoverageFlag(); Perf();
-		{   // PR D / PR #46 review: _Test6 RollDates = EventRules.RollDate, pinned to CME-published roll dates (not the generated CSV)
+		{   // PR D / PR #46 review: _A2_63_RegimeGate RollDates = EventRules.RollDate, pinned to CME-published roll dates (not the generated CSV)
 			var cme = new[] { new DateTime(2021, 12, 9), new DateTime(2022, 3, 10), new DateTime(2022, 6, 13), new DateTime(2022, 9, 12),
 				new DateTime(2025, 3, 17), new DateTime(2026, 6, 15), new DateTime(2027, 9, 13) };
 			foreach (var d in cme) Check(EventRules.RollDate(d.Year, d.Month) == d, "CME roll date " + d.ToString("yyyy-MM-dd"));
@@ -58,11 +58,11 @@ static class Program
 				if (EventRules.RollDate(exp.Year, exp.Month) != rr) { all = false; Console.WriteLine("roll table mismatch " + r[0]); }
 			}
 			Check(all, "PR D: roll_splices_2016_2024.csv rule_roll was regenerated from EventRules.RollDate (36 rows)");
-			// PR #46 review Q1: _Test6's RollDates (2000-2035) digest = A263Config.RollDatesDigest2000To2035 (also pinned in RegimeGateTests)
+			// PR #46 review Q1: _A2_63_RegimeGate's RollDates (2000-2035) digest = A263Config.RollDatesDigest2000To2035 (also pinned in RegimeGateTests)
 			var set = new List<DateTime>(); for (int y = 2000; y <= 2035; y++) for (int m = 3; m <= 12; m += 3) set.Add(EventRules.RollDate(y, m));
 			string dg = PowerLanguage.Function._RollDetector.DatesDigest(set);
 			Console.WriteLine("roll dates digest 2000-2035 = " + dg);
-			Check(set.Count == 144 && dg == RollDigestPin, "_Test6 roll-date digest pinned (re-pin = new build, update A263Config.RollDatesDigest2000To2035)");
+			Check(set.Count == 144 && dg == RollDigestPin, "_A2_63_RegimeGate roll-date digest pinned (re-pin = new build, update A263Config.RollDatesDigest2000To2035)");
 		}
 		Console.WriteLine($"EventTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);

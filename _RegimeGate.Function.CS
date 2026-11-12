@@ -52,7 +52,7 @@ namespace PowerLanguage.Function
 		public int contracts = 1;
 		/// <summary>CME early-close days (ruling 2): exit on the first bar closing at or after the early close minus this.</summary>
 		public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
-		// PR #46 review (Q1): roll handling is part of the hashed build. _Test6.StartCalc overwrites these with the values it actually
+		// PR #46 review (Q1): roll handling is part of the hashed build. _A2_63_RegimeGate.StartCalc overwrites these with the values it actually
 		// runs (RollDetection.ToString(), its table years, _RollDetector.DatesDigest(RollDates), its trading-day key), so an Off build
 		// and a Table build cannot share a hash. Defaults = the intended build.
 		public string rollDetection = "Table";

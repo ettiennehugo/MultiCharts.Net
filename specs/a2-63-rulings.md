@@ -2,10 +2,12 @@
 
 Binding alongside `specs/regime-consumer-prereg.md`, which is unchanged. This file records the rulings in substance, together with how each one is implemented.
 
+**Move note, 2026-11-12 (ET).** The A2-63 host + regime-gate harness moved from `_Test6.Strategy.CS` (class `_Test6`) to `_A2_63_RegimeGate.Strategy.CS` (class `_A2_63_RegimeGate`) at the repo root, with its own `Compile Include` in `PLStudies.csproj`. Owner, Ettienne, 2026-11-12 08:06 ET (verbatim): *"Move the regime gate to its own signal, e.g.  _A2_63_RegiimeGatewith a proper name so we can use that slot for dedicated testing."* and 08:08 ET (verbatim): *"move the code in test 1 to a similar dedicated signal with proper names, test 6 and test 1 ported signals can be added to csproj"*. The code moved **unchanged**: only the class name, the constructor name and the header title line (line 7) differ, so every line number cited below and in `specs/m-instr-spec.md` still points at the same code. The class name is not part of `RegimeGate.Canon` or any hashed field, so the U/G/A config hashes, the roll digest `fdd63bd8f179a8d4` and every other pin below are unchanged; the trace log's strategy column now reads `_A2_63_RegimeGate`. File SHA256: old `_Test6.Strategy.CS` `65996b7a5baa2957e38fc4b169aec3cf1a0599236ea87096429f52648e6e5483`, new `_A2_63_RegimeGate.Strategy.CS` `8e8cbc2308c176d7607f7f2b5d3ba9b20dc36688ef975c81a11a5c8141a3d857`. `specs/regime-consumer-prereg.md` is **not edited** (its signed rev 2 text is pinned by sha256 `66ae7bb5…` below); read its `_Test6` as `_A2_63_RegimeGate`. Names in this file were updated to the new class. `_Test6` is now an inert test slot (`specs/sandbox-test-protocol.md`).
+
 ## (1) ATR20d
 ATR20d is the Wilder M-DAILY `Atr20d`, computed over **completed prior sessions only**. Today's session must not be included, and the value is journaled at the open.
 
-- Implementation: `_Test6` passes `DailyContext.Atr20d` with its as-of date `DailyContext.PrevDate`. `A263Core.Latch` rejects the ATR (no entry that day, `atrOk(0)`) unless its as-of date is before the session date.
+- Implementation: `_A2_63_RegimeGate` passes `DailyContext.Atr20d` with its as-of date `DailyContext.PrevDate`. `A263Core.Latch` rejects the ATR (no entry that day, `atrOk(0)`) unless its as-of date is before the session date.
 - REGGATE journals `O()`, `atr20d()`, `atrAsOf()`, `atrOk()` and `thr()` at the open.
 
 ## (2) Timing
@@ -65,15 +67,15 @@ Nothing in this section is pre-registered until Ettienne accepts it, except (h),
 
 ## (d) PROPOSED, pending Ettienne: roll-date source and flag placement
 - **Source:** `EventRules.RollDate(y, m)` (CME customary roll). It is the Monday before the third Friday for contracts whose third Friday falls on or after `EventRules.RollRuleMondayFrom = 2022-04-01`, and the Thursday eight calendar days before it for earlier contracts. ESM22 is the first Monday roll (Mon 2022-06-13: Wayback 20220610060819 CME rolldates page; Sierra Chart support 2022-06-09). ESH22 rolled Thu 2022-03-10. Pinned in `tests/EventTests` against CME-published dates: ESZ21 2021-12-09, ESH22 2022-03-10, ESM22 2022-06-13, ESU22 2022-09-12, ESH25 2025-03-17, ESM26 2026-06-15 and ESU27 2027-09-13.
-- **Table:** `_Test6` runs `RollDetection = Table` with `RollDates` = that rule for every quarterly month of 2000-2035 (144 dates, `_RollDetector.DatesDigest` = `fdd63bd8f179a8d4`). `tests/RollTests` fails if `_Test6` is not Table.
-- **Flag placement:** `_Test6.tradingDayKey` is the Globex trading day (`_CmeSessionClock.GlobexTradingDayEt`: ET >= 18:00 belongs to the next date), the same key Gate0 uses through `_VolumeProfileFuturesBase.GlobexDate`. The flag therefore lands on the first bar of the roll trading day, the 18:00 ET Globex open of the evening before. The M-DAILY roll offset is that bar's open minus the old contract's last close (tests/DailyTests `EveningSplice`). Consequence: M-DAILY days and ATR20d are Globex days (18:00-17:00 ET), not calendar days.
+- **Table:** `_A2_63_RegimeGate` runs `RollDetection = Table` with `RollDates` = that rule for every quarterly month of 2000-2035 (144 dates, `_RollDetector.DatesDigest` = `fdd63bd8f179a8d4`). `tests/RollTests` fails if `_A2_63_RegimeGate` is not Table.
+- **Flag placement:** `_A2_63_RegimeGate.tradingDayKey` is the Globex trading day (`_CmeSessionClock.GlobexTradingDayEt`: ET >= 18:00 belongs to the next date), the same key Gate0 uses through `_VolumeProfileFuturesBase.GlobexDate`. The flag therefore lands on the first bar of the roll trading day, the 18:00 ET Globex open of the evening before. The M-DAILY roll offset is that bar's open minus the old contract's last close (tests/DailyTests `EveningSplice`). Consequence: M-DAILY days and ATR20d are Globex days (18:00-17:00 ET), not calendar days.
 - **Trial-definition change:** ATR20d (prereg §C1, ruling (1)) is now the Wilder ATR over Globex trading days (18:00-17:00 ET), not calendar days. Every arm's thresholds, stops and RG-03 terciles change with it.
 - **Offline exclusions:** the same table (`tools/m-event/out/roll_splices_2016_2024.csv` rule_roll, generated by `tools/m-event/roll_splices.py` from the same rule and checked against `EventRules.RollDate` by EventTests) drives the offline roll ±1 exclusions for every arm.
 
 ## (e) PROPOSED, pending Ettienne: new builds and hashes
 The pins below are facts of the PR #46 code (including the decided ATR carry, (h)). They become the pre-registered pins only after Ettienne accepts (d)-(g) and (i).
 
-`RegimeGate.HashFields` adds `host.rollDetection`, `host.rollYears`, `host.rollDates` (the digest), `host.tradingDay` and `host.atrRestartOnRoll` (ruling (h)). `_Test6` writes the values it actually runs into `HostConfig` before hashing, and the REGGATE header journals `roll(Table 144 dates 2000-2035 digest …) dayKey(Globex18ET)`. These pins supersede the pins in (c):
+`RegimeGate.HashFields` adds `host.rollDetection`, `host.rollYears`, `host.rollDates` (the digest), `host.tradingDay` and `host.atrRestartOnRoll` (ruling (h)). `_A2_63_RegimeGate` writes the values it actually runs into `HostConfig` before hashing, and the REGGATE header journals `roll(Table 144 dates 2000-2035 digest …) dayKey(Globex18ET)`. These pins supersede the pins in (c):
 
 | Arm | Hash |
 |---|---|
@@ -89,9 +91,9 @@ Before §8 step 3, run `_EventCalendarTest` Mode 2 on dxFeed @ES for 2016-2024, 
 
 ## (h) DECIDED (Ettienne, 2026-10-29): carry ATR20d on from the roll-adjusted history
 - **Decision:** "Carry ATR20d on from the roll-adjusted history." This replaces the earlier PROPOSED blackout entry.
-- **Implementation:** `DailyConfig.atrRestartOnRoll` (default `true`, so other hosts keep the §0.3 reseed bit-identically). `_Test6` sets it to `false`. When false, `_DailyContext.applyRoll` keeps the Wilder state (`m_atr`, `m_trSeed`, `m_trSeen`) and skips only the splice day's true range. The history is already difference-adjusted and TR is shift-invariant, so the pre-roll state is valid in new-contract space. There is no post-roll NaN blackout (previously about 20 of every ~63 sessions, ~720 sessions over 2016-2024).
+- **Implementation:** `DailyConfig.atrRestartOnRoll` (default `true`, so other hosts keep the §0.3 reseed bit-identically). `_A2_63_RegimeGate` sets it to `false`. When false, `_DailyContext.applyRoll` keeps the Wilder state (`m_atr`, `m_trSeed`, `m_trSeen`) and skips only the splice day's true range. The history is already difference-adjusted and TR is shift-invariant, so the pre-roll state is valid in new-contract space. There is no post-roll NaN blackout (previously about 20 of every ~63 sessions, ~720 sessions over 2016-2024).
 - **Trial-definition change:** ATR20d for every arm is a continuous Wilder ATR across rolls, with the splice-day TR excluded (previously reseeded after every roll, NaN for 20 days, with "no entry that day"). Entries, stops and RG-03 terciles on post-roll days change with it.
-- **Hash:** `RegimeGate.HashFields` adds `host.atrRestartOnRoll` (`A263Config.atrRestartOnRoll`, default false, written by `_Test6` before hashing); pins in (e).
+- **Hash:** `RegimeGate.HashFields` adds `host.atrRestartOnRoll` (`A263Config.atrRestartOnRoll`, default false, written by `_A2_63_RegimeGate` before hashing); pins in (e).
 - **Tests:** tests/DailyTests `RollCarryAtr`: splice-day TR excluded (ATR20d unchanged on the roll day despite a 500-point range); no NaN after the roll, and Wilder continues from the pre-roll value. The default (`true`) still pins the 20-day reseed (`EveningSplice`).
 - **Journal:** the REGGATE suffix keeps `nAtrNaN(n)` / `nRollAtrNaN(n)`. With the carry, `nRollAtrNaN` should be 0 after the first seed.
 

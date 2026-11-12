@@ -39,7 +39,7 @@ canonical: docs/engines-manual.md in the repo (any other copy, e.g. specs/engine
 │     │   Xmkt → Daily → Regime → Event → Tod → Avwap                           │
 │     │   then LevelStudy → portfolioBar (pm.* keys) → journalScan → CS-8 events│
 │     │                                                                         │
-│     ├─ YourStrategy : _CustomSignal        (e.g. _Test6, your signals)        │
+│     ├─ YourStrategy : _CustomSignal        (e.g. _A2_63_RegimeGate, yours)    │
 │     └─ _VolumeProfileBase : _CustomSignal  (VP, VWAP slots, confluence, P3)   │
 │         └─ _VolumeProfileFuturesBase       (CME session clock, IB/RTH stats,  │
 │                                             order flow, CME holiday hooks)    │
@@ -120,7 +120,7 @@ protected override void Create()
     RollDetection = ERollDetection.Series;
 }
 
-// Pattern B — in StartCalc() before base.StartCalc() (as _Test6 / _MtfProbe do)
+// Pattern B — in StartCalc() before base.StartCalc() (as _A2_63_RegimeGate / _MtfProbe do)
 protected override void StartCalc()
 {
     RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig);   // must precede base.StartCalc
@@ -224,7 +224,7 @@ protected override bool todHalfDay(DateTime d)
 }
 ```
 
-These bodies mirror `_VolumeProfileFuturesBase` lines 357–513. Since PR #46 `_Test6` overrides `tradingDayKey` with the static Globex key, `_CmeSessionClock.GlobexTradingDayEt(ToZone(barTime, Et))` (an ET time at or after 18:00 belongs to the next date), so its M-DAILY days are Globex days. A plain `_CustomSignal` that does not override it still gets calendar days (Appendix F). Also, on a plain `_CustomSignal`, `PriceActionConfig` keeps the **Library** preset. Call `PriceActionConfig.ApplyPreset(EPriceActionPreset.Futures)` in `Create()` to match the futures bases (LeftInclusive ties, `volumeIncludesCurrent = false`).
+These bodies mirror `_VolumeProfileFuturesBase` lines 357–513. Since PR #46 `_A2_63_RegimeGate` overrides `tradingDayKey` with the static Globex key, `_CmeSessionClock.GlobexTradingDayEt(ToZone(barTime, Et))` (an ET time at or after 18:00 belongs to the next date), so its M-DAILY days are Globex days. A plain `_CustomSignal` that does not override it still gets calendar days (Appendix F). Also, on a plain `_CustomSignal`, `PriceActionConfig` keeps the **Library** preset. Call `PriceActionConfig.ApplyPreset(EPriceActionPreset.Futures)` in `Create()` to match the futures bases (LeftInclusive ties, `volumeIncludesCurrent = false`).
 
 
 ### 1.7 Pitfalls checklist
@@ -235,7 +235,7 @@ These bodies mirror `_VolumeProfileFuturesBase` lines 357–513. Since PR #46 `_
   - Daily values require `PrevDate < today`; Regime requires `AsOf < today`; AVWAP requires `UsableFrom <= Bars.Time[0]`; HTF requires `HtfClosedIndex`/`htfMapped`, never `[0]` of a forming bar.
   - TOD norms use prior completed sessions only.
 - [ ] **Rolls (continuous unadjusted @ES).**
-  - Set `RollDetection = ERollDetection.Series` (or `Table` + `RollDates`, as `_Test6` does since PR #46). It is **Off** by default, and then nothing is roll-adjusted.
+  - Set `RollDetection = ERollDetection.Series` (or `Table` + `RollDates`, as `_A2_63_RegimeGate` does since PR #46). It is **Off** by default, and then nothing is roll-adjusted.
   - `Series` on an intraday chart whose `tradingDayKey` is the calendar date is blind to the 18:00 ET splice; the base traces a one-time Warning (`_RollDetector.SeriesKeyWarning`). Use a Globex key or `Table`. Since PR #51, `Series` takes one splice per contract inside the rule week, but it misses some contracts and can lock onto a weak gap (App F, Known issues); `Table` stays the reproducible choice.
   - `rollOn(1)` is true on the first bar of the new contract. Engines reset or adjust there: Daily `OnRoll` (history difference-adjusted; ATR **reseeded**, `Atr20d` NaN for `atrLength` sessions, unless `DailyConfig.atrRestartOnRoll = false`, PR #46), PA `roll reset`, AVWAP `invalidated (roll)`, and a Regime refit deferred on the roll day.
   - Exclude roll ±1 via `IsRollWindow(day)`. This works only when rings/FVG or RollDetection are active.
@@ -258,7 +258,7 @@ These bodies mirror `_VolumeProfileFuturesBase` lines 357–513. Since PR #46 `_
   - Set PT's *Max % Capital at Risk per Position* to at least 1%, or PT drops approved orders silently. See §4.16.1.
   - `equityAvailable` in PT uses `Portfolio.MaxRiskEquityPerPosPercent`. The *Percent parameters are fractions (0.01 = 1%).
 - [ ] **Validation data.**
-  - Engines step on closed Data1 bars, so the bar size changes results (`_Test6` journals a bar-size deviation).
+  - Engines step on closed Data1 bars, so the bar size changes results (`_A2_63_RegimeGate` journals a bar-size deviation).
   - Validate on 1-min with Bar Magnifier, or on tick (`TickConfig` uses a DataLoader 1-tick request; its size outputs stay parked until `sizeOutputsVerified`).
 - [ ] **Config timing.** Configs may be set in `Create()` or in `StartCalc()` before `base.StartCalc()`; engines are always constructed by the base inside `StartCalc` (lazily, only if enabled). Per-run helper objects may be (re)built in `StartCalc` so a recalculation starts clean. The exception is roll settings, which are read live.
 - [ ] **Event table coverage (EV-4.6b, PRs #28/#29).** The engine disables itself (Error line ending `; engine disabled`, neutral answers) only when the event table is missing or its hash does not match `EventRules.ExpectedTableSha`. Coverage holes no longer disable it: each kind and day is `EEventCoverage.NoEvent/Event/Unknown`. Call `CoverageBlocks(day, mask, minTier, out kind)` and treat true as "no trade" (unless `allowPartialCoverage`). See Appendix G.
@@ -2224,7 +2224,7 @@ namespace PowerLanguage.Strategy
 
 **Chart.** Data1 = @ES 30m (the book's size) or 1m, dxFeed unadjusted, 24h Globex template. `[Input] GateArm` 0 = U, 1 = G, 2 = A.
 
-**Walk-through.** This is `_Test6` cut down to show the API; `_Test6` stays the pre-registered harness.
+**Walk-through.** This is `_A2_63_RegimeGate` cut down to show the API; `_A2_63_RegimeGate` stays the pre-registered harness.
 - `StartCalc` validates the arm, then calls `RegimeGate.ApplyArm(GateCfg, RegimeConfig)` **before** `base.StartCalc()`, because the engines are built there. It sets `NeedsDaily` and `DailyConfig.atrLength`.
 - `AtrTercileTracker` gets one value per completed day (`daily.PrevDate`, `daily.Atr20d`).
 - On the latch bar (`A263Core.IsLatchBar`, the first bar closing after 09:30 ET) it reads ATR and as-of date, asks `RegimeGate.Decide(arm, Regime, day, tercile)` and latches the open, threshold and gate decision in `A263Core.Latch`.
@@ -2232,8 +2232,8 @@ namespace PowerLanguage.Strategy
 - `A263Core.Step` returns the stop price to send or the exit.
 
 **Pitfalls.**
-- Like `_Test6`, this example is a plain `_CustomSignal` that converts time with `ToZone(..., "Eastern Standard Time")`. Unlike `_Test6` (Globex key since PR #46) it does not override `tradingDayKey`, so M-DAILY days are calendar days on a Globex chart (**VERIFY**, §1.6 and Appendix F).
-- RollDetection is Off here: the roll gap enters the daily ATR. With it on and the default `atrRestartOnRoll = true`, `Atr20d` is NaN for 20 sessions after each roll (§4.3). `_Test6` itself switched in PR #46 to `Table` detection with `atrRestartOnRoll = false` (ATR carried on, splice-day TR skipped), which is the closest match to the catalogue's "Atr20d, roll-gap removed"; copy those two `StartCalc` lines (§4.3) to match it. See Appendix F.
+- Like `_A2_63_RegimeGate`, this example is a plain `_CustomSignal` that converts time with `ToZone(..., "Eastern Standard Time")`. Unlike `_A2_63_RegimeGate` (Globex key since PR #46) it does not override `tradingDayKey`, so M-DAILY days are calendar days on a Globex chart (**VERIFY**, §1.6 and Appendix F).
+- RollDetection is Off here: the roll gap enters the daily ATR. With it on and the default `atrRestartOnRoll = true`, `Atr20d` is NaN for 20 sessions after each roll (§4.3). `_A2_63_RegimeGate` itself switched in PR #46 to `Table` detection with `atrRestartOnRoll = false` (ATR carried on, splice-day TR skipped), which is the closest match to the catalogue's "Atr20d, roll-gap removed"; copy those two `StartCalc` lines (§4.3) to match it. See Appendix F.
 - Change the gate config only before `base.StartCalc()`; the hash (`RegimeGate.Hash`) records it.
 - **Not coded:** the host H2 "disaster-stop-at-the-open" arm named in A2-63's gate line (a disaster stop at O). `A263Config` has no disaster stop, so the core has no stop and the cost floor doesn't apply.
 
@@ -2242,7 +2242,7 @@ namespace PowerLanguage.Strategy
 ```csharp
 // Manual v4 example 9 - A2-63 long-only open + k x ATR20d breakout, exit 15:55 ET, with the _RegimeGate arm switch (G-R consumer C1).
 // Chart: Data1 = @ES 30m (book) or 1m, dxFeed continuous UNADJUSTED, 24h CME Globex template.
-// The pre-registered harness is _Test6; this example is the same wiring cut down to show the API (A263Core does the rules).
+// The pre-registered harness is _A2_63_RegimeGate; this example is the same wiring cut down to show the API (A263Core does the rules).
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -2294,7 +2294,7 @@ namespace PowerLanguage.Strategy
 
 			if (m_core.IsLatchBar(et))   // first bar closing after 09:30 ET: O = its open
 			{
-				double atr = daily != null ? daily.Atr20d : double.NaN;      // RollDetection is Off here (_Test6 uses Table + atrRestartOnRoll = false since PR #46): roll gaps enter the ATR
+				double atr = daily != null ? daily.Atr20d : double.NaN;      // RollDetection is Off here (_A2_63_RegimeGate uses Table + atrRestartOnRoll = false since PR #46): roll gaps enter the ATR
 				DateTime asOf = daily != null ? daily.PrevDate : DateTime.MinValue;
 				_CmeHolidays.Rules.Day cme = _CmeHolidays.Rules.Get(et.Date);
 				RegimeGateDecision d = RegimeGate.Decide(GateCfg.arm, Regime, et.Date, m_terc.LastDate == asOf ? m_terc.Tercile : -1);
@@ -5831,7 +5831,7 @@ protected override void CalcBar()
 | `HolidayHaltEt`, `RthEarlyCloseEt` | Holiday halt time and early RTH close (null when none). |
 | Hooks `GlobexClosedDayHook`, `NoRthDayHook`, `HolidayHaltHook`, `RthEarlyCloseHook` | Replace the built-in holiday rules. |
 | Statics `DefaultGlobexClosedDay`, `InWindow`, `IsSingleFlag` | The default closure rule; a `[start, end)` window test that wraps midnight; is a flag a single session? |
-| Static `GlobexTradingDayEt(DateTime et)`, `GlobexTradingDayEt(DateTime et, TimeSpan globexOpen)` (PR #46) | The Globex trading day of an ET time without a clock instance: at or after the open (18:00) it is the next date. `GlobexDateEt` and `_Test6.tradingDayKey` use it. |
+| Static `GlobexTradingDayEt(DateTime et)`, `GlobexTradingDayEt(DateTime et, TimeSpan globexOpen)` (PR #46) | The Globex trading day of an ET time without a clock instance: at or after the open (18:00) it is the next date. `GlobexDateEt` and `_A2_63_RegimeGate.tradingDayKey` use it. |
 
 **`_CmeHolidays.Rules`.** `Get(date)` returns a `Day` with `Closed`, `NoRth`, `HaltEt`, `RthCloseEt` and `Name`. Constants: `HolidayHaltEt` 13:00, `EarlyCloseEt` 13:15, `GoodFridayCloseEt` 09:15, `MourningCloseEt` 09:30. Helpers: `ClosedDates(year)`, `Observed`, `NthWeekday`, `LastWeekday`, `Easter`.
 
@@ -5905,14 +5905,14 @@ protected override void CalcBar()
 
 **Timing.** A day is added when the *next* trading day's first bar arrives, so on every bar `PrevDate` is a completed prior session. With a daily data stream, only the closed daily bar (`HtfClosedIndex`) whose day is before today is used. On a roll (only with RollDetection on) the host calls `OnRoll(day, rollBarOpen - PrevClose)` (`_CustomSignal` line 992): the stored o/h/l/c, RTH closes and weekly values are difference-adjusted, and, by default, the ATR restarts its seed: **`Atr20d` is NaN and `Valid` is false for `atrLength` sessions after every roll.** With `atrLength = 200` and quarterly @ES rolls (about every 63 sessions) the ATR never becomes valid. With RollDetection Off nothing is adjusted and the roll gap enters the ATR.
 
-**ATR across rolls (`DailyConfig.atrRestartOnRoll`, PR #46).** True ranges do not change when a whole history is shifted by the roll offset, so the ATR does not have to restart. Set `DailyConfig.atrRestartOnRoll = false` (default `true`, the old reseed) and the running ATR carries on; only the splice day's true range is skipped, so there is no NaN blackout. Use it when a strategy needs `Atr20d` every day (stops, filters, PS-13-style long ATRs); keep the default for a strict post-roll warm-up. `_Test6` sets it to false (a RegimeGate hash field, `host.atrRestartOnRoll`). Set it before `base.StartCalc()` (lives in `StartCalc` or `Create`):
+**ATR across rolls (`DailyConfig.atrRestartOnRoll`, PR #46).** True ranges do not change when a whole history is shifted by the roll offset, so the ATR does not have to restart. Set `DailyConfig.atrRestartOnRoll = false` (default `true`, the old reseed) and the running ATR carries on; only the splice day's true range is skipped, so there is no NaN blackout. Use it when a strategy needs `Atr20d` every day (stops, filters, PS-13-style long ATRs); keep the default for a strict post-roll warm-up. `_A2_63_RegimeGate` sets it to false (a RegimeGate hash field, `host.atrRestartOnRoll`). Set it before `base.StartCalc()` (lives in `StartCalc` or `Create`):
 
 ```csharp
 // StartCalc (before base.StartCalc)
 protected override void StartCalc()
 {
 	NeedsDaily = true;
-	RollDetection = ERollDetection.Table;          // _Test6 style: fixed roll dates
+	RollDetection = ERollDetection.Table;          // _A2_63_RegimeGate style: fixed roll dates
 	for (int y = 2016; y <= 2026; y++)
 		for (int m = 3; m <= 12; m += 3) RollDates.Add(EventRules.RollDate(y, m));
 	DailyConfig.atrRestartOnRoll = false;          // ATR carries on; only the splice day's TR is skipped
@@ -5959,7 +5959,7 @@ protected override void CalcBar()
 
 **Why it exists.** The same setup behaves differently in calm and in volatile markets. The regime engine labels each day as one of K market states (0 = calmest) with a hidden-Markov (or Gaussian-mixture) model on daily return, volatility and momentum features. Hysteresis stops the label flipping on noise, and an ATR-tercile fallback covers the warm-up.
 
-**When to use it.** As a filter or a sizing bucket, never as an entry trigger: example 9 (via RegimeGate, §4.5) and `_Test6`.
+**When to use it.** As a filter or a sizing bucket, never as an entry trigger: example 9 (via RegimeGate, §4.5) and `_A2_63_RegimeGate`.
 
 **Enable.** `RegimeConfig.enabled = true` in `Create()`. This also turns on M-DAILY with HV {20, 63}.
 
@@ -6020,7 +6020,7 @@ protected override void CalcBar()
 
 **Why it exists.** To test "does skipping volatile days improve this strategy?" fairly, the rule must be fixed in advance and the gated and ungated runs must be identical apart from the gate. RegimeGate is that pre-registered rule: three arms (U = ungated, G = skip days whose prior-session HMM label is 2, A = skip ATR tercile 2), one decision function, and hashes that prove which configuration produced a run.
 
-**When to use it.** Only for the A2-63 regime experiment: `_Test6` and example 9 (`_Ex09OpenAtrBreakout`). For other filters read `Regime` directly (§4.4).
+**When to use it.** Only for the A2-63 regime experiment: `_A2_63_RegimeGate` and example 9 (`_Ex09OpenAtrBreakout`). For other filters read `Regime` directly (§4.4).
 
 **Enable.** Build the configs yourself and call `RegimeGate.ApplyArm(RegimeGateConfig, RegimeConfig)` in `StartCalc()` **before** `base.StartCalc()`.
 
@@ -6564,9 +6564,9 @@ protected override void CalcBar()
 
 **M9 calibrator (not applied).** `RollGapCalibrator` computes round-half-away-from-zero of `c × Wilder ATR(20) / tick` with `c = 0.8933716847476064`. The true range matches `_DailyContext`: max(high, previous close) minus min(low, previous close). The seed is the average of the first 20 true ranges, then one update per completed day. `c` is `8 × 0.25 / 2.23870986079555`, and that denominator is the higher of the two central ATR values on RollTests series `b` (2112 days). That day rounds to 8. The other days round to 7 (2 days), 9 (305) or 10 (68). With the switch off, Series still uses 8 for every root. When Series is on and TraceLevel is Info or above, one line is written the first time the ATR is valid: `CFG ROLL gap calibrated(n) inUse(8) c(0.8933716847476064) atr(…) tick(…) apply(0)`. Table mode does not write it. No study sets the switch. The m-event splice CSV is not read.
 
-**Series or Table.** `Series` reads the splice from the prices and needs no date list, but since PR #51 it can still miss a contract or lock onto a weak gap (App F, Known issues), so `Table` with `EventRules.RollDate` stays the reproducible choice. On an intraday chart it compares trading-day opens, so it only works when `tradingDayKey` is a Globex (or other evening-rolling) key. `Table` uses fixed dates and is reproducible: `_Test6` fills `RollDates` through `fillProfileRollDates` (M5). On ES those dates equal `EventRules.RollDate` for 2000–2035. It keys days with `_CmeSessionClock.GlobexTradingDayEt` so a splice at the 18:00 ET open falls on the roll day's first bar, and journals `roll(Table n dates from-to digest)` with `_RollDetector.DatesDigest(RollDates)` (FNV-1a 64 of the sorted distinct dates) in the REGGATE header. The hash spellings are explicit switches: roll mode `Off` / `Series` / `Table` / `SeriesOrTable`, and the day key `Globex18ET`. REGGATE runs on ES only. The frozen 09:30–16:00 ET windows are refused, with an Error line first, when the chart sessions do not cover them. `EventRules.RollDate` uses the Monday-before-expiry rule from `RollRuleMondayFrom` = 2022-04-01 (ESM22 onward), the Thursday eight days before the third Friday earlier. See §4.3 for a `Table` snippet.
+**Series or Table.** `Series` reads the splice from the prices and needs no date list, but since PR #51 it can still miss a contract or lock onto a weak gap (App F, Known issues), so `Table` with `EventRules.RollDate` stays the reproducible choice. On an intraday chart it compares trading-day opens, so it only works when `tradingDayKey` is a Globex (or other evening-rolling) key. `Table` uses fixed dates and is reproducible: `_A2_63_RegimeGate` fills `RollDates` through `fillProfileRollDates` (M5). On ES those dates equal `EventRules.RollDate` for 2000–2035. It keys days with `_CmeSessionClock.GlobexTradingDayEt` so a splice at the 18:00 ET open falls on the roll day's first bar, and journals `roll(Table n dates from-to digest)` with `_RollDetector.DatesDigest(RollDates)` (FNV-1a 64 of the sorted distinct dates) in the REGGATE header. The hash spellings are explicit switches: roll mode `Off` / `Series` / `Table` / `SeriesOrTable`, and the day key `Globex18ET`. REGGATE runs on ES only. The frozen 09:30–16:00 ET windows are refused, with an Error line first, when the chart sessions do not cover them. `EventRules.RollDate` uses the Monday-before-expiry rule from `RollRuleMondayFrom` = 2022-04-01 (ESM22 onward), the Thursday eight days before the third Friday earlier. See §4.3 for a `Table` snippet.
 
-**Check 7 L9 (2026-11-10).** A Table-only detector on a plain `_CustomSignal` used to match roll dates to the calendar `tradingDayKey`, so `_TestCheck7Roll` fired at **2024-12-16 00:00** on an Exchange-time chart. Table now uses the same Globex re-key as Series when that key is the calendar date, the chart is intraday, and the symbol is a future: the Sunday 18:00 ET open belongs to Monday. `_DvpEngineTest` and `_TestGate0` already override `tradingDayKey` with `GlobexDate`, so `calendarKeyed` is false and their roll bar does not move. `_Test6` overrides it with `GlobexTradingDayEt` and is unchanged for the same reason. G0 is Series on that futures base, so its key is unchanged.
+**Check 7 L9 (2026-11-10).** A Table-only detector on a plain `_CustomSignal` used to match roll dates to the calendar `tradingDayKey`, so `_TestCheck7Roll` fired at **2024-12-16 00:00** on an Exchange-time chart. Table now uses the same Globex re-key as Series when that key is the calendar date, the chart is intraday, and the symbol is a future: the Sunday 18:00 ET open belongs to Monday. `_DvpEngineTest` and `_TestGate0` already override `tradingDayKey` with `GlobexDate`, so `calendarKeyed` is false and their roll bar does not move. `_A2_63_RegimeGate` overrides it with `GlobexTradingDayEt` and is unchanged for the same reason. G0 is Series on that futures base, so its key is unchanged.
 
 **Series rule (PR #51).** A trading-day open that gaps ≥ `RollGapTicks` from the prior close (up or down: the absolute gap) inside the contract's window, or a change of `Bars.Info.Name`. The window (`_RollDetector.SeriesWindow`) runs from the Monday of the week holding the rule day (Thursday = third Friday − 8 before 2022-04-01, Monday = third Friday − 4 from then on) through that week's Friday; before 2022 it no longer runs on into expiry week. Days are keyed by the Globex trading day (on intraday calendar-keyed Future charts `_CustomSignal` re-keys with `_CmeSessionClock.GlobexTradingDayEt`, so the 18:00 ET reopen belongs to the next date), and a per-contract latch (keyed by expiry) keeps only the first qualifying gap: **one splice per contract**. `Table` dates are matched against the same Globex day.
 
@@ -12050,7 +12050,7 @@ Features with no example: F-CONF, M-COST, M-GEX, Gate0. Each still has a snippet
 **Still VERIFY (could not be settled from the code; most need MultiCharts itself):**
 
 1. **TraceLevel override.** The default `None` is set in the `_CustomSignal` constructor (PR #49). Whether MC applies the Format Signal dialog value of `TraceLevel` after a value set in code in the constructor.
-2. **Example trading day.** `_Test6` is settled (PR #46: Globex key via `_CmeSessionClock.GlobexTradingDayEt`). The M-DAILY examples 9, 10, 17, 20, 27, 30, 31, 32, 33 (and 35 via 32) that derive from a plain `_CustomSignal` still do not override `tradingDayKey` (and leave `TradingDayRoll` at Calendar). On a Globex template their M-DAILY days are calendar days, not Globex days. Decide if that is intended.
+2. **Example trading day.** `_A2_63_RegimeGate` is settled (PR #46: Globex key via `_CmeSessionClock.GlobexTradingDayEt`). The M-DAILY examples 9, 10, 17, 20, 27, 30, 31, 32, 33 (and 35 via 32) that derive from a plain `_CustomSignal` still do not override `tradingDayKey` (and leave `TradingDayRoll` at Calendar). On a Globex template their M-DAILY days are calendar days, not Globex days. Decide if that is intended.
 3. **EventBlackout timing.** `EventBlackout` is computed on the bar close for `[open, close)`. Whether an order sent on that bar (filled next bar) should also check the next bar's window.
 4. **M-TICK reflection.** Settled (typed-enums follow-up to PR #79): `_CustomSignal.enqueueTick` reads the typed `Bar` fields; nothing on the M-TICK path is reached by member name.
 4a. **`autoTradingDay` category names.** `TradingDayRoll = Auto` still tests `Bars.Info.Category.ToString()` for `FOREX`/`CURRENCY`/`CRYPTO` (the one string-based MultiCharts enum test left, exempted by name in the OrderFlowTests typed-enum lint). `Future` and `Stock` are confirmed; the `Forex` and `Crypto` members are documented but not yet confirmed on Ettienne's install. Replace with `ESymbolCategory` members once a names dump confirms them.
@@ -12064,7 +12064,7 @@ Features with no example: F-CONF, M-COST, M-GEX, Gate0. Each still has a snippet
 
 **Discrepancies found (code vs catalogue vs v1 manual):**
 
-1. **M-DAILY at rolls — partly RESOLVED by PR #46.** v1 said "roll gaps are removed" from the ATR. On `main`, a roll reseeds the ATR by default: `Atr20d` is NaN for `atrLength` sessions after each roll (only when RollDetection is on). PR #46 added `DailyConfig.atrRestartOnRoll = false`: the ATR carries on and only the splice day's true range is skipped, which matches the catalogue's A2-63 "Atr20d, roll-gap removed"; `_Test6` uses it with `Table` detection. Examples that keep RollDetection Off (e.g. example 9) still let the gap enter the ATR.
+1. **M-DAILY at rolls — partly RESOLVED by PR #46.** v1 said "roll gaps are removed" from the ATR. On `main`, a roll reseeds the ATR by default: `Atr20d` is NaN for `atrLength` sessions after each roll (only when RollDetection is on). PR #46 added `DailyConfig.atrRestartOnRoll = false`: the ATR carries on and only the splice day's true range is skipped, which matches the catalogue's A2-63 "Atr20d, roll-gap removed"; `_A2_63_RegimeGate` uses it with `Table` detection. Examples that keep RollDetection Off (e.g. example 9) still let the gap enter the ATR.
 2. **PS-13's 200-day ATR.** The catalogue's M-DAILY `atrLength = 200` never becomes valid with RollDetection on and the default `atrRestartOnRoll = true`, because @ES rolls about every 63 sessions. Example 7 computes its own ATR200d instead; `atrRestartOnRoll = false` (PR #46) would now also make the M-DAILY value usable (example 7 not changed).
 3. **DV-03 follow-through** (≥ 1 box width before the retest) is not coded in example 7 (the PS-13 version).
 4. **A2-29 gating.** The G0-d table lists the A2-25…A2-32 range as G0-d-gated, but A2-29's own entry says "Gate (v2): none (classifier)".
@@ -12085,7 +12085,7 @@ Features with no example: F-CONF, M-COST, M-GEX, Gate0. Each still has a snippet
 
 **Known issues (main 63933a4):**
 
-1. **RollDetection.Series on intraday charts (over-detection fixed by PR #51; residual limits).** Before PR #51, 1-minute @ES 2016–2024 gave 72 splices against about 33 real quarterly rolls. With PR #51 (Globex-day key, rule-week window, one splice per contract) the live Mode 2 run (`_EventCalendarTest`, 2016-12 to 2024-12, `evroll-mode2-run-2026-10-30-c.csv`) gives **30 rolls**: 2022+ splices on the rule Monday; most earlier ones on the Monday of the rule week (offset −3, −2 after Labor Day). **Early splices:** M17 (2017-06-09) and Z19 (2019-12-13) splice on the Thursday 18:00 ET reopen of the rule day (offset +1). **Undetectable:** U18, U19 and U21 have no qualifying gap inside the window, so no roll is recorded for them. **Weak gaps can win:** the latch takes the first gap ≥ `RollGapTicks`, e.g. Z24 2024-12-16 at 2.25 pts (9 ticks, gapX 1.13), and 2017-03 (2.50), 2018-06 (3.50), 2021-06 (3.50) and 2021-12 (3.00 pts) are all ≤ 3.5 pts, so a non-roll gap could be taken instead. Use `RollDetection = Table` with `RollDates = EventRules.RollDate(y, 3/6/9/12)` (as `_Test6` does) when the roll dates must be reproducible. See §1.7 and §4.13.
+1. **RollDetection.Series on intraday charts (over-detection fixed by PR #51; residual limits).** Before PR #51, 1-minute @ES 2016–2024 gave 72 splices against about 33 real quarterly rolls. With PR #51 (Globex-day key, rule-week window, one splice per contract) the live Mode 2 run (`_EventCalendarTest`, 2016-12 to 2024-12, `evroll-mode2-run-2026-10-30-c.csv`) gives **30 rolls**: 2022+ splices on the rule Monday; most earlier ones on the Monday of the rule week (offset −3, −2 after Labor Day). **Early splices:** M17 (2017-06-09) and Z19 (2019-12-13) splice on the Thursday 18:00 ET reopen of the rule day (offset +1). **Undetectable:** U18, U19 and U21 have no qualifying gap inside the window, so no roll is recorded for them. **Weak gaps can win:** the latch takes the first gap ≥ `RollGapTicks`, e.g. Z24 2024-12-16 at 2.25 pts (9 ticks, gapX 1.13), and 2017-03 (2.50), 2018-06 (3.50), 2021-06 (3.50) and 2021-12 (3.00 pts) are all ≤ 3.5 pts, so a non-roll gap could be taken instead. Use `RollDetection = Table` with `RollDates = EventRules.RollDate(y, 3/6/9/12)` (as `_A2_63_RegimeGate` does) when the roll dates must be reproducible. See §1.7 and §4.13.
 
 
 ### F2. Optional follow-ups (not required, not scheduled)
@@ -12145,7 +12145,7 @@ if (ev.CoverageBlocks(day, EEventClassMask.Macro, EEventTier.T1, out hole)) { /*
 - §4 rework (Ettienne's feedback; checked against `origin/main` b2685dd, merge of PR #41, 2026-10-24 21:03 EDT): every §4 chapter now opens with **Why it exists** and **When to use it** (with example numbers), API tables give a plain meaning per entry, and each snippet has a lead-in saying what it does and what the result means. Snippets are compiled classes `_S4_01`–`_S4_14`, split by lifecycle with `// Create`, `// StartCalc (before/after base.StartCalc)`, `// CalcBar` and `// class fields` labels, chained one-liners split with inline comments. §4.14 rewritten concept-first (rings → FVG → `LevelRef`). Fixes: §4.15 base note (31 of 42 examples run on `_VolumeProfileFuturesBase`; 11 on `_CustomSignal`), OnRoll at `_CustomSignal` L958, TOD bucket at L860. §5: all 30 snippets relabelled by lifecycle and split the same way, each feature gained a **Why it exists** line and a snippet lead-in. `fibAnchor` statements updated (rejected on b2685dd); §5.31 pending list and App F #14 note that D5/D6 merged. Other line numbers in §5 and App E remain those of 628542f.
 - Round 5 (main still b2685dd, re-fetched 2026-10-24 ~21:55 EDT): every file:line reference moved from 628542f to b2685dd. That is 90 §5 signature comments, 408 Appendix E line numbers (Appendix E regenerated: +82 D5/D6 entries), and 12 prose references (§5.31 Where, `minBreakoutLayer` L625, `requireDataStream` L742/L2293). §5.31 was re-verified against D5 (#39, #40) and D6 (#41): the status, Where, signatures (+21) and pitfalls now cover confluence, acceptance semantics, HTF streams, `dvpTradeable` and the P2 gate, `dvpHtfAccepted`, `dvpHtfNextRailDistAtr`, and the `fibAnchor` rejection. D7–D9, Probe P2 and `rollMode` stay pending. The §5 status lines and the compile-status notes now name b2685dd. The quoted file header and the code of example 42 are unchanged (listing byte-match).
 - Round 6 (main 800bce7, merge of PR #42 / M-DVP D7): Analyst 2's Round 4/5 review applied after checking each item against the code. B1 `ValueMigrationScore(1, 3)` needs 4 completed sessions (20 without a daily ATR); B2 the §4.1 snippet now sizes at 1% with the 14-tick floor, skip-on-breach and no resize, and `riskPerTrade 0.005` is marked as the library default. Also: config changes after `base.StartCalc()` are unsupported, with `requireRing` as the after-StartCalc exception; ring capacity is the sum of requests; 10 + 1 `_CustomSignal` examples (24 via 18); the `entryAllowed` list no longer includes 39; order flow in 38 directly and in 34 via `BarLadders` (VPFB L133); `_ProfileStats` KDE/bootstrap/mixture members added; the KDE verdict rules in §5.25. §5.31 now reflects rev 5.3 with D7 on main, and `diagnosticOnly` is a by-design pitfall. References moved to 800bce7: 78 §4–§5 signature comments, 170 Appendix E line numbers (+4 `DvpA233` entries) and 25 prose references.
-- Round 7 (main a07257a, merges of PRs #43–#49): AV_OPEN retired (PR #44; §2.2 row now a retirement note, App E `AllTypes` now lists 36 types) and the Holm family is m = 36; ATR restart at a roll splice (PR #43) and `DailyConfig.atrRestartOnRoll` (PR #46; §4.3 paragraph and snippet, §5.19 pitfall, App F discrepancy #1 partly resolved); Data1 setup check `Gate0Data1.Check` in StartCalc (PR #45); bounded order-flow window `FlowCfg.MaxBars`, `DroppedBars`/`BarCap` and truncated cumulative delta (PR #48, §5.9); confluence zone width `ConfluenceSplitAtrFraction`, `UsesConfluenceZones` and the developing-profile score (PR #47, §5.11); trace lines via `AppendAllText` with per-signal trace-log path and `TraceLevel` default None set in the constructor (PR #49; §1.5, §4.1, App B); `_Test6` uses a roll Table and overrides `tradingDayKey` (§1.6, §1.7, §4.13, App F VERIFY #2). The §4.1 snippet now calls `portfolioStop(stop)` after the widened stop passes the budget check. References moved to a07257a: 125 §4–§5 signature comments, Appendix E regenerated, and 30 prose line references.
+- Round 7 (main a07257a, merges of PRs #43–#49): AV_OPEN retired (PR #44; §2.2 row now a retirement note, App E `AllTypes` now lists 36 types) and the Holm family is m = 36; ATR restart at a roll splice (PR #43) and `DailyConfig.atrRestartOnRoll` (PR #46; §4.3 paragraph and snippet, §5.19 pitfall, App F discrepancy #1 partly resolved); Data1 setup check `Gate0Data1.Check` in StartCalc (PR #45); bounded order-flow window `FlowCfg.MaxBars`, `DroppedBars`/`BarCap` and truncated cumulative delta (PR #48, §5.9); confluence zone width `ConfluenceSplitAtrFraction`, `UsesConfluenceZones` and the developing-profile score (PR #47, §5.11); trace lines via `AppendAllText` with per-signal trace-log path and `TraceLevel` default None set in the constructor (PR #49; §1.5, §4.1, App B); `_A2_63_RegimeGate` uses a roll Table and overrides `tradingDayKey` (§1.6, §1.7, §4.13, App F VERIFY #2). The §4.1 snippet now calls `portfolioStop(stop)` after the widened stop passes the budget check. References moved to a07257a: 125 §4–§5 signature comments, Appendix E regenerated, and 30 prose line references.
 - Round 7b (main a07257a): Analyst 2's Round 7 review. E1 the `TraceLevel` default is set in the constructor (PR #49), not `Create()` (§1 listing, §1 Input note, App F VERIFY #1). E2 `portfolioStop` only sets the stop behind `pm.riskOpen`; `pm.R$`/`pm.riskNew` stay structural and `pm.R$w` is draft-only, so pending risk is understated (§4.1 prose and snippet, §4.16). E3 `Flow.DroppedBars` is a whole-run total (§5.9); the two stop-floor notes now cite a07257a. E4 new App F Known issues: `RollDetection.Series` over-detects on intraday charts (72 vs ~33 rolls, 1-minute @ES 2016–2024), fix pending in PR #51; use `Table` meanwhile (cross-referenced from §1.7 and §4.13).
 - Nothing in this manual reports trading results.
 

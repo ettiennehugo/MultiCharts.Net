@@ -217,7 +217,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 - **L6 backtest pass.** `sameRef True` on all 5,420 lines. **Live paper run and restart persistence still pending.**
 - **L7 accepted** on `@ES` 1-minute + `@NQ` 5-minute (Check7 L7.pws, two strategies). The MM steps with the faster strategy. **`@CL` is unusable for this check:** dxFeed returned 0 minute bars for Nov 2024, and mixing time zones fails when the portfolio is on Exchange time zone. That is a known MultiCharts limitation, not an MM bug.
 - **L8 pass.** `PortfolioCurrency` and `StrategyCurrencyCode` are USD.
-- **L9 backtest detector only.** `_TestCheck7Roll` fired at **2024-12-16 00:00**, not at the Sunday 18:00 ET session open. Table-only did not set `m_rollGlobexKey` (that flag required Series), so the roll date was matched to the calendar `tradingDayKey`, and 00:00 is the first bar of that date on an Exchange-time chart. **Follow-up:** Table on an intraday futures chart now uses the same Globex re-key as Series when `tradingDayKey` is the calendar date. `_Test6` and `_DvpEngineTest` already key days with the Globex date (`tradingDayKey` override), so `calendarKeyed` is false and their roll bar does not move. G0 is Series, so its key does not move. **Live L9 across the Dec 2026 ES roll is still pending.** The IBKR `@ES` remap (ESZ6 → ESH7) stays manual.
+- **L9 backtest detector only.** `_TestCheck7Roll` fired at **2024-12-16 00:00**, not at the Sunday 18:00 ET session open. Table-only did not set `m_rollGlobexKey` (that flag required Series), so the roll date was matched to the calendar `tradingDayKey`, and 00:00 is the first bar of that date on an Exchange-time chart. **Follow-up:** Table on an intraday futures chart now uses the same Globex re-key as Series when `tradingDayKey` is the calendar date. `_A2_63_RegimeGate` and `_DvpEngineTest` already key days with the Globex date (`tradingDayKey` override), so `calendarKeyed` is false and their roll bar does not move. G0 is Series, so its key does not move. **Live L9 across the Dec 2026 ES roll is still pending.** The IBKR `@ES` remap (ESZ6 → ESH7) stays manual.
 
 ---
 
@@ -257,7 +257,7 @@ subtitle: "For Ettienne Hugo · repo MultiCharts.Net main @ 6450a9f (PRs #18–#
 
 **Steps**
 
-1. Strategy on `_VolumeProfileFuturesBase` with `FlowCfg.McBidAsk = Prefer` and `TraceLevel = Journal`, on an `@ES` 1-min chart inside the tick window.
+1. Strategy on `_VolumeProfileFuturesBase` with `FlowCfg.McBidAsk = Prefer` and `TraceLevel = Journal`, on an `@ES` 1-min chart inside the tick window. The probe used for Check 9a (commit `7015acd`, then in `_Test1`) is now `_McBidAskProbe.Strategy.CS` (class `_McBidAskProbe`), moved unchanged on 2026-11-12 (Ettienne, 08:08 ET: *"move the code in test 1 to a similar dedicated signal with proper names, test 6 and test 1 ported signals can be added to csproj"*).
 2. Run A: chart Format Instrument → Settings → Show Delta → Volume Delta, **Breakdown = Ask Traded vs Bid Traded**, Build from Ticks (Check 2 path).
 3. Run B: same, but **Breakdown = Up Ticks vs Down Ticks**.
 4. Run C: Show Delta **off** (a regular chart).

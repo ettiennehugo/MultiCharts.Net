@@ -1084,7 +1084,7 @@ namespace PowerLanguage.Strategy
 			// starts where the vendor splices. On an ETH futures chart keyed by calendar date a Globex-open (18:00 ET) splice puts
 			// new-contract bars in the evening stub BEFORE the flagged 00:00 bar, so PrevClose is already new-contract and the
 			// offset is ~0 (the spread stays in history and in ATR). Futures hosts must key days by the Globex trading day
-			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _Test6 do). Warned once below.
+			// (_CmeSessionClock.GlobexTradingDayEt; _VolumeProfileFuturesBase and _A2_63_RegimeGate do). Warned once below.
 			if (roll && m_daily.Days > 0 && !m_rollKeyWarned && tradingDayKey(t.Date.AddHours(1)) == tradingDayKey(t.Date.AddHours(20))
 				&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))
 			{
@@ -1952,7 +1952,7 @@ namespace PowerLanguage.Strategy
 		// (PR #51 review): a derived class that turns detection on only after that bar stays on tradingDayKey (pre-existing edge).
 		// Check 7 L9 (2026-11-10): Table uses the same key as Series. On a calendar-keyed intraday futures chart a Monday
 		// RollDates entry fires on the Sunday 18:00 ET open, not the first bar after Monday midnight. A host that already
-		// overrides tradingDayKey with the Globex date (VPFUT, _Test6) has calendarKeyed false, so this flag stays off.
+		// overrides tradingDayKey with the Globex date (VPFUT, _A2_63_RegimeGate) has calendarKeyed false, so this flag stays off.
 		private bool m_rollGlobexKey;
 		private TimeZoneInfo m_rollEtTz;           // PR #51 N2: cached ET zone for the Globex key (lazy)
 
