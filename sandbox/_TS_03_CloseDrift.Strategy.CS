@@ -83,19 +83,17 @@
 // Survivorship: Not applicable
 // Rolls: Series. A splice during the drift window clears the reference and does not enter.
 // Data quality: the 15:30 and 15:50 tests use an exact clock match, so a missing bar skips the day. Not yet verified on a chart.
-// Other: the stop is not sent on the signal bar, so the fill bar is unprotected. Variant B is not coded.
+// Other: the stop is not sent on the signal bar, so the fill bar is unprotected. Variant B is ReversionTo1645.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Variant
+// Purpose: which close-regime rule to run
+// Default: DriftTo1600 — at 15:50 trade the sign of the 15:30-15:50 move, exit at 16:00. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: DriftTo1600, ReversionTo1645. Reversion fades that same 15:30-15:50 move at 16:00 and exits at 16:45. Any other value throws in StartCalc.
+// Effect: the stop is still ATR(14) of the 5-minute stream, floored at 14 ticks. The name ATR5 in the catalogue means that stream, not a length of 5.
+// Interactions: early-close days are skipped in both variants
+// Fixed or research-tuned: fixed default. ReversionTo1645 is catalogue variant B.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,7 +134,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Variant B (enter against the drift at 16:00, exit 16:45) is an owner question, not this file.
+// Variant defaults to DriftTo1600, the previous trade list. ReversionTo1645 is catalogue variant B. ATR5 in the catalogue is ATR(14) on the 5-minute Data2 stream. The journal field is atr14of5m.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -145,12 +143,17 @@ namespace PowerLanguage.Strategy
 {
 	public class _TS_03_CloseDrift : _CustomSignal
 	{
+		/// <summary>Variant A fades nothing: it trades the 15:30-15:50 drift at 15:50 and exits at 16:00. Variant B fades that same drift at 16:00 and exits at 16:45.</summary>
+		public enum EVariant { DriftTo1600, ReversionTo1645 }
+
+		[Input] public EVariant Variant { get; set; }
+
 		protected sealed class Ts03Config
 		{
 			public int contracts = 1;
 			public TimeSpan driftFrom = new TimeSpan(15, 30, 0), entryAt = new TimeSpan(15, 50, 0), exitAt = new TimeSpan(16, 0, 0);
 			public int minDriftTicks = 1;
-			public int atrLength = 14;
+			public int atrLength = 14;   // ATR(14) of the 5-minute Data2 stream. The catalogue name "ATR5" means that stream, not a length of 5.
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
 		}
@@ -159,10 +162,12 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_lxStp, m_sxStp;
 		private _CmeSessionClock m_clock;
-		private double m_ref = double.NaN, m_stop = double.NaN;
+		private double m_ref = double.NaN, m_drift = double.NaN, m_stop = double.NaN;
 		private DateTime m_day = DateTime.MinValue;
 
-		public _TS_03_CloseDrift(object _ctx) : base(_ctx) { }
+		public _TS_03_CloseDrift(object _ctx) : base(_ctx) { Variant = EVariant.DriftTo1600; }
+
+		private TimeSpan exitAt() { return Variant == EVariant.ReversionTo1645 ? new TimeSpan(16, 45, 0) : Cfg.exitAt; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -184,10 +189,11 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EVariant), Variant)) throw new ArgumentException("_TS_03_CloseDrift: Variant is not a defined EVariant");
 			HtfStreams = new[] { 2 };
 			m_clock = null;
 			base.StartCalc();
-			m_ref = m_stop = double.NaN; m_day = DateTime.MinValue;
+			m_ref = m_drift = m_stop = double.NaN; m_day = DateTime.MinValue;
 		}
 
 		protected override void CalcBar()
@@ -195,25 +201,38 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = tradingDayKey(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_ref = double.NaN; }
+			if (day != m_day) { m_day = day; m_ref = m_drift = double.NaN; }
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			int pos = StrategyInfo.MarketPosition;
 			if (pos != 0)
 			{
-				if (tod >= Cfg.exitAt && tod < new TimeSpan(17, 0, 0)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }   // next-bar market: fills at the open of the 16:01 bar
+				if (tod >= exitAt() && tod < new TimeSpan(17, 0, 0)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }   // next-bar market: variant A fills at the 16:01 open
 				if (pos > 0) m_lxStp.Send(m_stop); else m_sxStp.Send(m_stop);
 				return;
 			}
 			if (rollOn(1)) { m_ref = double.NaN; return; }
 			if (_CmeHolidays.Rules.Get(day).RthCloseEt.HasValue) return;     // F-CAL: early close, no MOC window
 			if (tod == Cfg.driftFrom) m_ref = Bars.Close[0];                  // 1m bar closing at 15:30
-			if (tod != Cfg.entryAt || double.IsNaN(m_ref)) return;
-			double tick = tickSize(), drift = Bars.Close[0] - m_ref;
-			if (Math.Abs(drift) < Cfg.minDriftTicks * tick) return;
-			int side = Math.Sign(drift);
+			if (tod == Cfg.entryAt && !double.IsNaN(m_ref)) m_drift = Bars.Close[0] - m_ref;   // 15:30-15:50 drift, frozen at 15:50
+			double tick = tickSize(), drift;
+			int side;
+			if (Variant == EVariant.ReversionTo1645)
+			{
+				if (tod != new TimeSpan(16, 0, 0) || double.IsNaN(m_drift)) return;
+				drift = m_drift;
+				if (Math.Abs(drift) < Cfg.minDriftTicks * tick) return;
+				side = -Math.Sign(drift);                                 // fade the 15:30-15:50 drift
+			}
+			else
+			{
+				if (tod != Cfg.entryAt || double.IsNaN(m_ref)) return;
+				drift = Bars.Close[0] - m_ref;
+				if (Math.Abs(drift) < Cfg.minDriftTicks * tick) return;
+				side = Math.Sign(drift);
+			}
 			string why;
 			if (!entryAllowed(out why)) return;
-			double atr = atr5();
+			double atr = atr14Of5Minute();
 			if (double.IsNaN(atr)) return;
 			double r = Math.Max(atr, Cfg.costFloorTicks * tick);               // floor rule
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"TS-03 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
@@ -222,13 +241,14 @@ namespace PowerLanguage.Strategy
 			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
 			if (journalOn())
 			{
-				var ctx = new Dictionary<string, string> { { "drift", drift.ToString("F2") }, { "atr5", atr.ToString("F2") } };
+				var ctx = new Dictionary<string, string> { { "variant", Variant.ToString() }, { "drift", drift.ToString("F2") }, { "atr14of5m", atr.ToString("F2") } };
 				journalArm(side > 0 ? "TS03LE" : "TS03SE", entry, m_stop, double.NaN, ctx);
 				logSignal("TS-03", side, entry, m_stop, ctx, true);
 			}
 		}
 
-		private double atr5()
+		/// <summary>ATR(14) of closed Data2 bars. Data2 is the 5-minute stream, so this is the catalogue's ATR5, length 14.</summary>
+		private double atr14Of5Minute()
 		{
 			int n = Cfg.atrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;

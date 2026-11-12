@@ -86,16 +86,30 @@
 // Other: the host is illustrative. Do not read its trades as an AV-08 result. G0-d still applies to an AVWAP level when this layer is later put on a real host.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Layer
+// Purpose: which period VWAPs must agree
+// Default: WtdMtd — week and month. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: WtdMtd, WtdOnly, MtdQtd. StartCalc sets the VWAP slots from this value. Any other value throws.
+// Effect: WtdOnly uses the week slot. MtdQtd uses month and quarter.
+// Interactions: Side and Reanchor
+// Fixed or research-tuned: fixed default. The other two are the catalogue sweep.
+// Input: Side
+// Purpose: which side of the layer the illustrative host may trade
+// Default: LongOnly — close above the prior 20-bar high and above the layer. This is the previous trade list.
+// Units: Not applicable
+// Range: LongOnly, ShortOnly, Both. Any other value throws in StartCalc.
+// Effect: a short is a close below the prior 20-bar low and below every selected VWAP
+// Interactions: Layer
+// Fixed or research-tuned: fixed default
+// Input: Reanchor
+// Purpose: reset Week, Month and Quarter VWAP slots at a roll instead of turning the layer off for the rest of that period
+// Default: false — a roll makes that week or month unclean. This is the previous trade list.
+// Units: Not applicable
+// Range: false, true. True sets VwapConfig.resetPeriodSlotsOnRoll before StartCalc. Roll detection stays Series.
+// Effect: after a roll the slot starts again and the layer can trade
+// Interactions: Layer
+// Fixed or research-tuned: fixed default
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,7 +150,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Uncoded catalogue arms (short side, WTD only, MTD+QTD) and re-anchoring at the roll are an owner question, not this file.
+// Layer, Side and Reanchor are inputs. Defaults are WtdMtd, LongOnly and false, which is the previous trade list. Reanchor uses Series roll detection, not Table.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -145,6 +159,16 @@ namespace PowerLanguage.Strategy
 {
 	public class _AV_08_PeriodAvwapLayer : _VolumeProfileFuturesBase
 	{
+		/// <summary>Which period VWAPs the layer uses. WtdMtd is the current arm.</summary>
+		public enum ELayer { WtdMtd, WtdOnly, MtdQtd }
+		/// <summary>Which side of the layer may trade. LongOnly is the current arm. The host is the illustrative 20-bar extreme on that side.</summary>
+		public enum ESide { LongOnly, ShortOnly, Both }
+
+		[Input] public ELayer Layer { get; set; }
+		[Input] public ESide Side { get; set; }
+		/// <summary>When true, Week/Month/Quarter slots reset at a roll (VwapConfig.resetPeriodSlotsOnRoll) and the layer stays on. When false, a roll turns the layer off for the rest of that period. Default false keeps the current trade list.</summary>
+		[Input] public bool Reanchor { get; set; }
+
 		protected sealed class Av08Config
 		{
 			public int contracts = 1;
@@ -156,31 +180,35 @@ namespace PowerLanguage.Strategy
 		}
 		protected Av08Config Cfg { get; } = new Av08Config();
 
-		private IOrderMarket m_le, m_lx;
-		private IOrderPriced m_lxStp;
+		private IOrderMarket m_le, m_se, m_lx, m_sx;
+		private IOrderPriced m_lxStp, m_sxStp;
 		private DateTime m_lastRollDay = DateTime.MinValue;
 		private double m_stop = double.NaN;
 
-		public _AV_08_PeriodAvwapLayer(object _ctx) : base(_ctx) { }
+		public _AV_08_PeriodAvwapLayer(object _ctx) : base(_ctx) { Layer = ELayer.WtdMtd; Side = ESide.LongOnly; Reanchor = false; }
 
 		protected override void Create()
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV08LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV08SX", EOrderAction.BuyToCover));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV08LS", EOrderAction.Sell, OrderExit.FromAll));
-			// The VWAP slots are [Input]s of the VP base: these are defaults, the Format Signal dialog can override them.
-			Vwap1Type = EVwapType.Week;  Vwap1DataStream = 1;   // WTD: resets on the first bar of a new Monday-start Globex week
-			Vwap2Type = EVwapType.Month; Vwap2DataStream = 1;   // MTD
-			Vwap3Type = EVwapType.Disabled;
+			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV08SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(ELayer), Layer)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Layer is not a defined ELayer");
+			if (!Enum.IsDefined(typeof(ESide), Side)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Side is not a defined ESide");
+			VwapConfig.resetPeriodSlotsOnRoll = Reanchor;
+			Vwap1DataStream = 1; Vwap2DataStream = 1; Vwap3DataStream = 1;
+			if (Layer == ELayer.WtdOnly) { Vwap1Type = EVwapType.Week; Vwap2Type = EVwapType.Disabled; Vwap3Type = EVwapType.Disabled; }
+			else if (Layer == ELayer.MtdQtd) { Vwap1Type = EVwapType.Disabled; Vwap2Type = EVwapType.Month; Vwap3Type = EVwapType.Quarter; }
+			else { Vwap1Type = EVwapType.Week; Vwap2Type = EVwapType.Month; Vwap3Type = EVwapType.Disabled; }
 			base.StartCalc();
-			if (Vwap1Type != EVwapType.Week || Vwap2Type != EVwapType.Month || Vwap1DataStream != 1 || Vwap2DataStream != 1)
-				throw new ArgumentException("_AV_08_PeriodAvwapLayer: needs Vwap1Type = Week and Vwap2Type = Month on Data1");
 			m_lastRollDay = DateTime.MinValue; m_stop = double.NaN;
 		}
 
@@ -200,34 +228,49 @@ namespace PowerLanguage.Strategy
 				else if (!double.IsNaN(m_stop)) m_lxStp.Send(m_stop);
 				return;
 			}
+			if (pos < 0)
+			{
+				if (tod >= flat && tod < new TimeSpan(17, 0, 0)) m_sx.Send();
+				else if (!double.IsNaN(m_stop)) m_sxStp.Send(m_stop);
+				return;
+			}
 			if (tod < Cfg.from || tod >= Cfg.to || tod >= flat || Bars.CurrentBar <= Cfg.hostLookback + 1) return;
 
-			// --- the AV-08 layer (closed bar: the VWAP slots include this bar) ---
-			double wtd = CurrentVwap1, mtd = CurrentVwap2, c = Bars.Close[0];
-			DateTime weekStart = day.AddDays(-(((int)day.DayOfWeek + 6) % 7));   // Monday of the Globex week
+			double wtd = CurrentVwap1, mtd = CurrentVwap2, qtd = CurrentVwap3, c = Bars.Close[0];
+			DateTime weekStart = day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
 			DateTime monthStart = new DateTime(day.Year, day.Month, 1);
-			// Week/Month VWAPs do NOT reset at a roll. CODING CHOICE: the layer is off for the rest of a week/month that holds a roll
-			// (the catalogue says multi-day anchors reset at rolls; the alternative is to re-anchor the VWAPs at rollOn(1))
-			bool wtdClean = m_lastRollDay < weekStart, mtdClean = m_lastRollDay < monthStart;
-			bool layerLong = Vwap1Active && Vwap2Active && wtdClean && mtdClean && c > wtd && c > mtd;
+			int qm = ((day.Month - 1) / 3) * 3 + 1;
+			DateTime quarterStart = new DateTime(day.Year, qm, 1);
+			bool wtdOn = Layer != ELayer.MtdQtd, mtdOn = Layer != ELayer.WtdOnly, qtdOn = Layer == ELayer.MtdQtd;
+			bool wtdClean = Reanchor || m_lastRollDay < weekStart;
+			bool mtdClean = Reanchor || m_lastRollDay < monthStart;
+			bool qtdClean = Reanchor || m_lastRollDay < quarterStart;
+			bool active = (!wtdOn || (Vwap1Active && wtdClean)) && (!mtdOn || (Vwap2Active && mtdClean)) && (!qtdOn || (Vwap3Active && qtdClean));
+			bool above = (!wtdOn || c > wtd) && (!mtdOn || c > mtd) && (!qtdOn || c > qtd);
+			bool below = (!wtdOn || c < wtd) && (!mtdOn || c < mtd) && (!qtdOn || c < qtd);
+			int side = 0;
+			if (active && above && Side != ESide.ShortOnly) side = +1;
+			else if (active && below && Side != ESide.LongOnly) side = -1;
 
-			// --- illustrative host event ---
-			double hh = double.MinValue;
-			for (int i = 1; i <= Cfg.hostLookback; i++) hh = Math.Max(hh, Bars.High[i]);
-			if (!(c > hh)) return;
+			double hh = double.MinValue, ll = double.MaxValue;
+			for (int i = 1; i <= Cfg.hostLookback; i++) { hh = Math.Max(hh, Bars.High[i]); ll = Math.Min(ll, Bars.Low[i]); }
+			bool hostLong = c > hh, hostShort = c < ll;
+			if (side > 0 && !hostLong) side = 0;
+			if (side < 0 && !hostShort) side = 0;
+			if (!hostLong && !(hostShort && Side != ESide.LongOnly)) return;
 
-			var ctx = new Dictionary<string, string> { { "wtd", wtd.ToString("F2") }, { "mtd", mtd.ToString("F2") },
-				{ "wtdClean", wtdClean.ToString() }, { "mtdClean", mtdClean.ToString() } };
-			if (!layerLong) { if (journalOn()) logSignal("AV-08", +1, c, double.NaN, ctx, false); return; }
-			m_stop = c - Cfg.stopTicks * tickSize();
-			if (Cfg.contracts * (c - m_stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
+			var ctx = new Dictionary<string, string> { { "layer", Layer.ToString() }, { "wtd", wtd.ToString("F2") }, { "mtd", mtd.ToString("F2") }, { "qtd", qtd.ToString("F2") },
+				{ "wtdClean", wtdClean.ToString() }, { "mtdClean", mtdClean.ToString() }, { "reanchor", Reanchor.ToString() } };
+			if (side == 0) { if (journalOn()) logSignal("AV-08", hostShort ? -1 : +1, c, double.NaN, ctx, false); return; }
+			m_stop = c - side * Cfg.stopTicks * tickSize();
+			if (Cfg.contracts * Math.Abs(c - m_stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
 			{
-				if (journalOn()) { trace(ETraceLevel.Journal, $"AV-08 {t:yyyy-MM-dd HH:mm} skip: risk budget {Cfg.riskBudgetFraction:P2}"); logSignal("AV-08", +1, c, m_stop, ctx, false); }
+				if (journalOn()) { trace(ETraceLevel.Journal, $"AV-08 {t:yyyy-MM-dd HH:mm} skip: risk budget {Cfg.riskBudgetFraction:P2}"); logSignal("AV-08", side, c, m_stop, ctx, false); }
 				m_stop = double.NaN; return;
 			}
-			if (journalOn()) { journalArm("AV08LE", c, m_stop, double.NaN, ctx); logSignal("AV-08", +1, c, m_stop, ctx, true); }
-			m_le.Send(Cfg.contracts);
-			m_lxStp.Send(m_stop);
+			if (journalOn()) { journalArm(side > 0 ? "AV08LE" : "AV08SE", c, m_stop, double.NaN, ctx); logSignal("AV-08", side, c, m_stop, ctx, true); }
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
 
 		/// <summary>Flat time for a Globex day: Cfg.flat, or on a CME early-close day RthCloseEt - halfDayExitBefore if earlier

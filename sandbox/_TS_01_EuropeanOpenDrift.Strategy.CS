@@ -57,7 +57,7 @@
 // Entry order: MarketNextBar TS01LE.
 // Exit orders: MarketNextBar TS01LX; Stop TS01DS.
 // Fill assumption: next bar's open. The stop is sent on the signal bar.
-// Costs: the example assumes the ES research round trip of $17.00 ($2.25 commission and $6.25 slippage per side) set in MultiCharts, not in this file. The catalogue kill line is the MES round trip. Not yet verified
+// Costs: the stop floor is InstrumentProfile.costFloorTicks for Data1, and the journal records profile.cost (the preset cost key, for example Future:ES). This file does not set a fee or a slippage number. MultiCharts commission and slippage stay the chart settings. Not yet verified
 //
 // ## 12. Trade management
 // While open: the disaster stop is re-sent at the price stored at the signal. It is not trailed.
@@ -94,6 +94,14 @@
 // Effect: the narrow members use 02:00–03:00 ET. The EventFilter members also skip a night that fails the tier-1 08:30 check.
 // Interactions: the event-filter members turn EventConfig on. The other two leave M-EVENT disabled.
 // Fixed or research-tuned: research-tuned. The four members are the catalogue sweep. The default is the primary cell.
+// Input: atrLength
+// Purpose: simple-average true-range length on the closed 60-minute bars. ASSUMPTION – to be investigated. It is not an [Input]; it stays 14 in Ts01Config until the length is settled.
+// Default: 14 — predeclared assumption, not a fitted optimum
+// Units: bars
+// Range: the code uses 14. A searched range is Not yet verified.
+// Effect: a longer length smooths the disaster stop
+// Interactions: the stop is max(2 × that ATR, the profile cost-floor distance)
+// Fixed or research-tuned: fixed assumption, marked for investigation
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -122,7 +130,7 @@
 //   Pause means stop new entries. Open positions keep the exits in section 13.
 // Review: Not yet verified
 //   Review means the owner looks before new entries resume.
-// Uncertainty: no run yet; ATR length 14 is an assumption; rolls are off; the cost unit is ES while the catalogue kill is MES; the holdout still sealed.
+// Uncertainty: no run yet; ATR60m length 14 is ASSUMPTION – to be investigated; rolls are off; the holdout still sealed.
 // No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
 //
 // ## 21. Log diagnostics
@@ -135,7 +143,7 @@
 // Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // The old file name was _TS_02_EuropeanOpenDrift.Strategy.CS. The class was _TS_02_EuropeanOpenDrift. Both were TS-01. Variant was an int 1–4; it is now EVariant, and the default still selects the wide window with the filter off.
-// The catalogue's MES cost is not applied in code. Fees stay a MultiCharts setting.
+// ASSUMPTION – to be investigated: ATR60m length is 14. The cost floor is the Data1 instrument profile, not a hardcoded 14-tick ES floor. Fee and slippage numbers in the preset cost table are not changed by this file.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -159,8 +167,7 @@ namespace PowerLanguage.Strategy
 		{
 			public int contracts = 1;
 			public double disasterAtr = 2.0;
-			public int atrLength = 14;       // ATR60m length is not in the catalogue: an assumption of this example
-			public int costFloorTicks = 14;  // catalogue 2.1: ES cost floor; stop distance = max(structural, floor), size never shrunk
+			public int atrLength = 14;       // ASSUMPTION – to be investigated. The catalogue does not give the ATR60m length. This file uses 14 until that is settled.
 			public double riskBudgetFraction = 0.01;  // floor-rule risk budget: Ettienne, 2026-10-23: 1% of equity
 		}
 		protected Ts01Config Cfg { get; } = new Ts01Config();
@@ -170,6 +177,8 @@ namespace PowerLanguage.Strategy
 		private _CmeSessionClock m_clock;
 		private TimeSpan m_start, m_end;
 		private bool m_filter;
+		private int m_floorTicks;
+		private string m_costText = "";
 		private DateTime m_doneDay = DateTime.MinValue;
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 		private double m_stop = double.NaN;
@@ -203,6 +212,12 @@ namespace PowerLanguage.Strategy
 			HtfStreams = new[] { 2 };         // M-MTF: StartCalc fails loudly if Data2 is missing or another root
 			m_clock = null;
 			base.StartCalc();
+			InstrumentProfile profile = InstrumentProfileOf(1);
+			if (profile == null || !profile.cost.known || profile.costFloorTicks < 1)
+				throw new ArgumentException("_TS_01_EuropeanOpenDrift: Data1 instrument cost is unknown; the floor comes from InstrumentProfile, not a hardcoded ES or MES tick count");
+			m_floorTicks = profile.costFloorTicks;
+			m_costText = profile.cost.Text();
+			if (journalOn()) trace(ETraceLevel.Journal, $"TS-01 cost({m_costText}) floorTicks({m_floorTicks}) atr60Length({Cfg.atrLength}) ASSUMPTION");
 			m_doneDay = DateTime.MinValue; m_stop = double.NaN;
 		}
 
@@ -243,7 +258,7 @@ namespace PowerLanguage.Strategy
 			double planned = Bars.Close[0];
 			m_stop = planned - Cfg.disasterAtr * atr;   // planned from the signal close; the fill is the next bar's open
 			double tick = tickSize();
-			if (planned - m_stop < Cfg.costFloorTicks * tick) m_stop = planned - Cfg.costFloorTicks * tick;   // max(structural, 14 ticks)
+			if (planned - m_stop < m_floorTicks * tick) m_stop = planned - m_floorTicks * tick;   // max(structural, profile cost floor)
 			if (overRiskBudget(planned - m_stop))   // widened stop breaches the 1% budget: skip and log, never resize
 			{
 				if (journalOn()) trace(ETraceLevel.Journal, $"TS-01 {day:yyyy-MM-dd} skip: stop {(planned - m_stop) / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}");
@@ -251,7 +266,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (journalOn())
 			{
-				var ctx = new Dictionary<string, string> { { "variant", Variant.ToString() }, { "atr60", atr.ToString("F2") }, { "sendBar", tod.ToString(@"hh\:mm") } };
+				var ctx = new Dictionary<string, string> { { "variant", Variant.ToString() }, { "atr60", atr.ToString("F2") }, { "sendBar", tod.ToString(@"hh\:mm") }, { "cost", m_costText }, { "floorTicks", m_floorTicks.ToString() } };
 				journalArm("TS01LE", planned, m_stop, double.NaN, ctx);
 				logSignal("TS-01", +1, planned, m_stop, ctx, true);
 			}
