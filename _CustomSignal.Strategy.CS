@@ -1713,7 +1713,8 @@ namespace PowerLanguage.Strategy
 		private double m_gxPlanStop = double.NaN;
 		private string m_gxPlanSource = "";
 		private string m_gxExitReason = "";
-		private bool m_gxEngineOpen;
+		private bool m_gxPlacesT1;
+		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
 		private ExitPosition m_gxPos;
@@ -2903,7 +2904,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_journal == null)
 				{
-					m_journalGx = m_gxUsed;
+					m_journalGx = m_gxUsed || m_gxPlanLive;
 					string header = TradeJournal.HEADER;
 					if (m_event != null) header += "," + EVENT_JOURNAL_COLS;
 					if (m_journalGx) header += "," + GX_JOURNAL_COLS;
@@ -4198,6 +4199,7 @@ namespace PowerLanguage.Strategy
 			m_gxPlanEntry = plannedEntry;
 			m_gxPlanStop = plannedStop;
 			m_gxPlanLive = true;
+			if (!m_gxPlacesT1) m_gxPlanSource = "";
 			if (!m_portOn) return;
 			MyPortfolioData[_PortKeys.GxPlanEntry] = plannedEntry;
 			MyPortfolioData[_PortKeys.GxPlanStop] = plannedStop;
@@ -4249,6 +4251,12 @@ namespace PowerLanguage.Strategy
 				return double.NaN;
 			}
 			m_gxUsed = true;
+			m_gxPlacesT1 = true;
+			if (StrategyInfo.MarketPosition == 0)
+			{
+				m_gxGate.OnFlat();
+				m_gxExitReason = "";
+			}
 			if (mkt.Tick <= 0) mkt.Tick = tickSize();
 			if (mkt.Bpv <= 0) { try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { } }
 			if (mkt.FloorTicks == 0) mkt.FloorTicks = gxFloorTicks();
@@ -4277,22 +4285,22 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
-				m_gxEngineOpen = false;
+				m_gxGate.OnFlat();
+				m_gxExitReason = "";
 				if (m_gxPos != null) m_gxPos.Open = false;
 				m_gxArmed = false;
 				return;
 			}
-			if (!m_gxArmed && !m_gxEngineOpen) return;
+			if (!m_gxArmed && !m_gxGate.EngineOpen) return;
 			bool longSide = pos > 0;
 			if (m_gxPos == null) m_gxPos = new ExitPosition();
 			int lots = gxOpenLots(pos);
-			if (!m_gxEngineOpen)
+			if (m_gxGate.BeginPosition(gxPositionEntryTime()))
 			{
 				m_gxExitReason = "";
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
 				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
-				m_gxEngineOpen = true;
 				m_gxPos.T1PlanSource = m_gxPlanSource;
 				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * m_gxQty;
 				double fillR = m_gxPos.InitialRDollars;
@@ -4371,10 +4379,29 @@ namespace PowerLanguage.Strategy
 		/// <summary>Record the plan the exit actually used. source is plan or fill.</summary>
 		protected void gxSetPlan(double entry, double stop, string source)
 		{
+			m_gxPlacesT1 = true;
 			m_gxPlanEntry = entry;
 			m_gxPlanStop = stop;
 			m_gxPlanSource = source ?? "";
 			if (m_gxPos != null) m_gxPos.T1PlanSource = m_gxPlanSource;
+		}
+
+		private DateTime gxPositionEntryTime()
+		{
+			try
+			{
+				IMarketPosition p = Positions[0];
+				if (p == null || p.OpenTrades == null) return DateTime.MinValue;
+				DateTime t = DateTime.MinValue;
+				foreach (ITrade tr in p.OpenTrades)
+				{
+					if (tr == null || tr.EntryOrder == null) continue;
+					DateTime et = tr.EntryOrder.Time;
+					if (t == DateTime.MinValue || et < t) t = et;
+				}
+				return t;
+			}
+			catch (Exception) { return DateTime.MinValue; }
 		}
 
 		protected void gxNoteExit(string reason)
@@ -4412,7 +4439,8 @@ namespace PowerLanguage.Strategy
 			col(!eqOk || double.IsNaN(realPct) ? "" : ExitSession.Pct3(realPct));
 			col("bar");
 			col(m_gxPos.AddCount.ToString(CultureInfo.InvariantCulture));
-			string source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
+			string source = "";
+			if (m_gxPlacesT1) source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
 			col(ExitSession.ReasonFromExitOrder(exitName, m_gxExitReason));
 			double ro = m_gx == null ? double.NaN : m_gx.ROrig(m_gxPos, profit);
 			col(double.IsNaN(ro) ? "" : ExitSession.Ratio2(ro));

@@ -199,6 +199,36 @@ namespace PowerLanguage.Function
 		public bool TrailThrough;
 	}
 
+	/// <summary>
+	/// One engine open per MC position. Flat, or a different entry time, closes it.
+	/// The same entry time does not open again.
+	/// </summary>
+	public sealed class ExitOpenGate
+	{
+		public bool EngineOpen;
+		public DateTime SeenEntry = DateTime.MinValue;
+
+		public void OnFlat()
+		{
+			EngineOpen = false;
+			SeenEntry = DateTime.MinValue;
+		}
+
+		public bool BeginPosition(DateTime liveEntry)
+		{
+			bool different = EngineOpen && liveEntry != DateTime.MinValue && SeenEntry != DateTime.MinValue && liveEntry != SeenEntry;
+			if (different) EngineOpen = false;
+			if (!EngineOpen)
+			{
+				EngineOpen = true;
+				if (liveEntry != DateTime.MinValue) SeenEntry = liveEntry;
+				return true;
+			}
+			if (SeenEntry == DateTime.MinValue && liveEntry != DateTime.MinValue) SeenEntry = liveEntry;
+			return false;
+		}
+	}
+
 	/// <summary>One run of the exit state machine. Hosts send orders. This type decides levels, quantities and the one exit reason.</summary>
 	public sealed class ExitSession
 	{
@@ -654,6 +684,8 @@ namespace PowerLanguage.Function
 			if (MappedTf == "D1") return false;
 			int cut = Config.FlatByHHMM;
 			if (bar.EarlyClose && bar.RthCloseHHMM > 0) cut = MinusMinutes(bar.RthCloseHHMM, 5);
+			// Spec §4.6 uses CS-7 mustFlatten: time of day >= FlatBy, with no upper bound.
+			// The engines manual also requires tod < 17:00 on Globex. That cap is an owner question.
 			return Hhmm(bar.TimeEt) >= cut;
 		}
 
