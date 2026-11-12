@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using PowerLanguage.Function;
 
@@ -40,6 +41,7 @@ static class Program
 		RAccount();
 		RiskFields();
 		OverBudget();
+		Gx2Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -698,5 +700,27 @@ static class Program
 		pt.Open(p2, true, 100, 100, 96, 2, 0.25, 50, 10000, "LE", new DateTime(2024, 6, 3, 11, 0, 0), 0);
 		Check(Has(pt.Log, "PORT Warning: GX RISK-OVER-BUDGET"), "PT prefix");
 		Check(p2.Open, "the position is kept");
+	}
+
+	static void Gx2Source()
+	{
+		string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_CustomSignal.Strategy.CS"));
+		string src = File.ReadAllText(path);
+		int create = src.IndexOf("protected override void Create()", StringComparison.Ordinal);
+		int createEnd = src.IndexOf("protected override void Destroy()", StringComparison.Ordinal);
+		string createBody = create >= 0 && createEnd > create ? src.Substring(create, createEnd - create) : "";
+		Check(createBody.IndexOf("createGxOrders", StringComparison.Ordinal) < 0, "base Create does not create GX orders");
+		Check(src.IndexOf("protected double exitPlan(", StringComparison.Ordinal) >= 0 && src.IndexOf("protected void exitBar()", StringComparison.Ordinal) >= 0, "exitPlan and exitBar exist");
+		Check(src.IndexOf("if (m_gxPlanLive && pos == 0 && m_portArmBar != Bars.CurrentBar) gxClearPlan();", StringComparison.Ordinal) >= 0, "plan keys clear only after gxPublishPlan");
+		int calc = src.IndexOf("protected override void CalcBar()", StringComparison.Ordinal);
+		int calcEnd = src.IndexOf("private const string EVENT_JOURNAL_COLS", StringComparison.Ordinal);
+		string calcBody = calc >= 0 && calcEnd > calc ? src.Substring(calc, calcEnd - calc) : "";
+		Check(calcBody.IndexOf("exitBar()", StringComparison.Ordinal) < 0, "CalcBar does not call exitBar");
+		Check(src.IndexOf("if (m_journalGx) header += \",\" + GX_JOURNAL_COLS;", StringComparison.Ordinal) >= 0, "GX journal columns are appended only after exitPlan");
+		int gx = src.IndexOf("// ---- GX-2", StringComparison.Ordinal);
+		string gxBody = gx >= 0 ? src.Substring(gx) : "";
+		Check(gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0
+			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "GX orders are exits");
 	}
 }
