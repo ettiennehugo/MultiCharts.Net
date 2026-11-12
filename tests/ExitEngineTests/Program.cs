@@ -37,6 +37,7 @@ static class Program
 		BreakEvenAndTrail();
 		Precedence();
 		Clock();
+		FlatByAfterEntry();
 		Control();
 		Idx();
 		RAccount();
@@ -427,7 +428,9 @@ static class Program
 			var eve = Eng();
 			var peven = new ExitPosition();
 			eve.Open(peven, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 17, 18, 0, 0), 0);
-			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 17, 18, 20, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " 18:20 is FLATBY under mustFlatten (no 17:00 cap)");
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 17, 18, 20, 0))).Reason == null, (lng ? "L" : "S") + " 18:20 is held; the deadline is the next 15:55");
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 18, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " 15:54 the next day still holds");
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 18, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the next day's 15:55 is FLATBY");
 			var night = Eng();
 			var pnight = new ExitPosition();
 			night.Open(pnight, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 18, 0, 0, 0), 0);
@@ -484,6 +487,63 @@ static class Program
 		var ib = Quiet(false, new DateTime(2024, 6, 3, 16, 0, 0));
 		ib.RollFlattenBar = true;
 		Check(ign.Manage(pi, ib).Reason == null, "Ignore does not flatten on the splice");
+	}
+
+	static void FlatByAfterEntry()
+	{
+		var rthDeadline = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 10, 0, 0), 1555);
+		Check(rthDeadline == new DateTime(2024, 6, 3, 15, 55, 0), "a 10:00 entry is due at 15:55 the same day");
+		var after = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 16, 0, 0), 1555);
+		Check(after == new DateTime(2024, 6, 4, 15, 55, 0), "a 16:00 entry is due at 15:55 the next day");
+		var eve = ExitSession.FlatByDeadline(new DateTime(2024, 11, 17, 18, 20, 0), 1555);
+		Check(eve == new DateTime(2024, 11, 18, 15, 55, 0), "an 18:20 Globex entry is due at 15:55 the next day");
+		var atCut = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 15, 55, 0), 1555);
+		Check(atCut == new DateTime(2024, 6, 4, 15, 55, 0), "an entry exactly at 15:55 waits for the next cutoff");
+
+		foreach (bool lng in new[] { true, false })
+		{
+			var e = Eng();
+			var p = new ExitPosition();
+			var entry = new DateTime(2024, 6, 3, 10, 0, 0);
+			e.Open(p, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", entry, 0);
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 3, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " RTH 10:00 holds at 15:54");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 3, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " RTH 10:00 closes at 15:55 the same day");
+
+			var late = Eng();
+			var pl = new ExitPosition();
+			late.Open(pl, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 16, 0, 0), 0);
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 3, 16, 0, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry is not closed on its fill bar");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 3, 18, 20, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry is held through the evening");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 4, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry holds at 15:54 the next day");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " a 16:00 entry closes at the next day's 15:55");
+
+			var gap = Eng();
+			var pg = new ExitPosition();
+			gap.Open(pg, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 16, 0, 0), 0);
+			Check(gap.Manage(pg, Quiet(lng, new DateTime(2024, 6, 4, 16, 10, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the first bar after the deadline flattens when 15:55 itself has no bar");
+
+			var globex = Eng();
+			var pgx = new ExitPosition();
+			var night = new DateTime(2024, 11, 17, 18, 20, 0);
+			globex.Open(pgx, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", night, 0);
+			Check(globex.Manage(pgx, Quiet(lng, night)).Reason == null, (lng ? "L" : "S") + " 18:20 is not a flat-by");
+			Check(globex.Manage(pgx, Quiet(lng, new DateTime(2024, 11, 18, 0, 30, 0))).Reason == null, (lng ? "L" : "S") + " overnight 00:30 is still before the next 15:55");
+			Check(globex.Manage(pgx, Quiet(lng, new DateTime(2024, 11, 18, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " an 18:20 entry closes at the next day's 15:55");
+
+			var fri = Eng();
+			var pf = new ExitPosition();
+			fri.Open(pf, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 15, 18, 20, 0), 0);
+			Check(fri.Manage(pf, Quiet(lng, new DateTime(2024, 11, 17, 18, 0, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " a Friday 18:20 entry flattens on the first bar after Saturday 15:55");
+
+			var add = Eng();
+			var pa = new ExitPosition();
+			var original = new DateTime(2024, 6, 3, 16, 0, 0);
+			add.Open(pa, lng, 5000, 5000, lng ? 4900 : 5100, 2, 0.25, 50, 100000, "LE", original, 0);
+			add.OnAdd(pa, 5010, 1, lng ? 5008 : 5012, 5005, 50, 0.25);
+			Check(pa.FillTime == original && pa.AddCount == 1, (lng ? "L" : "S") + " an add keeps the original entry time");
+			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 10, 0, 0))).Reason == null, (lng ? "L" : "S") + " the morning after an add is not a new deadline");
+			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the add exits at the original entry's next 15:55");
+		}
 	}
 
 	static ExitBar Quiet(bool lng, DateTime t)
