@@ -44,6 +44,7 @@ static class Program
 		LogOnce();
 		ExitReasonMap();
 		ConsecutivePositions();
+		FillBarT1Resumes();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -773,6 +774,43 @@ static class Program
 		Check(stale.BeginPosition(fills[1]), "a new entry time opens even when flat was not observed");
 	}
 
+	static void FillBarT1Resumes()
+	{
+		var e = Eng(c => { c.Embedded = true; c.Id = "TH"; c.SingleLotMode = ESingleLotMode.ExitAtT1; });
+		var gate = new ExitOpenGate();
+		int opens = 0, journals = 0;
+		for (int trade = 0; trade < 3; trade++)
+		{
+			DateTime entry = new DateTime(2024, 11, 18, 3, trade, 0);
+			gate.OnFlat();
+			bool lng = trade != 0;
+			Check(gate.BeginPosition(entry), "trade " + trade.ToString(CultureInfo.InvariantCulture) + " opens");
+			opens++;
+			var p = new ExitPosition();
+			double fill = 5000;
+			double stop = lng ? 4990 : 5010;
+			e.Open(p, lng, fill, stop, fill, stop, 1, 0.25, 50, 100000, lng ? "THLE" : "THSE", entry, trade);
+			Check(p.T1Qty == 1 && !double.IsNaN(p.T1Level), "1-lot ExitAtT1 places T1 on trade " + trade.ToString(CultureInfo.InvariantCulture));
+			var bar = Quiet(lng, entry);
+			if (lng) { bar.High = p.T1Level + 0.25; bar.Low = fill + 0.25; bar.Close = fill + 0.25; }
+			else { bar.Low = p.T1Level - 0.25; bar.High = fill - 0.25; bar.Close = fill - 0.25; }
+			var d = e.Manage(p, bar);
+			Check(d.Reason == "T1" && !p.Open, "trade " + trade.ToString(CultureInfo.InvariantCulture) + " hits T1 on its fill bar");
+			ExitOrder sent = ExitSession.OrderFor(d.Reason, p.GapThroughStop, p, 1);
+			Check(sent.Kind == "t1" && sent.Qty == 1 && Near(sent.Price, p.T1Level), "the T1 limit is sent on the fill bar");
+			Check(!gate.BeginPosition(entry), "the same position does not open again");
+			ExitOrder again = ExitSession.OrderFor(d.Reason, p.GapThroughStop, p, 1);
+			Check(again.Kind == "t1" && again.Qty == 1, "the T1 limit is resent while MC is still in the position");
+			journals++;
+		}
+		Check(opens == 3 && journals == 3, "each fill-bar T1 is followed by further positions that trade and journal");
+		var held = new ExitPosition { Stop = 4990, T1Level = 5010, T1Qty = 1, FinalLevel = 5020 };
+		Check(ExitSession.OrderFor("FLATBY", false, held, 1).Kind == "market", "FLATBY stays a market exit");
+		Check(ExitSession.OrderFor("STOP", false, held, 1).Kind == "stop", "STOP stays the stop order");
+		Check(ExitSession.OrderFor("TARGET", false, held, 1).Kind == "target", "TARGET stays the final limit");
+		Check(ExitSession.OrderFor("T1", true, held, 1).Kind == "market", "a gap through the stop is a market exit");
+	}
+
 	static void ExitReasonMap()
 	{
 		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
@@ -821,6 +859,8 @@ static class Program
 		Check(host.IndexOf("class _GX_00_TestHost", StringComparison.Ordinal) >= 0 && host.IndexOf("EmbedEngine", StringComparison.Ordinal) >= 0, "test host file");
 		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.OnFlat()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.BeginPosition(", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens once per position");
 		Check(src.IndexOf("m_gxPlacesT1", StringComparison.Ordinal) >= 0 && src.IndexOf("if (!m_gxPlacesT1) m_gxPlanSource = \"\";", StringComparison.Ordinal) >= 0, "a host that only publishes does not record t1PlanSource plan");
+		Check(src.IndexOf("gxSendExit(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrderFor(", StringComparison.Ordinal) >= 0, "a decided T1 or target is sent and resent");
+		Check(gx.IndexOf("[Input] public bool FillBarDisasterStop { get; set; }", StringComparison.Ordinal) >= 0 && src.IndexOf("inputs[{inputSnapshot()}]", StringComparison.Ordinal) >= 0, "FillBarDisasterStop is an Input on the RUN line");
 		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
 		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
 		int n = 0;
