@@ -150,6 +150,9 @@ namespace PowerLanguage.Strategy
 		protected void createGxOrders() { }
 		protected void gxPublishPlan(double plannedEntry, double plannedStop) { }
 		protected void gxSetMarket(ExitMarket mkt) { }
+		protected void gxAttachSession(ExitSession session, ExitPosition pos) { }
+		protected void gxSetPlan(double entry, double stop, string source) { }
+		protected void gxNoteExit(string reason) { }
 		protected double exitPlan(bool longSide, double plannedEntry, double structuralStop, int qty, ExitMarket mkt, string entryOrderName) { return 0; }
 		protected void exitBar() { }
 	}

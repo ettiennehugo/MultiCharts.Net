@@ -41,6 +41,8 @@ static class Program
 		RAccount();
 		RiskFields();
 		OverBudget();
+		LogOnce();
+		ExitReasonMap();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -703,6 +705,32 @@ static class Program
 		Check(p2.Open, "the position is kept");
 	}
 
+	static void LogOnce()
+	{
+		var e = Eng();
+		int emitted = 0;
+		for (int i = 0; i < 4; i++)
+		{
+			var p = new ExitPosition();
+			e.Open(p, true, 100, 100, 90, 2, 0.25, 50, 1000, "LE" + i.ToString(CultureInfo.InvariantCulture), new DateTime(2024, 6, 3, 10, i, 0), i);
+			var lines = e.DrainLog();
+			int warnings = 0;
+			for (int k = 0; k < lines.Count; k++) if (lines[k].IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) warnings++;
+			Check(warnings == 1 && e.Log.Count == 0, "trade " + i.ToString(CultureInfo.InvariantCulture) + " emits one over-budget line and the queue is empty");
+			emitted += warnings;
+		}
+		Check(emitted == 4, "four trades emit four warnings, not a replay of the earlier ones");
+	}
+
+	static void ExitReasonMap()
+	{
+		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
+		Check(ExitSession.ReasonFromExitOrder("THLT1", "") == "T1" && ExitSession.ReasonFromExitOrder("GXST1", "STOP") == "T1", "T1 order names win over a pending market reason");
+		Check(ExitSession.ReasonFromExitOrder("THLT", "") == "TARGET" && ExitSession.ReasonFromExitOrder("GXST", "") == "TARGET", "final target order names");
+		Check(ExitSession.ReasonFromExitOrder("THLX", "FLATBY") == "FLATBY" && ExitSession.ReasonFromExitOrder("Stop Loss", "FLATBY") == "STOP", "market exit keeps the stored reason; MC Stop Loss is STOP");
+		Check(ExitSession.ReasonFromExitOrder("", "TIME") == "TIME", "a missing order name keeps the stored reason");
+	}
+
 	static void Gx2Source()
 	{
 		string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_CustomSignal.Strategy.CS"));
@@ -731,6 +759,7 @@ static class Program
 		string gx = File.ReadAllText(Path.Combine(root, "_GenericExit.Strategy.CS"));
 		string csproj = File.ReadAllText(Path.Combine(root, "PLStudies.csproj"));
 		string host = File.ReadAllText(Path.Combine(root, "sandbox", "_GX_00_TestHost.Strategy.CS"));
+		string src = File.ReadAllText(Path.Combine(root, "_CustomSignal.Strategy.CS"));
 		string[] inputs = { "InitialStop", "StopAtrMult", "StopAtrLength", "StopTicks", "StopSwingBars", "StopPct", "FillBarDisasterStop", "TargetMode", "T1Unit", "T1Value", "T1ScalePct", "FinalTargetUnit", "FinalTargetValue", "SingleLotMode", "BreakEven", "BreakEvenUnit", "BreakEvenValue", "BreakEvenOffsetTicks", "TrailMode", "TrailStart", "TrailStartUnit", "TrailStartValue", "TrailAtrMult", "TrailAtrLength", "TrailBars", "TrailEmaLength", "TimeStopBars", "TimeStopMinutes", "SessionExit", "FlatByHHMM", "MaxHoldDays", "NewsExitMinutes", "RollExit", "AddStopMode", "ExitControl", "ControlExitBarsM1", "ControlExitBarsM5", "ControlExitBarsM15", "ControlExitBarsH1", "ControlExitBarsD1", "InitialStopIdx", "T1UnitIdx", "FinalTargetUnitIdx", "BreakEvenIdx", "BreakEvenUnitIdx", "TrailModeIdx", "TrailStartIdx", "TrailStartUnitIdx" };
 		foreach (string name in inputs)
 			Check(gx.IndexOf("[Input] public ", StringComparison.Ordinal) >= 0 && gx.IndexOf(" " + name + " { get; set; }", StringComparison.Ordinal) >= 0, "wrapper input " + name);
@@ -739,6 +768,9 @@ static class Program
 		Check(gx.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && gx.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "wrapper has no entry order");
 		Check(csproj.IndexOf("_GX_00_TestHost", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox\\", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox/", StringComparison.Ordinal) < 0, "test host is not in PLStudies.csproj");
 		Check(host.IndexOf("class _GX_00_TestHost", StringComparison.Ordinal) >= 0 && host.IndexOf("EmbedEngine", StringComparison.Ordinal) >= 0, "test host file");
+		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxEngineOpen", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens each trade once");
+		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
+		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
 		int n = 0;
 		foreach (string f in new[] { "_StopsAndTargets.Strategy.CS", "_Stops_And_Targets.Strategy.CS", "_ExitStatic.Strategy.CS", "_StpOrLim_Exit.Strategy.CS", "_ExitHalfRiskHalfRoll.Strategy.CS" })
 			if (File.ReadAllText(Path.Combine(root, f)).IndexOf("SUPERSEDED by GX", StringComparison.Ordinal) >= 0) n++;

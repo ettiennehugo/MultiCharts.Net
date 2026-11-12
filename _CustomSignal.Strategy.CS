@@ -1711,6 +1711,9 @@ namespace PowerLanguage.Strategy
 		private string m_gxPrefix = "GX";
 		private double m_gxPlanEntry = double.NaN;
 		private double m_gxPlanStop = double.NaN;
+		private string m_gxPlanSource = "";
+		private string m_gxExitReason = "";
+		private bool m_gxEngineOpen;
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
 		private ExitPosition m_gxPos;
@@ -2854,6 +2857,8 @@ namespace PowerLanguage.Strategy
 			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
 			double bpv = Bars.Info.BigPointValue;
 			double tick = tickSize();
+			if (m_journalGx && m_journalArms != null && m_gxPos != null && !double.IsNaN(m_gxPlanEntry) && !m_journalArms.ContainsKey(entryName ?? ""))
+				m_journalArms[entryName ?? ""] = new JournalArm { tag = entryName ?? "", plannedEntry = m_gxPlanEntry, initialStop = m_gxPlanStop, target = double.NaN, context = "" };
 			JournalArm arm;
 			bool armed = m_journalArms.TryGetValue(entryName ?? "", out arm);
 
@@ -2905,7 +2910,7 @@ namespace PowerLanguage.Strategy
 					m_journal = new TradeJournal(RunId, "MCJournal_", header, Output);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
-				if (m_journalGx) gxAppendJournal(sb, exitPrice, bpv, profit);
+				if (m_journalGx) gxAppendJournal(sb, exitPrice, bpv, profit, exitName);
 				m_journal.Write(sb.ToString());
 			}
 			catch (Exception e)
@@ -4217,8 +4222,7 @@ namespace PowerLanguage.Strategy
 				m_gxMkt = mkt;
 				m_gx.Start(mkt);
 				m_gxStarted = true;
-				if (traceOn(ETraceLevel.Info))
-					foreach (string line in m_gx.Log) trace(line.IndexOf(" Error:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Error : line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+				gxEmitLog();
 			}
 		}
 
@@ -4258,6 +4262,7 @@ namespace PowerLanguage.Strategy
 			m_gxEntryOrder = entryOrderName ?? "";
 			m_gxArmed = true;
 			gxPublishPlan(plannedEntry, stop);
+			m_gxPlanSource = "plan";
 			if (m_portOn) portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop);
 			if (journalOn()) journalArm(m_gxEntryOrder, plannedEntry, stop, double.NaN);
 			if (longSide) m_gxLS.Send(stop, qty);
@@ -4272,23 +4277,34 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
-				if (m_gxPos != null && m_gxPos.Open) { m_gxPos.Open = false; m_gxArmed = false; }
+				m_gxEngineOpen = false;
+				if (m_gxPos != null) m_gxPos.Open = false;
+				m_gxArmed = false;
 				return;
 			}
-			if (!m_gxArmed && (m_gxPos == null || !m_gxPos.Open)) return;
+			if (!m_gxArmed && !m_gxEngineOpen) return;
 			bool longSide = pos > 0;
 			if (m_gxPos == null) m_gxPos = new ExitPosition();
 			int lots = gxOpenLots(pos);
-			if (!m_gxPos.Open)
+			if (!m_gxEngineOpen)
 			{
+				m_gxExitReason = "";
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
 				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
+				m_gxEngineOpen = true;
+				m_gxPos.T1PlanSource = m_gxPlanSource;
 				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * m_gxQty;
 				double fillR = m_gxPos.InitialRDollars;
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture));
-				if (m_gx.Log.Count > 0 && traceOn(ETraceLevel.Info))
-					foreach (string line in m_gx.Log) if (line.IndexOf("T1-SKIPPED", StringComparison.Ordinal) >= 0 || line.IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) trace(line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+				gxEmitLog();
+			}
+			else if (!m_gxPos.Open)
+			{
+				bool market = m_gxExitReason != "STOP" && m_gxExitReason != "T1" && m_gxExitReason != "TARGET" && m_gxExitReason.Length > 0;
+				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
+				else if (m_gxExitReason == "STOP") { if (longSide) m_gxLS.Send(m_gxPos.Stop, lots); else m_gxSS.Send(m_gxPos.Stop, lots); }
+				return;
 			}
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
@@ -4304,6 +4320,7 @@ namespace PowerLanguage.Strategy
 				{
 					if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots);
 				}
+				if (!string.IsNullOrEmpty(d.Reason)) m_gxExitReason = d.Reason;
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
 				return;
 			}
@@ -4331,7 +4348,41 @@ namespace PowerLanguage.Strategy
 			return Math.Abs(pos);
 		}
 
-		private void gxAppendJournal(StringBuilder sb, double exitPrice, double bpv, double profit)
+		private void gxEmitLog()
+		{
+			if (m_gx == null) return;
+			foreach (string line in m_gx.DrainLog())
+			{
+				ETraceLevel lv = ETraceLevel.Info;
+				if (line.IndexOf(" Error:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Error;
+				else if (line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Warning;
+				if (traceOn(lv)) trace(lv, line);
+			}
+		}
+
+		/// <summary>Point the CS-1 GX columns at a session. The wrapper calls this before base.CalcBar so the journal sees the trade that just closed.</summary>
+		protected void gxAttachSession(ExitSession session, ExitPosition pos)
+		{
+			m_gxUsed = true;
+			if (session != null) m_gx = session;
+			if (pos != null) m_gxPos = pos;
+		}
+
+		/// <summary>Record the plan the exit actually used. source is plan or fill.</summary>
+		protected void gxSetPlan(double entry, double stop, string source)
+		{
+			m_gxPlanEntry = entry;
+			m_gxPlanStop = stop;
+			m_gxPlanSource = source ?? "";
+			if (m_gxPos != null) m_gxPos.T1PlanSource = m_gxPlanSource;
+		}
+
+		protected void gxNoteExit(string reason)
+		{
+			m_gxExitReason = reason ?? "";
+		}
+
+		private void gxAppendJournal(StringBuilder sb, double exitPrice, double bpv, double profit, string exitName)
 		{
 			Action<string> col = s => { sb.Append(','); sb.Append(csvField(s)); };
 			if (m_gxPos == null)
@@ -4361,13 +4412,14 @@ namespace PowerLanguage.Strategy
 			col(!eqOk || double.IsNaN(realPct) ? "" : ExitSession.Pct3(realPct));
 			col("bar");
 			col(m_gxPos.AddCount.ToString(CultureInfo.InvariantCulture));
-			col("");
+			string source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
+			col(ExitSession.ReasonFromExitOrder(exitName, m_gxExitReason));
 			double ro = m_gx == null ? double.NaN : m_gx.ROrig(m_gxPos, profit);
 			col(double.IsNaN(ro) ? "" : ExitSession.Ratio2(ro));
 			col(m_gx == null ? "" : m_gx.Package ?? "");
 			col(flag);
 			col(m_gxPos.T1Skipped ? "1" : "0");
-			col("plan");
+			col(source);
 		}
 	}
 }
