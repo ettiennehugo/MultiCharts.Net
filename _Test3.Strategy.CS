@@ -5,7 +5,7 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	//public class _Ex02EuropeanOpenDrift : _CustomSignal
-	public class _Test03 : _CustomSignal
+	public class _Test3 : _CustomSignal
 	{
 		/// <summary>Sweep (catalogue): 1 = 01:30-04:30, 2 = 02:00-03:00, 3 = 1 + event filter, 4 = 2 + event filter.</summary>
 		[Input] public int Variant { get; set; }
@@ -29,7 +29,7 @@ namespace PowerLanguage.Strategy
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 		private double m_stop = double.NaN;
 
-		public _Test03(object _ctx) : base(_ctx) { Variant = 1; }
+		public _Test3(object _ctx) : base(_ctx) { Variant = 1; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }

@@ -5,6 +5,8 @@
 **Requested by Ettienne, 2026-11-12 07:36 ET (verbatim):** *"I'll want to systematically test all those signals by moving their code to one of the _Test** signals. Test them thoroughly and document the results. We can create more _Test** signals, say 30 so we can test larger batches of signals at a time."*
 Earlier the same morning Ettienne said: test and development strategies live in `sandbox/` and are not in `PLStudies.csproj`; concrete strategies go in the studies folder.
 
+**Rev 1.1, 2026-11-12 08:06 ET (owner answers):** `_Test3` class renamed to `_Test3`; `_Test1` released as a free slot; starting capital $50,000; sandbox signals are standardized by Coder before testing (owner 08:03 ET). See §9.
+
 **Status:** documentation and inert slots only. No signal has been run, validated or promoted by this document. Every result table below starts at "not run".
 
 **Holdout (applies to every step).** Non-order-flow strategies use data **up to 31 Dec 2024 only** (programme overview `specs/strategies/00-programme-overview.md` §5.1). Never view, screenshot, export or report prices or results on or after 2025-01-01. Every chart and Portfolio Trader run gets a **dated** From/To range with To ≤ 2024-12-31 **before** OK is clicked. A journal row dated 2025-01-01 or later invalidates the run: delete the output, do not read it, and note "holdout breach, rerun" in the register.
@@ -23,10 +25,10 @@ The sandbox file stays the source of truth. A slot only ever holds a byte-for-by
 
 | Slot | Base class | Current content | In `PLStudies.csproj` | May be overwritten? |
 |---|---|---|---|---|
-| `_Test1` | `_VolumeProfileFuturesBase` | Scaffold with no orders: `OrderFlowEnabled = true`, `FlowCfg.McBidAsk = Prefer`, `MinNodeTicks = 3`, `McBidAskChartType = FootPrint` (commit `7015acd`, "Changes to test check 9a"). Named as the Gate-0/KD batch host in the catalogue and `specs/keller-b5-p6p7-entries-analyst2.md` | yes | **No: reserved** (owner to release) |
+| `_Test1` | `_VolumeProfileFuturesBase` | Scaffold with no orders: `OrderFlowEnabled = true`, `FlowCfg.McBidAsk = Prefer`, `MinNodeTicks = 3`, `McBidAskChartType = FootPrint` (commit `7015acd`, "Changes to test check 9a"). Released as a free slot (Ettienne, 2026-11-12 08:06 ET). The scaffold may be overwritten; it stays in git history (`7015acd`) | yes | Yes |
 | `_Test1.Indicator.CS` | indicator | not a slot; left alone | yes | No |
 | `_Test2` | `_CustomSignal` | Copy of `sandbox/_A2_69_KaufmanThreeDay` (code-identical; only class name, BOM, whitespace differ) | yes | Yes, after its result is recorded |
-| `_Test3` | `_CustomSignal` | Copy of `sandbox/_TS_02_EuropeanOpenDrift` (TS-01 rules). **Public class is `_Test03`, not `_Test3`** | yes | Yes, after its result is recorded. Fix the class name when it is next loaded |
+| `_Test3` | `_CustomSignal` | Copy of `sandbox/_TS_02_EuropeanOpenDrift` (TS-01 rules). Public class renamed `_Test03` → `_Test3` (Ettienne, 2026-11-12 08:06 ET; class and constructor only) | yes | Yes, after its result is recorded |
 | `_Test4` | `_CustomSignal` | Copy of `sandbox/_A2_49_MiddayBreakout` | yes | Yes, after its result is recorded |
 | `_Test5` | `_CustomSignal` | Copy of `sandbox/_SW_02_SwingPullback` | yes | Yes, after its result is recorded |
 | `_Test6` | `_CustomSignal` | **A2-63 host + pre-registered RegimeGate harness** (`specs/regime-consumer-prereg.md`, `_RegimeGate.Function.CS`, REGGATE journal, hash pins; named throughout the engines manual) | yes | **Never** |
@@ -36,15 +38,19 @@ The sandbox file stays the source of truth. A slot only ever holds a byte-for-by
 | `_Test10` | `_VolumeProfileFuturesBase` | Copy of `sandbox/_A2_70_OpenFadeHvGate` (class `_Ex17OpenFadeHvGate`, A2-64 gated by A2-70) | yes | Yes, after its result is recorded |
 | `_Test11`–`_Test30` | `_CustomSignal` | **Inert** (this branch): no orders, no `[Input]` besides the inherited `TraceLevel` | yes (this branch) | Yes |
 
-Slots 2–5 and 7–10 were filled by Ettienne in `c862ad2` (7 Nov 2026) from the same sandbox sources. No results for them are recorded in the repo, so they are "loaded, not run". They can be tested where they are (batch 1, §7) instead of being moved.
+Slots 2–5 and 7–10 were filled by Ettienne in `c862ad2` (7 Nov 2026) from the same sandbox sources. No results for them are recorded in the repo, so they are "loaded, not run". They hold the **pre-standardization** engine-manual examples: before testing, each is reloaded from Coder's standardized sandbox file (§3.0).
 
 Other root `_Test*` strategies (`_TestGate0`, `_TestPortArm`, `_TestPortThrottle`, `_TestPortThrottleMM`) are purpose-built harnesses, not slots. Do not use them.
 
 ## 3. Slot workflow
 
+### 3.0 Standardize first (owner, 2026-11-12 08:03 ET)
+
+Ettienne, 2026-11-12 08:03 ET: the sandbox signals are engine-manual examples, and Coder will standardize their comments and code to the spec (header standard `docs/research-strategy-header.md` and the batch conventions) **before testing**. Testing runs only on Coder's standardized versions: the slot register records the commit and blob of the standardized sandbox file, and a slot still holding a pre-standardization copy is reloaded before its battery starts.
+
 ### 3.1 Load a signal into a slot
 
-1. Pick a free slot from the slot register (§3.4). Never `_Test1` or `_Test6`.
+1. Pick a free slot from the slot register (§3.4). Never `_Test6`. The sandbox file must be Coder's standardized version (§3.0).
 2. Record the source: `git rev-parse --short HEAD` (commit) and `git rev-parse --short HEAD:sandbox/<file>` (blob) of the branch the sandbox file is read from.
 3. Copy the sandbox file over `_TestNN.Strategy.CS`, then rename **only**:
    - the public class (`public class _A2_49_MiddayBreakout` → `public class _TestNN`);
@@ -77,16 +83,16 @@ After the result is recorded (§6) and the owner has read the verdict:
 
 | Slot | Signal ID | Sandbox file | Source commit | Blob | Loaded (ET) | Batch | Status |
 |---|---|---|---|---|---|---|---|
-| `_Test1` | — | — | — | — | — | — | reserved (Gate-0 / KD host) |
-| `_Test2` | A2-69 | `_A2_69_KaufmanThreeDay.Strategy.CS` | `c862ad2` | `24309f4` | 2026-11-07 (owner) | — | loaded, not run |
-| `_Test3` | TS-01 (file TS-02) | `_TS_02_EuropeanOpenDrift.Strategy.CS` | `c862ad2` | `bbdd251` | 2026-11-07 (owner) | — | loaded, not run; class `_Test03` |
-| `_Test4` | A2-49 | `_A2_49_MiddayBreakout.Strategy.CS` | `c862ad2` | `a61de99` | 2026-11-07 (owner) | — | loaded, not run |
-| `_Test5` | SW-02 | `_SW_02_SwingPullback.Strategy.CS` | `c862ad2` | `eb551f8` | 2026-11-07 (owner) | — | loaded, not run |
+| `_Test1` | | | | | | | free (Ettienne, 2026-11-12 08:06 ET); order-flow scaffold may be overwritten, kept in git `7015acd` |
+| `_Test2` | A2-69 | `_A2_69_KaufmanThreeDay.Strategy.CS` | `c862ad2` | `24309f4` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
+| `_Test3` | TS-01 (file TS-02) | `_TS_02_EuropeanOpenDrift.Strategy.CS` | `c862ad2` | `bbdd251` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run; class renamed `_Test3` 2026-11-12 |
+| `_Test4` | A2-49 | `_A2_49_MiddayBreakout.Strategy.CS` | `c862ad2` | `a61de99` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
+| `_Test5` | SW-02 | `_SW_02_SwingPullback.Strategy.CS` | `c862ad2` | `eb551f8` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test6` | A2-63 + G-R | (not a sandbox copy) | — | — | — | — | reserved, never overwrite |
-| `_Test7` | AV-08 | `_AV_08_PeriodAvwapLayer.Strategy.CS` | `c862ad2` | `d4f7fef` | 2026-11-07 (owner) | — | loaded, not run |
-| `_Test8` | VW-05 | `_VW_05_LateDayVwap.Strategy.CS` | `c862ad2` | `8afaba5` | 2026-11-07 (owner) | — | loaded, not run |
-| `_Test9` | A2-56 | `_A2_56_FirstHourBreak.Strategy.CS` | `c862ad2` | `04b50f3` | 2026-11-07 (owner) | — | loaded, not run |
-| `_Test10` | A2-64 + A2-70 | `_A2_70_OpenFadeHvGate.Strategy.CS` | `c862ad2` | `888eeae` | 2026-11-07 (owner) | — | loaded, not run |
+| `_Test7` | AV-08 | `_AV_08_PeriodAvwapLayer.Strategy.CS` | `c862ad2` | `d4f7fef` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
+| `_Test8` | VW-05 | `_VW_05_LateDayVwap.Strategy.CS` | `c862ad2` | `8afaba5` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
+| `_Test9` | A2-56 | `_A2_56_FirstHourBreak.Strategy.CS` | `c862ad2` | `04b50f3` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
+| `_Test10` | A2-64 + A2-70 | `_A2_70_OpenFadeHvGate.Strategy.CS` | `c862ad2` | `888eeae` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test11` | | | | | | | free |
 | `_Test12` | | | | | | | free |
 | `_Test13` | | | | | | | free |
@@ -140,7 +146,7 @@ Every step writes its evidence into the signal's result block (§6). The battery
 | Data coverage | If @ES minute history on the MiniPC still starts 26 Dec 2022 (overview §5.2 caveat), every 1m/30m run is an **engineering smoke test**, not development evidence. Record the first bar date actually loaded |
 | Costs | ES: commission **$2.25 per contract per side**, slippage **$6.25 per contract per side** (= $17.00 round trip, overview §4). NQ $2.24 + $2.50, CL $2.36 + $5.00, 6E $2.46 + $3.125 if another instrument is run |
 | Fills | Bar Magnifier **on**, 1-minute detail for bars above 1m (30m, daily). Limits fill on trade-through only. IOG **off** (none of the ten signals declares IOG) |
-| Size / capital | Size as coded (1 contract). Initial capital: **$100,000** (PROPOSED, owner to confirm; see §9). Record it, because the 1% risk-budget skip depends on it |
+| Size / capital | Size as coded (1 contract). Initial capital: **$50,000** (Ettienne, 2026-11-12 08:06 ET). Record it. The sandbox signals skip a trade when 1 contract × stop × big point value > 1% of equity: at $50,000 that is **$500 risk**, so on ES ($50/point, $12.50/tick) a stop wider than **10 points = 40 ticks** is skipped and journaled |
 | Max bars back | Auto-detect, or the value the signal's warm-up needs; record it |
 | Inputs | `TraceLevel = Journal`. All other inputs at defaults unless the step says otherwise |
 | Output | Output window + CS-1 log `%LOCALAPPDATA%\MCSignalLogs\MCSignal<stamp>-<pid>.csv`, `MCJournal_<runId>.csv`, `MCEvents_<runId>.csv`. Copy the three files for the run into the batch folder `C:\Share\MultiCharts\<Batch>\out\<Slot>_<ID>_<step>\` |
@@ -212,14 +218,14 @@ Tested by / date (ET): <...>   Slot freed: <date or "still loaded">
 
 ## 7. Batches
 
-- A batch is up to **30** signals, one per slot (`_Test11`–`_Test30` plus any released slot among 2–5 and 7–10; never `_Test1` or `_Test6`).
+- A batch is up to **30** signals, one per slot (`_Test1`, `_Test11`–`_Test30`, plus any released slot among 2–5 and 7–10; never `_Test6`).
 - **One chart workspace per batch:** `C:\Share\MultiCharts\Workspaces\SandboxBatch<NN> Charts.wsp`, one chart window per signal, titled `<Slot> <ID>`. One signal per chart: two signals on one chart share a position and contaminate each other.
 - Charts that share Data1/Data2 (for example all 1m @ES Globex) can be built from one chart template, but each keeps its own signal.
 - **Run one chart at a time** (set the other charts' strategies off, or keep only a few charts open). Ten or more 1m charts over 2016–2024 recalculating together will exhaust memory on the MiniPC.
 - Portfolio Trader: an optional **one PT workspace per batch** (`SandboxBatch<NN> Backtest.pws`) is for portfolio-level checks only (M-PORT interactions). It is not used for the per-signal battery, because the MM and shared capital change fills.
 - Staging and outputs per batch: `C:\Share\MultiCharts\SandboxBatch<NN>\` (slot files as copied) and `...\out\` (journals per run). Never open or save `M5 Validation 388314a.wsp` or any `Check7*` file.
 - Order inside a batch: compile all slots first (one F7 each), then run (a)–(b) for every signal, then (c)–(f) per signal, then verdicts.
-- **Batch 1 (proposed):** the ten sandbox signals of §4. Eight are already loaded in `_Test2`–`_Test5`, `_Test7`–`_Test10`, so only DV-15 and TS-03 need slots (`_Test11`, `_Test12`). `_Test3`'s class must be renamed to `_Test3` before F7 (see §9).
+- **Batch 1 (proposed):** the ten sandbox signals of §4, in Coder's standardized versions (§3.0). Eight keep their current slots (`_Test2`–`_Test5`, `_Test7`–`_Test10`) and are reloaded from the standardized files; DV-15 and TS-03 take `_Test11` and `_Test12` (or `_Test1`).
 
 ## 8. Results register (one row per sandbox signal)
 
@@ -240,11 +246,12 @@ New sandbox signals (for example the batch-1 strategies PS-02, PS-01, VW-01, AV-
 
 ## 9. Open points
 
-1. **`_Test3` class name.** The file `_Test3.Strategy.CS` declares `public class _Test03`. MultiCharts names a study after its class/file, so this slot will probably not load as `_Test3`. Not verified natively. Proposed: rename to `_Test3` when batch 1 loads it.
-2. **`_Test1` reserved?** It holds an order-flow VP scaffold and is named as the Gate-0/KD host in the catalogue and the Keller B5 notes. This protocol treats it as reserved until the owner releases it.
-3. **Initial capital.** PROPOSED $100,000 for every slot run. The sandbox signals skip a trade when 1 contract × stop × $50 > 1% of equity, so capital changes the trade list (AV-08 needs ≥ $20,000 just for its 16-tick stop).
+1. **[RESOLVED Ettienne, 2026-11-12 08:06 ET]** `_Test3` class name: renamed `_Test03` → `_Test3` (class and constructor only) in `_Test3.Strategy.CS`.
+2. **[RESOLVED Ettienne, 2026-11-12 08:06 ET]** `_Test1` is a free slot. Its order-flow VP scaffold may be overwritten; it stays in git history (`7015acd`).
+3. **[RESOLVED Ettienne, 2026-11-12 08:06 ET]** Starting capital **$50,000** for every slot run. The 1%-of-equity skip is then $500 risk per trade: on ES (1 contract, $50/point) any stop wider than 10 points (40 ticks) is skipped. AV-08's 16-tick stop ($200) and the 14-tick floor ($175) fit; wide ATR-based stops (for example TS-01's 2 × ATR60m, SW-02's 3 × ATR20 daily) may be skipped on volatile days, and every skip is journaled.
 4. **TS-02 file holds TS-01.** `sandbox/_TS_02_EuropeanOpenDrift.Strategy.CS` implements catalogue TS-01 (orders `TS01*`, tag `TS-01`). Results are recorded under TS-01. Renaming the file is a separate change.
 5. **`Variant` is an int input** on TS-01 (1–4), against the house rule that multi-value inputs are typed enums. Tested as is; changing it is a sandbox-file change.
 6. **Data coverage.** The 1m runs are smoke tests until 2016–2022 minute history is verified on the MiniPC (overview §5.2).
 7. **Control arm** depends on the `_GenericExit` build from PR #119.
 8. **New slots on the MiniPC.** Slots 11–30 exist on the MiniPC only after this branch is merged and the studies clone is updated by the owner; until then each new slot is registered once with New Signal (§3.2).
+9. **[RESOLVED Ettienne, 2026-11-12 08:03 ET]** The sandbox signals are engine-manual examples. Coder standardizes their comments and code to the spec before testing; testing runs on Coder's standardized versions (§3.0). Items 4 and 5 may be closed by that standardization.
