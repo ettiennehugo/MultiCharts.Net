@@ -208,6 +208,60 @@ namespace PowerLanguage.Function
 	}
 
 	/// <summary>
+	/// Wrapper bar policy. The fill bar keeps the disaster stop already working and does not send an explicit stop.
+	/// A later bar keeps managing, so an unfilled T1 limit does not block a stop or a flat-by.
+	/// </summary>
+	public sealed class WrapperRun
+	{
+		public bool InTrade;
+		public int Opens;
+		public int Journals;
+
+		public struct Plan
+		{
+			public bool Disaster;
+			public bool OpenTrade;
+			public bool Reopen;
+			public bool SkipFillBarStop;
+			public bool WorkingStop;
+			public bool RestingT1;
+		}
+
+		public Plan OnBar(int mcPos, bool disasterStop)
+		{
+			var p = new Plan();
+			if (mcPos == 0)
+			{
+				if (InTrade) Journals++;
+				InTrade = false;
+				p.Disaster = disasterStop;
+				return p;
+			}
+			p.OpenTrade = !InTrade;
+			if (p.OpenTrade) Opens++;
+			p.SkipFillBarStop = p.OpenTrade;
+			p.Reopen = true;
+			p.WorkingStop = !p.OpenTrade;
+			p.RestingT1 = true;
+			InTrade = true;
+			return p;
+		}
+
+		public static string ExitToSend(Plan plan, string reason, bool gapThrough, ExitPosition pos, int lots)
+		{
+			if (!string.IsNullOrEmpty(reason))
+			{
+				if (plan.SkipFillBarStop && reason == "STOP" && !gapThrough) return "";
+				return ExitSession.OrderFor(reason, gapThrough, pos, lots).Kind ?? "";
+			}
+			if (plan.WorkingStop && plan.RestingT1) return "stop+t1";
+			if (plan.WorkingStop) return "stop";
+			if (plan.RestingT1) return "t1";
+			return "";
+		}
+	}
+
+	/// <summary>
 	/// One engine open per MC position. Flat, or a different entry time, closes it.
 	/// The same entry time does not open again.
 	/// </summary>
@@ -1200,9 +1254,10 @@ namespace PowerLanguage.Strategy
 		[Input] public int TrailStartUnitIdx { get; set; }
 
 		private ExitSession m_wrap;
+		private readonly WrapperRun m_life = new WrapperRun();
 		private ExitPosition m_wrapPos;
 		private ExitMarket m_mkt;
-		private bool m_inert, m_started, m_inTrade, m_explicitNext, m_wroteR, m_haveNet, m_wasFlat, m_havePx;
+		private bool m_inert, m_started, m_wroteR, m_haveNet, m_wasFlat, m_havePx;
 		private string m_exitReason = "";
 		private double m_prevNet, m_disasterPx, m_disasterDl, m_prevClose, m_atrS, m_atrT, m_seedS, m_seedT, m_ema;
 		private int m_nS, m_nT;
@@ -1234,7 +1289,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			base.StartCalc();
-			m_inert = false; m_started = false; m_inTrade = false; m_explicitNext = false; m_wroteR = false; m_haveNet = false; m_wasFlat = false; m_havePx = false; m_haveEma = false;
+			m_inert = false; m_started = false; m_wroteR = false; m_haveNet = false; m_wasFlat = false; m_havePx = false; m_haveEma = false;
 			m_nS = m_nT = 0; m_atrS = m_atrT = m_seedS = m_seedT = 0; m_disasterPx = m_disasterDl = 0;
 			if (Environment.ApplicationCode == EApplicationCode.Portfolio)
 			{
@@ -1251,6 +1306,7 @@ namespace PowerLanguage.Strategy
 			m_wrap.Config.Embedded = false;
 			m_wrap.Config.Id = "GX";
 			m_wrap.Config.InPortfolio = Environment.ApplicationCode == EApplicationCode.Portfolio;
+			m_life.InTrade = false; m_life.Opens = 0; m_life.Journals = 0;
 		}
 
 		protected override void CalcBar()
@@ -1268,10 +1324,13 @@ namespace PowerLanguage.Strategy
 			if (!m_started) return;
 			int pos = StrategyInfo.MarketPosition;
 			if (Bars.Status == EBarState.Close) UpdateSeries();
+			bool wasIn = m_life.InTrade;
+			WrapperRun.Plan plan = m_life.OnBar(pos, pos == 0 && FillBarDisasterStop && m_disasterDl > 0);
 			if (pos == 0)
 			{
-				if (m_inTrade) { m_inTrade = false; m_explicitNext = false; m_wroteR = false; if (m_wrapPos != null) m_wrapPos.Open = false; }
-				if (FillBarDisasterStop && m_disasterDl > 0)
+				if (wasIn) m_wroteR = false;
+				if (m_wrapPos != null) m_wrapPos.Open = false;
+				if (plan.Disaster)
 				{
 					CurSpecOrdersMode = ESpecOrdersMode.PerContract;
 					GenerateStopLoss(m_disasterDl);
@@ -1281,9 +1340,8 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 			m_wasFlat = false;
-			if (!m_inTrade) { OpenTrade(pos > 0); m_inTrade = true; m_explicitNext = true; return; }
-			if (m_explicitNext) { SendStop(pos > 0); m_explicitNext = false; }
-			ManageTrade(pos > 0);
+			if (plan.OpenTrade) OpenTrade(pos > 0);
+			ManageTrade(pos > 0, plan);
 		}
 
 		private void CopyConfig(ExitConfig c)
@@ -1403,30 +1461,31 @@ namespace PowerLanguage.Strategy
 			catch (Exception) { return false; }
 		}
 
-		private void ManageTrade(bool longSide)
+		private void ManageTrade(bool longSide, WrapperRun.Plan plan)
 		{
 			int lots = OpenLots();
-			if (m_wrapPos != null && !m_wrapPos.Open)
-			{
-				gxSendExit(m_exitReason, m_wrapPos.GapThroughStop, m_wrapPos, longSide, lots);
-				return;
-			}
+			if (plan.Reopen && m_wrapPos != null && !m_wrapPos.Open) m_wrapPos.Open = true;
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_mkt.Tick; bar.Bpv = m_mkt.Bpv; bar.AtrTrail = m_mkt.AtrTrail > 0 ? m_mkt.AtrTrail : m_atrT; bar.Ema = m_ema;
 			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_mkt.BarMinutes; bar.MinutesToNews = double.NaN;
-			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
 			ExitDecision d = m_wrap.Manage(m_wrapPos, bar);
 			PublishOpen(m_wrapPos.Stop);
+			string kind = WrapperRun.ExitToSend(plan, d.Reason, m_wrapPos != null && m_wrapPos.GapThroughStop, m_wrapPos, lots);
 			if (d.Reason != null)
 			{
-				gxSendExit(d.Reason, m_wrapPos.GapThroughStop, m_wrapPos, longSide, lots);
+				if (kind == "market" || kind == "stop" || kind == "t1" || kind == "target")
+					gxSendExit(d.Reason, m_wrapPos.GapThroughStop, m_wrapPos, longSide, lots);
+				bool changed = m_exitReason != (d.Reason ?? "");
 				gxNoteExit(d.Reason);
 				m_exitReason = d.Reason ?? "";
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
+				if (changed && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
 				return;
 			}
-			SendStop(longSide);
+			m_exitReason = "";
+			gxNoteExit("");
+			if (plan.WorkingStop) SendStop(longSide);
+			if (!plan.RestingT1) return;
 			if (d.SendT1 && d.T1Qty > 0 && !double.IsNaN(m_wrapPos.T1Level))
 			{
 				int q = d.T1Qty < lots ? d.T1Qty : lots;
