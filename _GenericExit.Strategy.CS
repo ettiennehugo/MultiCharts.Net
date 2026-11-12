@@ -187,6 +187,8 @@ namespace PowerLanguage.Function
 		public bool ForceClose;
 		public bool IsExitBar;
 		public double ExitPrice;
+		/// <summary>Embedded: a T1 touch sends the limit and keeps the stop. It does not scale out or move to breakeven until MC's quantity drops.</summary>
+		public bool DeferPartial;
 	}
 
 	public struct ExitDecision
@@ -959,6 +961,31 @@ namespace PowerLanguage.Function
 			if (p.OpenQty <= 0) p.Open = false;
 		}
 
+		/// <summary>MC is holding more contracts than the engine recorded. The stop and a not-yet-filled T1 follow the actual size.</summary>
+		public void CoverContracts(ExitPosition p, int mcLots, double bpv)
+		{
+			if (p == null || mcLots <= p.OpenQty) return;
+			int add = mcLots - p.OpenQty;
+			p.Lots.Add(new ExitLot { Fill = p.Fill, Qty = add });
+			p.OpenQty = mcLots;
+			p.Qty = mcLots;
+			p.SegmentQty = mcLots;
+			if (p.InitialRPrice > 0 && bpv > 0) p.InitialRDollars = p.InitialRPrice * bpv * mcLots;
+			if (!p.T1Filled && !p.T1Skipped)
+				p.T1Qty = T1Qty(mcLots, Config.T1ScalePct, Effective.SingleLotMode, Effective.TargetMode);
+		}
+
+		/// <summary>MC's open quantity fell while a T1 limit was working. Scale out that many and let breakeven run on the next Manage.</summary>
+		public int ConfirmReduced(ExitPosition p, int mcLots, double bpv)
+		{
+			if (p == null || !p.Open || p.T1Filled || p.T1Qty < 1 || mcLots < 0 || mcLots >= p.OpenQty) return 0;
+			int drop = p.OpenQty - mcLots;
+			int take = drop < p.T1Qty ? drop : p.T1Qty;
+			if (take < 1) return 0;
+			ScaleOut(p, take, p.T1Level, bpv);
+			return take;
+		}
+
 		public double R(ExitPosition p, double mark, double bpv)
 		{
 			double seg = p.SegmentRealized + OpenPnl(p, mark, bpv);
@@ -1029,7 +1056,9 @@ namespace PowerLanguage.Function
 			string reason = Precedence(bar.ForceClose, stop, target, news, session, roll, invalidate, time, control, targetReason);
 			if (reason == "STOP" && stopReason == "TRAIL-THROUGH") reason = "TRAIL-THROUGH";
 			int partialT1 = 0;
-			if (reason == "T1" && p.T1Qty > 0 && p.T1Qty < p.OpenQty)
+			if (reason == "T1" && bar.DeferPartial && p.T1Qty > 0)
+				reason = null;
+			else if (reason == "T1" && p.T1Qty > 0 && p.T1Qty < p.OpenQty)
 			{
 				partialT1 = p.T1Qty;
 				ScaleOut(p, partialT1, p.T1Level, bar.Bpv);
@@ -1130,7 +1159,7 @@ namespace PowerLanguage.Function
 			string rp = !equityOk || double.IsNaN(realPct) ? "" : Pct3(realPct);
 			double r = R(p, mark, bpv);
 			double ro = ROrig(p, totalPnl);
-			string prefix = Config.InPortfolio ? "PORT CLOSE " : "EXIT CLOSE ";
+			string prefix = "EXIT CLOSE ";
 			return prefix + Config.Id + " side=" + (p.Long ? "long" : "short") + " qty=" + p.Qty.ToString(CultureInfo.InvariantCulture) + "+" + p.AddCount.ToString(CultureInfo.InvariantCulture)
 				+ " reason=" + reason + " R=" + Ratio2(r) + " Rorig=" + (double.IsNaN(ro) ? "" : Ratio2(ro))
 				+ " plannedRiskPct=" + pp + " plannedRiskPctPeak=" + pk + " actualRiskPct=" + ap + " actualToPlanned=" + ra
@@ -1141,7 +1170,7 @@ namespace PowerLanguage.Function
 		/// <summary>A scale-out that leaves a runner. EXIT CLOSE is only for the bar the position goes flat.</summary>
 		public string PartialLine(ExitPosition p, int closed, int remaining)
 		{
-			string prefix = Config.InPortfolio ? "PORT PARTIAL " : "EXIT PARTIAL ";
+			string prefix = "EXIT PARTIAL ";
 			return prefix + Config.Id + " side=" + (p.Long ? "long" : "short")
 				+ " closed=" + closed.ToString(CultureInfo.InvariantCulture)
 				+ " remaining=" + remaining.ToString(CultureInfo.InvariantCulture)
@@ -1351,7 +1380,8 @@ namespace PowerLanguage.Strategy
 		private readonly WrapperRun m_life = new WrapperRun();
 		private ExitPosition m_wrapPos;
 		private ExitMarket m_mkt;
-		private bool m_inert, m_started, m_wroteR, m_haveNet, m_wasFlat, m_havePx;
+		private bool m_inert, m_started, m_wroteR, m_haveNet, m_wasFlat, m_havePx, m_swapLogged;
+		private double m_loggedStop = double.NaN;
 		private string m_exitReason = "";
 		private double m_prevNet, m_disasterPx, m_disasterDl, m_prevClose, m_atrS, m_atrT, m_seedS, m_seedT, m_ema;
 		private int m_nS, m_nT;
@@ -1385,16 +1415,12 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			m_inert = false; m_started = false; m_wroteR = false; m_haveNet = false; m_wasFlat = false; m_havePx = false; m_haveEma = false;
 			m_nS = m_nT = 0; m_atrS = m_atrT = m_seedS = m_seedT = 0; m_disasterPx = m_disasterDl = 0;
-			m_wrapPos = null; m_exitReason = ""; m_mkt = new ExitMarket(); m_prevNet = 0; m_prevClose = 0; m_ema = 0;
+			m_wrapPos = null; m_exitReason = ""; m_mkt = new ExitMarket(); m_prevNet = 0; m_prevClose = 0; m_ema = 0; m_loggedStop = double.NaN; m_swapLogged = false;
 			if (Environment.ApplicationCode == EApplicationCode.Portfolio)
 			{
 				bool follows = false;
 				try { follows = MyPortfolioData.ContainsKey(_PortKeys.Ver); } catch (Exception) { follows = false; }
-				if (!follows)
-				{
-					m_inert = true;
-					trace(ETraceLevel.Error, "EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list");
-				}
+				if (!follows) m_inert = true;
 			}
 			m_wrap = new ExitSession();
 			CopyConfig(m_wrap.Config);
@@ -1404,8 +1430,31 @@ namespace PowerLanguage.Strategy
 			m_life.InTrade = false; m_life.Opens = 0; m_life.Journals = 0;
 		}
 
+		private void gxNoteOrder()
+		{
+			if (Environment.ApplicationCode != EApplicationCode.Portfolio) return;
+			bool follows = false;
+			try
+			{
+				if (MyPortfolioData.ContainsKey(_PortKeys.Ver) && MyPortfolioData.ContainsKey(_PortKeys.Stamp))
+				{
+					object stamp = MyPortfolioData[_PortKeys.Stamp];
+					follows = stamp is DateTime && (DateTime)stamp == Bars.Time[0];
+				}
+			}
+			catch (Exception) { follows = false; }
+			if (follows) { m_inert = false; return; }
+			m_inert = true;
+			if (m_swapLogged) return;
+			m_swapLogged = true;
+			string line = "EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list";
+			trace(ETraceLevel.Error, line);
+			try { Output.WriteLine(line); } catch (Exception) { }
+		}
+
 		protected override void CalcBar()
 		{
+			gxNoteOrder();
 			if (m_wrap != null) gxAttachSession(m_wrap, m_wrapPos);
 			base.CalcBar();
 			if (m_inert || m_wrap == null) return;
@@ -1425,6 +1474,7 @@ namespace PowerLanguage.Strategy
 			{
 				if (wasIn) LogFilledExit();
 				if (wasIn) m_wroteR = false;
+				m_loggedStop = double.NaN;
 				if (m_wrapPos != null) m_wrapPos.Open = false;
 				if (plan.Disaster)
 				{
@@ -1648,7 +1698,13 @@ namespace PowerLanguage.Strategy
 			{
 				MyPortfolioData[_PortKeys.GxStop] = stop;
 				MyPortfolioData[_PortKeys.GxOwner] = "GX";
-				MyPortfolioData[_PortKeys.RiskOpen] = Math.Abs(StrategyInfo.AvgEntryPrice - stop) * m_mkt.Bpv * Math.Abs(StrategyInfo.MarketPosition);
+				int held = StrategyInfo.MarketPosition;
+				double bpv = m_mkt.Bpv > 0 ? m_mkt.Bpv : 0;
+				double risk = _PortArm.RiskOpen(held, StrategyInfo.AvgEntryPrice, Bars.Close[0], stop, bpv);
+				MyPortfolioData[_PortKeys.RiskOpen] = risk;
+				if (m_loggedStop != stop && traceOn(ETraceLevel.Journal))
+					trace(ETraceLevel.Journal, "EXIT Journal: GX STOP-MOVE GX " + ExitSession.Px(m_loggedStop) + " -> " + ExitSession.Px(stop) + " pm.riskOpen $" + risk.ToString("0.00", CultureInfo.InvariantCulture));
+				m_loggedStop = stop;
 				double r = m_wrapPos.InitialRDollars;
 				MyPortfolioData[_PortKeys.OpenR] = r > 0 ? this.CurrentPosition.OpenProfit / r : double.NaN;
 				if (!m_wroteR)

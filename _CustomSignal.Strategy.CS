@@ -1715,6 +1715,7 @@ namespace PowerLanguage.Strategy
 		private string m_gxExitReason = "";
 		private bool m_gxPlacesT1;
 		private bool m_gxWroteR;
+		private bool m_gxT1Sent;
 		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
@@ -2410,6 +2411,7 @@ namespace PowerLanguage.Strategy
 			m_gxExitReason = "";
 			m_gxPlacesT1 = false;
 			m_gxWroteR = false;
+			m_gxT1Sent = false;
 			m_gxGate.OnFlat();
 			m_gx = null;
 			m_gxPos = null;
@@ -4276,6 +4278,15 @@ namespace PowerLanguage.Strategy
 			MyPortfolioData[_PortKeys.GxPlanStop] = double.NaN;
 		}
 
+		/// <summary>Replace the embedded engine config before the first exitPlan. The default is EntryProvided so a production host keeps its own stop.</summary>
+		protected void gxConfigure(ExitConfig cfg)
+		{
+			if (cfg == null) return;
+			cfg.Embedded = true;
+			m_gxCfg = cfg;
+			if (m_gx != null) m_gx.Config = cfg;
+		}
+
 		private void ensureGx(ExitMarket mkt)
 		{
 			if (m_gx == null) m_gx = new ExitSession { Config = m_gxCfg };
@@ -4352,8 +4363,10 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
+				gxLogFlatClose();
 				m_gxGate.OnFlat();
 				m_gxExitReason = "";
+				m_gxT1Sent = false;
 				if (m_gxPos != null) m_gxPos.Open = false;
 				m_gxArmed = false;
 				return;
@@ -4365,6 +4378,7 @@ namespace PowerLanguage.Strategy
 			if (m_gxGate.BeginPosition(gxPositionEntryTime()))
 			{
 				m_gxExitReason = "";
+				m_gxT1Sent = false;
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
 				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
@@ -4372,22 +4386,33 @@ namespace PowerLanguage.Strategy
 				m_gxPos.T1PlanSource = m_gxPlanSource;
 				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * lots;
 				double fillR = m_gxPos.InitialRDollars;
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture));
-				gxRewriteFillR(lots, fillR);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " planEntry=" + ExitSession.Px(m_gxPlanEntry) + " fill=" + ExitSession.Px(fill) + " stop=" + ExitSession.Px(m_gxPlanStop));
+				gxPublishFillR();
 				gxEmitLog();
 			}
-			else if (!m_gxPos.Open)
+			else if (lots > 0 && m_gxPos.Qty > 0)
 			{
-				gxSendExit(m_gxExitReason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
-				return;
+				if (!m_gxPos.Open) m_gxPos.Open = true;
+				if (lots > m_gxPos.OpenQty) m_gx.CoverContracts(m_gxPos, lots, m_gxMkt.Bpv);
+				else if (m_gxT1Sent && lots < m_gxPos.OpenQty)
+				{
+					int closed = m_gx.ConfirmReduced(m_gxPos, lots, m_gxMkt.Bpv);
+					if (closed > 0)
+					{
+						m_gxT1Sent = false;
+						if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, closed, m_gxPos.OpenQty));
+					}
+				}
 			}
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_gxMkt.Tick; bar.Bpv = m_gxMkt.Bpv; bar.AtrTrail = m_gxMkt.AtrTrail; bar.Ema = m_gxMkt.Ema;
 			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
 			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
+			bar.DeferPartial = true;
 			ExitDecision d = m_gx.Manage(m_gxPos, bar);
 			if (m_portOn) portfolioStop(m_gxPos.Stop);
+			gxPublishFillR();
 			if (d.Reason != null)
 			{
 				gxSendExit(d.Reason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
@@ -4398,7 +4423,11 @@ namespace PowerLanguage.Strategy
 			if (d.PartialQty > 0 && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, d.PartialQty, m_gxPos.OpenQty));
 			WorkingExit work = ExitSession.OrdersAfter(d, m_gxPos, lots);
 			if (work.Stop) { if (longSide) m_gxLS.Send(m_gxPos.Stop, work.StopQty); else m_gxSS.Send(m_gxPos.Stop, work.StopQty); }
-			if (work.T1) { if (longSide) m_gxLT1.Send(m_gxPos.T1Level, work.T1Qty); else m_gxST1.Send(m_gxPos.T1Level, work.T1Qty); }
+			if (work.T1)
+			{
+				m_gxT1Sent = true;
+				if (longSide) m_gxLT1.Send(m_gxPos.T1Level, work.T1Qty); else m_gxST1.Send(m_gxPos.T1Level, work.T1Qty);
+			}
 			if (m_gx.FinalOn && !m_gxPos.FinalSkipped && !double.IsNaN(m_gxPos.FinalLevel))
 			{
 				int qf = lots - (m_gxPos.T1Filled ? 0 : m_gxPos.T1Qty);
@@ -4430,12 +4459,42 @@ namespace PowerLanguage.Strategy
 			return n > 0 ? n : 1;
 		}
 
-		/// <summary>Once, on the fill: pm.R$ and pm.R$w become the actual per-contract dollars. The kill's riskAtOpen is that times |position|, which is the position's 1R.</summary>
-		private void gxRewriteFillR(int lots, double fillR)
+		/// <summary>The stop filled before this bar's Manage. Log EXIT CLOSE once, from the exit order MC recorded.</summary>
+		private void gxLogFlatClose()
 		{
-			if (!m_portOn || m_gxWroteR || lots < 1 || !(fillR > 0)) return;
+			if (m_gx == null || m_gxPos == null || !m_gxGate.EngineOpen) return;
+			string name = "";
+			double px = 0;
+			try { px = Bars.Close[0]; } catch (Exception) { }
+			try
+			{
+				IMarketPosition held = null;
+				if (CurrentPosition != null && CurrentPosition.ClosedTrades != null && CurrentPosition.ClosedTrades.Count > 0
+					&& (CurrentPosition.OpenTrades == null || CurrentPosition.OpenTrades.Count == 0))
+					held = CurrentPosition;
+				else if (Positions != null && Positions.Count > 1) held = Positions[1];
+				if (held != null && held.ClosedTrades != null && held.ClosedTrades.Count > 0)
+				{
+					ITrade t = held.ClosedTrades[held.ClosedTrades.Count - 1];
+					if (t != null && t.ExitOrder != null) { name = t.ExitOrder.Name ?? ""; px = t.ExitOrder.Price; }
+				}
+			}
+			catch (Exception) { }
+			string reason = ExitSession.UnloggedFillReason(m_gxExitReason, name);
+			if (reason == null || !traceOn(ETraceLevel.Journal)) return;
+			double bpv = m_gxMkt.Bpv > 0 ? m_gxMkt.Bpv : 0;
+			trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, reason, px, bpv, 0, "bar"));
+			m_gxExitReason = reason;
+		}
+
+		/// <summary>Once, on the fill: pm.R$ and pm.R$w become the actual per-contract dollars. The kill's riskAtOpen is that times |position|, which is the position's 1R.</summary>
+		private void gxPublishFillR()
+		{
+			if (!m_portOn || m_gxPos == null || !(m_gxPos.InitialRPrice > 0) || !(m_gxMkt.Bpv > 0)) return;
+			double per = m_gxPos.InitialRPrice * m_gxMkt.Bpv;
+			if (!(per > 0) || double.IsInfinity(per)) return;
 			m_gxWroteR = true;
-			double per = fillR / lots;
+			m_portRDollar = per;
 			try
 			{
 				MyPortfolioData[_PortKeys.RDollar] = per;

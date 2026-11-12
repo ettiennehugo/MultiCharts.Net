@@ -214,10 +214,11 @@ namespace PowerLanguage.Strategy
 			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0]; mkt.SwingLow = Bars.Low[0]; mkt.SwingHigh = Bars.High[0];
 			mkt.BarMinutes = 1; mkt.BarKind = EGxBarKind.Minute; mkt.ResolutionLabel = "1 min";
 			try { InstrumentProfile ip = InstrumentProfileOf(1); if (ip != null && ip.costFloorTicks > 0) mkt.FloorTicks = ip.costFloorTicks; } catch (Exception) { }
-			var cfg = new ExitConfig { InitialStop = EInitialStop.AtrMultiple, StopAtrMult = 1.5, StopAtrLength = 14 };
+			var cfg = new ExitConfig { InitialStop = EInitialStop.AtrMultiple, StopAtrMult = 1.5, StopAtrLength = 14, Id = "TH" };
 			double planned = _ExitEngine.InitialStop(EInitialStop.AtrMultiple, longSide, entry, mkt, cfg, true);
 			if (EmbedEngine)
 			{
+				gxConfigure(cfg);
 				gxSetMarket(mkt);
 				exitPlan(longSide, entry, structural, 1, mkt, longSide ? "THLE" : "THSE");
 			}
