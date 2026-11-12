@@ -86,16 +86,14 @@
 // Other: RSI here is Cutler's simple average, not Wilder's smoothing.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Filter
+// Purpose: the location filter on the RSI(2) dip
+// Default: Avwap — close must be above the latest valid swing-low AVWAP. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: Avwap, None, Composite. Any other value throws in StartCalc.
+// Effect: None is the unfiltered base (close above the 200-bar average and RSI(2) under 10). Composite also requires the close at or below the prior 20-day composite VAH.
+// Interactions: the composite is computed in this file from daily bars. It is not the volume-profile Composite() call.
+// Fixed or research-tuned: fixed default. None and Composite are the catalogue arms.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -137,7 +135,7 @@
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // avwapFilter stays true inside the protected config. It is a bool, not a multi-value input.
-// Uncoded catalogue arms (filter off, composite VAH, RSI threshold 5, Wilder RSI) are an owner question, not this file.
+// Filter defaults to Avwap, the previous trade list. None and Composite are selectable. The composite VAH spreads each prior daily bar's volume uniformly from low to high. RSI stays Cutler, threshold 10. Wilder RSI and the threshold 5 are not inputs.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -146,12 +144,17 @@ namespace PowerLanguage.Strategy
 {
 	public class _SW_02_SwingPullback : _CustomSignal
 	{
+		/// <summary>Location filter. Avwap is the current arm. None is the RSI base. Composite requires the close at or below the prior 20-day composite VAH.</summary>
+		public enum EFilter { Avwap, None, Composite }
+
+		[Input] public EFilter Filter { get; set; }
+
 		protected sealed class Sw02Config
 		{
 			public int contracts = 1;
 			public int smaLong = 200, smaExit = 5, rsiLength = 2, maxHoldBars = 5, atrLength = 20;
 			public double rsiEntry = 10, disasterAtr = 3.0;
-			public bool avwapFilter = true;
+			public int compositeDays = 20;
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
 		}
@@ -162,7 +165,7 @@ namespace PowerLanguage.Strategy
 		private double m_stop = double.NaN;
 		private int m_entryBar = -1;
 
-		public _SW_02_SwingPullback(object _ctx) : base(_ctx) { }
+		public _SW_02_SwingPullback(object _ctx) : base(_ctx) { Filter = EFilter.Avwap; }
 
 		protected override void Create()
 		{
@@ -177,6 +180,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
 			base.StartCalc();
 			m_stop = double.NaN; m_entryBar = -1;
 		}
@@ -198,12 +202,18 @@ namespace PowerLanguage.Strategy
 			if (rollOn(1)) return;
 			if (!(c > sma(Cfg.smaLong)) || !(rsi(Cfg.rsiLength) < Cfg.rsiEntry)) return;
 			double av = double.NaN;
-			if (Cfg.avwapFilter)
+			if (Filter == EFilter.Avwap)
 			{
 				_AvwapManager mgr = AvwapManager;
 				_Avwap a = mgr != null ? mgr.Latest(EAvwapAnchor.SwingLow) : null;
 				av = a != null && a.Valid ? a.Value : double.NaN;
 				if (double.IsNaN(av) || c <= av) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "avwap", double.IsNaN(av) ? "na" : av.ToString("F2") } }, false); return; }
+			}
+			else if (Filter == EFilter.Composite)
+			{
+				double vah = compositeVah(Cfg.compositeDays);
+				if (double.IsNaN(vah) || c > vah) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "vah", double.IsNaN(vah) ? "na" : vah.ToString("F2") } }, false); return; }
+				av = vah;
 			}
 			double tick = tickSize(), atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (!(atr > 0)) return;
@@ -213,10 +223,50 @@ namespace PowerLanguage.Strategy
 			m_le.Send(Cfg.contracts);
 			if (journalOn())
 			{
-				var ctx = new Dictionary<string, string> { { "rsi2", rsi(Cfg.rsiLength).ToString("F1") }, { "atr20", atr.ToString("F2") }, { "avwap", double.IsNaN(av) ? "off" : av.ToString("F2") } };
+				var ctx = new Dictionary<string, string> { { "filter", Filter.ToString() }, { "rsi2", rsi(Cfg.rsiLength).ToString("F1") }, { "atr20", atr.ToString("F2") }, { "level", Filter == EFilter.None ? "off" : double.IsNaN(av) ? "na" : av.ToString("F2") } };
 				journalArm("SW02LE", c, m_stop, double.NaN, ctx);
 				logSignal("SW-02", +1, c, m_stop, ctx, true);
 			}
+		}
+
+		/// <summary>70% value-area high of the prior n daily bars. Each bar's volume is spread uniformly from its low to its high. The signal bar is not included. NaN when volume or the tick is missing.</summary>
+		private double compositeVah(int n)
+		{
+			double tick = tickSize();
+			if (!(tick > 0) || Bars.CurrentBar <= n + 1) return double.NaN;
+			var vol = new Dictionary<long, double>();
+			double total = 0;
+			for (int i = 1; i <= n; i++)
+			{
+				double lo = Bars.Low[i], hi = Bars.High[i], v = Bars.Volume[i];
+				if (!(v > 0) || !(hi >= lo)) continue;
+				long a = (long)Math.Round(lo / tick), b = (long)Math.Round(hi / tick);
+				if (b < a) { long t = a; a = b; b = t; }
+				double each = v / (b - a + 1);
+				for (long p = a; p <= b; p++)
+				{
+					double got;
+					vol.TryGetValue(p, out got);
+					vol[p] = got + each;
+				}
+				total += v;
+			}
+			if (!(total > 0) || vol.Count == 0) return double.NaN;
+			long poc = long.MaxValue; double pocVol = -1;
+			foreach (var kv in vol) if (kv.Value > pocVol || (kv.Value == pocVol && kv.Key < poc)) { pocVol = kv.Value; poc = kv.Key; }
+			var prices = new List<long>(vol.Keys);
+			prices.Sort();
+			int at = prices.IndexOf(poc);
+			int loI = at, hiI = at;
+			double acc = vol[poc];
+			while (acc < 0.70 * total && (loI > 0 || hiI < prices.Count - 1))
+			{
+				double down = loI > 0 ? vol[prices[loI - 1]] : -1;
+				double up = hiI < prices.Count - 1 ? vol[prices[hiI + 1]] : -1;
+				if (up >= down) hiI++; else loI--;
+				acc += vol[prices[up >= down ? hiI : loI]];
+			}
+			return prices[hiI] * tick;
 		}
 
 		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[i]; return s / n; }

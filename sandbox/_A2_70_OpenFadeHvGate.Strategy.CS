@@ -86,16 +86,22 @@
 // Other: the fill bar is unprotected. m = 0.5 is the example value and is not the catalogue core.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Input: Band
+// Purpose: A2-64 distance from the RTH open, in ATR20d
+// Default: M100 — 1.0, the catalogue core. Owner 2026-11-12. The previous example value was 0.5. Not a fitted optimum.
+// Units: ATR20d
+// Range: M075 = 0.75, M100 = 1.0, M125 = 1.25. Any other value throws in StartCalc.
+// Effect: a larger band rests the limits farther from the open and widens the 2m disaster stop
+// Interactions: the disaster distance is 2 × Band × ATR20d, floored at 14 ticks
+// Fixed or research-tuned: research-tuned. The three members are the catalogue sweep. The default is the core.
+// Input: ThetaOff
+// Purpose: A2-70 annualised HV20 level that blocks new entries
+// Default: Pct50 — 0.50. Owner 2026-11-12. The previous value was the 0.30 placeholder. Not a fitted optimum.
+// Units: annualised volatility (fraction)
+// Range: Pct30 = 0.30, Pct40 = 0.40, Pct50 = 0.50, Pct70 = 0.70. Any other value throws in StartCalc.
+// Effect: a higher threshold blocks fewer days. Re-enable is 0.8 × the chosen threshold.
+// Interactions: an open trade is not flattened when the gate turns off
+// Fixed or research-tuned: research-tuned. The four members are the catalogue sweep. The default is the book 50 percent.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,8 +142,8 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// m stays 0.5 and thetaOff stays 0.30, the example's values. Changing either changes which days trade. That is an owner question.
-// Uncoded catalogue arms (prior-close reference, the m grid, the thetaOff grid including 50%) are an owner question, not this file.
+// Default change (owner 2026-11-12): Band is 1.0 (was 0.5) and ThetaOff is 0.50 (was 0.30). Both change which limits are sent.
+// The prior-close reference (R-C) is not coded. That remains an owner question.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -146,14 +152,20 @@ namespace PowerLanguage.Strategy
 {
 	public class _A2_70_OpenFadeHvGate : _VolumeProfileFuturesBase
 	{
+		/// <summary>A2-64 band multiple of ATR20d. Catalogue sweep {0.75, 1.0, 1.25}. Default is the catalogue core 1.0 (owner 2026-11-12; was 0.5).</summary>
+		public enum EBandMultiple { M075, M100, M125 }
+		/// <summary>A2-70 annualised HV20 off-switch. Catalogue sweep {30, 40, 50, 70} percent. Default 50 percent (owner 2026-11-12; was the 30 percent placeholder).</summary>
+		public enum EThetaOff { Pct30, Pct40, Pct50, Pct70 }
+
+		[Input] public EBandMultiple Band { get; set; }
+		[Input] public EThetaOff ThetaOff { get; set; }
+
 		protected sealed class A264Config
 		{
 			public int contracts = 1;
 			public TimeSpan from = new TimeSpan(9, 45, 0), to = new TimeSpan(15, 0, 0), flat = new TimeSpan(15, 55, 0);
 			public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
-			public double m = 0.5;                 // example value; catalogue core is 1.0 and the sweep is {0.75, 1.0, 1.25}
 			public int atrLength = 20, hvLength = 20;
-			public double thetaOff = 0.30;         // PLACEHOLDER (annualised HV); A2-70 sets it
 			public double reEnable = 0.8;
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
@@ -168,7 +180,10 @@ namespace PowerLanguage.Strategy
 		private bool m_traded;
 		private double m_r = double.NaN;
 
-		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { }
+		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { Band = EBandMultiple.M100; ThetaOff = EThetaOff.Pct50; }
+
+		private double bandMultiple() { return Band == EBandMultiple.M075 ? 0.75 : Band == EBandMultiple.M125 ? 1.25 : 1.0; }
+		private double thetaOff() { return ThetaOff == EThetaOff.Pct30 ? 0.30 : ThetaOff == EThetaOff.Pct40 ? 0.40 : ThetaOff == EThetaOff.Pct70 ? 0.70 : 0.50; }
 
 		protected override void Create()
 		{
@@ -187,6 +202,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EBandMultiple), Band)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Band is not a defined EBandMultiple");
+			if (!Enum.IsDefined(typeof(EThetaOff), ThetaOff)) throw new ArgumentException("_A2_70_OpenFadeHvGate: ThetaOff is not a defined EThetaOff");
 			NeedsDaily = true;                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
 			DailyConfig.atrLength = Cfg.atrLength; DailyConfig.hvLengths = new[] { Cfg.hvLength };
 			base.StartCalc();
@@ -216,8 +233,8 @@ namespace PowerLanguage.Strategy
 			if (tod < Cfg.from || tod >= Cfg.to || tod >= flat) return;
 			string why;
 			if (!entryAllowed(out why)) return;
-			double tick = tickSize(), band = Cfg.m * m_atr;
-			double r = Math.Max(2 * Cfg.m * m_atr, Cfg.costFloorTicks * tick);   // disaster stop 2m x ATR, floored
+			double tick = tickSize(), m = bandMultiple(), band = m * m_atr;
+			double r = Math.Max(2 * m * m_atr, Cfg.costFloorTicks * tick);   // disaster stop 2m x ATR, floored
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-64 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_traded = true; return; }
 			double buyAt = Math.Round((s.rthOpen - band) / tick) * tick, sellAt = Math.Round((s.rthOpen + band) / tick) * tick;
 			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). The protective stop
@@ -235,8 +252,9 @@ namespace PowerLanguage.Strategy
 			m_atr = d.Atr20d; m_hv = d.Hv(Cfg.hvLength);
 			if (double.IsNaN(m_hv)) return;
 			bool was = m_gateOff;
-			if (!m_gateOff && m_hv > Cfg.thetaOff) m_gateOff = true;
-			else if (m_gateOff && m_hv < Cfg.reEnable * Cfg.thetaOff) m_gateOff = false;
+			double theta = thetaOff();
+			if (!m_gateOff && m_hv > theta) m_gateOff = true;
+			else if (m_gateOff && m_hv < Cfg.reEnable * theta) m_gateOff = false;
 			if (was != m_gateOff && journalOn()) trace(ETraceLevel.Journal, $"A2-70 {d.PrevDate:yyyy-MM-dd} HV20 {m_hv:P1} gate {(m_gateOff ? "OFF" : "ON")}");
 		}
 
