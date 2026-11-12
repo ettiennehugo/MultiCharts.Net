@@ -204,6 +204,26 @@ namespace PowerLanguage.Function
 	{
 		public ExitConfig Config = new ExitConfig();
 		public readonly List<string> Log = new List<string>();
+
+		/// <summary>Copy the queued lines and clear them so a later bar cannot emit them again.</summary>
+		public List<string> DrainLog()
+		{
+			var copy = new List<string>(Log);
+			Log.Clear();
+			return copy;
+		}
+
+		/// <summary>Map an MC exit order name to the §4.10 reason. Market exits (LX/SX) keep the reason stored when the order was sent.</summary>
+		public static string ReasonFromExitOrder(string exitName, string pendingMarket)
+		{
+			if (string.IsNullOrEmpty(exitName)) return pendingMarket ?? "";
+			if (exitName == "Stop Loss") return "STOP";
+			if (exitName.EndsWith("LT1", StringComparison.Ordinal) || exitName.EndsWith("ST1", StringComparison.Ordinal)) return "T1";
+			if (exitName.EndsWith("LT", StringComparison.Ordinal) || exitName.EndsWith("ST", StringComparison.Ordinal)) return "TARGET";
+			if (exitName.EndsWith("LS", StringComparison.Ordinal) || exitName.EndsWith("SS", StringComparison.Ordinal)) return "STOP";
+			if (exitName.EndsWith("LX", StringComparison.Ordinal) || exitName.EndsWith("SX", StringComparison.Ordinal)) return pendingMarket ?? "";
+			return pendingMarket ?? "";
+		}
 		public ExitEffective Effective;
 		public string Package;
 		public int FillBarStops;
@@ -1110,6 +1130,7 @@ namespace PowerLanguage.Strategy
 		private ExitPosition m_wrapPos;
 		private ExitMarket m_mkt;
 		private bool m_inert, m_started, m_inTrade, m_explicitNext, m_wroteR, m_haveNet, m_wasFlat, m_havePx;
+		private string m_exitReason = "";
 		private double m_prevNet, m_disasterPx, m_disasterDl, m_prevClose, m_atrS, m_atrT, m_seedS, m_seedT, m_ema;
 		private int m_nS, m_nT;
 		private bool m_haveEma;
@@ -1161,6 +1182,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
+			if (m_wrap != null) gxAttachSession(m_wrap, m_wrapPos);
 			base.CalcBar();
 			if (m_inert || m_wrap == null) return;
 			if (!m_started && Bars.Status == EBarState.Close)
@@ -1279,6 +1301,9 @@ namespace PowerLanguage.Strategy
 				ps = m_wrap.InitialStop(longSide, fill, m_mkt);
 			}
 			else m_wrap.NotePlan(longSide, true, true, pe, ps, Bars.CurrentBar, Bars.CurrentBar, out pe, out ps);
+			gxSetPlan(pe, ps, m_wrap.PlanSource);
+			gxNoteExit("");
+			m_exitReason = "";
 			EInitialStop mode = m_wrap.Effective.InitialStop;
 			bool level = mode == EInitialStop.SignalBarExtreme || mode == EInitialStop.SwingExtreme;
 			double live = level || !(m_disasterPx > 0) ? m_wrap.InitialStop(longSide, fill, m_mkt) : ExitSession.HandoverStop(longSide, fill, m_disasterPx);
@@ -1308,6 +1333,13 @@ namespace PowerLanguage.Strategy
 		private void ManageTrade(bool longSide)
 		{
 			int lots = OpenLots();
+			if (m_wrapPos != null && !m_wrapPos.Open)
+			{
+				bool market = m_exitReason.Length > 0 && m_exitReason != "STOP" && m_exitReason != "T1" && m_exitReason != "TARGET";
+				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
+				else if (m_exitReason == "STOP") { if (longSide) m_gxLS.Send(m_wrapPos.Stop, lots); else m_gxSS.Send(m_wrapPos.Stop, lots); }
+				return;
+			}
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_mkt.Tick; bar.Bpv = m_mkt.Bpv; bar.AtrTrail = m_mkt.AtrTrail > 0 ? m_mkt.AtrTrail : m_atrT; bar.Ema = m_ema;
@@ -1318,6 +1350,8 @@ namespace PowerLanguage.Strategy
 			if (d.Reason != null)
 			{
 				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_wrapPos.GapThroughStop;
+				gxNoteExit(d.Reason);
+				m_exitReason = d.Reason ?? "";
 				if (market) { if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots); }
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
 				return;
