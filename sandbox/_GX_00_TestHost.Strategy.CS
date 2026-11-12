@@ -59,7 +59,7 @@
 // Costs: the chart's own commission and slippage. This file does not change them.
 //
 // ## 12. Trade management
-// While open: exitBar when EmbedEngine is true. Otherwise the wrapper.
+// While open: exitBar on every closed bar when EmbedEngine is true, including the flat bar. Otherwise the wrapper.
 //
 // ## 13. Exits
 // Hard stop: the widened GX stop when embedded
@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			int pos = StrategyInfo.MarketPosition;
-			if (EmbedEngine && pos != 0) { exitBar(); return; }
+			if (EmbedEngine) exitBar();
 			if (pos != 0) return;
 			m_wait++;
 			int every = EntryEveryBars < 1 ? 1 : EntryEveryBars;

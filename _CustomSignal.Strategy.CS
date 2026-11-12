@@ -1716,12 +1716,14 @@ namespace PowerLanguage.Strategy
 		private bool m_gxPlacesT1;
 		private bool m_gxWroteR;
 		private bool m_gxT1Sent;
+		private bool m_gxFullSpent;
+		private bool m_gxCloseLogged;
 		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
 		private ExitPosition m_gxPos;
 		private ExitMarket m_gxMkt;
-		protected IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST;
+		protected IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST, m_gxLF, m_gxSF;
 		protected IOrderMarket m_gxLX, m_gxSX;
 
 		private void startPortfolio()
@@ -2412,6 +2414,8 @@ namespace PowerLanguage.Strategy
 			m_gxPlacesT1 = false;
 			m_gxWroteR = false;
 			m_gxT1Sent = false;
+			m_gxFullSpent = false;
+			m_gxCloseLogged = false;
 			m_gxGate.OnFlat();
 			m_gx = null;
 			m_gxPos = null;
@@ -4236,6 +4240,8 @@ namespace PowerLanguage.Strategy
 			m_gxST = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "ST", EOrderAction.BuyToCover, OrderExit.Total));
 			m_gxLX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "LX", EOrderAction.Sell, OrderExit.Total));
 			m_gxSX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "SX", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxLF = OrderCreator.Stop(new SOrderParameters(Contracts.Default, id + "LF", EOrderAction.Sell, OrderExit.FromAll));
+			m_gxSF = OrderCreator.Stop(new SOrderParameters(Contracts.Default, id + "SF", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_gxOrders = true;
 		}
 
@@ -4351,24 +4357,30 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX ARM side=" + (longSide ? "long" : "short") + " qty=" + qty.ToString(CultureInfo.InvariantCulture) + " entry=" + plannedEntry.ToString("0.########", CultureInfo.InvariantCulture) + " stop=" + stop.ToString("0.########", CultureInfo.InvariantCulture));
 			}
 			if (journalOn()) journalArm(m_gxEntryOrder, plannedEntry, stop, double.NaN);
-			if (longSide) m_gxLS.Send(stop, qty);
-			else m_gxSS.Send(stop, qty);
+			// qty is the arm code the MM may replace. A Total stop for that code covers one contract of a larger fill.
+			// FromAll with no quantity exits whatever size the entry fills, including on the fill bar.
+			gxSendFullStop(longSide, stop);
 			return stop;
 		}
 
-		/// <summary>One closed bar of an embedded GX trade. No-op until exitPlan has been called. Sends only exits that reduce the open side.</summary>
+		/// <summary>One closed bar of an embedded GX trade, including the flat bar after the exit. No-op until exitPlan has been called. Sends only exits that reduce the open side. EXIT CLOSE is written once, on the flat bar.</summary>
 		protected void exitBar()
 		{
 			if (!m_gxUsed || m_gx == null) return;
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
+				bool wasOpen = m_gxGate.EngineOpen;
 				gxLogFlatClose();
-				m_gxGate.OnFlat();
-				m_gxExitReason = "";
-				m_gxT1Sent = false;
-				if (m_gxPos != null) m_gxPos.Open = false;
-				m_gxArmed = false;
+				if (wasOpen)
+				{
+					m_gxGate.OnFlat();
+					m_gxExitReason = "";
+					m_gxT1Sent = false;
+					m_gxFullSpent = false;
+					if (m_gxPos != null) m_gxPos.Open = false;
+					m_gxArmed = false;
+				}
 				return;
 			}
 			if (!m_gxArmed && !m_gxGate.EngineOpen) return;
@@ -4379,6 +4391,9 @@ namespace PowerLanguage.Strategy
 			{
 				m_gxExitReason = "";
 				m_gxT1Sent = false;
+				m_gxCloseLogged = false;
+				m_gxFullSpent = false;
+				if (gxPrimaryStopFilled()) gxMarkFullSpent(lots);
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
 				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
@@ -4392,9 +4407,7 @@ namespace PowerLanguage.Strategy
 			}
 			else if (lots > 0 && m_gxPos.Qty > 0)
 			{
-				if (!m_gxPos.Open) m_gxPos.Open = true;
-				if (lots > m_gxPos.OpenQty) m_gx.CoverContracts(m_gxPos, lots, m_gxMkt.Bpv);
-				else if (m_gxT1Sent && lots < m_gxPos.OpenQty)
+				if (m_gxT1Sent && lots < m_gxPos.OpenQty)
 				{
 					int closed = m_gx.ConfirmReduced(m_gxPos, lots, m_gxMkt.Bpv);
 					if (closed > 0)
@@ -4403,6 +4416,10 @@ namespace PowerLanguage.Strategy
 						if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, closed, m_gxPos.OpenQty));
 					}
 				}
+				else if (m_gxPos.OpenQty > lots)
+					gxMarkFullSpent(lots);
+				if (gxPrimaryStopFilled()) gxMarkFullSpent(lots);
+				m_gx.ReopenRemainder(m_gxPos, lots, m_gxPos.Stop, m_gxMkt.Bpv);
 			}
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
@@ -4413,16 +4430,20 @@ namespace PowerLanguage.Strategy
 			ExitDecision d = m_gx.Manage(m_gxPos, bar);
 			if (m_portOn) portfolioStop(m_gxPos.Stop);
 			gxPublishFillR();
+			if (lots > 0 && !m_gxPos.Open) m_gxPos.Open = true;
+			ExitSession.RemainderBook guard = ExitSession.Protection(lots, m_gxCloseLogged, m_gxExitReason);
 			if (d.Reason != null)
 			{
-				gxSendExit(d.Reason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
 				if (!string.IsNullOrEmpty(d.Reason)) m_gxExitReason = d.Reason;
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
+				if ((d.Reason == "STOP" || d.Reason == "TRAIL-THROUGH") && !m_gxPos.GapThroughStop)
+					gxSendWorkingStop(longSide, guard);
+				else
+					gxSendExit(d.Reason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
 				return;
 			}
 			if (d.PartialQty > 0 && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, d.PartialQty, m_gxPos.OpenQty));
 			WorkingExit work = ExitSession.OrdersAfter(d, m_gxPos, lots);
-			if (work.Stop) { if (longSide) m_gxLS.Send(m_gxPos.Stop, work.StopQty); else m_gxSS.Send(m_gxPos.Stop, work.StopQty); }
+			if (work.Stop) gxSendWorkingStop(longSide, guard);
 			if (work.T1)
 			{
 				m_gxT1Sent = true;
@@ -4435,6 +4456,31 @@ namespace PowerLanguage.Strategy
 				if (qf > lots) qf = lots;
 				if (longSide) m_gxLT.Send(m_gxPos.FinalLevel, qf); else m_gxST.Send(m_gxPos.FinalLevel, qf);
 			}
+		}
+
+		/// <summary>FromAll stop, no quantity. It covers the position the MM fills, on the fill bar and after.</summary>
+		private void gxSendFullStop(bool longSide, double stop)
+		{
+			if (m_gxLF == null || m_gxSF == null) return;
+			if (longSide) m_gxLF.Send(stop); else m_gxSF.Send(stop);
+		}
+
+		/// <summary>FromAll covers the fill the MM sized. The Total stop is the same count MC still holds, and it is a different order, so a partial fill of the first stop does not leave the rest unprotected.</summary>
+		private void gxSendWorkingStop(bool longSide, ExitSession.RemainderBook guard)
+		{
+			if (m_gxPos == null) return;
+			if (guard.SendFull) gxSendFullStop(longSide, m_gxPos.Stop);
+			if (guard.SendSized && guard.StopQty > 0)
+			{
+				if (longSide) m_gxLS.Send(m_gxPos.Stop, guard.StopQty); else m_gxSS.Send(m_gxPos.Stop, guard.StopQty);
+			}
+		}
+
+		private void gxMarkFullSpent(int lots)
+		{
+			if (m_gxFullSpent) return;
+			m_gxFullSpent = true;
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: GX STOP-REMAINDER " + m_gxPrefix + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " - the fill-bar stop left contracts open");
 		}
 
 		/// <summary>Refresh ATR, EMA and the bar size the trail and the control-bar map read. Call before exitBar when they change.</summary>
@@ -4459,10 +4505,10 @@ namespace PowerLanguage.Strategy
 			return n > 0 ? n : 1;
 		}
 
-		/// <summary>The stop filled before this bar's Manage. Log EXIT CLOSE once, from the exit order MC recorded.</summary>
+		/// <summary>MC is flat. Log EXIT CLOSE once. A stop touch while contracts remain is not a close.</summary>
 		private void gxLogFlatClose()
 		{
-			if (m_gx == null || m_gxPos == null || !m_gxGate.EngineOpen) return;
+			if (m_gxCloseLogged || m_gx == null || m_gxPos == null || !m_gxGate.EngineOpen) return;
 			string name = "";
 			double px = 0;
 			try { px = Bars.Close[0]; } catch (Exception) { }
@@ -4480,11 +4526,38 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			catch (Exception) { }
-			string reason = ExitSession.UnloggedFillReason(m_gxExitReason, name);
-			if (reason == null || !traceOn(ETraceLevel.Journal)) return;
+			string reason = m_gxExitReason;
+			if (string.IsNullOrEmpty(reason)) reason = ExitSession.UnloggedFillReason("", name);
+			m_gxCloseLogged = true;
+			if (string.IsNullOrEmpty(reason)) return;
+			m_gxExitReason = reason;
+			if (!traceOn(ETraceLevel.Journal)) return;
 			double bpv = m_gxMkt.Bpv > 0 ? m_gxMkt.Bpv : 0;
 			trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, reason, px, bpv, 0, "bar"));
-			m_gxExitReason = reason;
+		}
+
+		/// <summary>A stop order from this position already filled while MC still holds contracts. That order will not fill again.</summary>
+		private bool gxPrimaryStopFilled()
+		{
+			try
+			{
+				IMarketPosition held = CurrentPosition;
+				if (held == null || held.OpenTrades == null || held.OpenTrades.Count == 0) return false;
+				if (held.ClosedTrades == null || held.ClosedTrades.Count == 0) return false;
+				DateTime entry = gxPositionEntryTime();
+				string lf = m_gxPrefix + "LF", sf = m_gxPrefix + "SF", ls = m_gxPrefix + "LS", ss = m_gxPrefix + "SS";
+				for (int i = 0; i < held.ClosedTrades.Count; i++)
+				{
+					ITrade t = held.ClosedTrades[i];
+					if (t == null || t.ExitOrder == null) continue;
+					string n = t.ExitOrder.Name ?? "";
+					if (n != lf && n != sf && n != ls && n != ss) continue;
+					if (entry != DateTime.MinValue && t.ExitOrder.Time < entry) continue;
+					return true;
+				}
+			}
+			catch (Exception) { }
+			return false;
 		}
 
 		/// <summary>Once, on the fill: pm.R$ and pm.R$w become the actual per-contract dollars. The kill's riskAtOpen is that times |position|, which is the position's 1R.</summary>

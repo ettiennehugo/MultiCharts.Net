@@ -353,6 +353,7 @@ namespace PowerLanguage.Function
 			if (exitName.EndsWith("LT1", StringComparison.Ordinal) || exitName.EndsWith("ST1", StringComparison.Ordinal)) return "T1";
 			if (exitName.EndsWith("LT", StringComparison.Ordinal) || exitName.EndsWith("ST", StringComparison.Ordinal)) return "TARGET";
 			if (exitName.EndsWith("LS", StringComparison.Ordinal) || exitName.EndsWith("SS", StringComparison.Ordinal)) return "STOP";
+			if (exitName.EndsWith("LF", StringComparison.Ordinal) || exitName.EndsWith("SF", StringComparison.Ordinal)) return "STOP";
 			if (exitName.EndsWith("LX", StringComparison.Ordinal) || exitName.EndsWith("SX", StringComparison.Ordinal)) return pendingMarket ?? "";
 			return pendingMarket ?? "";
 		}
@@ -396,6 +397,36 @@ namespace PowerLanguage.Function
 				o.Qty = lots;
 			}
 			return o;
+		}
+
+		/// <summary>
+		/// Stop to keep working while MC is not flat. Once the fill is known, StopQty is MC's contracts, not the arm code.
+		/// The FromAll stop is sent only with the entry. EXIT CLOSE is only when mcLots is 0, and only once.
+		/// </summary>
+		public struct RemainderBook
+		{
+			public bool SendFull;
+			public bool SendSized;
+			public int StopQty;
+			public bool LogClose;
+			public string CloseReason;
+		}
+
+		public static RemainderBook Protection(int mcLots, bool closeLogged, string pendingReason)
+		{
+			var b = new RemainderBook();
+			if (mcLots <= 0)
+			{
+				if (!closeLogged)
+				{
+					b.LogClose = true;
+					b.CloseReason = pendingReason ?? "";
+				}
+				return b;
+			}
+			b.StopQty = mcLots;
+			b.SendSized = true;
+			return b;
 		}
 
 		/// <summary>
@@ -940,9 +971,10 @@ namespace PowerLanguage.Function
 			if (openAdv > p.MaeOpenDollars) p.MaeOpenDollars = openAdv;
 		}
 
-		public void ScaleOut(ExitPosition p, int qtyOut, double price, double bpv)
+		int TakeContracts(ExitPosition p, int qtyOut, double price, double bpv)
 		{
 			if (qtyOut > p.OpenQty) qtyOut = p.OpenQty;
+			if (qtyOut < 1) return 0;
 			int left = qtyOut;
 			for (int i = 0; i < p.Lots.Count && left > 0; i++)
 			{
@@ -956,9 +988,41 @@ namespace PowerLanguage.Function
 				left -= take;
 			}
 			for (int i = p.Lots.Count - 1; i >= 0; i--) if (p.Lots[i].Qty <= 0) p.Lots.RemoveAt(i);
-			p.OpenQty -= qtyOut;
+			int taken = qtyOut - left;
+			p.OpenQty -= taken;
+			return taken;
+		}
+
+		public void ScaleOut(ExitPosition p, int qtyOut, double price, double bpv)
+		{
+			TakeContracts(p, qtyOut, price, bpv);
 			p.T1Filled = true;
 			if (p.OpenQty <= 0) p.Open = false;
+		}
+
+		/// <summary>
+		/// MC still holds contracts after the engine marked the book closed, or it holds fewer than the book recorded.
+		/// Reopen on that size. A partial stop fill is not a T1 and does not close the trade.
+		/// </summary>
+		public void ReopenRemainder(ExitPosition p, int mcLots, double price, double bpv)
+		{
+			if (p == null || mcLots < 1) return;
+			p.Open = true;
+			if (p.OpenQty < 1)
+			{
+				p.OpenQty = mcLots;
+				if (p.Qty < mcLots) p.Qty = mcLots;
+				if (p.Lots.Count == 0) p.Lots.Add(new ExitLot { Fill = p.Fill, Qty = mcLots });
+				return;
+			}
+			if (mcLots > p.OpenQty)
+			{
+				CoverContracts(p, mcLots, bpv);
+				p.Open = true;
+				return;
+			}
+			if (mcLots < p.OpenQty) TakeContracts(p, p.OpenQty - mcLots, price, bpv);
+			p.Open = true;
 		}
 
 		/// <summary>MC is holding more contracts than the engine recorded. The stop and a not-yet-filled T1 follow the actual size.</summary>
