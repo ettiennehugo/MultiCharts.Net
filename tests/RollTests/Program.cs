@@ -119,23 +119,23 @@ static class Program
 		Check(_RollDetector.SeriesKeyWarning(true, true, "Minute", false) == null, "R1 no warn: Globex key");
 		Check(_RollDetector.SeriesKeyWarning(false, true, "Minute", true) == null, "R1 no warn: Table only");
 		Check((_RollDetector.SeriesKeyWarning(true, true, "Minute", true) ?? "").Contains("Table") && (_RollDetector.SeriesKeyWarning(true, true, "Tick", true) ?? "").Contains("(Tick)"), "R1 warning points to Table and names the resolution label");
-		// PR #46 review (M1): fail if _Test6 stops running Table mode on Globex days (no suite compiles _Test6/_CustomSignal, so a
-		// source check). Needs _Test6.Strategy.CS on disk (searched upwards from the test directory).
+		// PR #46 review (M1): fail if _A2_63_RegimeGate stops running Table mode on Globex days (no suite compiles _A2_63_RegimeGate/_CustomSignal, so a
+		// source check). Needs _A2_63_RegimeGate.Strategy.CS on disk (searched upwards from the test directory).
 		{
 			string dir = AppContext.BaseDirectory, path = null;
-			for (var di = new DirectoryInfo(dir); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_Test6.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			for (var di = new DirectoryInfo(dir); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_A2_63_RegimeGate.Strategy.CS"); if (File.Exists(fp)) path = fp; }
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			var assigns = Regex.Matches(src, @"\bRollDetection\s*=(?!=)\s*([^;]+);").Cast<Match>().Select(m => m.Groups[1].Value.Trim()).ToList();
-			Check(path != null && assigns.Count == 1 && assigns[0] == "ERollDetection.Table", "_Test6 sets RollDetection = ERollDetection.Table exactly once [" + string.Join(" | ", assigns) + "]");
-			Check(Regex.IsMatch(src, @"override\s+DateTime\s+tradingDayKey\s*\([^)]*\)\s*\{\s*return\s+_CmeSessionClock\.GlobexTradingDayEt\("), "_Test6 tradingDayKey = _CmeSessionClock.GlobexTradingDayEt");
+			Check(path != null && assigns.Count == 1 && assigns[0] == "ERollDetection.Table", "_A2_63_RegimeGate sets RollDetection = ERollDetection.Table exactly once [" + string.Join(" | ", assigns) + "]");
+			Check(Regex.IsMatch(src, @"override\s+DateTime\s+tradingDayKey\s*\([^)]*\)\s*\{\s*return\s+_CmeSessionClock\.GlobexTradingDayEt\("), "_A2_63_RegimeGate tradingDayKey = _CmeSessionClock.GlobexTradingDayEt");
 			Check(Regex.IsMatch(src, @"HostConfig\.rollDetection\s*=\s*rollText") && Regex.IsMatch(src, @"RollDetectionText\(RollDetection\)") && !src.Contains("RollDetection.ToString()")
 				&& Regex.IsMatch(src, @"HostConfig\.rollDatesDigest\s*=\s*_RollDetector\.DatesDigest\(RollDates\)")
 				&& Regex.IsMatch(src, @"TradingDayText\(ETradingDayKey\.Globex18ET\)")
 				&& src.Contains("ES only (N2)") && src.Contains("RequireGate0Rth"),
-				"_Test6 hashes explicit roll and day-key spellings, accepts ES only, and checks the frozen window");
-			Check(Regex.IsMatch(src, @"HostConfig\.atrRestartOnRoll\s*=\s*false\s*;") && Regex.IsMatch(src, @"DailyConfig\.atrRestartOnRoll\s*=\s*HostConfig\.atrRestartOnRoll\s*;"), "_Test6 carries ATR20d across rolls (atrRestartOnRoll = false, hashed) - rulings (h)");
+				"_A2_63_RegimeGate hashes explicit roll and day-key spellings, accepts ES only, and checks the frozen window");
+			Check(Regex.IsMatch(src, @"HostConfig\.atrRestartOnRoll\s*=\s*false\s*;") && Regex.IsMatch(src, @"DailyConfig\.atrRestartOnRoll\s*=\s*HostConfig\.atrRestartOnRoll\s*;"), "_A2_63_RegimeGate carries ATR20d across rolls (atrRestartOnRoll = false, hashed) - rulings (h)");
 		}
-		// PR #51 review item 2: host-side Globex key in _CustomSignal (no suite compiles it, so a source check like _Test6's).
+		// PR #51 review item 2: host-side Globex key in _CustomSignal (no suite compiles it, so a source check like _A2_63_RegimeGate's).
 		// Kills: key forced off, Future-category gate removed, intraday gate removed, warning not suppressed, day not re-keyed.
 		{
 			string dir = AppContext.BaseDirectory, path = null;

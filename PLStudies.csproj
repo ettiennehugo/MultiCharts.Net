@@ -539,6 +539,8 @@
     <Compile Include="_Test28.Strategy.CS" />
     <Compile Include="_Test29.Strategy.CS" />
     <Compile Include="_Test30.Strategy.CS" />
+    <Compile Include="_A2_63_RegimeGate.Strategy.CS" />
+    <Compile Include="_McBidAskProbe.Strategy.CS" />
     <Compile Include="_CmeHolidays.Function.CS" />
     <Compile Include="_SignalJournal.Function.CS" />
     <Compile Include="_CmeSessionClock.Function.CS" />

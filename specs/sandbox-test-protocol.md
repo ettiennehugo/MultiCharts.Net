@@ -5,6 +5,8 @@
 **Requested by Ettienne, 2026-11-12 07:36 ET (verbatim):** *"I'll want to systematically test all those signals by moving their code to one of the _Test** signals. Test them thoroughly and document the results. We can create more _Test** signals, say 30 so we can test larger batches of signals at a time."*
 Earlier the same morning Ettienne said: test and development strategies live in `sandbox/` and are not in `PLStudies.csproj`; concrete strategies go in the studies folder.
 
+**Rev 1.2, 2026-11-12 08:08 ET:** the `_Test1` order-flow probe moved unchanged to `_McBidAskProbe.Strategy.CS` and the `_Test6` A2-63 regime-gate harness moved unchanged to `_A2_63_RegimeGate.Strategy.CS` (both at the repo root, each with its own `Compile Include`, owner-approved). `_Test1` and `_Test6` are now inert free slots. See §9 item 10.
+
 **Rev 1.1, 2026-11-12 08:06 ET (owner answers):** `_Test3` class renamed to `_Test3`; `_Test1` released as a free slot; starting capital $50,000; sandbox signals are standardized by Coder before testing (owner 08:03 ET). See §9.
 
 **Status:** documentation and inert slots only. No signal has been run, validated or promoted by this document. Every result table below starts at "not run".
@@ -25,13 +27,13 @@ The sandbox file stays the source of truth. A slot only ever holds a byte-for-by
 
 | Slot | Base class | Current content | In `PLStudies.csproj` | May be overwritten? |
 |---|---|---|---|---|
-| `_Test1` | `_VolumeProfileFuturesBase` | Scaffold with no orders: `OrderFlowEnabled = true`, `FlowCfg.McBidAsk = Prefer`, `MinNodeTicks = 3`, `McBidAskChartType = FootPrint` (commit `7015acd`, "Changes to test check 9a"). Released as a free slot (Ettienne, 2026-11-12 08:06 ET). The scaffold may be overwritten; it stays in git history (`7015acd`) | yes | Yes |
+| `_Test1` | `_CustomSignal` | **Inert** (2026-11-12). Its former content, the live Check 9a MC-BidAsk order-flow probe (`7015acd`), moved unchanged to `_McBidAskProbe.Strategy.CS` | yes | Yes |
 | `_Test1.Indicator.CS` | indicator | not a slot; left alone | yes | No |
 | `_Test2` | `_CustomSignal` | Copy of `sandbox/_A2_69_KaufmanThreeDay` (code-identical; only class name, BOM, whitespace differ) | yes | Yes, after its result is recorded |
 | `_Test3` | `_CustomSignal` | Copy of `sandbox/_TS_02_EuropeanOpenDrift` (TS-01 rules). Public class renamed `_Test03` → `_Test3` (Ettienne, 2026-11-12 08:06 ET; class and constructor only) | yes | Yes, after its result is recorded |
 | `_Test4` | `_CustomSignal` | Copy of `sandbox/_A2_49_MiddayBreakout` | yes | Yes, after its result is recorded |
 | `_Test5` | `_CustomSignal` | Copy of `sandbox/_SW_02_SwingPullback` | yes | Yes, after its result is recorded |
-| `_Test6` | `_CustomSignal` | **A2-63 host + pre-registered RegimeGate harness** (`specs/regime-consumer-prereg.md`, `_RegimeGate.Function.CS`, REGGATE journal, hash pins; named throughout the engines manual) | yes | **Never** |
+| `_Test6` | `_CustomSignal` | **Inert** (2026-11-12). Its former content, the A2-63 host + pre-registered RegimeGate harness, moved unchanged to `_A2_63_RegimeGate.Strategy.CS` (see `specs/a2-63-rulings.md` move note) | yes | Yes |
 | `_Test7` | `_VolumeProfileFuturesBase` | Copy of `sandbox/_AV_08_PeriodAvwapLayer` | yes | Yes, after its result is recorded |
 | `_Test8` | `_VolumeProfileFuturesBase` | Copy of `sandbox/_VW_05_LateDayVwap` | yes | Yes, after its result is recorded |
 | `_Test9` | `_CustomSignal` | Copy of `sandbox/_A2_56_FirstHourBreak` | yes | Yes, after its result is recorded |
@@ -40,7 +42,7 @@ The sandbox file stays the source of truth. A slot only ever holds a byte-for-by
 
 Slots 2–5 and 7–10 were filled by Ettienne in `c862ad2` (7 Nov 2026) from the same sandbox sources. No results for them are recorded in the repo, so they are "loaded, not run". They hold the **pre-standardization** engine-manual examples: before testing, each is reloaded from Coder's standardized sandbox file (§3.0).
 
-Other root `_Test*` strategies (`_TestGate0`, `_TestPortArm`, `_TestPortThrottle`, `_TestPortThrottleMM`) are purpose-built harnesses, not slots. Do not use them.
+The dedicated signals `_A2_63_RegimeGate` (A2-63 harness) and `_McBidAskProbe` (Check 9a probe) are not slots. Other root `_Test*` strategies (`_TestGate0`, `_TestPortArm`, `_TestPortThrottle`, `_TestPortThrottleMM`) are purpose-built harnesses, not slots. Do not use them.
 
 ## 3. Slot workflow
 
@@ -50,7 +52,7 @@ Ettienne, 2026-11-12 08:03 ET: the sandbox signals are engine-manual examples, a
 
 ### 3.1 Load a signal into a slot
 
-1. Pick a free slot from the slot register (§3.4). Never `_Test6`. The sandbox file must be Coder's standardized version (§3.0).
+1. Pick a free slot from the slot register (§3.4). Any of `_Test1`–`_Test30`. The sandbox file must be Coder's standardized version (§3.0).
 2. Record the source: `git rev-parse --short HEAD` (commit) and `git rev-parse --short HEAD:sandbox/<file>` (blob) of the branch the sandbox file is read from.
 3. Copy the sandbox file over `_TestNN.Strategy.CS`, then rename **only**:
    - the public class (`public class _A2_49_MiddayBreakout` → `public class _TestNN`);
@@ -83,12 +85,12 @@ After the result is recorded (§6) and the owner has read the verdict:
 
 | Slot | Signal ID | Sandbox file | Source commit | Blob | Loaded (ET) | Batch | Status |
 |---|---|---|---|---|---|---|---|
-| `_Test1` | | | | | | | free (Ettienne, 2026-11-12 08:06 ET); order-flow scaffold may be overwritten, kept in git `7015acd` |
+| `_Test1` | | | | | | | free (inert since 2026-11-12; former probe now `_McBidAskProbe`) |
 | `_Test2` | A2-69 | `_A2_69_KaufmanThreeDay.Strategy.CS` | `c862ad2` | `24309f4` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test3` | TS-01 (file TS-02) | `_TS_02_EuropeanOpenDrift.Strategy.CS` | `c862ad2` | `bbdd251` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run; class renamed `_Test3` 2026-11-12 |
 | `_Test4` | A2-49 | `_A2_49_MiddayBreakout.Strategy.CS` | `c862ad2` | `a61de99` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test5` | SW-02 | `_SW_02_SwingPullback.Strategy.CS` | `c862ad2` | `eb551f8` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
-| `_Test6` | A2-63 + G-R | (not a sandbox copy) | — | — | — | — | reserved, never overwrite |
+| `_Test6` | | | | | | | free (inert since 2026-11-12; former harness now `_A2_63_RegimeGate`) |
 | `_Test7` | AV-08 | `_AV_08_PeriodAvwapLayer.Strategy.CS` | `c862ad2` | `d4f7fef` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test8` | VW-05 | `_VW_05_LateDayVwap.Strategy.CS` | `c862ad2` | `8afaba5` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
 | `_Test9` | A2-56 | `_A2_56_FirstHourBreak.Strategy.CS` | `c862ad2` | `04b50f3` | 2026-11-07 (owner) | — | loaded (pre-standardization), not run |
@@ -218,14 +220,14 @@ Tested by / date (ET): <...>   Slot freed: <date or "still loaded">
 
 ## 7. Batches
 
-- A batch is up to **30** signals, one per slot (`_Test1`, `_Test11`–`_Test30`, plus any released slot among 2–5 and 7–10; never `_Test6`).
+- A batch is up to **30** signals, one per slot (`_Test1`, `_Test6`, `_Test11`–`_Test30`, plus any released slot among 2–5 and 7–10).
 - **One chart workspace per batch:** `C:\Share\MultiCharts\Workspaces\SandboxBatch<NN> Charts.wsp`, one chart window per signal, titled `<Slot> <ID>`. One signal per chart: two signals on one chart share a position and contaminate each other.
 - Charts that share Data1/Data2 (for example all 1m @ES Globex) can be built from one chart template, but each keeps its own signal.
 - **Run one chart at a time** (set the other charts' strategies off, or keep only a few charts open). Ten or more 1m charts over 2016–2024 recalculating together will exhaust memory on the MiniPC.
 - Portfolio Trader: an optional **one PT workspace per batch** (`SandboxBatch<NN> Backtest.pws`) is for portfolio-level checks only (M-PORT interactions). It is not used for the per-signal battery, because the MM and shared capital change fills.
 - Staging and outputs per batch: `C:\Share\MultiCharts\SandboxBatch<NN>\` (slot files as copied) and `...\out\` (journals per run). Never open or save `M5 Validation 388314a.wsp` or any `Check7*` file.
 - Order inside a batch: compile all slots first (one F7 each), then run (a)–(b) for every signal, then (c)–(f) per signal, then verdicts.
-- **Batch 1 (proposed):** the ten sandbox signals of §4, in Coder's standardized versions (§3.0). Eight keep their current slots (`_Test2`–`_Test5`, `_Test7`–`_Test10`) and are reloaded from the standardized files; DV-15 and TS-03 take `_Test11` and `_Test12` (or `_Test1`).
+- **Batch 1 (proposed):** the ten sandbox signals of §4, in Coder's standardized versions (§3.0). Eight keep their current slots (`_Test2`–`_Test5`, `_Test7`–`_Test10`) and are reloaded from the standardized files; DV-15 and TS-03 take `_Test11` and `_Test12` (or `_Test1` / `_Test6`).
 
 ## 8. Results register (one row per sandbox signal)
 
@@ -255,3 +257,4 @@ New sandbox signals (for example the batch-1 strategies PS-02, PS-01, VW-01, AV-
 7. **Control arm** depends on the `_GenericExit` build from PR #119.
 8. **New slots on the MiniPC.** Slots 11–30 exist on the MiniPC only after this branch is merged and the studies clone is updated by the owner; until then each new slot is registered once with New Signal (§3.2).
 9. **[RESOLVED Ettienne, 2026-11-12 08:03 ET]** The sandbox signals are engine-manual examples. Coder standardizes their comments and code to the spec before testing; testing runs on Coder's standardized versions (§3.0). Items 4 and 5 may be closed by that standardization.
+10. **[RESOLVED Ettienne, 2026-11-12 08:06 and 08:08 ET]** 08:06 ET (verbatim): *"Move the regime gate to its own signal, e.g.  _A2_63_RegiimeGatewith a proper name so we can use that slot for dedicated testing."* 08:08 ET (verbatim): *"move the code in test 1 to a similar dedicated signal with proper names, test 6 and test 1 ported signals can be added to csproj"*. Done: `_Test6` → `_A2_63_RegimeGate.Strategy.CS` (SHA256 `65996b7a…` → `8e8cbc23…`; class, constructor and header title only) and `_Test1` → `_McBidAskProbe.Strategy.CS` (SHA256 `cf834a1a…` → `2aff76c7…`; class, constructor and one provenance comment only). Both are at the repo root with hand-written `Compile Include` lines. `_Test1` and `_Test6` are inert slots.

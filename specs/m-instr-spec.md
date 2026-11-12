@@ -104,7 +104,7 @@ Today an engine run on anything other than @ES/@MES silently uses ES facts, gues
 
 Method: `rg` over every `*.CS`, `specs/*.md`, `tests/*` for 0.25, 12.5, $50, `"ES"`/`@ES`, H/M/U/Z, `ThirdFriday`, `TimeSpan(9,30)`, (16,0), (16,15), (17,0), (18,0), (15,15), Globex, Eastern/Central, USD, `Category.ToString`, `SymbolRoot`, `PortfolioCluster`, cost literals (471 raw hits, `/workspace/m-instr/grep1.txt`), reduced to one row per distinct hardcoding, plus the 8 rows the rev-1 review found missing (63–70). Column "Sess" = **S** where the row is replaced by chart-session data under R12 (§4.5), **T** where it is a frozen pre-registered trial value (kept, coverage-checked, §6.4 S3).
 
-Engine tags: CS host `_CustomSignal`; VPFUT `_VolumeProfileFuturesBase`; CLOCK `_CmeSessionClock`; CAL holiday calendars; ROLL `_RollDetector` + host roll code; EVENT `_EventCalendar`; G0 `_Gate0`/`_TestGate0`; FLOW `_OrderFlow`; REGGATE `_RegimeGate`/`_Test6`; REGIME `_RegimeEngine`; DAILY `_DailyContext`; TOD `_TodNormaliser` (host side); DVP `_DvpEngine`/`_DvpEngineTest`; SIZE CS-4 sizing; COST; PORT M-PORT; MTF `_MtfMath`; LEVEL, AVWAP, RANGE, WEEKLY, PSTATS `_ProfileStats`; LEGACY pre-engine studies.
+Engine tags: CS host `_CustomSignal`; VPFUT `_VolumeProfileFuturesBase`; CLOCK `_CmeSessionClock`; CAL holiday calendars; ROLL `_RollDetector` + host roll code; EVENT `_EventCalendar`; G0 `_Gate0`/`_TestGate0`; FLOW `_OrderFlow`; REGGATE `_RegimeGate`/`_A2_63_RegimeGate`; REGIME `_RegimeEngine`; DAILY `_DailyContext`; TOD `_TodNormaliser` (host side); DVP `_DvpEngine`/`_DvpEngineTest`; SIZE CS-4 sizing; COST; PORT M-PORT; MTF `_MtfMath`; LEVEL, AVWAP, RANGE, WEEKLY, PSTATS `_ProfileStats`; LEGACY pre-engine studies.
 
 ### 3.1 Table
 
@@ -159,7 +159,7 @@ Engine tags: CS host `_CustomSignal`; VPFUT `_VolumeProfileFuturesBase`; CLOCK `
 | 47 | `_OrderFlow` L935 | `PlanGlobexDays(...)` | FLOW | `tradingDay` | S |
 | 48 | `_RegimeGate` L45–48 | A2-63: rthOpen 09:30, activeEnd 15:30, exit 15:55, rthClose 16:00 ET | REGGATE | frozen trial windows | T |
 | 49 | `_RegimeGate` L48–65; `ETradingDayKey` L28; `TradingDayText` L120 | Windows frozen. Digest `fdd63bd8f179a8d4`. Hash spelling `Globex18ET` from the switch (M6h) | REGGATE | `roll`, typed key | |
-| 50 | `_Test6` L102, L110, L114, L116, L127, L137 | Table mode, profile roll dates (M5), `RollDetectionText`, `TradingDayText`, ES only, S3 window | REGGATE | typed key | S |
+| 50 | `_A2_63_RegimeGate` (formerly `_Test6`) L102, L110, L114, L116, L127, L137 | Table mode, profile roll dates (M5), `RollDetectionText`, `TradingDayText`, ES only, S3 window | REGGATE | typed key | S |
 | 51 | `_DailyContext` L30, L33, L38 | defaults `{252,126,63}`, `hvAnnualisation 252`; `ApplySessionsPerYear` replaces those defaults with `spy`, `spy/2`, `spy/4` | DAILY | `sessionsPerYear` | |
 | 52 | `_RegimeEngine` L63, L274 | `sessionsPerYear` default 252; `sqrt(63/sessionsPerYear)` (the 63-session window stays) | REGIME | `sessionsPerYear` | |
 | 53 | `_LevelStudy` L80 | no `tickSize` default (M6d). Host sets `tickSize()` (CS L1477). Gate 0 sets `study.tickSize = tick` (L471) | LEVEL | `tick` | |
@@ -173,7 +173,7 @@ Engine tags: CS host `_CustomSignal`; VPFUT `_VolumeProfileFuturesBase`; CLOCK `
 | 61 | `_EconomicCalendar` L231; `_EhlersFilter` L149; `_StructuralTargetPatterns.Strategy` L1060; `_GenerateNNTrainingData` L354 | FX pip = `PointValue × 10 × BigPointValue` | LEGACY | note only | |
 | 62 | `_EpisodicPivotBase` L32–35; `_ParabolicShortSESX` L51–52; `_BreakoutAutoLELX` L42; `_TrendLine` L2755–2756; `_VolumeProfileBaseLog` L206, L426 | US-stock 09:30/16:00 ET; `m_tick = 0.25` | LEGACY | note only | |
 | 63 | `_CustomSignal` L1888–1889 | `findTz("Eastern Standard Time")` + `GlobexTradingDayEt` for the roll key on any future | CS | `tradingDay` (removed) | S |
-| 64 | `_DvpEngineTest` L122; `_Test6` L109; `fillProfileRollDates` CS L1996 | Roll table is `CollectRollDates` (shipped in M5). ES dates equal `EventRules.RollDate`. The old quarterly host loop is gone | DVP | `contractMonths`, `roll` | |
+| 64 | `_DvpEngineTest` L122; `_A2_63_RegimeGate` L109; `fillProfileRollDates` CS L1996 | Roll table is `CollectRollDates` (shipped in M5). ES dates equal `EventRules.RollDate`. The old quarterly host loop is gone | DVP | `contractMonths`, `roll` | |
 | 65 | `_ProfileStats` L47 | `ringBars = 1440` (bar count; M6e literal kept) | PSTATS | none: literal kept | |
 | 66 | `_ProfileStats` L575 | `disagree` when |mcPoc − cvPoc| > 4 × tick (ES-tuned). CFG note when the engine is enabled (M6e) | PSTATS | none: CFG note | |
 | 67 | `_TestGate0` L157 | NQ slippage $2.50 in the canary note | G0 | `cost` (doc) | |
@@ -218,7 +218,7 @@ Engine tags: CS host `_CustomSignal`; VPFUT `_VolumeProfileFuturesBase`; CLOCK `
 | `_InstrProbe` L67, L74, L75 | `Category.ToString()` / reflection | violation | PR-M1e: retire the probe |
 | `_CustomSignal` L279 | `TimeZone.ToString()` into a log line | allowed (log) | none |
 | `_CustomSignal` L1883 | `res.ToString()` (`EResolution`) into a Warning text | allowed (log) | none |
-| `_Test6` L114 | `RollDetectionText` (`_CustomSignal` L1905) into the A2-63 hash | explicit switch, same spellings `Off` / `Series` / `Table` / `SeriesOrTable` (M6h) | done |
+| `_A2_63_RegimeGate` L114 | `RollDetectionText` (`_CustomSignal` L1905) into the A2-63 hash | explicit switch, same spellings `Off` / `Series` / `Table` / `SeriesOrTable` (M6h) | done |
 
 ---
 
@@ -531,7 +531,7 @@ The PR-M0 question (did @CL not start?) is moot. Ettienne's earlier @6E rerun is
 | RANGE / WEEKLY / PSTATS | `ringBars` literals kept (L31 2880, L47 1440). WEEKLY `RthSessions` with a filled profile and no `rthSplit` is S7; `GlobexSessions` is the user's other source. `isRthBar` stays. PSTATS 4-tick disagreement stays, with one CFG Info line when enabled | identical | M6e |
 | PORT | `PortfolioCluster` returns `p.cluster` when set, else the root switch. 6E seed `6E` → `FX_EUR`. ES/MES stay EQIDX | identical for ES/MES; 6E portfolio seed changes (owner accepted 2026-11-09) | M6f |
 | DVP | Roll table already `fillProfileRollDates` (M5, `_DvpEngineTest` L122, CS L1996). D9a `root == "ES"` check (L213, L229–237) stays so `7fbe5bff` still prints `root=0` and `root(ES)`. Root string is F1 (M1a) | identical (post-#88 baseline) | M6g |
-| REGGATE / `_Test6` | ES only (N2): Error, then throw, for any other root. Windows frozen. S3 coverage of 09:30–16:00 ET. Hash spellings `TradingDayText` = `Globex18ET` and `RollDetectionText` = `Table` for this host. Roll table already `fillProfileRollDates` (M5, L110) | hash identical | M6h |
+| REGGATE / `_A2_63_RegimeGate` | ES only (N2): Error, then throw, for any other root. Windows frozen. S3 coverage of 09:30–16:00 ET. Hash spellings `TradingDayText` = `Globex18ET` and `RollDetectionText` = `Table` for this host. Roll table already `fillProfileRollDates` (M5, L110) | hash identical | M6h |
 | SIZE / COST | `unitNotional` defaults to entry × `p.bigPointValue`. `applyCostFloor` (default false) widens the skip stop to `max(structural, costFloorTicks × tick)`. ES 14, MES 20 | identical (off by default) | M7 |
 | MTF | `SymbolRoot` resolves via §4.3; doc fix (L28) | identical for ES | M1a |
 | LEGACY | F3a/F3b only; others a one-line note | — | M1c |
@@ -623,7 +623,7 @@ The PR-M0 question (did @CL not start?) is moot. Ettienne's earlier @6E rerun is
 | 6 | PR-M2 **#96 merged** | `_InstrumentProfile.Function.CS` core (enums, resolver, presets, `InstrumentConfig`, `CostModel`, exceptions, session derivations on structs), `<Compile Include>` + import order, `tests/InstrumentTests` + sln, rev-3 "superseded for C1–C9" banner (Q10) | none (not wired) | MI-T2–T9, T11, T13, T16 (core) |
 | 7 | PR-M3 **#97 merged** | Wire `buildProfiles()` + `SessionReader` (StartCalc read + first-CalcBar re-check), `ClassOf` switch, INSTR line, cross-checks, `profileHash` on RUN | log only (+ `mismatch:*` and `sessions:changed` throw, §6.2) | MI-T12, T13, T15 (MC run pending) |
 | 8 | PR-M4 **#98 merged** (`d3c0c1a`, head `2418052`) | Enforce every §6.3 refusal globally (A1); D1 class:root cost keys; D2 exchange-time profileHash via `exchangeZoneIdOf` token match; strict tick / FALLBACK_TICK removed; floor `src=…`; PORT publish line deferred to first CalcBar; `_TestPortMM` deleted (A2); DST tests; Start marks started only after Guard(Build). Scope detail: §11.1 | refusals → Error + throw on every stream for all `_CustomSignal` studies; same instrument hashes equal across chart/PT zones | MI-T7, T8, T15, T16 + D2/DST; full check **23 / 4528 / 0** |
-| 9 | PR-M5 | Expiry/roll from the profile: `_RollDetector`, `EventRules`, host quarterly loops (`_DvpEngineTest`, `_Test6`). Rev 2.5.1: separate `ownContract` / `sharedCalendar`; no roll facts → `Unavailable` on Step/Classify (not the ES quarter, not false); explicit queries throw S5 | non-ES only; ES identical | MI-T4–T6, T15 |
+| 9 | PR-M5 | Expiry/roll from the profile: `_RollDetector`, `EventRules`, host quarterly loops (`_DvpEngineTest`, `_A2_63_RegimeGate`). Rev 2.5.1: separate `ownContract` / `sharedCalendar`; no roll facts → `Unavailable` on Step/Classify (not the ES quarter, not false); explicit queries throw S5 | non-ES only; ES identical | MI-T4–T6, T15 |
 | 10 | PR-M6a | G0: tick default removed + **Gate0Tests 35 constructions set tick**; root; S3 | none for ES | Gate0Tests, T15 |
 | 11 | PR-M6b | FLOW: chunk boundary = listed `sessionEnd` converted to ET. Stale Globex ES moves 17:00 → 17:30 ET | ES on that template moves 30 minutes (accepted 2026-11-09) | OrderFlowTests |
 | 12 | PR-M6c | DAILY/REGIME `sessionsPerYear` (defaults only; 63-session window stays) | non-futures only | DailyTests, RegimeTests |

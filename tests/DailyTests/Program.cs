@@ -258,7 +258,7 @@ static class Program
 		Check(Math.Abs(gx[0] - spread) < 25, "evening splice, Globex key: roll offset ~ the spread (" + gx[0].ToString("0.##") + ")");
 		Check(Math.Abs(cal[0]) < 25 && Math.Abs(cal[0]) < Math.Abs(gx[0]) - 20, "evening splice, calendar key: offset ~0, the known failure (" + cal[0].ToString("0.##") + ")");
 		// PR #46 re-review: ATR20d. The roll reseeds Wilder (applyRoll), so ATR20d is NaN for the next 20 completed days (the
-		// default atrRestartOnRoll = true reseed; _Test6 carries instead, rulings (h) and RollCarryAtr), then finite and free of the 40-point spread (bar TRs are ~26 here).
+		// default atrRestartOnRoll = true reseed; _A2_63_RegimeGate carries instead, rulings (h) and RollCarryAtr), then finite and free of the 40-point spread (bar TRs are ~26 here).
 		Console.WriteLine("EveningSplice: Globex offset " + gx[0].ToString("0.##") + " atr " + gx[1].ToString("0.##") + " nanDays " + gx[2] + "; calendar offset " + cal[0].ToString("0.##") + " atr " + cal[1].ToString("0.##") + " nanDays " + cal[2]);
 		// Holidays (rulings (i), accepted, documented): the key is a pure 18:00 ET rule. MLK 2024-01-15: Sun 18:00 -> Mon 01-15
 		// (a short holiday day of its own), Mon 18:00 -> Tue 01-16. CME books the holiday session to the next trade date.

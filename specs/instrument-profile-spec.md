@@ -52,7 +52,7 @@ Read on `Bars.Info` / `BarsOfData(ds).Info` (type `IInstrumentSettings`, Program
 | `Expiration` | DateTime | doc ("for futures") | futures sanity check |
 | `TimeZone` | `RequestTimeZone` | verified (`resolveBarTimeZone` L2129–2145) | bar time zone |
 | `SessionName` | string | doc only, **VERIFY** value format | log; session template hint |
-| `Resolution` | `Resolution` | verified (`_Test6` L110) | log, volume quality |
+| `Resolution` | `Resolution` | verified (`_A2_63_RegimeGate` L110, formerly `_Test6`) | log, volume quality |
 | `QuoteField` | `RequestQuoteField` (Ask/Bid/Trade) | doc only, **VERIFY** | FX bid/ask charts |
 | `StrikePrice`, `OptionType` | | doc only | options → unsupported |
 
