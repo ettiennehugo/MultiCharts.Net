@@ -1698,6 +1698,25 @@ namespace PowerLanguage.Strategy
 		private bool m_portRollToday;
 		private double m_portRDollar = double.NaN, m_portStop = double.NaN, m_portMult = double.NaN;
 		private int m_portArmBar = -1;
+		// GX-2. Untouched until a strategy calls exitPlan or gxPublishPlan, so a study that never does is unchanged.
+		private bool m_gxUsed;
+		private bool m_gxStarted;
+		private bool m_gxOrders;
+		private bool m_gxArmed;
+		private bool m_gxPlanLive;
+		private bool m_gxLong;
+		private bool m_journalGx;
+		private int m_gxQty;
+		private string m_gxEntryOrder = "";
+		private string m_gxPrefix = "GX";
+		private double m_gxPlanEntry = double.NaN;
+		private double m_gxPlanStop = double.NaN;
+		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
+		private ExitSession m_gx;
+		private ExitPosition m_gxPos;
+		private ExitMarket m_gxMkt;
+		private IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST;
+		private IOrderMarket m_gxLX, m_gxSX;
 
 		private void startPortfolio()
 		{
@@ -1795,6 +1814,7 @@ namespace PowerLanguage.Strategy
 			pd[_PortKeys.Day] = day;
 			if (m_portArmBar != Bars.CurrentBar) { pd[_PortKeys.RiskNew] = 0.0; pd[_PortKeys.Side] = 0; }   // re-armed below by the strategy this bar
 			if (pos == 0 && m_portArmBar != Bars.CurrentBar) m_portStop = double.NaN;
+			if (m_gxPlanLive && pos == 0 && m_portArmBar != Bars.CurrentBar) gxClearPlan();
 
 			// book multiplier from the MM: journal only (sizing is applied by the MM through EntryContracts)
 			object m = CommonPortfolioData.ContainsKey(_PortKeys.Mult) ? CommonPortfolioData[_PortKeys.Mult] : null;
@@ -2464,6 +2484,7 @@ namespace PowerLanguage.Strategy
 		/// (reflection over public instance properties carrying the typed [Input] attribute, InputAttribute, sorted by name).
 		/// </summary>
 		private const string EVENT_JOURNAL_COLS = "evtDayTier,evtMinSince";   // M-EVENT CS-1 extra columns (enabled only)
+		private const string GX_JOURNAL_COLS = "equityAtEntry,plannedRiskDollars,plannedRiskPct,plannedRiskPctPeak,maeTradeDollars,maeOpenDollars,actualRiskPct,actualToPlanned,realizedPnlPct,maeScope,addCount,gxExitReason,rOrig,gxPackage,riskFlag,t1Skipped,t1PlanSource";
 
 		protected string runLine()
 		{
@@ -2877,9 +2898,14 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_journal == null)
 				{
-					m_journal = m_event != null ? new TradeJournal(RunId, "MCJournal_", TradeJournal.HEADER + "," + EVENT_JOURNAL_COLS, Output) : new TradeJournal(RunId, Output);
+					m_journalGx = m_gxUsed;
+					string header = TradeJournal.HEADER;
+					if (m_event != null) header += "," + EVENT_JOURNAL_COLS;
+					if (m_journalGx) header += "," + GX_JOURNAL_COLS;
+					m_journal = new TradeJournal(RunId, "MCJournal_", header, Output);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
+				if (m_journalGx) gxAppendJournal(sb, exitPrice, bpv, profit);
 				m_journal.Write(sb.ToString());
 			}
 			catch (Exception e)
@@ -4132,6 +4158,216 @@ namespace PowerLanguage.Strategy
 					System.Threading.Interlocked.Exchange(ref s_lastTradeManagerRefreshTicks, DateTime.Now.Ticks);
 				}
 			}
+		}
+
+		// ---- GX-2 (specs/generic-exit-manager-spec.md rev 1.1 §8.1). Opt-in. A strategy that never calls these is unchanged. ----
+
+		/// <summary>Embedded GX settings. Default is EntryProvided. Set fields in Create before exitPlan. Not an [Input].</summary>
+		protected ExitConfig GxConfig { get { return m_gxCfg; } }
+
+		/// <summary>Order-name prefix for the GX orders (&lt;prefix&gt;LS / SS / LT1 / ST1 / LT / ST / LX / SX). Set before createGxOrders.</summary>
+		protected string GxOrderPrefix { get { return m_gxPrefix; } set { m_gxPrefix = string.IsNullOrEmpty(value) ? "GX" : value; } }
+
+		/// <summary>Minutes to the next news event. NaN = no news exit. The host sets it before exitBar. Not read unless GX is on.</summary>
+		protected double GxMinutesToNews { get; set; } = double.NaN;
+
+		/// <summary>Create the GX exit orders. Call from the derived Create when the strategy will call exitPlan. The base Create does not call this.</summary>
+		protected void createGxOrders()
+		{
+			if (m_gxOrders) return;
+			string id = m_gxPrefix;
+			m_gxLS = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, id + "LS", EOrderAction.Sell, OrderExit.Total));
+			m_gxSS = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, id + "SS", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxLT1 = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "LT1", EOrderAction.Sell, OrderExit.Total));
+			m_gxST1 = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "ST1", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxLT = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "LT", EOrderAction.Sell, OrderExit.Total));
+			m_gxST = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "ST", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxLX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "LX", EOrderAction.Sell, OrderExit.Total));
+			m_gxSX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "SX", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxOrders = true;
+		}
+
+		/// <summary>Publish the planned entry and planned widened stop for the wrapper. Cleared by portfolioBar when flat and not armed.</summary>
+		protected void gxPublishPlan(double plannedEntry, double plannedStop)
+		{
+			m_gxPlanEntry = plannedEntry;
+			m_gxPlanStop = plannedStop;
+			m_gxPlanLive = true;
+			if (!m_portOn) return;
+			MyPortfolioData[_PortKeys.GxPlanEntry] = plannedEntry;
+			MyPortfolioData[_PortKeys.GxPlanStop] = plannedStop;
+		}
+
+		private void gxClearPlan()
+		{
+			m_gxPlanLive = false;
+			if (!m_portOn) return;
+			MyPortfolioData[_PortKeys.GxPlanEntry] = double.NaN;
+			MyPortfolioData[_PortKeys.GxPlanStop] = double.NaN;
+		}
+
+		private void ensureGx(ExitMarket mkt)
+		{
+			if (m_gx == null) m_gx = new ExitSession { Config = m_gxCfg };
+			m_gx.Config.Embedded = true;
+			m_gx.Config.Id = m_gxPrefix;
+			if (!m_gxStarted)
+			{
+				if (mkt.FloorTicks == 0) mkt.FloorTicks = gxFloorTicks();
+				m_gxMkt = mkt;
+				m_gx.Start(mkt);
+				m_gxStarted = true;
+				if (traceOn(ETraceLevel.Info))
+					foreach (string line in m_gx.Log) trace(line.IndexOf(" Error:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Error : line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+			}
+		}
+
+		private int gxFloorTicks()
+		{
+			try
+			{
+				InstrumentProfile p = InstrumentProfileOf(1);
+				if (p != null && p.costFloorTicks > 0) return p.costFloorTicks;
+			}
+			catch (Exception) { }
+			return 0;
+		}
+
+		/// <summary>
+		/// Arm an embedded GX trade and send the protective stop in this CalcBar, beside the entry order.
+		/// Returns the widened stop. Does not send an entry and does not reverse a position.
+		/// </summary>
+		protected double exitPlan(bool longSide, double plannedEntry, double structuralStop, int qty, ExitMarket mkt, string entryOrderName)
+		{
+			if (qty < 1 || double.IsNaN(plannedEntry) || double.IsInfinity(plannedEntry) || double.IsNaN(structuralStop) || double.IsInfinity(structuralStop))
+			{
+				trace(ETraceLevel.Error, m_gxPrefix + " Error: GX exitPlan rejected qty(" + qty.ToString(CultureInfo.InvariantCulture) + ") entry(" + plannedEntry.ToString(CultureInfo.InvariantCulture) + ") stop(" + structuralStop.ToString(CultureInfo.InvariantCulture) + ")");
+				return double.NaN;
+			}
+			m_gxUsed = true;
+			if (mkt.Tick <= 0) mkt.Tick = tickSize();
+			if (mkt.Bpv <= 0) { try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { } }
+			if (mkt.FloorTicks == 0) mkt.FloorTicks = gxFloorTicks();
+			mkt.EntryStop = structuralStop;
+			ensureGx(mkt);
+			createGxOrders();
+			double stop = m_gx.InitialStop(longSide, plannedEntry, mkt);
+			m_gxMkt = mkt;
+			m_gxLong = longSide;
+			m_gxQty = qty;
+			m_gxEntryOrder = entryOrderName ?? "";
+			m_gxArmed = true;
+			gxPublishPlan(plannedEntry, stop);
+			if (m_portOn) portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop);
+			if (journalOn()) journalArm(m_gxEntryOrder, plannedEntry, stop, double.NaN);
+			if (longSide) m_gxLS.Send(stop, qty);
+			else m_gxSS.Send(stop, qty);
+			return stop;
+		}
+
+		/// <summary>One closed bar of an embedded GX trade. No-op until exitPlan has been called. Sends only exits that reduce the open side.</summary>
+		protected void exitBar()
+		{
+			if (!m_gxUsed || m_gx == null) return;
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0)
+			{
+				if (m_gxPos != null && m_gxPos.Open) { m_gxPos.Open = false; m_gxArmed = false; }
+				return;
+			}
+			if (!m_gxArmed && (m_gxPos == null || !m_gxPos.Open)) return;
+			bool longSide = pos > 0;
+			if (m_gxPos == null) m_gxPos = new ExitPosition();
+			int lots = gxOpenLots(pos);
+			if (!m_gxPos.Open)
+			{
+				double fill = StrategyInfo.AvgEntryPrice;
+				double equity = this.InitialCapital + this.NetProfit;
+				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
+				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * m_gxQty;
+				double fillR = m_gxPos.InitialRDollars;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture));
+				if (m_gx.Log.Count > 0 && traceOn(ETraceLevel.Info))
+					foreach (string line in m_gx.Log) if (line.IndexOf("T1-SKIPPED", StringComparison.Ordinal) >= 0 || line.IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) trace(line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+			}
+			var bar = new ExitBar();
+			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
+			bar.Tick = m_gxMkt.Tick; bar.Bpv = m_gxMkt.Bpv; bar.AtrTrail = m_gxMkt.AtrTrail; bar.Ema = m_gxMkt.Ema;
+			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
+			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
+			ExitDecision d = m_gx.Manage(m_gxPos, bar);
+			if (m_portOn) portfolioStop(m_gxPos.Stop);
+			if (d.Reason != null)
+			{
+				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_gxPos.GapThroughStop;
+				if (market)
+				{
+					if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots);
+				}
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
+				return;
+			}
+			if (longSide) m_gxLS.Send(m_gxPos.Stop, lots); else m_gxSS.Send(m_gxPos.Stop, lots);
+			if (d.SendT1 && d.T1Qty > 0 && !double.IsNaN(m_gxPos.T1Level))
+			{
+				int q = d.T1Qty < lots ? d.T1Qty : lots;
+				if (q > 0) { if (longSide) m_gxLT1.Send(m_gxPos.T1Level, q); else m_gxST1.Send(m_gxPos.T1Level, q); }
+			}
+			if (m_gx.FinalOn && !m_gxPos.FinalSkipped && !double.IsNaN(m_gxPos.FinalLevel))
+			{
+				int qf = lots - (m_gxPos.T1Filled ? 0 : m_gxPos.T1Qty);
+				if (qf < 1) qf = lots;
+				if (qf > lots) qf = lots;
+				if (longSide) m_gxLT.Send(m_gxPos.FinalLevel, qf); else m_gxST.Send(m_gxPos.FinalLevel, qf);
+			}
+		}
+
+		/// <summary>Refresh ATR, EMA and the bar size the trail and the control-bar map read. Call before exitBar when they change.</summary>
+		protected void gxSetMarket(ExitMarket mkt) { m_gxMkt = mkt; }
+
+		private int gxOpenLots(int pos)
+		{
+			try { int n = this.CurrentPosition.OpenLots; if (n > 0) return n; } catch (Exception) { }
+			return Math.Abs(pos);
+		}
+
+		private void gxAppendJournal(StringBuilder sb, double exitPrice, double bpv, double profit)
+		{
+			Action<string> col = s => { sb.Append(','); sb.Append(csvField(s)); };
+			if (m_gxPos == null)
+			{
+				for (int i = 0; i < 17; i++) col("");
+				return;
+			}
+			if (m_gx != null) m_gx.MarkMae(m_gxPos, exitPrice, bpv, true, exitPrice);
+			double eq = m_gxPos.EquityAtEntry;
+			double planned = m_gxPos.InitialRDollars;
+			double plannedPct = ExitSession.PlannedRiskPct(planned, eq);
+			double peakPct = ExitSession.PlannedRiskPct(m_gxPos.PeakRiskDollars, eq);
+			bool eqOk = eq > 0;
+			double actualPct = eqOk ? m_gxPos.MaeTradeDollars / eq * 100.0 : double.NaN;
+			double ratio = planned > 0 ? m_gxPos.MaeTradeDollars / planned : double.NaN;
+			double realPct = eqOk ? profit / eq * 100.0 : double.NaN;
+			string flag = m_gxPos.RiskFlag ?? "";
+			if (!(planned > 0)) flag = flag.Length == 0 ? "NO-PLANNED-RISK" : flag;
+			col(eqOk ? ExitSession.Money(eq) : "");
+			col(planned > 0 ? ExitSession.Money(planned) : "");
+			col(double.IsNaN(plannedPct) ? "" : ExitSession.Pct3(plannedPct));
+			col(double.IsNaN(peakPct) ? "" : ExitSession.Pct3(peakPct));
+			col(ExitSession.Money(m_gxPos.MaeTradeDollars));
+			col(ExitSession.Money(m_gxPos.MaeOpenDollars));
+			col(!eqOk || double.IsNaN(actualPct) ? "" : ExitSession.Pct3(actualPct));
+			col(double.IsNaN(ratio) ? "" : ExitSession.Ratio2(ratio));
+			col(!eqOk || double.IsNaN(realPct) ? "" : ExitSession.Pct3(realPct));
+			col("bar");
+			col(m_gxPos.AddCount.ToString(CultureInfo.InvariantCulture));
+			col("");
+			double ro = m_gx == null ? double.NaN : m_gx.ROrig(m_gxPos, profit);
+			col(double.IsNaN(ro) ? "" : ExitSession.Ratio2(ro));
+			col(m_gx == null ? "" : m_gx.Package ?? "");
+			col(flag);
+			col(m_gxPos.T1Skipped ? "1" : "0");
+			col("plan");
 		}
 	}
 }

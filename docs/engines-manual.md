@@ -6987,6 +6987,18 @@ All lines below are printed to the PowerLanguage .NET Editor Output. `{…}` are
 | | `AggregateBars`; `GmmSession.FromBars` | Combine bars; build a GMM input from session bars. |
 | `_SignalJournal` | `PROBE_ID`, `Describe()` | A CS-0 probe description only; no runtime role. |
 
+### 4.19 GX exit engine (`_ExitEngine`, embedded helpers)
+
+**Why it exists.** One exit state machine for entry-only ideas (specs/generic-exit-manager-spec.md rev 1.1). It only takes an open position to flat. It never opens a position and never reverses one.
+
+**Where the code is.** The pure engine is `public static class _ExitEngine` and `ExitSession` in `_GenericExit.Strategy.CS`, `namespace PowerLanguage.Function`. The off-MC tests link that file with `GX_OFFMC`. `_CustomSignal` adds the embedded helpers. A strategy that never calls them is unchanged: the base `Create` does not create GX orders, and `CalcBar` does not call `exitBar`.
+
+**Enable.** Call `createGxOrders()` from the derived `Create` (order names `<prefix>LS` / `SS` / `LT1` / `ST1` / `LT` / `ST` / `LX` / `SX`). Set `GxConfig` there if the embedded default (`EntryProvided`, the other §8.2 defaults) is not the one this strategy wants. No new base `[Input]`.
+
+**API.** `exitPlan(longSide, plannedEntry, structuralStop, qty, market, entryOrderName)` sends the widened protective stop in the same `CalcBar` as the entry and publishes `pm.gxPlanEntry` / `pm.gxPlanStop` when Portfolio Trader publishing is on. `exitBar()` on each later closed bar resends the stop and any targets, or one market exit. `gxPublishPlan` writes the same two keys without sending an exit, for a host that leaves management to `_GenericExit`. `gxSetMarket` refreshes ATR and EMA before `exitBar`.
+
+**Journal.** The extra CS-1 columns (planned risk, whole-trade MAE, `t1Skipped`, `t1PlanSource`) are appended only after `exitPlan` has been called. A run that never calls it keeps the previous journal header.
+
 ---
 
 ## 5 — Feature reference (catalogue §2.4 base-feature map)
