@@ -1000,6 +1000,7 @@ namespace PowerLanguage.Function
 #if !GX_OFFMC
 namespace PowerLanguage.Strategy
 {
+	using PowerLanguage.Function;
 	/// <summary>
 	/// GX-3 wrapper (specs/generic-exit-manager-spec.md rev 1.1). Exit only: it never opens or reverses a position.
 	/// PortfolioPublish is false so it does not reset the entry's pm.* keys. The engine is PowerLanguage.Function._ExitEngine in this file.
