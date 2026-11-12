@@ -864,6 +864,31 @@ namespace PowerLanguage.Function
 
 		public static int Hhmm(DateTime t) { return t.Hour * 100 + t.Minute; }
 
+		public static bool TryClock(int hhmm, out int hour, out int minute)
+		{
+			hour = hhmm / 100;
+			minute = hhmm % 100;
+			if (hhmm < 0 || hour > 23 || minute > 59) { hour = 0; minute = 0; return false; }
+			return true;
+		}
+
+		/// <summary>The first FlatByHHMM strictly after the entry. An entry at the cutoff itself waits until the next one.</summary>
+		public static DateTime FlatByDeadline(DateTime entry, int flatByHHMM)
+		{
+			int hour, minute;
+			if (entry == DateTime.MinValue || !TryClock(flatByHHMM, out hour, out minute)) return DateTime.MaxValue;
+			var same = new DateTime(entry.Year, entry.Month, entry.Day, hour, minute, 0);
+			if (same > entry) return same;
+			return same.AddDays(1);
+		}
+
+		public static DateTime CutoffOn(DateTime day, int hhmm)
+		{
+			int hour, minute;
+			if (!TryClock(hhmm, out hour, out minute)) return DateTime.MaxValue;
+			return new DateTime(day.Year, day.Month, day.Day, hour, minute, 0);
+		}
+
 		public static int MinusMinutes(int hhmm, int minutes)
 		{
 			int total = (hhmm / 100) * 60 + (hhmm % 100) - minutes;
@@ -877,16 +902,21 @@ namespace PowerLanguage.Function
 			return minutesTo > 0 && minutesTo < newsMinutes + barMinutes;
 		}
 
-		public bool SessionFlatten(ExitBar bar)
+		public bool SessionFlatten(ExitPosition p, ExitBar bar)
 		{
 			if (Config.SessionExit != ESessionExit.FlatBy) return false;
 			if (bar.HolidayClosed) return false;
 			if (MappedTf == "D1") return false;
-			int cut = Config.FlatByHHMM;
-			if (bar.EarlyClose && bar.RthCloseHHMM > 0) cut = MinusMinutes(bar.RthCloseHHMM, 5);
-			// Spec §4.6 uses CS-7 mustFlatten: time of day >= FlatBy, with no upper bound.
-			// The engines manual also requires tod < 17:00 on Globex. That cap is an owner question.
-			return Hhmm(bar.TimeEt) >= cut;
+			if (p == null || p.FillTime == DateTime.MinValue) return false;
+			// Owner 2026-11-12 15:28 ET: the deadline is the first FlatBy strictly after the original entry.
+			// The first bar at or after that deadline flattens. Daily bars never reach here.
+			DateTime deadline = FlatByDeadline(p.FillTime, Config.FlatByHHMM);
+			if (bar.EarlyClose && bar.RthCloseHHMM > 0)
+			{
+				DateTime earlyAt = CutoffOn(bar.TimeEt.Date, MinusMinutes(bar.RthCloseHHMM, 5));
+				if (earlyAt > p.FillTime && earlyAt < deadline) deadline = earlyAt;
+			}
+			return bar.TimeEt >= deadline;
 		}
 
 		public bool TimeHit(ExitPosition p, DateTime barEt)
@@ -1112,7 +1142,7 @@ namespace PowerLanguage.Function
 			bool target = t1Hit || finalHit;
 			string targetReason = t1Hit ? "T1" : "TARGET";
 			bool news = NewsWindow(bar.MinutesToNews, Config.NewsExitMinutes, bar.BarMinutes);
-			bool session = SessionFlatten(bar);
+			bool session = SessionFlatten(p, bar);
 			bool roll = Effective.RollExit == ERollExit.FlattenBeforeSplice && bar.RollFlattenBar;
 			bool invalidate = Config.Embedded && bar.Invalidate;
 			bool time = TimeHit(p, bar.TimeEt);
