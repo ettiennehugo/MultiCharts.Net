@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using PowerLanguage.Function;
 
 // Off-MC tests for the GX engine in _GenericExit.Strategy.CS (specs/generic-exit-manager-spec.md rev 1.1 §8.3).
@@ -36,12 +37,24 @@ static class Program
 		BreakEvenAndTrail();
 		Precedence();
 		Clock();
+		FlatByAfterEntry();
 		Control();
 		Idx();
 		RAccount();
 		RiskFields();
 		OverBudget();
+		LogOnce();
+		ExitReasonMap();
+		ConsecutivePositions();
+		FillBarT1Resumes();
+		WrapperProtectedT1();
+		RecalcClearsGx();
+		PtFillScalesT1();
+		RunnerStopAfterPartial();
+		EmbeddedFillDefersT1();
+		FillBarPartialStopKeepsRemainder();
 		Gx2Source();
+		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -412,6 +425,17 @@ static class Program
 			Check(es.Manage(ps, Quiet(lng, new DateTime(2024, 6, 3, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " 15:54 holds");
 			Check(es.Manage(ps, Quiet(lng, new DateTime(2024, 6, 3, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " FlatBy 15:55");
 
+			var eve = Eng();
+			var peven = new ExitPosition();
+			eve.Open(peven, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 17, 18, 0, 0), 0);
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 17, 18, 20, 0))).Reason == null, (lng ? "L" : "S") + " 18:20 is held; the deadline is the next 15:55");
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 18, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " 15:54 the next day still holds");
+			Check(eve.Manage(peven, Quiet(lng, new DateTime(2024, 11, 18, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the next day's 15:55 is FLATBY");
+			var night = Eng();
+			var pnight = new ExitPosition();
+			night.Open(pnight, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 18, 0, 0, 0), 0);
+			Check(night.Manage(pnight, Quiet(lng, new DateTime(2024, 11, 18, 0, 30, 0))).Reason == null, (lng ? "L" : "S") + " 00:30 is before FlatBy");
+
 			var ee = Eng();
 			var pe = new ExitPosition();
 			ee.Open(pe, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
@@ -463,6 +487,63 @@ static class Program
 		var ib = Quiet(false, new DateTime(2024, 6, 3, 16, 0, 0));
 		ib.RollFlattenBar = true;
 		Check(ign.Manage(pi, ib).Reason == null, "Ignore does not flatten on the splice");
+	}
+
+	static void FlatByAfterEntry()
+	{
+		var rthDeadline = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 10, 0, 0), 1555);
+		Check(rthDeadline == new DateTime(2024, 6, 3, 15, 55, 0), "a 10:00 entry is due at 15:55 the same day");
+		var after = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 16, 0, 0), 1555);
+		Check(after == new DateTime(2024, 6, 4, 15, 55, 0), "a 16:00 entry is due at 15:55 the next day");
+		var eve = ExitSession.FlatByDeadline(new DateTime(2024, 11, 17, 18, 20, 0), 1555);
+		Check(eve == new DateTime(2024, 11, 18, 15, 55, 0), "an 18:20 Globex entry is due at 15:55 the next day");
+		var atCut = ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 15, 55, 0), 1555);
+		Check(atCut == new DateTime(2024, 6, 4, 15, 55, 0), "an entry exactly at 15:55 waits for the next cutoff");
+
+		foreach (bool lng in new[] { true, false })
+		{
+			var e = Eng();
+			var p = new ExitPosition();
+			var entry = new DateTime(2024, 6, 3, 10, 0, 0);
+			e.Open(p, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", entry, 0);
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 3, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " RTH 10:00 holds at 15:54");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 3, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " RTH 10:00 closes at 15:55 the same day");
+
+			var late = Eng();
+			var pl = new ExitPosition();
+			late.Open(pl, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 16, 0, 0), 0);
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 3, 16, 0, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry is not closed on its fill bar");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 3, 18, 20, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry is held through the evening");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 4, 15, 54, 0))).Reason == null, (lng ? "L" : "S") + " a 16:00 entry holds at 15:54 the next day");
+			Check(late.Manage(pl, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " a 16:00 entry closes at the next day's 15:55");
+
+			var gap = Eng();
+			var pg = new ExitPosition();
+			gap.Open(pg, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 16, 0, 0), 0);
+			Check(gap.Manage(pg, Quiet(lng, new DateTime(2024, 6, 4, 16, 10, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the first bar after the deadline flattens when 15:55 itself has no bar");
+
+			var globex = Eng();
+			var pgx = new ExitPosition();
+			var night = new DateTime(2024, 11, 17, 18, 20, 0);
+			globex.Open(pgx, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", night, 0);
+			Check(globex.Manage(pgx, Quiet(lng, night)).Reason == null, (lng ? "L" : "S") + " 18:20 is not a flat-by");
+			Check(globex.Manage(pgx, Quiet(lng, new DateTime(2024, 11, 18, 0, 30, 0))).Reason == null, (lng ? "L" : "S") + " overnight 00:30 is still before the next 15:55");
+			Check(globex.Manage(pgx, Quiet(lng, new DateTime(2024, 11, 18, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " an 18:20 entry closes at the next day's 15:55");
+
+			var fri = Eng();
+			var pf = new ExitPosition();
+			fri.Open(pf, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 15, 18, 20, 0), 0);
+			Check(fri.Manage(pf, Quiet(lng, new DateTime(2024, 11, 17, 18, 0, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " a Friday 18:20 entry flattens on the first bar after Saturday 15:55");
+
+			var add = Eng();
+			var pa = new ExitPosition();
+			var original = new DateTime(2024, 6, 3, 16, 0, 0);
+			add.Open(pa, lng, 5000, 5000, lng ? 4900 : 5100, 2, 0.25, 50, 100000, "LE", original, 0);
+			add.OnAdd(pa, 5010, 1, lng ? 5008 : 5012, 5005, 50, 0.25);
+			Check(pa.FillTime == original && pa.AddCount == 1, (lng ? "L" : "S") + " an add keeps the original entry time");
+			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 10, 0, 0))).Reason == null, (lng ? "L" : "S") + " the morning after an add is not a new deadline");
+			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the add exits at the original entry's next 15:55");
+		}
 	}
 
 	static ExitBar Quiet(bool lng, DateTime t)
@@ -673,7 +754,7 @@ static class Program
 		var pt = Eng(c => c.InPortfolio = true);
 		var pp = new ExitPosition();
 		pt.Open(pp, false, 100, 100, 104, 1, 0.25, 50, 50000, "SE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
-		Check(pt.CloseLine(pp, "STOP", 100, 50, -200, "bar").StartsWith("PORT CLOSE "), "PT close prefix");
+		Check(pt.CloseLine(pp, "STOP", 100, 50, -200, "bar").StartsWith("EXIT CLOSE "), "PT close line keeps the EXIT prefix");
 	}
 
 	static void OverBudget()
@@ -702,6 +783,302 @@ static class Program
 		Check(p2.Open, "the position is kept");
 	}
 
+	static void LogOnce()
+	{
+		var e = Eng();
+		int emitted = 0;
+		for (int i = 0; i < 4; i++)
+		{
+			var p = new ExitPosition();
+			e.Open(p, true, 100, 100, 90, 2, 0.25, 50, 1000, "LE" + i.ToString(CultureInfo.InvariantCulture), new DateTime(2024, 6, 3, 10, i, 0), i);
+			var lines = e.DrainLog();
+			int warnings = 0;
+			for (int k = 0; k < lines.Count; k++) if (lines[k].IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) warnings++;
+			Check(warnings == 1 && e.Log.Count == 0, "trade " + i.ToString(CultureInfo.InvariantCulture) + " emits one over-budget line and the queue is empty");
+			emitted += warnings;
+		}
+		Check(emitted == 4, "four trades emit four warnings, not a replay of the earlier ones");
+	}
+
+	static void ConsecutivePositions()
+	{
+		var e = Eng(c => { c.Embedded = true; c.FinalTargetValue = 2; c.Id = "TH"; });
+		var start = e.DrainLog();
+		int starts = 0;
+		for (int s = 0; s < start.Count; s++) if (start[s].IndexOf("GX START", StringComparison.Ordinal) >= 0) starts++;
+		Check(starts == 1, "one START for the run");
+		DateTime[] fills = {
+			new DateTime(2024, 11, 17, 18, 20, 0),
+			new DateTime(2024, 11, 18, 10, 0, 0),
+			new DateTime(2024, 11, 18, 14, 0, 0)
+		};
+		var gate = new ExitOpenGate();
+		for (int i = 0; i < fills.Length; i++)
+		{
+			gate.OnFlat();
+			Check(!gate.EngineOpen, "flat closes session " + i.ToString(CultureInfo.InvariantCulture));
+			bool first = gate.BeginPosition(fills[i]);
+			bool again = gate.BeginPosition(fills[i]);
+			Check(first && !again, "position " + i.ToString(CultureInfo.InvariantCulture) + " opens once");
+			var p = new ExitPosition();
+			e.Open(p, true, 5000, 4990, 5000, 4990, 1, 0.25, 50, 10000, "THLE" + i.ToString(CultureInfo.InvariantCulture), fills[i], i);
+			Check(!double.IsNaN(p.T1Level) && p.T1Level > 5000, "T1 placed on position " + i.ToString(CultureInfo.InvariantCulture));
+			Check(!double.IsNaN(p.FinalLevel) && p.FinalLevel > p.T1Level, "target placed on position " + i.ToString(CultureInfo.InvariantCulture));
+			var lines = e.DrainLog();
+			int warnings = 0;
+			for (int k = 0; k < lines.Count; k++) if (lines[k].IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) warnings++;
+			Check(warnings == 1 && e.Log.Count == 0, "position " + i.ToString(CultureInfo.InvariantCulture) + " emits one over-budget line");
+			Check(!gate.BeginPosition(fills[i]), "a later bar of position " + i.ToString(CultureInfo.InvariantCulture) + " does not open");
+			if (fills[i].Hour < 15)
+			{
+				var d = e.Manage(p, Quiet(true, fills[i].AddMinutes(1)));
+				Check(d.Reason == null && d.SendT1 && d.T1Qty > 0, "daytime position " + i.ToString(CultureInfo.InvariantCulture) + " keeps T1 working");
+			}
+			p.Open = false;
+		}
+		var stale = new ExitOpenGate();
+		Check(stale.BeginPosition(fills[0]) && !stale.BeginPosition(fills[0]), "same entry time stays on the first session");
+		Check(stale.BeginPosition(fills[1]), "a new entry time opens even when flat was not observed");
+	}
+
+	static void FillBarT1Resumes()
+	{
+		var e = Eng(c => { c.Embedded = true; c.Id = "TH"; c.SingleLotMode = ESingleLotMode.ExitAtT1; });
+		var gate = new ExitOpenGate();
+		int opens = 0, journals = 0;
+		for (int trade = 0; trade < 3; trade++)
+		{
+			DateTime entry = new DateTime(2024, 11, 18, 3, trade, 0);
+			gate.OnFlat();
+			bool lng = trade != 0;
+			Check(gate.BeginPosition(entry), "trade " + trade.ToString(CultureInfo.InvariantCulture) + " opens");
+			opens++;
+			var p = new ExitPosition();
+			double fill = 5000;
+			double stop = lng ? 4990 : 5010;
+			e.Open(p, lng, fill, stop, fill, stop, 1, 0.25, 50, 100000, lng ? "THLE" : "THSE", entry, trade);
+			Check(p.T1Qty == 1 && !double.IsNaN(p.T1Level), "1-lot ExitAtT1 places T1 on trade " + trade.ToString(CultureInfo.InvariantCulture));
+			var bar = Quiet(lng, entry);
+			if (lng) { bar.High = p.T1Level + 0.25; bar.Low = fill + 0.25; bar.Close = fill + 0.25; }
+			else { bar.Low = p.T1Level - 0.25; bar.High = fill - 0.25; bar.Close = fill - 0.25; }
+			var d = e.Manage(p, bar);
+			Check(d.Reason == "T1" && !p.Open, "trade " + trade.ToString(CultureInfo.InvariantCulture) + " hits T1 on its fill bar");
+			ExitOrder sent = ExitSession.OrderFor(d.Reason, p.GapThroughStop, p, 1);
+			Check(sent.Kind == "t1" && sent.Qty == 1 && Near(sent.Price, p.T1Level), "the T1 limit is sent on the fill bar");
+			Check(!gate.BeginPosition(entry), "the same position does not open again");
+			ExitOrder again = ExitSession.OrderFor(d.Reason, p.GapThroughStop, p, 1);
+			Check(again.Kind == "t1" && again.Qty == 1, "the T1 limit is resent while MC is still in the position");
+			journals++;
+		}
+		Check(opens == 3 && journals == 3, "each fill-bar T1 is followed by further positions that trade and journal");
+		var held = new ExitPosition { Stop = 4990, T1Level = 5010, T1Qty = 1, FinalLevel = 5020 };
+		Check(ExitSession.OrderFor("FLATBY", false, held, 1).Kind == "market", "FLATBY stays a market exit");
+		Check(ExitSession.OrderFor("STOP", false, held, 1).Kind == "stop", "STOP stays the stop order");
+		Check(ExitSession.OrderFor("TARGET", false, held, 1).Kind == "target", "TARGET stays the final limit");
+		Check(ExitSession.OrderFor("T1", true, held, 1).Kind == "market", "a gap through the stop is a market exit");
+	}
+
+	static void WrapperProtectedT1()
+	{
+		var pos = new ExitPosition { Stop = 5010, T1Level = 4990, T1Qty = 1, Open = true };
+		var w = new WrapperRun();
+		var flat = w.OnBar(0, true);
+		Check(flat.Disaster && !flat.WorkingStop && !flat.RestingT1, "flat bar with protection is the disaster stop only");
+		var fill = w.OnBar(-1, true);
+		Check(fill.OpenTrade && fill.SkipFillBarStop && !fill.WorkingStop && fill.RestingT1, "protected fill bar rests T1 and does not send the explicit stop");
+		Check(WrapperRun.ExitToSend(fill, "STOP", false, pos, 1) == "", "fill-bar stop is left to the disaster stop");
+		Check(WrapperRun.ExitToSend(fill, "T1", false, pos, 1) == "t1", "a T1 decided on the fill bar still sends the limit");
+		var next = w.OnBar(-1, true);
+		Check(!next.OpenTrade && next.Reopen && next.WorkingStop && !next.SkipFillBarStop, "the bar after the fill keeps managing");
+		Check(WrapperRun.ExitToSend(next, "T1", false, pos, 1) == "t1", "T1 on the next bar sends the limit");
+		Check(WrapperRun.ExitToSend(next, null, false, pos, 1) == "stop+t1", "no new decision keeps the stop and the resting T1");
+		var later = w.OnBar(-1, true);
+		Check(WrapperRun.ExitToSend(later, "FLATBY", false, pos, 1) == "market", "flat-by replaces an unfilled T1");
+		var done = w.OnBar(0, true);
+		Check(done.Disaster && w.Journals == 1 && !w.InTrade, "flat journals the trade and arms the disaster stop");
+		var again = w.OnBar(1, true);
+		Check(again.OpenTrade && w.Opens == 2, "the next position opens");
+
+		var off = new WrapperRun();
+		Check(!off.OnBar(0, false).Disaster, "FillBarDisasterStop false sends no disaster stop");
+		var offFill = off.OnBar(1, false);
+		Check(WrapperRun.ExitToSend(offFill, "T1", false, pos, 1) == "t1", "fill-bar T1 with the disaster stop off");
+		Check(WrapperRun.ExitToSend(off.OnBar(1, false), "T1", false, pos, 1) == "t1", "the limit is resent while MC is still in the position");
+		off.OnBar(0, false);
+		off.OnBar(-1, false);
+		Check(off.Opens == 2 && off.Journals == 1, "a later position trades and journals");
+	}
+
+	static string HostTrades(GxRunMemory s, int bars)
+	{
+		int wait = s.Wait;
+		bool next = s.NextLong;
+		var sb = new StringBuilder();
+		for (int bar = 0; bar < bars; bar++)
+		{
+			wait++;
+			if (wait < 30) continue;
+			wait = 0;
+			sb.Append(next ? 'L' : 'S');
+			next = !next;
+		}
+		return sb.ToString();
+	}
+
+	static void RecalcClearsGx()
+	{
+		var fresh = new GxRunMemory();
+		string trades = HostTrades(fresh, 120);
+		var again = new GxRunMemory();
+		again.Used = again.PlacesT1 = again.PlanLive = again.JournalGx = true;
+		again.PlanSource = "plan";
+		again.ExitReason = "T1";
+		again.Package = "906176546f6158f5";
+		again.Equity = 13725;
+		again.PlannedRisk = 162.50;
+		again.Gate.BeginPosition(new DateTime(2024, 11, 18, 18, 20, 0));
+		again.Wait = 12;
+		again.NextLong = false;
+		Check(HostTrades(again, 120) != trades, "leftover wait and side change the next run's entries");
+		Check(again.JournalSource() == "plan" && again.JournalEquity() == "13725.00" && again.Package == "906176546f6158f5", "without a reset the journal keeps the embedded run");
+		again.Reset();
+		Check(HostTrades(again, 120) == trades, "after StartCalc the second run matches a fresh instance");
+		Check(again.JournalSource() == "" && again.JournalReason("GXST1") == "" && again.JournalReason("GXLX") == "" && again.JournalEquity() == "" && again.JournalRisk() == "" && again.Package == "" && !again.Gate.EngineOpen, "the second run's GX journal fields are blank");
+		var other = new GxRunMemory();
+		Check(HostTrades(other, 120) == trades && other.JournalSource() == "", "a new instance matches the reset instance");
+	}
+
+	static void PtFillScalesT1()
+	{
+		var e = Eng(c => { c.Embedded = true; c.Id = "TH"; c.T1ScalePct = 50; c.SingleLotMode = ESingleLotMode.ExitAtT1; });
+		var p = new ExitPosition();
+		int planQty = 1;
+		int filled = 100;
+		e.Open(p, true, 5000, 4990, 5000, 4990, filled, 0.25, 50, 10000000, "THLE", new DateTime(2024, 11, 17, 18, 21, 0), 0);
+		double per = Math.Abs(5000 - 4990) * 50;
+		Check(p.Qty == filled && p.T1Qty == 50 && p.OpenQty == filled, "plan qty " + planQty + ", MC fill 100, T1 closes 50");
+		Check(Near(p.InitialRDollars, per * filled), "actual R uses the filled contracts");
+		Check(Near(per * filled, per * filled) && Near(per * planQty, 500), "planned R per contract times the fill is not the 1-lot plan");
+		var bar = Quiet(true, new DateTime(2024, 11, 17, 18, 21, 0));
+		bar.High = p.T1Level + 0.25; bar.Low = 4995; bar.Close = 5005;
+		var d = e.Manage(p, bar);
+		Check(d.Reason == null && d.SendT1 && d.T1Qty == 50 && d.PartialQty == 50 && p.Open && p.OpenQty == 50 && p.T1Filled, "the 50-lot T1 leaves a 50-lot runner");
+		string partial = e.PartialLine(p, d.PartialQty, p.OpenQty);
+		Check(partial.IndexOf("EXIT CLOSE", StringComparison.Ordinal) < 0 && partial.IndexOf("closed=50", StringComparison.Ordinal) >= 0 && partial.IndexOf("remaining=50", StringComparison.Ordinal) >= 0, "a partial is not an EXIT CLOSE");
+		WorkingExit stillFull = ExitSession.OrdersAfter(d, p, filled);
+		Check(stillFull.Stop && stillFull.StopQty == filled && stillFull.T1 && stillFull.T1Qty == 50, "until MC fills the partial, the stop covers the whole position and the T1 stays working");
+		Check(ExitSession.UnloggedFillReason("", "GXLT1") == "T1" && ExitSession.UnloggedFillReason("T1", "GXLT1") == null, "a resting T1 fill is logged once when Manage did not see it");
+	}
+
+	static void RunnerStopAfterPartial()
+	{
+		var e = Eng(c => { c.Id = "TH"; c.T1ScalePct = 50; c.SingleLotMode = ESingleLotMode.ExitAtT1; c.BreakEven = EBreakEven.AfterT1; c.BreakEvenOffsetTicks = 1; c.TrailMode = ETrailMode.None; });
+		var p = new ExitPosition();
+		e.Open(p, false, 5000, 5007, 5000, 5007, 2, 0.25, 50, 50000, "THSE", new DateTime(2024, 11, 19, 1, 22, 0), 0);
+		Check(p.T1Qty == 1 && p.OpenQty == 2, "a 2-lot T1 closes 1");
+		double per = Math.Abs(5000 - 5007) * 50;
+		Check(Near(per, 350) && Near(p.InitialRDollars, per * 2), "actual R is $350 per contract times the 2 contracts filled");
+		var hit = Bar(false, p.T1Level - 0.25, 5002, p.T1Level);
+		hit.High = 5002; hit.Low = p.T1Level - 0.25; hit.Close = p.T1Level;
+		hit.TimeEt = new DateTime(2024, 11, 19, 1, 40, 0);
+		var d = e.Manage(p, hit);
+		double be = ExitSession.BreakEvenStop(false, 5000, 1, 0.25);
+		Check(d.Reason == null && p.Open && p.OpenQty == 1 && d.PartialQty == 1, "the T1 leaves the runner open");
+		Check(Near(p.Stop, be), "the runner stop moves to breakeven");
+		WorkingExit live = ExitSession.OrdersAfter(d, p, 2);
+		Check(live.Stop && live.StopQty == 2 && live.T1 && live.T1Qty == 1, "the same bar sends the runner stop and the 1-lot T1");
+		WorkingExit caught = ExitSession.OrdersAfter(d, p, 1);
+		Check(caught.Stop && caught.StopQty == 1 && !caught.T1, "once MC shows the runner, only its stop stays working");
+		var adv = Bar(false, 4996, be + 0.50, be + 0.25);
+		adv.Low = 4996; adv.High = be + 0.50; adv.Close = be + 0.25;
+		adv.TimeEt = new DateTime(2024, 11, 19, 1, 41, 0);
+		var d2 = e.Manage(p, adv);
+		Check(d2.Reason == "STOP" && !p.Open, "an adverse bar exits the runner at its stop");
+		var held = Eng(c => { c.BreakEven = EBreakEven.Off; c.TrailMode = ETrailMode.None; c.T1ScalePct = 50; });
+		var q = new ExitPosition();
+		held.Open(q, true, 5000, 4990, 5000, 4990, 2, 0.25, 50, 50000, "THLE", new DateTime(2024, 11, 17, 18, 21, 0), 0);
+		var t1 = Bar(true, q.T1Level + 0.25, 4995, q.T1Level);
+		t1.High = q.T1Level + 0.25; t1.Low = 4995; t1.Close = q.T1Level;
+		var d3 = held.Manage(q, t1);
+		Check(d3.Reason == null && q.Open && Near(q.Stop, 4990), "with breakeven off the runner keeps the initial stop");
+		var back = Bar(true, 4996, 4989, 4991);
+		back.High = 4996; back.Low = 4989; back.Close = 4991;
+		Check(held.Manage(q, back).Reason == "STOP" && !q.Open, "the initial stop still flattens the runner");
+	}
+
+	static void EmbeddedFillDefersT1()
+	{
+		var e = Eng(c => { c.Id = "TH"; c.Embedded = true; c.T1ScalePct = 50; c.SingleLotMode = ESingleLotMode.ExitAtT1; c.BreakEven = EBreakEven.AfterT1; c.BreakEvenOffsetTicks = 1; c.TrailMode = ETrailMode.None; });
+		var p = new ExitPosition();
+		e.Open(p, true, 5000, 4990, 5000, 4990, 1, 0.25, 20, 50000, "THLE", new DateTime(2024, 11, 17, 18, 52, 0), 0);
+		Check(p.T1Qty == 1 && p.OpenQty == 1, "a recorded 1-lot would exit all at T1");
+		e.CoverContracts(p, 2, 20);
+		Check(p.OpenQty == 2 && p.Qty == 2 && p.T1Qty == 1, "MC holding 2 contracts retargets T1 to one contract, not the whole position");
+		var touch = Bar(true, p.T1Level + 0.25, 4995, 5005);
+		touch.High = p.T1Level + 0.25; touch.Low = 4995; touch.Close = 5005;
+		touch.DeferPartial = true;
+		touch.TimeEt = new DateTime(2024, 11, 17, 18, 52, 0);
+		var d = e.Manage(p, touch);
+		Check(d.Reason == null && p.Open && p.OpenQty == 2 && !p.T1Filled && Near(p.Stop, 4990) && d.SendT1 && d.T1Qty == 1 && d.PartialQty == 0, "a fill-bar T1 touch sends the limit and does not move the stop");
+		WorkingExit live = ExitSession.OrdersAfter(d, p, 2);
+		Check(live.Stop && live.StopQty == 2 && live.T1 && live.T1Qty == 1, "the stop covers MC's 2 contracts while the T1 limit works");
+		var still = Bar(true, 5008, 4996, 5002);
+		still.High = 5008; still.Low = 4996; still.Close = 5002; still.DeferPartial = true;
+		var d2 = e.Manage(p, still);
+		Check(d2.Reason == null && Near(p.Stop, 4990) && p.OpenQty == 2, "without an MC fill the stop stays at the initial stop");
+		int closed = e.ConfirmReduced(p, 1, 20);
+		Check(closed == 1 && p.T1Filled && p.OpenQty == 1 && p.Open, "the partial counts only once MC's quantity drops");
+		var beBar = Bar(true, 5012, 5004, 5008);
+		beBar.High = 5012; beBar.Low = 5004; beBar.Close = 5008; beBar.DeferPartial = true;
+		e.Manage(p, beBar);
+		double be = ExitSession.BreakEvenStop(true, 5000, 1, 0.25);
+		Check(Near(p.Stop, be) && p.Open, "breakeven waits until the partial has filled");
+		var adv = Bar(true, 5002, be - 0.50, be - 0.25);
+		adv.High = 5002; adv.Low = be - 0.50; adv.Close = be - 0.25; adv.DeferPartial = true;
+		Check(e.Manage(p, adv).Reason == "STOP" && !p.Open, "the runner then exits at the breakeven stop");
+	}
+
+	static void FillBarPartialStopKeepsRemainder()
+	{
+		var e = Eng(c => { c.Id = "TH"; c.Embedded = true; c.BreakEven = EBreakEven.Off; c.TrailMode = ETrailMode.None; });
+		var p = new ExitPosition();
+		var when = new DateTime(2024, 11, 18, 3, 18, 0);
+		e.Open(p, true, 5000, 4990, 5000, 4990, 2, 0.25, 20, 50000, "THLE", when, 0);
+		Check(p.Qty == 2 && p.OpenQty == 2, "a 2-lot fill is recorded as 2, not the plan qty of 1");
+		var fill = Bar(true, 5004, 4988, 4992);
+		fill.High = 5004; fill.Low = 4988; fill.Close = 4992; fill.DeferPartial = true; fill.TimeEt = when;
+		var d = e.Manage(p, fill);
+		Check(d.Reason == "STOP" && !p.Open, "the fill bar trades through the stop");
+		e.ReopenRemainder(p, 1, p.Stop, 20);
+		Check(p.Open && p.OpenQty == 1 && !p.T1Filled && Near(p.Stop, 4990), "the contract MC still holds reopens at the same stop");
+		ExitSession.RemainderBook live = ExitSession.Protection(1, false, "STOP");
+		Check(!live.LogClose && live.SendSized && live.StopQty == 1 && !live.SendFull, "the next order is a 1-lot stop, and the fill bar is not EXIT CLOSE");
+		var later = Bar(true, 4994, 4970, 4975);
+		later.High = 4994; later.Low = 4970; later.Close = 4975; later.DeferPartial = true;
+		later.TimeEt = when.AddMinutes(1);
+		var d2 = e.Manage(p, later);
+		Check(d2.Reason == "STOP" && !p.Open, "the next bar is still through the stop");
+		e.ReopenRemainder(p, 1, p.Stop, 20);
+		ExitSession.RemainderBook again = ExitSession.Protection(1, false, "STOP");
+		Check(p.Open && p.OpenQty == 1 && !again.LogClose && again.SendSized && again.StopQty == 1, "every later bar resends the 1-lot stop until MC is flat");
+		ExitSession.RemainderBook flat = ExitSession.Protection(0, false, "STOP");
+		Check(flat.LogClose && !flat.SendSized && !flat.SendFull && flat.CloseReason == "STOP", "EXIT CLOSE is logged once, when MC is flat");
+		ExitSession.RemainderBook twice = ExitSession.Protection(0, true, "STOP");
+		Check(!twice.LogClose, "a second flat bar does not log EXIT CLOSE again");
+		ExitSession.RemainderBook cover = ExitSession.Protection(2, false, "");
+		Check(!cover.SendFull && cover.SendSized && cover.StopQty == 2 && !cover.LogClose, "once MC holds 2, the working stop is 2 rather than the plan qty");
+	}
+
+	static void ExitReasonMap()
+	{
+		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
+		Check(ExitSession.ReasonFromExitOrder("THLF", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSF", "") == "STOP", "the FromAll fill-bar stop is a stop");
+		Check(ExitSession.ReasonFromExitOrder("THLT1", "") == "T1" && ExitSession.ReasonFromExitOrder("GXST1", "STOP") == "T1", "T1 order names win over a pending market reason");
+		Check(ExitSession.ReasonFromExitOrder("THLT", "") == "TARGET" && ExitSession.ReasonFromExitOrder("GXST", "") == "TARGET", "final target order names");
+		Check(ExitSession.ReasonFromExitOrder("THLX", "FLATBY") == "FLATBY" && ExitSession.ReasonFromExitOrder("Stop Loss", "FLATBY") == "STOP", "market exit keeps the stored reason; MC Stop Loss is STOP");
+		Check(ExitSession.ReasonFromExitOrder("", "TIME") == "TIME", "a missing order name keeps the stored reason");
+	}
+
 	static void Gx2Source()
 	{
 		string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "_CustomSignal.Strategy.CS"));
@@ -719,8 +1096,59 @@ static class Program
 		Check(src.IndexOf("if (m_journalGx) header += \",\" + GX_JOURNAL_COLS;", StringComparison.Ordinal) >= 0, "GX journal columns are appended only after exitPlan");
 		int gx = src.IndexOf("// ---- GX-2", StringComparison.Ordinal);
 		string gxBody = gx >= 0 ? src.Substring(gx) : "";
-		Check(gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) >= 0
+		Check(gxBody.IndexOf("m_gxLF.Send(stop)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("m_gxSF.Send(stop)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) < 0
 			&& gxBody.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0
-			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "GX orders are exits");
+			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "the fill-bar stop is FromAll with no quantity, and GX orders are exits");
+	}
+
+	static void Gx3Source()
+	{
+		string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+		string gx = File.ReadAllText(Path.Combine(root, "_GenericExit.Strategy.CS"));
+		string csproj = File.ReadAllText(Path.Combine(root, "PLStudies.csproj"));
+		string host = File.ReadAllText(Path.Combine(root, "sandbox", "_GX_00_TestHost.Strategy.CS"));
+		string src = File.ReadAllText(Path.Combine(root, "_CustomSignal.Strategy.CS"));
+		string[] inputs = { "InitialStop", "StopAtrMult", "StopAtrLength", "StopTicks", "StopSwingBars", "StopPct", "FillBarDisasterStop", "TargetMode", "T1Unit", "T1Value", "T1ScalePct", "FinalTargetUnit", "FinalTargetValue", "SingleLotMode", "BreakEven", "BreakEvenUnit", "BreakEvenValue", "BreakEvenOffsetTicks", "TrailMode", "TrailStart", "TrailStartUnit", "TrailStartValue", "TrailAtrMult", "TrailAtrLength", "TrailBars", "TrailEmaLength", "TimeStopBars", "TimeStopMinutes", "SessionExit", "FlatByHHMM", "MaxHoldDays", "NewsExitMinutes", "RollExit", "AddStopMode", "ExitControl", "ControlExitBarsM1", "ControlExitBarsM5", "ControlExitBarsM15", "ControlExitBarsH1", "ControlExitBarsD1", "InitialStopIdx", "T1UnitIdx", "FinalTargetUnitIdx", "BreakEvenIdx", "BreakEvenUnitIdx", "TrailModeIdx", "TrailStartIdx", "TrailStartUnitIdx" };
+		foreach (string name in inputs)
+			Check(gx.IndexOf("[Input] public ", StringComparison.Ordinal) >= 0 && gx.IndexOf(" " + name + " { get; set; }", StringComparison.Ordinal) >= 0, "wrapper input " + name);
+		Check(inputs.Length == 48, "48 inputs");
+		Check(gx.IndexOf("PortfolioPublish { get { return false; } }", StringComparison.Ordinal) >= 0, "wrapper does not publish pm.ver");
+		Check(gx.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && gx.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "wrapper has no entry order");
+		Check(csproj.IndexOf("_GX_00_TestHost", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox\\", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox/", StringComparison.Ordinal) < 0, "test host is not in PLStudies.csproj");
+		Check(host.IndexOf("class _GX_00_TestHost", StringComparison.Ordinal) >= 0 && host.IndexOf("EmbedEngine", StringComparison.Ordinal) >= 0, "test host file");
+		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.OnFlat()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.BeginPosition(", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens once per position");
+		Check(src.IndexOf("m_gxPlacesT1", StringComparison.Ordinal) >= 0 && src.IndexOf("if (!m_gxPlacesT1) m_gxPlanSource = \"\";", StringComparison.Ordinal) >= 0, "a host that only publishes does not record t1PlanSource plan");
+		Check(src.IndexOf("gxSendExit(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrderFor(", StringComparison.Ordinal) >= 0, "a decided T1 or target is sent and resent");
+		Check(gx.IndexOf("m_life.OnBar(", StringComparison.Ordinal) >= 0 && gx.IndexOf("WrapperRun.ExitToSend(", StringComparison.Ordinal) >= 0 && gx.IndexOf("m_explicitNext", StringComparison.Ordinal) < 0, "wrapper manages before it sends a stop");
+		Check(src.IndexOf("if (m_gxPlacesT1)", StringComparison.Ordinal) >= 0, "a host that does not place T1 leaves gxExitReason and t1PlanSource empty");
+		Check(src.IndexOf("gxResetRun();", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos = null;", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPlacesT1 = false;", StringComparison.Ordinal) >= 0 && src.IndexOf("m_journalGx = false;", StringComparison.Ordinal) >= 0, "StartCalc clears the embedded session");
+		Check(gx.IndexOf("m_wrapPos = null;", StringComparison.Ordinal) >= 0 && gx.IndexOf("m_exitReason = \"\";", StringComparison.Ordinal) >= 0, "wrapper StartCalc drops the previous position");
+		Check(host.IndexOf("m_wait = 0;", StringComparison.Ordinal) >= 0 && host.IndexOf("m_nextLong = true;", StringComparison.Ordinal) >= 0, "host alternation restarts on recalculation");
+		Check(host.IndexOf("gxArmEntry(", StringComparison.Ordinal) >= 0 && src.IndexOf("sizeForRisk(Bars, entry, structuralStop", StringComparison.Ordinal) >= 0, "wrapper mode arms through sizeForRisk before the entry");
+		Check(src.IndexOf("portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop)", StringComparison.Ordinal) >= 0, "embedded exitPlan arms in Portfolio Trader");
+		Check(src.IndexOf("EXIT Journal: GX STOP-MOVE", StringComparison.Ordinal) >= 0, "portfolioStop logs the stop move and pm.riskOpen");
+		Check(src.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0, "embedded and the wrapper keep a stop working after a partial T1");
+		Check(src.IndexOf("EXIT PARTIAL", StringComparison.Ordinal) < 0 && gx.IndexOf("EXIT PARTIAL ", StringComparison.Ordinal) >= 0 && gx.IndexOf("plan.WorkingStop || d.StopChanged || d.PartialQty > 0", StringComparison.Ordinal) >= 0, "a partial is its own line and the wrapper still sends the runner stop");
+		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
+		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");
+		Check(host.IndexOf("gxConfigure(cfg)", StringComparison.Ordinal) >= 0 && host.IndexOf("InitialStop = EInitialStop.AtrMultiple", StringComparison.Ordinal) >= 0, "the embedded host's working stop is the ATR stop, not a one-tick bar extreme");
+		Check(src.IndexOf("bar.DeferPartial = true", StringComparison.Ordinal) >= 0 && src.IndexOf("ReopenRemainder(", StringComparison.Ordinal) >= 0 && src.IndexOf("if (lots > 0 && !m_gxPos.Open) m_gxPos.Open = true", StringComparison.Ordinal) >= 0, "embedded T1 waits for MC's quantity, and a closed book reopens while MC still holds contracts");
+		Check(src.IndexOf("ExitSession.Protection(", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxLS.Send(m_gxPos.Stop, guard.StopQty)", StringComparison.Ordinal) >= 0 && src.IndexOf("OrderExit.FromAll", StringComparison.Ordinal) >= 0, "the remainder stop is sized to MC, and the fill-bar stop is FromAll");
+		int closeLines = 0;
+		for (int at = 0; (at = src.IndexOf("CloseLine(", at, StringComparison.Ordinal)) >= 0; at++) closeLines++;
+		Check(closeLines == 1, "EXIT CLOSE is written from the flat bar only");
+		Check(host.IndexOf("if (EmbedEngine) exitBar();", StringComparison.Ordinal) >= 0, "the embedded host calls exitBar on the flat bar");
+		Check(src.IndexOf("gxLogFlatClose()", StringComparison.Ordinal) >= 0 && gx.IndexOf("trace(ETraceLevel.Journal, m_wrap.PartialLine(", StringComparison.Ordinal) >= 0 && gx.IndexOf("trace(ETraceLevel.Journal, m_wrap.CloseLine(", StringComparison.Ordinal) >= 0 && gx.IndexOf("EXIT Journal: GX STOP-MOVE GX", StringComparison.Ordinal) >= 0, "partial, close and stop-move are Journal lines");
+		Check(gx.IndexOf("EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list", StringComparison.Ordinal) >= 0 && gx.IndexOf("Output.WriteLine(line)", StringComparison.Ordinal) >= 0, "a wrapper listed first logs the order Error on the calc bar");
+		Check(src.IndexOf("exitPlan(") >= 0 && File.ReadAllText(Path.Combine(root, "_TestGate0.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0 && File.ReadAllText(Path.Combine(root, "_DvpEngineTest.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0, "G0 and D9a do not call exitPlan");
+		Check(gx.IndexOf("[Input] public bool FillBarDisasterStop { get; set; }", StringComparison.Ordinal) >= 0 && src.IndexOf("inputs[{inputSnapshot()}]", StringComparison.Ordinal) >= 0, "FillBarDisasterStop is an Input on the RUN line");
+		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
+		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
+		int n = 0;
+		foreach (string f in new[] { "_StopsAndTargets.Strategy.CS", "_Stops_And_Targets.Strategy.CS", "_ExitStatic.Strategy.CS", "_StpOrLim_Exit.Strategy.CS", "_ExitHalfRiskHalfRoll.Strategy.CS" })
+			if (File.ReadAllText(Path.Combine(root, f)).IndexOf("SUPERSEDED by GX", StringComparison.Ordinal) >= 0) n++;
+		Check(n == 5, "five legacy exit studies marked superseded");
 	}
 }

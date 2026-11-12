@@ -395,6 +395,42 @@ static class Program
 			"self-test: descriptive PascalCase names pass, and the literal StudyName placeholder does not");
 	}
 
+	// The first code line of each PowerLanguage.Strategy block. Comments and whitespace do not count.
+	static string StrategyFunctionUsingProblem(string text)
+	{
+		if (text == null || text.IndexOf("namespace PowerLanguage.Function", StringComparison.Ordinal) < 0) return null;
+		int at = 0;
+		while (at < text.Length)
+		{
+			int ns = text.IndexOf("namespace PowerLanguage.Strategy", at, StringComparison.Ordinal);
+			if (ns < 0) return null;
+			int brace = text.IndexOf('{', ns);
+			if (brace < 0) return "Strategy namespace has no body";
+			int i = brace + 1;
+			while (i < text.Length)
+			{
+				if (char.IsWhiteSpace(text[i])) { i++; continue; }
+				if (i + 1 < text.Length && text[i] == '/' && text[i + 1] == '/')
+				{
+					while (i < text.Length && text[i] != '\n') i++;
+					continue;
+				}
+				if (i + 1 < text.Length && text[i] == '/' && text[i + 1] == '*')
+				{
+					int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+					i = end < 0 ? text.Length : end + 2;
+					continue;
+				}
+				break;
+			}
+			const string need = "using PowerLanguage.Function;";
+			if (i >= text.Length || string.CompareOrdinal(text, i, need, 0, need.Length) != 0)
+				return "namespace PowerLanguage.Strategy must start with using PowerLanguage.Function;";
+			at = i + need.Length;
+		}
+		return null;
+	}
+
 	static int Main()
 	{
 		string root = Root(), csproj = Path.Combine(root, "PLStudies.csproj");
@@ -488,7 +524,25 @@ static class Program
 			Check(McEnums.Contains("MTPA_MCSymbolCategories") && McEnums.Contains("MTPA_SymbolFields") && McEnums.Length == 8, "MI-T14 scope = the eight MC enum types of spec rev 2.3 §10");
 		}
 
-		// (6) research drafts in sandbox/ stay out of the production project (docs/research-strategy-header.md)
+		// (6) a file that holds both PowerLanguage.Function and PowerLanguage.Strategy must import Function inside the Strategy namespace.
+		// File-level usings are easy to miss once a second namespace starts, and GX_OFFMC hides that half from the off-MC build.
+		{
+			var usingHits = new List<string>();
+			foreach (string f in Directory.GetFiles(root, "*.CS").Concat(Directory.Exists(Path.Combine(root, "sandbox")) ? Directory.GetFiles(Path.Combine(root, "sandbox"), "*.CS") : new string[0]))
+			{
+				string problem = StrategyFunctionUsingProblem(File.ReadAllText(f));
+				if (problem != null) usingHits.Add(Path.GetFileName(f) + ": " + problem);
+			}
+			foreach (string h in usingHits) Console.WriteLine("  strategy using: " + h);
+			string badNs = "namespace PowerLanguage.Function {}\nnamespace PowerLanguage.Strategy {\n\tpublic class X {}\n}";
+			string goodNs = "namespace PowerLanguage.Function {}\nnamespace PowerLanguage.Strategy {\n\tusing PowerLanguage.Function;\n\tpublic class X {}\n}";
+			string onlyStrategy = "namespace PowerLanguage.Strategy {\n\tpublic class X {}\n}";
+			Check(usingHits.Count == 0, "Strategy namespace in a Function file starts with using PowerLanguage.Function (" + usingHits.Count + ")");
+			Check(StrategyFunctionUsingProblem(badNs) != null && StrategyFunctionUsingProblem(goodNs) == null && StrategyFunctionUsingProblem(onlyStrategy) == null,
+				"self-test: a second namespace without the Function using fails, a file-level-only Strategy file does not");
+		}
+
+		// (7) research drafts in sandbox/ stay out of the production project (docs/research-strategy-header.md)
 		SandboxGuard(root);
 
 		Console.WriteLine($"RepoLintTests: {s_pass} passed, {s_fail} failed");

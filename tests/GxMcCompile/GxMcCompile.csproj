@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Compiles _CustomSignal, _GenericExit and the test host with GX_OFFMC off, against the real
+       engine types (ExitMarket is the struct) and MC stubs. Not part of PLStudies.csproj.
+       The host is copied out of sandbox/ so the csproj Include does not point at that folder. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS0649;CS0169;CS0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Generated\**" />
+    <Compile Include="..\..\_PortMM.Function.CS" Link="Linked\_PortMM.cs" />
+    <Compile Include="..\..\_SignalJournal.Function.CS" Link="Linked\_SignalJournal.cs" />
+    <Compile Include="..\..\_MtfMath.Function.CS" Link="Linked\_MtfMath.cs" />
+    <Compile Include="..\..\_BarRing.Function.CS" Link="Linked\_BarRing.cs" />
+    <Compile Include="..\..\_LevelRef.Function.CS" Link="Linked\_LevelRef.cs" />
+    <Compile Include="..\..\_LevelStudy.Function.CS" Link="Linked\_LevelStudy.cs" />
+    <Compile Include="..\..\_Holidays.Function.CS" Link="Linked\_Holidays.cs" />
+    <Compile Include="..\..\_CmeHolidays.Function.CS" Link="Linked\_CmeHolidays.cs" />
+    <Compile Include="..\..\_CmeSessionClock.Function.CS" Link="Linked\_CmeSessionClock.cs" />
+    <Compile Include="..\..\_Gmm.Function.CS" Link="Linked\_Gmm.cs" />
+    <Compile Include="..\..\_ProfileMath.Function.CS" Link="Linked\_ProfileMath.cs" />
+    <Compile Include="..\..\_OrderFlow.Function.CS" Link="Linked\_OrderFlow.cs" />
+    <Compile Include="..\..\_Rng.Function.CS" Link="Linked\_Rng.cs" />
+    <Compile Include="..\..\_ProfileStats.Function.CS" Link="Linked\_ProfileStats.cs" />
+    <Compile Include="..\..\_Gate0.Function.CS" Link="Linked\_Gate0.cs" />
+    <Compile Include="..\..\_NyseHolidays.Function.CS" Link="Linked\_NyseHolidays.cs" />
+    <Compile Include="..\..\_InstrumentProfile.Function.CS" Link="Linked\_InstrumentProfile.cs" />
+    <Compile Include="..\..\_RollDetector.Function.CS" Link="Linked\_RollDetector.cs" />
+    <Compile Include="..\..\_PriceActionEngine.Function.CS" Link="Linked\_PriceActionEngine.cs" />
+    <Compile Include="..\..\_DvpEngine.Function.CS" Link="Linked\_DvpEngine.cs" />
+    <Compile Include="..\..\_DailyContext.Function.CS" Link="Linked\_DailyContext.cs" />
+    <Compile Include="..\..\_RegimeEngine.Function.CS" Link="Linked\_RegimeEngine.cs" />
+    <Compile Include="..\..\_EventCalendar.Function.CS" Link="Linked\_EventCalendar.cs" />
+    <Compile Include="..\..\_AvwapManager.Function.CS" Link="Linked\_AvwapManager.cs" />
+    <Compile Include="..\..\_TodNormaliser.Function.CS" Link="Linked\_TodNormaliser.cs" />
+    <Compile Include="..\..\_FvgDetector.Function.CS" Link="Linked\_FvgDetector.cs" />
+    <Compile Include="..\..\_TickStream.Function.CS" Link="Linked\_TickStream.cs" />
+    <Compile Include="..\..\_XmktLeg.Function.CS" Link="Linked\_XmktLeg.cs" />
+    <Compile Include="..\..\_GenericExit.Strategy.CS" Link="Linked\_GenericExit.cs" />
+    <Compile Include="Generated\CustomSignal.cs" Link="Linked\_CustomSignal.cs" />
+    <Compile Include="Generated\Host.cs" Link="Linked\Host.cs" />
+  </ItemGroup>
+  <Target Name="StageSources" BeforeTargets="CoreCompile"
+          Inputs="..\..\_CustomSignal.Strategy.CS;..\..\sandbox\_GX_00_TestHost.Strategy.CS"
+          Outputs="Generated\CustomSignal.cs;Generated\Host.cs">
+    <MakeDir Directories="Generated" />
+    <Copy SourceFiles="..\..\sandbox\_GX_00_TestHost.Strategy.CS" DestinationFiles="Generated\Host.cs" />
+    <!-- Roslyn binds the simple name TradeManager to the PowerLanguage.TradeManager namespace.
+         Alias that one using so the real file's calls typecheck. Every other line is the real file. -->
+    <Exec Command="sed 's/using PowerLanguage.TradeManager;/using TradeManager = McTradeManager;/' ../../_CustomSignal.Strategy.CS &gt; Generated/CustomSignal.cs" />
+  </Target>
+</Project>

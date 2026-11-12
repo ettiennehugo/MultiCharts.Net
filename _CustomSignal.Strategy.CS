@@ -1711,12 +1711,20 @@ namespace PowerLanguage.Strategy
 		private string m_gxPrefix = "GX";
 		private double m_gxPlanEntry = double.NaN;
 		private double m_gxPlanStop = double.NaN;
+		private string m_gxPlanSource = "";
+		private string m_gxExitReason = "";
+		private bool m_gxPlacesT1;
+		private bool m_gxWroteR;
+		private bool m_gxT1Sent;
+		private bool m_gxFullSpent;
+		private bool m_gxCloseLogged;
+		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
 		private ExitPosition m_gxPos;
 		private ExitMarket m_gxMkt;
-		private IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST;
-		private IOrderMarket m_gxLX, m_gxSX;
+		protected IOrderPriced m_gxLS, m_gxSS, m_gxLT1, m_gxST1, m_gxLT, m_gxST, m_gxLF, m_gxSF;
+		protected IOrderMarket m_gxLX, m_gxSX;
 
 		private void startPortfolio()
 		{
@@ -1768,7 +1776,20 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>M-PORT: the active protective stop of the open position (for pm.riskOpen). Defaults to the armed active stop (the widened stop when portfolioArm got a valid one, else the structural stop; rev 2.7); call it to trail or move to breakeven.</summary>
-		protected void portfolioStop(double stop) { if (m_portOn) m_portStop = stop; }
+		protected void portfolioStop(double stop)
+		{
+			if (!m_portOn || double.IsNaN(stop)) return;
+			double old = m_portStop;
+			if (old == stop) return;
+			m_portStop = stop;
+			int pos = StrategyInfo.MarketPosition;
+			double bpv = 0;
+			double px = 0;
+			double mark = 0;
+			try { bpv = Bars.Info.BigPointValue; px = StrategyInfo.AvgEntryPrice; mark = Bars.Close[0]; } catch (Exception) { }
+			double risk = _PortArm.RiskOpen(pos, px, mark, stop, bpv);
+			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX STOP-MOVE " + m_gxPrefix + " " + old.ToString("0.########", CultureInfo.InvariantCulture) + " -> " + stop.ToString("0.########", CultureInfo.InvariantCulture) + " pm.riskOpen $" + risk.ToString("0.00", CultureInfo.InvariantCulture));
+		}
 
 		private void portfolioBar()
 		{
@@ -2372,6 +2393,39 @@ namespace PowerLanguage.Strategy
 			startEngines();   // lazy engines (§0.1); null unless enabled
 			startLevelStudy();   // A2-33 harness (off by default)
 			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
+			gxResetRun();
+		}
+
+		/// <summary>Drop GX-2/GX-3 run state. MC reuses this instance on recalculation. Orders and GxConfig stay; they are created once.</summary>
+		private void gxResetRun()
+		{
+			m_gxUsed = false;
+			m_gxStarted = false;
+			m_gxArmed = false;
+			m_gxPlanLive = false;
+			m_gxLong = false;
+			m_journalGx = false;
+			m_gxQty = 0;
+			m_gxEntryOrder = "";
+			m_gxPlanEntry = double.NaN;
+			m_gxPlanStop = double.NaN;
+			m_gxPlanSource = "";
+			m_gxExitReason = "";
+			m_gxPlacesT1 = false;
+			m_gxWroteR = false;
+			m_gxT1Sent = false;
+			m_gxFullSpent = false;
+			m_gxCloseLogged = false;
+			m_gxGate.OnFlat();
+			m_gx = null;
+			m_gxPos = null;
+			m_gxMkt = default(ExitMarket);
+			GxMinutesToNews = double.NaN;
+			if (m_portOn)
+			{
+				MyPortfolioData[_PortKeys.GxPlanEntry] = double.NaN;
+				MyPortfolioData[_PortKeys.GxPlanStop] = double.NaN;
+			}
 		}
 
 		/// <summary>
@@ -2854,6 +2908,8 @@ namespace PowerLanguage.Strategy
 			System.Globalization.CultureInfo ic = System.Globalization.CultureInfo.InvariantCulture;
 			double bpv = Bars.Info.BigPointValue;
 			double tick = tickSize();
+			if (m_journalGx && m_journalArms != null && m_gxPos != null && !double.IsNaN(m_gxPlanEntry) && !m_journalArms.ContainsKey(entryName ?? ""))
+				m_journalArms[entryName ?? ""] = new JournalArm { tag = entryName ?? "", plannedEntry = m_gxPlanEntry, initialStop = m_gxPlanStop, target = double.NaN, context = "" };
 			JournalArm arm;
 			bool armed = m_journalArms.TryGetValue(entryName ?? "", out arm);
 
@@ -2898,14 +2954,14 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_journal == null)
 				{
-					m_journalGx = m_gxUsed;
+					m_journalGx = m_gxUsed || m_gxPlanLive;
 					string header = TradeJournal.HEADER;
 					if (m_event != null) header += "," + EVENT_JOURNAL_COLS;
 					if (m_journalGx) header += "," + GX_JOURNAL_COLS;
 					m_journal = new TradeJournal(RunId, "MCJournal_", header, Output);
 					trace(ETraceLevel.Journal, $"JOURNAL file({m_journal.Path_})");
 				}
-				if (m_journalGx) gxAppendJournal(sb, exitPrice, bpv, profit);
+				if (m_journalGx) gxAppendJournal(sb, exitPrice, bpv, profit, exitName);
 				m_journal.Write(sb.ToString());
 			}
 			catch (Exception e)
@@ -4184,7 +4240,28 @@ namespace PowerLanguage.Strategy
 			m_gxST = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, id + "ST", EOrderAction.BuyToCover, OrderExit.Total));
 			m_gxLX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "LX", EOrderAction.Sell, OrderExit.Total));
 			m_gxSX = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, id + "SX", EOrderAction.BuyToCover, OrderExit.Total));
+			m_gxLF = OrderCreator.Stop(new SOrderParameters(Contracts.Default, id + "LF", EOrderAction.Sell, OrderExit.FromAll));
+			m_gxSF = OrderCreator.Stop(new SOrderParameters(Contracts.Default, id + "SF", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_gxOrders = true;
+		}
+
+		/// <summary>
+		/// Wrapper-mode arm. Publishes the plan, and in Portfolio Trader calls sizeForRisk so pm.state is Armed
+		/// with pm.side and pm.R$ before the entry. On a chart it does not size and does not skip the entry.
+		/// Returns false only when Portfolio Trader sizing produced no contracts.
+		/// </summary>
+		protected bool gxArmEntry(bool longSide, double entry, double structuralStop, double plannedStop)
+		{
+			gxPublishPlan(entry, plannedStop);
+			if (!m_portOn) return true;
+			int qty = sizeForRisk(Bars, entry, structuralStop, _PortArm.TradeBudgetFraction, new SizingLimits(), plannedStop);
+			if (qty > 0)
+			{
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX ARM side=" + (longSide ? "long" : "short") + " qty=" + qty.ToString(CultureInfo.InvariantCulture) + " entry=" + entry.ToString("0.########", CultureInfo.InvariantCulture) + " stop=" + plannedStop.ToString("0.########", CultureInfo.InvariantCulture));
+				return true;
+			}
+			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX ARM-SKIP side=" + (longSide ? "long" : "short") + " entry=" + entry.ToString("0.########", CultureInfo.InvariantCulture) + " stop=" + structuralStop.ToString("0.########", CultureInfo.InvariantCulture) + " sizeForRisk 0");
+			return false;
 		}
 
 		/// <summary>Publish the planned entry and planned widened stop for the wrapper. Cleared by portfolioBar when flat and not armed.</summary>
@@ -4193,6 +4270,7 @@ namespace PowerLanguage.Strategy
 			m_gxPlanEntry = plannedEntry;
 			m_gxPlanStop = plannedStop;
 			m_gxPlanLive = true;
+			if (!m_gxPlacesT1) m_gxPlanSource = "";
 			if (!m_portOn) return;
 			MyPortfolioData[_PortKeys.GxPlanEntry] = plannedEntry;
 			MyPortfolioData[_PortKeys.GxPlanStop] = plannedStop;
@@ -4206,6 +4284,15 @@ namespace PowerLanguage.Strategy
 			MyPortfolioData[_PortKeys.GxPlanStop] = double.NaN;
 		}
 
+		/// <summary>Replace the embedded engine config before the first exitPlan. The default is EntryProvided so a production host keeps its own stop.</summary>
+		protected void gxConfigure(ExitConfig cfg)
+		{
+			if (cfg == null) return;
+			cfg.Embedded = true;
+			m_gxCfg = cfg;
+			if (m_gx != null) m_gx.Config = cfg;
+		}
+
 		private void ensureGx(ExitMarket mkt)
 		{
 			if (m_gx == null) m_gx = new ExitSession { Config = m_gxCfg };
@@ -4217,12 +4304,11 @@ namespace PowerLanguage.Strategy
 				m_gxMkt = mkt;
 				m_gx.Start(mkt);
 				m_gxStarted = true;
-				if (traceOn(ETraceLevel.Info))
-					foreach (string line in m_gx.Log) trace(line.IndexOf(" Error:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Error : line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+				gxEmitLog();
 			}
 		}
 
-		private int gxFloorTicks()
+		protected int gxFloorTicks()
 		{
 			try
 			{
@@ -4245,6 +4331,12 @@ namespace PowerLanguage.Strategy
 				return double.NaN;
 			}
 			m_gxUsed = true;
+			m_gxPlacesT1 = true;
+			if (StrategyInfo.MarketPosition == 0)
+			{
+				m_gxGate.OnFlat();
+				m_gxExitReason = "";
+			}
 			if (mkt.Tick <= 0) mkt.Tick = tickSize();
 			if (mkt.Bpv <= 0) { try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { } }
 			if (mkt.FloorTicks == 0) mkt.FloorTicks = gxFloorTicks();
@@ -4258,60 +4350,104 @@ namespace PowerLanguage.Strategy
 			m_gxEntryOrder = entryOrderName ?? "";
 			m_gxArmed = true;
 			gxPublishPlan(plannedEntry, stop);
-			if (m_portOn) portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop);
+			m_gxPlanSource = "plan";
+			if (m_portOn)
+			{
+				portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop);
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX ARM side=" + (longSide ? "long" : "short") + " qty=" + qty.ToString(CultureInfo.InvariantCulture) + " entry=" + plannedEntry.ToString("0.########", CultureInfo.InvariantCulture) + " stop=" + stop.ToString("0.########", CultureInfo.InvariantCulture));
+			}
 			if (journalOn()) journalArm(m_gxEntryOrder, plannedEntry, stop, double.NaN);
-			if (longSide) m_gxLS.Send(stop, qty);
-			else m_gxSS.Send(stop, qty);
+			// qty is the arm code the MM may replace. A Total stop for that code covers one contract of a larger fill.
+			// FromAll with no quantity exits whatever size the entry fills, including on the fill bar.
+			gxSendFullStop(longSide, stop);
 			return stop;
 		}
 
-		/// <summary>One closed bar of an embedded GX trade. No-op until exitPlan has been called. Sends only exits that reduce the open side.</summary>
+		/// <summary>One closed bar of an embedded GX trade, including the flat bar after the exit. No-op until exitPlan has been called. Sends only exits that reduce the open side. EXIT CLOSE is written once, on the flat bar.</summary>
 		protected void exitBar()
 		{
 			if (!m_gxUsed || m_gx == null) return;
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
-				if (m_gxPos != null && m_gxPos.Open) { m_gxPos.Open = false; m_gxArmed = false; }
+				bool wasOpen = m_gxGate.EngineOpen;
+				gxLogFlatClose();
+				if (wasOpen)
+				{
+					m_gxGate.OnFlat();
+					m_gxExitReason = "";
+					m_gxT1Sent = false;
+					m_gxFullSpent = false;
+					if (m_gxPos != null) m_gxPos.Open = false;
+					m_gxArmed = false;
+				}
 				return;
 			}
-			if (!m_gxArmed && (m_gxPos == null || !m_gxPos.Open)) return;
+			if (!m_gxArmed && !m_gxGate.EngineOpen) return;
 			bool longSide = pos > 0;
 			if (m_gxPos == null) m_gxPos = new ExitPosition();
 			int lots = gxOpenLots(pos);
-			if (!m_gxPos.Open)
+			if (m_gxGate.BeginPosition(gxPositionEntryTime()))
 			{
+				m_gxExitReason = "";
+				m_gxT1Sent = false;
+				m_gxCloseLogged = false;
+				m_gxFullSpent = false;
+				if (gxPrimaryStopFilled()) gxMarkFullSpent(lots);
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
 				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
-				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * m_gxQty;
+				m_gxQty = lots;
+				m_gxPos.T1PlanSource = m_gxPlanSource;
+				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * lots;
 				double fillR = m_gxPos.InitialRDollars;
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture));
-				if (m_gx.Log.Count > 0 && traceOn(ETraceLevel.Info))
-					foreach (string line in m_gx.Log) if (line.IndexOf("T1-SKIPPED", StringComparison.Ordinal) >= 0 || line.IndexOf("RISK-OVER-BUDGET", StringComparison.Ordinal) >= 0) trace(line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0 ? ETraceLevel.Warning : ETraceLevel.Info, line);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " planEntry=" + ExitSession.Px(m_gxPlanEntry) + " fill=" + ExitSession.Px(fill) + " stop=" + ExitSession.Px(m_gxPlanStop));
+				gxPublishFillR();
+				gxEmitLog();
+			}
+			else if (lots > 0 && m_gxPos.Qty > 0)
+			{
+				if (m_gxT1Sent && lots < m_gxPos.OpenQty)
+				{
+					int closed = m_gx.ConfirmReduced(m_gxPos, lots, m_gxMkt.Bpv);
+					if (closed > 0)
+					{
+						m_gxT1Sent = false;
+						if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, closed, m_gxPos.OpenQty));
+					}
+				}
+				else if (m_gxPos.OpenQty > lots)
+					gxMarkFullSpent(lots);
+				if (gxPrimaryStopFilled()) gxMarkFullSpent(lots);
+				m_gx.ReopenRemainder(m_gxPos, lots, m_gxPos.Stop, m_gxMkt.Bpv);
 			}
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_gxMkt.Tick; bar.Bpv = m_gxMkt.Bpv; bar.AtrTrail = m_gxMkt.AtrTrail; bar.Ema = m_gxMkt.Ema;
 			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
 			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
+			bar.DeferPartial = true;
 			ExitDecision d = m_gx.Manage(m_gxPos, bar);
 			if (m_portOn) portfolioStop(m_gxPos.Stop);
+			gxPublishFillR();
+			if (lots > 0 && !m_gxPos.Open) m_gxPos.Open = true;
+			ExitSession.RemainderBook guard = ExitSession.Protection(lots, m_gxCloseLogged, m_gxExitReason);
 			if (d.Reason != null)
 			{
-				bool market = (d.Reason != "STOP" && d.Reason != "T1" && d.Reason != "TARGET") || m_gxPos.GapThroughStop;
-				if (market)
-				{
-					if (longSide) m_gxLX.Send(lots); else m_gxSX.Send(lots);
-				}
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, d.Reason, bar.Close, bar.Bpv, 0, "bar"));
+				if (!string.IsNullOrEmpty(d.Reason)) m_gxExitReason = d.Reason;
+				if ((d.Reason == "STOP" || d.Reason == "TRAIL-THROUGH") && !m_gxPos.GapThroughStop)
+					gxSendWorkingStop(longSide, guard);
+				else
+					gxSendExit(d.Reason, m_gxPos.GapThroughStop, m_gxPos, longSide, lots);
 				return;
 			}
-			if (longSide) m_gxLS.Send(m_gxPos.Stop, lots); else m_gxSS.Send(m_gxPos.Stop, lots);
-			if (d.SendT1 && d.T1Qty > 0 && !double.IsNaN(m_gxPos.T1Level))
+			if (d.PartialQty > 0 && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_gx.PartialLine(m_gxPos, d.PartialQty, m_gxPos.OpenQty));
+			WorkingExit work = ExitSession.OrdersAfter(d, m_gxPos, lots);
+			if (work.Stop) gxSendWorkingStop(longSide, guard);
+			if (work.T1)
 			{
-				int q = d.T1Qty < lots ? d.T1Qty : lots;
-				if (q > 0) { if (longSide) m_gxLT1.Send(m_gxPos.T1Level, q); else m_gxST1.Send(m_gxPos.T1Level, q); }
+				m_gxT1Sent = true;
+				if (longSide) m_gxLT1.Send(m_gxPos.T1Level, work.T1Qty); else m_gxST1.Send(m_gxPos.T1Level, work.T1Qty);
 			}
 			if (m_gx.FinalOn && !m_gxPos.FinalSkipped && !double.IsNaN(m_gxPos.FinalLevel))
 			{
@@ -4322,16 +4458,181 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>FromAll stop, no quantity. It covers the position the MM fills, on the fill bar and after.</summary>
+		private void gxSendFullStop(bool longSide, double stop)
+		{
+			if (m_gxLF == null || m_gxSF == null) return;
+			if (longSide) m_gxLF.Send(stop); else m_gxSF.Send(stop);
+		}
+
+		/// <summary>FromAll covers the fill the MM sized. The Total stop is the same count MC still holds, and it is a different order, so a partial fill of the first stop does not leave the rest unprotected.</summary>
+		private void gxSendWorkingStop(bool longSide, ExitSession.RemainderBook guard)
+		{
+			if (m_gxPos == null) return;
+			if (guard.SendFull) gxSendFullStop(longSide, m_gxPos.Stop);
+			if (guard.SendSized && guard.StopQty > 0)
+			{
+				if (longSide) m_gxLS.Send(m_gxPos.Stop, guard.StopQty); else m_gxSS.Send(m_gxPos.Stop, guard.StopQty);
+			}
+		}
+
+		private void gxMarkFullSpent(int lots)
+		{
+			if (m_gxFullSpent) return;
+			m_gxFullSpent = true;
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: GX STOP-REMAINDER " + m_gxPrefix + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " - the fill-bar stop left contracts open");
+		}
+
 		/// <summary>Refresh ATR, EMA and the bar size the trail and the control-bar map read. Call before exitBar when they change.</summary>
 		protected void gxSetMarket(ExitMarket mkt) { m_gxMkt = mkt; }
 
-		private int gxOpenLots(int pos)
+		/// <summary>Send the one decided exit and keep it alive. A T1 or target limit is sent, not dropped.</summary>
+		protected void gxSendExit(string reason, bool gapThrough, ExitPosition p, bool longSide, int lots)
 		{
-			try { int n = this.CurrentPosition.OpenLots; if (n > 0) return n; } catch (Exception) { }
-			return Math.Abs(pos);
+			ExitOrder o = ExitSession.OrderFor(reason, gapThrough, p, lots);
+			if (o.Kind == "market") { if (longSide) m_gxLX.Send(o.Qty); else m_gxSX.Send(o.Qty); }
+			else if (o.Kind == "stop") { if (longSide) m_gxLS.Send(o.Price, o.Qty); else m_gxSS.Send(o.Price, o.Qty); }
+			else if (o.Kind == "t1") { if (longSide) m_gxLT1.Send(o.Price, o.Qty); else m_gxST1.Send(o.Price, o.Qty); }
+			else if (o.Kind == "target") { if (longSide) m_gxLT.Send(o.Price, o.Qty); else m_gxST.Send(o.Price, o.Qty); }
 		}
 
-		private void gxAppendJournal(StringBuilder sb, double exitPrice, double bpv, double profit)
+		protected int gxOpenLots(int pos)
+		{
+			int fromPos = Math.Abs(pos);
+			int fromLots = 0;
+			try { fromLots = this.CurrentPosition.OpenLots; } catch (Exception) { }
+			int n = fromLots > fromPos ? fromLots : fromPos;
+			return n > 0 ? n : 1;
+		}
+
+		/// <summary>MC is flat. Log EXIT CLOSE once. A stop touch while contracts remain is not a close.</summary>
+		private void gxLogFlatClose()
+		{
+			if (m_gxCloseLogged || m_gx == null || m_gxPos == null || !m_gxGate.EngineOpen) return;
+			string name = "";
+			double px = 0;
+			try { px = Bars.Close[0]; } catch (Exception) { }
+			try
+			{
+				IMarketPosition held = null;
+				if (CurrentPosition != null && CurrentPosition.ClosedTrades != null && CurrentPosition.ClosedTrades.Count > 0
+					&& (CurrentPosition.OpenTrades == null || CurrentPosition.OpenTrades.Count == 0))
+					held = CurrentPosition;
+				else if (Positions != null && Positions.Count > 1) held = Positions[1];
+				if (held != null && held.ClosedTrades != null && held.ClosedTrades.Count > 0)
+				{
+					ITrade t = held.ClosedTrades[held.ClosedTrades.Count - 1];
+					if (t != null && t.ExitOrder != null) { name = t.ExitOrder.Name ?? ""; px = t.ExitOrder.Price; }
+				}
+			}
+			catch (Exception) { }
+			string reason = m_gxExitReason;
+			if (string.IsNullOrEmpty(reason)) reason = ExitSession.UnloggedFillReason("", name);
+			m_gxCloseLogged = true;
+			if (string.IsNullOrEmpty(reason)) return;
+			m_gxExitReason = reason;
+			if (!traceOn(ETraceLevel.Journal)) return;
+			double bpv = m_gxMkt.Bpv > 0 ? m_gxMkt.Bpv : 0;
+			trace(ETraceLevel.Journal, m_gx.CloseLine(m_gxPos, reason, px, bpv, 0, "bar"));
+		}
+
+		/// <summary>A stop order from this position already filled while MC still holds contracts. That order will not fill again.</summary>
+		private bool gxPrimaryStopFilled()
+		{
+			try
+			{
+				IMarketPosition held = CurrentPosition;
+				if (held == null || held.OpenTrades == null || held.OpenTrades.Count == 0) return false;
+				if (held.ClosedTrades == null || held.ClosedTrades.Count == 0) return false;
+				DateTime entry = gxPositionEntryTime();
+				string lf = m_gxPrefix + "LF", sf = m_gxPrefix + "SF", ls = m_gxPrefix + "LS", ss = m_gxPrefix + "SS";
+				for (int i = 0; i < held.ClosedTrades.Count; i++)
+				{
+					ITrade t = held.ClosedTrades[i];
+					if (t == null || t.ExitOrder == null) continue;
+					string n = t.ExitOrder.Name ?? "";
+					if (n != lf && n != sf && n != ls && n != ss) continue;
+					if (entry != DateTime.MinValue && t.ExitOrder.Time < entry) continue;
+					return true;
+				}
+			}
+			catch (Exception) { }
+			return false;
+		}
+
+		/// <summary>Once, on the fill: pm.R$ and pm.R$w become the actual per-contract dollars. The kill's riskAtOpen is that times |position|, which is the position's 1R.</summary>
+		private void gxPublishFillR()
+		{
+			if (!m_portOn || m_gxPos == null || !(m_gxPos.InitialRPrice > 0) || !(m_gxMkt.Bpv > 0)) return;
+			double per = m_gxPos.InitialRPrice * m_gxMkt.Bpv;
+			if (!(per > 0) || double.IsInfinity(per)) return;
+			m_gxWroteR = true;
+			m_portRDollar = per;
+			try
+			{
+				MyPortfolioData[_PortKeys.RDollar] = per;
+				MyPortfolioData[_PortKeys.RDollarW] = per;
+			}
+			catch (Exception ex)
+			{
+				trace(ETraceLevel.Error, "EXIT Error: GX fill R write failed - " + ex.Message);
+			}
+		}
+
+		private void gxEmitLog()
+		{
+			if (m_gx == null) return;
+			foreach (string line in m_gx.DrainLog())
+			{
+				ETraceLevel lv = ETraceLevel.Info;
+				if (line.IndexOf(" Error:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Error;
+				else if (line.IndexOf(" Warning:", StringComparison.Ordinal) >= 0) lv = ETraceLevel.Warning;
+				if (traceOn(lv)) trace(lv, line);
+			}
+		}
+
+		/// <summary>Point the CS-1 GX columns at a session. The wrapper calls this before base.CalcBar so the journal sees the trade that just closed.</summary>
+		protected void gxAttachSession(ExitSession session, ExitPosition pos)
+		{
+			m_gxUsed = true;
+			if (session != null) m_gx = session;
+			if (pos != null) m_gxPos = pos;
+		}
+
+		/// <summary>Record the plan the exit actually used. source is plan or fill.</summary>
+		protected void gxSetPlan(double entry, double stop, string source)
+		{
+			m_gxPlacesT1 = true;
+			m_gxPlanEntry = entry;
+			m_gxPlanStop = stop;
+			m_gxPlanSource = source ?? "";
+			if (m_gxPos != null) m_gxPos.T1PlanSource = m_gxPlanSource;
+		}
+
+		private DateTime gxPositionEntryTime()
+		{
+			try
+			{
+				IMarketPosition p = Positions[0];
+				if (p == null || p.OpenTrades == null) return DateTime.MinValue;
+				DateTime t = DateTime.MinValue;
+				foreach (ITrade tr in p.OpenTrades)
+				{
+					if (tr == null || tr.EntryOrder == null) continue;
+					DateTime et = tr.EntryOrder.Time;
+					if (t == DateTime.MinValue || et < t) t = et;
+				}
+				return t;
+			}
+			catch (Exception) { return DateTime.MinValue; }
+		}
+
+		protected void gxNoteExit(string reason)
+		{
+			m_gxExitReason = reason ?? "";
+		}
+
+		private void gxAppendJournal(StringBuilder sb, double exitPrice, double bpv, double profit, string exitName)
 		{
 			Action<string> col = s => { sb.Append(','); sb.Append(csvField(s)); };
 			if (m_gxPos == null)
@@ -4361,13 +4662,20 @@ namespace PowerLanguage.Strategy
 			col(!eqOk || double.IsNaN(realPct) ? "" : ExitSession.Pct3(realPct));
 			col("bar");
 			col(m_gxPos.AddCount.ToString(CultureInfo.InvariantCulture));
-			col("");
+			string source = "";
+			string why = "";
+			if (m_gxPlacesT1)
+			{
+				source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
+				why = ExitSession.ReasonFromExitOrder(exitName, m_gxExitReason);
+			}
+			col(why);
 			double ro = m_gx == null ? double.NaN : m_gx.ROrig(m_gxPos, profit);
 			col(double.IsNaN(ro) ? "" : ExitSession.Ratio2(ro));
 			col(m_gx == null ? "" : m_gx.Package ?? "");
 			col(flag);
 			col(m_gxPos.T1Skipped ? "1" : "0");
-			col("plan");
+			col(source);
 		}
 	}
 }
