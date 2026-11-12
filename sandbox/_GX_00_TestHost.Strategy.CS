@@ -210,14 +210,18 @@ namespace PowerLanguage.Strategy
 			mkt.Tick = tick;
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { mkt.Bpv = 1; }
 			mkt.AtrStop = tick * 8; mkt.AtrTrail = tick * 8;
+			mkt.EntryStop = structural;
 			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0]; mkt.SwingLow = Bars.Low[0]; mkt.SwingHigh = Bars.High[0];
 			mkt.BarMinutes = 1; mkt.BarKind = EGxBarKind.Minute; mkt.ResolutionLabel = "1 min";
+			try { InstrumentProfile ip = InstrumentProfileOf(1); if (ip != null && ip.costFloorTicks > 0) mkt.FloorTicks = ip.costFloorTicks; } catch (Exception) { }
+			var cfg = new ExitConfig { InitialStop = EInitialStop.AtrMultiple, StopAtrMult = 1.5, StopAtrLength = 14 };
+			double planned = _ExitEngine.InitialStop(EInitialStop.AtrMultiple, longSide, entry, mkt, cfg, true);
 			if (EmbedEngine)
 			{
 				gxSetMarket(mkt);
 				exitPlan(longSide, entry, structural, 1, mkt, longSide ? "THLE" : "THSE");
 			}
-			else gxPublishPlan(entry, structural);
+			else if (!gxArmEntry(longSide, entry, structural, planned)) return;
 			if (longSide) m_le.Send(); else m_se.Send();
 		}
 	}

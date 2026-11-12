@@ -196,7 +196,17 @@ namespace PowerLanguage.Function
 		public bool StopChanged;
 		public bool SendT1;
 		public int T1Qty;
+		public int PartialQty;
 		public bool TrailThrough;
+	}
+
+	/// <summary>Orders that stay working while a position is open. A partial T1 does not replace the stop.</summary>
+	public struct WorkingExit
+	{
+		public bool Stop;
+		public int StopQty;
+		public bool T1;
+		public int T1Qty;
 	}
 
 	/// <summary>The one exit order a decided reason must keep working until MC is flat. Kind is market, stop, t1, target, or empty.</summary>
@@ -345,6 +355,14 @@ namespace PowerLanguage.Function
 			return pendingMarket ?? "";
 		}
 
+		/// <summary>Reason to log when a resting limit filled before this bar's Manage. Null when a decision was already logged, or the order name does not say.</summary>
+		public static string UnloggedFillReason(string pendingReason, string exitOrderName)
+		{
+			if (!string.IsNullOrEmpty(pendingReason)) return null;
+			string reason = ReasonFromExitOrder(exitOrderName, "");
+			return string.IsNullOrEmpty(reason) ? null : reason;
+		}
+
 		/// <summary>Order to send for a decided exit. A T1 or target limit is included; a gap through the stop is a market exit.</summary>
 		public static ExitOrder OrderFor(string reason, bool gapThrough, ExitPosition p, int lots)
 		{
@@ -376,6 +394,32 @@ namespace PowerLanguage.Function
 				o.Qty = lots;
 			}
 			return o;
+		}
+
+		/// <summary>
+		/// While the engine position is open and this bar is not a full exit, the stop covers every contract MC still holds.
+		/// The T1 limit stays up for the scale-out until MC's open quantity has fallen to the runner.
+		/// </summary>
+		public static WorkingExit OrdersAfter(ExitDecision d, ExitPosition p, int mcLots)
+		{
+			var w = new WorkingExit();
+			if (p == null || !p.Open || mcLots < 1 || !string.IsNullOrEmpty(d.Reason)) return w;
+			w.Stop = true;
+			w.StopQty = mcLots;
+			int t1 = 0;
+			if (p.T1Filled || d.PartialQty > 0)
+			{
+				if (mcLots > p.OpenQty)
+				{
+					int want = d.PartialQty > 0 ? d.PartialQty : p.T1Qty;
+					int gap = mcLots - p.OpenQty;
+					if (want > 0 && gap > 0) t1 = want < gap ? want : gap;
+				}
+			}
+			else if (d.SendT1 && d.T1Qty > 0) t1 = d.T1Qty < mcLots ? d.T1Qty : mcLots;
+			if (t1 > mcLots) t1 = mcLots;
+			if (t1 > 0 && !double.IsNaN(p.T1Level)) { w.T1 = true; w.T1Qty = t1; }
+			return w;
 		}
 		public ExitEffective Effective;
 		public string Package;
@@ -984,6 +1028,13 @@ namespace PowerLanguage.Function
 			bool control = ControlHit(p);
 			string reason = Precedence(bar.ForceClose, stop, target, news, session, roll, invalidate, time, control, targetReason);
 			if (reason == "STOP" && stopReason == "TRAIL-THROUGH") reason = "TRAIL-THROUGH";
+			int partialT1 = 0;
+			if (reason == "T1" && p.T1Qty > 0 && p.T1Qty < p.OpenQty)
+			{
+				partialT1 = p.T1Qty;
+				ScaleOut(p, partialT1, p.T1Level, bar.Bpv);
+				reason = null;
+			}
 			if (reason != null)
 			{
 				d.Reason = reason;
@@ -1039,8 +1090,13 @@ namespace PowerLanguage.Function
 				}
 			}
 			d.Stop = p.Stop;
-			d.SendT1 = T1On && !p.T1Skipped && !p.T1Filled && p.T1Qty > 0;
-			d.T1Qty = d.SendT1 ? p.T1Qty : 0;
+			d.PartialQty = partialT1;
+			if (partialT1 > 0) { d.SendT1 = true; d.T1Qty = partialT1; }
+			else
+			{
+				d.SendT1 = T1On && !p.T1Skipped && !p.T1Filled && p.T1Qty > 0;
+				d.T1Qty = d.SendT1 ? p.T1Qty : 0;
+			}
 			return d;
 		}
 
@@ -1080,6 +1136,16 @@ namespace PowerLanguage.Function
 				+ " plannedRiskPct=" + pp + " plannedRiskPctPeak=" + pk + " actualRiskPct=" + ap + " actualToPlanned=" + ra
 				+ " realizedPnlPct=" + rp + " mae=$" + Money(p.MaeTradeDollars) + " maeScope=" + maeScope
 				+ " equity=$" + Money(p.EquityAtEntry) + (flag.Length > 0 ? " riskFlag=" + flag : "");
+		}
+
+		/// <summary>A scale-out that leaves a runner. EXIT CLOSE is only for the bar the position goes flat.</summary>
+		public string PartialLine(ExitPosition p, int closed, int remaining)
+		{
+			string prefix = Config.InPortfolio ? "PORT PARTIAL " : "EXIT PARTIAL ";
+			return prefix + Config.Id + " side=" + (p.Long ? "long" : "short")
+				+ " closed=" + closed.ToString(CultureInfo.InvariantCulture)
+				+ " remaining=" + remaining.ToString(CultureInfo.InvariantCulture)
+				+ " reason=T1";
 		}
 	}
 
@@ -1357,6 +1423,7 @@ namespace PowerLanguage.Strategy
 			WrapperRun.Plan plan = m_life.OnBar(pos, pos == 0 && FillBarDisasterStop && m_disasterDl > 0);
 			if (pos == 0)
 			{
+				if (wasIn) LogFilledExit();
 				if (wasIn) m_wroteR = false;
 				if (m_wrapPos != null) m_wrapPos.Open = false;
 				if (plan.Disaster)
@@ -1371,6 +1438,34 @@ namespace PowerLanguage.Strategy
 			m_wasFlat = false;
 			if (plan.OpenTrade) OpenTrade(pos > 0);
 			ManageTrade(pos > 0, plan);
+		}
+
+		private void LogFilledExit()
+		{
+			if (m_wrap == null || m_wrapPos == null) return;
+			string name = "";
+			double px = 0;
+			try { px = Bars.Close[0]; } catch (Exception) { }
+			try
+			{
+				IMarketPosition p = null;
+				if (CurrentPosition != null && CurrentPosition.ClosedTrades != null && CurrentPosition.ClosedTrades.Count > 0
+					&& (CurrentPosition.OpenTrades == null || CurrentPosition.OpenTrades.Count == 0))
+					p = CurrentPosition;
+				else if (Positions != null && Positions.Count > 1) p = Positions[1];
+				if (p != null && p.ClosedTrades != null && p.ClosedTrades.Count > 0)
+				{
+					ITrade t = p.ClosedTrades[p.ClosedTrades.Count - 1];
+					if (t != null && t.ExitOrder != null) { name = t.ExitOrder.Name ?? ""; px = t.ExitOrder.Price; }
+				}
+			}
+			catch (Exception) { }
+			string reason = ExitSession.UnloggedFillReason(m_exitReason, name);
+			if (reason == null || !traceOn(ETraceLevel.Journal)) return;
+			double bpv = m_mkt.Bpv > 0 ? m_mkt.Bpv : 0;
+			trace(ETraceLevel.Journal, m_wrap.CloseLine(m_wrapPos, reason, px, bpv, 0, "bar"));
+			m_exitReason = reason;
+			gxNoteExit(reason);
 		}
 
 		private void CopyConfig(ExitConfig c)
@@ -1470,7 +1565,7 @@ namespace PowerLanguage.Strategy
 			double equity = this.InitialCapital + this.NetProfit;
 			m_wrap.Open(m_wrapPos, longSide, pe, ps, fill, live, lots, m_mkt.Tick, m_mkt.Bpv, equity, "", Bars.Time[0], 0);
 			double arm = Math.Abs(pe - ps) * m_mkt.Bpv * lots;
-			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill GX planned $" + arm.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + m_wrapPos.InitialRDollars.ToString("0.00", CultureInfo.InvariantCulture));
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill GX planned $" + arm.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + m_wrapPos.InitialRDollars.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture));
 			Emit(m_wrap.Log);
 			PublishOpen(live);
 		}
@@ -1513,12 +1608,13 @@ namespace PowerLanguage.Strategy
 			}
 			m_exitReason = "";
 			gxNoteExit("");
-			if (plan.WorkingStop) SendStop(longSide);
+			if (d.PartialQty > 0 && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_wrap.PartialLine(m_wrapPos, d.PartialQty, m_wrapPos.OpenQty));
+			WorkingExit work = ExitSession.OrdersAfter(d, m_wrapPos, lots);
+			if (work.Stop && (plan.WorkingStop || d.StopChanged || d.PartialQty > 0)) SendStop(longSide, work.StopQty);
 			if (!plan.RestingT1) return;
-			if (d.SendT1 && d.T1Qty > 0 && !double.IsNaN(m_wrapPos.T1Level))
+			if (work.T1)
 			{
-				int q = d.T1Qty < lots ? d.T1Qty : lots;
-				if (q > 0) { if (longSide) m_gxLT1.Send(m_wrapPos.T1Level, q); else m_gxST1.Send(m_wrapPos.T1Level, q); }
+				if (longSide) m_gxLT1.Send(m_wrapPos.T1Level, work.T1Qty); else m_gxST1.Send(m_wrapPos.T1Level, work.T1Qty);
 			}
 			if (m_wrap.FinalOn && !m_wrapPos.FinalSkipped && !double.IsNaN(m_wrapPos.FinalLevel))
 			{
@@ -1539,11 +1635,10 @@ namespace PowerLanguage.Strategy
 			return 0;
 		}
 
-		private void SendStop(bool longSide)
+		private void SendStop(bool longSide, int qty)
 		{
-			int lots = OpenLots();
-			if (lots < 1 || m_wrapPos == null) return;
-			if (longSide) m_gxLS.Send(m_wrapPos.Stop, lots); else m_gxSS.Send(m_wrapPos.Stop, lots);
+			if (qty < 1 || m_wrapPos == null) return;
+			if (longSide) m_gxLS.Send(m_wrapPos.Stop, qty); else m_gxSS.Send(m_wrapPos.Stop, qty);
 		}
 
 		private void PublishOpen(double stop)
