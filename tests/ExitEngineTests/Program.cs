@@ -51,6 +51,7 @@ static class Program
 		PtFillScalesT1();
 		RunnerStopAfterPartial();
 		EmbeddedFillDefersT1();
+		FillBarPartialStopKeepsRemainder();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -977,9 +978,41 @@ static class Program
 		Check(e.Manage(p, adv).Reason == "STOP" && !p.Open, "the runner then exits at the breakeven stop");
 	}
 
+	static void FillBarPartialStopKeepsRemainder()
+	{
+		var e = Eng(c => { c.Id = "TH"; c.Embedded = true; c.BreakEven = EBreakEven.Off; c.TrailMode = ETrailMode.None; });
+		var p = new ExitPosition();
+		var when = new DateTime(2024, 11, 18, 3, 18, 0);
+		e.Open(p, true, 5000, 4990, 5000, 4990, 2, 0.25, 20, 50000, "THLE", when, 0);
+		Check(p.Qty == 2 && p.OpenQty == 2, "a 2-lot fill is recorded as 2, not the plan qty of 1");
+		var fill = Bar(true, 5004, 4988, 4992);
+		fill.High = 5004; fill.Low = 4988; fill.Close = 4992; fill.DeferPartial = true; fill.TimeEt = when;
+		var d = e.Manage(p, fill);
+		Check(d.Reason == "STOP" && !p.Open, "the fill bar trades through the stop");
+		e.ReopenRemainder(p, 1, p.Stop, 20);
+		Check(p.Open && p.OpenQty == 1 && !p.T1Filled && Near(p.Stop, 4990), "the contract MC still holds reopens at the same stop");
+		ExitSession.RemainderBook live = ExitSession.Protection(1, false, "STOP");
+		Check(!live.LogClose && live.SendSized && live.StopQty == 1 && !live.SendFull, "the next order is a 1-lot stop, and the fill bar is not EXIT CLOSE");
+		var later = Bar(true, 4994, 4970, 4975);
+		later.High = 4994; later.Low = 4970; later.Close = 4975; later.DeferPartial = true;
+		later.TimeEt = when.AddMinutes(1);
+		var d2 = e.Manage(p, later);
+		Check(d2.Reason == "STOP" && !p.Open, "the next bar is still through the stop");
+		e.ReopenRemainder(p, 1, p.Stop, 20);
+		ExitSession.RemainderBook again = ExitSession.Protection(1, false, "STOP");
+		Check(p.Open && p.OpenQty == 1 && !again.LogClose && again.SendSized && again.StopQty == 1, "every later bar resends the 1-lot stop until MC is flat");
+		ExitSession.RemainderBook flat = ExitSession.Protection(0, false, "STOP");
+		Check(flat.LogClose && !flat.SendSized && !flat.SendFull && flat.CloseReason == "STOP", "EXIT CLOSE is logged once, when MC is flat");
+		ExitSession.RemainderBook twice = ExitSession.Protection(0, true, "STOP");
+		Check(!twice.LogClose, "a second flat bar does not log EXIT CLOSE again");
+		ExitSession.RemainderBook cover = ExitSession.Protection(2, false, "");
+		Check(!cover.SendFull && cover.SendSized && cover.StopQty == 2 && !cover.LogClose, "once MC holds 2, the working stop is 2 rather than the plan qty");
+	}
+
 	static void ExitReasonMap()
 	{
 		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
+		Check(ExitSession.ReasonFromExitOrder("THLF", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSF", "") == "STOP", "the FromAll fill-bar stop is a stop");
 		Check(ExitSession.ReasonFromExitOrder("THLT1", "") == "T1" && ExitSession.ReasonFromExitOrder("GXST1", "STOP") == "T1", "T1 order names win over a pending market reason");
 		Check(ExitSession.ReasonFromExitOrder("THLT", "") == "TARGET" && ExitSession.ReasonFromExitOrder("GXST", "") == "TARGET", "final target order names");
 		Check(ExitSession.ReasonFromExitOrder("THLX", "FLATBY") == "FLATBY" && ExitSession.ReasonFromExitOrder("Stop Loss", "FLATBY") == "STOP", "market exit keeps the stored reason; MC Stop Loss is STOP");
@@ -1003,9 +1036,11 @@ static class Program
 		Check(src.IndexOf("if (m_journalGx) header += \",\" + GX_JOURNAL_COLS;", StringComparison.Ordinal) >= 0, "GX journal columns are appended only after exitPlan");
 		int gx = src.IndexOf("// ---- GX-2", StringComparison.Ordinal);
 		string gxBody = gx >= 0 ? src.Substring(gx) : "";
-		Check(gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) >= 0
+		Check(gxBody.IndexOf("m_gxLF.Send(stop)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("m_gxSF.Send(stop)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) < 0
 			&& gxBody.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0
-			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "GX orders are exits");
+			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "the fill-bar stop is FromAll with no quantity, and GX orders are exits");
 	}
 
 	static void Gx3Source()
@@ -1039,7 +1074,12 @@ static class Program
 		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
 		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");
 		Check(host.IndexOf("gxConfigure(cfg)", StringComparison.Ordinal) >= 0 && host.IndexOf("InitialStop = EInitialStop.AtrMultiple", StringComparison.Ordinal) >= 0, "the embedded host's working stop is the ATR stop, not a one-tick bar extreme");
-		Check(src.IndexOf("bar.DeferPartial = true", StringComparison.Ordinal) >= 0 && src.IndexOf("CoverContracts(", StringComparison.Ordinal) >= 0 && src.IndexOf("if (!m_gxPos.Open) m_gxPos.Open = true", StringComparison.Ordinal) >= 0, "embedded T1 waits for MC's quantity, and a stop is resent while MC still holds contracts");
+		Check(src.IndexOf("bar.DeferPartial = true", StringComparison.Ordinal) >= 0 && src.IndexOf("ReopenRemainder(", StringComparison.Ordinal) >= 0 && src.IndexOf("if (lots > 0 && !m_gxPos.Open) m_gxPos.Open = true", StringComparison.Ordinal) >= 0, "embedded T1 waits for MC's quantity, and a closed book reopens while MC still holds contracts");
+		Check(src.IndexOf("ExitSession.Protection(", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxLS.Send(m_gxPos.Stop, guard.StopQty)", StringComparison.Ordinal) >= 0 && src.IndexOf("OrderExit.FromAll", StringComparison.Ordinal) >= 0, "the remainder stop is sized to MC, and the fill-bar stop is FromAll");
+		int closeLines = 0;
+		for (int at = 0; (at = src.IndexOf("CloseLine(", at, StringComparison.Ordinal)) >= 0; at++) closeLines++;
+		Check(closeLines == 1, "EXIT CLOSE is written from the flat bar only");
+		Check(host.IndexOf("if (EmbedEngine) exitBar();", StringComparison.Ordinal) >= 0, "the embedded host calls exitBar on the flat bar");
 		Check(src.IndexOf("gxLogFlatClose()", StringComparison.Ordinal) >= 0 && gx.IndexOf("trace(ETraceLevel.Journal, m_wrap.PartialLine(", StringComparison.Ordinal) >= 0 && gx.IndexOf("trace(ETraceLevel.Journal, m_wrap.CloseLine(", StringComparison.Ordinal) >= 0 && gx.IndexOf("EXIT Journal: GX STOP-MOVE GX", StringComparison.Ordinal) >= 0, "partial, close and stop-move are Journal lines");
 		Check(gx.IndexOf("EXIT Error: _GenericExit must follow the entry signal in the Portfolio Trader signal list", StringComparison.Ordinal) >= 0 && gx.IndexOf("Output.WriteLine(line)", StringComparison.Ordinal) >= 0, "a wrapper listed first logs the order Error on the calc bar");
 		Check(src.IndexOf("exitPlan(") >= 0 && File.ReadAllText(Path.Combine(root, "_TestGate0.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0 && File.ReadAllText(Path.Combine(root, "_DvpEngineTest.Strategy.CS")).IndexOf("exitPlan(", StringComparison.Ordinal) < 0, "G0 and D9a do not call exitPlan");
