@@ -163,12 +163,9 @@ static class Program
 		"// ## 22. Notes",
 	};
 
-	// Existing sandbox files whose public class predates the "class name = file stem" rule. New files are not added here.
-	static readonly Dictionary<string, string> SandboxClassAllow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-	{
-		{ "_A2_70_OpenFadeHvGate.Strategy.CS", "_Ex17OpenFadeHvGate" },
-		{ "_DV_15_EmaVwapPullback.Strategy.CS", "_Ex20EmaVwapPullback" },
-	};
+	// Class/stem mismatches that predate the file-stem rule. Empty: the two sandbox files that used
+	// _Ex17OpenFadeHvGate and _Ex20EmaVwapPullback now use the file stem. Do not add a new mismatch.
+	static readonly Dictionary<string, string> SandboxClassAllow = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
 	static bool HasGlob(string include) { return include != null && (include.IndexOf('*') >= 0 || include.IndexOf('?') >= 0); }
 
@@ -332,7 +329,7 @@ static class Program
 		foreach (string p in stemProblems) Console.WriteLine("  class/stem: " + p);
 		foreach (string p in classClash) Console.WriteLine("  class clash: " + p);
 		Check(fileNameProblems.Count == 0, "sandbox strategy files are _<ID>_<DescriptiveName>.Strategy.CS and do not use the StudyName placeholder (" + fileNameProblems.Count + ")");
-		Check(stemProblems.Count == 0, "sandbox study class matches the file stem, except the two recorded mismatches (" + stemProblems.Count + ")");
+		Check(stemProblems.Count == 0, "sandbox study class matches the file stem (" + stemProblems.Count + ")");
 		Check(classClash.Count == 0, "sandbox study class names are unique and absent from root studies (" + classClash.Count + ")");
 
 		string templateText = File.Exists(template) ? File.ReadAllText(template) : "";
