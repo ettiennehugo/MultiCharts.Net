@@ -175,6 +175,13 @@ namespace PowerLanguage.Strategy
 			EntrySide = ETestGxSide.Alternate;
 		}
 
+		protected override void StartCalc()
+		{
+			base.StartCalc();
+			m_wait = 0;
+			m_nextLong = true;
+		}
+
 		protected override void Create()
 		{
 			base.Create();

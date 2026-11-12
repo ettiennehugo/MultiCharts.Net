@@ -2376,6 +2376,35 @@ namespace PowerLanguage.Strategy
 			startEngines();   // lazy engines (§0.1); null unless enabled
 			startLevelStudy();   // A2-33 harness (off by default)
 			startPortfolio();   // M-PORT publisher (Portfolio Trader only)
+			gxResetRun();
+		}
+
+		/// <summary>Drop GX-2/GX-3 run state. MC reuses this instance on recalculation. Orders and GxConfig stay; they are created once.</summary>
+		private void gxResetRun()
+		{
+			m_gxUsed = false;
+			m_gxStarted = false;
+			m_gxArmed = false;
+			m_gxPlanLive = false;
+			m_gxLong = false;
+			m_journalGx = false;
+			m_gxQty = 0;
+			m_gxEntryOrder = "";
+			m_gxPlanEntry = double.NaN;
+			m_gxPlanStop = double.NaN;
+			m_gxPlanSource = "";
+			m_gxExitReason = "";
+			m_gxPlacesT1 = false;
+			m_gxGate.OnFlat();
+			m_gx = null;
+			m_gxPos = null;
+			m_gxMkt = null;
+			GxMinutesToNews = double.NaN;
+			if (m_portOn)
+			{
+				MyPortfolioData[_PortKeys.GxPlanEntry] = double.NaN;
+				MyPortfolioData[_PortKeys.GxPlanStop] = double.NaN;
+			}
 		}
 
 		/// <summary>

@@ -262,6 +262,34 @@ namespace PowerLanguage.Function
 	}
 
 	/// <summary>
+	/// Per-run GX memory. MultiCharts reuses the study instance, so StartCalc must clear this
+	/// or the next run journals the previous run's package, plan and equity.
+	/// </summary>
+	public sealed class GxRunMemory
+	{
+		public bool Used, Started, Armed, PlanLive, JournalGx, PlacesT1, NextLong = true;
+		public int Qty, Wait;
+		public string EntryOrder = "", PlanSource = "", ExitReason = "", Package = "";
+		public double PlanEntry = double.NaN, PlanStop = double.NaN, Equity = double.NaN, PlannedRisk = double.NaN;
+		public readonly ExitOpenGate Gate = new ExitOpenGate();
+
+		public void Reset()
+		{
+			Used = Started = Armed = PlanLive = JournalGx = PlacesT1 = false;
+			NextLong = true;
+			Qty = Wait = 0;
+			EntryOrder = PlanSource = ExitReason = Package = "";
+			PlanEntry = PlanStop = Equity = PlannedRisk = double.NaN;
+			Gate.OnFlat();
+		}
+
+		public string JournalSource() { return PlacesT1 ? (PlanSource ?? "") : ""; }
+		public string JournalReason(string exitName) { return PlacesT1 ? ExitSession.ReasonFromExitOrder(exitName, ExitReason) : ""; }
+		public string JournalEquity() { return Used && Equity > 0 ? ExitSession.Money(Equity) : ""; }
+		public string JournalRisk() { return Used && PlannedRisk > 0 ? ExitSession.Money(PlannedRisk) : ""; }
+	}
+
+	/// <summary>
 	/// One engine open per MC position. Flat, or a different entry time, closes it.
 	/// The same entry time does not open again.
 	/// </summary>
@@ -1291,6 +1319,7 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 			m_inert = false; m_started = false; m_wroteR = false; m_haveNet = false; m_wasFlat = false; m_havePx = false; m_haveEma = false;
 			m_nS = m_nT = 0; m_atrS = m_atrT = m_seedS = m_seedT = 0; m_disasterPx = m_disasterDl = 0;
+			m_wrapPos = null; m_exitReason = ""; m_mkt = new ExitMarket(); m_prevNet = 0; m_prevClose = 0; m_ema = 0;
 			if (Environment.ApplicationCode == EApplicationCode.Portfolio)
 			{
 				bool follows = false;
