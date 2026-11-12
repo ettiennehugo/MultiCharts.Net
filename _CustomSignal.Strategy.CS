@@ -4444,8 +4444,13 @@ namespace PowerLanguage.Strategy
 			col("bar");
 			col(m_gxPos.AddCount.ToString(CultureInfo.InvariantCulture));
 			string source = "";
-			if (m_gxPlacesT1) source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
-			col(ExitSession.ReasonFromExitOrder(exitName, m_gxExitReason));
+			string why = "";
+			if (m_gxPlacesT1)
+			{
+				source = string.IsNullOrEmpty(m_gxPlanSource) ? (m_gxPos.T1PlanSource ?? "") : m_gxPlanSource;
+				why = ExitSession.ReasonFromExitOrder(exitName, m_gxExitReason);
+			}
+			col(why);
 			double ro = m_gx == null ? double.NaN : m_gx.ROrig(m_gxPos, profit);
 			col(double.IsNaN(ro) ? "" : ExitSession.Ratio2(ro));
 			col(m_gx == null ? "" : m_gx.Package ?? "");

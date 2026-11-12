@@ -45,6 +45,7 @@ static class Program
 		ExitReasonMap();
 		ConsecutivePositions();
 		FillBarT1Resumes();
+		WrapperProtectedT1();
 		Gx2Source();
 		Gx3Source();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
@@ -811,6 +812,37 @@ static class Program
 		Check(ExitSession.OrderFor("T1", true, held, 1).Kind == "market", "a gap through the stop is a market exit");
 	}
 
+	static void WrapperProtectedT1()
+	{
+		var pos = new ExitPosition { Stop = 5010, T1Level = 4990, T1Qty = 1, Open = true };
+		var w = new WrapperRun();
+		var flat = w.OnBar(0, true);
+		Check(flat.Disaster && !flat.WorkingStop && !flat.RestingT1, "flat bar with protection is the disaster stop only");
+		var fill = w.OnBar(-1, true);
+		Check(fill.OpenTrade && fill.SkipFillBarStop && !fill.WorkingStop && fill.RestingT1, "protected fill bar rests T1 and does not send the explicit stop");
+		Check(WrapperRun.ExitToSend(fill, "STOP", false, pos, 1) == "", "fill-bar stop is left to the disaster stop");
+		Check(WrapperRun.ExitToSend(fill, "T1", false, pos, 1) == "t1", "a T1 decided on the fill bar still sends the limit");
+		var next = w.OnBar(-1, true);
+		Check(!next.OpenTrade && next.Reopen && next.WorkingStop && !next.SkipFillBarStop, "the bar after the fill keeps managing");
+		Check(WrapperRun.ExitToSend(next, "T1", false, pos, 1) == "t1", "T1 on the next bar sends the limit");
+		Check(WrapperRun.ExitToSend(next, null, false, pos, 1) == "stop+t1", "no new decision keeps the stop and the resting T1");
+		var later = w.OnBar(-1, true);
+		Check(WrapperRun.ExitToSend(later, "FLATBY", false, pos, 1) == "market", "flat-by replaces an unfilled T1");
+		var done = w.OnBar(0, true);
+		Check(done.Disaster && w.Journals == 1 && !w.InTrade, "flat journals the trade and arms the disaster stop");
+		var again = w.OnBar(1, true);
+		Check(again.OpenTrade && w.Opens == 2, "the next position opens");
+
+		var off = new WrapperRun();
+		Check(!off.OnBar(0, false).Disaster, "FillBarDisasterStop false sends no disaster stop");
+		var offFill = off.OnBar(1, false);
+		Check(WrapperRun.ExitToSend(offFill, "T1", false, pos, 1) == "t1", "fill-bar T1 with the disaster stop off");
+		Check(WrapperRun.ExitToSend(off.OnBar(1, false), "T1", false, pos, 1) == "t1", "the limit is resent while MC is still in the position");
+		off.OnBar(0, false);
+		off.OnBar(-1, false);
+		Check(off.Opens == 2 && off.Journals == 1, "a later position trades and journals");
+	}
+
 	static void ExitReasonMap()
 	{
 		Check(ExitSession.ReasonFromExitOrder("THLS", "") == "STOP" && ExitSession.ReasonFromExitOrder("GXSS", "") == "STOP", "stop order names");
@@ -860,6 +892,8 @@ static class Program
 		Check(src.IndexOf("gxEmitLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("DrainLog()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.OnFlat()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxGate.BeginPosition(", StringComparison.Ordinal) >= 0, "embedded path drains the log and opens once per position");
 		Check(src.IndexOf("m_gxPlacesT1", StringComparison.Ordinal) >= 0 && src.IndexOf("if (!m_gxPlacesT1) m_gxPlanSource = \"\";", StringComparison.Ordinal) >= 0, "a host that only publishes does not record t1PlanSource plan");
 		Check(src.IndexOf("gxSendExit(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrderFor(", StringComparison.Ordinal) >= 0, "a decided T1 or target is sent and resent");
+		Check(gx.IndexOf("m_life.OnBar(", StringComparison.Ordinal) >= 0 && gx.IndexOf("WrapperRun.ExitToSend(", StringComparison.Ordinal) >= 0 && gx.IndexOf("m_explicitNext", StringComparison.Ordinal) < 0, "wrapper manages before it sends a stop");
+		Check(src.IndexOf("if (m_gxPlacesT1)", StringComparison.Ordinal) >= 0, "a host that does not place T1 leaves gxExitReason and t1PlanSource empty");
 		Check(gx.IndexOf("[Input] public bool FillBarDisasterStop { get; set; }", StringComparison.Ordinal) >= 0 && src.IndexOf("inputs[{inputSnapshot()}]", StringComparison.Ordinal) >= 0, "FillBarDisasterStop is an Input on the RUN line");
 		Check(gx.IndexOf("gxAttachSession(m_wrap, m_wrapPos)", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxSetPlan(pe, ps, m_wrap.PlanSource)", StringComparison.Ordinal) >= 0, "wrapper journal uses its own plan source");
 		Check(src.IndexOf("ReasonFromExitOrder(exitName, m_gxExitReason)", StringComparison.Ordinal) >= 0, "journal writes the exit reason from the order name");
