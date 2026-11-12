@@ -6999,6 +6999,10 @@ All lines below are printed to the PowerLanguage .NET Editor Output. `{…}` are
 
 **Journal.** The extra CS-1 columns (planned risk, whole-trade MAE, `t1Skipped`, `t1PlanSource`) are appended only after `exitPlan` has been called. A run that never calls it keeps the previous journal header.
 
+**Wrapper.** `_GenericExit` is the chart and Portfolio Trader exit signal (48 Inputs, prefix `GX`). It publishes `PortfolioPublish => false` and sends only exits. `sandbox/_GX_00_TestHost` is the A-check entry. It is not in `PLStudies.csproj`.
+
+`_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit` and `_ExitHalfRiskHalfRoll` are superseded by this engine. Their code is unchanged and they stay compiled.
+
 ---
 
 ## 5 — Feature reference (catalogue §2.4 base-feature map)

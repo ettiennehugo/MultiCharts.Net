@@ -1,4 +1,5 @@
-﻿using System;
+﻿// SUPERSEDED by GX (_ExitEngine / _GenericExit, specs/generic-exit-manager-spec.md); kept for reproducibility, not deleted
+using System;
 
 namespace PowerLanguage.Strategy
 {
