@@ -62,6 +62,7 @@
 // While open: the example re-sends its stop or target. Nothing else is added.
 //
 // ## 13. Exits
+// Exit orders: this file sends none. Not applicable. The host, when this class extends one, sends its own from sendExits.
 // Hard stop: the example's stop, or Not applicable when the example has none.
 // Target: the example's target, or Not applicable.
 // Time exit: the example's flat time, or Not applicable.

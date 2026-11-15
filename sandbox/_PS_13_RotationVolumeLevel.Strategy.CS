@@ -62,6 +62,7 @@
 // While open: the example re-sends its stop or target. Nothing else is added.
 //
 // ## 13. Exits
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 // Hard stop: the example's stop, or Not applicable when the example has none.
 // Target: the example's target, or Not applicable.
 // Time exit: the example's flat time, or Not applicable.
@@ -205,13 +206,15 @@ namespace PowerLanguage.Strategy
 			if (roll) { m_level = double.NaN; m_side = 0; }       // multi-day rotations reset at rolls
 
 			int pos = StrategyInfo.MarketPosition;
-			if (pos != 0)
+			// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
 			{
 				m_level = double.NaN; m_side = 0;                // filled: the level is spent (first touch only, no re-entry)
-				if (tod >= flat && tod < new TimeSpan(17, 0, 0)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+				if (tod >= flat && tod < new TimeSpan(17, 0, 0)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
-				return;
+				return true;
 			}
+			if (pos != 0 && sendExits()) return;
 			if (!double.IsNaN(m_level) && m_side != 0 && m_levelSessions > Cfg.validSessions) { m_level = double.NaN; m_side = 0; }
 
 			step15();

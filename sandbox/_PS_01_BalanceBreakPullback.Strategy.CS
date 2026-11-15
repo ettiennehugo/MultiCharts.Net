@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -160,8 +161,11 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_lx, m_sx;
 		private DateTime m_day = DateTime.MinValue;
 		private bool m_balanced, m_done;
-		private int m_vscore, m_up, m_dn, m_side;
-		private double m_vah, m_val, m_w, m_trigger = double.NaN, m_stop, m_target, m_entryRisk;
+		private int m_vscore, m_up, m_dn;
+		protected int m_side;
+		protected double m_vah, m_val, m_w;
+		protected DateTime m_acceptTime = DateTime.MinValue;
+		private double m_trigger = double.NaN, m_stop, m_target, m_entryRisk;
 
 		public _PS_01_BalanceBreakPullback(object _ctx) : base(_ctx) { }
 
@@ -193,23 +197,26 @@ namespace PowerLanguage.Strategy
 			if (rollOn(1)) m_done = true;
 			double tick = tickSize(), c = Bars.Close[0], d = Cfg.deltaTicks * tick;
 			int pos = StrategyInfo.MarketPosition;
-			if (pos != 0)
+						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
 			{
 				m_done = true;
-				if (mustFlatten() || (pos > 0 ? c < m_vah - d : c > m_val + d)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }  // hard invalidation
+				if (mustFlatten() || (pos > 0 ? c < m_vah - d : c > m_val + d)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }  // hard invalidation
 				double e = StrategyInfo.AvgEntryPrice;
 				if (pos > 0 ? Bars.High[0] >= e + m_entryRisk : Bars.Low[0] <= e - m_entryRisk) m_stop = pos > 0 ? Math.Max(m_stop, e) : Math.Min(m_stop, e);   // BE at +1R
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
-				return;
+				return true;
+			
 			}
+			if (pos != 0 && sendExits()) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_balanced || !(m_w > 0) || !IsRth() || tod > Cfg.to) return;
 			if (m_side == 0)
 			{
 				if (tod < Cfg.from) return;
 				m_up = c > m_vah + d ? m_up + 1 : 0; m_dn = c < m_val - d ? m_dn + 1 : 0;
-				if (m_up >= Cfg.acceptCloses && m_vscore >= 1) m_side = +1;
-				else if (m_dn >= Cfg.acceptCloses && m_vscore <= -1) m_side = -1;
+				if (m_up >= Cfg.acceptCloses && m_vscore >= 1) { m_side = +1; m_acceptTime = Bars.Time[0]; }
+				else if (m_dn >= Cfg.acceptCloses && m_vscore <= -1) { m_side = -1; m_acceptTime = Bars.Time[0]; }
 				if (m_side != 0 && journalOn()) trace(ETraceLevel.Journal, $"PS-01 {day:yyyy-MM-dd} accepted {(m_side > 0 ? "above VAH" : "below VAL")} W={m_w:F2} V={m_vscore}");
 				return;
 			}
@@ -231,18 +238,22 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			if (double.IsNaN(m_trigger)) return;
+			if (!legSkewAllows(m_side)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-01 {day:yyyy-MM-dd} skip: leg skew gate"); m_done = true; return; }
 			if (m_side > 0) m_leStp.Send(m_trigger, Cfg.contracts); else m_seStp.Send(m_trigger, Cfg.contracts);
 		}
 
 		private void newDay(DateTime day)
 		{
-			m_day = day; m_done = false; m_up = m_dn = m_side = 0; m_trigger = double.NaN;
+			m_day = day; m_done = false; m_up = m_dn = m_side = 0; m_trigger = double.NaN; m_acceptTime = DateTime.MinValue;
 			VpExtra comp = Composite(1, Cfg.n);                       // the n completed RTH profiles before today
 			m_balanced = comp != null && IsBalanced(1, Cfg.n, Cfg.balanceOverlap);
 			int? v = ValueMigrationScore(1, Cfg.n, 0.10, 20, false);  // completed sessions only (as of the prior close)
 			m_vscore = v ?? 0;
 			if (comp != null) { m_vah = comp.vah; m_val = comp.val; m_w = comp.vah - comp.val; } else m_w = double.NaN;
 		}
+
+		// A2-15 overrides this. The base returns true, so PS-01's orders are unchanged.
+		protected virtual bool legSkewAllows(int side) { return true; }
 
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 	}

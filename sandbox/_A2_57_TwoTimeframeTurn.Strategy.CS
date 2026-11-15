@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -213,7 +214,7 @@ namespace PowerLanguage.Strategy
 			bool new12 = step12(rthWindow);
 
 			int pos = StrategyInfo.MarketPosition;
-			if (pos > 0) { manage(tod, flat); return; }
+			if (pos > 0) { sendExits(tod, flat); return; }
 			m_stop = m_entry = m_risk = m_peak = double.NaN;
 			if (new12 && m_validLeft > 0) m_validLeft--;                    // "valid for the next 2 12m bars"
 			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts);
@@ -275,7 +276,8 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
-		private void manage(TimeSpan tod, TimeSpan flat)
+		// Exits. The only method that sends an exit order. A later GX exitPlan replaces this method.
+		private void sendExits(TimeSpan tod, TimeSpan flat)
 		{
 			if (double.IsNaN(m_entry))
 			{

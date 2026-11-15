@@ -1,9 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- Semantic compile of every sandbox strategy is Generated/SandboxLib.csproj, staged by stage.py.
+       This project does not Compile-include sandbox/. It only runs the naming and header checks. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>7.3</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <Target Name="SemanticCompile" BeforeTargets="CoreCompile">
+    <Exec Command="python3 stage.py" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <Exec Command="dotnet build Generated/SandboxLib.csproj -c $(Configuration) --disable-build-servers --nologo" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
 </Project>

@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -188,9 +189,10 @@ namespace PowerLanguage.Strategy
 			double tick = tickSize(), floor = Cfg.costFloorTicks * tick;
 			int pos = StrategyInfo.MarketPosition;
 			_TodNormaliser tod = TodNormaliser;
-			if (pos != 0)
+						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
 			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				int since = Bars.CurrentBar - m_shockBar;                     // 1 = entry bar b+1, 2 = b+2
 				if (since == 1)
 				{
@@ -204,10 +206,12 @@ namespace PowerLanguage.Strategy
 					if (since == 2) { double e = StrategyInfo.AvgEntryPrice; if (Math.Abs(e - ext) < floor) ext = e - Math.Sign(pos) * floor; m_stop = pos > 0 ? Math.Max(m_stop, ext) : Math.Min(m_stop, ext); }
 				}
 				if (since >= 2 && tod != null && tod.Valid(ETodMetric.Volume) && Bars.Volume[0] <= tod.Median(ETodMetric.Volume))
-				{ if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }      // E1 volume decay
+				{ if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }      // E1 volume decay
 				if (pos > 0) m_lxStp.Send(m_stop); else m_sxStp.Send(m_stop);
-				return;
+				return true;
+			
 			}
+			if (pos != 0 && sendExits()) return;
 			if (rollOn(1) || tod == null || !tod.Valid(ETodMetric.TrueRange)) return;
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan t = et.TimeOfDay;

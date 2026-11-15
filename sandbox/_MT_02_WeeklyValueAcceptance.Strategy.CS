@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -196,12 +197,15 @@ namespace PowerLanguage.Strategy
 			if (wk != m_week) { m_week = wk; m_vah = double.NaN; m_accept = 0; m_touched = m_doneWeek = m_rollThisWeek = false; }
 			if (roll) m_rollThisWeek = true;                 // multi-day levels reset at rolls: no new setup this week
 
-			if (StrategyInfo.MarketPosition > 0)
+						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
 			{
-				if (m_heldSessions >= Cfg.timeStopSessions) { m_lxTime.Send(); return; }
+				if (m_heldSessions >= Cfg.timeStopSessions) { m_lxTime.Send(); return true; }
 				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
-				return;
+				return true;
+			
 			}
+			if (StrategyInfo.MarketPosition > 0 && sendExits()) return;
 			m_heldSessions = 0;
 			if (m_doneWeek || m_rollThisWeek) return;
 			if (double.IsNaN(m_vah) && !loadPriorWeek(wk)) return;

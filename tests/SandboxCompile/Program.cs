@@ -1,14 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
 
-// Sandbox compile gate. GxMcCompile is not in this repo (_GenericExit is a spec, not a file).
-// This program parses every sandbox strategy as C# 7.3 via csc -langversion:7.3 and fails on a
-// syntax or language-version error. Missing MultiCharts types are expected: the reference
-// assemblies are not on this machine. It also checks the file stem, the 22 header titles, and
-// IOGMode.Disabled on every strategy that is not one of the ten PR 124 files.
+// Naming and header checks. The semantic C# 7.3 compile is Generated/SandboxLib.csproj,
+// built before this program starts (see SandboxCompile.csproj). It compiles _CustomSignal,
+// the volume-profile bases, the engines, and every sandbox strategy against McStubs.
+// A type error fails that build, so this process only runs after the semantic compile succeeds.
 static class Program
 {
 	static int s_pass, s_fail;
@@ -31,9 +29,6 @@ static class Program
 		"_SW_02_SwingPullback.Strategy.CS", "_TS_01_EuropeanOpenDrift.Strategy.CS", "_TS_03_CloseDrift.Strategy.CS",
 		"_VW_05_LateDayVwap.Strategy.CS",
 	};
-
-	// csc errors that mean the file is not valid C# 7.3. Missing MC types are not in this set.
-	static readonly Regex SyntaxError = new Regex(@"error CS(1001|1002|1003|1022|1026|1031|1513|1514|1519|1525|1644|8059)\b", RegexOptions.CultureInvariant);
 
 	static int Main()
 	{
@@ -65,50 +60,7 @@ static class Program
 				Check(text.IndexOf("IOGMode.Disabled", StringComparison.Ordinal) >= 0, name + " sets IOGMode.Disabled");
 		}
 
-		string csc = FindCsc();
-		Check(csc != null, "csc.dll found for the C# 7.3 parse");
-		if (csc != null)
-		{
-			int syntax = 0;
-			foreach (string path in files)
-			{
-				var psi = new ProcessStartInfo("dotnet", "exec \"" + csc + "\" -nologo -langversion:7.3 -t:library \"" + path + "\"")
-				{ RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-				using (var p = Process.Start(psi))
-				{
-					string both = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
-					p.WaitForExit();
-					if (SyntaxError.IsMatch(both))
-					{
-						syntax++;
-						Console.WriteLine("SYNTAX " + Path.GetFileName(path));
-						Console.WriteLine(both);
-					}
-				}
-			}
-			Check(syntax == 0, "C# 7.3 syntax errors: " + syntax + " (missing MultiCharts types are expected and are not counted)");
-		}
-		Console.WriteLine("SandboxCompile: " + s_pass + " passed, " + s_fail + " failed");
+		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
-	}
-
-	static string FindCsc()
-	{
-		string dotnet = Environment.GetEnvironmentVariable("DOTNET_ROOT");
-		var roots = new List<string>();
-		if (!string.IsNullOrEmpty(dotnet)) roots.Add(dotnet);
-		roots.Add("/usr/lib/dotnet");
-		roots.Add("/usr/share/dotnet");
-		foreach (string r in roots)
-		{
-			string sdk = Path.Combine(r, "sdk");
-			if (!Directory.Exists(sdk)) continue;
-			foreach (string ver in Directory.GetDirectories(sdk))
-			{
-				string csc = Path.Combine(ver, "Roslyn", "bincore", "csc.dll");
-				if (File.Exists(csc)) return csc;
-			}
-		}
-		return null;
 	}
 }

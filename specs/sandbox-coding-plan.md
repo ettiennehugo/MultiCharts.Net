@@ -6,7 +6,7 @@ Analyst's count is 291 distinct IDs. This file lists all 291. The count by famil
 
 Ten signals are already in `sandbox/` from PR 124. PR 126 on `cursor/sandbox-extend` adds arms to those same ten files. This plan does not edit them.
 
-`_GenericExit` and `exitPlan` are specified in `specs/generic-exit-manager-spec.md` and are not in the build. There is no `GxMcCompile` project in the repo. New files keep the worked example's own exit orders. A compile check lives in `tests/SandboxCompile`. It parses every sandbox strategy as C# 7.3 and fails on a language-version or syntax error. MultiCharts reference assemblies are not in this environment, so the check does not link `PowerLanguage.dll`. Native F7 on the MiniPC is still required. The check does not add a `Compile Include` for `sandbox/`, so RepoLint stays green.
+`_GenericExit` is on the GX branch (PRs 120, 122, 125), not on this branch. New files keep their own exit orders, and those orders are sent only from `sendExits`. `tests/SandboxCompile` does a semantic C# 7.3 compile of every sandbox strategy together with `_CustomSignal`, the volume-profile bases, and the engines, against MC stubs. The `TradeManager` using is aliased the same way as `tests/GxMcCompile`. MultiCharts reference assemblies are not in this environment. Native F7 on the MiniPC is still required. The check copies sources into `tests/SandboxCompile/Generated` and does not add a `Compile Include` for `sandbox/`, so RepoLint stays green.
 
 ## (b) Exits, regime filters, sizing
 
@@ -49,14 +49,14 @@ The counts are in the table at the end of this file.
 
 ## (e) Open questions, and the default used here
 
-1. **GX is not in the build.** Default: do not call `exitPlan`. Keep the worked example's orders. Do not add `_GenericExit` or edit the spec's engine.
+1. **GX exit seam.** GX is built on PRs 120, 122 and 125 and is in acceptance. It is not on this branch. Default: do not call `exitPlan`. Each new sandbox file sends its exit orders only from `sendExits`, so a later move to `exitPlan` replaces that method. The ten PR 126 files are not edited.
 2. **Merged ids.** Default: one file. A2-06 is the VW-05 arm, not a second file. A2-03 is EX-04. A2-22 is EX-12. DV-03 is the PS-13 file.
 3. **A2-63, VW-08, RG-03.** Default: no second sandbox copy. They already exist on main.
 4. **MT-02 `AcceptanceDays` was an int 1 or 2.** Default: enum `EAcceptanceDays` with default `Two`, which is the catalogue default of 2. The trade rule is unchanged.
 5. **IOG.** Default: `[IOGMode(IOGMode.Disabled)]` on every new file. The original ten are not edited to add it.
 6. **VX without a VIX series.** Default: HV20 on the traded future, marked ASSUMPTION.
 7. **L2.** Default: do not invent depth.
-8. **Compile.** Default: `tests/SandboxCompile` is the C# 7.3 syntax gate. Native compile is F7 after a slot copy. No `csproj` line points at `sandbox/`.
+8. **Compile.** Default: `tests/SandboxCompile` is a semantic C# 7.3 compile of every sandbox strategy with `_CustomSignal`, the volume-profile bases, the engines, and MC stubs. The TradeManager using is aliased the same way as `tests/GxMcCompile`. Native F7 after a slot copy is still required. No `csproj` line points at `sandbox/`.
 9. **Holdout.** Default: no result from 2025 onward is read or written.
 10. **Ambiguous catalogue rows with no heading.** Default: the batch that reaches them codes the sentence in the source that cites the id, and marks ASSUMPTION in the header. They are not skipped for lack of a heading.
 
