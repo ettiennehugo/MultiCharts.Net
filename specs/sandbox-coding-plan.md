@@ -406,3 +406,14 @@ A file journals and does not send an order only when its catalogue heading has n
 | A2-79 | Contraction gate for a host. No entry. |
 | AV-10 | Compares host events that already have an entry. No entry of its own. |
 | AV-13 | Stretch scale for a host anchor. No entry. |
+| VW-07 | Location filter for other entries. No standalone trade. No ETH type on EVwapType. |
+| DV-16 | Order-flow layer on a host level. No standalone entry. |
+| DV-04 | Merged into PS-12. No second entry. |
+| DV-05 | Merged into PS-14. No second entry. |
+| DV-10 | Merged into VW-08. No second entry. |
+| DV-12 | Merged into AV-02. No second entry. |
+| DV-13 | Merged into AV-11. No second entry. |
+| DV-14 | Merged into AV-08. No second entry. |
+| DV-17 | Merged into OF-08. No second entry. |
+| DV-18 | Merged into OF-05. No second entry. |
+| DV-19 | Merged into OF-06. No second entry. |
