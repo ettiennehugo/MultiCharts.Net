@@ -428,6 +428,35 @@ Check what PR-E #78 changed: arming uses the widened stop, roundLots never overr
 
 ---
 
+# Check GX-3: generic exit acceptance (PR #125, head 36f7c52)
+
+**Purpose / unblocks.** Native answers for the GX implementation-build checks in `specs/generic-exit-manager-spec.md` §8.4 (A-E2, A-E4, A-E7, A-S) plus the Gate 0 and D9a pins, on the real `_GenericExit` and `_GX_00_TestHost`.
+
+**Setup (2026-11-15, MultiCharts 17.0.30203, Analyst, backtest only, data through 2024-12-31).** Head `36f7c52` on `cursor/gx3-409e`. Dollar P&L and trade counts only; no prices.
+
+| # | Question | Result |
+|---|---|---|
+| G0 | Gate 0 journals vs `153f41d9` | **Pass.** `MCJournal_83d9e87c` and `_01903e4e`, 0 diffs, 35110 lines |
+| D9a | D9a events vs `bcca8d35` | **Pass.** `MCEvents_1ff61444` and `_650fe308`, 0 diffs, 182503 lines |
+| A-E4 run 1 | Wrapper, PT | **Pass.** 67 trades, +$3,920 |
+| A-E4 run 4 | Embedded, no wrapper | **Pass.** 70 trades, +$1,045. NQ fill-bar stops 12/29 (41%) at 12 ticks from the fill (NQ has no cost row, so the structural stop applies). ES 3/21 at the 14-tick floor |
+| A-E4 runs 2a/2b | Deny-all vs the allow run | **Pass.** 362 trades, +$3,630, 0 diffs after the runId strip, 0 Force Close. Variant b `posSteps` = `denySteps` (ES 2273, NQ 437), `refFail` 0 |
+| A-E4 run 3 | Wrapper listed first | **Pass.** One Error per instance, 0 GX exits |
+| A-E4 R | `riskAtOpen` = \|fill − first gxStop\| × BPV × qty | **Pass.** ES 150/150, NQ 202/202, matching `R fill … actual $` |
+| Flat-by | Exchange clock | **Pass.** ES `FLATBY` at 15:55 CT on 2024-11-18/20/21 on an Exchange chart, and at 16:55 ET on a Local chart. Entries after 15:55 were not flattened. SPY (ARCA, Local) had no false flattening. The positive stock trigger is covered by `ExitEngineTests` only |
+| A-S E5 | Partials, 3 contracts, `T1ScalePct` 34 | **Pass.** 62 `PARTIAL` lines `closed=1 remaining=2`, max qty 3 |
+| A-E2 | Fill-bar protection | **Pass.** Runs 1/2/3 = 5/3/0 `FILLBAR-STOP`, matching `barsHeld` 0 Stop Loss rows. Run 3 logs `FILLBAR-UNPROTECTED` once |
+| A-E7 | Idx companions | **Pass.** Idx maps correct. `InitialStopIdx` 0 in the wrapper falls back to `AtrMultiple` per §4.1. Idx 9 gives `IDX-RANGE` |
+| A-S E1 | Separate charts | **Pass.** 5m M5/12, 15m M15/8, 60m H1/6, daily D1/5 with the HoldOvernight warning |
+| E8 | IOG | **Pass.** IOG disabled by attribute |
+
+**Known, not fails.**
+
+- SPY `entryRefFail` 652 in the scratch MM test. Deferred to the stock-portfolio tests.
+- The `widened stop … ignored` Warning once per instance.
+
+---
+
 # Results table (fill in)
 
 | # | Check | Date / time (ET) | Key measurement | Pass / Fail / Info | Action taken | Spec to update |
@@ -462,6 +491,10 @@ Check what PR-E #78 changed: arming uses the widened stop, roundLots never overr
 | 7A-A6 | Add legs: reversal with adds | 2026-11-11 | 3→−1, both legs closed | Pass | — | add-legs §5 |
 | 7A-A7 | Add legs: ForceClosePosition with adds | 2026-11-11 | flat at T close | Pass | — | add-legs §5 (kill / daily flatten) |
 | 7A-A8 | Add legs: R re-base / ADD-BLOCKED (proxy) | 2026-11-11 | ES 1 rebase + 1 trade R; 1 Warning / 10 sends | Pass (proxy, ES only) | Re-run on implementation build | add-legs §3a, §6 |
+| GX-3 | G0 / D9a pins on MC 17 | 2026-11-15 | 0 diffs; G0 35110 lines, D9a 182503 lines | Pass | — | generic-exit §7.1 |
+| GX-3 A-E4 | PT wrapper, embedded, deny-all, order guard, riskAtOpen | 2026-11-15 | run 1 +$3,920 / 67; run 4 +$1,045 / 70; 2a/2b 0 diffs; run 3 one Error; ES 150/150, NQ 202/202 | Pass | — | generic-exit §8.4 |
+| GX-3 A-E2 | Fill-bar Stop Loss counts | 2026-11-15 | FILLBAR-STOP 5/3/0; UNPROTECTED once | Pass | A-E2(1) wording names Stop Loss | generic-exit §4.12, §8.4 |
+| GX-3 A-E7 / A-S / flat-by | Idx, charts, partials, exchange clock, IOG | 2026-11-15 | Idx 0 → AtrMultiple, Idx 9 IDX-RANGE; charts 12/8/6/5; 62 partials; ES 15:55 CT and 16:55 ET | Pass | E8 wording: IOG disabled by attribute | generic-exit §8.4 |
 
 # Items not pinned down by documentation
 
