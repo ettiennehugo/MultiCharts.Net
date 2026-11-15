@@ -34,6 +34,7 @@
 // Same session after a stop: no new entry that session, except where the catalogue allows re-entry.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: the catalogue market. Other roots are Not yet verified.
 // Validated: Not yet verified
 //

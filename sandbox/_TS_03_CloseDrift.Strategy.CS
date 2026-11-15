@@ -34,6 +34,7 @@
 // Same session after a stop: no. The entry time has passed, and the day's entry count is used once a fill exists.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES and NQ, 1-minute or 5-minute. This file is written for @ES.
 // Validated: Not yet verified
 //

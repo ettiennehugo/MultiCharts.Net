@@ -34,6 +34,7 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //

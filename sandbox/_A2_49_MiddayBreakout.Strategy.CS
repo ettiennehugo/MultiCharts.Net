@@ -34,6 +34,7 @@
 // Same session after a stop: yes, if a new break prints before 15:30 and the day's entry count allows it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES, with NQ, YM and RTY named as cross-market checks. This file is written for @ES.
 // Validated: Not yet verified
 //

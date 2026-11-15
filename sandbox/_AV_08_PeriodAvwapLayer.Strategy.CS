@@ -34,6 +34,7 @@
 // Same session after a stop: yes, if a new host bar passes the layer.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: a layer on any host. This file is written for @ES so the layer can be journaled.
 // Validated: Not yet verified
 //

@@ -34,6 +34,7 @@
 // Same session after a stop: Not applicable. This arm has no stop.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES, NQ and RTY, daily signal with 1-minute fills. This file is written for @ES 1-minute.
 // Validated: Not yet verified
 //
