@@ -475,3 +475,289 @@ A file journals and does not send an order only when its catalogue heading has n
 | PF-05 | Drawdown throttle. No entry. |
 | PF-06 | Portfolio volatility target. No single-instrument entry. |
 | PF-07 | Meta-label of host trades. No trained model and no entry. |
+| L2-01 | Cancellation veto. No historical depth of book. |
+| L2-02 | Book-shape regime. No historical depth of book. |
+| L2-03 | Resilience half-life. No historical depth of book. |
+| L2-04 | Iceberg versus replenishment. No historical depth of book. |
+| L2-05 | Pre-event depth withdrawal. No historical depth of book. |
+| L2-06 | Queue-depth rule. No historical depth of book. |
+| L2-07 | Two-sided cancellation alarm. No historical depth of book. |
+
+## Slot batches
+
+Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the same batch as its parent. A2-26 is the KDE veto inside `_A2_25_PocStabilityGate`, so it is copied with A2-25 and does not take a second slot. Copy a batch by placing each file in its own `_Test` slot and renaming only the class, with the parent present in that same set.
+
+### Slot batch 1 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| A2-04 | `_A2_04_OvernightInventory` | futures-only |
+| A2-09 | `_A2_09_NoiseBandLong` | futures-only |
+| A2-11 | `_A2_11_PriorDayVwap` | futures-only |
+| A2-12 | `_A2_12_VwapTwapDivergence` | futures-only |
+| A2-13 | `_A2_13_GapAvwapOpen` | futures-only |
+| A2-14 | `_A2_14_WeeklyAvwapReclaim` | both |
+| A2-27 | `_A2_27_BimodalVoidTraverse` | futures-only |
+| A2-28 | `_A2_28_MinorExcess` | futures-only |
+| A2-29 | `_A2_29_EntropyDayType` | futures-only |
+| A2-30 | `_A2_30_RisingEntropy` | futures-only |
+| A2-31 | `_A2_31_KlGate` | futures-only |
+| A2-32 | `_A2_32_SigmaMixture` | futures-only |
+| A2-34 | `_A2_34_VtTarget` | futures-only |
+| A2-35 | `_A2_35_EventReformation` | futures-only |
+| A2-36 | `_A2_36_GammaFilter` | both |
+| A2-37 | `_A2_37_DislocationFilter` | both |
+| A2-38 | `_A2_38_MetaorderDrift` | both |
+| A2-40 | `_A2_40_CostModel` | both |
+| A2-43 | `_A2_43_ConfluentHvn` | futures-only |
+| A2-45 | `_A2_45_SinglePrintShelf` | futures-only |
+| A2-46 | `_A2_46_VolumeGapCommitment` | futures-only |
+| A2-48 | `_A2_48_PoorHighsLows` | futures-only |
+| A2-49 | `_A2_49_MiddayBreakout` | futures-only |
+| A2-50 | `_A2_50_OpeningRvGate` | futures-only |
+| A2-51 | `_A2_51_ShockBarFade` | futures-only |
+| A2-52 | `_A2_52_TimeConfirmedOpening` | futures-only |
+| A2-53 | `_A2_53_RTHGapFade` | futures-only |
+| A2-54 | `_A2_54_UpGapPullback` | futures-only |
+| A2-56 | `_A2_56_FirstHourBreak` | futures-only |
+| RG-07 | `_RG_07_ExclusionGate` | both |
+
+### Slot batch 2 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| A2-57 | `_A2_57_TwoTimeframeTurn` | futures-only |
+| A2-58 | `_A2_58_FastInSlowFade` | futures-only |
+| A2-59 | `_A2_59_KaufmanCostUnables` | futures-only |
+| A2-60 | `_A2_60_MeyersNormalisedRange` | futures-only |
+| A2-61 | `_A2_61_EfficiencyRatioSession` | futures-only |
+| A2-62 | `_A2_62_Taylor3Day` | futures-only |
+| A2-65 | `_A2_65_Raschke1stCross` | both |
+| A2-66 | `_A2_66_RaschkeKaufman2nd` | both |
+| A2-67 | `_A2_67_IntradayRSIOf` | both |
+| A2-68 | `_A2_68_X5BarRun` | both |
+| A2-69 | `_A2_69_KaufmanThreeDay` | futures-only |
+| A2-70 | `_A2_70_OpenFadeHvGate` | futures-only |
+| A2-72 | `_A2_72_ProgressiveExposureLadder` | both |
+| A2-73 | `_A2_73_BreakevenStopAt` | both |
+| A2-74 | `_A2_74_FreeRollSell` | both |
+| A2-75 | `_A2_75_RollingHitRate` | both |
+| A2-76 | `_A2_76_SellIntoThe` | both |
+| A2-77 | `_A2_77_FailedFollowThrough` | both |
+| A2-79 | `_A2_79_IntradayVolatilityContraction` | futures-only |
+| AV-01 | `_AV_01_SwingHighAVWAP` | futures-only |
+| AV-02 | `_AV_02_ImpulseOriginAVWAP` | futures-only |
+| AV-03 | `_AV_03_AVWAPPinchBreakout` | futures-only |
+| AV-04 | `_AV_04_AVWAPHandoffContinuation` | futures-only |
+| AV-05 | `_AV_05_GapAnchoredAVWAP` | futures-only |
+| AV-06 | `_AV_06_EventBarAVWAP` | futures-only |
+| AV-07 | `_AV_07_ClimaxVolumeBar` | futures-only |
+| AV-08 | `_AV_08_PeriodAvwapLayer` | futures-only |
+| AV-09 | `_AV_09_RollAnchoredAVWAP` | futures-only |
+| AV-10 | `_AV_10_AVWAPProfileConfluence` | futures-only |
+| AV-11 | `_AV_11_BreakAvwapPullback` | futures-only |
+
+### Slot batch 3 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| AV-12 | `_AV_12_FailedAVWAPReclaim` | futures-only |
+| AV-13 | `_AV_13_AVWAPStretchExit` | futures-only |
+| DV-01 | `_DV_01_DailyPOCFirst` | futures-only |
+| DV-02 | `_DV_02_FailedLevelFlip` | futures-only |
+| A2-25 | `_A2_25_PocStabilityGate` | both |
+| A2-26 | `_A2_25_PocStabilityGate` | both |
+| DV-04 | `_DV_04_DV04` | futures-only |
+| DV-05 | `_DV_05_DV05` | futures-only |
+| DV-06 | `_DV_06_EndOfTrend` | futures-only |
+| DV-07 | `_DV_07_RotationDoubleDistribution` | futures-only |
+| DV-08 | `_DV_08_FvgHvnAlignment` | both |
+| DV-09 | `_DV_09_WeeklyVWAP1` | futures-only |
+| DV-10 | `_DV_10_DV10` | futures-only |
+| DV-11 | `_DV_11_VWAPTrendFailure` | futures-only |
+| DV-12 | `_DV_12_DV12` | futures-only |
+| DV-13 | `_DV_13_DV13` | futures-only |
+| DV-14 | `_DV_14_DV14` | futures-only |
+| DV-15 | `_DV_15_EmaVwapPullback` | futures-only |
+| DV-16 | `_DV_16_OrderFlowConfirmation` | futures-only |
+| DV-17 | `_DV_17_DV17` | futures-only |
+| DV-18 | `_DV_18_DV18` | futures-only |
+| DV-19 | `_DV_19_DV19` | futures-only |
+| DV-20 | `_DV_20_StopLossCluster` | futures-only |
+| DV-21 | `_DV_21_DV21` | futures-only |
+| DV-22 | `_DV_22_ABCDABCD` | futures-only |
+| DV-23 | `_DV_23_InitialBalanceDraw` | futures-only |
+| DV-24 | `_DV_24_DV24` | futures-only |
+| EX-01 | `_EX_01_EX01` | both |
+| EX-02 | `_EX_02_EX02` | both |
+| EX-03 | `_EX_03_EX03` | both |
+| EX-04 | `_EX_04_EX04` | both |
+
+### Slot batch 4 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| EX-05 | `_EX_05_EX05` | both |
+| EX-06 | `_EX_06_EX06` | both |
+| EX-07 | `_EX_07_EX07` | both |
+| EX-08 | `_EX_08_EX08` | both |
+| EX-09 | `_EX_09_EX09` | both |
+| EX-10 | `_EX_10_EX10` | futures-only |
+| EX-11 | `_EX_11_EX11` | futures-only |
+| EX-12 | `_EX_12_EX12` | futures-only |
+| EX-13 | `_EX_13_X15RPartial` | both |
+| KD-01 | `_KD_01_AcceptBeyondRail` | futures-only |
+| KD-02 | `_KD_02_BandStretchFade` | futures-only |
+| KD-03 | `_KD_03_ThreeFamilyConfluence` | futures-only |
+| KD-04 | `_KD_04_DetrendedFitRegime` | futures-only |
+| KD-05 | `_KD_05_HTFDetrendedRail` | futures-only |
+| KD-06 | `_KD_06_BandAcceptanceBreakout` | futures-only |
+| KD-07 | `_KD_07_NoFadeVeto` | futures-only |
+| KD-08 | `_KD_08_ForwardConeDiagnostic` | both |
+| KD-09 | `_KD_09_FamilyCountConfluence` | futures-only |
+| KD-10 | `_KD_10_FarOutsideBand` | futures-only |
+| KD-11 | `_KD_11_BeyondValueNode` | futures-only |
+| L2-01 | `_L2_01_CancellationVetoBefore` | futures-only |
+| L2-02 | `_L2_02_BookShapeRegime` | futures-only |
+| L2-03 | `_L2_03_ResilienceHalfLife` | futures-only |
+| L2-04 | `_L2_04_IcebergVsGenuine` | futures-only |
+| L2-05 | `_L2_05_PreEventDepth` | futures-only |
+| L2-06 | `_L2_06_QueueDepthRule` | futures-only |
+| L2-07 | `_L2_07_TwoSidedCancellation` | futures-only |
+| LE-01 | `_LE_01_X200DayTrend` | both |
+| LE-02 | `_LE_02_VolatilityTargetedLeverage` | both |
+| LE-03 | `_LE_03_QQQTQQQRegime` | both |
+
+### Slot batch 5 (29)
+
+| ID | Class | Market tag |
+|---|---|---|
+| LE-04 | `_LE_04_LETFRebalancingPressure` | futures-only |
+| LE-05 | `_LE_05_DecayPairShort` | stock-only |
+| LE-06 | `_LE_06_ShortTermRSI` | both |
+| LE-07 | `_LE_07_InverseLETFBear` | both |
+| MT-01 | `_MT_01_MultiTfStack` | futures-only |
+| MT-02 | `_MT_02_WeeklyValueAcceptance` | futures-only |
+| MT-04 | `_MT_04_X60mSwingAVWAP` | futures-only |
+| MT-05 | `_MT_05_X240mMultiSession` | futures-only |
+| MT-06 | `_MT_06_DailyFailedAuction` | futures-only |
+| MT-07 | `_MT_07_MT07` | futures-only |
+| OF-01 | `_OF_01_StackedImbalanceRetest` | futures-only |
+| OF-02 | `_OF_02_DeltaZRatification` | futures-only |
+| OF-03 | `_OF_03_AnchoredCVDFlip` | futures-only |
+| OF-04 | `_OF_04_AbsorptionAtAn` | futures-only |
+| OF-05 | `_OF_05_CVDDivergenceAt` | futures-only |
+| OF-06 | `_OF_06_UnfinishedAuctionVeto` | futures-only |
+| OF-07 | `_OF_07_BurstExtremeBreak` | futures-only |
+| A2-78 | `_A2_78_DailyKillSwitch` | both |
+| OF-08 | `_OF_08_LargeTradePrint` | futures-only |
+| OF-09 | `_OF_09_WeeklyBias30m` | futures-only |
+| OF-10 | `_OF_10_ESVsNQ` | futures-only |
+| PF-01 | `_PF_01_TrendCarryCore` | both |
+| PF-02 | `_PF_02_RegimeComplementaryIntraday` | futures-only |
+| PF-03 | `_PF_03_XmktBetaMonitor` | futures-only |
+| PF-04 | `_PF_04_RiskBudgetingDeflated` | both |
+| PF-05 | `_PF_05_DrawdownThrottlesTwo` | both |
+| PF-06 | `_PF_06_PortfolioVolatilityTargeting` | both |
+| PF-07 | `_PF_07_MetaLabellingThe` | both |
+| PF-08 | `_PF_08_DonchianTurtleDaily` | futures-only |
+
+### Slot batch 6 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| PS-01 | `_PS_01_BalanceBreakPullback` | futures-only |
+| A2-15 | `_A2_15_LegSkew` | both |
+| PS-02 | `_PS_02_BalanceBreakClose` | futures-only |
+| PS-03 | `_PS_03_ConfirmedFailedBreak` | futures-only |
+| PS-04 | `_PS_04_PriorValueMagnet` | futures-only |
+| PS-05 | `_PS_05_RejectedRepricingOpen` | futures-only |
+| PS-06 | `_PS_06_DefeatedAdjustmentContinuation` | futures-only |
+| PS-07 | `_PS_07_OpenDrive` | futures-only |
+| PS-08 | `_PS_08_NarrowIbBreak` | futures-only |
+| MT-03 | `_MT_03_CompositeValueGate` | both |
+| PS-09 | `_PS_09_IBCPeriod` | futures-only |
+| PS-10 | `_PS_10_DevelopingPOCMigration` | futures-only |
+| PS-11 | `_PS_11_UnratifiedNewExtreme` | futures-only |
+| PS-12 | `_PS_12_TrendClusterPullback` | both |
+| PS-13 | `_PS_13_RotationVolumeLevel` | futures-only |
+| PS-14 | `_PS_14_RejectionLedgeRevisit` | futures-only |
+| PS-15 | `_PS_15_LVNTraverseAfter` | futures-only |
+| PS-16 | `_PS_16_LVNSlowApproach` | futures-only |
+| PS-17 | `_PS_17_DoubleDistributionWaist` | futures-only |
+| PS-18 | `_PS_18_PBProfile` | futures-only |
+| PS-19 | `_PS_19_PoorHighRun` | futures-only |
+| PS-20 | `_PS_20_SinglePrintInitiative` | futures-only |
+| PS-21 | `_PS_21_NakedLevelReaction` | futures-only |
+| PS-22 | `_PS_22_LvnEdgeRejection` | futures-only |
+| PS-23 | `_PS_23_ProfileShapeAt` | futures-only |
+| PS-24 | `_PS_24_OvernightBreak` | futures-only |
+| PS-25 | `_PS_25_PS25` | futures-only |
+| PS-26 | `_PS_26_PS26` | futures-only |
+| RG-01 | `_RG_01_ValueMigrationGate` | futures-only |
+| RG-02 | `_RG_02_BalanceImbalanceClassifier` | futures-only |
+
+### Slot batch 7 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
+| RG-04 | `_RG_04_LiveDayType` | futures-only |
+| RG-05 | `_RG_05_NoiseBandFilter` | both |
+| RG-06 | `_RG_06_HTFTrendState` | both |
+| RG-08 | `_RG_08_CompressionStateRange` | both |
+| RG-09 | `_RG_09_RG09` | futures-only |
+| RG-10 | `_RG_10_RG10` | futures-only |
+| SP-01 | `_SP_01_FailedDoubleTop` | futures-only |
+| SP-02 | `_SP_02_DoubleTopAt` | futures-only |
+| SP-03 | `_SP_03_WyckoffSpringAt` | futures-only |
+| SP-04 | `_SP_04_LowerHighAfter` | futures-only |
+| SP-05 | `_SP_05_FourPartReversal` | futures-only |
+| SP-06 | `_SP_06_FirstHigherLow` | futures-only |
+| SP-07 | `_SP_07_FailedFailureRe` | futures-only |
+| SP-08 | `_SP_08_PointOfOrigin` | futures-only |
+| SP-09 | `_SP_09_ClockWindowEqual` | futures-only |
+| SW-01 | `_SW_01_WeeklyBalanceBreak` | futures-only |
+| SW-02 | `_SW_02_SwingPullback` | both |
+| SW-03 | `_SW_03_QuarterlyMonthlyAVWAP` | futures-only |
+| SW-04 | `_SW_04_MultiDayP` | futures-only |
+| SW-05 | `_SW_05_CompositeGapAnd` | futures-only |
+| SW-06 | `_SW_06_WeeklyIBMon` | futures-only |
+| TS-01 | `_TS_01_EuropeanOpenDrift` | futures-only |
+| TS-02 | `_TS_02_LondonOpenBreak` | futures-only |
+| TS-03 | `_TS_03_CloseDrift` | futures-only |
+| TS-04 | `_TS_04_CLGCPit` | futures-only |
+| TS-05 | `_TS_05_ZNPostRelease` | futures-only |
+| TS-06 | `_TS_06_OvernightInventoryCorrection` | futures-only |
+| TS-07 | `_TS_07_OpeningNoiseObservation` | futures-only |
+| VW-01 | `_VW_01_TrendDayFirst` | futures-only |
+| VW-02 | `_VW_02_BalanceDay2` | futures-only |
+
+### Slot batch 8 (25)
+
+| ID | Class | Market tag |
+|---|---|---|
+| VW-03 | `_VW_03_BandExpansionContinuation` | futures-only |
+| VW-04 | `_VW_04_FailedVWAPDefence` | futures-only |
+| VW-05 | `_VW_05_LateDayVwap` | futures-only |
+| VW-06 | `_VW_06_POCVWAPSkew` | futures-only |
+| VW-07 | `_VW_07_PriorDayVWAP` | futures-only |
+| VX-01 | `_VX_01_HedgedVXTerm` | futures-only |
+| VX-02 | `_VX_02_VRPFilteredShort` | futures-only |
+| VX-03 | `_VX_03_LongVolatilityIn` | futures-only |
+| VX-04 | `_VX_04_PostSpikeNormalisation` | futures-only |
+| VX-05 | `_VX_05_LongVolatilityTail` | futures-only |
+| VX-06 | `_VX_06_VIXTermStructure` | futures-only |
+| VX-07 | `_VX_07_VVIXGateModule` | futures-only |
+| VX-08 | `_VX_08_VIXStretchES` | futures-only |
+| YV-01 | `_YV_01_X30mBalanceVA` | futures-only |
+| YV-02 | `_YV_02_CrossIndexFlow` | futures-only |
+| YV-03 | `_YV_03_MomentumBurstPradeep` | stock-only |
+| YV-04 | `_YV_04_EnvironmentLocationConfirmation` | futures-only |
+| YV-05 | `_YV_05_AbsoluteParticipationGate` | futures-only |
+| YV-06 | `_YV_06_SessionStopAfter` | both |
+| YV-07 | `_YV_07_ICTMacroWindow` | futures-only |
+| YV-08 | `_YV_08_DailySweepStrategy` | futures-only |
+| YV-09 | `_YV_09_TurtleDonchianBreakout` | both |
+| YV-10 | `_YV_10_LabelledMarkovRegime` | both |
+| YV-11 | `_YV_11_X9EMA20` | both |
+| YV-12 | `_YV_12_PriorDayHigh` | futures-only |
