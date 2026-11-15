@@ -325,14 +325,14 @@ The counts are in the table at the end of this file.
 | PF-05 | Drawdown throttles + two-CUSUM monitoring | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_05_DrawdownThrottlesTwo.Strategy.CS | 12 | coded in batch 12 |
 | PF-06 | Portfolio volatility targeting | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_06_PortfolioVolatilityTargeting.Strategy.CS | 12 | coded in batch 12 |
 | PF-07 | Meta-labelling the survivors (later) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_07_MetaLabellingThe.Strategy.CS | 12 | coded in batch 12 |
-| PF-08 | Donchian / Turtle daily trend sleeve (companion to PF-01) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_08_DonchianTurtleDaily.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-01 | Cancellation veto before level entries | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_01_CancellationVetoBefore.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-02 | Book-shape regime | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_02_BookShapeRegime.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-03 | Resilience half-life T½ prior to range breaks | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_03_ResilienceHalfLife.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-04 | Iceberg vs genuine replenishment, and iceberg-exhaustion trapdoor | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_04_IcebergVsGenuine.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-05 | Pre-event depth withdrawal forecasts the spike's revert fraction | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_05_PreEventDepth.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-06 | Queue-depth rule for resting orders (rest only if depth < 1× average trade size; Ch 11.1) | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_06_QueueDepthRule.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
-| L2-07 | Two-sided cancellation surge = fragility alarm | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_07_TwoSidedCancellation.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
+| PF-08 | Donchian / Turtle daily trend sleeve (companion to PF-01) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_08_DonchianTurtleDaily.Strategy.CS | 13 | coded in batch 13 |
+| L2-01 | Cancellation veto before level entries | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_01_CancellationVetoBefore.Strategy.CS | 13 | coded in batch 13 |
+| L2-02 | Book-shape regime | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_02_BookShapeRegime.Strategy.CS | 13 | coded in batch 13 |
+| L2-03 | Resilience half-life T½ prior to range breaks | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_03_ResilienceHalfLife.Strategy.CS | 13 | coded in batch 13 |
+| L2-04 | Iceberg vs genuine replenishment, and iceberg-exhaustion trapdoor | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_04_IcebergVsGenuine.Strategy.CS | 13 | coded in batch 13 |
+| L2-05 | Pre-event depth withdrawal forecasts the spike's revert fraction | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_05_PreEventDepth.Strategy.CS | 13 | coded in batch 13 |
+| L2-06 | Queue-depth rule for resting orders (rest only if depth < 1× average trade size; Ch 11.1) | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_06_QueueDepthRule.Strategy.CS | 13 | coded in batch 13 |
+| L2-07 | Two-sided cancellation surge = fragility alarm | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_07_TwoSidedCancellation.Strategy.CS | 13 | coded in batch 13 |
 | VPF-2 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none | done | engine or catalogue infrastructure id, not a new sandbox strategy |
 | VPF-3 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none | done | engine or catalogue infrastructure id, not a new sandbox strategy |
 | VPF-4 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none | done | engine or catalogue infrastructure id, not a new sandbox strategy |
