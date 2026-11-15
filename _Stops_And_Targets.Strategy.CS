@@ -1,4 +1,5 @@
-﻿namespace PowerLanguage.Strategy
+﻿// SUPERSEDED by GX (_ExitEngine / _GenericExit, specs/generic-exit-manager-spec.md); kept for reproducibility, not deleted
+namespace PowerLanguage.Strategy
 {
     [IOGMode(IOGMode.Disabled)]
     public class _Stops_And_Targets : SignalObject

@@ -22,6 +22,15 @@ holdout: "No price data on or after 2025-01-01 is viewed or reported by anything
 - → §8.1, §8.7: `_GenericExit.Strategy.CS` sits in the studies folder, which is the repo root (the MiniPC clone is `C:\ProgramData\TS Support\MultiCharts .NET64\StudyServer\Techniques\CS`, so the file is `Techniques\CS\_GenericExit.Strategy.CS` there), with its one `<Compile Include>` line.
 - → §8.1, §8.7: test and development strategies (the A-check host `_GX_00_TestHost`) go in `sandbox/` under the sandbox naming lint, with no csproj line.
 
+**Owner, 2026-11-12 15:28 ET (verbatim):** *"Change this so that open positions at 15:55 are flagged and closed. New positions opened after that window is kept open till the next day at 15:55 - I think that would be the semantic reasoning behind the close by rule."*
+- → §4.6: the deadline is the first `FlatByHHMM` strictly after the original entry. The first bar at or after that deadline is `FLATBY`.
+
+**Owner, 2026-11-12 16:03 ET (verbatim):** *"Change the embedded fill-bar stop to be measured from the actual fill, like the wrapper."*
+- → §4.12: embedded `GenerateStopLoss` of the planned distance, measured from the fill.
+
+**Owner, 2026-11-15 11:28 ET (verbatim):** *"We want to use the instrument exchange time. So for futures, it would be the Chicago Board of Exchange, but for stocks, it might be the New York Stock Exchange."*
+- → §4.6 and input 30: `FlatByHHMM` is the instrument's exchange clock, not a fixed Eastern clock. Local-time charts convert into that zone.
+
 **How to read the approval marks.** An item is either **Owner-approved** (with the owner's words quoted), or marked **Analyst decision (2026-11-12), owner may override** (the owner may change it; Coder implements it as written until then), or an **acceptance check** on the implementation build (§8.4). The full list of Analyst decisions is in §9.
 
 **Owner answers, 2026-11-11 09:16 ET (verbatim):** *"1. Yes, this approach is fine. 2. Yes, they are good - I assume we'd be able to set the first target and break-even profit percentage (or amount). 3. No, we can make the standalone strategy work in portfolio trader as well for now. 4. Keep the position open and log the warning."*
@@ -281,11 +290,16 @@ public enum ETrailStart { AfterT1, AtTrigger, Immediately }   // rev 0.7: AtR re
 ```csharp
 public enum ESessionExit { FlatBy, HoldOvernight }
 ```
-- `FlatBy` (default for intraday): flatten at `FlatByHHMM` (int clock time, ET, default 1555 = 15:55, Cat. §2.1) through CS-7 `FlatBy` / `mustFlatten()`.
-- On an early-close day (`_CmeHolidays` / M8 calendars): `RthCloseEt − 5 min`.
+- `FlatBy` (default for intraday): `FlatByHHMM` (int clock time, ET, default 1555 = 15:55, Cat. §2.1). **Owner-approved 2026-11-12 15:28 ET**, Ettienne: *"Change this so that open positions at 15:55 are flagged and closed. New positions opened after that window is kept open till the next day at 15:55 - I think that would be the semantic reasoning behind the close by rule."* This supersedes the 10:23 ET reading of CS-7 `mustFlatten` (any bar whose clock is at or after `FlatByHHMM`, with no 17:00 cap).
+  - The position's deadline is the first `FlatByHHMM` **strictly after** its original entry time. An entry at 10:00 is due at 15:55 the same day. An entry at 16:00, or at 18:20 in the Globex evening, is due at 15:55 the next calendar day. An entry exactly at 15:55 is due at the next day's 15:55.
+  - `FLATBY` fires on the first bar at or after that deadline, reason unchanged. A missing 15:55 bar does not need a holiday or weekend calendar: the next bar whose time is at or after the deadline flattens (a Friday 18:20 entry is due Saturday 15:55, so the Sunday 18:00 reopen is that bar).
+  - Adds and re-entries keep the original entry time. The deadline does not move to the add.
+  - Embedded and the wrapper both decide this in `Manage`.
+  - **Exchange clock. Owner-approved 2026-11-15 11:28 ET**, Ettienne: *"We want to use the instrument exchange time. So for futures, it would be the Chicago Board of Exchange, but for stocks, it might be the New York Stock Exchange."* `FlatByHHMM` is that zone: 15:55 Central for CME futures, 15:55 Eastern for NYSE stocks. On an Exchange-time chart the bar time is already that clock. On a Local or GMT chart the bar time and the entry time are converted with `ExitSession.ToExchangeClock` from the profile's `barZone` (`Bars.Info.TimeZone`) to `exchangeZone` (`Bars.Info.Exchange` via `exchangeTimeZoneId`). DST uses `TimeZoneInfo`, and a spring-forward gap moves forward one hour, the same rule as `ToZone` and the M6b session conversion.
+- On an early-close day the cutoff is the exchange-time clock, not a raw ET number. Holiday tables store `RthCloseEt`; `ExchangeHhmm` turns that ET instant into the exchange zone, and the engine then subtracts 5 minutes. It applies when that exchange-time cutoff is strictly after the entry and earlier than the ordinary next `FlatByHHMM`.
 - A full-close holiday has no session, so there is nothing to manage.
 - `HoldOvernight`: swing holds keep the stop resting overnight, and `MaxHoldDays` (int, 0 = off) applies.
-- The Input default is `FlatBy`; a swing idea's registered run sets `HoldOvernight` (§6). **Analyst decision (2026-11-12), owner may override.** On a daily or longer Data1, `FlatBy` cannot act inside a bar: the engine treats it as `HoldOvernight` and logs once `<ID> Warning: GX SESSION FlatBy ignored on <resolution> bars: HoldOvernight`.
+- The Input default is `FlatBy`; a swing idea's registered run sets `HoldOvernight` (§6). **Analyst decision (2026-11-12), owner may override.** On a daily or longer Data1, `FlatBy` does not fire inside the bar. There is no intraday clock on that bar, so the engine treats the session rule as `HoldOvernight`: it logs once `<ID> Warning: GX SESSION FlatBy ignored on <resolution> bars: HoldOvernight`, and `Manage` does not return `FLATBY`. The 15:28 ET deadline does not change this.
 
 ### 4.7 News exit
 - `NewsExitMinutes` (int, 0 = off, range 0–120) is exactly PR #117 overview §7.6: `EventCalendar.MinutesTo(EEventTier.T1)` and the window rule `0 < m < N + B`. Reason `NEWS`.
@@ -353,11 +367,11 @@ Each gets a header §17 block. Mode-specific inputs are ignored when their mode 
 ### 4.12 Fill-bar protection (closes the E2 design choice)
 E2 (§7.1) showed that only a stop sent **with** the entry (E2(c)) or MC's built-in `GenerateStopLoss` called **every bar, including while flat** (E2(b)) protects the fill bar. GX uses one of these in each mode. **Analyst decision (2026-11-12), owner may override.**
 
-**Embedded mode (the engine is hosted in the entry signal): the required path for production strategies.**
-- On every bar on which the host sends an entry order, the engine also sends the initial protective stop for the next bar, in the same `CalcBar` (long `<ID>LS`, a sell stop; short `<ID>SS`, a buy-to-cover stop; PR #117 §7.1). This is the E2(c) pattern and the engines manual TS-01 pattern (`m_lxStp.Send(m_stop)` next to `m_le.Send`).
-- The level is the planned initial stop: the entry's structural stop (`EntryProvided`) or the §4.1 rule, widened by the cost floor, computed at that bar's close (the same stop passed to `sizeForRisk` / `portfolioArm`).
-- From the fill bar's close onward, the same level is re-sent every closed bar and only ever tightened (§7.3 one-way rules, PR #117 §7.1 "never moved away from the trade"); it is not recomputed from the fill. R uses the actual fill and this stop (§5).
-- A gap fill beyond the planned stop (long: fill ≤ planned stop; short: fill ≥ planned stop) gives a market exit on the next bar, reason `STOP`, as in PR #117 §7.3.
+**Embedded mode (the engine is hosted in the entry signal): the required path for production strategies. Owner-approved 2026-11-12 16:03 ET**, Ettienne: *"Change the embedded fill-bar stop to be measured from the actual fill, like the wrapper."*
+- On the bar the host sends the entry, while still flat, and on later flat bars while that entry is still armed, the engine sets `CurSpecOrdersMode = PerContract` and calls `GenerateStopLoss(distance × BigPointValue)`. The distance is the §4.1 stop widened by the cost floor. MultiCharts applies those dollars from the actual fill, for the whole position. It is not a resting price at the signal close ± the distance.
+- The signal-close price remains the plan for T1 and `portfolioArm`. It is not the live stop.
+- On the first bar the position is open, `GenerateStopLoss` stops. The explicit stop (`<ID>LS` / `<ID>SS`, then break-even, the trail, and a remainder stop) is the fill ± the same distance, and only tightens after that. Initial R and `pm.R$` use that fill-based stop.
+- A fill-bar exit that flattens before the engine sees the position logs `EXIT Info: GX FILLBAR-STOP <id> - closed on its fill bar by the built-in stop measured from the fill`. The trade-list order name is MC's "Stop Loss".
 - Production strategies (batch 1 under GX-5 and every new `_CustomSignal` strategy) use embedded mode. The wrapper is for research on entries that cannot embed the engine.
 
 **Wrapper mode (`_GenericExit`, a separate signal): an optional built-in disaster stop.**
@@ -528,14 +542,14 @@ Owner (09:16 ET): *"2. Yes, they are good"*. This is the default of every Input 
 | Component | Baseline |
 |---|---|
 | Size | 2 contracts (PR #117 §7.2), so the scale-out is exercised |
-| Fill-bar protection | Embedded: the initial stop is sent with the entry. Wrapper: `FillBarDisasterStop` true (§4.12; **Analyst decision (2026-11-12), owner may override.**) |
+| Fill-bar protection | Both modes anchor the fill-bar stop at the fill (§4.12). Embedded: `GenerateStopLoss` of the planned distance while flat (owner 16:03 ET); the explicit stop after the fill is the fill ± that distance. Wrapper: `FillBarDisasterStop` true |
 | Initial stop | Embedded: `EntryProvided`. Wrapper: `AtrMultiple` 1.5 × ATR(14) on Data1 (owner-approved default 18:18–18:21 ET; `SignalBarExtreme` selectable), floored at the cost floor (ES 14 / NQ 19 ticks) |
 | T1 | `T1Unit` `RMultiple`, `T1Value` 1.0, `T1ScalePct` 50 ⇒ ⌊q/2⌋ at +1.0R from the planned entry (planned R, §4.2), `OrderExit.Total`; q = 1 ⇒ `ExitAtT1` |
 | Break-even | `AfterT1`, `BreakEvenOffsetTicks` 1 (entry + 1 tick); `BreakEvenUnit` `RMultiple` / `BreakEvenValue` 1.0 used only by `AtTrigger` |
 | Runner trail | `Chandelier` 3.0 × ATR(22) on Data1, from T1 (`AfterT1`; `TrailStartUnit` `RMultiple` / `TrailStartValue` 1.0 used only by `AtTrigger`): **below the highest high for longs / above the lowest low for shorts, one-way** (long only moves up, short only moves down; owner-approved 09:34 ET) |
 | Final target | none (`FinalTargetUnit` `RMultiple`, `FinalTargetValue` 0) |
 | Time stop | off |
-| Session | intraday `FlatBy` 15:55 ET (early close: close − 5 min); swing ideas `HoldOvernight` with `ERollExit.FlattenBeforeSplice` |
+| Session | intraday `FlatBy`: the first 15:55 on the instrument's exchange clock strictly after the original entry (CME 15:55 Central, NYSE 15:55 Eastern; early close: exchange-time close − 5 min). An entry after that clock is held to the next day's 15:55 (§4.6, owner 15:28 ET and 2026-11-15 11:28 ET). Swing ideas `HoldOvernight` with `ERollExit.FlattenBeforeSplice`. Daily bars do not flatten inside the bar |
 | News exit | `NewsExitMinutes` 0 (off), approved here as part of the baseline; PR #117 overview §7.6 uses the same default and still marks it there for owner confirmation |
 | Adds | as the entry decides; `AddStopMode` `RaiseToAddLow`; R re-based on the add fill |
 | Control | `None` in the baseline arm. Each entry-only idea also runs a `FixedBars` control arm with N per timeframe (1m 30, 5m 12, 15m 8, 60m 6, daily 5) and reports CS-8 forward MFE/MAE (owner-approved 18:18–18:21 ET, Q4/Q5; other timeframes: nearest listed at or below, owner-approved 18:54 ET, §4.9) |
@@ -614,6 +628,34 @@ Spec implication, closed in rev 1.0: every sweepable enum Input gets a `<Name>Id
 
 **After this recording:** the implementation-build acceptance checks are in §8.4 (GX-4). Scratch cleanup of the `_TestGx*` studies, workspaces and logs awaits Ettienne's approval. Leave the Check7 files alone.
 
+### 7.1a GX-3 acceptance (MultiCharts 17.0.30203, 2026-11-15, head `36f7c52`)
+
+Analyst, backtest only, data through 2024-12-31. Dollar P&L and trade counts only. The same numbers are in `specs/live-check-sheet.md` (Check GX-3). **Pass.**
+
+**G0 / D9a — 0 diffs.** G0 `MCJournal_83d9e87c` and `_01903e4e` against `153f41d9`, 35110 lines. D9a `MCEvents_1ff61444` and `_650fe308` against `bcca8d35`, 182503 lines.
+
+**A-E4 — pass, runs 1–4.**
+
+- Run 1, wrapper: 67 trades, +$3,920.
+- Run 4, embedded: 70 trades, +$1,045. NQ fill-bar stops 12/29 (41%) at 12 ticks from the fill. NQ has no cost row, so the structural stop applies. ES 3/21 at the 14-tick floor.
+- Runs 2a/2b: 362 trades, +$3,630, 0 diffs after the runId strip, 0 Force Close. Variant b `posSteps` = `denySteps` (ES 2273, NQ 437), `refFail` 0.
+- Run 3, order guard: one Error per instance, 0 GX exits.
+- `riskAtOpen` = |fill − first gxStop| × BPV × qty: ES 150/150, NQ 202/202, matching `R fill … actual $`.
+
+**Flat-by, exchange clock.** ES `FLATBY` at 15:55 CT on 2024-11-18, 2024-11-20 and 2024-11-21 on an Exchange chart, and at 16:55 ET on a Local chart. Entries after 15:55 were not flattened. SPY (ARCA, Local) had no false flattening. The positive stock trigger is covered by `ExitEngineTests` only.
+
+**A-S E5.** 62 `PARTIAL` lines `closed=1 remaining=2`, max qty 3.
+
+**A-E2.** Runs 1/2/3 = 5/3/0 `FILLBAR-STOP`, matching the `barsHeld` 0 Stop Loss rows. Run 3 logs `FILLBAR-UNPROTECTED` once.
+
+**A-E7.** Idx maps are correct. `InitialStopIdx` 0 in the wrapper falls back to `AtrMultiple` per §4.1. Idx 9 gives `IDX-RANGE`.
+
+**A-S E1, separate charts.** 5m M5/12, 15m M15/8, 60m H1/6, daily D1/5 with the HoldOvernight warning.
+
+**E8.** IOG disabled by attribute.
+
+**Known, not fails.** SPY `entryRefFail` 652 in the scratch MM test, deferred to the stock-portfolio tests. The `widened stop … ignored` Warning once per instance.
+
 ## 8. Implementation hand-off for Coder (approved 2026-11-12; separate PRs)
 
 **Owner instruction, 2026-11-12 07:13 ET (verbatim):** *"Alright, you can recheck the tests left and please complete the spec so @Coder can start implementing strategies from it"*. Coder can start GX-1 now. Each GX step is its own PR on its own feature branch; Ettienne merges.
@@ -669,7 +711,7 @@ The enums of §4 (`EInitialStop`, `ETargetMode`, `ESingleLotMode`, `ETriggerUnit
 | 27 | `TimeStopBars` | int | 0 (off) | 4.5 | Owner 09:16 ET (baseline: off) |
 | 28 | `TimeStopMinutes` | int | 0 (off) | 4.5 | Owner 09:16 ET (baseline: off) |
 | 29 | `SessionExit` | `ESessionExit` | `FlatBy` | 4.6 | Owner 09:16 ET (baseline, intraday) |
-| 30 | `FlatByHHMM` | int, ET clock | 1555 | 4.6 | Owner 09:16 ET (baseline) |
+| 30 | `FlatByHHMM` | int, exchange clock | 1555 | 4.6 | Owner 09:16 ET (baseline); zone is the instrument exchange, owner 2026-11-15 11:28 ET |
 | 31 | `MaxHoldDays` | int | 0 (off) | 4.6 | Analyst |
 | 32 | `NewsExitMinutes` | int, 0–120 | 0 (off) | 4.7 | Owner 09:16 ET (baseline) |
 | 33 | `RollExit` | `ERollExit` | `FlattenBeforeSplice` | 4.8 | Owner 09:16 ET (baseline, swing) |
@@ -700,7 +742,7 @@ Each item is long **and** short unless it is side-free.
 5. **T1 quantity** (§4.2): q = 1, 2, 3, 5 with 0, 33, 50 and 100 %; `SingleLotMode`; planned T1 and final target from the planned entry and planned R (not from the fill); T1-SKIPPED when the actual fill is at or beyond the planned T1 ⇒ no T1, trail all, Info line, `t1Skipped` = 1, and not when it is short of it; the planned T1 is unchanged by a fill away from the plan; `SingleTarget` with the planned final target passed; the wrapper's plan source: valid `pm.gxPlanEntry`/`pm.gxPlanStop` ⇒ `plan`, missing, non-finite, wrong side or written after the fill ⇒ `fill` with the Info line once per run.
 6. **Break-even and trail:** `AfterT1` and its fallback to `AtTrigger` when no T1 exists (both BE and trail start, Info once); one-way rules; the cap one tick inside the last close; `TRAIL-THROUGH`.
 7. **Precedence (§4.10):** a bar where several exits fire gives exactly one reason, in order 1–9.
-8. **Clock:** time stop in bars and minutes; `FlatBy` at 15:55 ET and on an early-close day; `FlatBy` on daily bars ⇒ `HoldOvernight` with the Warning; `MaxHoldDays`; news window `0 < m < N + B`; roll flatten before the splice.
+8. **Clock:** time stop in bars and minutes; `FlatBy` deadline is the first 15:55 strictly after the original entry (10:00 → same day, 16:00 and 18:20 → next day, an entry at 15:55 waits a day, a missed 15:55 bar flattens on the next bar, an add keeps the original entry); early-close day; `FlatBy` on daily bars ⇒ `HoldOvernight` with the Warning and no `FLATBY`; `MaxHoldDays`; news window `0 < m < N + B`; roll flatten before the splice.
 9. **Control bars:** 1, 5, 15, 60 min and daily ⇒ 30/12/8/6/5; 2 ⇒ 30, 10 ⇒ 12, 30 ⇒ 8, 240 ⇒ 6, weekly ⇒ 5; seconds / tick / range bars ⇒ 30 + Warning; an Input override (e.g. `ControlExitBarsM5` = 20) wins; 0 ⇒ control off; `FixedBars` exits after exactly N closed bars with the disaster stop still active; `RandomBars` reproducible for a seed.
 10. **Optimiser companions (§4.13):** −1 ⇒ the enum; each index 0…N−1 ⇒ the member in the §4.13 table; −2 and N ⇒ Error and the enum; a pinned member-order test for all five companion enums; the START line prints Input, Idx and effective value for all 8 pairs; `gxPackage` is equal for a swept run and an enum-set run with the same effective settings.
 11. **R:** initial R from the widened stop; the add re-base by segments, `R` and `Rorig`; `AddMinR` on the current segment, triggers on the initial R (08:58 ET ruling).
@@ -712,10 +754,10 @@ Backtest only, data ≤ 31 Dec 2024 (`@ES`, `@NQ`, 1 minute, a dated From/To ran
 
 | # | Check | Set-up | Pass |
 |---|---|---|---|
-| **A-E2** | Fill-bar protection, both modes (§4.12) | (1) `_GX_00_TestHost` with `EmbedEngine` true; (2) `_GX_00_TestHost` with `EmbedEngine` false plus `_GenericExit` with `FillBarDisasterStop` true; (3) the same with it false. A stop tight enough (e.g. `FixedTicks` at the cost floor) that some fills trade through it on the fill bar | (1) every trade whose fill bar crosses the stop exits on that bar under `<ID>LS` / `<ID>SS`; (2) every such trade exits on that bar under MC's "Stop Loss", the `FILLBAR-STOP` Info line and `fillBarStops` count match, and from the bar after the fill the explicit `GXLS` / `GXSS` stop rests on every bar with no unprotected bar and no double exit; (3) 0 fill-bar exits and the `FILLBAR-UNPROTECTED` Warning once |
-| **A-E4** | Portfolio Trader with the real studies (§5.1) | PT workspace with `@ES` + `@NQ` 1 minute; each strategy `_GX_00_TestHost` (`EmbedEngine` false) first, `_GenericExit` second; the real `_PortfolioRiskManager` | `sameRef` True; calc order = list order; MM `riskAtOpen` = the wrapper's fill R; the `R fill` Info line present; deny-all leaves the exits unchanged (0 diffs); swapped order ⇒ the Error line and an inert wrapper; no `Bars` exception at `StartCalc`; the fill-bar disaster stop fires in PT; the wrapper reads `pm.gxPlanEntry` / `pm.gxPlanStop` (`t1PlanSource` = `plan`). Also one run with `EmbedEngine` true and no wrapper: `pm.riskOpen` follows every stop move |
-| **A-E7** | Enum Inputs and companions (§4.13) | `_GenericExit` on `@ES` 1 minute | The 8 enum Inputs show their named members in the Format Inputs dropdown (enums declared in the engine part of `_GenericExit.Strategy.CS`); the optimiser lists the 8 `<Name>Idx` Inputs; an Exhaustive sweep of `FinalTargetUnitIdx` 0…4 and one of `InitialStopIdx` 0…5 give START lines whose effective values change per iteration as the §4.13 table says; `FinalTargetUnitIdx` = 9 gives the `IDX-RANGE` Error and the enum value. No optimiser result is applied to the chart |
-| **A-S** | Smoke: E1, E3, E5, E8 | `_GX_00_TestHost` (`EmbedEngine` false) + `_GenericExit`, defaults | E1: the wrapper manages the host's position on 1m, 5m, 15m, 60m and daily, and the `CONTROL-BARS` line maps each to 30/12/8/6/5. E3: one bar where a stop and a target are both reachable gives exactly one `exitReason`. E5: with 3 contracts and `T1ScalePct` 34, T1 closes 1 and the runner exits close the rest, each partial a separate order object, no overshoot. E8: IOG off on both signals (`iogEnabled` False logged). Planned T1 on a chart: record `t1PlanSource` (`plan` if the chart shares the plan keys, else `fill` with the Info line) |
+| **A-E2** | Fill-bar protection, both modes (§4.12) | (1) `_GX_00_TestHost` with `EmbedEngine` true; (2) `_GX_00_TestHost` with `EmbedEngine` false plus `_GenericExit` with `FillBarDisasterStop` true; (3) the same with it false. A stop tight enough (e.g. `FixedTicks` at the cost floor) that some fills trade through it on the fill bar | (1) every trade whose fill bar crosses the stop exits on that bar under MC's "Stop Loss" (`GenerateStopLoss`, §4.12); (2) every such trade exits on that bar under MC's "Stop Loss", the `FILLBAR-STOP` Info line and `fillBarStops` count match, and from the bar after the fill the explicit `GXLS` / `GXSS` stop rests on every bar with no unprotected bar and no double exit; (3) 0 fill-bar exits and the `FILLBAR-UNPROTECTED` Warning once. The (1) name is wording aligned on 2026-11-15 to the owner's 12 Nov fill-anchored decision, not a pass-rule change. **Pass, 2026-11-15,** head `36f7c52`: runs 1/2/3 = 5/3/0 `FILLBAR-STOP` (§7.1a) |
+| **A-E4** | Portfolio Trader with the real studies (§5.1) | PT workspace with `@ES` + `@NQ` 1 minute; each strategy `_GX_00_TestHost` (`EmbedEngine` false) first, `_GenericExit` second; the real `_PortfolioRiskManager` | `sameRef` True; calc order = list order; MM `riskAtOpen` = the wrapper's fill R; the `R fill` Info line present; deny-all leaves the exits unchanged (0 diffs); swapped order ⇒ the Error line and an inert wrapper; no `Bars` exception at `StartCalc`; the fill-bar disaster stop fires in PT; the wrapper reads `pm.gxPlanEntry` / `pm.gxPlanStop` (`t1PlanSource` = `plan`). Also one run with `EmbedEngine` true and no wrapper: `pm.riskOpen` follows every stop move. **Pass, 2026-11-15,** head `36f7c52`: runs 1–4, `riskAtOpen` ES 150/150 and NQ 202/202 (§7.1a) |
+| **A-E7** | Enum Inputs and companions (§4.13) | `_GenericExit` on `@ES` 1 minute | The 8 enum Inputs show their named members in the Format Inputs dropdown (enums declared in the engine part of `_GenericExit.Strategy.CS`); the optimiser lists the 8 `<Name>Idx` Inputs; an Exhaustive sweep of `FinalTargetUnitIdx` 0…4 and one of `InitialStopIdx` 0…5 give START lines whose effective values change per iteration as the §4.13 table says; `FinalTargetUnitIdx` = 9 gives the `IDX-RANGE` Error and the enum value. No optimiser result is applied to the chart. **Pass, 2026-11-15,** head `36f7c52`: Idx maps correct; wrapper `InitialStopIdx` 0 falls back to `AtrMultiple` (§4.1); Idx 9 gives `IDX-RANGE` (§7.1a) |
+| **A-S** | Smoke: E1, E3, E5, E8 | `_GX_00_TestHost` (`EmbedEngine` false) + `_GenericExit`, defaults | E1: the wrapper manages the host's position on 1m, 5m, 15m, 60m and daily, and the `CONTROL-BARS` line maps each to 30/12/8/6/5. E3: one bar where a stop and a target are both reachable gives exactly one `exitReason`. E5: with 3 contracts and `T1ScalePct` 34, T1 closes 1 and the runner exits close the rest, each partial a separate order object, no overshoot. E8: IOG disabled by attribute. Planned T1 on a chart: record `t1PlanSource` (`plan` if the chart shares the plan keys, else `fill` with the Info line). **Pass, 2026-11-15,** head `36f7c52`, for the rows run: E1 separate charts 5m M5/12, 15m M15/8, 60m H1/6, daily D1/5 with the HoldOvernight warning; E5 62 `PARTIAL` `closed=1 remaining=2`, max qty 3; E8 IOG disabled by attribute (§7.1a) |
 
 A failed check is fixed in the GX-1 to GX-3 code, not by changing the check; the check's set-up or pass rule changes only with Ettienne's approval.
 
@@ -793,8 +835,18 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 **Resolved, owner 2026-11-12 07:33 ET** (*"Also _GenericExit can go under the Studies/CS folder since it is already a concrete strategy to use. The other strategies we develop for further testing will go under the sandbox folder and will not directly be included in the csproj."*):
 - `_GenericExit` is in the studies folder (the repo root, `Techniques\CS` on the MiniPC) with its csproj line; test and development strategies, including `_GX_00_TestHost`, are in `sandbox/` with no csproj line (§8.1, §8.7).
 
+**Resolved, owner 2026-11-12 15:28 ET** (*"Change this so that open positions at 15:55 are flagged and closed. New positions opened after that window is kept open till the next day at 15:55 - I think that would be the semantic reasoning behind the close by rule."*):
+- Supersedes the 10:23 ET literal reading of §4.6 (any bar at or after `FlatByHHMM`, the CS-7 `mustFlatten` clock, no 17:00 cap).
+- A position's flat-by deadline is the first `FlatByHHMM` strictly after its original entry. `FLATBY` fires on the first bar at or after that deadline. An RTH entry at 10:00 closes at 15:55 the same day. An entry at 16:00 or 18:20 is held overnight and closes at the next day's 15:55. Adds keep the original entry. Daily and longer bars stay `HoldOvernight` with the existing Warning and do not return `FLATBY` (§4.6).
+
+**Resolved, owner 2026-11-12 16:03 ET** (*"Change the embedded fill-bar stop to be measured from the actual fill, like the wrapper."*):
+- Embedded mode calls `GenerateStopLoss` for the widened planned distance in dollars per contract while flat, so the fill-bar stop is the fill ± that distance and covers the whole position. After the fill, the explicit stop, initial R and `pm.R$` use that same distance (§4.12). This replaces the signal-close price stop.
+
+**Resolved, owner 2026-11-15 11:28 ET** (*"We want to use the instrument exchange time. So for futures, it would be the Chicago Board of Exchange, but for stocks, it might be the New York Stock Exchange."*):
+- `FlatByHHMM` (input 30) is the instrument's exchange clock: 15:55 Central for CME futures, 15:55 Eastern for NYSE stocks. An Exchange-time chart already shows that clock. A Local or GMT chart converts the bar time and the entry time from `barZone` to `exchangeZone`. The early-close cutoff is that same exchange clock, converted from the holiday table's ET time (§4.6).
+
 **Analyst decisions (2026-11-12), owner may override.** Each is marked where it sits; Coder implements them as written unless Ettienne changes them:
-1. **Fill-bar protection (§4.12):** embedded mode sends the initial stop with the entry order (E2(c)) and is the required path for production strategies; the wrapper gets `FillBarDisasterStop` (default true): `GenerateStopLoss` every flat bar, $ per contract from the planned distance, with the explicit wrapper stop taking over from the bar after the fill; the `FILLBAR-*` log lines and the `fillBarStops` count.
+1. **Fill-bar protection (§4.12):** embedded mode is the required path for production strategies. The fill-bar mechanism itself is owner-approved (16:03 ET): `GenerateStopLoss` from the fill, not a price at the signal close. The wrapper keeps `FillBarDisasterStop` (default true): `GenerateStopLoss` every flat bar, with the explicit stop taking over from the bar after the fill.
 2. **Optimiser companions (§4.13):** which 8 enum Inputs get a `<Name>Idx` (not the 6 structural ones), −1 = use the enum, 0…N−1 by declared member order, out of range ⇒ Error and the enum; the START line prints Input, Idx and effective value; `gxPackage` hashes effective values. Numeric companions on real studies as such are owner-approved (07:31 ET).
 3. **Catalogue details (§4):** the enum member lists, Input names and the non-default mode rules without an owner quote; members only ever appended.
 4. **Invalid stop settings (§4.1):** Error and fall back to `AtrMultiple`; `StopTicks` and `StopPct` default 0; `EntryProvided` is invalid in the wrapper.
@@ -815,9 +867,13 @@ Regression: G0, D9a and the existing suites unchanged, because GX is inert unles
 **Remaining, not blockers to starting:**
 - The §8.4 acceptance checks, run by Analyst once GX-3 is built.
 - Cleanup of the scratch `_TestGx*` studies, workspaces and logs awaits Ettienne's approval. Leave the Check7 files alone.
-- No owner question is open. The 07:31 and 07:33 ET answers closed the three rev 1.0 questions (Idx on real studies, the csproj line, the planned T1).
+- No owner question is open. The 07:31 and 07:33 ET answers closed the three rev 1.0 questions (Idx on real studies, the csproj line, the planned T1). The 15:28 ET answer set the flat-by deadline (§4.6). The 16:03 ET answer anchors the embedded fill-bar stop at the fill (§4.12). The 2026-11-15 11:28 ET answer makes that deadline the instrument's exchange clock.
 
 ## 10. Revision history
+- **1.1 amendment (2026-11-15).** GX-3 acceptance on MultiCharts 17.0.30203, head `36f7c52`, recorded in §7.1a and `specs/live-check-sheet.md`. §8.4 A-E2(1) names the fill-bar exit MC's "Stop Loss" (wording aligned to the 12 Nov fill-anchored decision, not a pass-rule change). A-S E8 says IOG disabled by attribute.
+- **1.1 amendment (2026-11-15 11:28 ET).** Owner: *"We want to use the instrument exchange time. So for futures, it would be the Chicago Board of Exchange, but for stocks, it might be the New York Stock Exchange."* §4.6 and input 30: `FlatByHHMM` is the exchange clock. Local-time charts convert into it. The early-close cutoff is that same clock.
+- **1.1 amendment (2026-11-12 16:03 ET).** Owner: *"Change the embedded fill-bar stop to be measured from the actual fill, like the wrapper."* §4.12: embedded `GenerateStopLoss` while flat; the explicit stop after the fill is the fill ± the planned distance.
+- **1.1 amendment (2026-11-12 15:28 ET).** Owner: *"Change this so that open positions at 15:55 are flagged and closed. New positions opened after that window is kept open till the next day at 15:55 - I think that would be the semantic reasoning behind the close by rule."* §4.6: the flat-by deadline is the first `FlatByHHMM` strictly after the original entry; the first bar at or after that deadline is `FLATBY`. This supersedes the 10:23 ET reading (any bar at or after `FlatByHHMM`). Daily bars are unchanged (`HoldOvernight` plus the Warning, no `FLATBY` inside the bar).
 - **1.1 (2026-11-12 ET).** Owner answers 07:31 ET (*"Yes real studies can get the numeric inputs. You can add the _GenericExit to the csproj file. Yes you can measure it from the T1 planned"*) and placement rule 07:33 ET (*"Also _GenericExit can go under the Studies/CS folder since it is already a concrete strategy to use. The other strategies we develop for further testing will go under the sandbox folder and will not directly be included in the csproj."*), quoted at the top and in §9. §4.13: Idx companions owner-approved on real studies; the one-config-per-member fallback removed. §4.2: T1 and the final target planned from the planned entry and planned R; T1-SKIPPED compares the actual fill with the planned T1; planned entry passed through `exitPlan` (embedded) or the new `pm.gxPlanEntry` / `pm.gxPlanStop` keys with a fill fallback (wrapper, §5.1). §8.1 / §8.7: `_GenericExit.Strategy.CS` in the studies folder (repo root) with the one owner-approved csproj line, the engine inside that file behind a `GX_OFFMC` guard for the off-MC tests (no `_ExitEngine.Function.CS`), the test host renamed `sandbox/_GX_00_TestHost.Strategy.CS` with no csproj line; the rev 1.0 "wrapper and host at the repo root, one line per new file" note replaced. Unit tests, acceptance checks and the log index updated to match.
 - **1.0 (2026-11-12 ET), READY FOR IMPLEMENTATION.** Owner instruction 07:13 ET quoted in the status, the top of the spec, §8 and §9. E2 design closed: §4.12 fill-bar protection (embedded stop with the entry; wrapper `FillBarDisasterStop`, default true). E7 design closed: §4.13 `<Name>Idx` optimiser companions. §8 rewritten as the Coder hand-off: GX-1 to GX-5 with files, the consolidated 48-Input table, unit tests, native acceptance checks A-E2 / A-E4 / A-E7 / A-S, legacy studies, GX-5 migration, repo conventions and a log-line index. Every "PROPOSED" leftover resolved as owner-approved (quoted) or an Analyst decision (§9). Fixes: the wrapper Input count (§3 said about 28, §4.11 about 37; now 48 everywhere); `_GenericExit` moved from `sandbox/` to the repo root because the sandbox naming lint does not fit it; the `maeDollars` / `maeTradeDollars` naming choice closed; the embedded stop is re-sent at the planned level, never recomputed from the fill (PR #117 §7.1); owner questions listed in §9 (Idx sign-off under PR #117 §10, csproj lines, the T1-SKIPPED trigger); `TrailStart = AfterT1` without T1, invalid stop settings, `FlatBy` on daily bars and the `RandomBars` seed specified.
 - **0.9 (2026-11-11 ET):** MiniPC E1–E8 native results recorded on the scratch `_TestGx*` studies.
