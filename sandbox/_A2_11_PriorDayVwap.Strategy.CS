@@ -160,6 +160,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			GxOrderPrefix = "A211"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A211LE", EOrderAction.Buy));
@@ -193,7 +194,8 @@ namespace PowerLanguage.Strategy
 				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
 				return false;
 			}
-			if (pos > 0 && sendExits()) return;
+			exitBar();
+			if (pos > 0) return;
 			if (pos != 0 || m_done || rollOn(1) || !(m_pd > 0) || s == null || !(s.rthOpen > 0) || s.rthOpen >= m_pd) return;
 			if (!IsRth()) return;
 			bucket(et, 15, ref m_b15, ref m_15c, on15);
@@ -215,8 +217,27 @@ namespace PowerLanguage.Strategy
 			if (!(risk > 0) || double.IsNaN(target) || target - Bars.Close[0] < risk || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-11 " + day.ToString("yyyy-MM-dd") + " skip: target or risk"); m_done = true; return; }
 			m_stop = stop; m_target = target; m_done = true;
+			takeGx(true, Bars.Close[0], m_stop, m_target, "A211LE");
 			m_le.Send();
 			if (journalOn()) journalArm("A211LE", Bars.Close[0], m_stop, m_target, null);
+		}
+
+		private void takeGx(bool longSide, double entry, double stop, double target, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 
 		private void bucket(DateTime et, int minutes, ref DateTime cur, ref double close, Action onClose)

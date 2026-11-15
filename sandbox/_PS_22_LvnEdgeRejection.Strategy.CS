@@ -170,6 +170,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			GxOrderPrefix = "PS22"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;
 			FlatBy = Cfg.flat; MaxTradesPerDay = 1;
@@ -202,7 +203,8 @@ namespace PowerLanguage.Strategy
 				return true;
 			
 			}
-			if (pos != 0 && sendExits()) return;
+			exitBar();
+			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || m_comp == null || m_comp.crossesRoll || !IsRth() || tod < Cfg.from || tod > Cfg.to || !entryAllowed(out string _)) return;
 			double tick = tickSize(), d = Cfg.deltaTicks * tick, h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0], mid = (h + l) / 2;
@@ -221,6 +223,7 @@ namespace PowerLanguage.Strategy
 				if (why != null) { logSignal("PS22", side, c, stop, null, false); if (journalOn()) trace(ETraceLevel.Journal, $"PS-22 {day:yyyy-MM-dd} skip: {why}"); return; }
 				m_stop = stop; m_target = target;
 				logSignal("PS22", side, c, stop, null, true);
+				takeGx(side > 0, Bars.Close[0], m_stop, m_target, side > 0 ? "PS22LE" : "PS22SE");
 				if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
 				return;
 			}
@@ -231,6 +234,24 @@ namespace PowerLanguage.Strategy
 			double best = double.MaxValue;
 			foreach (Node n in m_comp.hvns) if (n.low > entry && n.low < best) best = n.low;
 			return best < target;
+		}
+
+		private void takeGx(bool longSide, double entry, double stop, double target, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 	}
 }

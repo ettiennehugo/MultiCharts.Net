@@ -168,6 +168,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			GxOrderPrefix = "PS19"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own;      // PriorRthProfile() is built from Own profiles
 			OwnProfileWindow = EOwnProfileWindow.Rth;
@@ -210,7 +211,8 @@ namespace PowerLanguage.Strategy
 				return true;
 			
 			}
-			if (pos != 0 && sendExits()) return;
+			exitBar();
+			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
 			double tick = tickSize(), c = Bars.Close[0], d = Cfg.deltaTicks * tick;
@@ -224,8 +226,27 @@ namespace PowerLanguage.Strategy
 			double r = Math.Abs(c - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-19 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_stop = stop; m_target = c + side * Cfg.targetR * r;
+			takeGx(side > 0, Bars.Close[0], m_stop, m_target, side > 0 ? "PS19LE" : "PS19SE");
 			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
 			if (journalOn()) journalArm(side > 0 ? "PS19LE" : "PS19SE", c, stop, m_target, null);
+		}
+
+		private void takeGx(bool longSide, double entry, double stop, double target, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
