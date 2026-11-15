@@ -428,3 +428,9 @@ A file journals and does not send an order only when its catalogue heading has n
 | OF-06 | Unfinished-auction veto. No entry. The journal uses a poor high as the proxy. |
 | OF-08 | Parked. Per-trade size is not in _TickStream. No entry. |
 | OF-10 | Not buildable. No second footprint engine. No entry. |
+| KD-01 | Same entry as PS-25. No second trade. |
+| KD-03 | Three-family confluence filter. No entry. |
+| KD-04 | Detrended-fit regime gate. No entry. |
+| KD-05 | Same layer as MT-07. No second trade. |
+| KD-07 | No-fade veto, the gate form of KD-02. No entry. |
+| MT-07 | Higher-timeframe gate on PS-25. No entry of its own. |
