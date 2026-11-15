@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract where the example fixes size.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -195,14 +196,17 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) newDay(day);
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition, bar = Bars.FullSymbolData.Current;
-			if (pos != 0)
+						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
 			{
 				m_done = true;
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				double e = StrategyInfo.AvgEntryPrice;
 				if (pos > 0) { m_lxStp.Send(e - m_sd); m_lxLmt.Send(e + m_br); } else { m_sxStp.Send(e + m_sd); m_sxLmt.Send(e - m_br); }
-				return;
+				return true;
+			
 			}
+			if (pos != 0 && sendExits()) return;
 			if (m_done || !(m_br > 0) || !IsRth()) return;
 			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			if (m_side != 0)                                           // armed: work the limit at L until the session ends

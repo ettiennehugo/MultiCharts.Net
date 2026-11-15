@@ -22,6 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract where the example fixes size.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -183,7 +184,11 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (rollOn(1)) m_cluster = double.NaN;
-			if (StrategyInfo.MarketPosition > 0) { m_cluster = double.NaN; m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); return; }
+						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
+			bool sendExits()
+			{ m_cluster = double.NaN; m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); return true; 
+			}
+			if (StrategyInfo.MarketPosition > 0 && sendExits()) return;
 			_PriceActionEngine pa60 = PriceActionFor(Cfg.ds60, "trend60");
 			bool up = pa60 != null && pa60.IsWarm && pa60.Structure(0) == EStructure.Up;
 			if (!up) { m_cluster = double.NaN; return; }

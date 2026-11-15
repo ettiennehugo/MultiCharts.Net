@@ -62,6 +62,7 @@
 // While open: the example re-sends its stop or target. Nothing else is added.
 //
 // ## 13. Exits
+// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
 // Hard stop: the example's stop, or Not applicable when the example has none.
 // Target: the example's target, or Not applicable.
 // Time exit: the example's flat time, or Not applicable.
@@ -166,12 +167,16 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();                                     // runs the host (which calls hostGate) and the event engine
 			if (Bars.Status != EBarState.Close) return;
-			if (EventFlattenNow)
-			{
-				int pos = StrategyInfo.MarketPosition;
-				if (pos > 0) m_flatL.Send(); else if (pos < 0) m_flatS.Send();
-				if (pos != 0 && journalOn()) trace(ETraceLevel.Journal, $"RG-07 {Bars.Time[0]:yyyy-MM-dd HH:mm} tier-1 blackout: flatten");
-			}
+			if (EventFlattenNow && sendExits()) { }
+		}
+
+		// Exits. The only method that sends an exit order. The host's own exits stay in the host sendExits. A later GX exitPlan replaces this method.
+		private bool sendExits()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos > 0) m_flatL.Send(); else if (pos < 0) m_flatS.Send();
+			if (pos != 0 && journalOn()) trace(ETraceLevel.Journal, $"RG-07 {Bars.Time[0]:yyyy-MM-dd HH:mm} tier-1 blackout: flatten");
+			return true;
 		}
 
 		protected override bool hostGate(DateTime day, out string why)

@@ -62,6 +62,7 @@ The counts are in the table at the end of this file.
 11. **Child examples.** Default: MT-03 extends `_PS_08_NarrowIbBreak`, A2-78 extends `_OF_07_BurstExtremeBreak`, RG-07 extends `_A2_56_FirstHourBreak` (that file is not edited), and A2-25 extends `_DV_02_FailedLevelFlip`. A slot copy of the child compiles only when the parent file is in the same project.
 12. **A2-26.** Default: it is the KDE veto inside the A2-25 file. No second file.
 13. **Merged A2 rows.** Default: the catalogue mapping table wins. A row marked "Merged into" is not a second sandbox file. The host carries the arm when that host is coded. A2-06 and A2-07 stay on the PR 126 files, which this work does not edit.
+14. **Catalogue-only batch 2 rules.** Default: the ASSUMPTION in each of A2-04, A2-09, A2-11, A2-12, A2-13, A2-14 and A2-15 is the reading that was coded. A2-15 is a gate on PS-01; the base gate returns true.
 
 ## (a) ID table
 
@@ -70,18 +71,18 @@ The counts are in the table at the end of this file.
 | A2-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-04) | done | merged into AV-04; no second sandbox file |
 | A2-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | duplicate-of | none (merged into AV-03) | done | merged into AV-03; no second sandbox file |
 | A2-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into EX-04) | done | merged into EX-04; no second sandbox file |
-| A2-04 | Overnight inventory vs oVWAP open drive | trading-idea-catalogue.md | entry signal | sandbox/_A2_04_OvernightInventoryVs.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-04 | Overnight inventory vs oVWAP open drive | trading-idea-catalogue.md | entry signal | sandbox/_A2_04_OvernightInventory.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
 | A2-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-12) | done | merged into AV-12; no second sandbox file |
 | A2-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into VW-05) | done | merged into VW-05; no second sandbox file |
 | A2-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-08) | done | merged into AV-08; no second sandbox file |
 | A2-08 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | duplicate-of | none (merged into PS-08) | done | merged into PS-08; no second sandbox file |
-| A2-09 | Noise-band long-only with sVWAP trail (MNQ benchmark) | trading-idea-catalogue.md | entry signal | sandbox/_A2_09_NoiseBandLong.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-09 | Noise-band long-only with sVWAP trail (MNQ benchmark) | trading-idea-catalogue.md | entry signal | sandbox/_A2_09_NoiseBandLong.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
 | A2-10 | (no heading; id is cited in the source) | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | duplicate-of | none (merged into VW-03) | done | merged into VW-03; no second sandbox file |
-| A2-11 | Prior-day VWAP static-level acceptance | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_11_PriorDayVWAP.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-12 | VWAP − TWAP divergence as an inventory signal | trading-idea-catalogue.md | entry signal | sandbox/_A2_12_VWAPTWAPDivergence.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-13 | Gap-day AVWAP-from-open: hold → go-with, fail → fade-to-value | trading-idea-catalogue.md | entry signal | sandbox/_A2_13_GapDayAVWAP.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-14 | Weekly AVWAP reclaim swing (MES daily) | trading-idea-catalogue.md | entry signal | sandbox/_A2_14_WeeklyAVWAPReclaim.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-15 | Breakout-leg POC vs leg AVWAP skew (layer on PS-01) | trading-idea-catalogue.md | entry signal | sandbox/_A2_15_BreakoutLegPOC.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-11 | Prior-day VWAP static-level acceptance | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_11_PriorDayVwap.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
+| A2-12 | VWAP − TWAP divergence as an inventory signal | trading-idea-catalogue.md | entry signal | sandbox/_A2_12_VwapTwapDivergence.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
+| A2-13 | Gap-day AVWAP-from-open: hold → go-with, fail → fade-to-value | trading-idea-catalogue.md | entry signal | sandbox/_A2_13_GapAvwapOpen.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
+| A2-14 | Weekly AVWAP reclaim swing (MES daily) | trading-idea-catalogue.md | entry signal | sandbox/_A2_14_WeeklyAvwapReclaim.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
+| A2-15 | Breakout-leg POC vs leg AVWAP skew (layer on PS-01) | trading-idea-catalogue.md | entry signal | sandbox/_A2_15_LegSkew.Strategy.CS | 2 | coded in batch 2; ASSUMPTION in the header |
 | A2-16 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into RG-04) | done | merged into RG-04; no second sandbox file |
 | A2-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-07) | done | merged into AV-07; no second sandbox file |
 | A2-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-10) | done | merged into PS-10; no second sandbox file |
