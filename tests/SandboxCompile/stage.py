@@ -26,7 +26,7 @@ functions = [
     "_XmktLeg.Function.CS", "_BarLadder.Function.CS", "_VpHistogram.Function.CS", "_VpVwapEngine.Function.CS", "_RangeProfile.Function.CS",
     "_WeeklyProfiles.Function.CS", "_VpConfluenceEngine.Function.CS",
 ]
-bases = ["_VolumeProfileBase.Strategy.CS", "_VolumeProfileFuturesBase.Strategy.CS"]
+bases = ["_VolumeProfileBase.Strategy.CS", "_VolumeProfileFuturesBase.Strategy.CS", "_GenericExit.Strategy.CS"]
 names = []
 for name in functions + bases:
     text = (root / name).read_text()
