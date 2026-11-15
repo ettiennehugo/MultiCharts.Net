@@ -417,3 +417,8 @@ A file journals and does not send an order only when its catalogue heading has n
 | DV-17 | Merged into OF-08. No second entry. |
 | DV-18 | Merged into OF-05. No second entry. |
 | DV-19 | Merged into OF-06. No second entry. |
+| TS-04 | Re-runs PS-01 and PS-24 on a pit profile. No entry of its own. |
+| TS-07 | Opening-noise blackout for other entries. No entry. |
+| DV-20 | Weak-low veto for a host level. No entry. |
+| DV-21 | Merged into DV-02. No second entry. |
+| DV-24 | Merged into EX-01. No second entry. |

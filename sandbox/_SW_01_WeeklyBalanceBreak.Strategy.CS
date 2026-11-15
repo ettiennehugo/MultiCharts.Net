@@ -1,90 +1,90 @@
 // ## 1. Identity
 // Catalogue ID: SW-01
 // ID mapping: SW-01 -> _SW_01_WeeklyBalanceBreak.Strategy.CS (class _SW_01_WeeklyBalanceBreak).
-// Name: SW-01 Weekly balance break (3–6-week composite)
+// Name: SW-01 weekly balance break
 // Header version: 1
-// Rules version: catalogue heading, coded 2026-11-15. Instrument-agnostic.
+// Rules version: catalogue specification under the SW-01 heading, rewritten 2026-11-15.
 // Study class: _SW_01_WeeklyBalanceBreak
 // File: sandbox/_SW_01_WeeklyBalanceBreak.Strategy.CS
 // Stage: sandbox
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md for SW-01.
-// Taken from the source: the heading and its rules.
-// Research assumption: ASSUMPTION: Weekly balance break (3–6-week composite) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag both.
+// Source: specs/trading-idea-catalogue.md, the SW-01 heading and its Analyst 2 specification.
+// Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
+// Research assumption: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
 // Link: specs/trading-idea-catalogue.md, the SW-01 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
-// Trigger: the coded arm in CalcBar, on a closed bar.
-// Management: one contract when this file trades.
+// Trigger: see CalcBar. Closed bar only.
+// Management: one contract when this file trades. Size is never cut to fit the stop.
 // Exit: see section 13.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only, after base.CalcBar.
-// Order sent: market next bar when this file trades.
-// Can fill: the next bar. IOG is disabled.
+// Order sent: the order type named in the catalogue (market next bar, stop, or limit).
+// Can fill: the next bar, or later for a resting stop or limit. IOG is disabled.
 //
 // ## 6. Position and re-entry
-// Position: flat or one.
-// Re-entry: one attempt per session when this file trades.
-// Same session after a stop: no new entry that session.
+// Position: flat or one, unless the catalogue says a reverse, which this file does not open inside GX.
+// Re-entry: one attempt per session unless the catalogue says otherwise.
+// Same session after a stop: no new entry that session unless the catalogue says otherwise.
 //
 // ## 7. Instruments
-// Market tag: both
+// Market tag: futures-only
 // Typical: the chart instrument. No symbol is hard-coded.
 // Validated: Not yet verified
 //
 // ## 8. Data
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: only if the code reads BarsOfData(2).
+// Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
-// Warmup: ATR(14) or the session profile, when used.
+// Warmup: the average or profile the rule names.
 //
 // ## 9. Entry and filters
-// All of these must be true: the coded arm, a ready profile or average when the arm reads one, and the 1 percent budget.
-// Skip when: the budget fails or the session API says the bar is outside the traded session.
+// All of these must be true: the catalogue trigger and the 1 percent budget when an order is sent.
+// Skip when: rollOn on a futures profile idea, the profile or average is not ready, or the budget fails.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract when this file trades.
 // Risk limit: skip when 1 contract times the widened stop times BigPointValue exceeds 1 percent of equity.
-// Size is never shrunk to fit a stop: yes. The floor is the instrument profile costFloorTicks, times tickSize().
+// Size is never shrunk to fit a stop: yes. The floor is InstrumentProfile.costFloorTicks times tickSize().
 //
 // ## 11. Orders, execution, and costs
-// Entry order: the order name in Create, when this file trades.
+// Entry order: named in Create when this file trades.
 // Exit orders: see section 13.
-// Fill assumption: next bar. IOG is off.
+// Fill assumption: next bar for a market order. A stop or limit rests. IOG is off.
 // Costs: MultiCharts commission and slippage. This file does not set a fee or a slippage number.
 //
 // ## 12. Trade management
-// While open: exitBar when GX is armed, otherwise sendExits.
+// While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX exitPlan on the entry bar and exitBar on each later closed bar.
-// Hard stop: the structural stop widened to the instrument cost floor, when this file trades.
-// Target: one R, or the level named in the assumption, passed to GX as points from the signal close.
-// Time exit: the chart session end, from the session API, as GX FlatByHHMM.
-// Invalidation: stated in the assumption when it is not a GX flat.
+// Exit orders: GX. Stop and target as above. MaxHoldDays is 15.
+// Hard stop: the catalogue stop, widened to the instrument cost floor.
+// Target: the catalogue target when it is a price known at the signal.
+// Time exit: the catalogue clock, taken from the session API when the rule says the session end.
+// Invalidation: any extra exit named in the assumption.
 //
 // ## 14. Regimes
-// Suitable: the instrument session the code consults.
-// Unsuitable: outside that session.
+// Suitable: the session the code consults.
+// Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
-// Base class: _CustomSignal
-// Engines enabled: those set in Create.
+// Base class: _VolumeProfileFuturesBase
+// Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series on the futures base.
+// Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Weekly balance break (3–6-week composite) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag both.
+// Other: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -95,7 +95,7 @@
 // Range: Not applicable
 // Effect: Not applicable
 // Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Fixed or research-tuned: the catalogue core, not a sweep. The sweep stays in the catalogue.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -123,120 +123,86 @@
 // No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
 //
 // ## 21. Log diagnostics
-// journalArm name: the entry order name when GX arms.
+// journalArm name: the entry order name when an entry is sent.
 // logSignal tag: SW-01
-// Skip / flatten lines: the trace strings in the file.
+// Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// Market tag: both
-// ASSUMPTION: Weekly balance break (3–6-week composite) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag both.
+// Market tag: futures-only
+// ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 // IOG is disabled.
 
 
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
-
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _SW_01_WeeklyBalanceBreak : _CustomSignal
+	public class _SW_01_WeeklyBalanceBreak : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se;
-		private bool m_done, m_logged;
-		private int m_hold;
-		private double m_orh = double.NaN, m_orl = double.NaN;
-		private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le; private int m_out; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _SW_01_WeeklyBalanceBreak(object _ctx) : base(_ctx) { }
-		protected override void Create()
-		{
-			base.Create();
-			
-			
-			GxOrderPrefix = "SW01"; createGxOrders();
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy));
-			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01SE", EOrderAction.SellShort));
-		}
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
+		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; WeeklyProfiles.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar();
-			if (Bars.Status != EBarState.Close) return;
-			exitBar();
-			
-			DateTime day = Bars.Time[0].Date;
-			if (day != m_day) { m_day = day; m_done = m_logged = false; m_hold = 0; m_orh = m_orl = double.NaN; }
-			if (StrategyInfo.MarketPosition != 0) return;
-			
-			if (!inChartSession()) return;
-			if (m_done || Bars.CurrentBar < 15) return;
-			double atr = averageTrueRange(Bars, 14);
-			if (!(atr > 0)) return;
-			double sma = 0; for (int i = 0; i < 10; i++) sma += Bars.Close[i]; sma /= 10.0;
-			bool longSide = Bars.Close[0] > sma && Bars.Close[1] <= sma;
-			if (!longSide) return;
-			double entry = Bars.Close[0];
-			double stop = widen(true, entry, entry - atr);
-			if (!budget(entry, stop)) return;
-			arm(true, entry, stop, entry + atr, "SW01LE");
-			m_le.Send(); m_done = true;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
+			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || CompletedWeeks < 3) return;
+			VpExtra a = Week(1), b = Week(2), c = Week(3), comp = WeeklyComposite(3);
+			if (a == null || b == null || c == null || comp == null) return;
+			if (!overlap(a, b) || !overlap(b, c)) return;
+			double atr = DailyContext.Atr20d; if (!(atr > 0)) return;
+			TimeSpan tod = sessionClock(Bars.Time[0]);
+			if (tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0) && Bars.Close[0] > comp.vah + 0.1 * atr) m_out++;
+			if (m_out < 2 || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(61))) return;
+			double lo = Bars.Low[0], prev = Bars.Low[60], hi = Bars.High[0];
+			for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[60 + i]); hi = Math.Max(hi, Bars.High[i]); }
+			if (!(lo > prev)) return;
+			double w = comp.vah - comp.val; if (!(w > 0)) return;
+			double entry = hi + tickSize();
+			double stop = widen(true, entry, comp.vah - 0.25 * w);
+			if (!budget(entry, stop)) { m_done = true; return; }
+			arm(true, entry, stop, entry + w, "SW01LE", 15); m_le.Send(); m_done = true;
 		}
-		
-		private int floorTicks()
+		private bool overlap(VpExtra x, VpExtra y)
 		{
-			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) return p.costFloorTicks; }
-			catch (Exception) { }
-			return 1;
-		}
-		private int sessionHhmm()
-		{
-			if (Bars.Sessions != null && Bars.Sessions.Count > 0) { TimeSpan e = Bars.Sessions[Bars.Sessions.Count - 1].EndTime; return e.Hours * 100 + e.Minutes; }
-			return 0;
-		}
-		private bool inChartSession()
-		{
-			if (Bars.Sessions == null || Bars.Sessions.Count == 0) return true;
-			TimeSpan t = Bars.Time[0].TimeOfDay;
-			foreach (SessionObject s in Bars.Sessions)
-			{
-				if (s.StartTime <= s.EndTime) { if (t >= s.StartTime && t <= s.EndTime) return true; }
-				else if (t >= s.StartTime || t <= s.EndTime) return true;
-			}
-			return false;
-		}
-		private bool budget(double entry, double stop)
-		{
-			double risk = Math.Abs(entry - stop);
-			return risk > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
-		}
-		private void arm(bool longSide, double entry, double stop, double target, string name)
-		{
-			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = ETargetMode.SingleTarget;
-			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			GxConfig.BreakEven = EBreakEven.Off;
-			GxConfig.TrailMode = ETrailMode.None;
-			GxConfig.SessionExit = ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = sessionHhmm();
-			GxConfig.TimeStopMinutes = 0;
-			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
-			ExitMarket mkt = new ExitMarket();
-			mkt.Tick = tickSize();
-			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
-			mkt.EntryStop = stop;
-			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
-			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(longSide, entry, stop, 1, mkt, name);
-		}
-		private double widen(bool longSide, double entry, double stop)
-		{
-			double floor = floorTicks() * tickSize();
-			if (longSide && entry - stop < floor) return entry - floor;
-			if (!longSide && stop - entry < floor) return entry + floor;
-			return stop;
+			double lo = Math.Max(x.val, y.val), hi = Math.Min(x.vah, y.vah);
+			double narrow = Math.Min(x.vah - x.val, y.vah - y.val);
+			return narrow > 0 && hi - lo >= 0.6 * narrow;
 		}
 
+		private double widen(bool buy, double entry, double stop)
+		{
+			int ticks = 1;
+			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
+			double floor = ticks * tickSize();
+			if (buy && entry - stop < floor) return entry - floor;
+			if (!buy && stop - entry < floor) return entry + floor;
+			return stop;
+		}
+		private int m_timeStop, m_flatOverride;
+		private bool budget(double a, double b) { double r = Math.Abs(a - b); return r > 0 && r * Bars.Info.BigPointValue <= equityAvailable(0.01); }
+		private void arm(bool buy, double entry, double stop, double target, string name, int holdDays)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			bool has = Math.Abs(target - entry) > tickSize();
+			GxConfig.TargetMode = has ? ETargetMode.SingleTarget : ETargetMode.None;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
+			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
+			GxConfig.MaxHoldDays = holdDays;
+			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(buy, entry, stop, 1, mkt, name);
+		}
 	}
 }
