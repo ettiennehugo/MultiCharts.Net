@@ -434,3 +434,12 @@ A file journals and does not send an order only when its catalogue heading has n
 | KD-05 | Same layer as MT-07. No second trade. |
 | KD-07 | No-fade veto, the gate form of KD-02. No entry. |
 | MT-07 | Higher-timeframe gate on PS-25. No entry of its own. |
+| KD-09 | Family-count filter on a host rail. No entry. |
+| KD-11 | Node-touch diagnostic. No entry. |
+| VX-01 | Needs VX1, VIX and the settlement calendar. HV20 is not that roll. |
+| VX-02 | Needs VIX and VIX3M. HV10 minus HV20 is not the variance risk premium. |
+| VX-03 | Needs VIX/VIX3M and the VX roll. |
+| VX-04 | Needs VIX/VIX3M and a VIX 10-day high. |
+| YV-02 | Chooses a second root by footprint. No second order-flow engine. |
+| YV-05 | Volume gate on a host. No entry. |
+| YV-06 | Stands a host down after losses. No entry. |
