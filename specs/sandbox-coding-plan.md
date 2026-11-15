@@ -443,3 +443,17 @@ A file journals and does not send an order only when its catalogue heading has n
 | YV-02 | Chooses a second root by footprint. No second order-flow engine. |
 | YV-05 | Volume gate on a host. No entry. |
 | YV-06 | Stands a host down after losses. No entry. |
+| VX-05 | Long-vol budget. Needs VIX and VVIX. |
+| VX-06 | VIX/VIX3M state gate. Those indexes are missing. |
+| VX-07 | VVIX percentile gate. VVIX is missing. |
+| VX-08 | VIX stretch. VIX is missing. |
+| LE-05 | Paired long and short leveraged funds. Needs borrow and the ETF pair. |
+| EX-01 | HVN target module. GX cannot retarget the next HVN. |
+| EX-02 | Naked-POC target module. No entry. |
+| EX-03 | Balance-width target module. No entry. |
+| EX-04 | AVWAP trail. GX has no AVWAP trail. |
+| EX-05 | Confirmed higher-low trail. GX has no such trail. |
+| EX-06 | Time stop only when open profit is under 0.5 R. GX time stop exits winners too. |
+| EX-07 | Half off at 1 R. GX ScaleOutThenRunner, T1 1 R, scale 50, BreakEven AfterT1. One contract cannot scale. |
+| EX-08 | Target-multiple diagnostic. No entry. |
+| EX-09 | Stagnation exit for a host. No entry. |
