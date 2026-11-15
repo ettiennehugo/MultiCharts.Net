@@ -26,7 +26,7 @@
 // ## 5. Timing
 // Signal evaluated: closed bar only, after base.CalcBar. The 15:30 reference is the 1-minute bar whose close time is 15:30. ATR uses closed Data2 bars.
 // Order sent: MarketNextBar TS03LE or TS03SE. Stop TS03LS or TS03SS is sent on later bars while the position is open, not on the signal bar. Flat is MarketNextBar TS03LX or TS03SX.
-// Can fill: the next bar. The stop is not working on the fill bar.
+// Can fill: the next bar. The protective stop is sent on the same bar as the entry, as DV-15 does. Owner 2026-11-15.
 //
 // ## 6. Position and re-entry
 // Position: flat or one. No scale-in.
@@ -56,7 +56,7 @@
 // ## 11. Orders, execution, and costs
 // Entry order: MarketNextBar TS03LE or TS03SE.
 // Exit orders: Stop TS03LS / TS03SS; MarketNextBar TS03LX / TS03SX.
-// Fill assumption: next bar's open. The stop starts on the bar after the fill.
+// Fill assumption: next bar's open. The stop is sent with the entry, so it is working on the fill bar.
 // Costs: the example assumes the ES research round trip of $17.00 ($2.25 commission and $6.25 slippage per side) set in MultiCharts, not in this file. Not yet verified
 //
 // ## 12. Trade management
@@ -83,7 +83,7 @@
 // Survivorship: Not applicable
 // Rolls: Series. A splice during the drift window clears the reference and does not enter.
 // Data quality: the 15:30 and 15:50 tests use an exact clock match, so a missing bar skips the day. Not yet verified on a chart.
-// Other: the stop is not sent on the signal bar, so the fill bar is unprotected. Variant B is ReversionTo1645.
+// Other: the protective stop is sent with the entry. Owner 2026-11-15. Variant B is ReversionTo1645.
 //
 // ## 17. Parameters
 // Input: Variant
@@ -134,7 +134,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Variant defaults to DriftTo1600, the previous trade list. ReversionTo1645 is catalogue variant B. ATR5 in the catalogue is ATR(14) on the 5-minute Data2 stream. The journal field is atr14of5m.
+// Variant defaults to DriftTo1600, the previous trade list. ReversionTo1645 is catalogue variant B. Owner 2026-11-15: the protective stop is sent with the entry. ATR5 in the catalogue is ATR(14) on the 5-minute Data2 stream. The journal field is atr14of5m.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -238,7 +238,8 @@ namespace PowerLanguage.Strategy
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"TS-03 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			double entry = Bars.Close[0];
 			m_stop = entry - side * r;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "variant", Variant.ToString() }, { "drift", drift.ToString("F2") }, { "atr14of5m", atr.ToString("F2") } };

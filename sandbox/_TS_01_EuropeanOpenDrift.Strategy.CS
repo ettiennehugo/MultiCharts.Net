@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "TS-01 · European-open overnight drift". The code is engines-manual example 2.
 // Taken from the source: buy at the window start and sell at the window end, every trading day. The sweep is two windows times an event filter. A disaster stop sits at 2 × ATR60m.
-// Research assumption: ATR60m length is 14, a simple average of true range. The catalogue does not give the length. RollDetection stays off, so an ATR window can include a roll gap. The catalogue kill is an MES cost. This file is written for @ES and does not change fees.
+// Research assumption: ATR60m length defaults to 14, a simple average of true range. Owner 2026-11-15 made that length an input. RollDetection stays off, so an ATR window can include a roll gap. The catalogue kill is an MES cost. This file is written for @ES and does not change fees.
 //
 // ## 3. Hypothesis
 // Mechanism: inventory taken at the US close is unwound when European liquidity opens, which leaves a small positive drift in the hours around that open. The event filter skips the night before a tier-1 08:30 release.
@@ -94,14 +94,14 @@
 // Effect: the narrow members use 02:00–03:00 ET. The EventFilter members also skip a night that fails the tier-1 08:30 check.
 // Interactions: the event-filter members turn EventConfig on. The other two leave M-EVENT disabled.
 // Fixed or research-tuned: research-tuned. The four members are the catalogue sweep. The default is the primary cell.
-// Input: atrLength
-// Purpose: simple-average true-range length on the closed 60-minute bars. ASSUMPTION – to be investigated. It is not an [Input]; it stays 14 in Ts01Config until the length is settled.
-// Default: 14 — predeclared assumption, not a fitted optimum
+// Input: AtrLength
+// Purpose: simple-average true-range length on the closed 60-minute bars
+// Default: 14 — owner 2026-11-15. This is the previous trade list.
 // Units: bars
-// Range: the code uses 14. A searched range is Not yet verified.
+// Range: an integer of at least 1. StartCalc throws otherwise.
 // Effect: a longer length smooths the disaster stop
 // Interactions: the stop is max(2 × that ATR, the profile cost-floor distance)
-// Fixed or research-tuned: fixed assumption, marked for investigation
+// Fixed or research-tuned: fixed default. The length is now a research input.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -130,7 +130,7 @@
 //   Pause means stop new entries. Open positions keep the exits in section 13.
 // Review: Not yet verified
 //   Review means the owner looks before new entries resume.
-// Uncertainty: no run yet; ATR60m length 14 is ASSUMPTION – to be investigated; rolls are off; the holdout still sealed.
+// Uncertainty: no run yet; ATR60m length defaults to 14; rolls are off; the holdout still sealed.
 // No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
 //
 // ## 21. Log diagnostics
@@ -143,7 +143,7 @@
 // Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // The old file name was _TS_02_EuropeanOpenDrift.Strategy.CS. The class was _TS_02_EuropeanOpenDrift. Both were TS-01. Variant was an int 1–4; it is now EVariant, and the default still selects the wide window with the filter off.
-// ASSUMPTION – to be investigated: ATR60m length is 14. The cost floor is the Data1 instrument profile, not a hardcoded 14-tick ES floor. Fee and slippage numbers in the preset cost table are not changed by this file.
+// Owner 2026-11-15: AtrLength defaults to 14. The cost floor is the Data1 instrument profile, not a hardcoded 14-tick ES floor. Fee and slippage numbers in the preset cost table are not changed by this file.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -162,12 +162,14 @@ namespace PowerLanguage.Strategy
 		}
 
 		[Input] public EVariant Variant { get; set; }
+		/// <summary>ATR length on closed 60-minute bars. Default 14 is the previous trade list. Owner 2026-11-15.</summary>
+		[Input] public int AtrLength { get; set; }
 
 		protected sealed class Ts01Config
 		{
 			public int contracts = 1;
 			public double disasterAtr = 2.0;
-			public int atrLength = 14;       // ASSUMPTION – to be investigated. The catalogue does not give the ATR60m length. This file uses 14 until that is settled.
+			// AtrLength is the ATR60m length. It is an input, default 14.
 			public double riskBudgetFraction = 0.01;  // floor-rule risk budget: Ettienne, 2026-10-23: 1% of equity
 		}
 		protected Ts01Config Cfg { get; } = new Ts01Config();
@@ -183,7 +185,7 @@ namespace PowerLanguage.Strategy
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 		private double m_stop = double.NaN;
 
-		public _TS_01_EuropeanOpenDrift(object _ctx) : base(_ctx) { Variant = EVariant.Window0130To0430; }
+		public _TS_01_EuropeanOpenDrift(object _ctx) : base(_ctx) { Variant = EVariant.Window0130To0430; AtrLength = 14; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -204,6 +206,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(EVariant), Variant)) throw new ArgumentException("_TS_01_EuropeanOpenDrift: Variant is not a defined EVariant");
+			if (AtrLength < 1) throw new ArgumentException("_TS_01_EuropeanOpenDrift: AtrLength must be at least 1");
 			bool narrow = Variant == EVariant.Window0200To0300 || Variant == EVariant.Window0200To0300EventFilter;
 			m_start = narrow ? new TimeSpan(2, 0, 0) : new TimeSpan(1, 30, 0);
 			m_end = narrow ? new TimeSpan(3, 0, 0) : new TimeSpan(4, 30, 0);
@@ -217,7 +220,7 @@ namespace PowerLanguage.Strategy
 				throw new ArgumentException("_TS_01_EuropeanOpenDrift: Data1 instrument cost is unknown; the floor comes from InstrumentProfile, not a hardcoded ES or MES tick count");
 			m_floorTicks = profile.costFloorTicks;
 			m_costText = profile.cost.Text();
-			if (journalOn()) trace(ETraceLevel.Journal, $"TS-01 cost({m_costText}) floorTicks({m_floorTicks}) atr60Length({Cfg.atrLength}) ASSUMPTION");
+			if (journalOn()) trace(ETraceLevel.Journal, $"TS-01 cost({m_costText}) floorTicks({m_floorTicks}) atr60Length({AtrLength})");
 			m_doneDay = DateTime.MinValue; m_stop = double.NaN;
 		}
 
@@ -251,7 +254,7 @@ namespace PowerLanguage.Strategy
 			m_doneDay = day;
 
 			string skip = skipReason(day);
-			double atr = atrClosed(2, Cfg.atrLength);
+			double atr = atrClosed(2, AtrLength);
 			if (skip == null && !(atr > 0)) skip = "ATR60m warm-up";
 			if (skip != null) { if (journalOn()) trace(ETraceLevel.Journal, $"TS-01 {day:yyyy-MM-dd} skip: {skip}"); return; }
 

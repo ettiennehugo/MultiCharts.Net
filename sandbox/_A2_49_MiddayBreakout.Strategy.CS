@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "A2-49 · Midday support/resistance and afternoon breakout". The code is engines-manual example 12.
 // Taken from the source: morning range 09:30–12:00 ET, afternoon break of that range, day-only flat at 15:55, disaster stop 1.5R.
-// Research assumption: this arm enters with a market order on a close beyond the morning high or low, and reverses while 12:00–15:30. The book's stop at the level ± 1 tick, the SR zone arm, and the overnight hold are not coded. R for the disaster stop is the morning range width.
+// Research assumption: this arm enters with a market order on a close beyond the morning high or low, and reverses while the midday clock is still open through 15:30. Midday is an input. The default is 12:00, which is the previous trade list. R for the disaster stop is the morning range width.
 //
 // ## 3. Hypothesis
 // Mechanism: the open is more likely than midday to hold the day's extreme, so a break of the morning range in the afternoon tends to close in that direction. Costs on an always-in afternoon are the risk the catalogue names.
@@ -110,6 +110,14 @@
 // Effect: a wider zone flags more closes as support or resistance
 // Interactions: used only by SrZone and Both
 // Fixed or research-tuned: fixed at the book core. The other two are the catalogue sweep.
+// Input: Midday
+// Purpose: the clock that ends the morning range and opens the afternoon
+// Default: At1200 — 12:00. Owner 2026-11-15. This is the previous trade list.
+// Units: Eastern clock
+// Range: At1130, At1200, At1230. Any other value throws in StartCalc.
+// Effect: an earlier clock shortens the morning range and starts the afternoon sooner. NoEntryBefore uses the same clock.
+// Interactions: Arm and Hold. The range is still the RTH bars that close after 09:30 and at or before this clock.
+// Fixed or research-tuned: fixed default. The other two clocks are the catalogue sweep.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -150,7 +158,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Book arms are inputs. Default Arm CloseBreak and Hold DayFlat reproduce the previous trade list. On a 30-minute chart the overnight exit is the first RTH bar, whose close is 10:00, not a 09:31 one-minute bar. Midday stays 12:00; the 11:30 and 12:30 clocks are not inputs.
+// Book arms are inputs. Default Arm CloseBreak, Hold DayFlat and Midday At1200 reproduce the previous trade list. On a 30-minute chart the overnight exit is the first RTH bar, whose close is 10:00, not a 09:31 one-minute bar. Owner 2026-11-15: Midday sweeps 11:30, 12:00 and 12:30.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -166,14 +174,18 @@ namespace PowerLanguage.Strategy
 		/// <summary>Zone width for the SR arm, as a fraction of the morning range. The book core is 25 percent. CloseBreak ignores it.</summary>
 		public enum EZone { Pct20, Pct25, Pct33 }
 
+		/// <summary>End of the morning range. At1200 is the previous trade list. Owner 2026-11-15.</summary>
+		public enum EMidday { At1130, At1200, At1230 }
+
 		[Input] public EArm Arm { get; set; }
 		[Input] public ESessionHold Hold { get; set; }
 		[Input] public EZone Zone { get; set; }
+		[Input] public EMidday Midday { get; set; }
 
 		protected sealed class A249Config
 		{
 			public int contracts = 1;
-			public TimeSpan rthOpen = new TimeSpan(9, 30, 0), midday = new TimeSpan(12, 0, 0);
+			public TimeSpan rthOpen = new TimeSpan(9, 30, 0);
 			public TimeSpan lastEntry = new TimeSpan(15, 30, 0), flat = new TimeSpan(15, 55, 0);
 			public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
 			public double disasterR = 1.5;
@@ -190,9 +202,10 @@ namespace PowerLanguage.Strategy
 		private double m_hi = double.NaN, m_lo = double.NaN, m_stop = double.NaN;
 		private bool m_skipDay, m_exitNextRth;
 
-		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; }
+		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
 
 		private double zoneFrac() { return Zone == EZone.Pct20 ? 0.20 : Zone == EZone.Pct33 ? 0.33 : 0.25; }
+		private TimeSpan middayAt() { return Midday == EMidday.At1130 ? new TimeSpan(11, 30, 0) : Midday == EMidday.At1230 ? new TimeSpan(12, 30, 0) : new TimeSpan(12, 0, 0); }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -204,7 +217,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			// CS-7 primitives: protected properties, set in code (never [Input])
-			NoEntryBefore = Cfg.midday; NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = Cfg.maxEntries;
+			NoEntryBefore = middayAt(); NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = Cfg.maxEntries;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A249LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A249SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A249LX", EOrderAction.Sell));
@@ -220,6 +233,8 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EArm), Arm)) throw new ArgumentException("_A2_49_MiddayBreakout: Arm is not a defined EArm");
 			if (!Enum.IsDefined(typeof(ESessionHold), Hold)) throw new ArgumentException("_A2_49_MiddayBreakout: Hold is not a defined ESessionHold");
 			if (!Enum.IsDefined(typeof(EZone), Zone)) throw new ArgumentException("_A2_49_MiddayBreakout: Zone is not a defined EZone");
+			if (!Enum.IsDefined(typeof(EMidday), Midday)) throw new ArgumentException("_A2_49_MiddayBreakout: Midday is not a defined EMidday");
+			NoEntryBefore = middayAt();
 			m_clock = null;
 			base.StartCalc();
 			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
@@ -248,14 +263,14 @@ namespace PowerLanguage.Strategy
 			}
 			if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 
-			// morning range: RTH bars that close in (09:30, 12:00]
-			if (tod > Cfg.rthOpen && tod <= Cfg.midday && isRthBar(Bars.Time[0]))
+			// morning range: RTH bars that close after 09:30 and at or before the midday input
+			if (tod > Cfg.rthOpen && tod <= middayAt() && isRthBar(Bars.Time[0]))
 			{
 				m_hi = double.IsNaN(m_hi) ? Bars.High[0] : Math.Max(m_hi, Bars.High[0]);
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
-			if (m_skipDay || double.IsNaN(m_hi) || tod <= Cfg.midday) return;
+			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
 			double tick = tickSize();
 			if (Arm == EArm.CloseBreak) closeBreak(pos, tick);

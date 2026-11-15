@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "SW-02 · RSI(2) dip-buy". The code is engines-manual example 16.
 // Taken from the source: close above the 200-day average and RSI(2) under 10 buys; exit when the close is above the 5-day average or after 5 bars. The filter variant also requires the close above the latest swing-low AVWAP. Disaster stop 3 × ATR(20).
-// Research assumption: the RSI is Cutler's simple-average RSI, labelled in the method, not Wilder's. The filter is on. The composite-VAH filter and the unfiltered base are not coded. The buy is at the signal close for the next bar's open.
+// Research assumption: the RSI is Cutler's simple-average RSI, labelled in the method, not Wilder's. The default filter is the swing-low AVWAP. Composite uses _VolumeProfileBase.Composite. The buy is at the signal close for the next bar's open.
 //
 // ## 3. Hypothesis
 // Mechanism: a short-term oversold dip in an index that is still above its long average tends to revert. The AVWAP filter tries to keep the dip on the side of the last swing-low cohort. The catalogue grades the filter as a hypothesis.
@@ -73,7 +73,7 @@
 // Unsuitable: close at or below the 200-bar average, and a close that is not above the swing-low AVWAP.
 //
 // ## 15. Dependencies
-// Base class: _CustomSignal
+// Base class: _VolumeProfileBase
 // Engines enabled: M-AVWAP with AvwapEvents = SwingLow. That anchor turns price action on for Data1.
 // Engine settings enabled: RollDetection = Series. AvwapLimits.maxAgeSessions = 60.
 //
@@ -91,8 +91,8 @@
 // Default: Avwap — close must be above the latest valid swing-low AVWAP. This is the previous trade list.
 // Units: Not applicable
 // Range: Avwap, None, Composite. Any other value throws in StartCalc.
-// Effect: None is the unfiltered base (close above the 200-bar average and RSI(2) under 10). Composite also requires the close at or below the prior 20-day composite VAH.
-// Interactions: the composite is computed in this file from daily bars. It is not the volume-profile Composite() call.
+// Effect: None is the unfiltered base (close above the 200-bar average and RSI(2) under 10). Composite also requires the close at or below the prior 20-session composite VAH.
+// Interactions: Composite calls _VolumeProfileBase.Composite on Data1. Owner 2026-11-15. That arm turns the own profile engine on. The default Avwap arm does not.
 // Fixed or research-tuned: fixed default. None and Composite are the catalogue arms.
 //
 // ## 18. Acceptance policy
@@ -135,14 +135,14 @@
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // avwapFilter stays true inside the protected config. It is a bool, not a multi-value input.
-// Filter defaults to Avwap, the previous trade list. None and Composite are selectable. The composite VAH spreads each prior daily bar's volume uniformly from low to high. RSI stays Cutler, threshold 10. Wilder RSI and the threshold 5 are not inputs.
+// Filter defaults to Avwap, the previous trade list. None and Composite are selectable. Owner 2026-11-15: the composite VAH is _VolumeProfileBase.Composite, not a uniform spread of daily bars. RSI stays Cutler, threshold 10. Wilder RSI and the threshold 5 are not inputs.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
 
 namespace PowerLanguage.Strategy
 {
-	public class _SW_02_SwingPullback : _CustomSignal
+	public class _SW_02_SwingPullback : _VolumeProfileBase
 	{
 		/// <summary>Location filter. Avwap is the current arm. None is the RSI base. Composite requires the close at or below the prior 20-day composite VAH.</summary>
 		public enum EFilter { Avwap, None, Composite }
@@ -181,6 +181,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
+			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
 			base.StartCalc();
 			m_stop = double.NaN; m_entryBar = -1;
 		}
@@ -211,7 +212,8 @@ namespace PowerLanguage.Strategy
 			}
 			else if (Filter == EFilter.Composite)
 			{
-				double vah = compositeVah(Cfg.compositeDays);
+				VpExtra comp = Composite(1, Cfg.compositeDays);
+				double vah = comp != null && comp.vah > 0 ? comp.vah : double.NaN;
 				if (double.IsNaN(vah) || c > vah) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "vah", double.IsNaN(vah) ? "na" : vah.ToString("F2") } }, false); return; }
 				av = vah;
 			}
@@ -227,46 +229,6 @@ namespace PowerLanguage.Strategy
 				journalArm("SW02LE", c, m_stop, double.NaN, ctx);
 				logSignal("SW-02", +1, c, m_stop, ctx, true);
 			}
-		}
-
-		/// <summary>70% value-area high of the prior n daily bars. Each bar's volume is spread uniformly from its low to its high. The signal bar is not included. NaN when volume or the tick is missing.</summary>
-		private double compositeVah(int n)
-		{
-			double tick = tickSize();
-			if (!(tick > 0) || Bars.CurrentBar <= n + 1) return double.NaN;
-			var vol = new Dictionary<long, double>();
-			double total = 0;
-			for (int i = 1; i <= n; i++)
-			{
-				double lo = Bars.Low[i], hi = Bars.High[i], v = Bars.Volume[i];
-				if (!(v > 0) || !(hi >= lo)) continue;
-				long a = (long)Math.Round(lo / tick), b = (long)Math.Round(hi / tick);
-				if (b < a) { long t = a; a = b; b = t; }
-				double each = v / (b - a + 1);
-				for (long p = a; p <= b; p++)
-				{
-					double got;
-					vol.TryGetValue(p, out got);
-					vol[p] = got + each;
-				}
-				total += v;
-			}
-			if (!(total > 0) || vol.Count == 0) return double.NaN;
-			long poc = long.MaxValue; double pocVol = -1;
-			foreach (var kv in vol) if (kv.Value > pocVol || (kv.Value == pocVol && kv.Key < poc)) { pocVol = kv.Value; poc = kv.Key; }
-			var prices = new List<long>(vol.Keys);
-			prices.Sort();
-			int at = prices.IndexOf(poc);
-			int loI = at, hiI = at;
-			double acc = vol[poc];
-			while (acc < 0.70 * total && (loI > 0 || hiI < prices.Count - 1))
-			{
-				double down = loI > 0 ? vol[prices[loI - 1]] : -1;
-				double up = hiI < prices.Count - 1 ? vol[prices[hiI + 1]] : -1;
-				if (up >= down) hiI++; else loI--;
-				acc += vol[prices[up >= down ? hiI : loI]];
-			}
-			return prices[hiI] * tick;
 		}
 
 		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[i]; return s / n; }

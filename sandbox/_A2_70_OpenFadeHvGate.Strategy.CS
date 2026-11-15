@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, headings "A2-64 · 1.0 × daily ATR fade" and "A2-70 · High-volatility skip gate". The code is engines-manual example 17.
 // Taken from the source: limit fades at the RTH open ± m × ATR20d, target the open, flat 15:55, disaster stop 2m × ATR20d. The gate blocks new entries while HV20 is above thetaOff and re-enables below 0.8 × thetaOff.
-// Research assumption: m is 0.5 in the example. The catalogue core is 1.0 and the sweep is 0.75, 1.0 and 1.25, so 0.5 is outside that grid. thetaOff 0.30 is marked PLACEHOLDER in the example. The reference is the RTH open only. The prior-close reference is not coded. The protective stop is sent on the first closed bar in the trade, so the fill bar is unprotected.
+// Research assumption: m is 0.5 in the example. The catalogue core is 1.0 and the sweep is 0.75, 1.0 and 1.25, so 0.5 is outside that grid. thetaOff 0.30 is marked PLACEHOLDER in the example. Reference defaults to the RTH open. PriorClose is the other catalogue reference. The protective stop is sent on the first closed bar in the trade, so the fill bar is unprotected.
 //
 // ## 3. Hypothesis
 // Mechanism: a move of about one daily ATR away from the open is the book's mean-reversion distance, and the fade targets a return to the open. A2-70 is a high-volatility veto on new entries, with a gap before it turns back on.
@@ -102,6 +102,14 @@
 // Effect: a higher threshold blocks fewer days. Re-enable is 0.8 × the chosen threshold.
 // Interactions: an open trade is not flattened when the gate turns off
 // Fixed or research-tuned: research-tuned. The four members are the catalogue sweep. The default is the book 50 percent.
+// Input: Reference
+// Purpose: the price the A2-64 band is measured from, and the limit target
+// Default: Open — the RTH open. Owner 2026-11-15. This is the previous trade list.
+// Units: Not applicable
+// Range: Open, PriorClose. Any other value throws in StartCalc.
+// Effect: PriorClose rests the limits around the prior RTH close and targets that close
+// Interactions: Band. The HV gate does not read this input.
+// Fixed or research-tuned: fixed default. PriorClose is the other catalogue reference.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -143,7 +151,7 @@
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // Default change (owner 2026-11-12): Band is 1.0 (was 0.5) and ThetaOff is 0.50 (was 0.30). Both change which limits are sent.
-// The prior-close reference (R-C) is not coded. That remains an owner question.
+// Owner 2026-11-15: Reference defaults to Open. PriorClose is the extra catalogue reference.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -157,8 +165,12 @@ namespace PowerLanguage.Strategy
 		/// <summary>A2-70 annualised HV20 off-switch. Catalogue sweep {30, 40, 50, 70} percent. Default 50 percent (owner 2026-11-12; was the 30 percent placeholder).</summary>
 		public enum EThetaOff { Pct30, Pct40, Pct50, Pct70 }
 
+		/// <summary>A2-64 reference. Open is the previous trade list. PriorClose measures the band from the prior RTH close. Owner 2026-11-15.</summary>
+		public enum EReference { Open, PriorClose }
+
 		[Input] public EBandMultiple Band { get; set; }
 		[Input] public EThetaOff ThetaOff { get; set; }
+		[Input] public EReference Reference { get; set; }
 
 		protected sealed class A264Config
 		{
@@ -180,7 +192,7 @@ namespace PowerLanguage.Strategy
 		private bool m_traded;
 		private double m_r = double.NaN;
 
-		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { Band = EBandMultiple.M100; ThetaOff = EThetaOff.Pct50; }
+		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { Band = EBandMultiple.M100; ThetaOff = EThetaOff.Pct50; Reference = EReference.Open; }
 
 		private double bandMultiple() { return Band == EBandMultiple.M075 ? 0.75 : Band == EBandMultiple.M125 ? 1.25 : 1.0; }
 		private double thetaOff() { return ThetaOff == EThetaOff.Pct30 ? 0.30 : ThetaOff == EThetaOff.Pct40 ? 0.40 : ThetaOff == EThetaOff.Pct70 ? 0.70 : 0.50; }
@@ -204,6 +216,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (!Enum.IsDefined(typeof(EBandMultiple), Band)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Band is not a defined EBandMultiple");
 			if (!Enum.IsDefined(typeof(EThetaOff), ThetaOff)) throw new ArgumentException("_A2_70_OpenFadeHvGate: ThetaOff is not a defined EThetaOff");
+			if (!Enum.IsDefined(typeof(EReference), Reference)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Reference is not a defined EReference");
 			NeedsDaily = true;                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
 			DailyConfig.atrLength = Cfg.atrLength; DailyConfig.hvLengths = new[] { Cfg.hvLength };
 			base.StartCalc();
@@ -225,22 +238,30 @@ namespace PowerLanguage.Strategy
 				m_traded = true;
 				if (double.IsNaN(m_stop)) m_stop = StrategyInfo.AvgEntryPrice - Math.Sign(pos) * m_r;   // first bar in the trade
 				if (tod >= flat && tod < new TimeSpan(17, 0, 0)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
-				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(s.rthOpen); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(s.rthOpen); }
+				double target = referencePrice(s);
+				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(target); }
 				return;
 			}
 			if (rollOn(1)) m_traded = true;
-			if (m_traded || s == null || s.rthOpen <= 0 || !(m_atr > 0) || m_gateOff) return;
+			double reference = referencePrice(s);
+			if (m_traded || s == null || !(reference > 0) || !(m_atr > 0) || m_gateOff) return;
 			if (tod < Cfg.from || tod >= Cfg.to || tod >= flat) return;
 			string why;
 			if (!entryAllowed(out why)) return;
 			double tick = tickSize(), m = bandMultiple(), band = m * m_atr;
 			double r = Math.Max(2 * m * m_atr, Cfg.costFloorTicks * tick);   // disaster stop 2m x ATR, floored
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-64 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_traded = true; return; }
-			double buyAt = Math.Round((s.rthOpen - band) / tick) * tick, sellAt = Math.Round((s.rthOpen + band) / tick) * tick;
+			double buyAt = Math.Round((reference - band) / tick) * tick, sellAt = Math.Round((reference + band) / tick) * tick;
 			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). The protective stop
 			// is placed from the fill price on the first closed bar in the trade: a fill-bar spike is unprotected (pitfall).
 			m_leLmt.Send(buyAt, Cfg.contracts); m_seLmt.Send(sellAt, Cfg.contracts);
 			m_r = r; m_stop = double.NaN;
+		}
+
+		private double referencePrice(SessionStats s)
+		{
+			if (s == null) return 0;
+			return Reference == EReference.PriorClose ? s.priorRthClose : s.rthOpen;
 		}
 
 		/// <summary>New completed day in M-DAILY: ATR20d and HV20 from the (roll-adjusted) daily context, and the A2-70 hysteresis gate.</summary>

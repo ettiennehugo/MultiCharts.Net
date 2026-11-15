@@ -75,13 +75,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: the base VWAP slots. No separate engine is switched on.
-// Engine settings enabled: RollDetection = Series. Vwap1Type = Week and Vwap2Type = Month on Data1, set in code. StartCalc throws if the dialog changes them. Vwap3Type = Disabled.
+// Engine settings enabled: RollDetection = Table. Vwap1Type = Week and Vwap2Type = Month on Data1, set in code. Vwap3Type = Disabled. Table is the roll source for resetPeriodSlotsOnRoll.
 //
 // ## 16. Pitfalls
 // Lookahead: the host high excludes the current bar (High[1] through High[20]). VWAP is the closed-bar slot.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: the Week and Month slots do not reset at a roll. This file turns the layer off for the rest of that week and month. The other reading, re-anchor at the roll, is not coded.
+// Rolls: RollDetection is Table. Owner 2026-11-15. With Reanchor false, a Table roll turns the layer off for the rest of that week or month. With Reanchor true, the Week and Month slots reset at that roll.
 // Data quality: the week slot starts at the week's first bar. On a Globex chart that is Sunday 18:00, the same bar as the A2-07 anchor. Not yet verified on a chart.
 // Other: the host is illustrative. Do not read its trades as an AV-08 result. G0-d still applies to an AVWAP level when this layer is later put on a real host.
 //
@@ -106,7 +106,7 @@
 // Purpose: reset Week, Month and Quarter VWAP slots at a roll instead of turning the layer off for the rest of that period
 // Default: false — a roll makes that week or month unclean. This is the previous trade list.
 // Units: Not applicable
-// Range: false, true. True sets VwapConfig.resetPeriodSlotsOnRoll before StartCalc. Roll detection stays Series.
+// Range: false, true. True sets VwapConfig.resetPeriodSlotsOnRoll before StartCalc. Roll detection is Table.
 // Effect: after a roll the slot starts again and the layer can trade
 // Interactions: Layer
 // Fixed or research-tuned: fixed default
@@ -150,7 +150,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Layer, Side and Reanchor are inputs. Defaults are WtdMtd, LongOnly and false, which is the previous trade list. Reanchor uses Series roll detection, not Table.
+// Layer, Side and Reanchor are inputs. Defaults are WtdMtd, LongOnly and false. Owner 2026-11-15: roll detection is Table, which can change which periods stay clean.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -166,7 +166,7 @@ namespace PowerLanguage.Strategy
 
 		[Input] public ELayer Layer { get; set; }
 		[Input] public ESide Side { get; set; }
-		/// <summary>When true, Week/Month/Quarter slots reset at a roll (VwapConfig.resetPeriodSlotsOnRoll) and the layer stays on. When false, a roll turns the layer off for the rest of that period. Default false keeps the current trade list.</summary>
+		/// <summary>When true, Week/Month/Quarter slots reset at a Table roll (VwapConfig.resetPeriodSlotsOnRoll) and the layer stays on. When false, a Table roll turns the layer off for the rest of that period.</summary>
 		[Input] public bool Reanchor { get; set; }
 
 		protected sealed class Av08Config
@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV08LX", EOrderAction.Sell));

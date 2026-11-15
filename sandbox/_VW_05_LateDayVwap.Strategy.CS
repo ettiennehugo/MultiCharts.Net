@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "VW-05 · Late-day continuation". The code is engines-manual example 14.
 // Taken from the source: at 15:00, if the sign of price minus the prior RTH close equals the sign of price minus session VWAP, enter that way. Exit at 15:55. Stop 1 × ATR of the 30-minute stream.
-// Research assumption: this is the 15:00 arm. The catalogue sweep also names 14:30 and 15:30, and the merged A2-06 rule (15:29, slope, a minimum move) is not coded. ATR length is 14 on the 30-minute bars. A roll day does not trade, because the prior close is the old contract.
+// Research assumption: this is the 15:00 arm. The catalogue sweep also names 14:30 and 15:30, and the merged A2-06 rule is the A206At1529 input. ATR length defaults to 14. Owner 2026-11-15 made that length an input. A roll day does not trade, because the prior close is the old contract.
 //
 // ## 3. Hypothesis
 // Mechanism: the rest of the day and the VWAP side agree when late rebalancing and VWAP-benchmarked flow are pushing the same way into the close. Published intraday-momentum results were fragile out of sample. This file does not claim they survived.
@@ -94,6 +94,14 @@
 // Effect: At1430 and At1530 use the same sign rule and the same 15:55 exit. A206At1529 signals on the 15:29 bar (fill at the 15:30 open), needs rest-of-day sign, VWAP sign and a positive 60-minute VWAP slope to agree, skips when |rest-of-day| is under 0.5 × ATR20d, exits at 15:59, and stops at ATR(14) of 5-minute buckets built from Data1.
 // Interactions: A206At1529 turns M-DAILY on. σ_daily is ATR20d. That substitution is an assumption.
 // Fixed or research-tuned: fixed default. The other members are the catalogue clocks and the A2-06 rule.
+// Input: AtrLength
+// Purpose: true-range length for the 30-minute stop, and for the 5-minute buckets on the A2-06 arm
+// Default: 14 — the previous value. Owner 2026-11-15. This is the previous trade list.
+// Units: bars
+// Range: an integer of at least 1. StartCalc throws otherwise.
+// Effect: a longer length smooths the stop. The ROD-only and EMA-side controls are not inputs.
+// Interactions: Entry. A206At1529 uses the same length on 5-minute buckets built from Data1.
+// Fixed or research-tuned: fixed default
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -134,7 +142,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class, its constructor, and the ArgumentException text that names the class. A _TestNN slot renames those to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Entry defaults to At1500, the previous trade list. A206 uses ATR20d as σ_daily and a 5-minute ATR built from Data1, because Data2 is 30-minute. Both are assumptions.
+// Entry defaults to At1500 and AtrLength defaults to 14, the previous trade list. A206 uses ATR20d as σ_daily and a 5-minute ATR of AtrLength built from Data1, because Data2 is 30-minute. The ROD-only and EMA-side controls are not coded.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -147,13 +155,15 @@ namespace PowerLanguage.Strategy
 		public enum EEntry { At1500, At1430, At1530, A206At1529 }
 
 		[Input] public EEntry Entry { get; set; }
+		/// <summary>ATR length. Default 14 is the previous trade list. Owner 2026-11-15. Used by the 30-minute stop and by the A2-06 5-minute buckets.</summary>
+		[Input] public int AtrLength { get; set; }
 
 		protected sealed class Vw05Config
 		{
 			public int contracts = 1;
 			public TimeSpan entryAt = new TimeSpan(15, 0, 0), flat = new TimeSpan(15, 55, 0);
 			public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
-			public int atrLength = 14;
+			// AtrLength is the ATR length. It is an input, default 14.
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
 		}
@@ -165,7 +175,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_tradedDay = DateTime.MinValue;
 		private readonly List<double> m_vwap = new List<double>();
 
-		public _VW_05_LateDayVwap(object _ctx) : base(_ctx) { Entry = EEntry.At1500; }
+		public _VW_05_LateDayVwap(object _ctx) : base(_ctx) { Entry = EEntry.At1500; AtrLength = 14; }
 
 		private TimeSpan entryAt()
 		{
@@ -195,6 +205,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(EEntry), Entry)) throw new ArgumentException("_VW_05_LateDayVwap: Entry is not a defined EEntry");
+			if (AtrLength < 1) throw new ArgumentException("_VW_05_LateDayVwap: AtrLength must be at least 1");
 			HtfStreams = new[] { 2 };
 			if (Entry == EEntry.A206At1529) NeedsDaily = true;   // σ_daily is ATR20d; see the header assumption
 			base.StartCalc();
@@ -260,7 +271,7 @@ namespace PowerLanguage.Strategy
 
 		private double atr30()
 		{
-			int n = Cfg.atrLength;
+			int n = AtrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;
 			double sum = 0;
 			for (int k = 0; k < n; k++)
@@ -276,7 +287,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>ATR(14) of 5-minute buckets built from Data1. Used by the A2-06 arm because Data2 is 30-minute. ASSUMPTION: σ_daily for that arm is ATR20d, and these buckets stand in for a 5-minute stream.</summary>
 		private double atr14Of5Minute()
 		{
-			const int n = 14, w = 5;
+			int n = AtrLength; const int w = 5;
 			if (Bars.CurrentBar <= n * w) return double.NaN;
 			double sum = 0, prevClose = double.NaN;
 			for (int k = n - 1; k >= 0; k--)
