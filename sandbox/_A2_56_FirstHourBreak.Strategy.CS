@@ -86,16 +86,30 @@
 // Other: both stops rest at once. Whichever fills first is the trade. The other entry is not a second position because MaxTradesPerDay is 1.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Setup
+// Purpose: whether the daily LBR filter must agree before a stop is sent
+// Default: Off — both sides, no daily filter. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
+// Range: Off, LbrRsi. LbrRsi is Wilder RSI(3) of daily ROC1: long if below 30, short if above 70. Any other value throws in StartCalc.
+// Effect: LbrRsi sends only the side the prior completed day allows
+// Interactions: turns M-DAILY on with lbrRsiLength = 3
+// Fixed or research-tuned: fixed default. LbrRsi is the book setup.
+// Input: Reentry
+// Purpose: one more stop on the same side after a stop-out, before 15:00
+// Default: false — one trade a day. This is the previous trade list.
+// Units: Not applicable
+// Range: false, true
+// Effect: true sets MaxTradesPerDay to 2 and re-arms only the side that was stopped
+// Interactions: Setup still applies to the retry
+// Fixed or research-tuned: fixed default. True is the book retry.
+// Input: Hold
+// Purpose: whether a profitable 15:55 position is held overnight
+// Default: Flat1555 — flatten at 15:55. This is the previous trade list.
+// Units: Not applicable
+// Range: Flat1555, Overnight. Any other value throws in StartCalc.
+// Effect: Overnight keeps a position that is in profit at 15:55. The next RTH open beyond that 15:55 price, in the trade's favour, exits. Otherwise the stop moves to the entry price and the position is flat at 15:55 the next session.
 // Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Fixed or research-tuned: fixed default. Overnight is the book hold.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -137,7 +151,7 @@
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // hostGate stays virtual and returns true. A derived exclusion layer can override it. The class name is not in that method.
-// Uncoded catalogue arms (LBR/RSI setup, one re-entry, overnight hold) are an owner question, not this file.
+// Setup, Reentry and Hold are inputs. All three default to the previous arm (off, false, flat at 15:55). LBR thresholds stay 30 and 70. RSI length stays 3.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -146,6 +160,16 @@ namespace PowerLanguage.Strategy
 {
 	public class _A2_56_FirstHourBreak : _CustomSignal
 	{
+		/// <summary>Off is the current arm (both sides, no daily filter). LbrRsi requires yesterday's Wilder RSI(3) of ROC1 below 30 for a long or above 70 for a short.</summary>
+		public enum ESetup { Off, LbrRsi }
+		/// <summary>Flat1555 is the current arm. Overnight holds a profitable 15:55 position and exits next session.</summary>
+		public enum EHold { Flat1555, Overnight }
+
+		[Input] public ESetup Setup { get; set; }
+		/// <summary>One re-break of the same side after a stop, before 15:00. Default false keeps one trade a day.</summary>
+		[Input] public bool Reentry { get; set; }
+		[Input] public EHold Hold { get; set; }
+
 		protected sealed class A256Config
 		{
 			public int contracts = 1;
@@ -161,10 +185,12 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_lx, m_sx;
 		private _CmeSessionClock m_clock;
 		private DateTime m_day = DateTime.MinValue;
-		private double m_fhH = double.NaN, m_fhL = double.NaN, m_stop = double.NaN;
-		private bool m_skip;
+		private double m_fhH = double.NaN, m_fhL = double.NaN, m_stop = double.NaN, m_mark = double.NaN;
+		private bool m_skip, m_retried, m_carried, m_carryChecked;
+		private int m_lastSide;
+		private DateTime m_carryDay = DateTime.MinValue;
 
-		public _A2_56_FirstHourBreak(object _ctx) : base(_ctx) { }
+		public _A2_56_FirstHourBreak(object _ctx) : base(_ctx) { Setup = ESetup.Off; Reentry = false; Hold = EHold.Flat1555; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -189,9 +215,14 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(ESetup), Setup)) throw new ArgumentException("_A2_56_FirstHourBreak: Setup is not a defined ESetup");
+			if (!Enum.IsDefined(typeof(EHold), Hold)) throw new ArgumentException("_A2_56_FirstHourBreak: Hold is not a defined EHold");
+			if (Setup == ESetup.LbrRsi) { NeedsDaily = true; DailyConfig.lbrRsiLength = 3; }
+			MaxTradesPerDay = Reentry ? 2 : 1;
 			m_clock = null;
 			base.StartCalc();
-			m_day = DateTime.MinValue; m_fhH = m_fhL = m_stop = double.NaN; m_skip = false;
+			m_day = DateTime.MinValue; m_fhH = m_fhL = m_stop = m_mark = double.NaN; m_skip = false;
+			m_retried = m_carried = m_carryChecked = false; m_lastSide = 0;
 		}
 
 		protected override void CalcBar()
@@ -199,11 +230,31 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = tradingDayKey(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_fhH = m_fhL = double.NaN; m_skip = false; FlatBy = flatAt(day); }
+			if (day != m_day)
+			{
+				bool held = StrategyInfo.MarketPosition != 0;
+				m_day = day;
+				if (!held || Hold == EHold.Flat1555) { m_fhH = m_fhL = double.NaN; m_skip = false; m_lastSide = 0; m_retried = false; m_carried = false; m_carryChecked = false; }
+				FlatBy = flatAt(day);
+			}
 			if (rollOn(1)) m_skip = true;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			int pos = StrategyInfo.MarketPosition;
-			if (mustFlatten()) { if (pos > 0) m_lx.Send(); else if (pos < 0) m_sx.Send(); return; }
+			if (pos != 0) m_lastSide = Math.Sign(pos);
+			if (m_carried && !m_carryChecked && pos != 0 && isRthBar(Bars.Time[0]) && tod > Cfg.open)
+			{
+				m_carryChecked = true;
+				double o = Bars.Open[0];
+				bool favourable = pos > 0 ? o > m_mark : o < m_mark;
+				if (favourable) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+				m_stop = StrategyInfo.AvgEntryPrice;
+			}
+			if (mustFlatten())
+			{
+				bool inProfit = pos > 0 ? Bars.Close[0] > StrategyInfo.AvgEntryPrice : pos < 0 && Bars.Close[0] < StrategyInfo.AvgEntryPrice;
+				if (Hold == EHold.Overnight && pos != 0 && !m_carried && inProfit) { m_carried = true; m_mark = Bars.Close[0]; m_carryDay = day; }
+				else if (!(m_carried && day == m_carryDay)) { if (pos > 0) m_lx.Send(); else if (pos < 0) m_sx.Send(); return; }
+			}
 			if (tod > Cfg.open && tod <= Cfg.fhEnd && isRthBar(Bars.Time[0]))
 			{
 				m_fhH = double.IsNaN(m_fhH) ? Bars.High[0] : Math.Max(m_fhH, Bars.High[0]);
@@ -220,12 +271,23 @@ namespace PowerLanguage.Strategy
 			}
 			m_stop = double.NaN;
 			if (m_skip || double.IsNaN(m_fhH) || tod <= Cfg.fhEnd) return;
+			if (m_lastSide != 0 && (!Reentry || m_retried)) return;
 			string why;
 			if (!entryAllowed(out why) || !hostGate(day, out why)) return;
+			bool buyOk = m_lastSide >= 0, sellOk = m_lastSide <= 0;
+			if (Setup == ESetup.LbrRsi)
+			{
+				double lbr = DailyContext != null ? DailyContext.Lbr : double.NaN;
+				buyOk = buyOk && lbr < 30;
+				sellOk = sellOk && lbr > 70;
+				if (!buyOk && !sellOk) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-56 {day:yyyy-MM-dd} skip: LBR {lbr:F1}"); return; }
+			}
 			double buy = m_fhH + tick, sell = m_fhL - tick;
 			double r = Math.Max(buy - sell, Cfg.costFloorTicks * tick);   // either side risks the first-hour range (+2 ticks), floored
 			if (overRiskBudget(r)) { if (!m_skip && journalOn()) trace(ETraceLevel.Journal, $"A2-56 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_skip = true; return; }
-			m_leStp.Send(buy, Cfg.contracts); m_seStp.Send(sell, Cfg.contracts);
+			if (m_lastSide != 0) m_retried = true;
+			if (buyOk) m_leStp.Send(buy, Cfg.contracts);
+			if (sellOk) m_seStp.Send(sell, Cfg.contracts);
 			if (journalOn() && Bars.High[0] < buy && Bars.Low[0] > sell && tod == Cfg.fhEnd + TimeSpan.FromMinutes(1))
 			{
 				var ctx = new Dictionary<string, string> { { "fhHigh", m_fhH.ToString("F2") }, { "fhLow", m_fhL.ToString("F2") } };

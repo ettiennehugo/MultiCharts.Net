@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "A2-49 · Midday support/resistance and afternoon breakout". The code is engines-manual example 12.
 // Taken from the source: morning range 09:30–12:00 ET, afternoon break of that range, day-only flat at 15:55, disaster stop 1.5R.
-// Research assumption: this arm enters with a market order on a close beyond the morning high or low, and reverses while 12:00–15:30. The book's stop at the level ± 1 tick, the SR zone arm, and the overnight hold are not coded. R for the disaster stop is the morning range width.
+// Research assumption: this arm enters with a market order on a close beyond the morning high or low, and reverses while the midday clock is still open through 15:30. Midday is an input. The default is 12:00, which is the previous trade list. R for the disaster stop is the morning range width.
 //
 // ## 3. Hypothesis
 // Mechanism: the open is more likely than midday to hold the day's extreme, so a break of the morning range in the afternoon tends to close in that direction. Costs on an always-in afternoon are the risk the catalogue names.
@@ -86,16 +86,38 @@
 // Other: mustFlatten is false when the position is flat, so the cover order is sent only while short.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Arm
+// Purpose: which afternoon rule to run
+// Default: CloseBreak — market on a close beyond the morning range. This is the previous trade list. Not a fitted optimum.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: CloseBreak, SrZone, BreakoutStop, Both. Any other value throws in StartCalc.
+// Effect: SrZone trades closes in the outer zone. BreakoutStop rests a stop at the morning high or low ± 1 tick. Both runs both.
+// Interactions: Hold and Zone. CloseBreak ignores Zone.
+// Fixed or research-tuned: fixed default. The other members are the book arms, not a searched optimum.
+// Input: Hold
+// Purpose: whether the position is flat at 15:55 or held to the next session
+// Default: DayFlat — flat at 15:55, or five minutes before an early close. This is the previous trade list.
+// Units: Not applicable
+// Range: DayFlat, Overnight. Any other value throws in StartCalc.
+// Effect: Overnight does not use FlatBy. It exits on the first RTH bar of the next session.
+// Interactions: Arm
+// Fixed or research-tuned: fixed default. Overnight is the book hold.
+// Input: Zone
+// Purpose: SR zone width as a fraction of the morning range
+// Default: Pct25 — 25 percent, the book core. CloseBreak does not read it, so the default trade list is unchanged.
+// Units: fraction of the morning range
+// Range: Pct20 = 0.20, Pct25 = 0.25, Pct33 = 0.33. Any other value throws in StartCalc.
+// Effect: a wider zone flags more closes as support or resistance
+// Interactions: used only by SrZone and Both
+// Fixed or research-tuned: fixed at the book core. The other two are the catalogue sweep.
+// Input: Midday
+// Purpose: the clock that ends the morning range and opens the afternoon
+// Default: At1200 — 12:00. Owner 2026-11-15. This is the previous trade list.
+// Units: Eastern clock
+// Range: At1130, At1200, At1230. Any other value throws in StartCalc.
+// Effect: an earlier clock shortens the morning range and starts the afternoon sooner. NoEntryBefore uses the same clock.
+// Interactions: Arm and Hold. The range is still the RTH bars that close after 09:30 and at or before this clock.
+// Fixed or research-tuned: fixed default. The other two clocks are the catalogue sweep.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,7 +158,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Uncoded catalogue arms (SR zones, stop-at-level reversals, overnight hold, the 18-point parameter surface) are an owner question, not this file.
+// Book arms are inputs. Default Arm CloseBreak, Hold DayFlat and Midday At1200 reproduce the previous trade list. On a 30-minute chart the overnight exit is the first RTH bar, whose close is 10:00, not a 09:31 one-minute bar. Owner 2026-11-15: Midday sweeps 11:30, 12:00 and 12:30.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -145,10 +167,25 @@ namespace PowerLanguage.Strategy
 {
 	public class _A2_49_MiddayBreakout : _CustomSignal
 	{
+		/// <summary>CloseBreak is the current market-on-close-beyond-the-range arm. SrZone is book rules 1-2. BreakoutStop is book rules 3-4 (stop at the level ± 1 tick). Both is the book combination.</summary>
+		public enum EArm { CloseBreak, SrZone, BreakoutStop, Both }
+		/// <summary>DayFlat exits at 15:55. Overnight holds and exits on the first RTH bar of the next session.</summary>
+		public enum ESessionHold { DayFlat, Overnight }
+		/// <summary>Zone width for the SR arm, as a fraction of the morning range. The book core is 25 percent. CloseBreak ignores it.</summary>
+		public enum EZone { Pct20, Pct25, Pct33 }
+
+		/// <summary>End of the morning range. At1200 is the previous trade list. Owner 2026-11-15.</summary>
+		public enum EMidday { At1130, At1200, At1230 }
+
+		[Input] public EArm Arm { get; set; }
+		[Input] public ESessionHold Hold { get; set; }
+		[Input] public EZone Zone { get; set; }
+		[Input] public EMidday Midday { get; set; }
+
 		protected sealed class A249Config
 		{
 			public int contracts = 1;
-			public TimeSpan rthOpen = new TimeSpan(9, 30, 0), midday = new TimeSpan(12, 0, 0);
+			public TimeSpan rthOpen = new TimeSpan(9, 30, 0);
 			public TimeSpan lastEntry = new TimeSpan(15, 30, 0), flat = new TimeSpan(15, 55, 0);
 			public TimeSpan halfDayExitBefore = new TimeSpan(0, 5, 0);
 			public double disasterR = 1.5;
@@ -159,13 +196,16 @@ namespace PowerLanguage.Strategy
 		protected A249Config Cfg { get; } = new A249Config();
 
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
-		private IOrderPriced m_lxStp, m_sxStp;
+		private IOrderPriced m_leLvl, m_seLvl, m_lxStp, m_sxStp;
 		private _CmeSessionClock m_clock;
 		private DateTime m_day = DateTime.MinValue;
 		private double m_hi = double.NaN, m_lo = double.NaN, m_stop = double.NaN;
-		private bool m_skipDay;
+		private bool m_skipDay, m_exitNextRth;
 
-		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { }
+		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
+
+		private double zoneFrac() { return Zone == EZone.Pct20 ? 0.20 : Zone == EZone.Pct33 ? 0.33 : 0.25; }
+		private TimeSpan middayAt() { return Midday == EMidday.At1130 ? new TimeSpan(11, 30, 0) : Midday == EMidday.At1230 ? new TimeSpan(12, 30, 0) : new TimeSpan(12, 0, 0); }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -177,20 +217,27 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			// CS-7 primitives: protected properties, set in code (never [Input])
-			NoEntryBefore = Cfg.midday; NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = Cfg.maxEntries;
+			NoEntryBefore = middayAt(); NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = Cfg.maxEntries;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A249LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A249SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A249LX", EOrderAction.Sell));
 			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A249SX", EOrderAction.BuyToCover));
+			m_leLvl = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "A249LB", EOrderAction.Buy));
+			m_seLvl = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "A249SB", EOrderAction.SellShort));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A249LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A249SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EArm), Arm)) throw new ArgumentException("_A2_49_MiddayBreakout: Arm is not a defined EArm");
+			if (!Enum.IsDefined(typeof(ESessionHold), Hold)) throw new ArgumentException("_A2_49_MiddayBreakout: Hold is not a defined ESessionHold");
+			if (!Enum.IsDefined(typeof(EZone), Zone)) throw new ArgumentException("_A2_49_MiddayBreakout: Zone is not a defined EZone");
+			if (!Enum.IsDefined(typeof(EMidday), Midday)) throw new ArgumentException("_A2_49_MiddayBreakout: Midday is not a defined EMidday");
+			NoEntryBefore = middayAt();
 			m_clock = null;
 			base.StartCalc();
-			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false;
+			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
 		}
 
 		protected override void CalcBar()
@@ -198,26 +245,45 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = tradingDayKey(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_hi = m_lo = double.NaN; m_skipDay = false; FlatBy = flatAt(day); }
+			if (day != m_day)
+			{
+				bool held = StrategyInfo.MarketPosition != 0;
+				m_day = day; m_hi = m_lo = double.NaN; m_skipDay = false;
+				FlatBy = Hold == ESessionHold.Overnight ? (TimeSpan?)null : flatAt(day);
+				m_exitNextRth = Hold == ESessionHold.Overnight && held;
+			}
 			if (rollOn(1)) m_skipDay = true;                        // the morning range would straddle the splice
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			int pos = StrategyInfo.MarketPosition;
+			if (m_exitNextRth && isRthBar(Bars.Time[0]) && tod > Cfg.rthOpen)
+			{
+				if (pos > 0) m_lx.Send(); else if (pos < 0) m_sx.Send();
+				m_exitNextRth = false;
+				return;
+			}
 			if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 
-			// morning range: RTH bars that close in (09:30, 12:00]
-			if (tod > Cfg.rthOpen && tod <= Cfg.midday && isRthBar(Bars.Time[0]))
+			// morning range: RTH bars that close after 09:30 and at or before the midday input
+			if (tod > Cfg.rthOpen && tod <= middayAt() && isRthBar(Bars.Time[0]))
 			{
 				m_hi = double.IsNaN(m_hi) ? Bars.High[0] : Math.Max(m_hi, Bars.High[0]);
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
-			if (m_skipDay || double.IsNaN(m_hi) || tod <= Cfg.midday) return;
+			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
+			double tick = tickSize();
+			if (Arm == EArm.CloseBreak) closeBreak(pos, tick);
+			else bookArm(pos, tick);
+		}
+
+		private void closeBreak(int pos, double tick)
+		{
 			int side = Bars.Close[0] > m_hi ? +1 : Bars.Close[0] < m_lo ? -1 : 0;
 			if (side == 0 || side == Math.Sign(pos)) return;        // SAR: only a break against the current position acts
 			string why;
 			if (!entryAllowed(out why)) { if (journalOn()) logSignal("A2-49", side, Bars.Close[0], double.NaN, new Dictionary<string, string> { { "blocked", why } }, false); return; }
-			double tick = tickSize(), entry = Bars.Close[0];
+			double entry = Bars.Close[0];
 			double r = Math.Max(Cfg.disasterR * (m_hi - m_lo), Cfg.costFloorTicks * tick);   // floor rule
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = entry - side * r;
@@ -226,6 +292,45 @@ namespace PowerLanguage.Strategy
 			{
 				var ctx = new Dictionary<string, string> { { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "tradesToday", TradesToday.ToString() } };
 				journalArm(side > 0 ? "A249LE" : "A249SE", entry, m_stop, double.NaN, ctx);
+				logSignal("A2-49", side, entry, m_stop, ctx, true);
+			}
+		}
+
+		/// <summary>Book SR zone (close in the outer fraction of the morning range) and breakout stops at ML-1 / MH+1 tick. A bar that trades through the level is a breakout, not an SR close.</summary>
+		private void bookArm(int pos, double tick)
+		{
+			double width = m_hi - m_lo;
+			if (!(width > 0)) return;
+			double frac = zoneFrac();
+			double lower = m_lo + frac * width, upper = m_hi - frac * width;
+			bool brokeLow = Bars.Low[0] < m_lo, brokeHigh = Bars.High[0] > m_hi;
+			bool sr = Arm == EArm.SrZone || Arm == EArm.Both;
+			bool bo = Arm == EArm.BreakoutStop || Arm == EArm.Both;
+			int side = 0;
+			bool stopEntry = false;
+			double entry = Bars.Close[0];
+			if (bo && (brokeLow || brokeHigh))
+			{
+				if (brokeHigh && pos <= 0) { side = +1; stopEntry = true; entry = m_hi + tick; }
+				else if (brokeLow && pos >= 0) { side = -1; stopEntry = true; entry = m_lo - tick; }
+			}
+			else if (sr)
+			{
+				if (pos <= 0 && !brokeLow && Bars.Close[0] <= lower) { side = +1; entry = Bars.Close[0]; }
+				else if (pos >= 0 && Bars.Close[0] >= upper) { side = -1; entry = Bars.Close[0]; }
+			}
+			if (side == 0 || side == Math.Sign(pos)) return;
+			string why;
+			if (!entryAllowed(out why)) { if (journalOn()) logSignal("A2-49", side, entry, double.NaN, new Dictionary<string, string> { { "blocked", why }, { "arm", Arm.ToString() } }, false); return; }
+			double r = Math.Max(Cfg.disasterR * width, Cfg.costFloorTicks * tick);
+			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
+			m_stop = entry - side * r;
+			if (stopEntry) { if (side > 0) m_leLvl.Send(entry, Cfg.contracts); else m_seLvl.Send(entry, Cfg.contracts); }
+			else if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (journalOn())
+			{
+				var ctx = new Dictionary<string, string> { { "arm", Arm.ToString() }, { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "zone", frac.ToString("F2") } };
+				journalArm(side > 0 ? (stopEntry ? "A249LB" : "A249LE") : (stopEntry ? "A249SB" : "A249SE"), entry, m_stop, double.NaN, ctx);
 				logSignal("A2-49", side, entry, m_stop, ctx, true);
 			}
 		}

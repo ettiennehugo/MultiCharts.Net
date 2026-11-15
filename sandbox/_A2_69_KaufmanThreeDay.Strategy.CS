@@ -86,16 +86,46 @@
 // Other: bars stamped 18:00–23:59 ET belong to the next Globex day, so the close test also requires the clock to be before 17:00.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Side
+// Purpose: which side of the three-close pattern may trade
+// Default: LongOnly — two lower closes, buy. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
+// Range: LongOnly, Both, FridayShort. Any other value throws in StartCalc.
+// Effect: Both adds the mirror short (two higher closes). FridayShort takes only that short, and only when the Globex date is Friday.
+// Interactions: Trend applies to both sides
+// Fixed or research-tuned: fixed default. The other members are the book arms.
+// Input: Trend
+// Purpose: prior RTH close versus an SMA of RTH closes
+// Default: Off — no SMA filter. This is the previous trade list.
+// Units: Not applicable
+// Range: Off, Sma50, Sma120. A side is allowed only when the newest close is beyond that SMA. Fewer than N closes blocks the trade. Any other value throws in StartCalc.
+// Effect: a filter, not a change to the three-close count
+// Interactions: Side
+// Fixed or research-tuned: fixed default. 50 and 120 are the catalogue arms.
+// Input: Hold
+// Purpose: how many later sessions the trade is held
+// Default: NextClose — exit at 15:59 on the next session. This is the previous trade list.
+// Units: sessions
+// Range: NextClose, ExtraDay. Any other value throws in StartCalc.
+// Effect: ExtraDay waits for the second later session's 15:59 bar
 // Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Fixed or research-tuned: fixed default. ExtraDay is the book arm.
+// Input: ProfitTake
+// Purpose: intraday limit at the fill ± 2 × ATR20d
+// Default: false — no target. This is the previous trade list.
+// Units: Not applicable
+// Range: false, true. True turns M-DAILY on and latches ATR20d at the entry.
+// Effect: a limit is sent while the position is open
+// Interactions: Spike shares the daily engine
+// Fixed or research-tuned: fixed default. True is the book profit-take.
+// Input: Spike
+// Purpose: also enter a day whose close is at least 2.5 × ATR20d through the prior close and in the outer 25 percent of that day's range
+// Default: false. This is the previous trade list.
+// Units: Not applicable
+// Range: false, true
+// Effect: an extra entry at the 15:59 bar when the three-close setup did not fire
+// Interactions: Side decides which spike is allowed. Trend still applies.
+// Fixed or research-tuned: fixed default. True is the book spike rule.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,7 +166,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Uncoded catalogue arms (SMA filter, profit-take, spike, Friday-short, extra hold day) are an owner question, not this file.
+// Side, Trend, Hold, ProfitTake and Spike are inputs. Every default is the previous long core. The SMA is an average of stored RTH closes, not DailyConfig.Sma200.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -146,7 +176,19 @@ namespace PowerLanguage.Strategy
 {
 	public class _A2_69_KaufmanThreeDay : _CustomSignal
 	{
-		// ---- protected config (no [Input]s besides TraceLevel) ----
+		/// <summary>LongOnly is the current core. Both mirrors the pattern for shorts. FridayShort takes only the short pattern, and only on Friday.</summary>
+		public enum ESide { LongOnly, Both, FridayShort }
+		/// <summary>Off is the current core. Otherwise the prior RTH close must be on the trade's side of that SMA.</summary>
+		public enum ETrend { Off, Sma50, Sma120 }
+		/// <summary>NextClose exits the following session. ExtraDay waits one more session.</summary>
+		public enum EHold { NextClose, ExtraDay }
+
+		[Input] public ESide Side { get; set; }
+		[Input] public ETrend Trend { get; set; }
+		[Input] public EHold Hold { get; set; }
+		[Input] public bool ProfitTake { get; set; }
+		[Input] public bool Spike { get; set; }
+
 		protected sealed class A269Config
 		{
 			public int contracts = 1;
@@ -155,14 +197,19 @@ namespace PowerLanguage.Strategy
 		}
 		protected A269Config Cfg { get; } = new A269Config();
 
-		private IOrderMarket m_le, m_lx;
+		private IOrderMarket m_le, m_se, m_lx, m_sx;
+		private IOrderPriced m_lt, m_st;
 		private _CmeSessionClock m_clock;
-		private readonly List<double> m_closes = new List<double>();   // 16:00 ET RTH closes C(t-1), C(t-2), C(t-3) ... newest first
+		private readonly List<double> m_closes = new List<double>();   // 16:00 ET RTH closes, newest first. The core uses the first three.
 		private DateTime m_day = DateTime.MinValue, m_entryDay = DateTime.MinValue;
-		private double m_rthClose = double.NaN;   // last RTH value-window close of the current trading day
-		private bool m_setup, m_openChecked, m_waitClose;
+		private double m_rthClose = double.NaN, m_rthHigh = double.NaN, m_rthLow = double.NaN, m_atrAtEntry = double.NaN;
+		private bool m_longSetup, m_shortSetup, m_openChecked, m_waitLong, m_waitShort;
+		private int m_sessionsAfter;
 
-		public _A2_69_KaufmanThreeDay(object _ctx) : base(_ctx) { }
+		public _A2_69_KaufmanThreeDay(object _ctx) : base(_ctx)
+		{
+			Side = ESide.LongOnly; Trend = ETrend.Off; Hold = EHold.NextClose; ProfitTake = false; Spike = false;
+		}
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		// CME session adapter (section 1.6): Globex trading day + ET clock + RTH value window (09:30-16:00 ET, early close aware).
@@ -174,16 +221,24 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "K3LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "K3SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "K3LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "K3SX", EOrderAction.BuyToCover));
+			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "K3LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "K3ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(ESide), Side)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Side is not a defined ESide");
+			if (!Enum.IsDefined(typeof(ETrend), Trend)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Trend is not a defined ETrend");
+			if (!Enum.IsDefined(typeof(EHold), Hold)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Hold is not a defined EHold");
+			if (ProfitTake || Spike) NeedsDaily = true;
 			m_clock = null;
 			RollDetection = ERollDetection.Series;   // unadjusted series: detect splices
 			base.StartCalc();
-			m_closes.Clear(); m_rthClose = double.NaN; m_day = m_entryDay = DateTime.MinValue;
-			m_setup = m_openChecked = m_waitClose = false;
+			m_closes.Clear(); m_rthClose = m_rthHigh = m_rthLow = m_atrAtEntry = double.NaN; m_day = m_entryDay = DateTime.MinValue;
+			m_longSetup = m_shortSetup = m_openChecked = m_waitLong = m_waitShort = false; m_sessionsAfter = 0;
 		}
 
 		protected override void CalcBar()
@@ -197,55 +252,98 @@ namespace PowerLanguage.Strategy
 
 			if (rollOn(1))
 			{
-				m_closes.Clear(); m_rthClose = double.NaN;   // the series jumps by the roll gap: restart the 3-close count (journaled below)
+				m_closes.Clear(); m_rthClose = m_rthHigh = m_rthLow = double.NaN;
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-69 roll at {Bars.Time[0]:yyyy-MM-dd HH:mm}: close history cleared");
 			}
 
-			// 1. new trading day: push the completed session's RTH close as C(t-1), then evaluate the setup once
+			int pos = StrategyInfo.MarketPosition;
 			if (day != m_day)
 			{
-				m_day = day; m_openChecked = false; m_waitClose = false;
-				if (!double.IsNaN(m_rthClose)) { m_closes.Insert(0, m_rthClose); if (m_closes.Count > 3) m_closes.RemoveAt(3); }
-				m_rthClose = double.NaN;
-				m_setup = !cme.NoRth && m_closes.Count == 3 && m_closes[0] < m_closes[1] && m_closes[1] < m_closes[2];
+				bool wasIn = pos != 0;
+				m_day = day; m_openChecked = false; m_waitLong = m_waitShort = false;
+				if (!double.IsNaN(m_rthClose)) { m_closes.Insert(0, m_rthClose); if (m_closes.Count > 120) m_closes.RemoveAt(120); }
+				m_rthClose = m_rthHigh = m_rthLow = double.NaN;
+				bool down = m_closes.Count > 2 && m_closes[0] < m_closes[1] && m_closes[1] < m_closes[2];
+				bool up = m_closes.Count > 2 && m_closes[0] > m_closes[1] && m_closes[1] > m_closes[2];
+				m_longSetup = !cme.NoRth && down && trendOk(+1) && Side != ESide.FridayShort;
+				m_shortSetup = !cme.NoRth && up && trendOk(-1) && Side != ESide.LongOnly && (Side != ESide.FridayShort || day.DayOfWeek == DayOfWeek.Friday);
+				if (wasIn && m_entryDay != DateTime.MinValue && day > m_entryDay) m_sessionsAfter++;
 				if (journalOn())
-					trace(ETraceLevel.Journal, $"A2-69 {day:yyyy-MM-dd} closes({string.Join(",", m_closes)}) setup({m_setup}) noRth({cme.NoRth}) halfDay({cme.RthCloseEt.HasValue})");
+					trace(ETraceLevel.Journal, $"A2-69 {day:yyyy-MM-dd} closes({string.Join(",", m_closes)}) long({m_longSetup}) short({m_shortSetup}) noRth({cme.NoRth}) halfDay({cme.RthCloseEt.HasValue})");
 			}
 
 			bool rth = isRthBar(Bars.Time[0]);
-			if (rth) m_rthClose = Bars.Close[0];   // ends as the 16:00 (or early-close) bar close
+			if (rth)
+			{
+				m_rthClose = Bars.Close[0];
+				m_rthHigh = double.IsNaN(m_rthHigh) ? Bars.High[0] : Math.Max(m_rthHigh, Bars.High[0]);
+				m_rthLow = double.IsNaN(m_rthLow) ? Bars.Low[0] : Math.Min(m_rthLow, Bars.Low[0]);
+			}
 
-			// ET 18:00-23:59 bars belong to the NEXT trading day, so "after 15:59" must also be "before 17:00"
 			bool atClose = et.TimeOfDay >= closeBar && et.TimeOfDay < new TimeSpan(17, 0, 0);
+			pos = StrategyInfo.MarketPosition;
+			if (ProfitTake && pos != 0 && m_atrAtEntry > 0)
+			{
+				double tgt = StrategyInfo.AvgEntryPrice + Math.Sign(pos) * 2.0 * m_atrAtEntry;
+				if (pos > 0) m_lt.Send(tgt); else m_st.Send(tgt);
+			}
+			int need = Hold == EHold.ExtraDay ? 2 : 1;
+			if (pos != 0 && m_sessionsAfter >= need && atClose) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+			if (pos != 0) return;
 
-			int pos = StrategyInfo.MarketPosition;
-
-			// 2. exit: on the session after the entry day, at the 15:59 bar
-			if (pos > 0 && day > m_entryDay && atClose) { m_lx.Send(); return; }
-			if (pos != 0 || !m_setup) return;
-
-			// 3. first RTH bar (close-stamped 09:31): O(t) is that bar's open; lower open -> buy the next bar's open
-			if (!m_openChecked && rth)
+			if (!m_openChecked && rth && (m_longSetup || m_shortSetup))
 			{
 				m_openChecked = true;
 				double o = Bars.Open[0];
-				if (o < m_closes[0]) { arm(o, "open"); return; }
-				m_waitClose = true;
+				if (m_longSetup && o < m_closes[0]) { arm(+1, o, "open"); return; }
+				if (m_shortSetup && o > m_closes[0]) { arm(-1, o, "open"); return; }
+				m_waitLong = m_longSetup && !(o < m_closes[0]);
+				m_waitShort = m_shortSetup && !(o > m_closes[0]);
 			}
-			// 4. otherwise buy at the 15:59 bar (MOC proxy)
-			if (m_waitClose && atClose) { m_waitClose = false; arm(Bars.Close[0], "close"); }
+			if (atClose && m_waitLong) { m_waitLong = false; arm(+1, Bars.Close[0], "close"); return; }
+			if (atClose && m_waitShort) { m_waitShort = false; arm(-1, Bars.Close[0], "close"); return; }
+			if (Spike && atClose && !m_longSetup && !m_shortSetup && m_closes.Count > 0 && m_atrAtEntryReady()) trySpike();
 		}
 
-		private void arm(double planned, string how)
+		private bool m_atrAtEntryReady()
 		{
-			m_setup = false; m_entryDay = m_day;
+			_DailyContext d = DailyContext;
+			return d != null && d.Valid && d.Atr20d > 0;
+		}
+
+		private void trySpike()
+		{
+			double atr = DailyContext.Atr20d, rng = m_rthHigh - m_rthLow;
+			if (!(atr > 0) || !(rng > 0)) return;
+			bool longSpike = m_rthClose <= m_closes[0] - 2.5 * atr && (m_rthClose - m_rthLow) / rng <= 0.25;
+			bool shortSpike = m_rthClose >= m_closes[0] + 2.5 * atr && (m_rthHigh - m_rthClose) / rng <= 0.25;
+			bool friday = m_day.DayOfWeek == DayOfWeek.Friday;
+			if (longSpike && Side != ESide.FridayShort && trendOk(+1)) arm(+1, m_rthClose, "spike");
+			else if (shortSpike && Side != ESide.LongOnly && (Side != ESide.FridayShort || friday) && trendOk(-1)) arm(-1, m_rthClose, "spike");
+		}
+
+		private bool trendOk(int side)
+		{
+			if (Trend == ETrend.Off) return true;
+			int n = Trend == ETrend.Sma50 ? 50 : 120;
+			if (m_closes.Count < n) return false;
+			double s = 0;
+			for (int i = 0; i < n; i++) s += m_closes[i];
+			double sma = s / n;
+			return side > 0 ? m_closes[0] > sma : m_closes[0] < sma;
+		}
+
+		private void arm(int side, double planned, string how)
+		{
+			m_longSetup = false; m_shortSetup = false; m_entryDay = m_day; m_sessionsAfter = 0;
+			m_atrAtEntry = (ProfitTake || Spike) && DailyContext != null ? DailyContext.Atr20d : double.NaN;
 			if (journalOn())
 			{
-				var ctx = new Dictionary<string, string> { { "c1", m_closes[0].ToString() }, { "how", how } };
-				journalArm("K3LE", planned, double.NaN, double.NaN, ctx);
-				logSignal("A2-69", +1, planned, double.NaN, ctx, true);
+				var ctx = new Dictionary<string, string> { { "c1", m_closes[0].ToString() }, { "how", how }, { "side", Side.ToString() } };
+				journalArm(side > 0 ? "K3LE" : "K3SE", planned, double.NaN, double.NaN, ctx);
+				logSignal("A2-69", side, planned, double.NaN, ctx, true);
 			}
-			m_le.Send(Cfg.contracts);
+			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
 		}
 	}
 }

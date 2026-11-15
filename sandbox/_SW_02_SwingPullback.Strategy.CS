@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, heading "SW-02 · RSI(2) dip-buy". The code is engines-manual example 16.
 // Taken from the source: close above the 200-day average and RSI(2) under 10 buys; exit when the close is above the 5-day average or after 5 bars. The filter variant also requires the close above the latest swing-low AVWAP. Disaster stop 3 × ATR(20).
-// Research assumption: the RSI is Cutler's simple-average RSI, labelled in the method, not Wilder's. The filter is on. The composite-VAH filter and the unfiltered base are not coded. The buy is at the signal close for the next bar's open.
+// Research assumption: the RSI is Cutler's simple-average RSI, labelled in the method, not Wilder's. The default filter is the swing-low AVWAP. Composite uses _VolumeProfileBase.Composite. The buy is at the signal close for the next bar's open.
 //
 // ## 3. Hypothesis
 // Mechanism: a short-term oversold dip in an index that is still above its long average tends to revert. The AVWAP filter tries to keep the dip on the side of the last swing-low cohort. The catalogue grades the filter as a hypothesis.
@@ -73,7 +73,7 @@
 // Unsuitable: close at or below the 200-bar average, and a close that is not above the swing-low AVWAP.
 //
 // ## 15. Dependencies
-// Base class: _CustomSignal
+// Base class: _VolumeProfileBase
 // Engines enabled: M-AVWAP with AvwapEvents = SwingLow. That anchor turns price action on for Data1.
 // Engine settings enabled: RollDetection = Series. AvwapLimits.maxAgeSessions = 60.
 //
@@ -86,16 +86,14 @@
 // Other: RSI here is Cutler's simple average, not Wilder's smoothing.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: Filter
+// Purpose: the location filter on the RSI(2) dip
+// Default: Avwap — close must be above the latest valid swing-low AVWAP. This is the previous trade list.
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: Avwap, None, Composite. Any other value throws in StartCalc.
+// Effect: None is the unfiltered base (close above the 200-bar average and RSI(2) under 10). Composite also requires the close at or below the prior 20-session composite VAH.
+// Interactions: Composite calls _VolumeProfileBase.Composite on Data1. Owner 2026-11-15. That arm turns the own profile engine on. The default Avwap arm does not.
+// Fixed or research-tuned: fixed default. None and Composite are the catalogue arms.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -137,21 +135,26 @@
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
 // avwapFilter stays true inside the protected config. It is a bool, not a multi-value input.
-// Uncoded catalogue arms (filter off, composite VAH, RSI threshold 5, Wilder RSI) are an owner question, not this file.
+// Filter defaults to Avwap, the previous trade list. None and Composite are selectable. Owner 2026-11-15: the composite VAH is _VolumeProfileBase.Composite, not a uniform spread of daily bars. RSI stays Cutler, threshold 10. Wilder RSI and the threshold 5 are not inputs.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
 
 namespace PowerLanguage.Strategy
 {
-	public class _SW_02_SwingPullback : _CustomSignal
+	public class _SW_02_SwingPullback : _VolumeProfileBase
 	{
+		/// <summary>Location filter. Avwap is the current arm. None is the RSI base. Composite requires the close at or below the prior 20-day composite VAH.</summary>
+		public enum EFilter { Avwap, None, Composite }
+
+		[Input] public EFilter Filter { get; set; }
+
 		protected sealed class Sw02Config
 		{
 			public int contracts = 1;
 			public int smaLong = 200, smaExit = 5, rsiLength = 2, maxHoldBars = 5, atrLength = 20;
 			public double rsiEntry = 10, disasterAtr = 3.0;
-			public bool avwapFilter = true;
+			public int compositeDays = 20;
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
 		}
@@ -162,7 +165,7 @@ namespace PowerLanguage.Strategy
 		private double m_stop = double.NaN;
 		private int m_entryBar = -1;
 
-		public _SW_02_SwingPullback(object _ctx) : base(_ctx) { }
+		public _SW_02_SwingPullback(object _ctx) : base(_ctx) { Filter = EFilter.Avwap; }
 
 		protected override void Create()
 		{
@@ -177,6 +180,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
+			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
 			base.StartCalc();
 			m_stop = double.NaN; m_entryBar = -1;
 		}
@@ -198,12 +203,19 @@ namespace PowerLanguage.Strategy
 			if (rollOn(1)) return;
 			if (!(c > sma(Cfg.smaLong)) || !(rsi(Cfg.rsiLength) < Cfg.rsiEntry)) return;
 			double av = double.NaN;
-			if (Cfg.avwapFilter)
+			if (Filter == EFilter.Avwap)
 			{
 				_AvwapManager mgr = AvwapManager;
 				_Avwap a = mgr != null ? mgr.Latest(EAvwapAnchor.SwingLow) : null;
 				av = a != null && a.Valid ? a.Value : double.NaN;
 				if (double.IsNaN(av) || c <= av) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "avwap", double.IsNaN(av) ? "na" : av.ToString("F2") } }, false); return; }
+			}
+			else if (Filter == EFilter.Composite)
+			{
+				VpExtra comp = Composite(1, Cfg.compositeDays);
+				double vah = comp != null && comp.vah > 0 ? comp.vah : double.NaN;
+				if (double.IsNaN(vah) || c > vah) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "vah", double.IsNaN(vah) ? "na" : vah.ToString("F2") } }, false); return; }
+				av = vah;
 			}
 			double tick = tickSize(), atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (!(atr > 0)) return;
@@ -213,7 +225,7 @@ namespace PowerLanguage.Strategy
 			m_le.Send(Cfg.contracts);
 			if (journalOn())
 			{
-				var ctx = new Dictionary<string, string> { { "rsi2", rsi(Cfg.rsiLength).ToString("F1") }, { "atr20", atr.ToString("F2") }, { "avwap", double.IsNaN(av) ? "off" : av.ToString("F2") } };
+				var ctx = new Dictionary<string, string> { { "filter", Filter.ToString() }, { "rsi2", rsi(Cfg.rsiLength).ToString("F1") }, { "atr20", atr.ToString("F2") }, { "level", Filter == EFilter.None ? "off" : double.IsNaN(av) ? "na" : av.ToString("F2") } };
 				journalArm("SW02LE", c, m_stop, double.NaN, ctx);
 				logSignal("SW-02", +1, c, m_stop, ctx, true);
 			}

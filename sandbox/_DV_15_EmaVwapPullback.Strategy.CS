@@ -86,16 +86,30 @@
 // Other: the fill bar is unprotected.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input]. TraceLevel stays the base [Input] on _CustomSignal.
-// Fixed example settings stay in the protected config class. They are not a sweep.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
+// Input: VwapSlot
+// Purpose: which VWAP the slope and the side test use
+// Default: Session — the previous trade list
 // Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Range: Session, Week. StartCalc sets Vwap1Type from this. Any other value throws.
+// Effect: Week keeps the slope samples across the Globex day and clears them on a new Monday
+// Interactions: SlopeMin
+// Fixed or research-tuned: fixed default. Week is the other catalogue cell.
+// Input: SlopeMin
+// Purpose: minimum |8-bar VWAP change| as a fraction of ATR(14) on the 30-minute bars
+// Default: S005 — 0.05. This is the previous trade list.
+// Units: ATR(14) of Data1
+// Range: S005 = 0.05, S015 = 0.15. Any other value throws in StartCalc.
+// Effect: a higher floor skips flatter VWAP
+// Interactions: VwapSlot
+// Fixed or research-tuned: research-tuned. The two members are the catalogue grid. The default is the previous cell.
+// Input: Bracket
+// Purpose: 1:1 stop and target as a fraction of ATR20d, then the 14-tick floor
+// Default: F015 — 0.15. This is the previous distance.
+// Units: ATR20d
+// Range: F010 = 0.10, F015 = 0.15. Any other value throws in StartCalc.
+// Effect: a smaller fraction tightens the bracket
+// Interactions: the stop is sent with the limit, so the fill bar is protected. That send is not optional.
+// Fixed or research-tuned: research-tuned. The two members are the catalogue grid. The default is the previous cell.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -136,7 +150,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Uncoded catalogue cells (weekly VWAP, s = 0.15, f = 0.10) are an owner question, not this file.
+// VwapSlot, SlopeMin and Bracket are inputs. Defaults are Session, 0.05 and 0.15. The protective stop is now sent with the limit, so the fill bar is protected. That changes fills that would have run through the stop on the entry bar.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -145,10 +159,20 @@ namespace PowerLanguage.Strategy
 {
 	public class _DV_15_EmaVwapPullback : _VolumeProfileFuturesBase
 	{
+		/// <summary>Which VWAP slot feeds the slope. Session is the current arm. Week is the catalogue's other cell.</summary>
+		public enum EVwapSlot { Session, Week }
+		/// <summary>Minimum |VWAP slope| as a fraction of ATR(14) on the 30-minute bars. Catalogue grid {0.05, 0.15}.</summary>
+		public enum ESlopeMin { S005, S015 }
+		/// <summary>1:1 bracket as a fraction of ATR20d. Catalogue grid {0.10, 0.15}.</summary>
+		public enum EBracketFrac { F010, F015 }
+
+		[Input] public EVwapSlot VwapSlot { get; set; }
+		[Input] public ESlopeMin SlopeMin { get; set; }
+		[Input] public EBracketFrac Bracket { get; set; }
+
 		protected sealed class Dv15Config
 		{
 			public int contracts = 1, emaLength = 20, sideBars = 3, slopeBars = 8, atrLength = 14;
-			public double slopeAtr = 0.05, bracketAtr20d = 0.15;
 			public TimeSpan firstEntry = new TimeSpan(10, 0, 0), lastEntry = new TimeSpan(15, 0, 0), flat = new TimeSpan(15, 55, 0);
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
@@ -162,13 +186,21 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_vwap = new List<double>();   // closed-bar VWAP values, newest last (session-reset aware)
 		private DateTime m_vwapDay = DateTime.MinValue;
 
-		public _DV_15_EmaVwapPullback(object _ctx) : base(_ctx) { }
+		public _DV_15_EmaVwapPullback(object _ctx) : base(_ctx)
+		{
+			VwapSlot = EVwapSlot.Session;
+			SlopeMin = ESlopeMin.S005;
+			Bracket = EBracketFrac.F015;
+		}
+
+		private double slopeMin() { return SlopeMin == ESlopeMin.S015 ? 0.15 : 0.05; }
+		private double bracketFrac() { return Bracket == EBracketFrac.F010 ? 0.10 : 0.15; }
 
 		protected override void Create()
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
-			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;     // [Input]s on the base: set in code
+			Vwap1DataStream = 1;
 			FlatBy = Cfg.flat;
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "DV15LE", EOrderAction.Buy));
 			m_seLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "DV15SE", EOrderAction.SellShort));
@@ -182,6 +214,11 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!Enum.IsDefined(typeof(EVwapSlot), VwapSlot)) throw new ArgumentException("_DV_15_EmaVwapPullback: VwapSlot is not a defined EVwapSlot");
+			if (!Enum.IsDefined(typeof(ESlopeMin), SlopeMin)) throw new ArgumentException("_DV_15_EmaVwapPullback: SlopeMin is not a defined ESlopeMin");
+			if (!Enum.IsDefined(typeof(EBracketFrac), Bracket)) throw new ArgumentException("_DV_15_EmaVwapPullback: Bracket is not a defined EBracketFrac");
+			Vwap1Type = VwapSlot == EVwapSlot.Week ? EVwapType.Week : EVwapType.Session;
+			Vwap1DataStream = 1;
 			NeedsDaily = true;                                      // before base.StartCalc (M-DAILY is built there)
 			base.StartCalc();
 			m_ema = double.NaN; m_emaBars = 0; m_sideRun = 0; m_side = 0; m_vwap.Clear(); m_vwapDay = DateTime.MinValue;
@@ -198,7 +235,10 @@ namespace PowerLanguage.Strategy
 			int s = Math.Sign(c - m_ema);
 			m_sideRun = s != 0 && s == m_side ? m_sideRun + 1 : 1; m_side = s;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_vwapDay) { m_vwapDay = day; m_vwap.Clear(); }
+			bool resetVwap = VwapSlot == EVwapSlot.Week
+				? day.AddDays(-(((int)day.DayOfWeek + 6) % 7)) != m_vwapDay
+				: day != m_vwapDay;
+			if (resetVwap) { m_vwapDay = VwapSlot == EVwapSlot.Week ? day.AddDays(-(((int)day.DayOfWeek + 6) % 7)) : day; m_vwap.Clear(); }
 			if (Vwap1Active) m_vwap.Add(CurrentVwap1);
 
 			int pos = StrategyInfo.MarketPosition;
@@ -215,12 +255,13 @@ namespace PowerLanguage.Strategy
 			if (side == 0 || !(Bars.Low[0] <= m_ema && Bars.High[0] >= m_ema)) return;                // touch
 			double vw = m_vwap[m_vwap.Count - 1], slope = vw - m_vwap[m_vwap.Count - 1 - Cfg.slopeBars];
 			double atr = averageTrueRange(Bars, Cfg.atrLength);
-			if (!(atr > 0) || Math.Sign(slope) != side || Math.Abs(slope) < Cfg.slopeAtr * atr || Math.Sign(c - vw) != side) return;
-			double d = Math.Max(Cfg.bracketAtr20d * DailyContext.Atr20d, Cfg.costFloorTicks * tick);
+			if (!(atr > 0) || Math.Sign(slope) != side || Math.Abs(slope) < slopeMin() * atr || Math.Sign(c - vw) != side) return;
+			double d = Math.Max(bracketFrac() * DailyContext.Atr20d, Cfg.costFloorTicks * tick);
 			if (!(d > 0) || overRiskBudget(d)) { if (journalOn()) trace(ETraceLevel.Journal, $"DV-15 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: bracket {d / tick:F0} ticks breaches risk budget"); return; }
 			double entry = Math.Round(m_ema / tick) * tick;
 			m_stop = entry - side * d; m_target = entry + side * d;      // 1:1 bracket
-			if (side > 0) m_leLmt.Send(entry, Cfg.contracts); else m_seLmt.Send(entry, Cfg.contracts);
+			if (side > 0) { m_leLmt.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { m_seLmt.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) logSignal("DV-15", side, entry, m_stop, new Dictionary<string, string> { { "vwap", vw.ToString("F2") }, { "slope", slope.ToString("F2") } }, true);
 		}
 
