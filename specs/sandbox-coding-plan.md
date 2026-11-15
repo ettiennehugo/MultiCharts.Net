@@ -399,3 +399,10 @@ A file journals and does not send an order only when its catalogue heading has n
 | A2-61 | Session efficiency-ratio router. It journals continuation or reversion and does not enter. |
 | A2-72 | Size ladder. It journals 25/50/100 percent and does not enter. |
 | A2-73 | Exit overlay. GX expresses it as BreakEven AtTrigger, RMultiple, value 3. It does not enter. |
+| A2-74 | Scale-out module. It needs two contracts and has no entry. GX: ScaleOutThenRunner, T1 2.5 R, scale 50, BreakEven AfterT1. |
+| A2-75 | Hit-rate throttle for a host. No entry. |
+| A2-76 | Climax exit for an open host winner. No entry. |
+| A2-77 | Follow-through checkpoint for a host. No entry. GX time stop does not test open profit. |
+| A2-79 | Contraction gate for a host. No entry. |
+| AV-10 | Compares host events that already have an entry. No entry of its own. |
+| AV-13 | Stretch scale for a host anchor. No entry. |
