@@ -59,38 +59,41 @@ The counts are in the table at the end of this file.
 8. **Compile.** Default: `tests/SandboxCompile` is a semantic C# 7.3 compile of every sandbox strategy with `_CustomSignal`, the volume-profile bases, the engines, and MC stubs. The TradeManager using is aliased the same way as `tests/GxMcCompile`. Native F7 after a slot copy is still required. No `csproj` line points at `sandbox/`.
 9. **Holdout.** Default: no result from 2025 onward is read or written.
 10. **Ambiguous catalogue rows with no heading.** Default: the batch that reaches them codes the sentence in the source that cites the id, and marks ASSUMPTION in the header. They are not skipped for lack of a heading.
+11. **Child examples.** Default: MT-03 extends `_PS_08_NarrowIbBreak`, A2-78 extends `_OF_07_BurstExtremeBreak`, RG-07 extends `_A2_56_FirstHourBreak` (that file is not edited), and A2-25 extends `_DV_02_FailedLevelFlip`. A slot copy of the child compiles only when the parent file is in the same project.
+12. **A2-26.** Default: it is the KDE veto inside the A2-25 file. No second file.
+13. **Merged A2 rows.** Default: the catalogue mapping table wins. A row marked "Merged into" is not a second sandbox file. The host carries the arm when that host is coded. A2-06 and A2-07 stay on the PR 126 files, which this work does not edit.
 
 ## (a) ID table
 
 | ID | Title | Source | Kind | Target file | Batch | Status |
 |---|---|---|---|---|---|---|
-| A2-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_01_A201.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_A2_02_A202.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_03_A203.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-04) | done | merged into AV-04; no second sandbox file |
+| A2-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | duplicate-of | none (merged into AV-03) | done | merged into AV-03; no second sandbox file |
+| A2-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into EX-04) | done | merged into EX-04; no second sandbox file |
 | A2-04 | Overnight inventory vs oVWAP open drive | trading-idea-catalogue.md | entry signal | sandbox/_A2_04_OvernightInventoryVs.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_05_A205.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_06_A206.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_07_A207.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-08 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_08_A208.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-12) | done | merged into AV-12; no second sandbox file |
+| A2-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into VW-05) | done | merged into VW-05; no second sandbox file |
+| A2-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-08) | done | merged into AV-08; no second sandbox file |
+| A2-08 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | duplicate-of | none (merged into PS-08) | done | merged into PS-08; no second sandbox file |
 | A2-09 | Noise-band long-only with sVWAP trail (MNQ benchmark) | trading-idea-catalogue.md | entry signal | sandbox/_A2_09_NoiseBandLong.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-10 | (no heading; id is cited in the source) | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_10_A210.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
+| A2-10 | (no heading; id is cited in the source) | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | duplicate-of | none (merged into VW-03) | done | merged into VW-03; no second sandbox file |
 | A2-11 | Prior-day VWAP static-level acceptance | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_11_PriorDayVWAP.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
 | A2-12 | VWAP − TWAP divergence as an inventory signal | trading-idea-catalogue.md | entry signal | sandbox/_A2_12_VWAPTWAPDivergence.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
 | A2-13 | Gap-day AVWAP-from-open: hold → go-with, fail → fade-to-value | trading-idea-catalogue.md | entry signal | sandbox/_A2_13_GapDayAVWAP.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
 | A2-14 | Weekly AVWAP reclaim swing (MES daily) | trading-idea-catalogue.md | entry signal | sandbox/_A2_14_WeeklyAVWAPReclaim.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
 | A2-15 | Breakout-leg POC vs leg AVWAP skew (layer on PS-01) | trading-idea-catalogue.md | entry signal | sandbox/_A2_15_BreakoutLegPOC.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-16 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_16_A216.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_17_A217.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_18_A218.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_19_A219.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-20 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_20_A220.Strategy.CS (name fixed when the batch is written) | 2 | not coded |
-| A2-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_21_A221.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-22 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_22_A222.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-23 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_23_A223.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-24 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_24_A224.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-25 | POC bootstrap-stability gate and minimum-stop rule (module) | keller-b5-catalogue-additions.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_25_POCBootstrapStability.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-26 | KDE bandwidth-sweep veto on FLAT/BIMODAL POCs (module) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_26_KDEBandwidthSweep.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-27 | Bimodal-profile void traverse | trading-idea-catalogue.md | entry signal | sandbox/_A2_27_BimodalProfileVoid.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
+| A2-16 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into RG-04) | done | merged into RG-04; no second sandbox file |
+| A2-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-07) | done | merged into AV-07; no second sandbox file |
+| A2-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-10) | done | merged into PS-10; no second sandbox file |
+| A2-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-13) | done | merged into AV-13; no second sandbox file |
+| A2-20 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-06) | done | merged into AV-06; no second sandbox file |
+| A2-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-06) | done | merged into AV-06; no second sandbox file |
+| A2-22 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into EX-12) | done | merged into EX-12; no second sandbox file |
+| A2-23 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into AV-09) | done | merged into AV-09; no second sandbox file |
+| A2-24 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | duplicate-of | none (merged into VW-08) | done | merged into VW-08; no second sandbox file |
+| A2-25 | POC bootstrap-stability gate and minimum-stop rule (module) | keller-b5-catalogue-additions.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_25_PocStabilityGate.Strategy.CS | 2 | coded in batch 2 |
+| A2-26 | KDE bandwidth-sweep veto on FLAT/BIMODAL POCs (module) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | duplicate-of | sandbox/_A2_25_PocStabilityGate.Strategy.CS | 2 | coded inside the A2-25 file (KDE veto); no second file |
+| A2-27 | Bimodal-profile void traverse | trading-idea-catalogue.md | entry signal | sandbox/_A2_27_BimodalVoidTraverse.Strategy.CS | 2 | coded in batch 2 |
 | A2-28 | Minor-component excess rejection (confirmation, not touch) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_28_MinorComponentExcess.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
 | A2-29 | Entropy day-type gate at 11:00 (module) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_29_EntropyDayType.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-30 | Rising-entropy balance break (leading signal) | trading-idea-catalogue.md | entry signal | sandbox/_A2_30_RisingEntropyBalance.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
@@ -104,13 +107,13 @@ The counts are in the table at the end of this file.
 | A2-38 | Metaorder drift completion (tick window only) | trading-idea-catalogue.md | entry signal | sandbox/_A2_38_MetaorderDriftCompletion.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
 | A2-39 | Roll-honest composites on unadjusted @ES (infrastructure) | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | duplicate-of | none | done | roll-reset arm exists in the engines. Cash and back-adjusted arms are not coded. |
 | A2-40 | Honest cost model and stressed-correlation sizing (Gate 0) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | sizing-portfolio | sandbox/_A2_40_HonestCostModel.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-41 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_41_A241.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-42 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_42_A242.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
+| A2-41 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-02) | done | merged into PS-02; no second sandbox file |
+| A2-42 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-03) | done | merged into PS-03; no second sandbox file |
 | A2-43 | Confluent-HVN level gate (target and veto module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_43_ConfluentHVNLevel.Strategy.CS (name fixed when the batch is written) | 3 | not coded |
-| A2-44 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_44_A244.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-44 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-15) | done | merged into PS-15; no second sandbox file |
 | A2-45 | Single-print shelf as destination (near-edge target, runner to far edge) | trading-idea-catalogue.md | entry signal | sandbox/_A2_45_SinglePrintShelf.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-46 | Volume-gap commitment entry to the far node | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_46_VolumeGapCommitment.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-47 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_47_A247.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-47 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-03) | done | merged into PS-03; no second sandbox file |
 | A2-48 | Poor highs/lows as destinations (exit and stop-placement module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_48_PoorHighsLows.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-49 | Midday support/resistance and afternoon breakout (Kaufman TSM) | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_49_MiddayBreakout.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-50 | Same-slot relative-volume opening regime gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_50_OpeningRvGate.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
@@ -118,7 +121,7 @@ The counts are in the table at the end of this file.
 | A2-52 | Time-confirmed opening-range break with pivot-range bias (Fisher ACD) | trading-idea-catalogue.md | entry signal | sandbox/_A2_52_TimeConfirmedOpening.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-53 | RTH gap fade with stop-and-reverse at the day's extreme (negative canary) | trading-idea-catalogue.md | entry signal | sandbox/_A2_53_RTHGapFade.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-54 | Up-gap pullback-to-prior-close short, exit next open | trading-idea-catalogue.md | entry signal | sandbox/_A2_54_UpGapPullback.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-55 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_A2_55_A255.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-55 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into RG-08) | done | merged into RG-08; no second sandbox file |
 | A2-56 | Momentum Pinball: daily LBR/RSI setup, first-hour break, conditional overnight hold | trading-idea-catalogue.md | entry signal | sandbox/_A2_56_FirstHourBreak.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-57 | Higher-TF turn plus first short-TF oversold entry (Kaufman/Elder) | trading-idea-catalogue.md | entry signal | sandbox/_A2_57_TwoTimeframeTurn.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-58 | Fade the fast trend inside the slow trend, intraday | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_58_FastInSlowFade.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
@@ -134,14 +137,14 @@ The counts are in the table at the end of this file.
 | A2-68 | 5-bar run + doji reversal, target 50% of the run | trading-idea-catalogue.md | entry signal | sandbox/_A2_68_X5BarRun.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-69 | Kaufman 3-day trade: two down closes, buy a lower open, exit next close | trading-idea-catalogue.md | entry signal | sandbox/_A2_69_KaufmanThreeDay.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-70 | High-volatility skip gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| A2-71 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_A2_71_A271.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-71 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | duplicate-of | none (merged into PF-06) | done | merged into PF-06; no second sandbox file |
 | A2-72 | Progressive exposure ladder 25/50/100% (sizing module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_72_ProgressiveExposureLadder.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-73 | Breakeven stop at ≈ 3R or above the rolling average gain (exit module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_73_BreakevenStopAt.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
 | A2-74 | Free roll: sell half at 2–3R, remainder at breakeven (scale-out module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_74_FreeRollSell.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | A2-75 | Rolling hit-rate throttle (RBA module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_75_RollingHitRate.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | A2-76 | Sell into the climax bar (profit-exit module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_76_SellIntoThe.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | A2-77 | Failed follow-through exit: time stop and bar-quality test (exit module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_77_FailedFollowThrough.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
-| A2-78 | Daily loss kill-switch and rules-first flatten (risk module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_78_DailyLossKill.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
+| A2-78 | Daily loss kill-switch and rules-first flatten (risk module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_78_DailyKillSwitch.Strategy.CS | 2 | coded in batch 2 |
 | A2-79 | Intraday volatility contraction + volume dry-up entry gate (VCP analogue; module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_79_IntradayVolatilityContraction.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | AV-01 | Swing-high AVWAP reclaim (Shannon "buy strength after the pullback") | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_AV_01_SwingHighAVWAP.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | AV-02 | Impulse-origin AVWAP higher-low continuation | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_AV_02_ImpulseOriginAVWAP.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
@@ -165,13 +168,13 @@ The counts are in the table at the end of this file.
 | VW-07 | Prior-day VWAP and ETH VWAP as opening reference (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_VW_07_PriorDayVWAP.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | VW-08 | VWAP-cross "Holy Grail" (canary) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | duplicate-of | _TestGate0 canary VW08 | done | already on main as _TestGate0 canary VW08. No second sandbox copy in batch 1. |
 | DV-01 | Daily POC first-touch pullback ("The Simplest Volume Profile Intraday Strategy for Beginners") | trading-idea-catalogue.md | entry signal | sandbox/_DV_01_DailyPOCFirst.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-02 | Failed level → reversal (flip) trade | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_02_FailedLevelReversal.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-02 | Failed level → reversal (flip) trade | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_02_FailedLevelFlip.Strategy.CS | 2 | coded in batch 2 |
 | DV-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | sandbox/_PS_13_RotationVolumeLevel.Strategy.CS | done | same worked example as PS-13. Do not write a second file. |
 | DV-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_04_DV04.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | DV-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_05_DV05.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | DV-06 | End-of-trend-day cluster pullback (into the NY close) | trading-idea-catalogue.md | entry signal | sandbox/_DV_06_EndOfTrend.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | DV-07 | Rotation / double-distribution edge → centre | trading-idea-catalogue.md | entry signal | sandbox/_DV_07_RotationDoubleDistribution.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-08 | Heavy-volume zone + Fair Value Gap alignment (level at the FVG start) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_08_HeavyVolumeZone.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-08 | Heavy-volume zone + Fair Value Gap alignment (level at the FVG start) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_08_FvgHvnAlignment.Strategy.CS | 2 | coded in batch 2 |
 | DV-09 | Weekly-VWAP ±1σ trend pullback | trading-idea-catalogue.md | entry signal | sandbox/_DV_09_WeeklyVWAP1.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | DV-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_DV_10_DV10.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
 | DV-11 | VWAP trend-failure (lose σ1 → pullback to σ1 → target VWAP) | trading-idea-catalogue.md | entry signal | sandbox/_DV_11_VWAPTrendFailure.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
@@ -212,7 +215,7 @@ The counts are in the table at the end of this file.
 | PS-09 | IB C-period failure → IB midpoint | trading-idea-catalogue.md | entry signal | sandbox/_PS_09_IBCPeriod.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
 | PS-10 | Developing-POC migration join (VAH-as-support pullback) | trading-idea-catalogue.md | entry signal | sandbox/_PS_10_DevelopingPOCMigration.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
 | PS-11 | Unratified new extreme (POC refuses to follow) → confirmed fade | trading-idea-catalogue.md | entry signal | sandbox/_PS_11_UnratifiedNewExtreme.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
-| PS-12 | Trend-cluster pullback (first touch of an in-trend volume cluster) | trading-idea-catalogue.md | entry signal | sandbox/_PS_12_TrendClusterPullback.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
+| PS-12 | Trend-cluster pullback (first touch of an in-trend volume cluster) | trading-idea-catalogue.md | entry signal | sandbox/_PS_12_TrendClusterPullback.Strategy.CS | 2 | coded in batch 2 |
 | PS-13 | Volume-accumulation breakout: first-touch retest | trading-idea-catalogue.md | entry signal | sandbox/_PS_13_RotationVolumeLevel.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | PS-14 | Rejection-ledge revisit fade | trading-idea-catalogue.md | entry signal | sandbox/_PS_14_RejectionLedgeRevisit.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
 | PS-15 | LVN traverse after acceptance into the void | trading-idea-catalogue.md | entry signal | sandbox/_PS_15_LVNTraverseAfter.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
@@ -239,7 +242,7 @@ The counts are in the table at the end of this file.
 | OF-10 | ES vs NQ relative order-flow selection (layer on OF-09) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_OF_10_ESVsNQ.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
 | MT-01 | HTF-aligned higher low at value (60m → 15m → 5m → 1m nesting) | trading-idea-catalogue.md | entry signal | sandbox/_MT_01_MultiTfStack.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | MT-02 | Weekly accepted value + 60m trigger (swing) | trading-idea-catalogue.md | entry signal | sandbox/_MT_02_WeeklyValueAcceptance.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| MT-03 | 20-day composite location gate + 5m acceptance break | trading-idea-catalogue.md | entry signal | sandbox/_MT_03_X20DayComposite.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
+| MT-03 | 20-day composite location gate + 5m acceptance break | trading-idea-catalogue.md | entry signal | sandbox/_MT_03_CompositeValueGate.Strategy.CS | 2 | coded in batch 2 |
 | MT-04 | 60m swing-AVWAP + 5m HL entry | trading-idea-catalogue.md | entry signal | sandbox/_MT_04_X60mSwingAVWAP.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
 | MT-05 | 240m multi-session LVN as pullback zone | trading-idea-catalogue.md | entry signal | sandbox/_MT_05_X240mMultiSession.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
 | MT-06 | Daily failed auction (excess / poor extreme) + intraday trigger | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_MT_06_DailyFailedAuction.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
@@ -260,7 +263,7 @@ The counts are in the table at the end of this file.
 | KD-05 | HTF detrended-rail alignment (15m entries on 60m/240m accepted rails) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_05_HTFDetrendedRail.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
 | KD-06 | σ-band acceptance breakout (PS-25 robustness arm "σ2") | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_06_BandAcceptanceBreakout.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
 | KD-07 | No-fade veto (gate form of KD-02) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_07_NoFadeVeto.Strategy.CS (name fixed when the batch is written) | 9 | not coded |
-| KD-08 | Forward-cone diagnostic (study, not a trade) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_08_ForwardConeDiagnostic.Strategy.CS (name fixed when the batch is written) | 10 | not coded |
+| KD-08 | Forward-cone diagnostic (study, not a trade) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_08_ForwardConeDiagnostic.Strategy.CS | 2 | coded in batch 2 |
 | KD-09 | Family-count confluence filter (rev 3.1 module form of RG-09 / KD-03) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_09_FamilyCountConfluence.Strategy.CS (name fixed when the batch is written) | 10 | not coded |
 | KD-10 | Far-outside / band-edge node: acceptance only (PS-25 robustness arm "node") | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_10_FarOutsideBand.Strategy.CS (name fixed when the batch is written) | 10 | not coded |
 | KD-11 | Beyond-value node reach-rate study (Field Drill 7.5; diagnostic) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_KD_11_BeyondValueNode.Strategy.CS (name fixed when the batch is written) | 10 | not coded |
@@ -310,13 +313,13 @@ The counts are in the table at the end of this file.
 | RG-04 | Live day-type proxy at 10:30 (includes VWAP-cross count) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_04_LiveDayType.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | RG-05 | Noise-band filter (Zarattini) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_05_NoiseBandFilter.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | RG-06 | HTF trend state (TSMOM + 60m structure) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | regime-filter | sandbox/_RG_06_HTFTrendState.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-07 | Event, roll and thin-session exclusions | trading-idea-catalogue.md | regime-filter | sandbox/_RG_07_EventRollAnd.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| RG-07 | Event, roll and thin-session exclusions | trading-idea-catalogue.md | regime-filter | sandbox/_RG_07_ExclusionGate.Strategy.CS | 2 | coded in batch 2 |
 | RG-08 | Compression state (range/ATR) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_08_CompressionStateRange.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | RG-09 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_09_RG09.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | RG-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_10_RG10.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | PF-01 | Trend + carry core (parallel track) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_01_TrendCarryCore.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | PF-02 | Regime-complementary intraday sleeves | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_02_RegimeComplementaryIntraday.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-03 | Cross-market diversification & hidden-beta monitor | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_03_CrossMarketDiversification.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| PF-03 | Cross-market diversification & hidden-beta monitor | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_03_XmktBetaMonitor.Strategy.CS | 2 | coded in batch 2 |
 | PF-04 | Risk budgeting (deflated quarter-Kelly, capped) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_04_RiskBudgetingDeflated.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | PF-05 | Drawdown throttles + two-CUSUM monitoring | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_05_DrawdownThrottlesTwo.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | PF-06 | Portfolio volatility targeting | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_06_PortfolioVolatilityTargeting.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
@@ -358,19 +361,21 @@ The counts are in the table at the end of this file.
 
 ## Batch counts
 
+Batch 2 in this update is the remaining engines-manual examples. Rows that the first draft called batch 2 and that the catalogue marks "Merged into" are now `done` / `duplicate-of`. The own entries that stay in batch 2 and are not coded yet are the next entry batch.
+
 | Batch | IDs | What |
 |---|---|---|
-| done | 43 | Already in sandbox, already on main as a production study, or not a strategy file (engine ids). |
+| done | 66 | A2-01, A2-02, A2-03, A2-05, A2-06, A2-07, A2-08, A2-10, A2-16, A2-17, A2-18, A2-19, ... (66) |
+| 2 | 18 | A2-04, A2-09, A2-11, A2-12, A2-13, A2-14, A2-15, A2-25, A2-26, A2-27, A2-78, DV-02, DV-08, PS-12, MT-03, KD-08, RG-07, PF-03 |
+| 3 | 11 | A2-28, A2-30, A2-31, A2-32, A2-34, A2-35, A2-36, A2-37, A2-38, A2-40, A2-43 |
 | 1 | 20 | A2-29, A2-50, A2-51, A2-57, A2-58, AV-11, PS-01, PS-02, PS-05, PS-07, PS-08, PS-13, PS-19, PS-21, PS-22, PS-24, OF-01, OF-07, MT-01, MT-02 |
-| 2 | 20 | A2-01, A2-02, A2-03, A2-04, A2-05, A2-06, A2-07, A2-08, A2-09, A2-10, A2-11, A2-12, A2-13, A2-14, A2-15, A2-16, A2-17, A2-18, A2-19, A2-20 |
-| 3 | 20 | A2-21, A2-22, A2-23, A2-24, A2-25, A2-26, A2-27, A2-28, A2-30, A2-31, A2-32, A2-34, A2-35, A2-36, A2-37, A2-38, A2-40, A2-41, A2-42, A2-43 |
-| 4 | 20 | A2-44, A2-45, A2-46, A2-47, A2-48, A2-52, A2-53, A2-54, A2-55, A2-59, A2-60, A2-61, A2-62, A2-65, A2-66, A2-67, A2-68, A2-71, A2-72, A2-73 |
-| 5 | 20 | A2-74, A2-75, A2-76, A2-77, A2-78, A2-79, AV-01, AV-02, AV-03, AV-04, AV-05, AV-06, AV-07, AV-09, AV-10, AV-12, AV-13, VW-01, VW-02, VW-03 |
-| 6 | 20 | VW-04, VW-06, VW-07, DV-01, DV-02, DV-04, DV-05, DV-06, DV-07, DV-08, DV-09, DV-10, DV-11, DV-12, DV-13, DV-14, DV-16, DV-17, DV-18, DV-19 |
+| 4 | 16 | A2-45, A2-46, A2-48, A2-52, A2-53, A2-54, A2-59, A2-60, A2-61, A2-62, A2-65, A2-66, A2-67, A2-68, A2-72, A2-73 |
+| 5 | 19 | A2-74, A2-75, A2-76, A2-77, A2-79, AV-01, AV-02, AV-03, AV-04, AV-05, AV-06, AV-07, AV-09, AV-10, AV-12, AV-13, VW-01, VW-02, VW-03 |
+| 6 | 18 | VW-04, VW-06, VW-07, DV-01, DV-04, DV-05, DV-06, DV-07, DV-09, DV-10, DV-11, DV-12, DV-13, DV-14, DV-16, DV-17, DV-18, DV-19 |
 | 7 | 20 | DV-20, DV-21, DV-22, DV-23, DV-24, TS-02, TS-04, TS-05, TS-06, TS-07, SW-01, SW-03, SW-04, SW-05, SW-06, PS-03, PS-04, PS-06, PS-09, PS-10 |
-| 8 | 20 | PS-11, PS-12, PS-14, PS-15, PS-16, PS-17, PS-18, PS-20, PS-23, PS-25, PS-26, OF-02, OF-03, OF-04, OF-05, OF-06, OF-08, OF-09, OF-10, MT-03 |
+| 8 | 18 | PS-11, PS-14, PS-15, PS-16, PS-17, PS-18, PS-20, PS-23, PS-25, PS-26, OF-02, OF-03, OF-04, OF-05, OF-06, OF-08, OF-09, OF-10 |
 | 9 | 20 | MT-04, MT-05, MT-06, MT-07, SP-01, SP-02, SP-03, SP-04, SP-05, SP-06, SP-07, SP-08, SP-09, KD-01, KD-02, KD-03, KD-04, KD-05, KD-06, KD-07 |
-| 10 | 20 | KD-08, KD-09, KD-10, KD-11, YV-01, YV-02, YV-03, YV-04, YV-05, YV-06, YV-07, YV-08, YV-09, YV-10, YV-11, YV-12, VX-01, VX-02, VX-03, VX-04 |
+| 10 | 19 | KD-09, KD-10, KD-11, YV-01, YV-02, YV-03, YV-04, YV-05, YV-06, YV-07, YV-08, YV-09, YV-10, YV-11, YV-12, VX-01, VX-02, VX-03, VX-04 |
 | 11 | 20 | VX-05, VX-06, VX-07, VX-08, LE-01, LE-02, LE-03, LE-04, LE-05, LE-06, LE-07, EX-01, EX-02, EX-03, EX-04, EX-05, EX-06, EX-07, EX-08, EX-09 |
-| 12 | 20 | EX-10, EX-11, EX-12, EX-13, RG-01, RG-02, RG-04, RG-05, RG-06, RG-07, RG-08, RG-09, RG-10, PF-01, PF-02, PF-03, PF-04, PF-05, PF-06, PF-07 |
+| 12 | 18 | EX-10, EX-11, EX-12, EX-13, RG-01, RG-02, RG-04, RG-05, RG-06, RG-08, RG-09, RG-10, PF-01, PF-02, PF-04, PF-05, PF-06, PF-07 |
 | 13 | 8 | PF-08, L2-01, L2-02, L2-03, L2-04, L2-05, L2-06, L2-07 |
