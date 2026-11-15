@@ -163,30 +163,30 @@ The counts are in the table at the end of this file.
 | VW-01 | Trend-day first VWAP pullback | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_VW_01_TrendDayFirst.Strategy.CS | 5 | coded in batch 5 |
 | VW-02 | Balance-day ±2σ fade at a composite HVN edge (conditional) | trading-idea-catalogue.md | entry signal | sandbox/_VW_02_BalanceDay2.Strategy.CS | 5 | coded in batch 5 |
 | VW-03 | σ-band expansion continuation | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_VW_03_BandExpansionContinuation.Strategy.CS | 5 | coded in batch 5 |
-| VW-04 | Failed VWAP defence → reversal context | trading-idea-catalogue.md | entry signal | sandbox/_VW_04_FailedVWAPDefence.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| VW-04 | Failed VWAP defence → reversal context | trading-idea-catalogue.md | entry signal | sandbox/_VW_04_FailedVWAPDefence.Strategy.CS | 6 | coded in batch 6 |
 | VW-05 | Late-day continuation: VWAP side × rest-of-day return | trading-idea-catalogue.md | entry signal | sandbox/_VW_05_LateDayVwap.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| VW-06 | POC–VWAP skew pullback | trading-idea-catalogue.md | entry signal | sandbox/_VW_06_POCVWAPSkew.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| VW-07 | Prior-day VWAP and ETH VWAP as opening reference (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_VW_07_PriorDayVWAP.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| VW-06 | POC–VWAP skew pullback | trading-idea-catalogue.md | entry signal | sandbox/_VW_06_POCVWAPSkew.Strategy.CS | 6 | coded in batch 6 |
+| VW-07 | Prior-day VWAP and ETH VWAP as opening reference (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_VW_07_PriorDayVWAP.Strategy.CS | 6 | coded in batch 6 |
 | VW-08 | VWAP-cross "Holy Grail" (canary) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | duplicate-of | _TestGate0 canary VW08 | done | already on main as _TestGate0 canary VW08. No second sandbox copy in batch 1. |
-| DV-01 | Daily POC first-touch pullback ("The Simplest Volume Profile Intraday Strategy for Beginners") | trading-idea-catalogue.md | entry signal | sandbox/_DV_01_DailyPOCFirst.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-01 | Daily POC first-touch pullback ("The Simplest Volume Profile Intraday Strategy for Beginners") | trading-idea-catalogue.md | entry signal | sandbox/_DV_01_DailyPOCFirst.Strategy.CS | 6 | coded in batch 6 |
 | DV-02 | Failed level → reversal (flip) trade | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_02_FailedLevelFlip.Strategy.CS | 2 | coded in batch 2 |
 | DV-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | sandbox/_PS_13_RotationVolumeLevel.Strategy.CS | done | same worked example as PS-13. Do not write a second file. |
-| DV-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_04_DV04.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_05_DV05.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-06 | End-of-trend-day cluster pullback (into the NY close) | trading-idea-catalogue.md | entry signal | sandbox/_DV_06_EndOfTrend.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-07 | Rotation / double-distribution edge → centre | trading-idea-catalogue.md | entry signal | sandbox/_DV_07_RotationDoubleDistribution.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_04_DV04.Strategy.CS | 6 | coded in batch 6 |
+| DV-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_05_DV05.Strategy.CS | 6 | coded in batch 6 |
+| DV-06 | End-of-trend-day cluster pullback (into the NY close) | trading-idea-catalogue.md | entry signal | sandbox/_DV_06_EndOfTrend.Strategy.CS | 6 | coded in batch 6 |
+| DV-07 | Rotation / double-distribution edge → centre | trading-idea-catalogue.md | entry signal | sandbox/_DV_07_RotationDoubleDistribution.Strategy.CS | 6 | coded in batch 6 |
 | DV-08 | Heavy-volume zone + Fair Value Gap alignment (level at the FVG start) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_08_FvgHvnAlignment.Strategy.CS | 2 | coded in batch 2 |
-| DV-09 | Weekly-VWAP ±1σ trend pullback | trading-idea-catalogue.md | entry signal | sandbox/_DV_09_WeeklyVWAP1.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_DV_10_DV10.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-11 | VWAP trend-failure (lose σ1 → pullback to σ1 → target VWAP) | trading-idea-catalogue.md | entry signal | sandbox/_DV_11_VWAPTrendFailure.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_12_DV12.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-13 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_13_DV13.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-14 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_14_DV14.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-09 | Weekly-VWAP ±1σ trend pullback | trading-idea-catalogue.md | entry signal | sandbox/_DV_09_WeeklyVWAP1.Strategy.CS | 6 | coded in batch 6 |
+| DV-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_DV_10_DV10.Strategy.CS | 6 | coded in batch 6 |
+| DV-11 | VWAP trend-failure (lose σ1 → pullback to σ1 → target VWAP) | trading-idea-catalogue.md | entry signal | sandbox/_DV_11_VWAPTrendFailure.Strategy.CS | 6 | coded in batch 6 |
+| DV-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_12_DV12.Strategy.CS | 6 | coded in batch 6 |
+| DV-13 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_13_DV13.Strategy.CS | 6 | coded in batch 6 |
+| DV-14 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_14_DV14.Strategy.CS | 6 | coded in batch 6 |
 | DV-15 | EMA20 pullback gated by VWAP slope | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_15_EmaVwapPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| DV-16 | Order-flow confirmation at a pre-defined level (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_16_OrderFlowConfirmation.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_17_DV17.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_18_DV18.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
-| DV-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_19_DV19.Strategy.CS (name fixed when the batch is written) | 6 | not coded |
+| DV-16 | Order-flow confirmation at a pre-defined level (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_16_OrderFlowConfirmation.Strategy.CS | 6 | coded in batch 6 |
+| DV-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_17_DV17.Strategy.CS | 6 | coded in batch 6 |
+| DV-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_18_DV18.Strategy.CS | 6 | coded in batch 6 |
+| DV-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_19_DV19.Strategy.CS | 6 | coded in batch 6 |
 | DV-20 | Stop-loss-cluster (weak low/high) veto | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_20_StopLossCluster.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
 | DV-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_21_DV21.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
 | DV-22 | ABCD (AB = CD) | trading-idea-catalogue.md | entry signal | sandbox/_DV_22_ABCDABCD.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
