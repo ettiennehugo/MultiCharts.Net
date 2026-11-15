@@ -384,3 +384,18 @@ Batch 2 in this update is the remaining engines-manual examples. Rows that the f
 ## Market tags
 
 Each sandbox header has `Market tag: futures-only`, `stock-only`, or `both`. Futures-only ideas use the futures session API (`IsRth`, `m_rthValueEnd`). Both and stock-only ideas use `Bars.Sessions` and never a hard-coded symbol, session clock, or tick floor. The floor is `InstrumentProfile.costFloorTicks`. Batches 1-3 were tagged from the code they already contain. New files are tagged with the idea.
+
+## Non-trading rows
+
+A file journals and does not send an order only when its catalogue heading has no entry. SandboxCompile rejects two sandbox signals whose CalcBar bodies match once comments, whitespace and quoted names are removed.
+
+| ID | Reason |
+|---|---|
+| A2-36 | No GEX series and no VIX series. The heading cannot be traded on this feed. |
+| A2-38 | Trade-size entropy is not in `_TickStream`. |
+| A2-40 | Cost note. It does not set Commission or Slippage and it has no entry. |
+| A2-48 | The heading says the module never opens a trade. It journals poor highs and poor lows. |
+| A2-59 | Cost and unables audit. It does not set a fee. |
+| A2-61 | Session efficiency-ratio router. It journals continuation or reversion and does not enter. |
+| A2-72 | Size ladder. It journals 25/50/100 percent and does not enter. |
+| A2-73 | Exit overlay. GX expresses it as BreakEven AtTrigger, RMultiple, value 3. It does not enter. |

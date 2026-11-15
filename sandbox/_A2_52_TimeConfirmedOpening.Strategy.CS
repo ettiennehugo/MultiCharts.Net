@@ -1,37 +1,37 @@
 // ## 1. Identity
 // Catalogue ID: A2-52
 // ID mapping: A2-52 -> _A2_52_TimeConfirmedOpening.Strategy.CS (class _A2_52_TimeConfirmedOpening).
-// Name: A2-52 Time-confirmed opening-range break with pivot-range bias (Fisher ACD)
+// Name: A2-52 time-confirmed opening range
 // Header version: 1
-// Rules version: catalogue heading, coded 2026-11-15. Instrument-agnostic.
+// Rules version: catalogue specification under the A2-52 heading, rewritten 2026-11-15.
 // Study class: _A2_52_TimeConfirmedOpening
 // File: sandbox/_A2_52_TimeConfirmedOpening.Strategy.CS
 // Stage: sandbox
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md for A2-52.
-// Taken from the source: the heading and its rules.
-// Research assumption: ASSUMPTION: Time-confirmed opening-range break with pivot-range bias (Fisher ACD) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag futures-only.
+// Source: specs/trading-idea-catalogue.md, the A2-52 heading and its Analyst 2 specification.
+// Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
+// Research assumption: ASSUMPTION: The opening range is the first 15 minutes after RthStart. A_up is ORH plus 0.5 times the range and A_dn is ORL minus 0.5 times the range. ASSUMPTION: eight consecutive 1-minute closes is the half-of-15 hold. The entry window ends at RthStart plus 2 hours. The pivot band is DPP plus or minus the absolute pivot differential of the prior RTH. A long requires the prior close at or above the band low and the current RTH low still above that band. The failure exit (flat when open profit is not positive 15 minutes after entry) is not a GX time stop, because a GX time stop exits a winner too.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
 // Link: specs/trading-idea-catalogue.md, the A2-52 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
-// Trigger: the coded arm in CalcBar, on a closed bar.
-// Management: one contract when this file trades.
+// Trigger: see CalcBar. Closed bar only.
+// Management: one contract when this file trades. Size is never cut to fit the stop.
 // Exit: see section 13.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only, after base.CalcBar.
-// Order sent: market next bar when this file trades.
-// Can fill: the next bar. IOG is disabled.
+// Order sent: the order type named in the catalogue (market next bar, stop, or limit).
+// Can fill: the next bar, or later for a resting stop or limit. IOG is disabled.
 //
 // ## 6. Position and re-entry
-// Position: flat or one.
-// Re-entry: one attempt per session when this file trades.
-// Same session after a stop: no new entry that session.
+// Position: flat or one, unless the catalogue says a reverse, which this file does not open inside GX.
+// Re-entry: one attempt per session unless the catalogue says otherwise.
+// Same session after a stop: no new entry that session unless the catalogue says otherwise.
 //
 // ## 7. Instruments
 // Market tag: futures-only
@@ -40,51 +40,51 @@
 //
 // ## 8. Data
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: only if the code reads BarsOfData(2).
+// Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
-// Warmup: ATR(14) or the session profile, when used.
+// Warmup: the average or profile the rule names.
 //
 // ## 9. Entry and filters
-// All of these must be true: the coded arm, a ready profile or average when the arm reads one, and the 1 percent budget.
-// Skip when: the budget fails or the session API says the bar is outside the traded session.
+// All of these must be true: the catalogue trigger and the 1 percent budget when an order is sent.
+// Skip when: rollOn on a futures profile idea, the profile or average is not ready, or the budget fails.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract when this file trades.
 // Risk limit: skip when 1 contract times the widened stop times BigPointValue exceeds 1 percent of equity.
-// Size is never shrunk to fit a stop: yes. The floor is the instrument profile costFloorTicks, times tickSize().
+// Size is never shrunk to fit a stop: yes. The floor is InstrumentProfile.costFloorTicks times tickSize().
 //
 // ## 11. Orders, execution, and costs
-// Entry order: the order name in Create, when this file trades.
+// Entry order: named in Create when this file trades.
 // Exit orders: see section 13.
-// Fill assumption: next bar. IOG is off.
+// Fill assumption: next bar for a market order. A stop or limit rests. IOG is off.
 // Costs: MultiCharts commission and slippage. This file does not set a fee or a slippage number.
 //
 // ## 12. Trade management
-// While open: exitBar when GX is armed, otherwise sendExits.
+// While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX exitPlan on the entry bar and exitBar on each later closed bar.
-// Hard stop: the structural stop widened to the instrument cost floor, when this file trades.
-// Target: one R, or the level named in the assumption, passed to GX as points from the signal close.
-// Time exit: the chart session end, from the session API, as GX FlatByHHMM.
-// Invalidation: stated in the assumption when it is not a GX flat.
+// Exit orders: sendExits. Protective stop at the far side of the opening range, target one times the opening range, flat at the session value end, and a market exit when 15 closed bars have passed and the open profit is not positive.
+// Hard stop: the catalogue stop, widened to the instrument cost floor.
+// Target: the catalogue target when it is a price known at the signal.
+// Time exit: the catalogue clock, taken from the session API when the rule says the session end.
+// Invalidation: any extra exit named in the assumption.
 //
 // ## 14. Regimes
-// Suitable: the instrument session the code consults.
-// Unsuitable: outside that session.
+// Suitable: the session the code consults.
+// Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
-// Engines enabled: those set in Create.
+// Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series on the futures base.
+// Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Time-confirmed opening-range break with pivot-range bias (Fisher ACD) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag futures-only.
+// Other: ASSUMPTION: The opening range is the first 15 minutes after RthStart. A_up is ORH plus 0.5 times the range and A_dn is ORL minus 0.5 times the range. ASSUMPTION: eight consecutive 1-minute closes is the half-of-15 hold. The entry window ends at RthStart plus 2 hours. The pivot band is DPP plus or minus the absolute pivot differential of the prior RTH. A long requires the prior close at or above the band low and the current RTH low still above that band. The failure exit (flat when open profit is not positive 15 minutes after entry) is not a GX time stop, because a GX time stop exits a winner too.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -95,7 +95,7 @@
 // Range: Not applicable
 // Effect: Not applicable
 // Interactions: Not applicable
-// Fixed or research-tuned: Not applicable
+// Fixed or research-tuned: the catalogue core, not a sweep. The sweep stays in the catalogue.
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -123,104 +123,99 @@
 // No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
 //
 // ## 21. Log diagnostics
-// journalArm name: the entry order name when GX arms.
+// journalArm name: the entry order name when an entry is sent.
 // logSignal tag: A2-52
-// Skip / flatten lines: the trace strings in the file.
+// Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: Time-confirmed opening-range break with pivot-range bias (Fisher ACD) Coded as a closed-bar arm on the chart instrument. The stop is widened with InstrumentProfile.costFloorTicks. The session flat comes from the session API. Market tag futures-only.
+// ASSUMPTION: The opening range is the first 15 minutes after RthStart. A_up is ORH plus 0.5 times the range and A_dn is ORL minus 0.5 times the range. ASSUMPTION: eight consecutive 1-minute closes is the half-of-15 hold. The entry window ends at RthStart plus 2 hours. The pivot band is DPP plus or minus the absolute pivot differential of the prior RTH. A long requires the prior close at or above the band low and the current RTH low still above that band. The failure exit (flat when open profit is not positive 15 minutes after entry) is not a GX time stop, because a GX time stop exits a winner too.
 // IOG is disabled.
 
 
 using System;
-using System.Collections.Generic;
 using PowerLanguage.Function;
-
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
 	public class _A2_52_TimeConfirmedOpening : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se;
-		private bool m_done, m_logged;
-		private int m_hold;
-		private double m_orh = double.NaN, m_orl = double.NaN;
+		private IOrderMarket m_le, m_se, m_lx, m_sx;
+		private IOrderPriced m_ls, m_ss, m_lt, m_st;
 		private DateTime m_day = DateTime.MinValue;
+		private double m_orh = double.NaN, m_orl = double.NaN, m_stop, m_target;
+		private int m_hold, m_entryBar, m_side;
+		private bool m_done;
 		public _A2_52_TimeConfirmedOpening(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
-			base.Create();
-			RollDetection = ERollDetection.Series;
-			
-			GxOrderPrefix = "A252"; createGxOrders();
+			base.Create(); RollDetection = ERollDetection.Series;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252SE", EOrderAction.SellShort));
+			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252LX", EOrderAction.Sell, OrderExit.FromAll));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252SX", EOrderAction.BuyToCover, OrderExit.FromAll));
+			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A252LS", EOrderAction.Sell, OrderExit.FromAll));
+			m_ss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A252SS", EOrderAction.BuyToCover, OrderExit.FromAll));
+			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A252LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A252ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			exitBar();
-			
-			DateTime day = Bars.Time[0].Date;
-			if (day != m_day) { m_day = day; m_done = m_logged = false; m_hold = 0; m_orh = m_orl = double.NaN; }
-			if (StrategyInfo.MarketPosition != 0) return;
-			
-			if (!IsRth() || rollOn(1)) return;
-			if (m_done) return;
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; m_done = false; m_hold = 0; m_orh = m_orl = double.NaN; }
+			int pos = StrategyInfo.MarketPosition;
+			if (pos != 0) { sendExits(pos); return; }
+			if (m_done || rollOn(1) || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (tod <= m_rthStart) return;
-			if (double.IsNaN(m_orh))
+			TimeSpan orEnd = m_rthStart.Add(TimeSpan.FromMinutes(15));
+			if (tod >= m_rthStart && tod < orEnd)
 			{
-				if (tod <= m_rthStart.Add(TimeSpan.FromMinutes(15))) { m_orh = Bars.High[0]; m_orl = Bars.Low[0]; return; }
+				if (double.IsNaN(m_orh)) { m_orh = Bars.High[0]; m_orl = Bars.Low[0]; }
+				else { m_orh = Math.Max(m_orh, Bars.High[0]); m_orl = Math.Min(m_orl, Bars.Low[0]); }
 				return;
 			}
-			double w = m_orh - m_orl; if (!(w > 0)) return;
-			double a = m_orh + 0.5 * w;
-			bool hold = Bars.Close[0] >= a;
-			m_hold = hold ? m_hold + 1 : 0;
-			if (m_hold < 8) return;
+			if (tod < orEnd || tod > m_rthStart.Add(TimeSpan.FromHours(2))) return;
+			double w = m_orh - m_orl;
+			if (!(w > 0)) return;
+			SessionStats s = Session;
+			double dpp = (s.priorRthHigh + s.priorRthLow + s.priorRthClose) / 3.0;
+			double half = Math.Abs(dpp - (s.priorRthHigh + s.priorRthLow) / 2.0);
+			bool longOk = s.priorRthClose >= dpp - half && !(s.rthLow > 0 && s.rthLow < dpp - half);
+			bool shortOk = s.priorRthClose <= dpp + half && !(s.rthHigh > dpp + half);
+			bool up = Bars.Close[0] >= m_orh + 0.5 * w;
+			bool dn = Bars.Close[0] <= m_orl - 0.5 * w;
+			if (up && longOk) m_hold = m_hold > 0 ? m_hold + 1 : 1;
+			else if (dn && shortOk) m_hold = m_hold < 0 ? m_hold - 1 : -1;
+			else m_hold = 0;
+			if (Math.Abs(m_hold) < 8) return;
+			bool buy = m_hold > 0;
 			double entry = Bars.Close[0];
-			double stop = widen(true, entry, m_orl);
-			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, entry + w, "A252LE");
-			m_le.Send(); m_done = true;
+			m_stop = widen(buy, entry, buy ? m_orl - tickSize() : m_orh + tickSize());
+			m_target = buy ? entry + w : entry - w;
+			if (!budget(entry, m_stop)) { m_done = true; return; }
+			m_side = buy ? 1 : -1; m_entryBar = Bars.CurrentBar;
+			if (buy) m_le.Send(); else m_se.Send();
+			m_done = true;
 		}
-		
+		private void sendExits(int pos)
+		{
+			TimeSpan tod = sessionClock(Bars.Time[0]);
+			bool flat = tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0);
+			double openPts = (Bars.Close[0] - StrategyInfo.AvgEntryPrice) * pos;
+			bool failed = Bars.CurrentBar - m_entryBar >= 15 && openPts <= 0;
+			if (flat || failed) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+			if (pos > 0) { m_ls.Send(m_stop); m_lt.Send(m_target); }
+			else { m_ss.Send(m_stop); m_st.Send(m_target); }
+		}
 		private int floorTicks()
 		{
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) return p.costFloorTicks; }
 			catch (Exception) { }
 			return 1;
-		}
-		private int sessionHhmm() { return m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes; }
-		private bool budget(double entry, double stop)
-		{
-			double risk = Math.Abs(entry - stop);
-			return risk > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
-		}
-		private void arm(bool longSide, double entry, double stop, double target, string name)
-		{
-			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = ETargetMode.SingleTarget;
-			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			GxConfig.BreakEven = EBreakEven.Off;
-			GxConfig.TrailMode = ETrailMode.None;
-			GxConfig.SessionExit = ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = sessionHhmm();
-			GxConfig.TimeStopMinutes = 0;
-			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
-			ExitMarket mkt = new ExitMarket();
-			mkt.Tick = tickSize();
-			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
-			mkt.EntryStop = stop;
-			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
-			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 		private double widen(bool longSide, double entry, double stop)
 		{
@@ -229,6 +224,10 @@ namespace PowerLanguage.Strategy
 			if (!longSide && stop - entry < floor) return entry + floor;
 			return stop;
 		}
-
+		private bool budget(double entry, double stop)
+		{
+			double risk = Math.Abs(entry - stop);
+			return risk > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
+		}
 	}
 }

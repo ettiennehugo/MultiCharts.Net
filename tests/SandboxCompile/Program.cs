@@ -59,8 +59,50 @@ static class Program
 			if (!OriginalTen.Contains(name))
 				Check(text.IndexOf("IOGMode.Disabled", StringComparison.Ordinal) >= 0, name + " sets IOGMode.Disabled");
 		}
+		var bodies = new Dictionary<string, string>(StringComparer.Ordinal);
+		int dup = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			if (OriginalTen.Contains(name)) continue;
+			string key = CalcBarKey(File.ReadAllText(path));
+			if (key.Length < 40) continue;
+			string prior;
+			if (bodies.TryGetValue(key, out prior))
+			{
+				dup++;
+				Console.WriteLine("FAIL duplicate CalcBar " + name + " == " + prior);
+			}
+			else bodies[key] = name;
+		}
+		Check(dup == 0, "CalcBar bodies are unique apart from names and string literals (" + dup + " duplicates)");
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
+	}
+
+	// Comments and quoted names are removed so two placeholders that differ only by an order name still match.
+	static string CalcBarKey(string text)
+	{
+		int i = text.IndexOf("void CalcBar(", StringComparison.Ordinal);
+		if (i < 0) return "";
+		int brace = text.IndexOf('{', i);
+		if (brace < 0) return "";
+		int depth = 0;
+		int end = brace;
+		for (int j = brace; j < text.Length; j++)
+		{
+			if (text[j] == '{') depth++;
+			else if (text[j] == '}')
+			{
+				depth--;
+				if (depth == 0) { end = j; break; }
+			}
+		}
+		string body = text.Substring(brace, end - brace + 1);
+		body = Regex.Replace(body, @"//[^\n]*", "");
+		body = Regex.Replace(body, "\"[^\"]*\"", "\"\"");
+		body = Regex.Replace(body, @"\s+", "");
+		return body;
 	}
 }

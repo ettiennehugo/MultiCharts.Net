@@ -149,7 +149,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			if (day == m_day) return;
 			m_day = day;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-38 " + day.ToString("yyyy-MM-dd") + " Trade-size entropy is not computed in _TickStream, and the catalogue says the ro");
+			double printVolume = Bars.Volume[0];
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-38 " + day.ToString("yyyy-MM-dd") + " Trade-size entropy is not in _TickStream. Bar volume " + printVolume.ToString("0") + " is not a print-size distribution.");
 		}
 	}
 }

@@ -149,7 +149,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			if (day == m_day) return;
 			m_day = day;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-36 " + day.ToString("yyyy-MM-dd") + " No GEX series is on this feed, and there is no VIX series to use as the catalogu");
+			double barSpan = Bars.High[0] - Bars.Low[0];
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-36 " + day.ToString("yyyy-MM-dd") + " No GEX series is on this feed. Bar span " + barSpan.ToString("0.00") + " is not a gamma reading.");
 		}
 	}
 }

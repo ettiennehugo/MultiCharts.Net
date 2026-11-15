@@ -149,7 +149,9 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			if (day == m_day) return;
 			m_day = day;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-40 " + day.ToString("yyyy-MM-dd") + " This is a cost model, not an entry. It does not set Commission or Slippage. It j");
+			double costFloor = tickSize();
+			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) costFloor = p.costFloorTicks * tickSize(); } catch (Exception) { }
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-40 " + day.ToString("yyyy-MM-dd") + " Cost floor " + costFloor.ToString("0.00") + ". This file does not set Commission or Slippage.");
 		}
 	}
 }
