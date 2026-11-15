@@ -457,3 +457,21 @@ A file journals and does not send an order only when its catalogue heading has n
 | EX-07 | Half off at 1 R. GX ScaleOutThenRunner, T1 1 R, scale 50, BreakEven AfterT1. One contract cannot scale. |
 | EX-08 | Target-multiple diagnostic. No entry. |
 | EX-09 | Stagnation exit for a host. No entry. |
+| EX-10 | Acceptance-failure exit for a host. No entry. |
+| EX-11 | Stop-beyond-LVN module. No entry. |
+| EX-12 | CVD-divergence exit for a host runner. No entry. |
+| EX-13 | 1.5 R partial and breakeven for a host. One contract cannot scale. |
+| RG-01 | Value-migration gate. No entry. |
+| RG-02 | Balance classifier. No entry. |
+| RG-04 | Live day-type gate. No entry. |
+| RG-05 | Noise-band gate. No entry. |
+| RG-06 | Higher-timeframe trend gate. No entry. |
+| RG-08 | Compression gate. No entry. |
+| RG-09 | Three-family filter. Same module as KD-09. No entry. |
+| RG-10 | Fit-regime stand-down. Same module as KD-04. No entry. |
+| PF-01 | Multi-market trend and carry book. No single-instrument entry. |
+| PF-02 | Regime sleeve router. No entry. |
+| PF-04 | Portfolio risk budget. No entry. |
+| PF-05 | Drawdown throttle. No entry. |
+| PF-06 | Portfolio volatility target. No single-instrument entry. |
+| PF-07 | Meta-label of host trades. No trained model and no entry. |
