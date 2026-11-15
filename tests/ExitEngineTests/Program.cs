@@ -38,6 +38,8 @@ static class Program
 		Precedence();
 		Clock();
 		FlatByAfterEntry();
+		FlatByExchangeClock();
+		EmbeddedFillAnchorsStop();
 		Control();
 		Idx();
 		RAccount();
@@ -544,6 +546,57 @@ static class Program
 			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 10, 0, 0))).Reason == null, (lng ? "L" : "S") + " the morning after an add is not a new deadline");
 			Check(add.Manage(pa, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "FLATBY", (lng ? "L" : "S") + " the add exits at the original entry's next 15:55");
 		}
+	}
+
+	static TimeZoneInfo Tz(string windowsId, string iana)
+	{
+		try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
+		catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById(iana); }
+		catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById(iana); }
+	}
+
+	static void FlatByExchangeClock()
+	{
+		TimeZoneInfo ct = Tz("Central Standard Time", "America/Chicago");
+		TimeZoneInfo et = Tz("Eastern Standard Time", "America/New_York");
+		var exch = new DateTime(2024, 6, 3, 15, 50, 0);
+		var local = new DateTime(2024, 6, 3, 16, 50, 0);
+		DateTime fromExchange = ExitSession.ToExchangeClock(exch, ct, ct);
+		DateTime fromLocal = ExitSession.ToExchangeClock(local, et, ct);
+		Check(fromExchange == fromLocal && fromExchange == exch, "a CME Exchange bar and the same instant on an Eastern Local chart are one Central time");
+		DateTime due = ExitSession.FlatByDeadline(fromExchange, 1555);
+		Check(due == ExitSession.FlatByDeadline(fromLocal, 1555) && due == new DateTime(2024, 6, 3, 15, 55, 0), "that futures entry is due at 15:55 Central the same day");
+		var lateEx = new DateTime(2024, 6, 3, 16, 0, 0);
+		var lateLocal = new DateTime(2024, 6, 3, 17, 0, 0);
+		DateTime late = ExitSession.ToExchangeClock(lateLocal, et, ct);
+		Check(late == ExitSession.ToExchangeClock(lateEx, ct, ct) && ExitSession.FlatByDeadline(late, 1555) == new DateTime(2024, 6, 4, 15, 55, 0), "a 16:00 Central entry is held to 15:55 Central the next day");
+		var stock = new DateTime(2024, 6, 3, 15, 50, 0);
+		DateTime stockEt = ExitSession.ToExchangeClock(stock, et, et);
+		Check(stockEt == stock && ExitSession.FlatByDeadline(stockEt, 1555) == new DateTime(2024, 6, 3, 15, 55, 0), "a NYSE stock uses Eastern: 15:50 is due at 15:55 Eastern the same day");
+		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 16, 0, 0), 1555) == new DateTime(2024, 6, 4, 15, 55, 0), "a 16:00 Eastern stock entry is held to the next day's 15:55 Eastern");
+		Check(ExitSession.ExchangeHhmm(new DateTime(2024, 11, 29), 1315, et, ct) == 1215, "an early close of 13:15 Eastern is 12:15 Central");
+		DateTime winterEx = ExitSession.ToExchangeClock(new DateTime(2024, 1, 15, 15, 50, 0), ct, ct);
+		DateTime winterLocal = ExitSession.ToExchangeClock(new DateTime(2024, 1, 15, 16, 50, 0), et, ct);
+		Check(winterEx == winterLocal, "Central and Eastern stay one hour apart in January");
+	}
+
+	static void EmbeddedFillAnchorsStop()
+	{
+		var cfg = new ExitConfig { InitialStop = EInitialStop.AtrMultiple, StopAtrMult = 1.5, Id = "TH" };
+		var m = Mkt(0.25, 20, 19, 2.0);
+		double signal = 20000;
+		double planned = _ExitEngine.InitialStop(EInitialStop.AtrMultiple, true, signal, m, cfg, true);
+		double dist = Math.Abs(signal - planned);
+		Check(Near(dist, 4.75), "the planned NQ distance is the 19-tick floor, wider than 1.5 x 8 ticks");
+		Check(Near(dist * m.Bpv, 95), "the fill-bar stop amount is that distance times the point value");
+		double fill = 20010;
+		double live = ExitSession.HandoverStop(true, fill, dist);
+		Check(Near(live, fill - dist) && Math.Abs(live - (signal - dist)) > 1, "a long fill that gaps up is stopped at the fill minus the distance");
+		double splan = _ExitEngine.InitialStop(EInitialStop.AtrMultiple, false, signal, m, cfg, true);
+		double sdist = Math.Abs(signal - splan);
+		double sfill = 19990;
+		double slive = ExitSession.HandoverStop(false, sfill, sdist);
+		Check(Near(sdist, dist) && Near(slive, sfill + sdist) && Math.Abs(slive - (signal + sdist)) > 1, "a short fill that gaps down is stopped at the fill plus the distance");
 	}
 
 	static ExitBar Quiet(bool lng, DateTime t)
@@ -1096,11 +1149,18 @@ static class Program
 		Check(src.IndexOf("if (m_journalGx) header += \",\" + GX_JOURNAL_COLS;", StringComparison.Ordinal) >= 0, "GX journal columns are appended only after exitPlan");
 		int gx = src.IndexOf("// ---- GX-2", StringComparison.Ordinal);
 		string gxBody = gx >= 0 ? src.Substring(gx) : "";
-		Check(gxBody.IndexOf("m_gxLF.Send(stop)", StringComparison.Ordinal) >= 0
-			&& gxBody.IndexOf("m_gxSF.Send(stop)", StringComparison.Ordinal) >= 0
+		int planAt = src.IndexOf("protected double exitPlan(", StringComparison.Ordinal);
+		int planEnd = src.IndexOf("protected DateTime gxExchangeTime(", StringComparison.Ordinal);
+		string planBody = planAt >= 0 && planEnd > planAt ? src.Substring(planAt, planEnd - planAt) : "";
+		Check(planBody.IndexOf("gxSendFillBarStop()", StringComparison.Ordinal) >= 0
+			&& planBody.IndexOf("gxSendFullStop(", StringComparison.Ordinal) < 0
+			&& gxBody.IndexOf("GenerateStopLoss(m_gxFillStopDl)", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("HandoverStop(", StringComparison.Ordinal) >= 0
 			&& gxBody.IndexOf("m_gxLS.Send(stop, qty)", StringComparison.Ordinal) < 0
 			&& gxBody.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0
-			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "the fill-bar stop is FromAll with no quantity, and GX orders are exits");
+			&& gxBody.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "the embedded fill-bar stop is GenerateStopLoss from the fill, and GX orders are exits");
+		Check(gxBody.IndexOf("bar.TimeEt = gxExchangeTime(Bars.Time[0])", StringComparison.Ordinal) >= 0
+			&& gxBody.IndexOf("gxExchangeTime(Bars.Time[0]), 0)", StringComparison.Ordinal) >= 0, "embedded FlatBy uses the exchange clock");
 	}
 
 	static void Gx3Source()
@@ -1130,6 +1190,7 @@ static class Program
 		Check(src.IndexOf("portfolioArm(longSide ? 1 : -1, plannedEntry, structuralStop, qty, stop)", StringComparison.Ordinal) >= 0, "embedded exitPlan arms in Portfolio Trader");
 		Check(src.IndexOf("EXIT Journal: GX STOP-MOVE", StringComparison.Ordinal) >= 0, "portfolioStop logs the stop move and pm.riskOpen");
 		Check(src.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0, "embedded and the wrapper keep a stop working after a partial T1");
+		Check(gx.IndexOf("bar.TimeEt = gxExchangeTime(Bars.Time[0])", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxExchangeTime(Bars.Time[0]), 0)", StringComparison.Ordinal) >= 0, "the wrapper converts the bar and the entry to the exchange clock");
 		Check(src.IndexOf("EXIT PARTIAL", StringComparison.Ordinal) < 0 && gx.IndexOf("EXIT PARTIAL ", StringComparison.Ordinal) >= 0 && gx.IndexOf("plan.WorkingStop || d.StopChanged || d.PartialQty > 0", StringComparison.Ordinal) >= 0, "a partial is its own line and the wrapper still sends the runner stop");
 		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
 		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");

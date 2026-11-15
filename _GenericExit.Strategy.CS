@@ -864,6 +864,29 @@ namespace PowerLanguage.Function
 
 		public static int Hhmm(DateTime t) { return t.Hour * 100 + t.Minute; }
 
+		/// <summary>
+		/// Chart bar time into the instrument exchange zone. Same rule as _CustomSignal.ToZone and InstrumentSessions:
+		/// identity when the zones match, a spring-forward gap moves forward one hour, then TimeZoneInfo.ConvertTime.
+		/// </summary>
+		public static DateTime ToExchangeClock(DateTime barTime, TimeZoneInfo barZone, TimeZoneInfo exchangeZone)
+		{
+			if (barZone == null || exchangeZone == null) return barTime;
+			if (barTime.Kind == DateTimeKind.Utc) return TimeZoneInfo.ConvertTimeFromUtc(barTime, exchangeZone);
+			DateTime t = DateTime.SpecifyKind(barTime, DateTimeKind.Unspecified);
+			if (barZone.Id == exchangeZone.Id) return t;
+			if (barZone.IsInvalidTime(t)) t = t.AddHours(1);
+			return TimeZoneInfo.ConvertTime(t, barZone, exchangeZone);
+		}
+
+		/// <summary>An ET clock time on an ET date, expressed as HHMM in the exchange zone. Used for an early-close cutoff stored as ET.</summary>
+		public static int ExchangeHhmm(DateTime etDate, int etHhmm, TimeZoneInfo eastern, TimeZoneInfo exchangeZone)
+		{
+			DateTime wall = CutoffOn(etDate, etHhmm);
+			if (wall == DateTime.MaxValue || eastern == null || exchangeZone == null) return etHhmm;
+			DateTime x = ToExchangeClock(wall, eastern, exchangeZone);
+			return x.Hour * 100 + x.Minute;
+		}
+
 		public static bool TryClock(int hhmm, out int hour, out int minute)
 		{
 			hour = hhmm / 100;
@@ -908,8 +931,8 @@ namespace PowerLanguage.Function
 			if (bar.HolidayClosed) return false;
 			if (MappedTf == "D1") return false;
 			if (p == null || p.FillTime == DateTime.MinValue) return false;
-			// Owner 2026-11-12 15:28 ET: the deadline is the first FlatBy strictly after the original entry.
-			// The first bar at or after that deadline flattens. Daily bars never reach here.
+			// Owner 2026-11-12 15:28 ET, clock amended 2026-11-15: FillTime and TimeEt are already in the
+			// instrument's exchange zone. FlatByHHMM and RthCloseHHMM are clocks in that same zone.
 			DateTime deadline = FlatByDeadline(p.FillTime, Config.FlatByHHMM);
 			if (bar.EarlyClose && bar.RthCloseHHMM > 0)
 			{
@@ -1431,7 +1454,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int TimeStopMinutes { get; set; }
 		// Purpose: session flatten. Default: FlatBy. Units: ESessionExit. Range: the two members. Effect: HoldOvernight keeps the stop. Interactions: FlatByHHMM. Fixed or research-tuned: fixed
 		[Input] public ESessionExit SessionExit { get; set; }
-		// Purpose: flatten clock, ET. Default: 1555. Units: HHMM. Range: 0..2359. Effect: the bar at or after this time flattens. Interactions: SessionExit. Fixed or research-tuned: research-tuned
+		// Purpose: flatten clock in the instrument's exchange time zone. Default: 1555. Units: HHMM. Range: 0..2359. Effect: 15:55 Central for CME futures, 15:55 Eastern for NYSE stocks. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int FlatByHHMM { get; set; }
 		// Purpose: maximum calendar days in a trade. Default: 0 (off). Units: days. Range: >= 0. Effect: exit on that day count. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int MaxHoldDays { get; set; }
@@ -1707,7 +1730,7 @@ namespace PowerLanguage.Strategy
 			bool level = mode == EInitialStop.SignalBarExtreme || mode == EInitialStop.SwingExtreme;
 			double live = level || !(m_disasterPx > 0) ? m_wrap.InitialStop(longSide, fill, m_mkt) : ExitSession.HandoverStop(longSide, fill, m_disasterPx);
 			double equity = this.InitialCapital + this.NetProfit;
-			m_wrap.Open(m_wrapPos, longSide, pe, ps, fill, live, lots, m_mkt.Tick, m_mkt.Bpv, equity, "", Bars.Time[0], 0);
+			m_wrap.Open(m_wrapPos, longSide, pe, ps, fill, live, lots, m_mkt.Tick, m_mkt.Bpv, equity, "", gxExchangeTime(Bars.Time[0]), 0);
 			double arm = Math.Abs(pe - ps) * m_mkt.Bpv * lots;
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill GX planned $" + arm.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + m_wrapPos.InitialRDollars.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture));
 			Emit(m_wrap.Log);
@@ -1736,7 +1759,7 @@ namespace PowerLanguage.Strategy
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_mkt.Tick; bar.Bpv = m_mkt.Bpv; bar.AtrTrail = m_mkt.AtrTrail > 0 ? m_mkt.AtrTrail : m_atrT; bar.Ema = m_ema;
-			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_mkt.BarMinutes; bar.MinutesToNews = double.NaN;
+			bar.TimeEt = gxExchangeTime(Bars.Time[0]); bar.BarMinutes = m_mkt.BarMinutes; bar.MinutesToNews = double.NaN;
 			ExitDecision d = m_wrap.Manage(m_wrapPos, bar);
 			PublishOpen(m_wrapPos.Stop);
 			string kind = WrapperRun.ExitToSend(plan, d.Reason, m_wrapPos != null && m_wrapPos.GapThroughStop, m_wrapPos, lots);

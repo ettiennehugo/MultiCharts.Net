@@ -1718,6 +1718,12 @@ namespace PowerLanguage.Strategy
 		private bool m_gxT1Sent;
 		private bool m_gxFullSpent;
 		private bool m_gxCloseLogged;
+		private bool m_gxHaveArmNet;
+		private bool m_gxFillStopLogged;
+		private bool m_gxZoneWarned;
+		private double m_gxStopDist;
+		private double m_gxFillStopDl;
+		private double m_gxArmNet;
 		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
@@ -2416,6 +2422,12 @@ namespace PowerLanguage.Strategy
 			m_gxT1Sent = false;
 			m_gxFullSpent = false;
 			m_gxCloseLogged = false;
+			m_gxHaveArmNet = false;
+			m_gxFillStopLogged = false;
+			m_gxZoneWarned = false;
+			m_gxStopDist = 0;
+			m_gxFillStopDl = 0;
+			m_gxArmNet = 0;
 			m_gxGate.OnFlat();
 			m_gx = null;
 			m_gxPos = null;
@@ -4357,10 +4369,65 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "EXIT Journal: GX ARM side=" + (longSide ? "long" : "short") + " qty=" + qty.ToString(CultureInfo.InvariantCulture) + " entry=" + plannedEntry.ToString("0.########", CultureInfo.InvariantCulture) + " stop=" + stop.ToString("0.########", CultureInfo.InvariantCulture));
 			}
 			if (journalOn()) journalArm(m_gxEntryOrder, plannedEntry, stop, double.NaN);
-			// qty is the arm code the MM may replace. A Total stop for that code covers one contract of a larger fill.
-			// FromAll with no quantity exits whatever size the entry fills, including on the fill bar.
-			gxSendFullStop(longSide, stop);
+			// The price above is the plan (T1, arm). The fill-bar stop is that distance in dollars, measured from the fill.
+			m_gxStopDist = Math.Abs(plannedEntry - stop);
+			double bpv = mkt.Bpv > 0 ? mkt.Bpv : 0;
+			m_gxFillStopDl = m_gxStopDist * bpv;
+			m_gxFillStopLogged = false;
+			try { m_gxArmNet = this.NetProfit; m_gxHaveArmNet = true; } catch (Exception) { m_gxHaveArmNet = false; }
+			gxSendFillBarStop();
 			return stop;
+		}
+
+		/// <summary>Chart bar time in the instrument's exchange zone. Identity when the chart is already on Exchange time. barZone and exchangeZone come from the instrument profile (Bars.Info.TimeZone and Bars.Info.Exchange).</summary>
+		protected DateTime gxExchangeTime(DateTime barTime)
+		{
+			InstrumentProfile p = null;
+			try { p = InstrumentProfileOf(1); }
+			catch (Exception ex)
+			{
+				trace(ETraceLevel.Error, "EXIT Error: GX exchange clock failed - " + ex.Message);
+				throw;
+			}
+			if (p == null || p.barZone == null || p.exchangeZone == null)
+			{
+				if (!m_gxZoneWarned)
+				{
+					m_gxZoneWarned = true;
+					trace(ETraceLevel.Error, "EXIT Error: GX exchange clock has no instrument time zone - using the chart bar time");
+				}
+				return barTime;
+			}
+			return ExitSession.ToExchangeClock(barTime, p.barZone, p.exchangeZone);
+		}
+
+		/// <summary>Built-in stop, dollars per contract, so the fill bar is protected at the fill ± the planned distance for the whole position.</summary>
+		private void gxSendFillBarStop()
+		{
+			if (!(m_gxFillStopDl > 0) || double.IsInfinity(m_gxFillStopDl)) return;
+			try
+			{
+				CurSpecOrdersMode = ESpecOrdersMode.PerContract;
+				GenerateStopLoss(m_gxFillStopDl);
+			}
+			catch (Exception ex)
+			{
+				trace(ETraceLevel.Error, "EXIT Error: GX fill-bar stop failed - " + ex.Message);
+			}
+		}
+
+		/// <summary>The built-in stop closed the trade before the first in-position bar. Log it once and drop the arm.</summary>
+		private void gxNoteEmbeddedFillStop()
+		{
+			if (m_gxFillStopLogged || !m_gxArmed || !m_gxHaveArmNet) return;
+			double net;
+			try { net = this.NetProfit; }
+			catch (Exception) { return; }
+			if (net == m_gxArmNet) return;
+			m_gxFillStopLogged = true;
+			m_gxArmed = false;
+			m_gxFillStopDl = 0;
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: GX FILLBAR-STOP " + m_gxPrefix + " - closed on its fill bar by the built-in stop measured from the fill");
 		}
 
 		/// <summary>One closed bar of an embedded GX trade, including the flat bar after the exit. No-op until exitPlan has been called. Sends only exits that reduce the open side. EXIT CLOSE is written once, on the flat bar.</summary>
@@ -4378,9 +4445,14 @@ namespace PowerLanguage.Strategy
 					m_gxExitReason = "";
 					m_gxT1Sent = false;
 					m_gxFullSpent = false;
+					m_gxStopDist = 0;
+					m_gxFillStopDl = 0;
+					m_gxHaveArmNet = false;
 					if (m_gxPos != null) m_gxPos.Open = false;
 					m_gxArmed = false;
 				}
+				else gxNoteEmbeddedFillStop();
+				if (m_gxArmed) gxSendFillBarStop();
 				return;
 			}
 			if (!m_gxArmed && !m_gxGate.EngineOpen) return;
@@ -4396,12 +4468,13 @@ namespace PowerLanguage.Strategy
 				if (gxPrimaryStopFilled()) gxMarkFullSpent(lots);
 				double fill = StrategyInfo.AvgEntryPrice;
 				double equity = this.InitialCapital + this.NetProfit;
-				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, m_gxPlanStop, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, Bars.Time[0], 0);
+				double live = m_gxStopDist > 0 ? ExitSession.HandoverStop(longSide, fill, m_gxStopDist) : m_gxPlanStop;
+				m_gx.Open(m_gxPos, longSide, m_gxPlanEntry, m_gxPlanStop, fill, live, lots, m_gxMkt.Tick, m_gxMkt.Bpv, equity, m_gxEntryOrder, gxExchangeTime(Bars.Time[0]), 0);
 				m_gxQty = lots;
 				m_gxPos.T1PlanSource = m_gxPlanSource;
 				double plannedR = Math.Abs(m_gxPlanEntry - m_gxPlanStop) * m_gxMkt.Bpv * lots;
 				double fillR = m_gxPos.InitialRDollars;
-				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " planEntry=" + ExitSession.Px(m_gxPlanEntry) + " fill=" + ExitSession.Px(fill) + " stop=" + ExitSession.Px(m_gxPlanStop));
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: R fill " + m_gxPrefix + " planned $" + plannedR.ToString("0.00", CultureInfo.InvariantCulture) + " actual $" + fillR.ToString("0.00", CultureInfo.InvariantCulture) + " qty=" + lots.ToString(CultureInfo.InvariantCulture) + " planEntry=" + ExitSession.Px(m_gxPlanEntry) + " fill=" + ExitSession.Px(fill) + " stop=" + ExitSession.Px(live));
 				gxPublishFillR();
 				gxEmitLog();
 			}
@@ -4424,7 +4497,7 @@ namespace PowerLanguage.Strategy
 			var bar = new ExitBar();
 			bar.High = Bars.High[0]; bar.Low = Bars.Low[0]; bar.Close = Bars.Close[0];
 			bar.Tick = m_gxMkt.Tick; bar.Bpv = m_gxMkt.Bpv; bar.AtrTrail = m_gxMkt.AtrTrail; bar.Ema = m_gxMkt.Ema;
-			bar.TimeEt = Bars.Time[0]; bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
+			bar.TimeEt = gxExchangeTime(Bars.Time[0]); bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
 			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
 			bar.DeferPartial = true;
 			ExitDecision d = m_gx.Manage(m_gxPos, bar);
