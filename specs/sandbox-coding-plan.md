@@ -422,3 +422,9 @@ A file journals and does not send an order only when its catalogue heading has n
 | DV-20 | Weak-low veto for a host level. No entry. |
 | DV-21 | Merged into DV-02. No second entry. |
 | DV-24 | Merged into EX-01. No second entry. |
+| PS-26 | The catalogue says there is no PS-26. No entry. |
+| OF-02 | Delta-z layer on a host breakout. No entry. |
+| OF-03 | Anchored-CVD layer on a host entry. No entry. |
+| OF-06 | Unfinished-auction veto. No entry. The journal uses a poor high as the proxy. |
+| OF-08 | Parked. Per-trade size is not in _TickStream. No entry. |
+| OF-10 | Not buildable. No second footprint engine. No entry. |
