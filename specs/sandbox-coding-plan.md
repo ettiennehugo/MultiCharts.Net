@@ -304,27 +304,27 @@ The counts are in the table at the end of this file.
 | EX-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_07_EX07.Strategy.CS | 11 | coded in batch 11 |
 | EX-08 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_08_EX08.Strategy.CS | 11 | coded in batch 11 |
 | EX-09 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_09_EX09.Strategy.CS | 11 | coded in batch 11 |
-| EX-10 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_10_EX10.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| EX-11 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_11_EX11.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| EX-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_12_EX12.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| EX-13 | 1.5R partial, deep-pullback breakeven, trail under the initiative print (module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_13_X15RPartial.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-01 | Value-migration gate (V-score) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_01_ValueMigrationGate.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-02 | Balance/imbalance classifier + entropy skip | trading-idea-catalogue.md | regime-filter | sandbox/_RG_02_BalanceImbalanceClassifier.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| EX-10 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_10_EX10.Strategy.CS | 12 | coded in batch 12 |
+| EX-11 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_11_EX11.Strategy.CS | 12 | coded in batch 12 |
+| EX-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_12_EX12.Strategy.CS | 12 | coded in batch 12 |
+| EX-13 | 1.5R partial, deep-pullback breakeven, trail under the initiative print (module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_13_X15RPartial.Strategy.CS | 12 | coded in batch 12 |
+| RG-01 | Value-migration gate (V-score) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_01_ValueMigrationGate.Strategy.CS | 12 | coded in batch 12 |
+| RG-02 | Balance/imbalance classifier + entropy skip | trading-idea-catalogue.md | regime-filter | sandbox/_RG_02_BalanceImbalanceClassifier.Strategy.CS | 12 | coded in batch 12 |
 | RG-03 | Volatility regime stratifier | trading-idea-catalogue.md | duplicate-of | _RegimeEngine AtrTercile / _A2_63_RegimeGate arm A | done | already on main as _RegimeEngine AtrTercile / _A2_63_RegimeGate arm A. No second sandbox copy in batch 1. |
-| RG-04 | Live day-type proxy at 10:30 (includes VWAP-cross count) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_04_LiveDayType.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-05 | Noise-band filter (Zarattini) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_05_NoiseBandFilter.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-06 | HTF trend state (TSMOM + 60m structure) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | regime-filter | sandbox/_RG_06_HTFTrendState.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| RG-04 | Live day-type proxy at 10:30 (includes VWAP-cross count) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_04_LiveDayType.Strategy.CS | 12 | coded in batch 12 |
+| RG-05 | Noise-band filter (Zarattini) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_05_NoiseBandFilter.Strategy.CS | 12 | coded in batch 12 |
+| RG-06 | HTF trend state (TSMOM + 60m structure) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | regime-filter | sandbox/_RG_06_HTFTrendState.Strategy.CS | 12 | coded in batch 12 |
 | RG-07 | Event, roll and thin-session exclusions | trading-idea-catalogue.md | regime-filter | sandbox/_RG_07_ExclusionGate.Strategy.CS | 2 | coded in batch 2 |
-| RG-08 | Compression state (range/ATR) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_08_CompressionStateRange.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-09 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_09_RG09.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| RG-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_10_RG10.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-01 | Trend + carry core (parallel track) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_01_TrendCarryCore.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-02 | Regime-complementary intraday sleeves | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_02_RegimeComplementaryIntraday.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| RG-08 | Compression state (range/ATR) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_08_CompressionStateRange.Strategy.CS | 12 | coded in batch 12 |
+| RG-09 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_09_RG09.Strategy.CS | 12 | coded in batch 12 |
+| RG-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_10_RG10.Strategy.CS | 12 | coded in batch 12 |
+| PF-01 | Trend + carry core (parallel track) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_01_TrendCarryCore.Strategy.CS | 12 | coded in batch 12 |
+| PF-02 | Regime-complementary intraday sleeves | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_02_RegimeComplementaryIntraday.Strategy.CS | 12 | coded in batch 12 |
 | PF-03 | Cross-market diversification & hidden-beta monitor | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_03_XmktBetaMonitor.Strategy.CS | 2 | coded in batch 2 |
-| PF-04 | Risk budgeting (deflated quarter-Kelly, capped) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_04_RiskBudgetingDeflated.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-05 | Drawdown throttles + two-CUSUM monitoring | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_05_DrawdownThrottlesTwo.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-06 | Portfolio volatility targeting | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_06_PortfolioVolatilityTargeting.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
-| PF-07 | Meta-labelling the survivors (later) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_07_MetaLabellingThe.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
+| PF-04 | Risk budgeting (deflated quarter-Kelly, capped) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_04_RiskBudgetingDeflated.Strategy.CS | 12 | coded in batch 12 |
+| PF-05 | Drawdown throttles + two-CUSUM monitoring | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_05_DrawdownThrottlesTwo.Strategy.CS | 12 | coded in batch 12 |
+| PF-06 | Portfolio volatility targeting | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_06_PortfolioVolatilityTargeting.Strategy.CS | 12 | coded in batch 12 |
+| PF-07 | Meta-labelling the survivors (later) | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_07_MetaLabellingThe.Strategy.CS | 12 | coded in batch 12 |
 | PF-08 | Donchian / Turtle daily trend sleeve (companion to PF-01) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_08_DonchianTurtleDaily.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
 | L2-01 | Cancellation veto before level entries | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_01_CancellationVetoBefore.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
 | L2-02 | Book-shape regime | trading-idea-catalogue.md | data-unavailable | sandbox/_L2_02_BookShapeRegime.Strategy.CS (name fixed when the batch is written) | 13 | not coded |
