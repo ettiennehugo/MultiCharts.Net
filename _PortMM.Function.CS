@@ -35,6 +35,12 @@ namespace PowerLanguage.Function
 		public const string EvtMask = "pm.evtMask";
 		public const string EvtWin = "pm.evtWin";
 		public const string EvtNext = "pm.evtNext";
+		/// <summary>GX-2. Planned entry and planned widened stop, written by exitPlan / gxPublishPlan and cleared when flat and not armed.</summary>
+		public const string GxPlanEntry = "pm.gxPlanEntry";
+		public const string GxPlanStop = "pm.gxPlanStop";
+		/// <summary>GX-3 wrapper. Active stop and the owner tag, written only while a position is open.</summary>
+		public const string GxStop = "pm.gxStop";
+		public const string GxOwner = "pm.gxOwner";
 		// book-level values written by the MM into CommonPortfolioData
 		public const string Mult = "pm.mult", Heat = "pm.heat", Dd = "pm.dd", Rho = "pm.rho";
 		public const string Profile = "pm.profile", Uncorr = "pm.uncorr", Uncorr03 = "pm.uncorr03";
