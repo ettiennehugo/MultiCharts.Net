@@ -63,7 +63,7 @@ namespace PowerLanguage.Function
 		public int TimeStopBars;
 		public int TimeStopMinutes;
 		public ESessionExit SessionExit = ESessionExit.FlatBy;
-		public int FlatByHHMM = 1555;
+		public int FlatByHHMM = -1;
 		public int MaxHoldDays;
 
 		public int NewsExitMinutes;
@@ -912,6 +912,9 @@ namespace PowerLanguage.Function
 			return new DateTime(day.Year, day.Month, day.Day, hour, minute, 0);
 		}
 
+		/// <summary>Five minutes before a regular-session end. The carry-over rule stays in FlatByDeadline.</summary>
+		public static int FlatByFromSessionEnd(int endHhmm) { return MinusMinutes(endHhmm, 5); }
+
 		public static int MinusMinutes(int hhmm, int minutes)
 		{
 			int total = (hhmm / 100) * 60 + (hhmm % 100) - minutes;
@@ -1454,7 +1457,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int TimeStopMinutes { get; set; }
 		// Purpose: session flatten. Default: FlatBy. Units: ESessionExit. Range: the two members. Effect: HoldOvernight keeps the stop. Interactions: FlatByHHMM. Fixed or research-tuned: fixed
 		[Input] public ESessionExit SessionExit { get; set; }
-		// Purpose: flatten clock in the instrument's exchange time zone. Default: 1555. Units: HHMM. Range: 0..2359. Effect: 15:55 Central for CME futures, 15:55 Eastern for NYSE stocks. Interactions: SessionExit. Fixed or research-tuned: research-tuned
+		// Purpose: explicit flat-by clock in the instrument's exchange time zone. Default: -1 (regular session end minus 5 minutes). Units: HHMM. Range: -1 or 0..2359. Effect: a set clock overrides the session. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int FlatByHHMM { get; set; }
 		// Purpose: maximum calendar days in a trade. Default: 0 (off). Units: days. Range: >= 0. Effect: exit on that day count. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int MaxHoldDays { get; set; }
@@ -1512,7 +1515,7 @@ namespace PowerLanguage.Strategy
 			BreakEven = EBreakEven.AfterT1; BreakEvenUnit = ETriggerUnit.RMultiple; BreakEvenValue = 1.0; BreakEvenOffsetTicks = 1;
 			TrailMode = ETrailMode.Chandelier; TrailStart = ETrailStart.AfterT1; TrailStartUnit = ETriggerUnit.RMultiple; TrailStartValue = 1.0;
 			TrailAtrMult = 3.0; TrailAtrLength = 22; TrailBars = 2; TrailEmaLength = 20;
-			TimeStopBars = 0; TimeStopMinutes = 0; SessionExit = ESessionExit.FlatBy; FlatByHHMM = 1555; MaxHoldDays = 0; NewsExitMinutes = 0;
+			TimeStopBars = 0; TimeStopMinutes = 0; SessionExit = ESessionExit.FlatBy; FlatByHHMM = -1; MaxHoldDays = 0; NewsExitMinutes = 0;
 			RollExit = ERollExit.FlattenBeforeSplice; AddStopMode = EAddStopMode.RaiseToAddLow; ExitControl = EExitControl.None;
 			ControlExitBarsM1 = 30; ControlExitBarsM5 = 12; ControlExitBarsM15 = 8; ControlExitBarsH1 = 6; ControlExitBarsD1 = 5;
 			InitialStopIdx = -1; T1UnitIdx = -1; FinalTargetUnitIdx = -1; BreakEvenIdx = -1; BreakEvenUnitIdx = -1; TrailModeIdx = -1; TrailStartIdx = -1; TrailStartUnitIdx = -1;
@@ -1641,7 +1644,7 @@ namespace PowerLanguage.Strategy
 			c.TargetMode = TargetMode; c.T1Unit = T1Unit; c.T1Value = T1Value; c.T1ScalePct = T1ScalePct; c.FinalTargetUnit = FinalTargetUnit; c.FinalTargetValue = FinalTargetValue; c.SingleLotMode = SingleLotMode;
 			c.BreakEven = BreakEven; c.BreakEvenUnit = BreakEvenUnit; c.BreakEvenValue = BreakEvenValue; c.BreakEvenOffsetTicks = BreakEvenOffsetTicks;
 			c.TrailMode = TrailMode; c.TrailStart = TrailStart; c.TrailStartUnit = TrailStartUnit; c.TrailStartValue = TrailStartValue; c.TrailAtrMult = TrailAtrMult; c.TrailAtrLength = TrailAtrLength; c.TrailBars = TrailBars; c.TrailEmaLength = TrailEmaLength;
-			c.TimeStopBars = TimeStopBars; c.TimeStopMinutes = TimeStopMinutes; c.SessionExit = SessionExit; c.FlatByHHMM = FlatByHHMM; c.MaxHoldDays = MaxHoldDays; c.NewsExitMinutes = NewsExitMinutes;
+			c.TimeStopBars = TimeStopBars; c.TimeStopMinutes = TimeStopMinutes; c.SessionExit = SessionExit; c.FlatByHHMM = gxResolveFlatBy(FlatByHHMM); c.MaxHoldDays = MaxHoldDays; c.NewsExitMinutes = NewsExitMinutes;
 			c.RollExit = RollExit; c.AddStopMode = AddStopMode; c.ExitControl = ExitControl;
 			c.ControlExitBarsM1 = ControlExitBarsM1; c.ControlExitBarsM5 = ControlExitBarsM5; c.ControlExitBarsM15 = ControlExitBarsM15; c.ControlExitBarsH1 = ControlExitBarsH1; c.ControlExitBarsD1 = ControlExitBarsD1;
 			c.InitialStopIdx = InitialStopIdx; c.T1UnitIdx = T1UnitIdx; c.FinalTargetUnitIdx = FinalTargetUnitIdx; c.BreakEvenIdx = BreakEvenIdx; c.BreakEvenUnitIdx = BreakEvenUnitIdx; c.TrailModeIdx = TrailModeIdx; c.TrailStartIdx = TrailStartIdx; c.TrailStartUnitIdx = TrailStartUnitIdx;

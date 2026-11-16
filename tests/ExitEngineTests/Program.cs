@@ -21,6 +21,7 @@ static class Program
 	static ExitSession Eng(Action<ExitConfig> set = null, ExitMarket? mkt = null)
 	{
 		var e = new ExitSession();
+		e.Config.FlatByHHMM = 1555;
 		if (set != null) set(e.Config);
 		e.Start(mkt ?? Mkt());
 		return e;
@@ -39,6 +40,7 @@ static class Program
 		Clock();
 		FlatByAfterEntry();
 		FlatByExchangeClock();
+		FlatByFromRegularSession();
 		EmbeddedFillAnchorsStop();
 		Control();
 		Idx();
@@ -71,7 +73,7 @@ static class Program
 		Check(c.BreakEven == EBreakEven.AfterT1 && c.BreakEvenUnit == ETriggerUnit.RMultiple && c.BreakEvenValue == 1 && c.BreakEvenOffsetTicks == 1, "default BE");
 		Check(c.TrailMode == ETrailMode.Chandelier && c.TrailStart == ETrailStart.AfterT1 && c.TrailAtrMult == 3 && c.TrailAtrLength == 22, "default trail");
 		Check(c.TrailStartUnit == ETriggerUnit.RMultiple && c.TrailStartValue == 1 && c.TrailBars == 2 && c.TrailEmaLength == 20, "default trail unit");
-		Check(c.TimeStopBars == 0 && c.TimeStopMinutes == 0 && c.SessionExit == ESessionExit.FlatBy && c.FlatByHHMM == 1555 && c.MaxHoldDays == 0, "default clock");
+		Check(c.TimeStopBars == 0 && c.TimeStopMinutes == 0 && c.SessionExit == ESessionExit.FlatBy && c.FlatByHHMM == -1 && c.MaxHoldDays == 0, "default clock derives from the session");
 		Check(c.NewsExitMinutes == 0 && c.RollExit == ERollExit.FlattenBeforeSplice && c.AddStopMode == EAddStopMode.RaiseToAddLow && c.ExitControl == EExitControl.None, "default news roll add control");
 		Check(c.ControlExitBarsM1 == 30 && c.ControlExitBarsM5 == 12 && c.ControlExitBarsM15 == 8 && c.ControlExitBarsH1 == 6 && c.ControlExitBarsD1 == 5, "default control N");
 		Check(c.InitialStopIdx == -1 && c.T1UnitIdx == -1 && c.FinalTargetUnitIdx == -1 && c.BreakEvenIdx == -1 && c.BreakEvenUnitIdx == -1 && c.TrailModeIdx == -1 && c.TrailStartIdx == -1 && c.TrailStartUnitIdx == -1, "default idx -1");
@@ -578,6 +580,24 @@ static class Program
 		DateTime winterEx = ExitSession.ToExchangeClock(new DateTime(2024, 1, 15, 15, 50, 0), ct, ct);
 		DateTime winterLocal = ExitSession.ToExchangeClock(new DateTime(2024, 1, 15, 16, 50, 0), et, ct);
 		Check(winterEx == winterLocal, "Central and Eastern stay one hour apart in January");
+	}
+
+	static void FlatByFromRegularSession()
+	{
+		TimeZoneInfo ct = Tz("Central Standard Time", "America/Chicago");
+		TimeZoneInfo et = Tz("Eastern Standard Time", "America/New_York");
+		int esEnd = ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), 1600, et, ct);
+		int esFlat = ExitSession.FlatByFromSessionEnd(esEnd);
+		Check(esEnd == 1500 && esFlat == 1455, "CME equity RTH ends 16:00 Eastern, so the flat-by is 14:55 Central");
+		Check(ExitSession.FlatByFromSessionEnd(1600) == 1555, "NYSE regular session ends 16:00 Eastern, so the flat-by is 15:55 Eastern");
+		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 10, 0, 0), esFlat) == new DateTime(2024, 6, 3, 14, 55, 0), "a morning CME entry closes at 14:55 Central the same day");
+		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 15, 0, 0), esFlat) == new DateTime(2024, 6, 4, 14, 55, 0), "an entry after the CME cutoff is held to the next session's cutoff");
+		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 16, 0, 0), 1555) == new DateTime(2024, 6, 4, 15, 55, 0), "an explicit FlatByHHMM still overrides the session");
+		var e = Eng(c => c.FlatByHHMM = esFlat);
+		var p = new ExitPosition();
+		e.Open(p, true, 5000, 5000, 4900, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
+		Check(e.Manage(p, Quiet(true, new DateTime(2024, 6, 3, 14, 54, 0))).Reason == null, "14:54 Central holds");
+		Check(e.Manage(p, Quiet(true, new DateTime(2024, 6, 3, 14, 55, 0))).Reason == "FLATBY", "14:55 Central is the CME session-end flat-by");
 	}
 
 	static void EmbeddedFillAnchorsStop()
@@ -1191,6 +1211,7 @@ static class Program
 		Check(src.IndexOf("EXIT Journal: GX STOP-MOVE", StringComparison.Ordinal) >= 0, "portfolioStop logs the stop move and pm.riskOpen");
 		Check(src.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0, "embedded and the wrapper keep a stop working after a partial T1");
 		Check(gx.IndexOf("bar.TimeEt = gxExchangeTime(Bars.Time[0])", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxExchangeTime(Bars.Time[0]), 0)", StringComparison.Ordinal) >= 0, "the wrapper converts the bar and the entry to the exchange clock");
+		Check(gx.IndexOf("FlatByHHMM = -1", StringComparison.Ordinal) >= 0 && src.IndexOf("gxResolveFlatBy(", StringComparison.Ordinal) >= 0 && src.IndexOf("case \"NYMEX\": case \"COMEX\": case \"XNYM\": case \"XCEC\":", StringComparison.Ordinal) >= 0, "the default flat-by is the session end minus 5, and NYMEX/COMEX are Central");
 		Check(src.IndexOf("EXIT PARTIAL", StringComparison.Ordinal) < 0 && gx.IndexOf("EXIT PARTIAL ", StringComparison.Ordinal) >= 0 && gx.IndexOf("plan.WorkingStop || d.StopChanged || d.PartialQty > 0", StringComparison.Ordinal) >= 0, "a partial is its own line and the wrapper still sends the runner stop");
 		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
 		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");

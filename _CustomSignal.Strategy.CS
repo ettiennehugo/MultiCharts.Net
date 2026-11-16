@@ -1721,6 +1721,9 @@ namespace PowerLanguage.Strategy
 		private bool m_gxHaveArmNet;
 		private bool m_gxFillStopLogged;
 		private bool m_gxZoneWarned;
+		private bool m_gxFlatWarned;
+		private bool m_gxFlatByCaptured;
+		private int m_gxFlatByRequest = -1;
 		private double m_gxStopDist;
 		private double m_gxFillStopDl;
 		private double m_gxArmNet;
@@ -2425,6 +2428,9 @@ namespace PowerLanguage.Strategy
 			m_gxHaveArmNet = false;
 			m_gxFillStopLogged = false;
 			m_gxZoneWarned = false;
+			m_gxFlatWarned = false;
+			m_gxFlatByCaptured = false;
+			m_gxFlatByRequest = -1;
 			m_gxStopDist = 0;
 			m_gxFillStopDl = 0;
 			m_gxArmNet = 0;
@@ -2850,11 +2856,13 @@ namespace PowerLanguage.Strategy
 		{
 			switch (token)
 			{
-				// Chicago: CME Group's CME/CBOT (GLOBEX, ECBOT, CBT; MIC XCME / XCBT) and CBOE
+				// Chicago clock: CME Group lists CME, CBOT, NYMEX and COMEX hours in Central Time
+				// (cmegroup.com/trading-hours.html, "U.S. Central Time unless otherwise stated").
 				case "CME": case "XCME": case "GLOBEX": case "CBOT": case "ECBOT": case "CBT": case "XCBT": case "CBOE":
+				case "NYMEX": case "COMEX": case "XNYM": case "XCEC":
 					return "Central Standard Time";
-				// New York: NYMEX/COMEX and the US equity exchanges
-				case "NYMEX": case "COMEX": case "NYSE": case "NASDAQ": case "ARCA":
+				// New York cash equities
+				case "NYSE": case "NASDAQ": case "ARCA":
 					return "Eastern Standard Time";
 				default:
 					return null;
@@ -4302,6 +4310,8 @@ namespace PowerLanguage.Strategy
 			if (cfg == null) return;
 			cfg.Embedded = true;
 			m_gxCfg = cfg;
+			m_gxFlatByCaptured = true;
+			m_gxFlatByRequest = cfg.FlatByHHMM;
 			if (m_gx != null) m_gx.Config = cfg;
 		}
 
@@ -4399,6 +4409,66 @@ namespace PowerLanguage.Strategy
 				return barTime;
 			}
 			return ExitSession.ToExchangeClock(barTime, p.barZone, p.exchangeZone);
+		}
+
+		/// <summary>-1 derives the flat-by clock: regular session end minus 5 minutes, in the exchange zone. Any other HHMM is that clock.</summary>
+		protected int gxResolveFlatBy(int requested)
+		{
+			if (requested >= 0 && requested <= 2359) return requested;
+			int derived = gxDerivedFlatByHhmm();
+			if (derived >= 0 && derived <= 2359) return derived;
+			if (!m_gxFlatWarned)
+			{
+				m_gxFlatWarned = true;
+				trace(ETraceLevel.Error, "EXIT Error: GX flat-by has no regular session - using 15:55 exchange time");
+			}
+			return 1555;
+		}
+
+		int gxDerivedFlatByHhmm()
+		{
+			InstrumentProfile p = null;
+			try { p = InstrumentProfileOf(1); }
+			catch (Exception ex)
+			{
+				trace(ETraceLevel.Error, "EXIT Error: GX flat-by session read failed - " + ex.Message);
+				throw;
+			}
+			if (p == null) return -1;
+			if (p.exchangeRth != null)
+			{
+				int end = p.exchangeRth.valueEnd.Hours * 100 + p.exchangeRth.valueEnd.Minutes;
+				if (p.exchangeRth.source == ERthSource.EquityIndexLegacy && p.exchangeZone != null)
+					end = ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), end, findTz("Eastern Standard Time"), p.exchangeZone);
+				return ExitSession.FlatByFromSessionEnd(end);
+			}
+			if (p.exchangeSessions == null || p.exchangeSessions.Length == 0) return -1;
+			TimeSpan latest = TimeSpan.MinValue;
+			bool any = false;
+			for (int i = 0; i < p.exchangeSessions.Length; i++)
+			{
+				_MtfMath.Session s = p.exchangeSessions[i];
+				if (s.EndDay == DayOfWeek.Saturday || s.EndDay == DayOfWeek.Sunday) continue;
+				if (!any || s.EndTime > latest) { latest = s.EndTime; any = true; }
+			}
+			if (!any)
+			{
+				for (int i = 0; i < p.exchangeSessions.Length; i++)
+					if (!any || p.exchangeSessions[i].EndTime > latest) { latest = p.exchangeSessions[i].EndTime; any = true; }
+			}
+			if (!any) return -1;
+			return ExitSession.FlatByFromSessionEnd(latest.Hours * 100 + latest.Minutes);
+		}
+
+		void gxApplyFlatBy()
+		{
+			if (m_gx == null) return;
+			if (!m_gxFlatByCaptured)
+			{
+				m_gxFlatByCaptured = true;
+				m_gxFlatByRequest = m_gx.Config.FlatByHHMM;
+			}
+			m_gx.Config.FlatByHHMM = gxResolveFlatBy(m_gxFlatByRequest);
 		}
 
 		/// <summary>Built-in stop, dollars per contract, so the fill bar is protected at the fill ± the planned distance for the whole position.</summary>
@@ -4500,6 +4570,7 @@ namespace PowerLanguage.Strategy
 			bar.TimeEt = gxExchangeTime(Bars.Time[0]); bar.BarMinutes = m_gxMkt.BarMinutes; bar.MinutesToNews = GxMinutesToNews;
 			bar.TrailLow = Bars.Low[0]; bar.TrailHigh = Bars.High[0];
 			bar.DeferPartial = true;
+			gxApplyFlatBy();
 			ExitDecision d = m_gx.Manage(m_gxPos, bar);
 			if (m_portOn) portfolioStop(m_gxPos.Stop);
 			gxPublishFillR();
