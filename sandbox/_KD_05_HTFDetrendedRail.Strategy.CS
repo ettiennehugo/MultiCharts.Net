@@ -145,5 +145,10 @@ namespace PowerLanguage.Strategy
 	public class _KD_05_HTFDetrendedRail : _MT_07_HtfDetrendedRail
 	{
 		public _KD_05_HTFDetrendedRail(object _ctx) : base(_ctx) { }
+		protected override void CalcBar()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			base.CalcBar();
+		}
 	}
 }
