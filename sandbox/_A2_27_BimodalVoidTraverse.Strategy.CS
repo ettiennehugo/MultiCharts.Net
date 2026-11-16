@@ -228,6 +228,7 @@ namespace PowerLanguage.Strategy
 			m_day = day; m_done = false; m_armed = false; m_up = 0; m_ok = false;
 			DateTime prev = priorTradingDay(day);
 			if (prev == DateTime.MinValue) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-27 " + day.ToString("yyyy-MM-dd") + " no Data2"); return; }
 			List<RingBar> bars = SessionBars(prev, true);
 			double tick = tickSize(), atr30 = averageTrueRange(BarsOfData(2), Cfg.atrLength);
 			double[] px, vol;
