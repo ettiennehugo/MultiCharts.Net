@@ -154,6 +154,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			VpExtra c = Composite(1, 5); bool back = c != null && Bars.Close[0] < c.vah && Bars.Close[0] > c.val; if (journalOn()) trace(ETraceLevel.Journal, "EX-10 back inside value " + back + ". Host exit, no order.");
 		}
