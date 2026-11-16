@@ -143,7 +143,7 @@ namespace PowerLanguage.Strategy
 	public class _DV_11_VWAPTrendFailure : _VolumeProfileFuturesBase
 	{
 		
-		private IOrderPriced m_le, m_se; private int m_arm; private bool m_done; private double m_limit, m_stop; private DateTime m_day = DateTime.MinValue;
+		private IOrderPriced m_le, m_se; private int m_arm; private bool m_done, m_sell; private double m_limit, m_stop; private DateTime m_day = DateTime.MinValue;
 		public _DV_11_VWAPTrendFailure(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Week; GxOrderPrefix = "DV11"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV11LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV11SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
@@ -152,25 +152,31 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (StrategyInfo.MarketPosition != 0 || rollOn(1) || Bars.CurrentBar < 300) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (((int)tod.TotalMinutes) % 30 != 0) return;
+			bool boundary = ((int)tod.TotalMinutes) % 30 == 0;
+			if (m_arm > 0)
+			{
+				sendLimit();
+				if (boundary) m_arm--;
+				if (m_arm == 0) m_done = false;
+				return;
+			}
+			if (!boundary || m_done) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1, atr = DailyContext.Atr20d;
 			if (double.IsNaN(vwap) || !(sig > 0) || !(atr > 0)) return;
-			if (m_arm > 0) { m_arm--; if (m_arm == 0) m_done = false; else { sendLimit(); return; } }
-			if (m_done) return;
 			int above = 0, below = 0;
 			for (int k = 0; k < 10; k++) { if (Bars.Close[k * 30] > vwap + sig) above++; if (Bars.Close[k * 30] < vwap - sig) below++; }
 			double range = Bars.High[0] - Bars.Low[0];
 			bool failShort = above >= 6 && Bars.Close[0] < vwap + sig - 0.1 * range;
 			bool failLong = below >= 6 && Bars.Close[0] > vwap - sig + 0.1 * range;
 			if (!failShort && !failLong) return;
-			bool sell = failShort;
-			m_limit = sell ? vwap + sig : vwap - sig;
-			m_stop = widen(!sell, m_limit, sell ? Bars.High[0] + 0.15 * atr : Bars.Low[0] - 0.15 * atr);
+			m_sell = failShort;
+			m_limit = m_sell ? vwap + sig : vwap - sig;
+			m_stop = widen(!m_sell, m_limit, m_sell ? Bars.High[0] + 0.15 * atr : Bars.Low[0] - 0.15 * atr);
 			if (!budget(m_limit, m_stop)) { m_done = true; return; }
-			arm(!sell, m_limit, m_stop, vwap, sell ? "DV11SE" : "DV11LE");
+			arm(!m_sell, m_limit, m_stop, vwap, m_sell ? "DV11SE" : "DV11LE");
 			m_arm = 8; sendLimit();
 		}
-		private void sendLimit() { if (m_limit > Bars.Close[0]) m_se.Send(m_limit); else m_le.Send(m_limit); }
+		private void sendLimit() { if (m_sell) m_se.Send(m_limit); else m_le.Send(m_limit); }
 
 		private double widen(bool buy, double entry, double stop)
 		{

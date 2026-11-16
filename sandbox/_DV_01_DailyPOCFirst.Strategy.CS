@@ -143,7 +143,7 @@ namespace PowerLanguage.Strategy
 	public class _DV_01_DailyPOCFirst : _VolumeProfileFuturesBase
 	{
 		
-		private IOrderPriced m_le, m_se; private bool m_away, m_done; private DateTime m_day = DateTime.MinValue;
+		private IOrderPriced m_le, m_se; private bool m_away, m_buy, m_done; private DateTime m_day = DateTime.MinValue;
 		public _DV_01_DailyPOCFirst(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "DV01"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV01LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV01SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; EventConfig.enabled = true; base.StartCalc(); }
@@ -155,15 +155,12 @@ namespace PowerLanguage.Strategy
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			VpExtra prior = PriorRthProfile();
 			if (prior == null || !(prior.poc > 0)) return;
-			double atr5 = averageTrueRange(Bars, 5), atr = DailyContext.Atr20d;
+			double atr5 = atrBlocks(5, 14), atr = DailyContext.Atr20d;
 			if (!(atr5 > 0) || !(atr > 0)) return;
-			if (Math.Abs(Bars.Close[0] - prior.poc) >= atr5) m_away = true;
+			if (!m_away && Math.Abs(Bars.Close[0] - prior.poc) >= atr5) { m_away = true; m_buy = Bars.Close[0] > prior.poc; }
 			if (!m_away) return;
 			if (newsSoon(day)) return;
-			bool fromAbove = Bars.High[0] >= prior.poc && Bars.Close[1] > prior.poc && Bars.Low[0] <= prior.poc - tickSize();
-			bool fromBelow = Bars.Low[0] <= prior.poc && Bars.Close[1] < prior.poc && Bars.High[0] >= prior.poc + tickSize();
-			if (!fromAbove && !fromBelow) return;
-			bool buy = fromAbove;
+			bool buy = m_buy;
 			double entry = prior.poc;
 			double stop = buy ? entry - 0.15 * atr : entry + 0.15 * atr;
 			stop = widen(buy, entry, stop);
@@ -171,7 +168,19 @@ namespace PowerLanguage.Strategy
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "DV01LE" : "DV01SE", false);
 			if (buy) m_le.Send(entry); else m_se.Send(entry);
-			m_done = true;
+		}
+		private double atrBlocks(int minutes, int length)
+		{
+			if (Bars.CurrentBar < minutes * (length + 1)) return 0;
+			double sum = 0;
+			for (int k = 0; k < length; k++)
+			{
+				double h = double.MinValue, l = double.MaxValue;
+				for (int i = k * minutes; i < k * minutes + minutes; i++) { h = Math.Max(h, Bars.High[i]); l = Math.Min(l, Bars.Low[i]); }
+				double prev = Bars.Close[(k + 1) * minutes];
+				sum += Math.Max(h - l, Math.Max(Math.Abs(h - prev), Math.Abs(l - prev)));
+			}
+			return sum / length;
 		}
 		private bool newsSoon(DateTime day)
 		{
@@ -179,7 +188,7 @@ namespace PowerLanguage.Strategy
 			foreach (EventRec r in EventCalendar.EventsOn(day))
 			{
 				if (r.kind != EEventKind.Cpi && r.kind != EEventKind.Nfp && r.kind != EEventKind.FomcDecision) continue;
-				double mins = (Bars.Time[0] - r.etTime).TotalMinutes;
+				double mins = (ToEastern(Bars.Time[0]) - r.etTime).TotalMinutes;
 				if (mins > -10 && mins < 5) return true;
 			}
 			return false;

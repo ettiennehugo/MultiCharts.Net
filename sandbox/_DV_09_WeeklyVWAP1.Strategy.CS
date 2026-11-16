@@ -136,6 +136,7 @@
 
 
 using System;
+using System.Collections.Generic;
 using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
@@ -144,6 +145,7 @@ namespace PowerLanguage.Strategy
 	{
 		
 		private IOrderPriced m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private readonly List<double> m_upper = new List<double>(), m_lower = new List<double>();
 		public _DV_09_WeeklyVWAP1(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Week; GxOrderPrefix = "DV09"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
@@ -151,19 +153,25 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; }
+			if (day != m_day) { m_day = day; m_done = false; if (day.DayOfWeek == DayOfWeek.Monday) { m_upper.Clear(); m_lower.Clear(); } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || Bars.CurrentBar < 300) return;
 			if (day.DayOfWeek == DayOfWeek.Monday || day.DayOfWeek == DayOfWeek.Tuesday) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (((int)tod.TotalMinutes) % 30 != 0) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1, atr = DailyContext.Atr20d;
 			if (double.IsNaN(vwap) || !(sig > 0) || !(atr > 0)) return;
-			double range = 0; for (int i = 0; i < 30; i++) range += Bars.High[i] - Bars.Low[i]; range /= 30;
-			double bandNow = vwap + sig, bandThen = Bars.Close[240];
-			if (!(range > 0) || !((bandNow - bandThen) / 8.0 >= 0.1 * range) && !((bandThen - bandNow) / 8.0 >= 0.1 * range)) return;
-			bool up = bandNow >= bandThen;
-			double band = up ? vwap + sig : vwap - sig;
-			bool touched = up ? Bars.Low[0] <= band && Bars.Close[30] > band + 0.25 * range : Bars.High[0] >= band && Bars.Close[30] < band - 0.25 * range;
+			m_upper.Add(vwap + sig); m_lower.Add(vwap - sig);
+			if (m_upper.Count < 9 || Bars.CurrentBar < 60) return;
+			double atr30 = atr30m();
+			if (!(atr30 > 0)) return;
+			double upNow = m_upper[m_upper.Count - 1], upThen = m_upper[m_upper.Count - 9];
+			double dnNow = m_lower[m_lower.Count - 1], dnThen = m_lower[m_lower.Count - 9];
+			bool up = (upNow - upThen) / 8.0 >= 0.1 * atr30;
+			bool down = (dnThen - dnNow) / 8.0 >= 0.1 * atr30;
+			if (!up && !down) return;
+			double bandThen = up ? m_upper[m_upper.Count - 2] : m_lower[m_lower.Count - 2];
+			double band = up ? upNow : dnNow;
+			bool touched = up ? Bars.Low[0] <= band && Bars.Close[30] > bandThen + 0.25 * atr30 : Bars.High[0] >= band && Bars.Close[30] < bandThen - 0.25 * atr30;
 			if (!touched) return;
 			double entry = band;
 			double stop = widen(up, entry, up ? entry - 0.15 * atr : entry + 0.15 * atr);
@@ -174,6 +182,18 @@ namespace PowerLanguage.Strategy
 			m_done = true;
 		}
 
+		private double atr30m()
+		{
+			if (Bars.CurrentBar < 30 * 8) return 0;
+			double sum = 0;
+			for (int k = 0; k < 8; k++)
+			{
+				double h = double.MinValue, l = double.MaxValue;
+				for (int i = k * 30; i < k * 30 + 30; i++) { h = Math.Max(h, Bars.High[i]); l = Math.Min(l, Bars.Low[i]); }
+				sum += h - l;
+			}
+			return sum / 8.0;
+		}
 		private double widen(bool buy, double entry, double stop)
 		{
 			int ticks = 1;
