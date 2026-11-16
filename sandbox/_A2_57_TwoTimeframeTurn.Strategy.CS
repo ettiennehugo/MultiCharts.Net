@@ -193,7 +193,7 @@ namespace PowerLanguage.Strategy
 		{
 			TimeSpan pitStart, pitEnd, pitValue;
 			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
-			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, Bars.Info.Exchange, Bars.Info.Category, out pitStart, out pitEnd, out pitValue);
 			Clock.RthStart = pitStart;
 			Clock.RthEnd = pitEnd;
 			Clock.RthValueEnd = pitValue;
@@ -325,7 +325,7 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero);
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero, Bars.Info.Exchange, Bars.Info.Category);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
