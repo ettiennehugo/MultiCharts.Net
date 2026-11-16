@@ -20,8 +20,8 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: sendExits re-sends the stop and the target while the position is open. Size stays 1 contract.
-// Exit: the catalogue stop, target or time exit, sent only from sendExits. Not the GX wrapper.
+// Management: exitBar re-sends the stop and the target while the position is open. Size stays 1 contract.
+// Exit: the catalogue stop and target, sent through exitPlan and exitBar.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -39,7 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 15-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
 // Data2: Not applicable. Higher-timeframe bars are built from Data1.
 // Further series: Not applicable
@@ -56,18 +56,18 @@
 //
 // ## 11. Orders, execution, and costs
 // Entry order: the order name in Create.
-// Exit orders: sent only from sendExits.
+// Exit orders: exitPlan and exitBar.
 // Fill assumption: next bar for a market order. A stop or limit rests until filled. IOG is off.
 // Costs: MultiCharts commission and slippage. This file does not set a fee or a slippage number. Not yet verified
 //
 // ## 12. Trade management
-// While open: sendExits re-sends the stop and the target. Nothing else is added.
+// While open: exitBar re-sends the stop and the target. Nothing else is added.
 //
 // ## 13. Exits
-// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
+// Exit orders go through exitPlan and exitBar.
 // Hard stop: the catalogue stop, widened to 14 ticks when the rule places a stop.
 // Target: the catalogue target, or Not applicable.
-// Time exit: the catalogue flat time, via FlatBy and mustFlatten inside sendExits.
+// Time exit: the catalogue flat time, via the GX FlatBy clock.
 // Invalidation: the catalogue skip rules.
 //
 // ## 14. Regimes
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // ASSUMPTION: Chart is 1-minute. pdVWAP is CurrentVwap1 (Vwap1Type Session) latched when Session.rthComplete first becomes true. 15-minute and 5-minute closes are built from Data1 bar-end times, not from extra series. A higher low is the first 5-minute bar whose low is above both pdVWAP and the prior 5-minute low. The 1-minute break of structure is a 1-minute close above that 5-minute bar's high. The target is the nearer of prior RTH high and prior VAH, and the trade is skipped when that distance is under 1R.
-// IOG is disabled. GX exitPlan is not called. Exit orders are sent only from sendExits.
+// IOG is disabled. Exits go through exitPlan and exitBar.
 
 
 using System;
@@ -155,11 +155,16 @@ namespace PowerLanguage.Strategy
 		private bool m_latched, m_accepted, m_haveHl, m_done, m_wasComplete;
 		private double m_15c, m_5h, m_5l, m_5c;
 
-		public _A2_11_PriorDayVwap(object _ctx) : base(_ctx) { AcceptBars = EAcceptBars.Two; }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
+		public _A2_11_PriorDayVwap(object _ctx) : base(_ctx) { AcceptBars = EAcceptBars.Two;  Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
 			base.Create();
+			GxOrderPrefix = "A211"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A211LE", EOrderAction.Buy));
@@ -170,6 +175,10 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EAcceptBars), AcceptBars)) throw new ArgumentException("_A2_11_PriorDayVwap: AcceptBars is not a defined EAcceptBars");
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			base.StartCalc();
@@ -180,20 +189,16 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_hl = m_hlHigh = double.NaN; }
+			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_filledSetup = false; m_restOn = false; m_hl = m_hlHigh = double.NaN; }
 			SessionStats s = Session;
 			if (s != null && s.rthComplete && !m_wasComplete && !double.IsNaN(CurrentVwap1)) m_pd = CurrentVwap1;
 			m_wasComplete = s != null && s.rthComplete;
 			int pos = StrategyInfo.MarketPosition;
-			bool sendExits()
-			{
-				if (mustFlatten()) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
-				return false;
-			}
-			if (pos > 0 && sendExits()) return;
+			exitBar();
+			if (pos > 0) return;
 			if (pos != 0 || m_done || rollOn(1) || !(m_pd > 0) || s == null || !(s.rthOpen > 0) || s.rthOpen >= m_pd) return;
 			if (!IsRth()) return;
 			bucket(et, 15, ref m_b15, ref m_15c, on15);
@@ -215,8 +220,27 @@ namespace PowerLanguage.Strategy
 			if (!(risk > 0) || double.IsNaN(target) || target - Bars.Close[0] < risk || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-11 " + day.ToString("yyyy-MM-dd") + " skip: target or risk"); m_done = true; return; }
 			m_stop = stop; m_target = target; m_done = true;
+			takeGx(true, Bars.Close[0], m_stop, m_target, "A211LE");
 			m_le.Send();
 			if (journalOn()) journalArm("A211LE", Bars.Close[0], m_stop, m_target, null);
+		}
+
+		private void takeGx(bool longSide, double entry, double stop, double target, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 
 		private void bucket(DateTime et, int minutes, ref DateTime cur, ref double close, Action onClose)
@@ -244,5 +268,45 @@ namespace PowerLanguage.Strategy
 			{ m_haveHl = true; m_hl = m_5l; m_hlHigh = m_5h; }
 			m_prev5Low = m_5l; m_prev5High = m_5h;
 		}
+
+		private bool hostGate(bool buy)
+		{
+			if (Gate == ESandboxGate.Off) return true;
+			VpExtra prior = null;
+			try { prior = PriorRthProfile(); } catch (Exception) { }
+			double poc = prior != null ? prior.poc : double.NaN;
+			double hi = Session != null ? Session.rthHigh : Bars.High[0];
+			double lo = Session != null ? Session.rthLow : Bars.Low[0];
+			double atr = averageTrueRange(Bars, 14);
+			double sma = double.NaN;
+			try { sma = DailyContext.Sma200; } catch (Exception) { }
+			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			int fam = 0, ranges = 0;
+			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
+			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			return ok;
+		}
+		private void honorExit(double entry, double risk)
+		{
+			double t1; int pct; bool be;
+			if (!_SandboxRules.ScaleExit(ExitMode, out t1, out pct, out be)) return;
+			int qty = _SandboxRules.ScaleQty(ExitMode, false);
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty);
+			if (qty > 1 && risk > 0 && qty * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{
+				if (journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent");
+				m_done = true; m_restOn = false; return;
+			}
+			GxConfig.TargetMode = pct > 0 ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.RMultiple;
+			GxConfig.T1Value = t1;
+			GxConfig.T1ScalePct = pct;
+			GxConfig.FinalTargetUnit = ETriggerUnit.RMultiple;
+			GxConfig.FinalTargetValue = t1;
+			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
 	}
 }

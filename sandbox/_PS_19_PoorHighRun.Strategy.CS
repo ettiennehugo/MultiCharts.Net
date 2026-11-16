@@ -22,7 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
-// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
+// Exit orders go through exitPlan and exitBar.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -131,13 +131,13 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // The worked example class was _Ex22PoorHighRun.
-// IOG is disabled. GX exitPlan is not called because _GenericExit is not in this build. The example's own exits remain.
+// IOG is disabled. Exits go through exitPlan and exitBar.
 
 // Manual v4 example 22 - PS-19 prior-session poor high / poor low run-through.
 // Level: the prior RTH profile's high when IsPoorHigh (low when IsPoorLow). Signal: the first 5m close >= delta beyond it, 09:45-14:30 ET.
 // Entry: market next bar. Stop: 0.5 x ATR(14, 5m) back inside the level, floored. Target: b x R (b = 1; the catalogue sweeps 0.75/1/1.5).
 // Flat 15:55. One trade per day.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: F-VP (DevelopingSource = Own, OwnProfileWindow = Rth, PriorRthProfile, IsPoorHigh/IsPoorLow), F-SESS, F-TM (FlatBy).
 using System;
 using PowerLanguage.Function;
@@ -163,11 +163,16 @@ namespace PowerLanguage.Strategy
 		private double m_hiLvl, m_loLvl, m_stop, m_target;
 		private bool m_done;
 
-		public _PS_19_PoorHighRun(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
+		public _PS_19_PoorHighRun(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
 			base.Create();
+			GxOrderPrefix = "PS19"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own;      // PriorRthProfile() is built from Own profiles
 			OwnProfileWindow = EOwnProfileWindow.Rth;
@@ -182,7 +187,22 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "PS19ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; m_done = false; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_day = DateTime.MinValue; m_done = false; m_filledSetup = false; m_restOn = false; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-19 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
@@ -191,7 +211,7 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day)
 			{
-				m_day = day; m_done = false; m_hiLvl = m_loLvl = double.NaN;
+				m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_hiLvl = m_loLvl = double.NaN;
 				VpExtra prior = PriorRthProfile();
 				if (prior != null && !prior.crossesRoll)
 				{
@@ -201,33 +221,85 @@ namespace PowerLanguage.Strategy
 			}
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition;
-						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
-			bool sendExits()
-			{
-				m_done = true;
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
-				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
-				return true;
-			
-			}
-			if (pos != 0 && sendExits()) return;
+			exitBar();
+			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
-			double tick = tickSize(), c = Bars.Close[0], d = Cfg.deltaTicks * tick;
+			if (!takeNative()) return;
+			double tick = tickSize(), c = BarsOfData(2).Close[0], d = Cfg.deltaTicks * tick;
 			int side = !double.IsNaN(m_hiLvl) && c >= m_hiLvl + d ? +1 : !double.IsNaN(m_loLvl) && c <= m_loLvl - d ? -1 : 0;
 			if (side == 0) return;
 			m_done = true;                                                  // the FIRST qualifying close only
-			double atr = averageTrueRange(Bars, Cfg.atrLength);
+			double atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
 			if (!(atr > 0)) return;
 			double lvl = side > 0 ? m_hiLvl : m_loLvl, stop = lvl - side * Cfg.stopAtr * atr;
 			if (side * (c - stop) < Cfg.costFloorTicks * tick) stop = c - side * Cfg.costFloorTicks * tick;
 			double r = Math.Abs(c - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-19 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_stop = stop; m_target = c + side * Cfg.targetR * r;
+			takeGx(side > 0, Bars.Close[0], m_stop, m_target, side > 0 ? "PS19LE" : "PS19SE");
 			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
 			if (journalOn()) journalArm(side > 0 ? "PS19LE" : "PS19SE", c, stop, m_target, null);
 		}
 
+		private void takeGx(bool longSide, double entry, double stop, double target, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
+			exitPlan(longSide, entry, stop, 1, mkt, name);
+		}
+
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+
+		private bool hostGate(bool buy)
+		{
+			if (Gate == ESandboxGate.Off) return true;
+			VpExtra prior = null;
+			try { prior = PriorRthProfile(); } catch (Exception) { }
+			double poc = prior != null ? prior.poc : double.NaN;
+			double hi = Session != null ? Session.rthHigh : Bars.High[0];
+			double lo = Session != null ? Session.rthLow : Bars.Low[0];
+			double atr = averageTrueRange(Bars, 14);
+			double sma = double.NaN;
+			try { sma = DailyContext.Sma200; } catch (Exception) { }
+			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			int fam = 0, ranges = 0;
+			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
+			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			return ok;
+		}
+		private void honorExit(double entry, double risk)
+		{
+			double t1; int pct; bool be;
+			if (!_SandboxRules.ScaleExit(ExitMode, out t1, out pct, out be)) return;
+			int qty = _SandboxRules.ScaleQty(ExitMode, false);
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty);
+			if (qty > 1 && risk > 0 && qty * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{
+				if (journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent");
+				m_done = true; m_restOn = false; return;
+			}
+			GxConfig.TargetMode = pct > 0 ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.RMultiple;
+			GxConfig.T1Value = t1;
+			GxConfig.T1ScalePct = pct;
+			GxConfig.FinalTargetUnit = ETriggerUnit.RMultiple;
+			GxConfig.FinalTargetValue = t1;
+			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
 	}
 }
