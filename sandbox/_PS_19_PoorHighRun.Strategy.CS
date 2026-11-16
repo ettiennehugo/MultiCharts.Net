@@ -137,7 +137,7 @@
 // Level: the prior RTH profile's high when IsPoorHigh (low when IsPoorLow). Signal: the first 5m close >= delta beyond it, 09:45-14:30 ET.
 // Entry: market next bar. Stop: 0.5 x ATR(14, 5m) back inside the level, floored. Target: b x R (b = 1; the catalogue sweeps 0.75/1/1.5).
 // Flat 15:55. One trade per day.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: F-VP (DevelopingSource = Own, OwnProfileWindow = Rth, PriorRthProfile, IsPoorHigh/IsPoorLow), F-SESS, F-TM (FlatBy).
 using System;
 using PowerLanguage.Function;
@@ -193,6 +193,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_day = DateTime.MinValue; m_done = false; m_filledSetup = false; m_restOn = false; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-19 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -214,11 +225,12 @@ namespace PowerLanguage.Strategy
 			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
-			double tick = tickSize(), c = Bars.Close[0], d = Cfg.deltaTicks * tick;
+			if (!takeNative()) return;
+			double tick = tickSize(), c = BarsOfData(2).Close[0], d = Cfg.deltaTicks * tick;
 			int side = !double.IsNaN(m_hiLvl) && c >= m_hiLvl + d ? +1 : !double.IsNaN(m_loLvl) && c <= m_loLvl - d ? -1 : 0;
 			if (side == 0) return;
 			m_done = true;                                                  // the FIRST qualifying close only
-			double atr = averageTrueRange(Bars, Cfg.atrLength);
+			double atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
 			if (!(atr > 0)) return;
 			double lvl = side > 0 ? m_hiLvl : m_loLvl, stop = lvl - side * Cfg.stopAtr * atr;
 			if (side * (c - stop) < Cfg.costFloorTicks * tick) stop = c - side * Cfg.costFloorTicks * tick;

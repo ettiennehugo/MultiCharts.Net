@@ -40,7 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the example's chart, dxFeed continuous unadjusted. Tests use data through 2024-12-31 only.
 // Data2: the example's second series, or Not applicable when the example has none.
 // Further series: Not applicable unless the example names one.
@@ -139,7 +139,7 @@
 // from above and closes back above lvn.high + delta in its upper half (rejection close, PS-16 without the slowness filter).
 // Short mirrors at lvn.low. Entry: market next bar. Stop: max(bar extreme -/+ 1 tick, 14-tick floor). Target 1 R.
 // Veto (Cfg.hvnVeto, tested separately): skip a long whose 1 R target lies beyond the low of the nearest composite HVN above.
-// Window 09:45-15:00 ET, one trade per day. Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-COMP (lvns/hvns), F-TM.
+// Window 09:45-15:00 ET, one trade per day. Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED. Features: F-COMP (lvns/hvns), F-TM.
 using System;
 using PowerLanguage.Function;
 
@@ -195,6 +195,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-22 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -207,12 +218,13 @@ namespace PowerLanguage.Strategy
 			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || m_comp == null || m_comp.crossesRoll || !IsRth() || tod < Cfg.from || tod > Cfg.to || !entryAllowed(out string _)) return;
-			double tick = tickSize(), d = Cfg.deltaTicks * tick, h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0], mid = (h + l) / 2;
+			if (!takeNative()) return;
+			double tick = tickSize(), d = Cfg.deltaTicks * tick, h = BarsOfData(2).High[0], l = BarsOfData(2).Low[0], c = BarsOfData(2).Close[0], mid = (h + l) / 2;
 			foreach (Node z in m_comp.lvns)
 			{
 				int side = 0;
-				if (l <= z.high && Bars.Close[1] > z.high && c > z.high + d && c >= mid) side = +1;       // support edge held
-				else if (h >= z.low && Bars.Close[1] < z.low && c < z.low - d && c <= mid) side = -1;    // resistance edge held
+				if (l <= z.high && BarsOfData(2).Close[1] > z.high && c > z.high + d && c >= mid) side = +1;       // support edge held
+				else if (h >= z.low && BarsOfData(2).Close[1] < z.low && c < z.low - d && c <= mid) side = -1;    // resistance edge held
 				if (side == 0) continue;
 				double stop = side > 0 ? Math.Min(l - tick, c - Cfg.costFloorTicks * tick) : Math.Max(h + tick, c + Cfg.costFloorTicks * tick);
 				double r = Math.Abs(c - stop), target = c + side * r;

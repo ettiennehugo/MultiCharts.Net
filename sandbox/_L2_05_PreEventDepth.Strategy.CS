@@ -148,7 +148,10 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _L2_05_PreEventDepth(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); }
-		protected override void StartCalc() { EventConfig.enabled = true; base.StartCalc(); }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ EventConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;

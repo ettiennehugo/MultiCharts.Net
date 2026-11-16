@@ -40,7 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the example's chart, dxFeed continuous unadjusted. Tests use data through 2024-12-31 only.
 // Data2: the example's second series, or Not applicable when the example has none.
 // Further series: Not applicable unless the example names one.
@@ -139,7 +139,7 @@
 // Entry: at market on the next bar after the 2nd consecutive closed 5m bar beyond composite VAH/VAL + delta, 09:45-14:30 ET.
 // Stop: composite VAH - 0.30 W (long) / VAL + 0.30 W (short), floored at 14 ticks from the signal close. Skip the setup (never resize)
 // if 0.30 W < ATR14(5m) + 2 ticks (noise) or 0.30 W > 1.5 x daily ATR (catalogue "daily ATR"; operationalised as M-DAILY Atr20d).
-// Target: 1.0 W beyond the broken edge. Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED.
+// Target: 1.0 W beyond the broken edge. Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: F-COMP, F-VP (IsBalanced, ValueMigrationScore), F-PSTAT (ProfileStats.enabled, ProfileEntropy), M-DAILY (Atr20d), F-TM.
 using System;
 using PowerLanguage.Function;
@@ -197,6 +197,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-02 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -209,7 +220,8 @@ namespace PowerLanguage.Strategy
 			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_ok || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
-			double tick = tickSize(), c = Bars.Close[0], d = Cfg.deltaTicks * tick;
+			if (!takeNative()) return;
+			double tick = tickSize(), c = BarsOfData(2).Close[0], d = Cfg.deltaTicks * tick;
 			m_up = c > m_vah + d ? m_up + 1 : 0; m_dn = c < m_val - d ? m_dn + 1 : 0;
 			int side = m_up >= Cfg.acceptCloses && m_vscore >= 1 ? +1 : m_dn >= Cfg.acceptCloses && m_vscore <= -1 ? -1 : 0;
 			if (side == 0) return;

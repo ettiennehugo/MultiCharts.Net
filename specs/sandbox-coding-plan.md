@@ -1,6 +1,6 @@
 # Sandbox coding plan
 
-**Date:** 15 Nov 2026. **Branch:** `cursor/sandbox-coding-plan-adb0`, from `origin/main` at the PR 124 merge. **Do not edit** the ten sandbox files that PR 126 (`cursor/sandbox-extend`) changes.
+**Date:** 15 Nov 2026. **Branch:** `cursor/sandbox-coding-plan-adb0`, from `origin/main` at the PR 124 merge.
 
 ## Owner decisions (2026-11-15 20:06 ET)
 
@@ -60,25 +60,24 @@ dxFeed in this project is futures, stocks and ETFs. It is not an index feed. For
 
 ## (d) Batches
 
-Batch 1 is the 20 worked examples in the engines manual that are not already in `sandbox/` and that do not subclass another example. They are the most fully specified code in the repo. Later batches follow A2, then AV, VW, DV, TS and SW, then the other entry families, then EX, RG and PF, then L2. Each later batch is its own branch and its own draft PR. Child examples wait until the parent file exists: MT-03 subclasses PS-08, RG-07 subclasses the A2-56 example (that file is frozen for PR 126, so RG-07 will subclass `_A2_56_FirstHourBreak` without editing it), A2-78 subclasses OF-07, A2-25 subclasses the DV-02 example.
+Batch 1 is the 20 worked examples in the engines manual that are not already in `sandbox/` and that do not subclass another example. They are the most fully specified code in the repo. Later batches follow A2, then AV, VW, DV, TS and SW, then the other entry families, then EX, RG and PF, then L2. Each later batch is its own branch and its own draft PR. Child examples wait until the parent file exists: MT-03 subclasses PS-08, RG-07 subclasses `_A2_56_FirstHourBreak`, A2-78 subclasses OF-07, A2-25 subclasses the DV-02 example.
 
 The counts are in the table at the end of this file.
 
 ## (e) Open questions, and the default used here
 
-1. **GX exit seam.** Main at 9107598 contains GX. From batch 3 on, a new entry whose exit is a stop, a point or R target, and a flat time calls `exitPlan` and `exitBar`. An exit GX cannot express keeps `sendExits`, with the reason in the header. Batches 1 and 2 still use `sendExits` until a later conversion commit. The ten PR 126 files are not edited.
+1. **GX exit seam.** Main at 9107598 contains GX. From batch 3 on, a new entry whose exit is a stop, a point or R target, and a flat time calls `exitPlan` and `exitBar`. An exit GX cannot express keeps `sendExits`, with the reason in the header. Batches 1 and 2 still use `sendExits` until a later conversion commit.
 2. **Merged ids.** Default: one file. A2-06 is the VW-05 arm, not a second file. A2-03 is EX-04. A2-22 is EX-12. DV-03 is the PS-13 file.
 3. **A2-63, VW-08, RG-03.** Default: no second sandbox copy. They already exist on main.
 4. **MT-02 `AcceptanceDays` was an int 1 or 2.** Default: enum `EAcceptanceDays` with default `Two`, which is the catalogue default of 2. The trade rule is unchanged.
-5. **IOG.** Default: `[IOGMode(IOGMode.Disabled)]` on every new file. The original ten are not edited to add it.
-6. **VX without a VIX series.** Default: HV20 on the traded future, marked ASSUMPTION.
+5. **IOG.** Default: `[IOGMode(IOGMode.Disabled)]` on every new file.6. **VX without a VIX series.** Default: HV20 on the traded future, marked ASSUMPTION.
 7. **L2.** Default: do not invent depth.
 8. **Compile.** Default: `tests/SandboxCompile` is a semantic C# 7.3 compile of every sandbox strategy with `_CustomSignal`, the volume-profile bases, the engines, and MC stubs. The TradeManager using is aliased the same way as `tests/GxMcCompile`. Native F7 after a slot copy is still required. No `csproj` line points at `sandbox/`.
 9. **Holdout.** Default: no result from 2025 onward is read or written.
 10. **Ambiguous catalogue rows with no heading.** Default: the batch that reaches them codes the sentence in the source that cites the id, and marks ASSUMPTION in the header. They are not skipped for lack of a heading.
-11. **Child examples.** Default: MT-03 extends `_PS_08_NarrowIbBreak`, A2-78 extends `_OF_07_BurstExtremeBreak`, RG-07 extends `_A2_56_FirstHourBreak` (that file is not edited), and A2-25 extends `_DV_02_FailedLevelFlip`. A slot copy of the child compiles only when the parent file is in the same project.
+11. **Child examples.** Default: MT-03 extends `_PS_08_NarrowIbBreak`, A2-78 extends `_OF_07_BurstExtremeBreak`, RG-07 extends `_A2_56_FirstHourBreak`, and A2-25 extends `_DV_02_FailedLevelFlip`. A slot copy of the child compiles only when the parent file is in the same project.
 12. **A2-26.** Default: it is the KDE veto inside the A2-25 file. No second file.
-13. **Merged A2 rows.** Default: the catalogue mapping table wins. A row marked "Merged into" is not a second sandbox file. The host carries the arm when that host is coded. A2-06 and A2-07 stay on the PR 126 files, which this work does not edit.
+13. **Merged A2 rows.** Default: the catalogue mapping table wins. A row marked "Merged into" is not a second sandbox file. The host carries the arm when that host is coded. A2-06 and A2-07 stay on the PR 126 files, and the owner decisions apply to those files.
 14. **Catalogue-only batch 2 rules.** Default: the ASSUMPTION in each of A2-04, A2-09, A2-11, A2-12, A2-13, A2-14 and A2-15 is the reading that was coded. A2-15 is a gate on PS-01; the base gate returns true.
 
 ## (a) ID table
@@ -133,14 +132,14 @@ The counts are in the table at the end of this file.
 | A2-46 | Volume-gap commitment entry to the far node | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_46_VolumeGapCommitment.Strategy.CS | 4 | coded in batch 4 |
 | A2-47 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-03) | done | merged into PS-03; no second sandbox file |
 | A2-48 | Poor highs/lows as destinations (exit and stop-placement module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_48_PoorHighsLows.Strategy.CS | 4 | coded in batch 4 |
-| A2-49 | Midday support/resistance and afternoon breakout (Kaufman TSM) | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_49_MiddayBreakout.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| A2-49 | Midday support/resistance and afternoon breakout (Kaufman TSM) | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_49_MiddayBreakout.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | A2-50 | Same-slot relative-volume opening regime gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_50_OpeningRvGate.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-51 | Intraday shock-bar fade with delayed stop and volume-decay exit | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_51_ShockBarFade.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-52 | Time-confirmed opening-range break with pivot-range bias (Fisher ACD) | trading-idea-catalogue.md | entry signal | sandbox/_A2_52_TimeConfirmedOpening.Strategy.CS | 4 | coded in batch 4 |
 | A2-53 | RTH gap fade with stop-and-reverse at the day's extreme (negative canary) | trading-idea-catalogue.md | entry signal | sandbox/_A2_53_RTHGapFade.Strategy.CS | 4 | coded in batch 4 |
 | A2-54 | Up-gap pullback-to-prior-close short, exit next open | trading-idea-catalogue.md | entry signal | sandbox/_A2_54_UpGapPullback.Strategy.CS | 4 | coded in batch 4 |
 | A2-55 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into RG-08) | done | merged into RG-08; no second sandbox file |
-| A2-56 | Momentum Pinball: daily LBR/RSI setup, first-hour break, conditional overnight hold | trading-idea-catalogue.md | entry signal | sandbox/_A2_56_FirstHourBreak.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| A2-56 | Momentum Pinball: daily LBR/RSI setup, first-hour break, conditional overnight hold | trading-idea-catalogue.md | entry signal | sandbox/_A2_56_FirstHourBreak.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | A2-57 | Higher-TF turn plus first short-TF oversold entry (Kaufman/Elder) | trading-idea-catalogue.md | entry signal | sandbox/_A2_57_TwoTimeframeTurn.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-58 | Fade the fast trend inside the slow trend, intraday | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_58_FastInSlowFade.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-59 | Kaufman cost, 'unables' and shock-audit module (Gate 0, extends A2-40) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | sizing-portfolio | sandbox/_A2_59_KaufmanCostUnables.Strategy.CS | 4 | coded in batch 4 |
@@ -148,13 +147,13 @@ The counts are in the table at the end of this file.
 | A2-61 | Efficiency-ratio session router (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_61_EfficiencyRatioSession.Strategy.CS | 4 | coded in batch 4 |
 | A2-62 | Taylor 3-day cycle 'low-first' buying day | trading-idea-catalogue.md | entry signal | sandbox/_A2_62_Taylor3Day.Strategy.CS | 4 | coded in batch 4 |
 | A2-63 | Long-only open + 0.5 × daily ATR breakout, exit at the close (host H2) | trading-idea-catalogue.md | duplicate-of | _A2_63_RegimeGate.Strategy.CS | done | already on main as _A2_63_RegimeGate.Strategy.CS. No second sandbox copy in batch 1. |
-| A2-64 | 1.0 × daily ATR fade from the open or prior close | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS (shared with A2-70) | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| A2-64 | 1.0 × daily ATR fade from the open or prior close | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS (shared with A2-70) | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | A2-65 | Raschke '1st cross' oscillator/trend cross with bar confirmation | trading-idea-catalogue.md | entry signal | sandbox/_A2_65_Raschke1stCross.Strategy.CS | 4 | coded in batch 4 |
 | A2-66 | Raschke/Kaufman '2nd cross' second stochastic pullback | trading-idea-catalogue.md | entry signal | sandbox/_A2_66_RaschkeKaufman2nd.Strategy.CS | 4 | coded in batch 4 |
 | A2-67 | Intraday RSI-of-highs/lows divergence long | trading-idea-catalogue.md | entry signal | sandbox/_A2_67_IntradayRSIOf.Strategy.CS | 4 | coded in batch 4 |
 | A2-68 | 5-bar run + doji reversal, target 50% of the run | trading-idea-catalogue.md | entry signal | sandbox/_A2_68_X5BarRun.Strategy.CS | 4 | coded in batch 4 |
-| A2-69 | Kaufman 3-day trade: two down closes, buy a lower open, exit next close | trading-idea-catalogue.md | entry signal | sandbox/_A2_69_KaufmanThreeDay.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| A2-70 | High-volatility skip gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| A2-69 | Kaufman 3-day trade: two down closes, buy a lower open, exit next close | trading-idea-catalogue.md | entry signal | sandbox/_A2_69_KaufmanThreeDay.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
+| A2-70 | High-volatility skip gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | A2-71 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | duplicate-of | none (merged into PF-06) | done | merged into PF-06; no second sandbox file |
 | A2-72 | Progressive exposure ladder 25/50/100% (sizing module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_72_ProgressiveExposureLadder.Strategy.CS | 4 | coded in batch 4 |
 | A2-73 | Breakeven stop at ≈ 3R or above the rolling average gain (exit module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_73_BreakevenStopAt.Strategy.CS | 4 | coded in batch 4 |
@@ -171,7 +170,7 @@ The counts are in the table at the end of this file.
 | AV-05 | Gap-anchored AVWAP swing hold | trading-idea-catalogue.md | entry signal | sandbox/_AV_05_GapAnchoredAVWAP.Strategy.CS | 5 | coded in batch 5 |
 | AV-06 | Event-bar AVWAP (FOMC / CPI / NFP) acceptance | trading-idea-catalogue.md | entry signal | sandbox/_AV_06_EventBarAVWAP.Strategy.CS | 5 | coded in batch 5 |
 | AV-07 | Climax-volume-bar AVWAP | trading-idea-catalogue.md | entry signal | sandbox/_AV_07_ClimaxVolumeBar.Strategy.CS | 5 | coded in batch 5 |
-| AV-08 | Week-open / month-open / quarter-open AVWAP as regime layer | trading-idea-catalogue.md | entry signal | sandbox/_AV_08_PeriodAvwapLayer.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| AV-08 | Week-open / month-open / quarter-open AVWAP as regime layer | trading-idea-catalogue.md | entry signal | sandbox/_AV_08_PeriodAvwapLayer.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | AV-09 | Roll-anchored AVWAP swing bias | trading-idea-catalogue.md | entry signal | sandbox/_AV_09_RollAnchoredAVWAP.Strategy.CS | 5 | coded in batch 5 |
 | AV-10 | AVWAP × profile confluence (does stacking help?) | trading-idea-catalogue.md | entry signal | sandbox/_AV_10_AVWAPProfileConfluence.Strategy.CS | 5 | coded in batch 5 |
 | AV-11 | Breakout-bar AVWAP first pullback | trading-idea-catalogue.md | entry signal | sandbox/_AV_11_BreakAvwapPullback.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
@@ -181,7 +180,7 @@ The counts are in the table at the end of this file.
 | VW-02 | Balance-day ±2σ fade at a composite HVN edge (conditional) | trading-idea-catalogue.md | entry signal | sandbox/_VW_02_BalanceDay2.Strategy.CS | 5 | coded in batch 5 |
 | VW-03 | σ-band expansion continuation | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_VW_03_BandExpansionContinuation.Strategy.CS | 5 | coded in batch 5 |
 | VW-04 | Failed VWAP defence → reversal context | trading-idea-catalogue.md | entry signal | sandbox/_VW_04_FailedVWAPDefence.Strategy.CS | 6 | coded in batch 6 |
-| VW-05 | Late-day continuation: VWAP side × rest-of-day return | trading-idea-catalogue.md | entry signal | sandbox/_VW_05_LateDayVwap.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| VW-05 | Late-day continuation: VWAP side × rest-of-day return | trading-idea-catalogue.md | entry signal | sandbox/_VW_05_LateDayVwap.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | VW-06 | POC–VWAP skew pullback | trading-idea-catalogue.md | entry signal | sandbox/_VW_06_POCVWAPSkew.Strategy.CS | 6 | coded in batch 6 |
 | VW-07 | Prior-day VWAP and ETH VWAP as opening reference (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_VW_07_PriorDayVWAP.Strategy.CS | 6 | coded in batch 6 |
 | VW-08 | VWAP-cross "Holy Grail" (canary) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | duplicate-of | _TestGate0 canary VW08 | done | already on main as _TestGate0 canary VW08. No second sandbox copy in batch 1. |
@@ -193,20 +192,20 @@ The counts are in the table at the end of this file.
 | DV-08 | Heavy-volume zone + Fair Value Gap alignment (level at the FVG start) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_08_FvgHvnAlignment.Strategy.CS | 2 | coded in batch 2 |
 | DV-09 | Weekly-VWAP ±1σ trend pullback | trading-idea-catalogue.md | entry signal | sandbox/_DV_09_WeeklyVWAP1.Strategy.CS | 6 | coded in batch 6 |
 | DV-11 | VWAP trend-failure (lose σ1 → pullback to σ1 → target VWAP) | trading-idea-catalogue.md | entry signal | sandbox/_DV_11_VWAPTrendFailure.Strategy.CS | 6 | coded in batch 6 |
-| DV-15 | EMA20 pullback gated by VWAP slope | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_15_EmaVwapPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| DV-15 | EMA20 pullback gated by VWAP slope | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_15_EmaVwapPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | DV-16 | Order-flow confirmation at a pre-defined level (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_16_OrderFlowConfirmation.Strategy.CS | 6 | coded in batch 6 |
 | DV-20 | Stop-loss-cluster (weak low/high) veto | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_20_StopLossCluster.Strategy.CS | 7 | coded in batch 7 |
 | DV-22 | ABCD (AB = CD) | trading-idea-catalogue.md | entry signal | sandbox/_DV_22_ABCDABCD.Strategy.CS | 7 | coded in batch 7 |
 | DV-23 | Initial-balance draw trade (guest: Dan McKen, Funded Trader Academy, not Dale) | trading-idea-catalogue.md | entry signal | sandbox/_DV_23_InitialBalanceDraw.Strategy.CS | 7 | coded in batch 7 |
-| TS-01 | European-open overnight drift (long MES 01:30–04:30 ET) | trading-idea-catalogue.md | entry signal | sandbox/_TS_01_EuropeanOpenDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| TS-01 | European-open overnight drift (long MES 01:30–04:30 ET) | trading-idea-catalogue.md | entry signal | sandbox/_TS_01_EuropeanOpenDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | TS-02 | London-open break of the Asia range (CL/GC) with an Asia AVWAP filter | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_TS_02_LondonOpenBreak.Strategy.CS | 7 | coded in batch 7 |
-| TS-03 | Close regime: 15:30–16:00 MOC drift then reversion | trading-idea-catalogue.md | entry signal | sandbox/_TS_03_CloseDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| TS-03 | Close regime: 15:30–16:00 MOC drift then reversion | trading-idea-catalogue.md | entry signal | sandbox/_TS_03_CloseDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | TS-04 | CL/GC pit-session profile (port of the PS ideas) | trading-idea-catalogue.md | entry signal | sandbox/_TS_04_CLGCPit.Strategy.CS | 7 | coded in batch 7 |
 | TS-05 | ZN post-release AVWAP acceptance (08:30 data) | trading-idea-catalogue.md | entry signal | sandbox/_TS_05_ZNPostRelease.Strategy.CS | 7 | coded in batch 7 |
 | TS-06 | Overnight inventory correction at the open | trading-idea-catalogue.md | entry signal | sandbox/_TS_06_OvernightInventoryCorrection.Strategy.CS | 7 | coded in batch 7 |
 | TS-07 | Opening-noise observation window (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_TS_07_OpeningNoiseObservation.Strategy.CS | 7 | coded in batch 7 |
 | SW-01 | Weekly balance break (3–6-week composite) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_SW_01_WeeklyBalanceBreak.Strategy.CS | 7 | coded in batch 7 |
-| SW-02 | RSI(2) dip-buy with a profile/AVWAP location filter | trading-idea-catalogue.md | entry signal | sandbox/_SW_02_SwingPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
+| SW-02 | RSI(2) dip-buy with a profile/AVWAP location filter | trading-idea-catalogue.md | entry signal | sandbox/_SW_02_SwingPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. The owner decisions apply to this file. |
 | SW-03 | Quarterly/monthly AVWAP swing pullback | trading-idea-catalogue.md | entry signal | sandbox/_SW_03_QuarterlyMonthlyAVWAP.Strategy.CS | 7 | coded in batch 7 |
 | SW-04 | Multi-day P-profile hold (Levy "will it move within 3 days?") | trading-idea-catalogue.md | entry signal | sandbox/_SW_04_MultiDayP.Strategy.CS | 7 | coded in batch 7 |
 | SW-05 | Composite gap-and-go (out of a 20-day composite) | trading-idea-catalogue.md | entry signal | sandbox/_SW_05_CompositeGapAnd.Strategy.CS | 7 | coded in batch 7 |
@@ -390,7 +389,7 @@ Batch 2 in this update is the remaining engines-manual examples. Rows that the f
 
 Each new sandbox header has `Market tag: futures-only`, `stock-only`, or `both`. Futures-only ideas use the futures session API (`IsRth`, `m_rthValueEnd`). Both and stock-only ideas use `Bars.Sessions` and never a hard-coded symbol, session clock, or tick floor. The floor is `InstrumentProfile.costFloorTicks`. Batches 1-3 were tagged from the code they already contain. New files are tagged with the idea.
 
-The ten files from the merged PR 126 are not edited by this stack. Their tags live here:
+The ten files from the merged PR 126 take the owner decisions. Their tags live here:
 
 | ID | Class | Market tag |
 |---|---|---|
