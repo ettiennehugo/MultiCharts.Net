@@ -34,6 +34,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -137,7 +138,7 @@
 // Rules: tier-1 news -2/+10 min blackout (and flatten); FOMC day after 14:00 ET -> no new entries; roll week -> no new entries;
 // CME half-days and holiday-adjacent sessions -> off. Unscheduled news is NOT covered. GDP/PCE coverage holes 2016-24 (EV-4.6b):
 // allowPartialCoverage = false makes an Unknown-coverage day block (conservative).
-// Chart: as example 18. M-EVENT uses its embedded table unless EventConfig.csvPath is set.
+// Chart: Data1 = 1-minute. The first hour is aggregated from Data1.
 // Features: M-EVENT (EventConfig, EventBlackout, EventFlattenNow, EventCalendar.Classify, IsRollWeek, CoverageBlocks), F-CAL, F-ROLL.
 using System;
 using System.Collections.Generic;
@@ -149,6 +150,7 @@ namespace PowerLanguage.Strategy
 	public class _RG_07_ExclusionGate : _A2_56_FirstHourBreak
 	{
 		private IOrderMarket m_flatL, m_flatS;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _RG_07_ExclusionGate(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -161,6 +163,11 @@ namespace PowerLanguage.Strategy
 			EventConfig.allowPartialCoverage = false;
 			m_flatL = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "RG07LX", EOrderAction.Sell));
 			m_flatS = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "RG07SX", EOrderAction.BuyToCover));
+		}
+
+		protected override void configureSessions()
+		{
+			base.configureSessions();
 		}
 
 		protected override void CalcBar()

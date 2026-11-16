@@ -7,6 +7,7 @@
 // Study class: _A2_36_GammaFilter
 // File: sandbox/_A2_36_GammaFilter.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: No GEX series and no VIX series.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -34,10 +35,12 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -148,7 +151,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			if (day == m_day) return;
 			m_day = day;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-36 " + day.ToString("yyyy-MM-dd") + " No GEX series is on this feed, and there is no VIX series to use as the catalogu");
+			double barSpan = Bars.High[0] - Bars.Low[0];
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-36 " + day.ToString("yyyy-MM-dd") + " No GEX series is on this feed. Bar span " + barSpan.ToString("0.00") + " is not a gamma reading.");
 		}
 	}
 }

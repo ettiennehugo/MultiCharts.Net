@@ -34,10 +34,12 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -151,6 +153,7 @@ namespace PowerLanguage.Strategy
 		private bool m_alert, m_done;
 		private DateTime m_alertAt = DateTime.MinValue;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_30_RisingEntropy(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -169,13 +172,20 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A230ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_side = 0; m_prevH = double.NaN; }
+			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			bool inside = !double.IsNaN(m_hi) && Bars.Close[0] < m_hi && Bars.Close[0] > m_lo;
 			bool sendExits()
@@ -201,7 +211,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
 			m_stop = stop; m_target = m_side > 0 ? m_hi + range : m_lo - range; m_done = true;
-			if (m_side > 0) m_le.Send(); else m_se.Send();
+			if (m_side > 0) { m_le.Send(); m_lxStp.Send(m_stop); } else { m_se.Send(); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(m_side > 0 ? "A230LE" : "A230SE", entry, m_stop, m_target, null);
 		}
 

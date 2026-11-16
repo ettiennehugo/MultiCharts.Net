@@ -7,6 +7,7 @@
 // Study class: _PF_03_XmktBetaMonitor
 // File: sandbox/_PF_03_XmktBetaMonitor.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cross-market beta monitor. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -34,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -138,7 +140,7 @@
 // market (here the leg role "SPX", e.g. an S&P index or another future), XmktLeg aligns it to Data1 on closed bars and keeps a rolling
 // return Correlation / Beta / RsZ over corrLength bars. At the last RTH bar it journals the values and flags |rho| > 0.5.
 // This is NOT the PF-03 statistic; the sleeve-P&L version must be computed offline from the trade journals.
-// Chart: Data1 @ES 30m, Data2 = the reference market at 30m. Features: M-XMKT (XmktLegs, XmktLeg, Correlation, Beta, RsZ, Available).
+// Chart: Data1 = 1-minute. Data2 = the reference market at 30-minute. Features: M-XMKT (XmktLegs, XmktLeg, Correlation, Beta, RsZ, Available).
 using System;
 using PowerLanguage.Function;
 
@@ -159,8 +161,15 @@ namespace PowerLanguage.Strategy
 			XmktLegs.Add(new XmktLegConfig { role = "SPX", dataStream = 2, returnBars = 1, corrLength = 60, rsLength = 60 });
 		}
 
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close || !IsRth()) return;
 			DateTime day = GlobexDate(Bars.Time[0]);

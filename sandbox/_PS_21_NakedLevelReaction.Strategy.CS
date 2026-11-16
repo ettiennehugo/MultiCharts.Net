@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -168,6 +169,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_21_NakedLevelReaction(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -187,6 +189,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			HtfStreams = new[] { 2 };
 			base.StartCalc();
 			if (!TrackNakedPoc) throw new ArgumentException("_PS_21_NakedLevelReaction: TrackNakedPoc must be true");
@@ -198,6 +202,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			int barNo = Bars.FullSymbolData.Current;           // 1-based Status Bar #: the unit of asOfBar (NOT Bars.CurrentBar)
 			if (rollOn(1)) { m_lastRollBar = barNo; m_level = double.NaN; m_side = 0; }
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
@@ -271,7 +276,7 @@ namespace PowerLanguage.Strategy
 			m_target = planned + side * r;                     // 1R from the planned (signal-close) price
 			var ctx = new Dictionary<string, string> { { "level", m_level.ToString() } };
 			if (journalOn()) { journalArm(side > 0 ? "PS21LE" : "PS21SE", planned, m_stop, m_target, ctx); logSignal("PS-21", side, planned, m_stop, ctx, true); }
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
 
 		/// <summary>Flat time for a Globex day: Cfg.flat, or on a CME early-close day RthCloseEt - halfDayExitBefore if earlier

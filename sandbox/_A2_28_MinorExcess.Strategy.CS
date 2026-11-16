@@ -34,10 +34,12 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -149,7 +151,11 @@ namespace PowerLanguage.Strategy
 		private bool m_done, m_inMinor;
 		private double m_5c;
 
-		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
+		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
@@ -157,16 +163,22 @@ namespace PowerLanguage.Strategy
 			RollDetection = ERollDetection.Series;
 			ProfileStats.enabled = true;
 			GxOrderPrefix = "A228"; createGxOrders();
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A228LE", EOrderAction.Buy));
-			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A228SE", EOrderAction.SellShort));
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A228LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A228SE", EOrderAction.SellShort));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_muMinor = double.NaN; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_muMinor = double.NaN; }
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = m_inMinor = false; m_side = m_back = 0; m_extreme = double.NaN; loadPrior(day); }
@@ -206,9 +218,8 @@ namespace PowerLanguage.Strategy
 			if (m_side * (entry - structural) < floor) structural = entry - m_side * floor;
 			if (!budgetOk(entry, structural)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-28 skip: risk budget"); m_done = true; return; }
 			string name = m_side > 0 ? "A228LE" : "A228SE";
-			armGx(m_side > 0, entry, structural, m_muMajor, 1555, name);
-			if (m_side > 0) m_le.Send(); else m_se.Send();
-			m_done = true;
+			armGx(m_side > 0, entry, structural, m_muMajor, _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), name);
+			if (m_side > 0) m_le.Send(2); else m_se.Send(2);
 		}
 
 		private void loadPrior(DateTime day)
@@ -262,5 +273,61 @@ namespace PowerLanguage.Strategy
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1; mkt.ResolutionLabel = "1 min";
 			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
+
+		private bool hostGate(bool buy)
+		{
+			if (Gate == ESandboxGate.Off) return true;
+			VpExtra prior = null;
+			try { prior = PriorRthProfile(); } catch (Exception) { }
+			double poc = prior != null ? prior.poc : double.NaN;
+			double hi = Session != null ? Session.rthHigh : Bars.High[0];
+			double lo = Session != null ? Session.rthLow : Bars.Low[0];
+			double atr = averageTrueRange(Bars, 14);
+			double sma = double.NaN;
+			try { sma = DailyContext.Sma200; } catch (Exception) { }
+			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			int fam = 0, ranges = 0;
+			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
+			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			return ok;
+		}
+		private void honorExit(double entry, double risk)
+		{
+			double t1; int pct; bool be;
+			if (!_SandboxRules.ScaleExit(ExitMode, out t1, out pct, out be)) return;
+			int qty = _SandboxRules.ScaleQty(ExitMode, false);
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty);
+			if (qty > 1 && risk > 0 && qty * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{
+				if (journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent");
+				m_done = true; m_restOn = false; return;
+			}
+			GxConfig.TargetMode = pct > 0 ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.RMultiple;
+			GxConfig.T1Value = t1;
+			GxConfig.T1ScalePct = pct;
+			GxConfig.FinalTargetUnit = ETriggerUnit.RMultiple;
+			GxConfig.FinalTargetValue = t1;
+			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

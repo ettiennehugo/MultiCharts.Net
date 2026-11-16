@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -139,7 +140,7 @@
 // direction, valid to the session end (X = 1 session), one flip per level. Bracket: +/- f x ATR20d (f = 0.10); the stop side is widened to
 // the 14-tick floor if narrower (target unchanged), skipped only on a risk-budget breach, never resized. s = 1.0 and f = 0.10 are catalogue grid points; M = 12 bars is a PLACEHOLDER.
 // Every armed flip is logged with logSignal(taken = true); skipped ones with taken = false (needs TraceLevel >= Journal).
-// Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-EVT/CS-8 (logSignal, ControlMode, controlAdjustLevel,
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: F-EVT/CS-8 (logSignal, ControlMode, controlAdjustLevel,
 // controlAdjustDelayBars), F-VP (PriorRthProfile), M-DAILY (Atr20d), F-TM.
 using System;
 using System.Collections.Generic;
@@ -167,6 +168,7 @@ namespace PowerLanguage.Strategy
 		private int m_touchBar, m_side, m_armBar;
 		private bool m_done;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _DV_02_FailedLevelFlip(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -186,7 +188,22 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV02ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "DV-02 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
@@ -208,13 +225,16 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !(m_br > 0) || !IsRth()) return;
+			if (sandboxBook()) return;
 			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			if (m_side != 0)                                           // armed: work the limit at L until the session ends
 			{
-				if (bar >= m_armBar + controlAdjustDelayBars())
+				if (IsExist(2) && BarsOfData(2).CurrentBar >= m_armBar + controlAdjustDelayBars())
 				{ if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); }
 				return;
 			}
+			if (!takeNative()) return;
+			h = BarsOfData(2).High[0]; l = BarsOfData(2).Low[0]; c = BarsOfData(2).Close[0]; bar = BarsOfData(2).CurrentBar;
 			if (m_touchBar == 0)
 			{
 				if (l <= m_level && h >= m_level) { m_touchBar = bar; m_hiSince = h; m_loSince = l; }
@@ -239,7 +259,7 @@ namespace PowerLanguage.Strategy
 
 		private void newDay(DateTime day)
 		{
-			m_day = day; m_done = false; m_touchBar = m_side = 0;
+			m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_touchBar = m_side = 0;
 			VpExtra prior = PriorRthProfile();
 			double atr = DailyContext != null ? DailyContext.Atr20d : double.NaN;
 			m_br = atr > 0 ? Cfg.f * atr : double.NaN;
@@ -249,5 +269,24 @@ namespace PowerLanguage.Strategy
 			if (!pocGate(day, prior.poc, ref m_br, out gw)) { if (journalOn()) trace(ETraceLevel.Journal, $"DV-02 {day:yyyy-MM-dd} gate: {gw}"); m_done = true; return; }
 			m_sd = Math.Max(m_br, Cfg.costFloorTicks * tickSize());   // stop = max(structural bracket, 14-tick floor); the target stays f x ATR20d
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seLmt.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -161,6 +162,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		private double m_hi, m_lo, m_stop, m_target;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _OF_07_BurstExtremeBreak(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -180,7 +182,11 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "OF07ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_day = DateTime.MinValue; }
 
 		protected override void CalcBar()
 		{
@@ -225,7 +231,7 @@ namespace PowerLanguage.Strategy
 			m_stop = stop; m_target = c + side * Cfg.targetR * r;
 			if (journalOn()) journalArm(side > 0 ? "OF07LE" : "OF07SE", c, m_stop, m_target, null);
 			portfolioArm(side, c, m_stop, Cfg.contracts);    // M-PORT: no-op outside Portfolio Trader
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
 	}
 }

@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -169,6 +170,8 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private bool m_done;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_57_TwoTimeframeTurn(object _ctx) : base(_ctx) { }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
@@ -185,10 +188,24 @@ namespace PowerLanguage.Strategy
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A257LX", EOrderAction.Sell));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			HtfStreams = new[] { 2, 3 };
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_last12 = m_last60 = DateTime.MinValue; m_ema = m_slope = double.NaN; m_ema60Count = 0;
 			m_up = m_osTaken = m_slopeDown = false; m_trigger = m_planStop = double.NaN; m_validLeft = 0;
@@ -199,6 +216,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = Clock.ToEastern(Bars.Time[0]).TimeOfDay;
 			TimeSpan flat = flatAt(tradingDayKey(Bars.Time[0]));
 			bool rthWindow = tod >= Cfg.from && tod < Cfg.to && tod < flat;
@@ -217,7 +235,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0) { sendExits(tod, flat); return; }
 			m_stop = m_entry = m_risk = m_peak = double.NaN;
 			if (new12 && m_validLeft > 0) m_validLeft--;                    // "valid for the next 2 12m bars"
-			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts);
+			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop);
 		}
 
 		/// <summary>New CLOSED 60m bar: update EMA(13) and the slope state.</summary>
@@ -303,5 +321,23 @@ namespace PowerLanguage.Strategy
 			if (cme.RthCloseEt.HasValue && cme.RthCloseEt.Value - Cfg.halfDayExitBefore < f) f = cme.RthCloseEt.Value - Cfg.halfDayExitBefore;
 			return f;
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

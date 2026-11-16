@@ -34,6 +34,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -170,6 +171,8 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private bool m_done;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_13_RotationVolumeLevel(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -189,6 +192,10 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			HtfStreams = new[] { 2 };
 			base.StartCalc();
 			m_last15 = m_aggDay = DateTime.MinValue; m_tr.Clear(); m_dC = m_prevC = double.NaN; m_dRoll = false;
@@ -199,6 +206,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime t = Bars.Time[0], day = GlobexDate(t);
 			TimeSpan tod = ToEastern(t).TimeOfDay, flat = flatAt(day);
 			bool roll = rollOn(1);
@@ -228,7 +237,7 @@ namespace PowerLanguage.Strategy
 				justArmed = false;
 				// entries 09:45-15:30 ET only (and before an early-close flat time): the limit sent on this close works on the next bar
 				bool window = tod >= Cfg.from && tod < Cfg.to && tod < flat;
-				if (window) { if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); }
+				if (window) { if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); } m_lxStp.Send(m_stop); m_sxStp.Send(m_stop);
 			}
 		}
 		// true only on the bar that armed the level: that 1m bar belongs to the breakout, so its own range must not count
@@ -322,5 +331,23 @@ namespace PowerLanguage.Strategy
 			if (cme.RthCloseEt.HasValue && cme.RthCloseEt.Value - Cfg.halfDayExitBefore < f) f = cme.RthCloseEt.Value - Cfg.halfDayExitBefore;
 			return f;
 		}
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seLmt.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

@@ -34,11 +34,12 @@
 // Same session after a stop: no new entry that session, except where the catalogue allows re-entry.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: the catalogue market. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
 // Data2: Not applicable. Higher-timeframe bars are built from Data1.
 // Further series: Not applicable
@@ -147,6 +148,7 @@ namespace PowerLanguage.Strategy
 		private readonly Dictionary<int, List<double>> m_hist = new Dictionary<int, List<double>>();
 		private int m_lastSlot = -1;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_09_NoiseBandLong(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -160,6 +162,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			base.StartCalc();
 		}
@@ -168,6 +172,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			bool check = tod.Seconds == 0 && tod.Minutes % 30 == 0 && tod >= new TimeSpan(9, 30, 0) && tod < new TimeSpan(16, 0, 0);
 			int pos = StrategyInfo.MarketPosition;

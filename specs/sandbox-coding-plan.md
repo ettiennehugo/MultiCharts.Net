@@ -112,35 +112,35 @@ The counts are in the table at the end of this file.
 | A2-42 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-03) | done | merged into PS-03; no second sandbox file |
 | A2-43 | Confluent-HVN level gate (target and veto module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_43_ConfluentHvn.Strategy.CS | 3 | coded in batch 3; partial gate, no order |
 | A2-44 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-15) | done | merged into PS-15; no second sandbox file |
-| A2-45 | Single-print shelf as destination (near-edge target, runner to far edge) | trading-idea-catalogue.md | entry signal | sandbox/_A2_45_SinglePrintShelf.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-46 | Volume-gap commitment entry to the far node | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_46_VolumeGapCommitment.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-45 | Single-print shelf as destination (near-edge target, runner to far edge) | trading-idea-catalogue.md | entry signal | sandbox/_A2_45_SinglePrintShelf.Strategy.CS | 4 | coded in batch 4 |
+| A2-46 | Volume-gap commitment entry to the far node | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_46_VolumeGapCommitment.Strategy.CS | 4 | coded in batch 4 |
 | A2-47 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into PS-03) | done | merged into PS-03; no second sandbox file |
-| A2-48 | Poor highs/lows as destinations (exit and stop-placement module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_48_PoorHighsLows.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-48 | Poor highs/lows as destinations (exit and stop-placement module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_48_PoorHighsLows.Strategy.CS | 4 | coded in batch 4 |
 | A2-49 | Midday support/resistance and afternoon breakout (Kaufman TSM) | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_49_MiddayBreakout.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-50 | Same-slot relative-volume opening regime gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_50_OpeningRvGate.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-51 | Intraday shock-bar fade with delayed stop and volume-decay exit | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_51_ShockBarFade.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| A2-52 | Time-confirmed opening-range break with pivot-range bias (Fisher ACD) | trading-idea-catalogue.md | entry signal | sandbox/_A2_52_TimeConfirmedOpening.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-53 | RTH gap fade with stop-and-reverse at the day's extreme (negative canary) | trading-idea-catalogue.md | entry signal | sandbox/_A2_53_RTHGapFade.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-54 | Up-gap pullback-to-prior-close short, exit next open | trading-idea-catalogue.md | entry signal | sandbox/_A2_54_UpGapPullback.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-52 | Time-confirmed opening-range break with pivot-range bias (Fisher ACD) | trading-idea-catalogue.md | entry signal | sandbox/_A2_52_TimeConfirmedOpening.Strategy.CS | 4 | coded in batch 4 |
+| A2-53 | RTH gap fade with stop-and-reverse at the day's extreme (negative canary) | trading-idea-catalogue.md | entry signal | sandbox/_A2_53_RTHGapFade.Strategy.CS | 4 | coded in batch 4 |
+| A2-54 | Up-gap pullback-to-prior-close short, exit next open | trading-idea-catalogue.md | entry signal | sandbox/_A2_54_UpGapPullback.Strategy.CS | 4 | coded in batch 4 |
 | A2-55 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | none (merged into RG-08) | done | merged into RG-08; no second sandbox file |
 | A2-56 | Momentum Pinball: daily LBR/RSI setup, first-hour break, conditional overnight hold | trading-idea-catalogue.md | entry signal | sandbox/_A2_56_FirstHourBreak.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-57 | Higher-TF turn plus first short-TF oversold entry (Kaufman/Elder) | trading-idea-catalogue.md | entry signal | sandbox/_A2_57_TwoTimeframeTurn.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | A2-58 | Fade the fast trend inside the slow trend, intraday | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_58_FastInSlowFade.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| A2-59 | Kaufman cost, 'unables' and shock-audit module (Gate 0, extends A2-40) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | sizing-portfolio | sandbox/_A2_59_KaufmanCostUnables.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-60 | Meyers normalised range-ratio adaptive breakout (5m) | trading-idea-catalogue.md | entry signal | sandbox/_A2_60_MeyersNormalisedRange.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-61 | Efficiency-ratio session router (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_61_EfficiencyRatioSession.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-62 | Taylor 3-day cycle 'low-first' buying day | trading-idea-catalogue.md | entry signal | sandbox/_A2_62_Taylor3Day.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-59 | Kaufman cost, 'unables' and shock-audit module (Gate 0, extends A2-40) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | sizing-portfolio | sandbox/_A2_59_KaufmanCostUnables.Strategy.CS | 4 | coded in batch 4 |
+| A2-60 | Meyers normalised range-ratio adaptive breakout (5m) | trading-idea-catalogue.md | entry signal | sandbox/_A2_60_MeyersNormalisedRange.Strategy.CS | 4 | coded in batch 4 |
+| A2-61 | Efficiency-ratio session router (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_61_EfficiencyRatioSession.Strategy.CS | 4 | coded in batch 4 |
+| A2-62 | Taylor 3-day cycle 'low-first' buying day | trading-idea-catalogue.md | entry signal | sandbox/_A2_62_Taylor3Day.Strategy.CS | 4 | coded in batch 4 |
 | A2-63 | Long-only open + 0.5 × daily ATR breakout, exit at the close (host H2) | trading-idea-catalogue.md | duplicate-of | _A2_63_RegimeGate.Strategy.CS | done | already on main as _A2_63_RegimeGate.Strategy.CS. No second sandbox copy in batch 1. |
 | A2-64 | 1.0 × daily ATR fade from the open or prior close | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS (shared with A2-70) | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| A2-65 | Raschke '1st cross' oscillator/trend cross with bar confirmation | trading-idea-catalogue.md | entry signal | sandbox/_A2_65_Raschke1stCross.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-66 | Raschke/Kaufman '2nd cross' second stochastic pullback | trading-idea-catalogue.md | entry signal | sandbox/_A2_66_RaschkeKaufman2nd.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-67 | Intraday RSI-of-highs/lows divergence long | trading-idea-catalogue.md | entry signal | sandbox/_A2_67_IntradayRSIOf.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-68 | 5-bar run + doji reversal, target 50% of the run | trading-idea-catalogue.md | entry signal | sandbox/_A2_68_X5BarRun.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-65 | Raschke '1st cross' oscillator/trend cross with bar confirmation | trading-idea-catalogue.md | entry signal | sandbox/_A2_65_Raschke1stCross.Strategy.CS | 4 | coded in batch 4 |
+| A2-66 | Raschke/Kaufman '2nd cross' second stochastic pullback | trading-idea-catalogue.md | entry signal | sandbox/_A2_66_RaschkeKaufman2nd.Strategy.CS | 4 | coded in batch 4 |
+| A2-67 | Intraday RSI-of-highs/lows divergence long | trading-idea-catalogue.md | entry signal | sandbox/_A2_67_IntradayRSIOf.Strategy.CS | 4 | coded in batch 4 |
+| A2-68 | 5-bar run + doji reversal, target 50% of the run | trading-idea-catalogue.md | entry signal | sandbox/_A2_68_X5BarRun.Strategy.CS | 4 | coded in batch 4 |
 | A2-69 | Kaufman 3-day trade: two down closes, buy a lower open, exit next close | trading-idea-catalogue.md | entry signal | sandbox/_A2_69_KaufmanThreeDay.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-70 | High-volatility skip gate (module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_70_OpenFadeHvGate.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | A2-71 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | duplicate-of | none (merged into PF-06) | done | merged into PF-06; no second sandbox file |
-| A2-72 | Progressive exposure ladder 25/50/100% (sizing module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_72_ProgressiveExposureLadder.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
-| A2-73 | Breakeven stop at ≈ 3R or above the rolling average gain (exit module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_73_BreakevenStopAt.Strategy.CS (name fixed when the batch is written) | 4 | not coded |
+| A2-72 | Progressive exposure ladder 25/50/100% (sizing module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_72_ProgressiveExposureLadder.Strategy.CS | 4 | coded in batch 4 |
+| A2-73 | Breakeven stop at ≈ 3R or above the rolling average gain (exit module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_A2_73_BreakevenStopAt.Strategy.CS | 4 | coded in batch 4 |
 | A2-74 | Free roll: sell half at 2–3R, remainder at breakeven (scale-out module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_74_FreeRollSell.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | A2-75 | Rolling hit-rate throttle (RBA module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_75_RollingHitRate.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
 | A2-76 | Sell into the climax bar (profit-exit module) | trading-idea-catalogue.md | entry signal | sandbox/_A2_76_SellIntoThe.Strategy.CS (name fixed when the batch is written) | 5 | not coded |
@@ -380,3 +380,22 @@ Batch 2 in this update is the remaining engines-manual examples. Rows that the f
 | 11 | 20 | VX-05, VX-06, VX-07, VX-08, LE-01, LE-02, LE-03, LE-04, LE-05, LE-06, LE-07, EX-01, EX-02, EX-03, EX-04, EX-05, EX-06, EX-07, EX-08, EX-09 |
 | 12 | 18 | EX-10, EX-11, EX-12, EX-13, RG-01, RG-02, RG-04, RG-05, RG-06, RG-08, RG-09, RG-10, PF-01, PF-02, PF-04, PF-05, PF-06, PF-07 |
 | 13 | 8 | PF-08, L2-01, L2-02, L2-03, L2-04, L2-05, L2-06, L2-07 |
+
+## Market tags
+
+Each sandbox header has `Market tag: futures-only`, `stock-only`, or `both`. Futures-only ideas use the futures session API (`IsRth`, `m_rthValueEnd`). Both and stock-only ideas use `Bars.Sessions` and never a hard-coded symbol, session clock, or tick floor. The floor is `InstrumentProfile.costFloorTicks`. Batches 1-3 were tagged from the code they already contain. New files are tagged with the idea.
+
+## Non-trading rows
+
+A file journals and does not send an order only when its catalogue heading has no entry. SandboxCompile rejects two sandbox signals whose CalcBar bodies match once comments, whitespace and quoted names are removed.
+
+| ID | Reason |
+|---|---|
+| A2-36 | No GEX series and no VIX series. The heading cannot be traded on this feed. |
+| A2-38 | Trade-size entropy is not in `_TickStream`. |
+| A2-40 | Cost note. It does not set Commission or Slippage and it has no entry. |
+| A2-48 | The heading says the module never opens a trade. It journals poor highs and poor lows. |
+| A2-59 | Cost and unables audit. It does not set a fee. |
+| A2-61 | Session efficiency-ratio router. It journals continuation or reversion and does not enter. |
+| A2-72 | Size ladder. It journals 25/50/100 percent and does not enter. |
+| A2-73 | Exit overlay. GX expresses it as BreakEven AtTrigger, RMultiple, value 3. It does not enter. |

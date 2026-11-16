@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -141,7 +142,7 @@
 // Stop: mu1 - 1 tick, capped at 1.0 x ATR(14, 5m) from the signal close, then floored at 14 ticks (user rule). Skip if mu2 - close < 1.2R
 // or if the risk budget (0.01 x equity) is breached. Target: mu2. Time stop: 90 minutes, flat by 15:55.
 // Not coded: T1 50% at E2 (single-contract example). Thresholds are catalogue values, not results.
-// Chart: Data1 @ES 5m, Data2 @ES 30m, dxFeed continuous UNADJUSTED. Features: F-PSTAT (ProfileStats.enabled ring, SessionBars,
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Data3 = 30-minute. Features: F-PSTAT (ProfileStats.enabled ring, SessionBars,
 // Histogram, ProfileMixture, MixtureSeed), F-TM (FlatBy).
 using System;
 using System.Collections.Generic;
@@ -160,14 +161,18 @@ namespace PowerLanguage.Strategy
 		}
 		protected A227Config Cfg { get; } = new A227Config();
 
-		private IOrderMarket m_le, m_lx;
-		private IOrderPriced m_lxStp, m_lxLmt;
+		private IOrderMarket m_le, m_lx, m_se, m_sx;
+		private IOrderPriced m_lxStp, m_lxLmt, m_sxStp, m_sxLmt;
 		private DateTime m_day = DateTime.MinValue, m_entryTime;
 		private bool m_ok, m_done, m_armed;
 		private int m_up, m_lastPos;
-		private double m_mu1, m_mu2, m_e1, m_stop, m_target;
+		private double m_mu1, m_mu2, m_e1, m_e2, m_stop, m_target;
+		private int m_dn;
+		private bool m_shortArmed;
 
-		public _A2_27_BimodalVoidTraverse(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _A2_27_BimodalVoidTraverse(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
@@ -176,12 +181,31 @@ namespace PowerLanguage.Strategy
 			ProfileStats.enabled = true;                      // lazy: Data1 ring for SessionBars
 			FlatBy = Cfg.flat;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A227LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A227SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A227LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A227SX", EOrderAction.BuyToCover));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A227LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A227LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A227SS", EOrderAction.BuyToCover, OrderExit.FromAll));
+			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A227ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; m_lastPos = 0; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_day = DateTime.MinValue; m_lastPos = 0; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-27 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
@@ -197,47 +221,66 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				m_done = true;
-				if (mustFlatten() || (Bars.Time[0] - m_entryTime).TotalMinutes >= Cfg.timeStopMin) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
+				bool flat = mustFlatten() || (Bars.Time[0] - m_entryTime).TotalMinutes >= Cfg.timeStopMin;
+				if (pos > 0)
+				{
+					if (flat) { m_lx.Send(); return true; }
+					m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
+				}
+				else
+				{
+					if (flat) { m_sx.Send(); return true; }
+					m_sxStp.Send(m_stop); m_sxLmt.Send(m_target);
+				}
 				return true;
-			
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !m_ok || !IsRth()) return;
-			double c = Bars.Close[0], tick = tickSize();
-			if (c <= m_e1) { m_armed = true; m_up = 0; return; }   // in or below the lower component
-			if (!m_armed) return;
-			m_up++;
+			if (!takeNative()) return;
+			double c = BarsOfData(2).Close[0], tick = tickSize();
+			bool wantLong = _SandboxRules.Allows(Side, true);
+			bool wantShort = _SandboxRules.Allows(Side, false);
+			if (wantLong && c <= m_e1) { m_armed = true; m_up = 0; }
+			if (wantShort && c >= m_e2) { m_shortArmed = true; m_dn = 0; }
+			if (wantLong && m_armed && c > m_e1) m_up++;
+			if (wantShort && m_shortArmed && c < m_e2) m_dn++;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (m_up < Cfg.acceptCloses || tod < Cfg.from || tod > Cfg.to) return;
-			m_done = true;                                          // one attempt per day
-			double atr5 = averageTrueRange(Bars, Cfg.atrLength);
-			double stop = Math.Max(m_mu1 - tick, c - Cfg.stopCapAtr5 * atr5);
-			if (c - stop < Cfg.costFloorTicks * tick) stop = c - Cfg.costFloorTicks * tick;
-			double r = c - stop;
-			string why = m_mu2 - c < Cfg.minRR * r ? "target < 1.2R"
+			if (tod < Cfg.from || tod > Cfg.to) return;
+			bool goLong = wantLong && m_armed && m_up >= Cfg.acceptCloses;
+			bool goShort = wantShort && m_shortArmed && m_dn >= Cfg.acceptCloses;
+			if (!goLong && !goShort) return;
+			m_done = true;
+			double atr5 = averageTrueRange(BarsOfData(2), Cfg.atrLength);
+			bool buy = goLong;
+			double stop = buy ? Math.Max(m_mu1 - tick, c - Cfg.stopCapAtr5 * atr5) : Math.Min(m_mu2 + tick, c + Cfg.stopCapAtr5 * atr5);
+			if (buy && c - stop < Cfg.costFloorTicks * tick) stop = c - Cfg.costFloorTicks * tick;
+			if (!buy && stop - c < Cfg.costFloorTicks * tick) stop = c + Cfg.costFloorTicks * tick;
+			double r = Math.Abs(c - stop);
+			double target = buy ? m_mu2 : m_mu1;
+			string why = Math.Abs(target - c) < Cfg.minRR * r ? "target < 1.2R"
 				: Cfg.contracts * r * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction) ? "risk budget" : null;
 			if (why != null) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-27 {day:yyyy-MM-dd} skip: {why}"); return; }
-			m_stop = stop; m_target = m_mu2;
-			if (journalOn()) journalArm("A227LE", c, m_stop, m_target, null);
-			m_le.Send(Cfg.contracts);
+			m_stop = stop; m_target = target;
+			if (journalOn()) journalArm(buy ? "A227LE" : "A227SE", c, m_stop, m_target, null);
+			if (buy) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
 
 		private void newDay(DateTime day)
 		{
-			m_day = day; m_done = false; m_armed = false; m_up = 0; m_ok = false;
+			m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_armed = false; m_shortArmed = false; m_up = 0; m_dn = 0; m_ok = false;
 			DateTime prev = priorTradingDay(day);
 			if (prev == DateTime.MinValue) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-27 " + day.ToString("yyyy-MM-dd") + " no Data2"); return; }
+			if (!IsExist(3)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-27 " + day.ToString("yyyy-MM-dd") + " no Data3"); return; }
 			List<RingBar> bars = SessionBars(prev, true);
-			double tick = tickSize(), atr30 = averageTrueRange(BarsOfData(2), Cfg.atrLength);
+			double tick = tickSize(), atr30 = averageTrueRange(BarsOfData(3), Cfg.atrLength);
 			double[] px, vol;
 			if (bars.Count < 20 || !_ProfileStats.Histogram(bars, null, tick, 2, out px, out vol)) return;
 			ProfileMixtureResult m = _ProfileStats.ProfileMixture(px, vol, Cfg.kMax, _ProfileStats.MixtureSeed(prev), EGmmNeff.Bars, bars.Count, tick);
 			if (journalOn()) trace(ETraceLevel.Journal, m.Journal(prev));
 			if (m.K != 2 || m.pi[0] < Cfg.minPi || m.pi[1] < Cfg.minPi || !(m.voidDepth.Length > 0 && m.voidDepth[0] >= Cfg.minVoidDepth)) return;
 			if (!(m.mu[1] - m.mu[0] >= Cfg.minSepAtr30 * atr30)) return;
-			m_mu1 = m.mu[0]; m_mu2 = m.mu[1]; m_e1 = m.mu[0] + m.sd[0];
+			m_mu1 = m.mu[0]; m_mu2 = m.mu[1]; m_e1 = m.mu[0] + m.sd[0]; m_e2 = m.mu[1] - m.sd[1];
 			m_ok = m_e1 < m.mu[1] - m.sd[1];                       // E1 below E2: a real void between the edges
 		}
 

@@ -7,6 +7,7 @@
 // Study class: _A2_29_EntropyDayType
 // File: sandbox/_A2_29_EntropyDayType.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Entropy day-type gate. It classifies the session and does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -34,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -168,6 +170,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			base.StartCalc();
 			m_slot = Cfg.decision.Hours * 60 + Cfg.decision.Minutes;   // = _EntropyTracker.Slot(11:00) = 660
 			m_hnorm = new _EntropyTracker(ProfileStats.pctLookbackA229, ProfileStats.pctMinFill, new[] { m_slot });

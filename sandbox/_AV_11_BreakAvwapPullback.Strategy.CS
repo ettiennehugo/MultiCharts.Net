@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -138,7 +139,7 @@
 // M-AVWAP Breakout anchor is a PA break-of-structure event, not a composite-edge break (see pitfall in section 5).
 // Entry: the first pullback whose low trades into AVWAP +/- 0.25 sigma and that prints a PA HL; buy stop 1 tick above that bar.
 // Stop: max(AVWAP - 1 sigma, 14-tick floor). Target: VAH + 1.0 W (PS-01 target). Invalidation: a 5m close < composite VAH - delta.
-// Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-COMP, F-VP, M-PA, F-TM.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: F-COMP, F-VP, M-PA, F-TM.
 using System;
 using PowerLanguage.Function;
 
@@ -157,28 +158,50 @@ namespace PowerLanguage.Strategy
 		}
 		protected Av11Config Cfg { get; } = new Av11Config();
 
-		private IOrderPriced m_leStp, m_lxStp, m_lxLmt;
-		private IOrderMarket m_lx;
+		private IOrderPriced m_leStp, m_seStp, m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
+		private IOrderMarket m_lx, m_sx;
+		private double m_val;
 		private DateTime m_day = DateTime.MinValue;
-		private bool m_ok, m_done, m_anchored, m_touched;
+		private bool m_ok, m_done, m_anchored, m_touched, m_longBreak = true;
 		private double m_vah, m_w, m_spv, m_sp2v, m_sv, m_trigger = double.NaN, m_stop, m_target;
 
-		public _AV_11_BreakAvwapPullback(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _AV_11_BreakAvwapPullback(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;
-			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 1;
+			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 2;
 			FlatBy = Cfg.flat;
 			m_leStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "AV11LE", EOrderAction.Buy));
+			m_seStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "AV11SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV11LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV11SX", EOrderAction.BuyToCover));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV11LS", EOrderAction.Sell, OrderExit.FromAll));
+			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV11SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "AV11LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "AV11ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_day = DateTime.MinValue; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "AV-11 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
@@ -192,39 +215,68 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				m_done = true;
-				if (mustFlatten() || c < m_vah - d) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); return true;
+				bool invalid = m_longBreak ? c < m_vah - d : c > m_val + d;
+				if (mustFlatten() || invalid)
+				{
+					if (StrategyInfo.MarketPosition > 0) m_lx.Send(); else m_sx.Send();
+					return true;
+				}
+				if (StrategyInfo.MarketPosition > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
+				else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
+				return true;
 			
 			}
-			if (StrategyInfo.MarketPosition > 0 && sendExits()) return;
+			if (StrategyInfo.MarketPosition != 0 && sendExits()) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_ok || !IsRth()) return;
+			if (sandboxBook()) return;
+			if (!double.IsNaN(m_trigger))
+			{
+				m_restPx = m_trigger; m_restBuy = m_longBreak; m_restOn = true; m_restQty = Cfg.contracts;
+				if (m_longBreak) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); }
+				else { m_seStp.Send(m_trigger, Cfg.contracts); m_sxStp.Send(m_stop); }
+				return;
+			}
+			if (!takeNative()) return;
+			c = BarsOfData(2).Close[0];
+			bool wantLong = _SandboxRules.Allows(Side, true);
+			bool wantShort = _SandboxRules.Allows(Side, false);
 			if (!m_anchored)
 			{
-				if (tod < Cfg.from || tod > Cfg.to || !(c > m_vah + d)) return;
-				m_anchored = true;
-				if (journalOn()) trace(ETraceLevel.Journal, $"AV-11 {day:yyyy-MM-dd} anchor {Bars.Time[0]:HH:mm} close {c:F2} > VAH {m_vah:F2}");
+				if (tod < Cfg.from || tod > Cfg.to) return;
+				if (wantLong && c > m_vah + d) { m_anchored = true; m_longBreak = true; }
+				else if (wantShort && c < m_val - d) { m_anchored = true; m_longBreak = false; }
+				else return;
+				if (journalOn()) trace(ETraceLevel.Journal, "AV-11 " + day.ToString("yyyy-MM-dd") + (m_longBreak ? " long break above VAH" : " short break below VAL"));
 			}
-			double tp = (Bars.High[0] + Bars.Low[0] + c) / 3, v = Bars.Volume[0];
+			double tp = (BarsOfData(2).High[0] + BarsOfData(2).Low[0] + c) / 3, v = BarsOfData(2).Volume[0];
 			m_spv += tp * v; m_sp2v += tp * tp * v; m_sv += v;
 			if (!(m_sv > 0)) return;
 			double av = m_spv / m_sv, sig = Math.Sqrt(Math.Max(0, m_sp2v / m_sv - av * av));
-			if (c < m_vah - d) { m_done = true; return; }                       // break failed before the re-entry
-			if (Bars.Low[0] <= av + Cfg.zoneSigma * sig && Bars.High[0] >= av - Cfg.zoneSigma * sig) m_touched = true;
+			if (m_longBreak ? c < m_vah - d : c > m_val + d) { m_done = true; return; }
+			if (BarsOfData(2).Low[0] <= av + Cfg.zoneSigma * sig && BarsOfData(2).High[0] >= av - Cfg.zoneSigma * sig) m_touched = true;
 			_PriceActionEngine pa = PriceActionEngine;
-			if (m_touched && double.IsNaN(m_trigger) && tod <= Cfg.to && pa != null && pa.IsWarm && pa.NewPivotLow)
+			bool pivot = m_longBreak ? pa != null && pa.IsWarm && pa.NewPivotLow : pa != null && pa.IsWarm && pa.NewPivotHigh;
+			if (m_touched && double.IsNaN(m_trigger) && tod <= Cfg.to && pivot)
 			{
-				_Pivot p = pa.LastLow(0);
-				if (p != null && p.label == EPivotLabel.HL)
+				_Pivot p = m_longBreak ? pa.LastLow(0) : pa.LastHigh(0);
+				EPivotLabel want = m_longBreak ? EPivotLabel.HL : EPivotLabel.LH;
+				if (p != null && p.label == want)
 				{
-					double trig = Bars.High[0] + tick, stop = Math.Min(av - Cfg.stopSigma * sig, trig - Cfg.costFloorTicks * tick);
-					if (Cfg.contracts * (trig - stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
-					{ if (journalOn()) trace(ETraceLevel.Journal, $"AV-11 {day:yyyy-MM-dd} skip: risk budget"); m_done = true; return; }
-					m_trigger = trig; m_stop = stop; m_target = m_vah + Cfg.targetW * m_w;
-					if (journalOn()) journalArm("AV11LE", m_trigger, m_stop, m_target, null);
+					double trig = m_longBreak ? BarsOfData(2).High[0] + tick : BarsOfData(2).Low[0] - tick;
+					double stop = m_longBreak ? Math.Min(av - Cfg.stopSigma * sig, trig - Cfg.costFloorTicks * tick) : Math.Max(av + Cfg.stopSigma * sig, trig + Cfg.costFloorTicks * tick);
+					if (Cfg.contracts * Math.Abs(trig - stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
+					{ if (journalOn()) trace(ETraceLevel.Journal, "AV-11 " + day.ToString("yyyy-MM-dd") + " skip: risk budget"); m_done = true; return; }
+					m_trigger = trig; m_stop = stop; m_target = m_longBreak ? m_vah + Cfg.targetW * m_w : m_val - Cfg.targetW * m_w;
+					if (journalOn()) journalArm(m_longBreak ? "AV11LE" : "AV11SE", m_trigger, m_stop, m_target, null);
 				}
 			}
-			if (!double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts);
+			if (!double.IsNaN(m_trigger))
+			{
+				m_restPx = m_trigger; m_restBuy = m_longBreak; m_restOn = true; m_restQty = Cfg.contracts;
+				if (m_longBreak) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); }
+				else { m_seStp.Send(m_trigger, Cfg.contracts); m_sxStp.Send(m_stop); }
+			}
 		}
 
 		private void newDay(DateTime day)
@@ -232,7 +284,25 @@ namespace PowerLanguage.Strategy
 			m_day = day; m_done = m_anchored = m_touched = false; m_trigger = double.NaN; m_spv = m_sp2v = m_sv = 0;
 			VpExtra comp = Composite(1, Cfg.n);
 			m_ok = comp != null && IsBalanced(1, Cfg.n, Cfg.balanceOverlap) && (ValueMigrationScore(1, Cfg.n, 0.10, 20, false) ?? 0) >= 1;
-			if (comp != null) { m_vah = comp.vah; m_w = comp.vah - comp.val; m_ok &= m_w > 0; }
+			if (comp != null) { m_vah = comp.vah; m_val = comp.val; m_w = comp.vah - comp.val; m_ok &= m_w > 0; }
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

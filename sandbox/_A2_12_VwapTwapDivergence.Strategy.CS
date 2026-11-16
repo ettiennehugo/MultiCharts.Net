@@ -34,11 +34,12 @@
 // Same session after a stop: no new entry that session, except where the catalogue allows re-entry.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: the catalogue market. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
 // Data2: Not applicable. Higher-timeframe bars are built from Data1.
 // Further series: Not applicable
@@ -153,6 +154,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue, m_bucket = DateTime.MinValue;
 		private bool m_done;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_12_VwapTwapDivergence(object _ctx) : base(_ctx) { DeltaMin = EDeltaMin.D025; }
 
 		protected override void Create()
@@ -167,6 +169,10 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EDeltaMin), DeltaMin)) throw new ArgumentException("_A2_12_VwapTwapDivergence: DeltaMin is not a defined EDeltaMin");
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			base.StartCalc();
@@ -177,10 +183,11 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_twapNum = 0; m_twapN = 0; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_twapNum = 0; m_twapN = 0; }
 			if (IsRth()) { m_twapNum += Bars.Close[0]; m_twapN++; }
 			stepAtr(et);
 			double vwap = CurrentVwap1;
@@ -204,7 +211,7 @@ namespace PowerLanguage.Strategy
 			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-12 " + day.ToString("yyyy-MM-dd") + " skip: risk budget"); m_done = true; return; }
 			m_stop = stop; m_done = true;
-			m_le.Send();
+			m_le.Send(); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A212LE", Bars.Close[0], m_stop, double.NaN, null);
 		}
 

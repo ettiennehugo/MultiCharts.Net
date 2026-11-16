@@ -7,6 +7,7 @@
 // Study class: _A2_37_DislocationFilter
 // File: sandbox/_A2_37_DislocationFilter.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cross-instrument dislocation filter. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -34,10 +35,12 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -148,6 +151,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (!IsExist(2))
 			{
 				DateTime day = Bars.Time[0].Date;

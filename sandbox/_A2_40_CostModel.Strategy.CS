@@ -7,6 +7,7 @@
 // Study class: _A2_40_CostModel
 // File: sandbox/_A2_40_CostModel.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cost note. It does not set a fee and it does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -34,10 +35,12 @@
 // Same session after a stop: no new entry that session.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -148,7 +151,9 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			if (day == m_day) return;
 			m_day = day;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-40 " + day.ToString("yyyy-MM-dd") + " This is a cost model, not an entry. It does not set Commission or Slippage. It j");
+			double costFloor = tickSize();
+			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) costFloor = p.costFloorTicks * tickSize(); } catch (Exception) { }
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-40 " + day.ToString("yyyy-MM-dd") + " Cost floor " + costFloor.ToString("0.00") + ". This file does not set Commission or Slippage.");
 		}
 	}
 }

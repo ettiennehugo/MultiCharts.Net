@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -137,7 +138,7 @@
 // Signal: by 10:15 ET, two 5m closes back inside the prior VA (gap up: close <= prior VAH). Entry: sell stop 1 tick through the low
 // of the second inside bar (buy stop through the high for a gap down). Stop: max(session extreme + 1 tick, 14-tick floor).
 // Target: prior POC (the "then opposite VA edge" leg is not coded: one target). The prior profile is skipped if it crosses a roll.
-// Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-VP (PriorRthProfile), F-SESS (Session), M-DAILY (Atr20d), F-TM.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: F-VP (PriorRthProfile), F-SESS (Session), M-DAILY (Atr20d), F-TM.
 using System;
 using PowerLanguage.Function;
 
@@ -163,6 +164,7 @@ namespace PowerLanguage.Strategy
 		private int m_side, m_inside;
 		private double m_vah, m_val, m_poc, m_trigger = double.NaN, m_stop;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_05_RejectedRepricingOpen(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -181,14 +183,29 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "PS05ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
+		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-05 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_opened = m_done = false; m_side = m_inside = 0; m_trigger = double.NaN; }
+			if (day != m_day) { m_day = day; m_opened = m_done = false; m_filledSetup = false; m_restOn = false; m_side = m_inside = 0; m_trigger = double.NaN; }
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
@@ -202,6 +219,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !IsRth()) return;
+			if (sandboxBook()) return;
 			SessionStats s = Session;
 			double tick = tickSize(), c = Bars.Close[0];
 			if (!m_opened)
@@ -219,17 +237,38 @@ namespace PowerLanguage.Strategy
 			if (double.IsNaN(m_trigger))
 			{
 				if (ToEastern(Bars.Time[0]).TimeOfDay > Cfg.signalBy) { m_done = true; return; }
+				if (!takeNative()) return;
+				c = BarsOfData(2).Close[0];
 				bool inside = m_side < 0 ? c <= m_vah : c >= m_val;
 				m_inside = inside ? m_inside + 1 : 0;
 				if (m_inside < Cfg.insideCloses) return;
-				double trig = m_side < 0 ? Bars.Low[0] - tick : Bars.High[0] + tick;
+				double trig = m_side < 0 ? BarsOfData(2).Low[0] - tick : BarsOfData(2).High[0] + tick;
 				double stop = m_side < 0 ? Math.Max(s.rthHigh + tick, trig + Cfg.costFloorTicks * tick) : Math.Min(s.rthLow - tick, trig - Cfg.costFloorTicks * tick);
 				if (m_side * (m_poc - trig) <= 0 || Cfg.contracts * Math.Abs(trig - stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
 				{ if (journalOn()) trace(ETraceLevel.Journal, $"PS-05 {day:yyyy-MM-dd} skip: target behind trigger or risk budget"); m_done = true; return; }
 				m_trigger = trig; m_stop = stop;
 				if (journalOn()) journalArm(m_side > 0 ? "PS05LE" : "PS05SE", m_trigger, m_stop, m_poc, null);
 			}
-			if (m_side > 0) m_leStp.Send(m_trigger, Cfg.contracts); else m_seStp.Send(m_trigger, Cfg.contracts);
+			if (m_side > 0) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seStp.Send(m_trigger, Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seStp.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

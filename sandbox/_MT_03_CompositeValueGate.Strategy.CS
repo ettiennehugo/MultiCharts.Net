@@ -34,6 +34,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: both
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -135,7 +136,7 @@
 
 // Manual v4 example 21 - MT-03 composite-value gate on the example 15 host (PS-08 narrow-IB breakout).
 // Rule: long only if price >= the 20-session composite POC and the 20-session V-score >= 0; short mirrors (price <= POC, V-score <= 0).
-// Chart: as example 15 (@ES 5m). The completed-session profiles come from the base's Own profiles (OwnProfileWindow = Rth), so the gate
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // does not depend on the MC Volume Profile study settings.
 // Features: F-VP (Composite, ValueMigrationScore, OwnProfileWindow, DevelopingSource), M-VSCORE.
 using System;
@@ -147,13 +148,19 @@ namespace PowerLanguage.Strategy
 	public class _MT_03_CompositeValueGate : _PS_08_NarrowIbBreak
 	{
 		private const int N = 20;
-		public _MT_03_CompositeValueGate(object _ctx) : base(_ctx) { }
+		public _MT_03_CompositeValueGate(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
 			base.Create();
 			DevelopingSource = EDevelopingSource.Own;   // [Input] on the base: set in code, not in the Format dialog
 			OwnProfileWindow = EOwnProfileWindow.Rth;
+		}
+
+		protected override void CalcBar()
+		{
+			if (Bars.Status == EBarState.Close && !IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "MT-03 Data2 missing"); return; }
+			base.CalcBar();
 		}
 
 		protected override bool hostGate(int side, out string why)

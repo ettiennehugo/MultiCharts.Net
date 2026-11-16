@@ -35,6 +35,7 @@
 // Same session after a stop: as the example codes it.
 //
 // ## 7. Instruments
+// Market tag: futures-only
 // Typical: @ES, the example's chart. Other roots are Not yet verified.
 // Validated: Not yet verified
 //
@@ -134,7 +135,7 @@
 
 // Manual v4 example 15 - PS-08 narrow initial balance breakout (core arm). IB width <= 33rd percentile of the last 20 sessions;
 // after 10:30 ET, 2 consecutive closed 5m bars beyond IB +/- delta -> market; stop back inside by 0.25 x IB (floored); target 1 x IB beyond.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED. IbMinutes = 60 (default).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. IbMinutes = 60 (default).
 // Features: F-SESS (Session.ibHigh/ibLow/ibComplete, IbRange), F-CAL half-days, F-JRNL, roll guard, floor rule.
 using System;
 using System.Collections.Generic;
@@ -167,7 +168,9 @@ namespace PowerLanguage.Strategy
 		private int m_up, m_dn;
 		private double m_stop = double.NaN, m_target = double.NaN;
 
-		public _PS_08_NarrowIbBreak(object _ctx) : base(_ctx) { }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		[Input] public ESandboxSide Side { get; set; }
+		public _PS_08_NarrowIbBreak(object _ctx) : base(_ctx) {  Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
@@ -185,9 +188,22 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			base.StartCalc();
-			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_up = m_dn = 0;
+			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0;
 			m_stop = m_target = double.NaN;
+		}
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-08 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
 		}
 
 		protected override void CalcBar()
@@ -195,7 +211,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_ibLogged = m_narrow = m_done = false; m_up = m_dn = 0; }
+			if (day != m_day) { m_day = day; m_ibLogged = m_narrow = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; }
 			if (rollOn(1)) m_done = true;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay, flat = flatAt(day);
 			int pos = StrategyInfo.MarketPosition;
@@ -219,21 +235,22 @@ namespace PowerLanguage.Strategy
 				if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {day:yyyy-MM-dd} IB {s.ibLow:F2}-{s.ibHigh:F2} width {ib:F2} narrow({m_narrow})");
 			}
 			if (!m_narrow || m_done || tod < Cfg.from || tod >= Cfg.to || tod >= flat) return;
-			double tick = tickSize();
-			m_up = Bars.Close[0] > s.ibHigh + Cfg.deltaTicks * tick ? m_up + 1 : 0;
-			m_dn = Bars.Close[0] < s.ibLow - Cfg.deltaTicks * tick ? m_dn + 1 : 0;
+			if (!takeNative()) return;
+			double tick = tickSize(), c2 = BarsOfData(2).Close[0];
+			m_up = c2 > s.ibHigh + Cfg.deltaTicks * tick ? m_up + 1 : 0;
+			m_dn = c2 < s.ibLow - Cfg.deltaTicks * tick ? m_dn + 1 : 0;
 			int side = m_up >= Cfg.closesNeeded ? +1 : m_dn >= Cfg.closesNeeded ? -1 : 0;
 			if (side == 0) return;
 			m_done = true;                                        // one attempt per session
 			string why;
 			if (!hostGate(side, out why)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {Bars.Time[0]:yyyy-MM-dd HH:mm} gate blocked side {side}: {why}"); return; }
-			double edge = side > 0 ? s.ibHigh : s.ibLow, entry = Bars.Close[0];
+			double edge = side > 0 ? s.ibHigh : s.ibLow, entry = BarsOfData(2).Close[0];
 			double stop = edge - side * Cfg.stopInsideIb * ib;
 			if (side * (entry - stop) < Cfg.costFloorTicks * tick) stop = entry - side * Cfg.costFloorTicks * tick;
 			double r = Math.Abs(entry - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = stop; m_target = edge + side * Cfg.targetIb * ib;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "ib", ib.ToString("F2") }, { "edge", edge.ToString("F2") } };
