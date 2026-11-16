@@ -191,7 +191,7 @@ namespace PowerLanguage.Strategy
 				{
 					m_lt.Send(m_buyHigh);
 					TimeSpan tod = sessionClock(Bars.Time[0]);
-					if (_SandboxRules.PastFlat(tod, Bars.Info.Exchange)) m_lx.Send();
+					if (_SandboxRules.PastFlat(tod, Bars.Info.Name, m_rthValueEnd)) m_lx.Send();
 				}
 				return;
 			}
@@ -245,7 +245,7 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

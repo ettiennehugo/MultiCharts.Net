@@ -166,7 +166,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			base.StartCalc();
 		}
 		protected override void CalcBar()
@@ -212,7 +212,7 @@ namespace PowerLanguage.Strategy
 		private void sendExits(int pos)
 		{
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			bool flat = _SandboxRules.PastFlat(tod, Bars.Info.Exchange);
+			bool flat = _SandboxRules.PastFlat(tod, Bars.Info.Name, m_rthValueEnd);
 			double openPts = (Bars.Close[0] - StrategyInfo.AvgEntryPrice) * pos;
 			bool failed = Bars.CurrentBar - m_entryBar >= 15 && openPts <= 0;
 			if (flat || failed) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
