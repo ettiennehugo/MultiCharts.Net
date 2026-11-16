@@ -164,7 +164,7 @@ namespace PowerLanguage.Strategy
 			if (!overlap(a, b) || !overlap(b, c)) return;
 			double atr = DailyContext.Atr20d; if (!(atr > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_counted && _SandboxRules.PastFlat(tod, Bars.Info.Exchange)) { m_counted = true; if (Bars.Close[0] > comp.vah + 0.1 * atr) m_out++; else m_out = 0; }
+			if (!m_counted && _SandboxRules.PastFlat(tod, Bars.Info.Name, m_rthValueEnd)) { m_counted = true; if (Bars.Close[0] > comp.vah + 0.1 * atr) m_out++; else m_out = 0; }
 			if (m_out < 2 || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(61))) return;
 			double lo = Bars.Low[0], prev = Bars.Low[60], hi = Bars.High[0];
 			for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[60 + i]); hi = Math.Max(hi, Bars.High[i]); }
@@ -203,7 +203,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange);
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
