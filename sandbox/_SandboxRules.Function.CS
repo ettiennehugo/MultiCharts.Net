@@ -138,11 +138,10 @@ namespace PowerLanguage.Strategy
 
 		static int LagMinutes(string exchange)
 		{
-			// Same tokens as _CustomSignal.exchangeTokenZoneId. Central is 60 minutes behind Eastern.
-			// NYMEX and COMEX are Eastern in that map, so 1555 is 15:55 ET there.
+			// Central is 60 minutes behind Eastern. PR #141 puts NYMEX, COMEX, XNYM and XCEC on Central with CME and CBOT.
 			if (string.IsNullOrEmpty(exchange)) return 0;
 			string e = exchange.ToUpperInvariant();
-			string[] central = { "CME", "XCME", "GLOBEX", "CBOT", "ECBOT", "CBT", "XCBT", "CBOE" };
+			string[] central = { "CME", "XCME", "GLOBEX", "CBOT", "ECBOT", "CBT", "XCBT", "CBOE", "NYMEX", "COMEX", "XNYM", "XCEC" };
 			for (int i = 0; i < central.Length; i++)
 				if (Token(e, central[i])) return 60;
 			return 0;
