@@ -19,6 +19,16 @@ namespace PowerLanguage.Strategy
 
 	public static class _SandboxRules
 	{
+		/// <summary>Analyst MC17 run (A2-15): MaxBarsBack-safe lookback. Sandbox studies run at MaxBarsBack 49, so Bars.X[ago] past 49
+		/// aborts the study. Studies read deeper Data1 history from an engine ring (requireRing in StartCalc) through this:
+		/// the closed bar `ago` (0 = this bar), or a NaN bar with time MinValue while the ring is still shorter than ago.</summary>
+		public static PowerLanguage.Function.RingBar RingAgo(PowerLanguage.Function._BarRing r, int ago)
+		{
+			if (r == null || ago < 0 || ago >= r.Count)
+				return new PowerLanguage.Function.RingBar { bar = -1, time = DateTime.MinValue, tradingDay = DateTime.MinValue, o = double.NaN, h = double.NaN, l = double.NaN, c = double.NaN, v = double.NaN, up = double.NaN, down = double.NaN };
+			return r[ago];
+		}
+
 		/// <summary>Regular close in US Eastern. The named pits and index futures come from the sandbox table. Anything else uses a daytime session-template end, then 16:00 ET (a stock close).</summary>
 		public static TimeSpan RegularCloseEt(string symbol, TimeSpan listedSessionEnd)
 		{

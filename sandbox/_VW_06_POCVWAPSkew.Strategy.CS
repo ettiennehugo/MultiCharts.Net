@@ -151,11 +151,14 @@ namespace PowerLanguage.Strategy
 
 		public _VW_06_POCVWAPSkew(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Session; GxOrderPrefix = "VW06"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW06LE", EOrderAction.Buy)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "VW-06 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -173,7 +176,7 @@ namespace PowerLanguage.Strategy
 			VpExtra dev = RangeProfileAfter(1, m_open, Bars.Time[0]);
 			if (dev == null || !(dev.poc > 0) || dev.poc - vwap < 0.5 * sig) return;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];
-			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[5 + i]); hi = Math.Max(hi, Bars.High[i]); }
+			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); }
 			if (!(lo > prev) || lo > vwap - 0.25 * sig) return;
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, vwap - 1.5 * sig);
@@ -250,8 +253,11 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
 			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);

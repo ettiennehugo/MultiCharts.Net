@@ -151,11 +151,14 @@ namespace PowerLanguage.Strategy
 
 		public _PS_14_RejectionLedgeRevisit(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS14"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS14LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS14SE", EOrderAction.SellShort)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "PS-14 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -168,7 +171,7 @@ namespace PowerLanguage.Strategy
 			double atr = averageTrueRange(Bars, 5); if (!(atr > 0)) return;
 			if (m_have) m_since++;
 			double barHi = Bars.High[0], barLo = Bars.Low[0];
-			for (int i = 1; i < 5; i++) { barHi = Math.Max(barHi, Bars.High[i]); barLo = Math.Min(barLo, Bars.Low[i]); }
+			for (int i = 1; i < 5; i++) { barHi = Math.Max(barHi, lbBar(i).h); barLo = Math.Min(barLo, lbBar(i).l); }
 			if (!m_have && volZ() >= 2)
 			{
 				double span = barHi - barLo;
@@ -177,7 +180,7 @@ namespace PowerLanguage.Strategy
 				if (atHigh || atLow) { m_have = true; m_up = atLow; m_level = m_up ? barLo : barHi; m_since = 0; }
 			}
 			if (!m_have || m_since < 12) return;
-			double rng = 0; for (int i = 0; i < 3; i++) rng += Bars.High[i * 5] - Bars.Low[i * 5];
+			double rng = 0; for (int i = 0; i < 3; i++) rng += lbBar(i * 5).h - lbBar(i * 5).l;
 			if (rng / 3.0 >= 0.8 * atr) return;
 			bool fadeBuy = m_up && Bars.Low[0] <= m_level && Bars.Close[0] > m_level;
 			bool fadeSell = !m_up && Bars.High[0] >= m_level && Bars.Close[0] < m_level;
@@ -192,7 +195,7 @@ namespace PowerLanguage.Strategy
 		private double blockVolume(int ago)
 		{
 			double v = 0; int from = ago * 5;
-			for (int i = from; i < from + 5; i++) v += Bars.Volume[i];
+			for (int i = from; i < from + 5; i++) v += lbBar(i).v;
 			return v;
 		}
 		private double volZ()
@@ -275,8 +278,11 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
 			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);

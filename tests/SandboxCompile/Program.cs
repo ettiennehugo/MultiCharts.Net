@@ -77,6 +77,9 @@ static class Program
 		}
 		Check(dup == 0, "CalcBar bodies are unique apart from names, string literals and numeric literals (" + dup + " duplicates)");
 		ConfigChecks(files);
+		LookbackChecks(files);
+		OwnSourceChecks(files);
+		BookChecks(files);
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
@@ -136,6 +139,106 @@ static class Program
 			if (rangeRx.IsMatch(own))
 				Check(rangeOnRx.IsMatch(chain), name + " queries a range profile and enables RangeProfiles (or ProfileStats)");
 		}
+	}
+
+	// Analyst MC17 run (A2-15 aborted): the sandbox workspaces use MaxBarsBack 49, so a Data1 series read Bars.X[i] with a
+	// computed index (or a literal past 49) aborts the study. Deep Data1 history comes from the engine ring through lbBar().
+	// Data2 reads with a computed index are listed with their bound. The ten original files are not edited and are reported.
+	const int SandboxMaxBarsBack = 49;
+	static readonly Dictionary<string, string> Data2Lookback = new Dictionary<string, string>(StringComparer.Ordinal)
+	{
+		{ "_A2_58_FastInSlowFade.Strategy.CS", @"\bslow\s*=\s*(\d+)" },   // sma(Cfg.slow) on Data2; Cfg.fast is smaller
+	};
+	static void LookbackChecks(List<string> files)
+	{
+		var d1 = new Regex(@"\bBars\.(Time|Close|Open|High|Low|Volume|Ticks|UpTicks|DownTicks)\[\s*([^\]]+?)\s*\]");
+		var dn = new Regex(@"\bBarsOfData\(\s*\d+\s*\)\.(Time|Close|Open|High|Low|Volume|Ticks|UpTicks|DownTicks)\[\s*([^\]]+?)\s*\]");
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			var bad = new List<string>();
+			bool d2computed = false;
+			foreach (Match m in d1.Matches(code))
+			{
+				int lit;
+				if (int.TryParse(m.Groups[2].Value, out lit) && lit <= SandboxMaxBarsBack) continue;
+				bad.Add(m.Value);
+			}
+			foreach (Match m in dn.Matches(code))
+			{
+				int lit;
+				if (!int.TryParse(m.Groups[2].Value, out lit)) d2computed = true;
+				else if (lit > SandboxMaxBarsBack) bad.Add(m.Value);
+			}
+			if (OriginalTen.Contains(name))
+			{
+				if (bad.Count > 0 || d2computed) Console.WriteLine("NOTE " + name + " (original ten, not edited) reads series history by a computed index; it needs MaxBarsBack above 49 if the bound exceeds it");
+				continue;
+			}
+			Check(bad.Count == 0, name + " reads Data1 history only within MaxBarsBack " + SandboxMaxBarsBack + " (deeper reads go through lbBar): " + string.Join(", ", bad.ToArray()));
+			if (code.Contains("lbBar("))
+				Check(Regex.IsMatch(code, @"requireRing\(\s*1\s*,"), name + " uses lbBar and asks for a Data1 ring in StartCalc");
+			if (d2computed)
+			{
+				string rx;
+				Match b = Data2Lookback.TryGetValue(name, out rx) ? Regex.Match(code, rx) : Match.Empty;
+				int bound;
+				Check(b.Success && int.TryParse(b.Groups[1].Value, out bound) && bound <= SandboxMaxBarsBack, name + " reads Data2 history by a computed index with a known bound within MaxBarsBack");
+			}
+		}
+	}
+
+	// Analyst MC17 run (A2-13): DevelopingSource is an [Input], so a value assigned in Create() is replaced by the value saved
+	// with the chart's study instance. A sandbox study that needs the Own RTH engine re-applies it in StartCalc.
+	static void OwnSourceChecks(List<string> files)
+	{
+		var ownRx = new Regex(@"DevelopingSource\s*=\s*EDevelopingSource\.Own");
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			if (OriginalTen.Contains(name)) continue;
+			string code = WithoutMethod(Regex.Replace(File.ReadAllText(path), @"//[^\n]*", ""), "applyGateNeeds");
+			if (!ownRx.IsMatch(MethodBody(code, "void Create()"))) continue;
+			string start = MethodBody(code, "void StartCalc()");
+			Match own = ownRx.Match(start);
+			int b = start.IndexOf("base.StartCalc()", StringComparison.Ordinal);
+			Check(own.Success && b > own.Index, name + " sets DevelopingSource = Own in Create and re-applies it in StartCalc before base.StartCalc()");
+		}
+	}
+
+	// Analyst MC17 run (A2-32 / A2-35 traded once, then never again): sandboxBook ran before the day reset, so after the first
+	// fill Rest returned Done on every later bar. Every sandboxBook re-arms m_filledSetup at the trading-day change before Rest.
+	static void BookChecks(List<string> files)
+	{
+		var rearm = new Regex(@"if\s*\(\s*bookDay\s*!=\s*m_bookDay\s*\)\s*\{\s*m_bookDay\s*=\s*bookDay;\s*m_filledSetup\s*=\s*false;");
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			if (OriginalTen.Contains(name)) continue;
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			if (!code.Contains("_SandboxRules.Rest(")) continue;
+			string book = MethodBody(code, "bool sandboxBook()");
+			Match m = rearm.Match(book);
+			int rest = book.IndexOf("_SandboxRules.Rest(", StringComparison.Ordinal);
+			Check(m.Success && rest > m.Index, name + " sandboxBook re-arms the one-trade-per-day state at the trading-day change before Rest");
+		}
+	}
+
+	// Brace-matched body of the first method whose text starts with `signature`, or "" when absent.
+	static string MethodBody(string code, string signature)
+	{
+		int i = code.IndexOf(signature, StringComparison.Ordinal);
+		if (i < 0) return "";
+		int brace = code.IndexOf('{', i);
+		if (brace < 0) return "";
+		int depth = 0;
+		for (int j = brace; j < code.Length; j++)
+		{
+			if (code[j] == '{') depth++;
+			else if (code[j] == '}' && --depth == 0) return code.Substring(brace, j - brace + 1);
+		}
+		return code.Substring(brace);
 	}
 
 	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.

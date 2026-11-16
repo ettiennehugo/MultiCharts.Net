@@ -149,11 +149,14 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _A2_76_SellIntoThe(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-76 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 
 		protected override void CalcBar()
@@ -163,7 +166,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan t = Bars.Time[0].TimeOfDay; if (((int)t.TotalMinutes) % 5 != 0) return;
 			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
 			double range = Bars.High[0] - Bars.Low[0], mean = 0;
-			for (int k = 1; k <= 20; k++) mean += Bars.High[k * 5] - Bars.Low[k * 5];
+			for (int k = 1; k <= 20; k++) mean += lbBar(k * 5).h - lbBar(k * 5).l;
 			mean /= 20;
 			bool climax = mean > 0 && range >= 2 * mean && Bars.Close[0] > Bars.Open[0];
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-76 climax bar " + climax + ". Exit module, no order.");
