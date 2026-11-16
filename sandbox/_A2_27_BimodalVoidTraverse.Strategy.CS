@@ -142,7 +142,7 @@
 // Stop: mu1 - 1 tick, capped at 1.0 x ATR(14, 5m) from the signal close, then floored at 14 ticks (user rule). Skip if mu2 - close < 1.2R
 // or if the risk budget (0.01 x equity) is breached. Target: mu2. Time stop: 90 minutes, flat by 15:55.
 // Not coded: T1 50% at E2 (single-contract example). Thresholds are catalogue values, not results.
-// Chart: Data1 @ES 5m, Data2 @ES 30m, dxFeed continuous UNADJUSTED. Features: F-PSTAT (ProfileStats.enabled ring, SessionBars,
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Data3 = 30-minute. Features: F-PSTAT (ProfileStats.enabled ring, SessionBars,
 // Histogram, ProfileMixture, MixtureSeed), F-TM (FlatBy).
 using System;
 using System.Collections.Generic;
@@ -196,11 +196,21 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_day = DateTime.MinValue; m_lastPos = 0; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-27 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) newDay(day);
 			if (rollOn(1)) m_done = true;
@@ -226,7 +236,8 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !m_ok || !IsRth()) return;
-			double c = Bars.Close[0], tick = tickSize();
+			if (!takeNative()) return;
+			double c = BarsOfData(2).Close[0], tick = tickSize();
 			bool wantLong = _SandboxRules.Allows(Side, true);
 			bool wantShort = _SandboxRules.Allows(Side, false);
 			if (wantLong && c <= m_e1) { m_armed = true; m_up = 0; }
@@ -239,7 +250,7 @@ namespace PowerLanguage.Strategy
 			bool goShort = wantShort && m_shortArmed && m_dn >= Cfg.acceptCloses;
 			if (!goLong && !goShort) return;
 			m_done = true;
-			double atr5 = averageTrueRange(Bars, Cfg.atrLength);
+			double atr5 = averageTrueRange(BarsOfData(2), Cfg.atrLength);
 			bool buy = goLong;
 			double stop = buy ? Math.Max(m_mu1 - tick, c - Cfg.stopCapAtr5 * atr5) : Math.Min(m_mu2 + tick, c + Cfg.stopCapAtr5 * atr5);
 			if (buy && c - stop < Cfg.costFloorTicks * tick) stop = c - Cfg.costFloorTicks * tick;
@@ -260,9 +271,9 @@ namespace PowerLanguage.Strategy
 			m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_armed = false; m_shortArmed = false; m_up = 0; m_dn = 0; m_ok = false;
 			DateTime prev = priorTradingDay(day);
 			if (prev == DateTime.MinValue) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-27 " + day.ToString("yyyy-MM-dd") + " no Data2"); return; }
+			if (!IsExist(3)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-27 " + day.ToString("yyyy-MM-dd") + " no Data3"); return; }
 			List<RingBar> bars = SessionBars(prev, true);
-			double tick = tickSize(), atr30 = averageTrueRange(BarsOfData(2), Cfg.atrLength);
+			double tick = tickSize(), atr30 = averageTrueRange(BarsOfData(3), Cfg.atrLength);
 			double[] px, vol;
 			if (bars.Count < 20 || !_ProfileStats.Histogram(bars, null, tick, 2, out px, out vol)) return;
 			ProfileMixtureResult m = _ProfileStats.ProfileMixture(px, vol, Cfg.kMax, _ProfileStats.MixtureSeed(prev), EGmmNeff.Bars, bars.Count, tick);

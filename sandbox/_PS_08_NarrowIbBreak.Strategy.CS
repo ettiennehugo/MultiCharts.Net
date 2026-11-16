@@ -135,7 +135,7 @@
 
 // Manual v4 example 15 - PS-08 narrow initial balance breakout (core arm). IB width <= 33rd percentile of the last 20 sessions;
 // after 10:30 ET, 2 consecutive closed 5m bars beyond IB +/- delta -> market; stop back inside by 0.25 x IB (floored); target 1 x IB beyond.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED. IbMinutes = 60 (default).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. IbMinutes = 60 (default).
 // Features: F-SESS (Session.ibHigh/ibLow/ibComplete, IbRange), F-CAL half-days, F-JRNL, roll guard, floor rule.
 using System;
 using System.Collections.Generic;
@@ -195,6 +195,17 @@ namespace PowerLanguage.Strategy
 			m_stop = m_target = double.NaN;
 		}
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-08 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -224,15 +235,16 @@ namespace PowerLanguage.Strategy
 				if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {day:yyyy-MM-dd} IB {s.ibLow:F2}-{s.ibHigh:F2} width {ib:F2} narrow({m_narrow})");
 			}
 			if (!m_narrow || m_done || tod < Cfg.from || tod >= Cfg.to || tod >= flat) return;
-			double tick = tickSize();
-			m_up = Bars.Close[0] > s.ibHigh + Cfg.deltaTicks * tick ? m_up + 1 : 0;
-			m_dn = Bars.Close[0] < s.ibLow - Cfg.deltaTicks * tick ? m_dn + 1 : 0;
+			if (!takeNative()) return;
+			double tick = tickSize(), c2 = BarsOfData(2).Close[0];
+			m_up = c2 > s.ibHigh + Cfg.deltaTicks * tick ? m_up + 1 : 0;
+			m_dn = c2 < s.ibLow - Cfg.deltaTicks * tick ? m_dn + 1 : 0;
 			int side = m_up >= Cfg.closesNeeded ? +1 : m_dn >= Cfg.closesNeeded ? -1 : 0;
 			if (side == 0) return;
 			m_done = true;                                        // one attempt per session
 			string why;
 			if (!hostGate(side, out why)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {Bars.Time[0]:yyyy-MM-dd HH:mm} gate blocked side {side}: {why}"); return; }
-			double edge = side > 0 ? s.ibHigh : s.ibLow, entry = Bars.Close[0];
+			double edge = side > 0 ? s.ibHigh : s.ibLow, entry = BarsOfData(2).Close[0];
 			double stop = edge - side * Cfg.stopInsideIb * ib;
 			if (side * (entry - stop) < Cfg.costFloorTicks * tick) stop = entry - side * Cfg.costFloorTicks * tick;
 			double r = Math.Abs(entry - stop);

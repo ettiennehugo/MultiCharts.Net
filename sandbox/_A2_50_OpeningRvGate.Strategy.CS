@@ -136,8 +136,7 @@
 
 // Manual v4 example 4 - A2-50 same-slot relative-volume opening gate (module). Computes RV30 once per session at the 10:00 ET
 // bar close and journals HIGH / MID / LOW. It places NO orders: hosts read Rv30State (A2-50 routes hosts, it is not a strategy).
-// Chart: Data1 = @ES 30m (bars end 10:00, 10:30, ...), dxFeed continuous UNADJUSTED, 24h CME Globex template. A 30m chart is used
-// because a 30m TOD bucket on a 1m chart groups bar ENDS 09:31-10:00 into two buckets (09:31-09:59 and 10:00-10:29).
+// Chart: Data1 = 1-minute. Data2 = 30-minute (the bar that ends at 10:00 ET). dxFeed continuous UNADJUSTED. The opening volume is that Data2 bar.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -165,6 +164,7 @@ namespace PowerLanguage.Strategy
 
 		private _CmeSessionClock m_clock;
 		private readonly List<double> m_history = new List<double>();   // prior sessions' RV30, oldest first
+		private readonly List<double> m_openVol = new List<double>();
 		private DateTime m_day = DateTime.MinValue;
 
 		public _A2_50_OpeningRvGate(object _ctx) : base(_ctx) { }
@@ -184,6 +184,17 @@ namespace PowerLanguage.Strategy
 			EventConfig.classes = EEventClassMask.Macro;
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -191,10 +202,11 @@ namespace PowerLanguage.Strategy
 			TodMetrics = ETodMetric.Volume;
 			TodSessions = Cfg.ssbSessions;
 			TodMinSessions = Cfg.ssbSessions;        // no SSB until 20 completed sessions
-			TodBucketMinutes = 0;                    // 0 = Data1 bar size (30)
+			TodBucketMinutes = 30;                   // hosts that read the engine see the 30-minute slot
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
-			m_history.Clear(); m_day = DateTime.MinValue; Rv30State = ERvState.Unknown; Rv30 = double.NaN;
+			m_history.Clear(); m_openVol.Clear(); m_day = DateTime.MinValue; Rv30State = ERvState.Unknown; Rv30 = double.NaN;
 		}
 
 		protected override void CalcBar()
@@ -203,17 +215,19 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			DateTime t = Bars.Time[0], day = tradingDayKey(t);
 			if (day != m_day) { m_day = day; Rv30State = ERvState.Unknown; Rv30 = double.NaN; }
-			if (Clock.ToEastern(t).TimeOfDay != Cfg.slotEnd) return;
-			if (Bars.Info.Resolution.Size != 30) throw new ArgumentException("_A2_50_OpeningRvGate: Data1 must be 30-minute bars");
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-50 Data2 missing"); return; }
+			if (BarsOfData(2).Status != EBarState.Close) return;
+			if (BarsOfData(2).Info.Resolution.Size != 30) throw new ArgumentException("_A2_50_OpeningRvGate: Data2 must be 30-minute bars");
+			if (Clock.ToEastern(BarsOfData(2).Time[0]).TimeOfDay != Cfg.slotEnd) return;
 
 			_CmeHolidays.Rules.Day cme = _CmeHolidays.Rules.Get(day);
 			if (cme.NoRth || cme.RthCloseEt.HasValue) { journal(day, "skip half-day/no-RTH", double.NaN, double.NaN); return; }
 
-			IList<double> pool = TodNormaliser.VolumePool(todMinuteOfSession(t));
-			if (pool == null || pool.Count < Cfg.ssbSessions) { journal(day, "SSB warm-up", double.NaN, double.NaN); return; }
-			double ssb = pool.Skip(pool.Count - Cfg.ssbSessions).Average();   // mean of the last 20 completed sessions' 09:30-10:00 volume
+			double vol = BarsOfData(2).Volume[0];
+			if (m_openVol.Count < Cfg.ssbSessions) { m_openVol.Add(vol); journal(day, "SSB warm-up", double.NaN, double.NaN); return; }
+			double ssb = m_openVol.Skip(m_openVol.Count - Cfg.ssbSessions).Average();
 			if (!(ssb > 0)) return;
-			double rv = Bars.Volume[0] / ssb;
+			double rv = vol / ssb;
 			Rv30 = rv;
 
 			if (m_history.Count >= Cfg.pctSessions)
@@ -224,7 +238,7 @@ namespace PowerLanguage.Strategy
 				journal(day, Rv30State.ToString(), hi, lo);
 			}
 			else journal(day, "percentile warm-up " + m_history.Count + "/" + Cfg.pctSessions, double.NaN, double.NaN);
-			m_history.Add(rv);
+			m_history.Add(rv); m_openVol.Add(vol);
 			if (m_history.Count > Cfg.pctSessions + 5) m_history.RemoveAt(0);
 		}
 

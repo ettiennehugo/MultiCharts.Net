@@ -137,7 +137,7 @@
 // Slow direction = sign(SMA_S[t] - SMA_S[t-1]); fast direction likewise with SMA_F. Long: slow up and fast turns from up to down on this
 // closed bar, 09:45-15:00 ET; market next bar. Mirror short. Exit: slow direction turns, or 15:55. Disaster stop 2.0 x ATR(14, 5m), floored.
 // S = 30, F = 3 (one point of the catalogue's 4 x 3 grid, not a tuned value).
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED. Indicators run on all bars (ETH included).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: CME clock adapter on a plain _CustomSignal, F-TM (NoEntryBefore/After, FlatBy, entryAllowed, mustFlatten), averageTrueRange.
 using System;
 using PowerLanguage.Function;
@@ -184,29 +184,57 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A258SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0;
 		}
 
-		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[i]; return s / n; }
+		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += BarsOfData(2).Close[i]; return s / n; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-58 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (Bars.Status != EBarState.Close || Bars.CurrentBar <= Cfg.slow) return;
-			if (rollOn(1)) { m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0; }   // directions restart; the SMAs still span the roll gap for S bars (pitfall: detect rolls and restart the SMAs, or accept the bias; the engines assume an unadjusted series)
-			double sl = sma(Cfg.slow), fs = sma(Cfg.fast);
-			int slowDir = double.IsNaN(m_slowPrev) ? 0 : Math.Sign(sl - m_slowPrev);
-			int fastDir = double.IsNaN(m_fastPrev) ? 0 : Math.Sign(fs - m_fastPrev);
+			if (Bars.Status != EBarState.Close) return;
+			bool step = takeNative() && BarsOfData(2).CurrentBar > Cfg.slow;
 			int prevSlow = m_slowDir, prevFast = m_fastDir;
-			m_slowPrev = sl; m_fastPrev = fs;
-			if (slowDir != 0) m_slowDir = slowDir;
-			if (fastDir != 0) m_fastDir = fastDir;
+			if (step)
+			{
+				if (rollOn(1)) { m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0; }   // directions restart; the SMAs still span the roll gap for S bars
+				double sl = sma(Cfg.slow), fs = sma(Cfg.fast);
+				int slowDir = double.IsNaN(m_slowPrev) ? 0 : Math.Sign(sl - m_slowPrev);
+				int fastDir = double.IsNaN(m_fastPrev) ? 0 : Math.Sign(fs - m_fastPrev);
+				prevSlow = m_slowDir; prevFast = m_fastDir;
+				m_slowPrev = sl; m_fastPrev = fs;
+				if (slowDir != 0) m_slowDir = slowDir;
+				if (fastDir != 0) m_fastDir = fastDir;
+			}
 
 			int pos = StrategyInfo.MarketPosition;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
@@ -223,8 +251,8 @@ namespace PowerLanguage.Strategy
 			int side = 0;
 			if (m_slowDir > 0 && prevFast > 0 && m_fastDir < 0 && prevSlow > 0) side = +1;
 			else if (m_slowDir < 0 && prevFast < 0 && m_fastDir > 0 && prevSlow < 0) side = -1;
-			if (side == 0) return;
-			double atr = averageTrueRange(Bars, Cfg.atrLength), tick = tickSize(), c = Bars.Close[0];
+			if (side == 0 || !step) return;
+			double atr = averageTrueRange(BarsOfData(2), Cfg.atrLength), tick = tickSize(), c = BarsOfData(2).Close[0];
 			if (!(atr > 0)) return;
 			double r = Math.Max(Cfg.stopAtr * atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-58 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget"); return; }

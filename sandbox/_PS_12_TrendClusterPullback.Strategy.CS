@@ -138,7 +138,7 @@
 // (BarLadders, bid/ask tiers only) >= 2 x the bar's median row volume, inside a pause (bar range <= 0.7 x ATR30m).
 // Validity: 2 later 30m closes above cluster + delta. Entry: buy limit at the cluster price (first touch). Stop: the next composite
 // LVN low below the cluster, floored at 14 ticks. Target: the last 30m pivot high (skip if not above the entry). One cluster at a time.
-// Chart: Data1 = @ES 30m, Data2 = @ES 60m, dxFeed continuous UNADJUSTED; needs tick/bid-ask history for the flow tiers.
+// Chart: Data1 = 1-minute. Data2 = 30-minute. Data3 = 60-minute. dxFeed continuous UNADJUSTED.
 // Features: F-LADDER (BarLadders.enabled -> OrderFlowEnabled, Ladder(ago), LadderBar rows/total/HasBidAsk), M-PA (ExtraPriceAction),
 // F-COMP (lvns), F-TM.
 using System;
@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 	{
 		protected sealed class Ps12Config
 		{
-			public int contracts = 1, atrLength = 14, validCloses = 2, deltaTicks = 2, n = 20, ds60 = 2;
+			public int contracts = 1, atrLength = 14, validCloses = 2, deltaTicks = 2, n = 20, ds60 = 3;
 			public double clusterMult = 2.0, pauseAtr = 0.7;
 			public int costFloorTicks = 14;
 			public double riskBudgetFraction = 0.01;
@@ -172,8 +172,8 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;
-			BarLadders.enabled = true; BarLadders.keepBars = 500;                       // also switches OrderFlowEnabled on (VP-3)
-			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 1;
+			BarLadders.enabled = true; BarLadders.keepBars = 500; BarLadders.htfStreams = new[] { 2 };
+			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 2;
 			ExtraPriceAction.Add(new PriceActionConfig { enabled = true, dataStream = Cfg.ds60, role = "trend60" });
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "PS12LE", EOrderAction.Buy));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS12LS", EOrderAction.Sell, OrderExit.FromAll));
@@ -181,15 +181,28 @@ namespace PowerLanguage.Strategy
 		}
 
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_cluster = double.NaN; }
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-12 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			if (!IsExist(2) || !IsExist(3)) { if (journalOn()) trace(ETraceLevel.Error, "PS-12 Data2 or Data3 missing"); return; }
 			if (rollOn(1)) m_cluster = double.NaN;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
@@ -203,8 +216,9 @@ namespace PowerLanguage.Strategy
 			if (double.IsNaN(m_cluster)) { findCluster(); return; }
 			if (!m_valid)
 			{
-				m_above = Bars.Close[0] > m_cluster + Cfg.deltaTicks * tick ? m_above + 1 : 0;
 				if (Bars.Low[0] <= m_cluster) { m_cluster = double.NaN; return; }       // touched before it was validated
+				if (!takeNative()) return;
+				m_above = BarsOfData(2).Close[0] > m_cluster + Cfg.deltaTicks * tick ? m_above + 1 : 0;
 				if (m_above >= Cfg.validCloses) m_valid = arm();
 				return;
 			}
@@ -214,9 +228,9 @@ namespace PowerLanguage.Strategy
 
 		private void findCluster()
 		{
-			LadderBar lb = Ladder(0);
-			double atr = averageTrueRange(Bars, Cfg.atrLength);
-			if (lb == null || !lb.HasBidAsk || !lb.HasRows || lb.crossesRoll || !(atr > 0) || Bars.High[0] - Bars.Low[0] > Cfg.pauseAtr * atr) return;
+			LadderBar lb = HtfLadder(2, 0);
+			double atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
+			if (lb == null || !lb.HasBidAsk || !lb.HasRows || lb.crossesRoll || !(atr > 0) || BarsOfData(2).High[0] - BarsOfData(2).Low[0] > Cfg.pauseAtr * atr) return;
 			double[] t = (double[])lb.total.Clone();
 			Array.Sort(t);
 			double med = t[t.Length / 2];

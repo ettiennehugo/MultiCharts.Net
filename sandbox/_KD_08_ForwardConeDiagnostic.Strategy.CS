@@ -142,7 +142,7 @@
 // PR-D9 (rev 6, online self-calibration): degMode = SelfCalibrate (default) picks the degree online (DV-3.10); d = 1 while warming (one "DVP DEGREE warming" warning).
 // Every Step closed bars it journals the as-of t-1 snapshot, z of the close and the +-2 sigma rail prices. winLen 240 / projBars 60 /
 // degMax 3 are DvpConfig defaults, not tuned values; Step 12 is a journal-thinning choice, not a parameter of the measurement.
-// Chart: Data1 @ES 5m, dxFeed continuous UNADJUSTED. Features: M-DVP host API (+ F-ROLL via the snapshot's roll skip).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: M-DVP host API (+ F-ROLL via the snapshot's roll skip).
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -159,20 +159,31 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			DvpConfig.enabled = true;        // lazy engine, Data1 only (DvpConfig.streams default { 1 })
+			DvpConfig.enabled = true; DvpConfig.streams = new[] { 2 };
 			DvpConfig.journalFits = true;    // DVP FIT per fit + DVP RUN (cov_fwd) at run end - the KD-08 measurement
 			DvpConfig.coneMode = EDvpConeMode.Prediction;
+		}
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "KD-08 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar();                  // stepDvp runs inside; the snapshot below is as of t-1
-			if (Bars.Status != EBarState.Close || Bars.CurrentBar % Step != 0 || rollOn(1)) return;
-			DvpSnapshot s = dvpSnapshot(1);
+			if (Bars.Status != EBarState.Close || !takeNative() || BarsOfData(2).CurrentBar % Step != 0 || rollOn(1)) return;
+			DvpSnapshot s = dvpSnapshot(2);
 			if (s == null || !s.valid) return;   // warm-up, or the window crosses a roll
-			double z = dvpZ(1, Bars.Close[0]);
-			double up2 = dvpRailPrice(1, ELevelKind.DvpSigma, 2), dn2 = dvpRailPrice(1, ELevelKind.DvpSigma, -2);
-			IReadOnlyList<LevelRef> rails = dvpRails(1);   // reused by the next call; only counted here
+			double z = dvpZ(2, BarsOfData(2).Close[0]);
+			double up2 = dvpRailPrice(2, ELevelKind.DvpSigma, 2), dn2 = dvpRailPrice(2, ELevelKind.DvpSigma, -2);
+			IReadOnlyList<LevelRef> rails = dvpRails(2);   // reused by the next call; only counted here
 			if (journalOn()) trace(ETraceLevel.Journal, $"KD-08sketch {Bars.Time[0]:yyyy-MM-dd HH:mm} deg {s.deg} calibrating {s.calibrating} R2 {s.r2:F2} sigmaAtr {s.sigmaAtr:F2} drift {s.endpointDrift:F2} cov2s(in) {s.inSampleCov2:F2} z {z:F2} band {dn2:F2}..{up2:F2} rails {rails.Count}");
 		}
 	}

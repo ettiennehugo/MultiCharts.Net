@@ -138,7 +138,7 @@
 // Signal: by 10:15 ET, two 5m closes back inside the prior VA (gap up: close <= prior VAH). Entry: sell stop 1 tick through the low
 // of the second inside bar (buy stop through the high for a gap down). Stop: max(session extreme + 1 tick, 14-tick floor).
 // Target: prior POC (the "then opposite VA edge" leg is not coded: one target). The prior profile is skipped if it crosses a roll.
-// Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-VP (PriorRthProfile), F-SESS (Session), M-DAILY (Atr20d), F-TM.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: F-VP (PriorRthProfile), F-SESS (Session), M-DAILY (Atr20d), F-TM.
 using System;
 using PowerLanguage.Function;
 
@@ -189,6 +189,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-05 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -226,10 +237,12 @@ namespace PowerLanguage.Strategy
 			if (double.IsNaN(m_trigger))
 			{
 				if (ToEastern(Bars.Time[0]).TimeOfDay > Cfg.signalBy) { m_done = true; return; }
+				if (!takeNative()) return;
+				c = BarsOfData(2).Close[0];
 				bool inside = m_side < 0 ? c <= m_vah : c >= m_val;
 				m_inside = inside ? m_inside + 1 : 0;
 				if (m_inside < Cfg.insideCloses) return;
-				double trig = m_side < 0 ? Bars.Low[0] - tick : Bars.High[0] + tick;
+				double trig = m_side < 0 ? BarsOfData(2).Low[0] - tick : BarsOfData(2).High[0] + tick;
 				double stop = m_side < 0 ? Math.Max(s.rthHigh + tick, trig + Cfg.costFloorTicks * tick) : Math.Min(s.rthLow - tick, trig - Cfg.costFloorTicks * tick);
 				if (m_side * (m_poc - trig) <= 0 || Cfg.contracts * Math.Abs(trig - stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
 				{ if (journalOn()) trace(ETraceLevel.Journal, $"PS-05 {day:yyyy-MM-dd} skip: target behind trigger or risk budget"); m_done = true; return; }

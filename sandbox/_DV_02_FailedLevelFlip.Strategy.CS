@@ -140,7 +140,7 @@
 // direction, valid to the session end (X = 1 session), one flip per level. Bracket: +/- f x ATR20d (f = 0.10); the stop side is widened to
 // the 14-tick floor if narrower (target unchanged), skipped only on a risk-budget breach, never resized. s = 1.0 and f = 0.10 are catalogue grid points; M = 12 bars is a PLACEHOLDER.
 // Every armed flip is logged with logSignal(taken = true); skipped ones with taken = false (needs TraceLevel >= Journal).
-// Chart: Data1 = @ES 5m, dxFeed continuous UNADJUSTED. Features: F-EVT/CS-8 (logSignal, ControlMode, controlAdjustLevel,
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: F-EVT/CS-8 (logSignal, ControlMode, controlAdjustLevel,
 // controlAdjustDelayBars), F-VP (PriorRthProfile), M-DAILY (Atr20d), F-TM.
 using System;
 using System.Collections.Generic;
@@ -194,6 +194,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "DV-02 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -218,10 +229,12 @@ namespace PowerLanguage.Strategy
 			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			if (m_side != 0)                                           // armed: work the limit at L until the session ends
 			{
-				if (bar >= m_armBar + controlAdjustDelayBars())
+				if (IsExist(2) && BarsOfData(2).CurrentBar >= m_armBar + controlAdjustDelayBars())
 				{ if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); }
 				return;
 			}
+			if (!takeNative()) return;
+			h = BarsOfData(2).High[0]; l = BarsOfData(2).Low[0]; c = BarsOfData(2).Close[0]; bar = BarsOfData(2).CurrentBar;
 			if (m_touchBar == 0)
 			{
 				if (l <= m_level && h >= m_level) { m_touchBar = bar; m_hiSince = h; m_loSince = l; }

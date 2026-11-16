@@ -139,7 +139,7 @@
 // 08:30 / 10:00 / 14:00 ET +/- 2 min are skipped. Entry: market next bar. Stop: disaster entry -/+ 1.5 x TR_b throughout; from the close of
 // b+2 a stop beyond the b..b+2 extreme + 1 tick (both floored at 14 ticks). Exit E1: the first closed bar with volume <= the same-slot TOD
 // median volume; E0 15:55 as backstop. k = 2.5.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED, tick-built volume.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: M-TOD (TodMetrics = TrueRange | Volume, TodSessions = 100, Valid, Median), F-SESS, F-TM (FlatBy, mustFlatten).
 using System;
 using PowerLanguage.Function;
@@ -188,6 +188,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_shockBar = -1; m_side = 0; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-51 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -199,7 +210,7 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
-				int since = Bars.CurrentBar - m_shockBar;                     // 1 = entry bar b+1, 2 = b+2
+				int since = (IsExist(2) ? BarsOfData(2).CurrentBar : Bars.CurrentBar) - m_shockBar;   // 1 = next 5-minute bar
 				if (since == 1)
 				{
 					double e = StrategyInfo.AvgEntryPrice, d = Math.Max(Cfg.disasterTr * m_shockTr, floor);
@@ -207,11 +218,11 @@ namespace PowerLanguage.Strategy
 				}
 				else if (since >= 2)
 				{
-					double ext = pos > 0 ? Math.Min(Bars.Low[0], Math.Min(Bars.Low[1], Bars.Low[2])) - tick
-					                     : Math.Max(Bars.High[0], Math.Max(Bars.High[1], Bars.High[2])) + tick;
+					double ext = pos > 0 ? Math.Min(BarsOfData(2).Low[0], Math.Min(BarsOfData(2).Low[1], BarsOfData(2).Low[2])) - tick
+					                     : Math.Max(BarsOfData(2).High[0], Math.Max(BarsOfData(2).High[1], BarsOfData(2).High[2])) + tick;
 					if (since == 2) { double e = StrategyInfo.AvgEntryPrice; if (Math.Abs(e - ext) < floor) ext = e - Math.Sign(pos) * floor; m_stop = pos > 0 ? Math.Max(m_stop, ext) : Math.Min(m_stop, ext); }
 				}
-				if (since >= 2 && tod != null && tod.Valid(ETodMetric.Volume) && Bars.Volume[0] <= tod.Median(ETodMetric.Volume))
+				if (since >= 2 && tod != null && tod.Valid(ETodMetric.Volume) && IsExist(2) && BarsOfData(2).Volume[0] <= tod.Median(ETodMetric.Volume))
 				{ if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }      // E1 volume decay
 				if (pos > 0) m_lxStp.Send(m_stop); else m_sxStp.Send(m_stop);
 				return true;
@@ -222,8 +233,9 @@ namespace PowerLanguage.Strategy
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan t = et.TimeOfDay;
 			if (!IsRth() || t < Cfg.from || t > Cfg.to || nearRelease(t)) return;
-			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
-			double tr = Math.Max(h, Bars.Close[1]) - Math.Min(l, Bars.Close[1]);
+			if (!takeNative()) return;
+			double h = BarsOfData(2).High[0], l = BarsOfData(2).Low[0], c = BarsOfData(2).Close[0];
+			double tr = Math.Max(h, BarsOfData(2).Close[1]) - Math.Min(l, BarsOfData(2).Close[1]);
 			double med = tod.Median(ETodMetric.TrueRange);
 			if (!(med > 0) || tr < Cfg.k * med || !(h > l)) return;
 			double loc = (c - l) / (h - l);
@@ -231,7 +243,7 @@ namespace PowerLanguage.Strategy
 			if (side == 0) return;
 			double r = Math.Max(Cfg.disasterTr * tr, floor);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} skip: disaster stop {r / tick:F0} ticks breaches risk budget"); return; }
-			m_shockBar = Bars.CurrentBar; m_shockTr = tr; m_stop = c - side * r;
+			m_shockBar = BarsOfData(2).CurrentBar; m_shockTr = tr; m_stop = c - side * r;
 			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} shock TR {tr:F2} = {tr / med:F2} x median; fade {(side > 0 ? "long" : "short")}");
 		}

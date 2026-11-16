@@ -139,7 +139,7 @@
 // Arming: price then moves >= 1 x ATR(14, 5m) above the zone top. Entry: first retest only - buy limit at the zone top
 // (catalogue entry arm "limit"; the 1m HL arm is not coded). Stop: zone low - 1 tick, floored at 14 ticks. Target: 1R.
 // Deviation: the catalogue's volume floor P70 is not computed; minVol = 10 contracts is a PLACEHOLDER. Zone expires at session end.
-// Chart: Data1 @ES 5m, dxFeed continuous UNADJUSTED. Features: VPF order flow (OrderFlowEnabled, StackedImbalances, FlowQuality).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Features: VPF order flow (OrderFlowEnabled, StackedImbalances, FlowQuality).
 using System;
 using PowerLanguage.Function;
 
@@ -190,6 +190,17 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "OF-01 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -229,7 +240,11 @@ namespace PowerLanguage.Strategy
 					{ m_seLmt.Send(m_zLo, Cfg.contracts); m_sxStp.Send(m_stop); return; }
 				}
 			}
-			if (m_zone || m_used || h - l <= 0 || (c - l) / (h - l) < 1 - Cfg.closeTopFrac) return;
+			if (m_zone || m_used) return;
+			if (!takeNative()) return;
+			h = BarsOfData(2).High[0]; l = BarsOfData(2).Low[0]; c = BarsOfData(2).Close[0];
+			atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
+			if (h - l <= 0 || (c - l) / (h - l) < 1 - Cfg.closeTopFrac) return;
 			_OrderFlow.StackedResult s = StackedImbalances(0, Cfg.ratio, Cfg.minVol, Cfg.minStack);
 			if (!s.Found || s.Quality > _OrderFlow.FlowQuality.High) return;
 			foreach (double[] run in s.Runs)

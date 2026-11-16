@@ -138,7 +138,7 @@
 // edge (high of bar 1, fvgLevel(f, true)) and is kept only if it lies within 0.2 x ATR30m of an HVN edge of the range profile of the
 // last 20 closed 30m bars (RangeProfileBars). Entry (DV-03/04 host style): buy limit at the level while the gap is live and untouched,
 // valid until the gap fills or expires. Bracket: +/- f x ATR20d, f = 0.10 (catalogue grid point); the stop is widened to the 14-tick floor if narrower; skipped only on a risk-budget breach.
-// Chart: Data1 = @ES 30m, dxFeed continuous UNADJUSTED. Features: F-FVG (Fvgs, FvgDetector.NewThisBar/Live, fvgLevel -> LevelRef),
+// Chart: Data1 = 1-minute. Data2 = 30-minute. Features: F-FVG (Fvgs, FvgDetector.NewThisBar/Live, fvgLevel -> LevelRef),
 // F-RANGE (RangeProfiles.enabled, RangeProfileBars), M-DAILY (Atr20d), F-TM.
 using System;
 using PowerLanguage.Function;
@@ -169,14 +169,16 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
-			Fvgs.enabled = true; Fvgs.dataStream = 1; Fvgs.minAtrFrac = Cfg.gapAtr; Fvgs.atrLen = 14; Fvgs.maxAgeSessions = 5;
-			RangeProfiles.enabled = true; RangeProfiles.streams = new[] { 1 };
+			Fvgs.enabled = true; Fvgs.dataStream = 2; Fvgs.minAtrFrac = Cfg.gapAtr; Fvgs.atrLen = 14; Fvgs.maxAgeSessions = 5;
+			RangeProfiles.enabled = true; RangeProfiles.streams = new[] { 2 };
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "DV08LE", EOrderAction.Buy));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "DV08LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV08LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; base.StartCalc(); m_gap = null; }
 
@@ -195,6 +197,7 @@ namespace PowerLanguage.Strategy
 			
 			}
 			if (StrategyInfo.MarketPosition > 0 && sendExits()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "DV-08 Data2 missing"); return; }
 			_FvgDetector det = FvgDetector;
 			if (det == null) return;
 			Fvg nf = det.NewThisBar;
@@ -207,7 +210,7 @@ namespace PowerLanguage.Strategy
 		private void consider(Fvg f, double atr30)
 		{
 			LevelRef lv = fvgLevel(f, true);
-			VpExtra rp = RangeProfileBars(1, 0, Cfg.profileBars);
+			VpExtra rp = RangeProfileBars(2, 0, Cfg.profileBars);
 			double atrD = DailyContext != null ? DailyContext.Atr20d : double.NaN, tick = tickSize();
 			if (lv == null || lv.crossesRoll || rp == null || !(atr30 > 0) || !(atrD > 0)) return;
 			bool aligned = false;

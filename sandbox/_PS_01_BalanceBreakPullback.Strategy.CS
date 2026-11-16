@@ -138,7 +138,7 @@
 // Acceptance: 2 closed 5m bars > composite VAH + delta (W = composite VAH - VAL). Entry: the first pullback that holds above
 // VAH - 0.25 W and prints a PA pivot low labelled HL; buy stop 1 tick above the confirming bar. Stop: max(1 tick below the HL, floor);
 // hard invalidation on a 5m close < VAH - delta. Target: VAH + 1.0 W; stop to break-even at +1 R.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: F-COMP (Composite), F-VP (IsBalanced, ValueMigrationScore, OwnProfileWindow), M-PA (HL pivots), F-TM (FlatBy).
 using System;
 using PowerLanguage.Function;
@@ -179,7 +179,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;
-			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 1;
+			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 2;
 			FlatBy = Cfg.flat;
 			m_leStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS01LE", EOrderAction.Buy));
 			m_seStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS01SE", EOrderAction.SellShort));
@@ -199,6 +199,17 @@ namespace PowerLanguage.Strategy
 			m_day = DateTime.MinValue;
 		}
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-01 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -212,7 +223,8 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				m_done = true;
-				if (mustFlatten() || (pos > 0 ? c < m_vah - d : c > m_val + d)) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }  // hard invalidation
+				bool nativeInv = IsExist(2) && BarsOfData(2).Status == EBarState.Close && (pos > 0 ? BarsOfData(2).Close[0] < m_vah - d : BarsOfData(2).Close[0] > m_val + d);
+				if (mustFlatten() || nativeInv) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }  // hard invalidation is a closed 5-minute bar
 				double e = StrategyInfo.AvgEntryPrice;
 				if (pos > 0 ? Bars.High[0] >= e + m_entryRisk : Bars.Low[0] <= e - m_entryRisk) m_stop = pos > 0 ? Math.Max(m_stop, e) : Math.Min(m_stop, e);   // BE at +1R
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
@@ -223,6 +235,8 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_balanced || !(m_w > 0) || !IsRth() || tod > Cfg.to) return;
 			if (sandboxBook()) return;
+			if (!takeNative()) return;
+			c = BarsOfData(2).Close[0];
 			if (m_side == 0)
 			{
 				if (tod < Cfg.from) return;
@@ -233,14 +247,14 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 			double hold = m_side > 0 ? m_vah - Cfg.holdW * m_w : m_val + Cfg.holdW * m_w;
-			if (m_side > 0 ? Bars.Low[0] < hold : Bars.High[0] > hold) { m_done = true; return; }   // pullback failed to hold
+			if (m_side > 0 ? BarsOfData(2).Low[0] < hold : BarsOfData(2).High[0] > hold) { m_done = true; return; }   // pullback failed to hold
 			_PriceActionEngine pa = PriceActionEngine;
 			if (pa != null && pa.IsWarm)
 			{
 				_Pivot p = m_side > 0 ? (pa.NewPivotLow ? pa.LastLow(0) : null) : (pa.NewPivotHigh ? pa.LastHigh(0) : null);
 				if (p != null && p.label == (m_side > 0 ? EPivotLabel.HL : EPivotLabel.LH))
 				{
-					m_trigger = m_side > 0 ? Bars.High[0] + tick : Bars.Low[0] - tick;
+					m_trigger = m_side > 0 ? BarsOfData(2).High[0] + tick : BarsOfData(2).Low[0] - tick;
 					double stop = p.price - m_side * tick;
 					if (m_side * (m_trigger - stop) < Cfg.costFloorTicks * tick) stop = m_trigger - m_side * Cfg.costFloorTicks * tick;
 					m_entryRisk = Math.Abs(m_trigger - stop);

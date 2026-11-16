@@ -138,7 +138,7 @@
 // 09:45 close in the outer third of that range in the drive direction. Entry: after the first PA pivot low labelled HL (long) / pivot
 // high labelled LH (short) that confirms before 11:30, a stop order 1 tick beyond the confirming bar. Stop: the pivot -/+ 1 tick, floored.
 // Exit: 11:30 time stop. One trade per day.
-// Chart: Data1 = @ES 5m (24h Globex template), dxFeed continuous UNADJUSTED.
+// Chart: Data1 = 1-minute. Data2 = 5-minute. dxFeed continuous UNADJUSTED.
 // Features: M-TOD (TodMetrics = Range, Median, Valid), M-PA (PriceActionConfig, NewPivotLow/High, LastLow/LastHigh, EPivotLabel), F-SESS.
 using System;
 using PowerLanguage.Function;
@@ -174,7 +174,7 @@ namespace PowerLanguage.Strategy
 			RollDetection = ERollDetection.Series;
 			TodMetrics = ETodMetric.Range; TodSessions = 20; TodMinSessions = 10; TodBucketMinutes = 5;
 			PriceActionConfig.enabled = true;               // Futures preset applied by the base
-			PriceActionConfig.dataStream = 1;
+			PriceActionConfig.dataStream = 2;
 			m_leStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS07LE", EOrderAction.Buy));
 			m_seStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS07SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS07LX", EOrderAction.Sell));
@@ -191,6 +191,17 @@ namespace PowerLanguage.Strategy
 
 			base.StartCalc();
 			m_day = DateTime.MinValue; m_side = 0; m_done = false; m_filledSetup = false; m_restOn = false; m_trigger = m_stop = double.NaN;
+		}
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "PS-07 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
 		}
 
 		protected override void CalcBar()
@@ -223,13 +234,14 @@ namespace PowerLanguage.Strategy
 				return;
 			}
 			if (m_side == 0 || tod >= Cfg.timeStop) return;
+			if (!takeNative()) return;
 			_PriceActionEngine pa = PriceActionEngine;
 			if (pa == null || !pa.IsWarm) return;
 			if (double.IsNaN(m_trigger))
 			{
 				_Pivot p = m_side > 0 ? (pa.NewPivotLow ? pa.LastLow(0) : null) : (pa.NewPivotHigh ? pa.LastHigh(0) : null);
 				if (p == null || p.label != (m_side > 0 ? EPivotLabel.HL : EPivotLabel.LH)) return;
-				m_trigger = m_side > 0 ? Bars.High[0] + tick : Bars.Low[0] - tick;
+				m_trigger = m_side > 0 ? BarsOfData(2).High[0] + tick : BarsOfData(2).Low[0] - tick;
 				m_stop = m_side > 0 ? p.price - tick : p.price + tick;
 				if (m_side * (m_trigger - m_stop) < Cfg.costFloorTicks * tick) m_stop = m_trigger - m_side * Cfg.costFloorTicks * tick;
 				double r = Math.Abs(m_trigger - m_stop);

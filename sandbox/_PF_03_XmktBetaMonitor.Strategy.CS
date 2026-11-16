@@ -140,7 +140,7 @@
 // market (here the leg role "SPX", e.g. an S&P index or another future), XmktLeg aligns it to Data1 on closed bars and keeps a rolling
 // return Correlation / Beta / RsZ over corrLength bars. At the last RTH bar it journals the values and flags |rho| > 0.5.
 // This is NOT the PF-03 statistic; the sleeve-P&L version must be computed offline from the trade journals.
-// Chart: Data1 @ES 30m, Data2 = the reference market at 30m. Features: M-XMKT (XmktLegs, XmktLeg, Correlation, Beta, RsZ, Available).
+// Chart: Data1 = 1-minute. Data2 = the reference market at 30-minute. Features: M-XMKT (XmktLegs, XmktLeg, Correlation, Beta, RsZ, Available).
 using System;
 using PowerLanguage.Function;
 

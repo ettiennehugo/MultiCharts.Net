@@ -139,7 +139,7 @@
 // (delta15 = 0.25 x the 15m engine ATR: PLACEHOLDER, not a catalogue value; swing-AVWAP level omitted).
 // Entry: the next 5m pivot low labelled HL (Data1 engine), buy stop 1 tick above the confirming bar. Stop: max(HL - 1 tick, floor).
 // Target: the last 15m pivot high. RTH 09:45-15:00 ET; one trade per day.
-// Chart: Data1 = @ES 5m, Data2 = @ES 15m, Data3 = @ES 60m (same symbol, dxFeed continuous UNADJUSTED).
+// Chart: Data1 = 1-minute. Data2 = 5-minute. Data3 = 15-minute. Data4 = 60-minute. dxFeed continuous UNADJUSTED.
 // Features: M-PA (PriceActionConfig + ExtraPriceAction + PriceActionFor, Structure), M-DAILY (Tsmom), F-COMP, F-VP (RthProfile).
 using System;
 using PowerLanguage.Function;
@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 	{
 		protected sealed class Mt01Config
 		{
-			public int contracts = 1, tsmomDays = 20, n = 20, ds15 = 2, ds60 = 3;
+			public int contracts = 1, tsmomDays = 20, n = 20, ds15 = 3, ds60 = 4;
 			public double nearAtr15 = 0.25;   // PLACEHOLDER
 			public TimeSpan from = new TimeSpan(9, 45, 0), to = new TimeSpan(15, 0, 0), flat = new TimeSpan(15, 55, 0);
 			public int costFloorTicks = 14;
@@ -174,7 +174,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;
-			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 1;                     // 5m trigger engine
+			PriceActionConfig.enabled = true; PriceActionConfig.dataStream = 2;                     // 5-minute trigger on Data2
 			ExtraPriceAction.Add(new PriceActionConfig { enabled = true, dataStream = Cfg.ds15, role = "pb15" });
 			ExtraPriceAction.Add(new PriceActionConfig { enabled = true, dataStream = Cfg.ds60, role = "trend60" });
 			FlatBy = Cfg.flat; MaxTradesPerDay = 1;
@@ -190,11 +190,22 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "MT-01 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			if (!IsExist(2) || !IsExist(3) || !IsExist(4)) { if (journalOn()) trace(ETraceLevel.Error, "MT-01 Data2, Data3, or Data4 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_trigger = double.NaN; m_comp = Composite(1, Cfg.n); }
 			if (rollOn(1)) m_done = true;
@@ -210,7 +221,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
 			if (sandboxBook()) return;
-			if (double.IsNaN(m_trigger)) arm(day);
+			if (double.IsNaN(m_trigger) && takeNative()) arm(day);
 			if (!double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop);
 		}
 
@@ -226,7 +237,7 @@ namespace PowerLanguage.Strategy
 			double near = Cfg.nearAtr15 * pa15.Atr;
 			bool atLevel = (m_comp != null && Math.Abs(pb.price - m_comp.vah) <= near) || (dev != null && dev.poc > 0 && Math.Abs(pb.price - dev.poc) <= near);
 			if (!atLevel) return;
-			double tick = tickSize(), trig = Bars.High[0] + tick, stop = Math.Min(hl.price - tick, trig - Cfg.costFloorTicks * tick);
+			double tick = tickSize(), trig = BarsOfData(2).High[0] + tick, stop = Math.Min(hl.price - tick, trig - Cfg.costFloorTicks * tick);
 			string why = sh.price <= trig ? "15m swing high below trigger" : Cfg.contracts * (trig - stop) * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction) ? "risk budget" : null;
 			if (why != null) { if (journalOn()) trace(ETraceLevel.Journal, $"MT-01 {day:yyyy-MM-dd} skip: {why}"); m_done = true; return; }
 			m_trigger = trig; m_stop = stop; m_target = sh.price;
