@@ -152,6 +152,8 @@ namespace PowerLanguage.Strategy
 		public _KD_02_BandStretchFade(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "KD02"; createGxOrders(); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "KD02SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
