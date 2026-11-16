@@ -1,11 +1,11 @@
 // ## 1. Identity
 // Catalogue ID: MT-07
-// ID mapping: MT-07 -> _MT_07_MT07.Strategy.CS (class _MT_07_MT07).
+// ID mapping: MT-07 -> _MT_07_HtfDetrendedRail.Strategy.CS (class _MT_07_HtfDetrendedRail).
 // Name: MT-07 higher-timeframe rail gate
 // Header version: 1
 // Rules version: catalogue specification under the MT-07 heading, rewritten 2026-11-15.
-// Study class: _MT_07_MT07
-// File: sandbox/_MT_07_MT07.Strategy.CS
+// Study class: _MT_07_HtfDetrendedRail
+// File: sandbox/_MT_07_HtfDetrendedRail.Strategy.CS
 // Stage: sandbox
 // Owner approval: Not yet verified
 //
@@ -75,7 +75,7 @@
 // Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
-// Base class: _PS_25_PS25
+// Base class: _PS_25_AcceptBeyondRail
 // Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
@@ -142,10 +142,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _MT_07_MT07 : _PS_25_PS25
+	public class _MT_07_HtfDetrendedRail : _PS_25_AcceptBeyondRail
 	{
 		private int m_htf;
-		public _MT_07_MT07(object _ctx) : base(_ctx) { }
+		public _MT_07_HtfDetrendedRail(object _ctx) : base(_ctx) { }
 		protected override void CalcBar()
 		{
 			if (Bars.Status == EBarState.Close)

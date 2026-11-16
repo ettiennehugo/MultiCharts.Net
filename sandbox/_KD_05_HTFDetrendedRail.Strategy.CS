@@ -75,7 +75,7 @@
 // Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
-// Base class: _MT_07_MT07
+// Base class: _MT_07_HtfDetrendedRail
 // Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
@@ -142,7 +142,7 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _KD_05_HTFDetrendedRail : _MT_07_MT07
+	public class _KD_05_HTFDetrendedRail : _MT_07_HtfDetrendedRail
 	{
 		public _KD_05_HTFDetrendedRail(object _ctx) : base(_ctx) { }
 	}
