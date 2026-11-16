@@ -2,6 +2,23 @@
 
 **Date:** 15 Nov 2026. **Branch:** `cursor/sandbox-coding-plan-adb0`, from `origin/main` at the PR 124 merge. **Do not edit** the ten sandbox files that PR 126 (`cursor/sandbox-extend`) changes.
 
+## Owner decisions (2026-11-15 20:06 ET)
+
+1. Flat-by is 15:55 in the exchange zone (`_SandboxRules.Flat1555`). An earlier catalogue clock is Eastern and is converted by `_SandboxRules.FlatBy`. NYMEX and COMEX stay Eastern, matching the GX zone map. That is 15:55 ET there, not Central.
+2. RG gates and the GX scale exits are default-off inputs on `_PS_01_BalanceBreakPullback` (`EHostGate.Off`, `EHostExit.Host`). The RG and EX files still journal the rule and do not enter.
+3. `RollDetection` is turned off in `StartCalc` when the instrument is not a future.
+4. Data1 is 1-minute. Data2 is the idea's native timeframe, declared on the `// Chart:` line. A file that emulates a higher bar requires Data2 and logs an Error when it is missing.
+5. A priced entry is resent while its signal is still true. One fill per session.
+6. A new swing anchor, and a new session, clears the once-only latch. That is one trade per anchor per day.
+7. `ESandboxSide` exists for a host that codes both sides. The default is Both.
+8. VX files do not trade. They log an Error that VIX data is unavailable. HV20 is not a substitute.
+9. CL, GC, ZN and 6E use the pit table in `_SandboxRules.ApplyPit` when the chart name matches. Other symbols keep the base session.
+10. A host exit of Partial1R or Partial15R uses 2 contracts, logs a Warning, and logs an Error if that risk exceeds 1 percent of equity.
+11. A2-53 keeps a plain protective stop. The catalogue note says the sandbox does not stop-and-reverse.
+12. PS-01 sends the protective stop on the same bar as the entry stop.
+
+Deleted, because the catalogue merges them or says they do not exist: DV-04, DV-05, DV-10, DV-12, DV-13, DV-14, DV-17, DV-18, DV-19, DV-21, DV-24, PS-26. Their hosts are PS-12, PS-14, VW-08, AV-02, AV-11, AV-08, OF-08, OF-05, OF-06, DV-02, EX-01. There is no PS-26.
+
 Analyst's count is 291 distinct IDs. This file lists all 291. The count by family matches that list: A2 79, PS 26, DV 24, EX 13, AV 13, YV 12, KD 11, OF 10, RG 10, SP 9, PF 8, VX 8, VW 8, TS 7, L2 7, MT 7, LE 7, VPF 6, VP 6, SW 6, CS 5, VPB 5, IX 3, EV 1.
 
 Ten signals are already in `sandbox/` from PR 124. PR 126 on `cursor/sandbox-extend` adds arms to those same ten files. This plan does not edit them.
@@ -36,7 +53,7 @@ dxFeed in this project is futures, stocks and ETFs. It is not an index feed. For
 | Gap | IDs | Substitute used when the batch is written |
 |---|---|---|
 | No DOM / L2 | L2-01 through L2-07 | None. Kind is `data-unavailable`. No fake book. |
-| No VIX or cash index | VX-01 through VX-08, and any row that names SPX | HV20 from M-DAILY on the future being traded. The header says ASSUMPTION. |
+| No VIX or cash index | VX-01 through VX-08, and any row that names SPX | No trade. The file logs an Error that VIX data is unavailable. HV20 is not a substitute. |
 | ETF rows | LE-01 through LE-07 | The ETF itself, if it is on the stock/ETF feed. Not a future substitute. |
 | Spot FX or crypto only | any row whose only market is not a future or a stock | 6E for a euro FX idea. No crypto substitute. The header says so. |
 | Order-flow depth | OF-01, OF-07, OF-09, OF-10, EX-11, EX-12 | Code the rule. If flow quality is only BarUpDown, skip the flow arm and journal the skip. |
@@ -171,27 +188,16 @@ The counts are in the table at the end of this file.
 | DV-01 | Daily POC first-touch pullback ("The Simplest Volume Profile Intraday Strategy for Beginners") | trading-idea-catalogue.md | entry signal | sandbox/_DV_01_DailyPOCFirst.Strategy.CS | 6 | coded in batch 6 |
 | DV-02 | Failed level → reversal (flip) trade | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_02_FailedLevelFlip.Strategy.CS | 2 | coded in batch 2 |
 | DV-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | duplicate-of | sandbox/_PS_13_RotationVolumeLevel.Strategy.CS | done | same worked example as PS-13. Do not write a second file. |
-| DV-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_04_DV04.Strategy.CS | 6 | coded in batch 6 |
-| DV-05 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_05_DV05.Strategy.CS | 6 | coded in batch 6 |
 | DV-06 | End-of-trend-day cluster pullback (into the NY close) | trading-idea-catalogue.md | entry signal | sandbox/_DV_06_EndOfTrend.Strategy.CS | 6 | coded in batch 6 |
 | DV-07 | Rotation / double-distribution edge → centre | trading-idea-catalogue.md | entry signal | sandbox/_DV_07_RotationDoubleDistribution.Strategy.CS | 6 | coded in batch 6 |
 | DV-08 | Heavy-volume zone + Fair Value Gap alignment (level at the FVG start) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_08_FvgHvnAlignment.Strategy.CS | 2 | coded in batch 2 |
 | DV-09 | Weekly-VWAP ±1σ trend pullback | trading-idea-catalogue.md | entry signal | sandbox/_DV_09_WeeklyVWAP1.Strategy.CS | 6 | coded in batch 6 |
-| DV-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md | entry signal | sandbox/_DV_10_DV10.Strategy.CS | 6 | coded in batch 6 |
 | DV-11 | VWAP trend-failure (lose σ1 → pullback to σ1 → target VWAP) | trading-idea-catalogue.md | entry signal | sandbox/_DV_11_VWAPTrendFailure.Strategy.CS | 6 | coded in batch 6 |
-| DV-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_12_DV12.Strategy.CS | 6 | coded in batch 6 |
-| DV-13 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_13_DV13.Strategy.CS | 6 | coded in batch 6 |
-| DV-14 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_14_DV14.Strategy.CS | 6 | coded in batch 6 |
 | DV-15 | EMA20 pullback gated by VWAP slope | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_DV_15_EmaVwapPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | DV-16 | Order-flow confirmation at a pre-defined level (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_16_OrderFlowConfirmation.Strategy.CS | 6 | coded in batch 6 |
-| DV-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_17_DV17.Strategy.CS | 6 | coded in batch 6 |
-| DV-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_18_DV18.Strategy.CS | 6 | coded in batch 6 |
-| DV-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_19_DV19.Strategy.CS | 6 | coded in batch 6 |
 | DV-20 | Stop-loss-cluster (weak low/high) veto | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_20_StopLossCluster.Strategy.CS | 7 | coded in batch 7 |
-| DV-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_21_DV21.Strategy.CS | 7 | coded in batch 7 |
 | DV-22 | ABCD (AB = CD) | trading-idea-catalogue.md | entry signal | sandbox/_DV_22_ABCDABCD.Strategy.CS | 7 | coded in batch 7 |
 | DV-23 | Initial-balance draw trade (guest: Dan McKen, Funded Trader Academy, not Dale) | trading-idea-catalogue.md | entry signal | sandbox/_DV_23_InitialBalanceDraw.Strategy.CS | 7 | coded in batch 7 |
-| DV-24 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_24_DV24.Strategy.CS | 7 | coded in batch 7 |
 | TS-01 | European-open overnight drift (long MES 01:30–04:30 ET) | trading-idea-catalogue.md | entry signal | sandbox/_TS_01_EuropeanOpenDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
 | TS-02 | London-open break of the Asia range (CL/GC) with an Asia AVWAP filter | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_TS_02_LondonOpenBreak.Strategy.CS | 7 | coded in batch 7 |
 | TS-03 | Close regime: 15:30–16:00 MOC drift then reversion | trading-idea-catalogue.md | entry signal | sandbox/_TS_03_CloseDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
@@ -230,7 +236,6 @@ The counts are in the table at the end of this file.
 | PS-23 | Profile shape at the close → next-session tilt | trading-idea-catalogue.md | entry signal | sandbox/_PS_23_ProfileShapeAt.Strategy.CS | 8 | coded in batch 8 |
 | PS-24 | Overnight high/low break-and-go at RTH | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_24_OvernightBreak.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | PS-25 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_PS_25_PS25.Strategy.CS | 8 | coded in batch 8 |
-| PS-26 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_PS_26_PS26.Strategy.CS | 8 | coded in batch 8 |
 | OF-01 | Stacked-imbalance origin: first retest continuation | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_OF_01_StackedImbalanceRetest.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | OF-02 | Delta-z ratification of the breakout bar (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_OF_02_DeltaZRatification.Strategy.CS | 8 | coded in batch 8 |
 | OF-03 | Anchored CVD flip at a failed break (layer) | trading-idea-catalogue.md | entry signal | sandbox/_OF_03_AnchoredCVDFlip.Strategy.CS | 8 | coded in batch 8 |
@@ -432,21 +437,9 @@ A file journals and does not send an order only when its catalogue heading has n
 | AV-13 | Stretch scale for a host anchor. No entry. |
 | VW-07 | Location filter for other entries. No standalone trade. No ETH type on EVwapType. |
 | DV-16 | Order-flow layer on a host level. No standalone entry. |
-| DV-04 | Merged into PS-12. No second entry. |
-| DV-05 | Merged into PS-14. No second entry. |
-| DV-10 | Merged into VW-08. No second entry. |
-| DV-12 | Merged into AV-02. No second entry. |
-| DV-13 | Merged into AV-11. No second entry. |
-| DV-14 | Merged into AV-08. No second entry. |
-| DV-17 | Merged into OF-08. No second entry. |
-| DV-18 | Merged into OF-05. No second entry. |
-| DV-19 | Merged into OF-06. No second entry. |
 | TS-04 | Re-runs PS-01 and PS-24 on a pit profile. No entry of its own. |
 | TS-07 | Opening-noise blackout for other entries. No entry. |
 | DV-20 | Weak-low veto for a host level. No entry. |
-| DV-21 | Merged into DV-02. No second entry. |
-| DV-24 | Merged into EX-01. No second entry. |
-| PS-26 | The catalogue says there is no PS-26. No entry. |
 | OF-02 | Delta-z layer on a host breakout. No entry. |
 | OF-03 | Anchored-CVD layer on a host entry. No entry. |
 | OF-06 | Unfinished-auction veto. No entry. The journal uses a poor high as the proxy. |
@@ -581,7 +574,7 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | AV-10 | `_AV_10_AVWAPProfileConfluence` | futures-only |
 | AV-11 | `_AV_11_BreakAvwapPullback` | futures-only |
 
-### Slot batch 3 (30)
+### Slot batch 3 (20)
 
 | ID | Class | Market tag |
 |---|---|---|
@@ -591,27 +584,16 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | DV-02 | `_DV_02_FailedLevelFlip` | futures-only |
 | A2-25 | `_A2_25_PocStabilityGate` | both |
 | A2-26 | `_A2_25_PocStabilityGate` | both |
-| DV-04 | `_DV_04_DV04` | futures-only |
-| DV-05 | `_DV_05_DV05` | futures-only |
 | DV-06 | `_DV_06_EndOfTrend` | futures-only |
 | DV-07 | `_DV_07_RotationDoubleDistribution` | futures-only |
 | DV-08 | `_DV_08_FvgHvnAlignment` | both |
 | DV-09 | `_DV_09_WeeklyVWAP1` | futures-only |
-| DV-10 | `_DV_10_DV10` | futures-only |
 | DV-11 | `_DV_11_VWAPTrendFailure` | futures-only |
-| DV-12 | `_DV_12_DV12` | futures-only |
-| DV-13 | `_DV_13_DV13` | futures-only |
-| DV-14 | `_DV_14_DV14` | futures-only |
 | DV-15 | `_DV_15_EmaVwapPullback` | futures-only |
 | DV-16 | `_DV_16_OrderFlowConfirmation` | futures-only |
-| DV-17 | `_DV_17_DV17` | futures-only |
-| DV-18 | `_DV_18_DV18` | futures-only |
-| DV-19 | `_DV_19_DV19` | futures-only |
 | DV-20 | `_DV_20_StopLossCluster` | futures-only |
-| DV-21 | `_DV_21_DV21` | futures-only |
 | DV-22 | `_DV_22_ABCDABCD` | futures-only |
 | DV-23 | `_DV_23_InitialBalanceDraw` | futures-only |
-| DV-24 | `_DV_24_DV24` | futures-only |
 | EX-01 | `_EX_01_EX01` | both |
 | EX-02 | `_EX_02_EX02` | both |
 | EX-03 | `_EX_03_EX03` | both |
@@ -686,7 +668,7 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | PF-07 | `_PF_07_MetaLabellingThe` | both |
 | PF-08 | `_PF_08_DonchianTurtleDaily` | futures-only |
 
-### Slot batch 6 (30)
+### Slot batch 6 (29)
 
 | ID | Class | Market tag |
 |---|---|---|
@@ -717,7 +699,6 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | PS-23 | `_PS_23_ProfileShapeAt` | futures-only |
 | PS-24 | `_PS_24_OvernightBreak` | futures-only |
 | PS-25 | `_PS_25_PS25` | futures-only |
-| PS-26 | `_PS_26_PS26` | futures-only |
 | RG-01 | `_RG_01_ValueMigrationGate` | futures-only |
 | RG-02 | `_RG_02_BalanceImbalanceClassifier` | futures-only |
 

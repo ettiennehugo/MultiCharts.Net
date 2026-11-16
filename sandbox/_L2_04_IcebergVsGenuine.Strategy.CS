@@ -7,6 +7,7 @@
 // Study class: _L2_04_IcebergVsGenuine
 // File: sandbox/_L2_04_IcebergVsGenuine.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: No historical depth of book and no market-by-order flag.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -152,7 +154,7 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vol = Bars.Volume[0];
 			int repeats = Bars.Close[0] == Bars.Close[1] ? 1 : 0;
-			if (journalOn()) trace(ETraceLevel.Journal, "L2-04 volume " + vol.ToString("0") + " same-close " + repeats + " is not an iceberg. No order.");
+			if (journalOn()) trace(ETraceLevel.Error, "L2-04 volume " + vol.ToString("0") + " same-close " + repeats + " is not an iceberg. No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -177,7 +179,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange);
 			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
