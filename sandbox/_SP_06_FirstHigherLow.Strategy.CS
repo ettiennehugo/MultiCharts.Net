@@ -143,12 +143,14 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_06_FirstHigherLow : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private double m_hl; private bool m_ready, m_done;
+		private IOrderPriced m_le; private double m_hl; private bool m_ready, m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_06_FirstHigherLow(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP06"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SP06LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_ready = false; } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || Bars.CurrentBar < 180) return;
 			VpExtra comp = Composite(1, 5); if (comp == null || !(comp.val > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);

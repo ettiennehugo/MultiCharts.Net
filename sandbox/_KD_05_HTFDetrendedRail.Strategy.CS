@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the KD-05 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The catalogue equates KD-05 with MT-07, a layer on PS-25. This file does not open a second trade.
+// Research assumption: ASSUMPTION: KD-05 is the MT-07 entry: PS-25's 15-minute rail break only while two 60-minute closes have held beyond the detrended VAH.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -74,7 +74,7 @@
 // Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
-// Base class: _VolumeProfileFuturesBase
+// Base class: _MT_07_MT07
 // Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
@@ -84,7 +84,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The catalogue equates KD-05 with MT-07, a layer on PS-25. This file does not open a second trade.
+// Other: ASSUMPTION: KD-05 is the MT-07 entry: PS-25's 15-minute rail break only while two 60-minute closes have held beyond the detrended VAH.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -131,7 +131,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The catalogue equates KD-05 with MT-07, a layer on PS-25. This file does not open a second trade.
+// ASSUMPTION: KD-05 is the MT-07 entry: PS-25's 15-minute rail break only while two 60-minute closes have held beyond the detrended VAH.
 // IOG is disabled.
 
 
@@ -141,47 +141,8 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _KD_05_HTFDetrendedRail : _VolumeProfileFuturesBase
+	public class _KD_05_HTFDetrendedRail : _MT_07_MT07
 	{
-		private DateTime m_day = DateTime.MinValue;
 		public _KD_05_HTFDetrendedRail(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
-		protected override void StartCalc() { DvpConfig.enabled = true; base.StartCalc(); }
-		protected override void CalcBar()
-		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0); int above = Bars.Close[0] > vah ? 1 : 0; if (journalOn()) trace(ETraceLevel.Journal, "KD-05 lives in MT-07. Close above VAH " + above + ". No order.");
-		}
-
-		private double widen(bool buy, double entry, double stop)
-		{
-			int ticks = 1;
-			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
-			double floor = ticks * tickSize();
-			if (buy && entry - stop < floor) return entry - floor;
-			if (!buy && stop - entry < floor) return entry + floor;
-			return stop;
-		}
-		private int m_timeStop, m_flatOverride;
-		private bool budget(double a, double b) { double r = Math.Abs(a - b); return r > 0 && r * Bars.Info.BigPointValue <= equityAvailable(0.01); }
-		private void arm(bool buy, double entry, double stop, double target, string name, int holdDays)
-		{
-			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			bool has = Math.Abs(target - entry) > tickSize();
-			GxConfig.TargetMode = has ? ETargetMode.SingleTarget : ETargetMode.None;
-			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
-			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
-			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
-			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
-			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
-			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
-			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
-			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(buy, entry, stop, 1, mkt, name);
-		}
 	}
 }

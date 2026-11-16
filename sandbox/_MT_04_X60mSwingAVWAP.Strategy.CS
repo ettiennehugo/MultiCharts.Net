@@ -143,14 +143,15 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _MT_04_X60mSwingAVWAP : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private bool m_done;
+		private IOrderPriced m_le; private bool m_done; private int m_anchor = -1;
 		public _MT_04_X60mSwingAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "MT04"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "MT04LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
+			if (a != null && a.Valid && a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; }
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			if (a == null || !a.Valid || !(a.Sigma > 0) || !(a.SlopeAtr > 0) || !(Bars.Close[0] > a.Value)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 10) return;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];

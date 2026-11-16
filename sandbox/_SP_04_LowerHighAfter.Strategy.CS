@@ -143,12 +143,14 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_04_LowerHighAfter : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_se; private double m_probe; private bool m_done;
+		private IOrderPriced m_se; private double m_probe; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_04_LowerHighAfter(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP04"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SP04SE", EOrderAction.SellShort)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_probe = 0; } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || Bars.CurrentBar < 40) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 15 != 0) return;
 			VpExtra comp = Composite(1, 5); if (comp == null || !(comp.vah > 0)) return;

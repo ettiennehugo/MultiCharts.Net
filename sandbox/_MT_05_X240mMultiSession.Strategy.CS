@@ -143,15 +143,18 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _MT_05_X240mMultiSession : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private bool m_done, m_touched;
+		private IOrderPriced m_le; private bool m_done, m_touched; private double m_lvn; private DateTime m_day = DateTime.MinValue;
 		public _MT_05_X240mMultiSession(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "MT05"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "MT05LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_touched = false; } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			VpExtra comp = Composite(1, 5); if (comp == null || comp.lvns == null || comp.lvns.Count == 0 || comp.hvns == null || comp.hvns.Count == 0) return;
 			Node lv = comp.lvns[0]; foreach (Node n in comp.lvns) if (n.high - n.low > lv.high - lv.low) lv = n;
+			if (Math.Abs(lv.low - m_lvn) > tickSize()) { m_lvn = lv.low; m_touched = false; if (StrategyInfo.MarketPosition == 0) m_done = false; }
 			if (Bars.Low[0] <= lv.high && Bars.Low[0] >= lv.low) m_touched = true;
 			if (!m_touched) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30) return;

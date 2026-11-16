@@ -143,12 +143,14 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_08_PointOfOrigin : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private double m_origin, m_range, m_break; private bool m_have, m_done;
+		private IOrderPriced m_le; private double m_origin, m_range, m_break; private bool m_have, m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_08_PointOfOrigin(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP08"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SP08LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_have = false; } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 160) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (!m_have && ((int)tod.TotalMinutes) % 15 == 0)
