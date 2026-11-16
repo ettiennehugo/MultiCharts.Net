@@ -85,6 +85,8 @@ static class Program
 		CalendarKeyChecks(files);
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
+		GateSourceChecks(files);
+		GateRuleProbes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Generated", "bin", "Release", "net8.0", "SandboxLib.dll"));
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
@@ -146,6 +148,97 @@ static class Program
 		}
 	}
 
+	// Every study with a Gate input turns on what the gate reads at the top of StartCalc, and its hostGate reads that data
+	// behind a try/null check that blocks with a once-per-day Warning instead of dereferencing it (PS-01's Trend arm did).
+	static void GateSourceChecks(List<string> files)
+	{
+		int hosts = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			if (!Regex.IsMatch(code, @"\[Input\]\s*public\s+ESandboxGate\s+Gate\b")) continue;
+			hosts++;
+			string start = MethodBody(code, @"void\s+StartCalc\s*\(\s*\)");
+			int apply = start.IndexOf("applyGateNeeds();", StringComparison.Ordinal);
+			int bse = start.IndexOf("base.StartCalc();", StringComparison.Ordinal);
+			Check(apply >= 0 && bse > apply, name + " applies the gate's needs in StartCalc before base.StartCalc");
+			string needs = MethodBody(code, @"void\s+applyGateNeeds\s*\(\s*\)");
+			Check(needs.Contains("_SandboxRules.GateNeeds(Gate,") && needs.Contains("NeedsDaily = true") && needs.Contains("DvpConfig.enabled = true")
+				&& needs.Contains("OwnProfileWindow = EOwnProfileWindow.Rth") && needs.Contains("NeedsDaily = false"), name + " applyGateNeeds turns on (and restores) Own RTH, daily and DVP from GateNeeds");
+			string gate = MethodBody(code, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)");
+			Check(gate.Length > 0 && gate.Contains("try") && gate.Contains("catch (Exception") && gate.Contains("gateWarn(") && !Regex.IsMatch(gate, @"\bDailyContext\s*\."),
+				name + " hostGate guards its reads (try, no DailyContext dereference, Warning on not ready)");
+			string warn = MethodBody(code, @"void\s+gateWarn\s*\(\s*string\s+why\s*\)");
+			Check(warn.Contains("m_gateWarnDay") && warn.Contains("ETraceLevel.Warning"), name + " gateWarn is a Warning once per day");
+		}
+		Check(hosts >= 89, "gate hosts found: " + hosts);
+	}
+
+	static string MethodBody(string code, string signature)
+	{
+		Match m = new Regex(signature + @"\s*\{").Match(code);
+		if (!m.Success) return "";
+		int depth = 0;
+		for (int j = m.Index + m.Length - 1; j < code.Length; j++)
+		{
+			if (code[j] == '{') depth++;
+			else if (code[j] == '}' && --depth == 0) return code.Substring(m.Index, j + 1 - m.Index);
+		}
+		return "";
+	}
+
+	// Unit probes of the shared gate rule (the built SandboxLib): a gate needs exactly the inputs its GateAllows arm reads,
+	// a missing input is reported as not ready, and no gate throws on missing (NaN / 0) inputs.
+	static void GateRuleProbes(string dll)
+	{
+		Type rules = null, gateT = null;
+		try { Assembly a = Assembly.LoadFrom(Path.GetFullPath(dll)); rules = a.GetType("PowerLanguage.Strategy._SandboxRules"); gateT = a.GetType("PowerLanguage.Strategy.ESandboxGate"); }
+		catch (Exception ex) { Console.WriteLine("  gate probe load: " + ex.Message); }
+		Check(rules != null && gateT != null, "SandboxLib _SandboxRules loads for the gate probes");
+		if (rules == null || gateT == null) return;
+		MethodInfo allows = rules.GetMethod("GateAllows"), needs = rules.GetMethod("GateNeeds"), notReady = rules.GetMethod("GateNotReady");
+		Func<object, bool, double, double, double, double, double, double, double, int, bool> A = (g, buy, c, poc, hi, lo, atr, sma, prev, fam) =>
+			(bool)allows.Invoke(null, new object[] { g, buy, c, poc, hi, lo, atr, sma, prev, fam });
+		foreach (object g in Enum.GetValues(gateT))
+		{
+			string n = g.ToString();
+			// A setup every gate allows for a buy: close above the prior POC and the SMA, a narrow session, three families.
+			double c = 100, poc = 99, hi = 100.5, lo = 100.2, atr = 2, sma = 95, prev = 98; int fam = 3;
+			bool readsPoc = false, readsSma = false, readsFam = false, threw = false;
+			try
+			{
+				bool baseOk = A(g, true, c, poc, hi, lo, atr, sma, prev, fam);
+				readsPoc = baseOk != A(g, true, c, double.NaN, hi, lo, atr, sma, prev, fam);
+				readsSma = baseOk != A(g, true, c, poc, hi, lo, atr, double.NaN, prev, fam);
+				readsFam = baseOk != A(g, true, c, poc, hi, lo, atr, sma, prev, 0);
+				foreach (bool buy in new[] { true, false })
+				{
+					A(g, buy, c, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, 0);
+					A(g, buy, c, 0, 0, 0, 0, 0, 0, 0);
+				}
+			}
+			catch (Exception) { threw = true; }
+			Check(!threw, n + ": GateAllows does not throw on missing inputs");
+			object[] args = { g, false, false, false, false };
+			needs.Invoke(null, args);
+			bool own = (bool)args[2], daily = (bool)args[3], dvp = (bool)args[4];
+			Check(own == readsPoc && daily == readsSma && dvp == readsFam,
+				n + ": GateNeeds(ownRth " + own + ", daily " + daily + ", dvp " + dvp + ") matches what GateAllows reads (poc " + readsPoc + ", sma " + readsSma + ", families " + readsFam + ")");
+			Func<double, double, double, double, bool, string> R = (p, s, pr, at, d) => (string)notReady.Invoke(null, new object[] { g, p, s, pr, at, d });
+			bool atrGate = n == "Balance" || n == "DayType" || n == "Noise" || n == "Compression";
+			Check(R(poc, sma, prev, atr, true) == null, n + ": ready with every input present");
+			if (readsPoc) Check(R(double.NaN, sma, prev, atr, true) != null, n + ": not ready without the prior RTH profile");
+			if (readsSma) Check(R(poc, double.NaN, prev, atr, true) != null, n + ": not ready without the daily SMA200");
+			if (readsFam) Check(R(poc, sma, prev, atr, false) != null, n + ": not ready with the DVP engine off");
+			if (atrGate) Check(R(poc, sma, prev, double.NaN, true) != null, n + ": not ready without ATR(14)");
+			if (n == "Off") Check(!own && !daily && !dvp && R(double.NaN, double.NaN, double.NaN, double.NaN, false) == null, "Off: needs nothing and is always ready");
+		}
+		object comp = Enum.Parse(gateT, "Compression");
+		object[] ca = { comp, true, false, false, false }; needs.Invoke(null, ca);
+		Check((bool)ca[3], "Compression with compressionUsesDaily (PS-01) needs the daily context");
+	}
+
 	// Analyst MC17 run (A2-15 aborted): the sandbox workspaces use MaxBarsBack 49, so a Data1 series read Bars.X[i] with a
 	// computed index (or a literal past 49) aborts the study. Deep Data1 history comes from the engine ring through lbBar().
 	// Computed-index reads that stay within 49 are listed with their bound. Owner 2026-11-16: the original ten are checked too.
@@ -203,8 +296,8 @@ static class Program
 			string name = Path.GetFileName(path);
 			if (OriginalTen.Contains(name)) continue;
 			string code = WithoutMethod(Regex.Replace(File.ReadAllText(path), @"//[^\n]*", ""), "applyGateNeeds");
-			if (!ownRx.IsMatch(MethodBody(code, "void Create()"))) continue;
-			string start = MethodBody(code, "void StartCalc()");
+			if (!ownRx.IsMatch(MethodBody(code, @"void\s+Create\s*\(\s*\)"))) continue;
+			string start = MethodBody(code, @"void\s+StartCalc\s*\(\s*\)");
 			Match own = ownRx.Match(start);
 			int b = start.IndexOf("base.StartCalc()", StringComparison.Ordinal);
 			Check(own.Success && b > own.Index, name + " sets DevelopingSource = Own in Create and re-applies it in StartCalc before base.StartCalc()");
@@ -222,27 +315,11 @@ static class Program
 			if (OriginalTen.Contains(name)) continue;
 			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
 			if (!code.Contains("_SandboxRules.Rest(")) continue;
-			string book = MethodBody(code, "bool sandboxBook()");
+			string book = MethodBody(code, @"bool\s+sandboxBook\s*\(\s*\)");
 			Match m = rearm.Match(book);
 			int rest = book.IndexOf("_SandboxRules.Rest(", StringComparison.Ordinal);
 			Check(m.Success && rest > m.Index, name + " sandboxBook re-arms the one-trade-per-day state at the trading-day change before Rest");
 		}
-	}
-
-	// Brace-matched body of the first method whose text starts with `signature`, or "" when absent.
-	static string MethodBody(string code, string signature)
-	{
-		int i = code.IndexOf(signature, StringComparison.Ordinal);
-		if (i < 0) return "";
-		int brace = code.IndexOf('{', i);
-		if (brace < 0) return "";
-		int depth = 0;
-		for (int j = brace; j < code.Length; j++)
-		{
-			if (code[j] == '{') depth++;
-			else if (code[j] == '}' && --depth == 0) return code.Substring(brace, j - brace + 1);
-		}
-		return code.Substring(brace);
 	}
 
 	// Owner 2026-11-16: every sandbox study that reads DailyContext.Atr20d carries the 20-day ATR over the roll
