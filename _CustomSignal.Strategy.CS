@@ -1408,81 +1408,254 @@ namespace PowerLanguage.Strategy
 		}
 
 		// ---- M-TICK (§7): lazy DataLoader 1-tick Trade stream for the Data1 symbol; no tick chart stream (§6). ----
+		// History follows the tick-chunk pattern of _VolumeProfileFuturesBase (specs/mcbidask-recalc-chunking-spec.md §4.5, §5):
+		// the request is planned on the first CalcBar (FullSymbolData is read there, not in StartCalc), a FromTo chart gets one FromTo
+		// request per calendar day of Data1 bars from the first bar - 1 day to the last bar (never past it), and CalcBar waits
+		// (bounded, TickConfig.chunkWaitMs, historical calc only) for the day covering the bar: callbacks arrive while it sleeps (P-RC7).
+		// No recalc: the wait gives each bar its day's ticks in the same pass, and only the days in flight are held in memory.
 
 		/// <summary>M-TICK configuration; enabled=false (default) = no DataLoader request, TickStats null.</summary>
 		protected TickConfig TickConfig { get; } = new TickConfig();
 		private _TickStream m_tickStream;
-		private IDataLoaderResult m_tickReq;
-		private int m_tickLastBar = -1;
+		private IDataLoaderResult m_tickReq;                       // the single BarsBack request (non-FromTo chart)
+		private TickChunkFeed m_tickFeed;                          // the chunked FromTo history (null: single request)
+		private readonly Dictionary<int, IDataLoaderResult> m_tickLoads = new Dictionary<int, IDataLoaderResult>();   // calc thread
+		private int m_tickIdSeed = 1000;                           // chunk ids increase across passes: stale callbacks find no chunk
+		private int m_tickLastBar = -1, m_tickWaitedId, m_tickBatches;
+		private bool m_tickPlanned, m_tickLive, m_tickSummaryLogged, m_tickLegacyWaited;
+		private readonly System.Diagnostics.Stopwatch m_tickPumpClock = new System.Diagnostics.Stopwatch();
 
 		/// <summary>M-TICK aggregate of the last closed Data1 bar, or null when M-TICK is off. Check valid; size fields stay
 		/// parked (NaN / null) until TickConfig.sizeOutputsVerified (rev 2.7 §E6).</summary>
 		internal TickBarStats TickStats { get { return m_tickStream != null ? m_tickStream.Last : null; } }
 
+		/// <summary>Calc thread: a live chart (real-time calc, or the last bar within a day of now) subscribes RT. Shared with
+		/// _VolumeProfileFuturesBase (tick chunks, McBidAsk).</summary>
+		protected bool chartIsLive(DateTime lastBar) { return Environment.IsRealTimeCalc || lastBar >= DateTime.Now.AddDays(-1); }
+
+		/// <summary>Recalc spec §4.5: the request window. API dump (P-RC5/P-RC8): InstrumentDataRequest.Range is a DataRequest struct
+		/// field (CreateFromTo sets RequestType FromTo); From/To are properties. Both carry the same window; TimeZone stays as copied
+		/// from Bars.Request (the zone the chart bars use).</summary>
+		protected static void setRequestWindow(ref InstrumentDataRequest req, DateTime from, DateTime to)
+		{
+			req.Range = DataRequest.CreateFromTo(from, to);
+			req.From = from;
+			req.To = to;
+		}
+
+		/// <summary>Journal text of a request window: the typed Range fields and the From/To properties.</summary>
+		protected static string requestWindowText(InstrumentDataRequest req)
+		{
+			DataRequest rg = req.Range;
+			return $"range(type({rg.RequestType}) from({rg.From:yyyy-MM-dd HH:mm}) to({rg.To:yyyy-MM-dd HH:mm}) toAlwaysIsNow({rg.ToAlwaysIsNow})) " +
+				$"from({req.From:yyyy-MM-dd HH:mm}) to({req.To:yyyy-MM-dd HH:mm}) zone({req.TimeZone})";
+		}
+
 		private void startTick()
 		{
-			m_tickStream = null; m_tickReq = null; m_tickLastBar = -1;
+			stopTickLoads();
+			m_tickStream = null; m_tickReq = null; m_tickFeed = null; m_tickLastBar = -1; m_tickWaitedId = 0; m_tickBatches = 0;
+			m_tickPlanned = m_tickLive = m_tickSummaryLogged = m_tickLegacyWaited = false;
 			if (!TickConfig.enabled) return;
 			var t = new _TickStream { config = TickConfig, journal = engineSink(ETraceLevel.Journal) };
 			string err = t.Configure();
 			if (err != null) throw new ArgumentException(err);
-			m_tickStream = t;
-			InstrumentDataRequest req = Bars.Request;   // same symbol / feed / session as Data1 (PG p72-73)
-			req.Resolution = new Resolution(EResolution.Tick, 1);
-			req.QuoteField = RequestQuoteField.Trade;
-			req.Subscribe2RT = TickConfig.realTime;
-			// Anchor the tick window to the chart's own range, never to 'now' (a BarsBack request without To throws on MC17,
-			// and one anchored at now would read past a backtest's end into holdout data). A FromTo chart gets the same window
-			// (from one day early, for the first bar's opening ticks); any other chart gets historyTicks back from its end.
-			DataRequest cr = Bars.Request.Range;
-			DateTime to = cr.ToAlwaysIsNow ? DateTime.Now : cr.To;
-			bool fromTo = cr.RequestType == DataRequestType.FromTo && cr.From > DateTime.MinValue;
-			if (fromTo) req.Range = DataRequest.CreateFromTo(cr.From.AddDays(-1), to);
-			else req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks, To = to };
-			req.To = to;
-			if (fromTo) req.From = cr.From.AddDays(-1);
-			m_tickReq = DataLoader.BeginLoadData(req, onTickData, null);
-			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, fromTo
-				? $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, from {cr.From.AddDays(-1):yyyy-MM-dd} to {to:yyyy-MM-dd HH:mm}, RT={TickConfig.realTime}"
-				: $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, {TickConfig.historyTicks} ticks back to {to:yyyy-MM-dd HH:mm}, RT={TickConfig.realTime}");
+			m_tickStream = t;   // the request is planned on the first CalcBar (planTick): FullSymbolData is not valid in StartCalc
 		}
 
-		/// <summary>DataLoader callback (separate thread, PG p72): buffer only.</summary>
+		// First CalcBar of the pass (calc thread). Same first/last bar reads as _VolumeProfileFuturesBase.startFlowLoader (P-RC6).
+		private void planTick()
+		{
+			m_tickPlanned = true;
+			int cur = Bars.FullSymbolData.Current, count = Bars.FullSymbolData.Count;
+			DateTime firstBar = Bars.FullSymbolData.Time[cur - 1];       // bar 1
+			DateTime lastBar = Bars.FullSymbolData.Time[cur - count];    // the last bar on the chart (Time[k]: k bars back from Current)
+			m_tickLive = chartIsLive(lastBar);
+			bool rt = TickConfig.realTime && m_tickLive;              // a historical backtest never subscribes
+			DataRequest cr = Bars.Request.Range;
+			string name = Bars.Info.Name;
+			if (TickConfig.chunkByDay && cr.RequestType == DataRequestType.FromTo)
+			{
+				List<_OrderFlow.DayChunk> days = TickChunkFeed.PlanDays(barCloses(cur, count), firstBar.AddDays(-1));
+				m_tickFeed = new TickChunkFeed(m_tickStream, days, TickConfig.chunkMaxInFlightDays, TickConfig.chunkSplitOnFail, m_tickIdSeed, TickConfig.batchLines);
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal,
+					$"TICK DataLoader 1-tick Trade request for {name}, chunked days({m_tickFeed.Days}) from({m_tickFeed.From:yyyy-MM-dd HH:mm}) to({m_tickFeed.To:yyyy-MM-dd HH:mm}) " +
+					$"firstBar({firstBar:yyyy-MM-dd HH:mm}) lastBar({lastBar:yyyy-MM-dd HH:mm}) waitMs({TickConfig.chunkWaitMs}) maxInFlightDays({TickConfig.chunkMaxInFlightDays}) " +
+					$"timeoutSec({TickConfig.chunkTimeoutSec}) live({m_tickLive}) RT={rt}");
+				pumpTick(true);
+				return;
+			}
+			InstrumentDataRequest req = Bars.Request;   // same symbol / feed / session / zone as Data1 (PG p72-73)
+			req.Resolution = new Resolution(EResolution.Tick, 1);
+			req.QuoteField = RequestQuoteField.Trade;
+			req.Subscribe2RT = rt;
+			// historyTicks back from the chart's last bar, never from 'now' (a BarsBack request without To throws on MC17, and one
+			// anchored at now would read past a backtest's end into holdout data).
+			req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks, To = lastBar };
+			req.To = lastBar;
+			m_tickReq = DataLoader.BeginLoadData(req, onTickData, null);
+			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal,
+				$"TICK DataLoader 1-tick Trade request for {name}, {TickConfig.historyTicks} ticks back to {lastBar:yyyy-MM-dd HH:mm} ({cr.RequestType} chart), live({m_tickLive}) RT={rt}");
+		}
+
+		// Data1 bar closes, oldest first (bar b = FullSymbolData.Time[Current - b]).
+		private IEnumerable<DateTime> barCloses(int cur, int count)
+		{
+			for (int b = 1; b <= count; b++) yield return Bars.FullSymbolData.Time[cur - b];
+		}
+
+		// Calc thread: end finished day requests, fail silent ones, issue the next days. Runs when a callback changed something,
+		// at most once a second otherwise (timeouts), and in the wait loop.
+		private void pumpTick(bool force)
+		{
+			TickChunkFeed f = m_tickFeed;
+			if (f == null) return;
+			bool wake = f.TakeWake();
+			if (!force && !wake && m_tickPumpClock.IsRunning && m_tickPumpClock.ElapsedMilliseconds < 1000) return;
+			m_tickPumpClock.Restart();
+			DateTime now = DateTime.UtcNow;
+			foreach (string l in f.Timeouts(now, TickConfig.chunkTimeoutSec)) m_tickStream.Note(l);
+			List<int> ended = null;
+			foreach (KeyValuePair<int, IDataLoaderResult> kv in m_tickLoads)
+				if (f.ShouldEnd(kv.Key, m_tickLive)) (ended ?? (ended = new List<int>())).Add(kv.Key);
+			if (ended != null)
+				foreach (int id in ended)
+				{
+					IDataLoaderResult r = m_tickLoads[id];
+					m_tickLoads.Remove(id);
+					if (r != null) { try { DataLoader.EndLoadData(r); } catch (Exception ex) { m_tickStream.Note($"TICK endLoadData exception({ex.GetType().FullName}) message({ex.Message})"); } }
+				}
+			bool info = traceOn(ETraceLevel.Info);
+			foreach (_OrderFlow.TickChunk c in f.Next(now))
+			{
+				InstrumentDataRequest req = Bars.Request;   // TimeZone kept as copied: the chart's zone, the zone of the windows
+				req.Resolution = new Resolution(EResolution.Tick, 1);
+				req.QuoteField = RequestQuoteField.Trade;
+				setRequestWindow(ref req, c.ReqFrom, c.ReqTo);
+				req.Subscribe2RT = c.Rt && m_tickLive && TickConfig.realTime;   // only the last day of a live chart
+				if (info) trace(ETraceLevel.Info, $"TICK chunk start day({c.Day:yyyy-MM-dd}) id({c.Id}) sub({c.Sub}) attempt({c.Attempt}) rt({c.Rt}) subscribe2RT({req.Subscribe2RT}) {requestWindowText(req)}");
+				m_tickLoads[c.Id] = DataLoader.BeginLoadData(req, onTickData, c.Id);   // state: the chunk id (boxed int)
+			}
+		}
+
+		/// <summary>DataLoader callback (separate thread, PG p72): buffer only; lines are queued (no trace off the calc thread).</summary>
 		private void onTickData(IDataLoaderResult r)
 		{
 			_TickStream t = m_tickStream;
-			if (t == null) return;
-			switch (r.Event)
+			if (t == null || r == null) return;
+			TickChunkFeed f = m_tickFeed;
+			int id = f != null && r.State is int ? (int)r.State : 0;
+			try
 			{
-				case DataLoadedEvent.History:
-					if (r.Data != null) foreach (Bar b in r.Data) enqueueTick(t, b);
-					if (r.IsCompleted) t.MarkHistoryComplete();
-					break;
-				case DataLoadedEvent.RTNewBar:
-					if (r.RTData.HasValue) enqueueTick(t, r.RTData.Value);
-					break;
+				switch (r.Event)
+				{
+					case DataLoadedEvent.History:
+						if (f != null) { if (id != 0) f.OnHistory(id, ticksOf(r.Data), r.IsCompleted); break; }
+						List<TickPrint> batch = ticksOf(r.Data);
+						t.EnqueueRange(batch);
+						int n = System.Threading.Interlocked.Increment(ref m_tickBatches);
+						if (n <= TickConfig.batchLines)
+							t.Note($"TICK batch n({batch.Count}) first({(batch.Count > 0 ? batch[0].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) " +
+								$"last({(batch.Count > 0 ? batch[batch.Count - 1].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) completed({r.IsCompleted})");
+						if (r.IsCompleted) { t.MarkHistoryComplete(); t.Note($"TICK history complete (single request) batches({n})"); }
+						break;
+					case DataLoadedEvent.RTNewBar:
+						if (!r.RTData.HasValue) break;
+						Bar b = r.RTData.Value;
+						var k = new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume };
+						if (f != null) { if (id != 0) f.OnRealtime(id, k); }
+						else t.Enqueue(k.t, k.p, k.s);
+						break;
+				}
+			}
+			catch (Exception ex)
+			{
+				if (f != null && id != 0) f.OnFail(id, ex.GetType().FullName + ": " + ex.Message);
+				else t.Note($"TICK loader callback exception({ex.GetType().FullName}) message({ex.Message})");
 			}
 		}
 
 		// Typed Bar fields (Ettienne's _McApiDump: Bar is a struct with fields Time, Close, float TotalVolume; the same members
-		// _VolumeProfileFuturesBase.flowTick reads on main). TotalVolume was also the first name the old reflection lookup tried.
-		private static void enqueueTick(_TickStream t, Bar b)
+		// _VolumeProfileFuturesBase.flowTick reads on main).
+		private static List<TickPrint> ticksOf(IEnumerable<Bar> data)
 		{
-			t.Enqueue(b.Time, b.Close, (double)b.TotalVolume);   // Bar.TotalVolume is float: explicit widening to double
+			var l = new List<TickPrint>();
+			if (data != null) foreach (Bar b in data) l.Add(new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume });   // float -> double
+			return l;
 		}
 
 		private void stepTick()
 		{
+			if (!m_tickPlanned) planTick();
+			pumpTick(false);
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar == m_tickLastBar) return;
 			m_tickLastBar = Bars.CurrentBar;
-			DateTime start = Bars.CurrentBar > 1 ? Bars.Time[1] : Bars.Time[0] - Bars.Info.Resolution.Duration();
-			m_tickStream.Aggregate(start, Bars.Time[0]);
+			DateTime end = Bars.Time[0];
+			DateTime start = Bars.CurrentBar > 1 ? Bars.Time[1] : end - Bars.Info.Resolution.Duration();
+			bool? ready = null;
+			bool historical = !Environment.IsRealTimeCalc;
+			if (m_tickFeed != null)
+			{
+				int waitId;
+				ready = m_tickFeed.Ready(end, out waitId);
+				if (ready == false && waitId != 0 && waitId != m_tickWaitedId && historical && TickConfig.chunkWaitMs > 0)
+				{
+					m_tickWaitedId = waitId;   // one bounded wait per day (a day that times out leaves its bars invalid)
+					ready = tickWait(end, waitId);
+				}
+			}
+			else if (historical && !m_tickLegacyWaited && TickConfig.chunkWaitMs > 0 && m_tickReq != null)
+			{
+				m_tickLegacyWaited = true;   // single request: wait once, at the first closed bar, for the whole history
+				var sw = System.Diagnostics.Stopwatch.StartNew();
+				while (!m_tickStream.HistoryComplete && sw.ElapsedMilliseconds < TickConfig.chunkWaitMs) System.Threading.Thread.Sleep(50);
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"TICK wait history ms({sw.ElapsedMilliseconds}) complete({m_tickStream.HistoryComplete})");
+			}
+			m_tickStream.Aggregate(start, end, ready);
+			if (m_tickFeed != null && !m_tickSummaryLogged && m_tickFeed.AllFinished)
+			{
+				m_tickSummaryLogged = true;
+				m_tickStream.DrainNotes();
+				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_tickFeed.SummaryLine("complete"));
+			}
+		}
+
+		// Calc thread, outside every lock: bounded wait for the day covering barEnd (P-RC7: callbacks arrive while CalcBar sleeps).
+		private bool? tickWait(DateTime barEnd, int waitId)
+		{
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			bool? ready = false; int id = waitId;
+			while (ready == false && id != 0 && sw.ElapsedMilliseconds < TickConfig.chunkWaitMs)
+			{
+				System.Threading.Thread.Sleep(50);
+				pumpTick(false);
+				ready = m_tickFeed.Ready(barEnd, out id);
+			}
+			m_tickStream.DrainNotes();
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"TICK wait bar({barEnd:yyyy-MM-dd HH:mm}) ms({sw.ElapsedMilliseconds}) ready({(ready.HasValue ? ready.Value.ToString() : "n/a")})");
+			return ready;
+		}
+
+		private void stopTickLoads()
+		{
+			if (m_tickReq != null) { try { DataLoader.EndLoadData(m_tickReq); } catch (Exception) { } }
+			foreach (IDataLoaderResult r in m_tickLoads.Values) if (r != null) { try { DataLoader.EndLoadData(r); } catch (Exception) { } }
+			m_tickLoads.Clear();
+			m_tickReq = null;
+			if (m_tickFeed != null) m_tickIdSeed = m_tickFeed.NextId + 1000;
 		}
 
 		private void stopTick()
 		{
-			if (m_tickReq != null) { try { DataLoader.EndLoadData(m_tickReq); } catch (Exception) { } }
-			m_tickReq = null; m_tickStream = null;
+			TickChunkFeed f = m_tickFeed;
+			stopTickLoads();
+			if (m_tickStream != null)
+			{
+				m_tickStream.DrainNotes();
+				if (f != null && !m_tickSummaryLogged) engineSink(ETraceLevel.Journal)?.Invoke(f.SummaryLine("at stop"));   // StopCalc runs on the UI thread: engine sink, as the VPF summary
+			}
+			m_tickSummaryLogged = true;
+			m_tickFeed = null; m_tickStream = null;
 		}
 
 		// ---- A2-33 (catalogue §3.0, Gate 0 G0-d): level persistence vs matched controls ----
@@ -2380,6 +2553,7 @@ namespace PowerLanguage.Strategy
 			m_fractionWarned = false;
 			m_barTz = null;   // CS-6
 			m_tmDay = DateTime.MinValue; m_tmEntrySeen.Clear(); m_tmExitSeen.Clear(); m_tmEntries = m_tmLosers = 0; m_tmNet = 0;   // CS-7
+			m_entryBlockedLog.Reset();
 			m_volumeMbbWarned = false;
 			m_tradingDayWarned = false;
 			m_entryCacheBar = -1;
@@ -3475,7 +3649,9 @@ namespace PowerLanguage.Strategy
 			if (m_tmEntrySeen.Add(name + "\u001f" + bar + "\u001f" + time.Ticks)) m_tmEntries++;
 		}
 
-		/// <summary>CS-7: may the strategy enter now? reason names the first rule that blocks (traced at Info).</summary>
+		private readonly DailyOnceLog m_entryBlockedLog = new DailyOnceLog();
+
+		/// <summary>CS-7: may the strategy enter now? reason names the first rule that blocks (traced at Info once per trading day and rule).</summary>
 		protected bool entryAllowed(out string reason)
 		{
 			reason = null;
@@ -3490,7 +3666,9 @@ namespace PowerLanguage.Strategy
 				else if (DailyLossStopCount > 0 && m_tmLosers >= DailyLossStopCount) reason = $"DailyLossStopCount({DailyLossStopCount}) reached: {m_tmLosers} losers";
 				else if (DailyLossStopR > 0 && RiskUnitDollars > 0 && -m_tmNet / RiskUnitDollars >= DailyLossStopR) reason = $"DailyLossStopR({DailyLossStopR}) reached: {m_tmNet / RiskUnitDollars:0.00} R";
 			}
-			if (reason != null && traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "entry blocked: " + reason);
+			// once per trading day and rule (a strategy that asks every bar wrote one Info line per bar: A2-78, 218k lines)
+			if (reason != null && traceOn(ETraceLevel.Info) && m_entryBlockedLog.ShouldLog(tradingDayKey(Bars.Time[0]), reason))
+				trace(ETraceLevel.Info, "entry blocked: " + reason + " (repeats suppressed until the next trading day)");
 			return reason == null;
 		}
 

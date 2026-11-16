@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Off-MultiCharts tests for _TickStream (spec missing-functionality §7). Not part of PLStudies.csproj. -->
+  <!-- Off-MultiCharts tests for _TickStream and the M-TICK chunk feed (spec missing-functionality §7, tick-chunk spec §5), and the CS-7 DailyOnceLog. Not part of PLStudies.csproj. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -12,5 +12,7 @@
   <ItemGroup>
     <Compile Remove="Generated\**" />
     <Compile Include="..\..\_TickStream.Function.CS" Link="Linked\_TickStream.cs" />
+    <Compile Include="..\..\_OrderFlow.Function.CS" Link="Linked\_OrderFlow.cs" />
+    <Compile Include="..\..\_SignalJournal.Function.CS" Link="Linked\_SignalJournal.cs" />
   </ItemGroup>
 </Project>

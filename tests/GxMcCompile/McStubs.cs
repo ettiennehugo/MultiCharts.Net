@@ -172,6 +172,7 @@ namespace PowerLanguage
 		public DataRequest Range;
 		public DateTime From { get; set; }
 		public DateTime To { get; set; }
+		public RequestTimeZone TimeZone;   // P-RC6 (API dump): RequestTimeZone field
 	}
 
 	public class SessionObject
@@ -256,6 +257,7 @@ namespace PowerLanguage
 		DataLoadedEvent Event { get; }
 		bool IsCompleted { get; }
 		Bar? RTData { get; }
+		object State { get; }
 	}
 
 	public enum ESymbolCategory
@@ -354,6 +356,7 @@ namespace PowerLanguage
 	public class FullSymbolData
 	{
 		public int Current;
+		public int Count;
 		public TimeSeries Time = new TimeSeries();
 	}
 }

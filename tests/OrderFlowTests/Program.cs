@@ -1042,7 +1042,7 @@ static class Program
 			string[][] stopPath = {
 				new[] { "vp", "protected override void StopCalc()" }, new[] { "vp", "private void drainFlowQueue()" }, new[] { "vp", "private string mcStopLine(" },
 				new[] { "vp", "private void tickChunkSummary()" }, new[] { "vp", "private void stopOrderFlowLoads(" }, new[] { "vp", "private void endLoads(" },
-				new[] { "cs", "protected override void StopCalc()" }, new[] { "cs", "private void stopEngines()" }, new[] { "cs", "private void stopTick()" } };
+				new[] { "cs", "protected override void StopCalc()" }, new[] { "cs", "private void stopEngines()" }, new[] { "cs", "private void stopTick()" }, new[] { "cs", "private void stopTickLoads()" } };
 			foreach (string[] m in stopPath)
 			{
 				string body = MethodBody(m[0] == "vp" ? vp : cs, m[1]);
@@ -1166,8 +1166,8 @@ static class Program
 					&& tb2.Contains("return _OrderFlow.ExactBarLength(_OrderFlow.ExactBarLength(unit, r.Size), 2);") && !tb2.Contains("ToString"), "TE5 XMKT twoBars: typed EResolution switch, 2 x Size x unit via ExactBarLength");
 				Check(OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromMinutes(1), 5), 2) == TimeSpan.FromMinutes(10) && OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromDays(7), 1), 2) == TimeSpan.FromDays(14)
 					&& OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromDays(1), long.MaxValue), 2) == TimeSpan.Zero, "TE6 twoBars arithmetic: 5 m -> 10 m, 1 week -> 14 d, overflow -> Zero (staleness off)");
-				string eq2 = MethodBody(cs, "private static void enqueueTick(_TickStream t, Bar b)") ?? "";
-				Check(eq2.Contains("t.Enqueue(b.Time, b.Close, (double)b.TotalVolume);") && !cs.Contains("tickBarMember") && !cs.Contains("System.Reflection.MemberInfo"), "TE7 M-TICK enqueueTick reads the typed Bar fields; tickBarMember reflection removed");
+				string eq2 = MethodBody(cs, "private static List<TickPrint> ticksOf(IEnumerable<Bar> data)") ?? "";
+				Check(eq2.Contains("l.Add(new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume });") && !cs.Contains("tickBarMember") && !cs.Contains("System.Reflection.MemberInfo"), "TE7 M-TICK enqueueTick reads the typed Bar fields; tickBarMember reflection removed");
 				string ip = MethodBody(cs, "private static bool isInputProperty(System.Reflection.PropertyInfo p)") ?? "";
 				Check(ip.Contains("return Attribute.IsDefined(p, typeof(InputAttribute), true);") && !ip.Contains(".Name"), "TE8 RUN-line inputs: typed InputAttribute (inherit = true), not a type-name compare");
 				Check(cs.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")

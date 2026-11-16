@@ -5736,7 +5736,7 @@ namespace PowerLanguage.Strategy
 | `NoEntryBefore`, `NoEntryAfter`, `FlatBy` (`TimeSpan?`) | Daily entry window and the forced-flat time, compared with `sessionClock()`. |
 | `MaxTradesPerDay`, `DailyLossStopCount`, `DailyLossStopR`, `RiskUnitDollars` | Daily limits: max entries, max losing trades, max loss in R (R = `RiskUnitDollars`). 0 = off. |
 | `TimeStopBars` | Exit a position after this many bars. 0 = off. |
-| `entryAllowed(out string reason)` | May I enter now? False with the rule that blocked (traced as `entry blocked: …` at Info). |
+| `entryAllowed(out string reason)` | May I enter now? False with the rule that blocked (traced as `entry blocked: …` at Info, once per trading day and rule). |
 | `mustFlatten()` | Should the open position be closed now (FlatBy reached or TimeStopBars elapsed)? Always false when flat. |
 | `TradesToday`, `LosersToday`, `NetProfitToday` | Today's counters, per `tradingDayKey`. |
 | `sizeForRisk(IInstrument bars, double entry, double stop, double riskFraction, SizingLimits limits, double widenedStop = double.NaN)` | Contracts so that the entry-to-**structural**-stop loss ≈ `riskFraction` of equity, then capped by `SizingLimits` (`maxQty`, `maxNotionalFraction`, `unitNotional`, `minStopTicks`, `roundLots`; `roundLots` never overrides a binding `maxQty`/notional cap, it logs a Warning instead, rev 2.7). 0 = do not trade (reason traced). With `widenedStop` (the cost-floored stop the order carries) it never cuts size: off-PT (or for Data2+) it returns 0 when qty × widened risk > 1% of equity; in PT for Data1 it arms M-PORT (`pm.R$`, `pm.R$w`) and the MM decides. See §5.13. |
@@ -5756,7 +5756,7 @@ namespace PowerLanguage.Strategy
 **Journal.**
 - `RUN id(..) build(..) strategy(..) symbol(..) category(..) resolution(..) timeZone(..) firstBar(..) barNumber(..) app(..) inputs[..]`, plus ` event[canon] journalSchema(CS-1+evtDayTier,evtMinSince)` when Event is on.
 - `RUN-END id(..) lastBar(..) barNumber(..) realTime(..)`.
-- `entry blocked: <reason>` at Info.
+- `entry blocked: <reason> (repeats suppressed until the next trading day)` at Info, once per trading day and rule (the rule is the reason text before its first `(`).
 
 **Snippet.** A long breakout entry that uses every core service: daily rules in `Create`, then on each closed bar: flatten if the rules say so, ask whether an entry is allowed, size from the stop, check costs, journal and send. Sizing follows the house rule (cost floor, §5.13): risk 1% of equity on the structural stop, widen the stop to at least 14 ticks, skip the setup if the widened risk exceeds 1%, and never shrink the size. The floor is strategy code; `sizeForRisk` has no floor of its own, but since M-PORT rev 2 it takes the widened stop as `widenedStop` and applies the skip itself: on a chart it returns 0 when qty × widened risk > 1% of equity; in Portfolio Trader (Data1) it arms M-PORT with `pm.R$` on the structural stop and `pm.R$w` on the widened stop, and the money manager (§4.16) skips the entry if the widened risk breaks its 1% per-trade budget or any cap. Either way the size is never cut. Since M-PORT rev 2.7 (PR-E) arming makes the widened stop the active stop, so `pm.riskOpen` uses it as soon as the order fills and the snippet no longer calls `portfolioStop` at entry (`protected void portfolioStop(double stop)` is for trailing or breakeven later; a no-op outside Portfolio Trader). A result of `qty = 0`, a skipped entry or a failed cost filter means "skip this setup"; the reason is in the trace (or in the MM's `PORT Info: skip` line).
 
@@ -6458,7 +6458,12 @@ protected override void CalcBar()
 
 **Enable.** `TickConfig.enabled = true` in `Create()`. Nothing is requested while it is off.
 
-**Defaults.** `historyTicks 2,000,000`, `realTime true`, `burstZ 3`, `burstNormLength 200`, `burstMinSamples 30`, `sizeBuckets {1,2,5,10,20,50}`, `largePrintSize 20`, `sizeOutputsVerified false`.
+**Defaults.** `historyTicks 2,000,000`, `realTime true`, `chunkByDay true`, `chunkWaitMs 120,000`, `chunkMaxInFlightDays 2`, `chunkSplitOnFail 4`, `chunkTimeoutSec 300`, `batchLines 20`, `burstZ 3`, `burstNormLength 200`, `burstMinSamples 30`, `sizeBuckets {1,2,5,10,20,50}`, `largePrintSize 20`, `sizeOutputsVerified false`.
+
+**Loading.** The request is planned on the first `CalcBar` (it reads `Bars.FullSymbolData`, which is not valid in `StartCalc`). It never reaches past the chart's last bar and never anchors at "now".
+- **FromTo chart** (a backtest range): one FromTo request per calendar day of Data1 bars, in the chart's zone, from the first bar − 1 day to the last bar. This is the tick-chunk pattern of `_VolumeProfileFuturesBase` (`specs/mcbidask-recalc-chunking-spec.md` §5, shared `_OrderFlow.TickChunkScheduler`). Two days are in flight at a time. A day is handed to the stream only when it is complete, and days are handed over in order. At the first closed bar of a day whose ticks are not in yet, `CalcBar` waits up to `chunkWaitMs` (historical calc only; DataLoader callbacks arrive while it sleeps, probe P-RC7). A day that does not arrive in time, fails twice or comes back empty leaves its bars `valid = false`. There is no recalc: each bar gets its day's ticks in the same pass, and only the days in flight are held in memory.
+- **Any other chart**: one BarsBack request of `historyTicks`, back from the chart's last bar; on a historical calc the first closed bar waits up to `chunkWaitMs` for it to complete.
+- **Real time.** `Subscribe2RT` is on only when `realTime` is set and the chart is live (real-time calc, or the last bar within a day of now). A historical backtest never subscribes.
 
 **API.** `TickStats` returns the last closed bar's `TickBarStats`, or null.
 
@@ -6470,9 +6475,15 @@ protected override void CalcBar()
 | `burstZ`, `burst` | z-score of this bar's busiest-second print count vs the previous `burstNormLength` bars (NaN until `burstMinSamples` bars); `burst` = z ≥ `TickConfig.burstZ`. |
 | `sizeHistogram`, `largePrints`, `volume` | Trade-size counts and large prints; null / −1 / NaN until `sizeOutputsVerified` is set. |
 
-**Timing.** Aggregated over `(Time[1], Time[0]]` at bar close. Late ticks are dropped.
+**Timing.** Aggregated over `(Time[1], Time[0]]` at bar close. Late ticks are dropped. A bar before the stream's first tick is never valid with zero prints.
 
-**Journal.** `TICK DataLoader 1-tick Trade request for {sym}, N ticks back, RT=…`; `TICK n late tick(s) dropped …`; `TICK data missing/late … outputs invalid`; `TICK data valid again …`.
+**Journal.**
+- `TICK DataLoader 1-tick Trade request for {sym}, chunked days(N) from(..) to(..) firstBar(..) lastBar(..) waitMs(..) maxInFlightDays(..) timeoutSec(..) live(..) RT=…` (FromTo chart), or `TICK DataLoader 1-tick Trade request for {sym}, N ticks back to {lastBar} ({type} chart), live(..) RT=…`.
+- `TICK batch day(..) id(..) sub(..) n(..) first(..) last(..) outOfWindow(..) completed(..)` for the first `batchLines` callback batches, then `TICK batch lines capped at N …` once.
+- `TICK chunk done day(..) id(..) sub(..) ticks(..) batches(..) first(..) last(..) window(..) outOfWindow(..) sec(..)` per day; `TICK chunk failed …` / `TICK chunk timeout …` with `next(split4|giveUp)`.
+- `TICK history complete days(..) done(..) failed(..) pending(0) ticks(..) first(..) last(..) planTo(..) outOfWindow(..) batches(..)` once (or `TICK history at stop …` from `StopCalc` if days were still pending).
+- Info: `TICK chunk start …` per request, `TICK wait bar(..) ms(..) ready(..)` per wait.
+- `TICK n late tick(s) dropped …`; `TICK data missing/late … outputs invalid`; `TICK data valid again …`.
 
 **Bar fields (typed).** `enqueueTick` reads the typed `Bar` fields `b.Time`, `b.Close` and `(double)b.TotalVolume`, the same members `_VolumeProfileFuturesBase.flowTick` reads (confirmed by Ettienne's `_McApiDump`). The old by-name reflection (`Time`, `Close`, `TotalVolume`/`Volume`/`Ticks`) is gone (typed-enums follow-up to PR #79).
 
