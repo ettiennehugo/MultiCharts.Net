@@ -19,28 +19,6 @@ namespace PowerLanguage.Strategy
 
 	public static class _SandboxRules
 	{
-		static readonly TimeSpan EquityOpen = new TimeSpan(9, 30, 0);
-		static readonly TimeSpan EquityClose = new TimeSpan(16, 0, 0);
-
-		/// <summary>US stock or ETF. ETF is <see cref="ESymbolCategory.Stock"/>. NYSE, ARCA, NASDAQ, AMEX and BATS are the cash venues. Their regular session is 09:30–16:00 ET, not the template's extended-hours end.</summary>
-		public static bool UsEquity(string exchange, ESymbolCategory category)
-		{
-			if (category == ESymbolCategory.Stock) return true;
-			if (string.IsNullOrEmpty(exchange)) return false;
-			string e = exchange.ToUpperInvariant();
-			string[] venues = { "NYSE", "XNYS", "NYSEARCA", "NASDAQ", "NASD", "XNAS", "ARCA", "ARCX", "AMEX", "XASE", "NYSEMKT", "NYSEAMEX", "BATS", "BZX", "BYX", "BATY" };
-			for (int i = 0; i < venues.Length; i++)
-				if (Token(e, venues[i])) return true;
-			return false;
-		}
-
-		/// <summary>Regular close in US Eastern. A US stock or ETF is 16:00 ET. The named pits and index futures come from the sandbox table. Anything else uses a daytime session-template end, then 16:00 ET.</summary>
-		public static TimeSpan RegularCloseEt(string symbol, TimeSpan listedSessionEnd, string exchange, ESymbolCategory category)
-		{
-			if (UsEquity(exchange, category)) return EquityClose;
-			return RegularCloseEt(symbol, listedSessionEnd);
-		}
-
 		/// <summary>Regular close in US Eastern. The named pits and index futures come from the sandbox table. Anything else uses a daytime session-template end, then 16:00 ET (a stock close).</summary>
 		public static TimeSpan RegularCloseEt(string symbol, TimeSpan listedSessionEnd)
 		{
@@ -52,7 +30,7 @@ namespace PowerLanguage.Strategy
 				return new TimeSpan(16, 0, 0);
 			if (listedSessionEnd > new TimeSpan(12, 0, 0) && listedSessionEnd < new TimeSpan(17, 0, 0))
 				return listedSessionEnd;
-			return EquityClose;
+			return new TimeSpan(16, 0, 0);
 		}
 
 		public static TimeSpan DaytimeEnd(TimeSpan listedEnd)
@@ -62,17 +40,12 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>A positive override is an Eastern catalogue clock. Zero is five minutes before the regular close, in the exchange zone.</summary>
-		public static int FlatBy(int etOverrideHhmm, string exchange, string symbol, TimeSpan listedSessionEnd, ESymbolCategory category)
-		{
-			if (etOverrideHhmm > 0) return EtToExchangeHhmm(etOverrideHhmm, exchange);
-			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd, exchange, category) - TimeSpan.FromMinutes(5);
-			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
-			return EtToExchangeHhmm(flat.Hours * 100 + flat.Minutes, exchange);
-		}
-
 		public static int FlatBy(int etOverrideHhmm, string exchange, string symbol, TimeSpan listedSessionEnd)
 		{
-			return FlatBy(etOverrideHhmm, exchange, symbol, listedSessionEnd, ESymbolCategory.None);
+			if (etOverrideHhmm > 0) return EtToExchangeHhmm(etOverrideHhmm, exchange);
+			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd) - TimeSpan.FromMinutes(5);
+			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
+			return EtToExchangeHhmm(flat.Hours * 100 + flat.Minutes, exchange);
 		}
 
 		public static int FlatBy(int etOverrideHhmm, string exchange)
@@ -86,18 +59,13 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>sessionClock is Eastern. True once that clock is within five minutes of the regular close, and before 18:00 ET.</summary>
-		public static bool PastFlat(TimeSpan etTod, string symbol, TimeSpan listedSessionEnd, string exchange, ESymbolCategory category)
+		public static bool PastFlat(TimeSpan etTod, string symbol, TimeSpan listedSessionEnd)
 		{
-			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd, exchange, category) - TimeSpan.FromMinutes(5);
+			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd) - TimeSpan.FromMinutes(5);
 			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
 			int now = etTod.Hours * 100 + etTod.Minutes;
 			int limit = flat.Hours * 100 + flat.Minutes;
 			return now >= limit && now < 1800;
-		}
-
-		public static bool PastFlat(TimeSpan etTod, string symbol, TimeSpan listedSessionEnd)
-		{
-			return PastFlat(etTod, symbol, listedSessionEnd, "", ESymbolCategory.None);
 		}
 
 		public static bool PastFlat(TimeSpan etTod, string exchange)
@@ -106,38 +74,14 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>Regular-session start, end, and value end. A futures base passes the three spans to ApplyPit.</summary>
-		public static void PitWindows(string symbol, TimeSpan listedEnd, string exchange, ESymbolCategory category, out TimeSpan start, out TimeSpan end, out TimeSpan valueEnd)
-		{
-			if (UsEquity(exchange, category))
-			{
-				start = EquityOpen;
-				end = EquityClose;
-				valueEnd = EquityClose;
-				return;
-			}
-			PitWindows(symbol, listedEnd, out start, out end, out valueEnd);
-		}
-
 		public static void PitWindows(string symbol, TimeSpan listedEnd, out TimeSpan start, out TimeSpan end, out TimeSpan valueEnd)
 		{
 			valueEnd = RegularCloseEt(symbol, listedEnd);
 			end = valueEnd;
-			start = EquityOpen;
+			start = new TimeSpan(9, 30, 0);
 			string root = Root(symbol);
 			if (root == "CL") start = new TimeSpan(9, 0, 0);
 			else if (root == "GC" || root == "ZN" || root == "6E") start = new TimeSpan(8, 20, 0);
-		}
-
-		public static void ApplyPit(string name, ref TimeSpan start, ref TimeSpan end, ref TimeSpan valueEnd, TimeSpan listedEnd, string exchange, ESymbolCategory category)
-		{
-			if (UsEquity(exchange, category))
-			{
-				start = EquityOpen;
-				end = EquityClose;
-				valueEnd = EquityClose;
-				return;
-			}
-			ApplyPit(name, ref start, ref end, ref valueEnd, listedEnd);
 		}
 
 		public static void ApplyPit(string name, ref TimeSpan start, ref TimeSpan end, ref TimeSpan valueEnd, TimeSpan listedEnd)

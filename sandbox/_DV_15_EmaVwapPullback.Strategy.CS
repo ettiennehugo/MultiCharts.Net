@@ -215,7 +215,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
-			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero, Bars.Info.Exchange, Bars.Info.Category);
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EVwapSlot), VwapSlot)) throw new ArgumentException("_DV_15_EmaVwapPullback: VwapSlot is not a defined EVwapSlot");
@@ -252,7 +252,7 @@ namespace PowerLanguage.Strategy
 			DateTime dayNow = GlobexDate(Bars.Time[0]);
 			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = 0; }
 			TimeSpan todNow = ToEastern(Bars.Time[0]).TimeOfDay;
-			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(todNow, Bars.Info.Name, m_rthValueEnd, Bars.Info.Exchange, Bars.Info.Category);
+			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(todNow, Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (pos != 0)
 			{
