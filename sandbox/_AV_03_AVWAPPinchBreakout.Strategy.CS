@@ -207,7 +207,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = Math.Abs(target - entry);
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = hold ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.MaxHoldDays = hold ? 10 : 0;
 			GxConfig.TimeStopMinutes = 0; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
