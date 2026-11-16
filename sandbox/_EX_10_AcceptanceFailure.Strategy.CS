@@ -1,23 +1,23 @@
 // ## 1. Identity
-// Catalogue ID: EX-11
-// ID mapping: EX-11 -> _EX_11_EX11.Strategy.CS (class _EX_11_EX11).
-// Name: EX-11 stop beyond the LVN
+// Catalogue ID: EX-10
+// ID mapping: EX-10 -> _EX_10_AcceptanceFailure.Strategy.CS (class _EX_10_AcceptanceFailure).
+// Name: EX-10 acceptance failure
 // Header version: 1
-// Rules version: catalogue specification under the EX-11 heading, rewritten 2026-11-15.
-// Study class: _EX_11_EX11
-// File: sandbox/_EX_11_EX11.Strategy.CS
+// Rules version: catalogue specification under the EX-10 heading, rewritten 2026-11-15.
+// Study class: _EX_10_AcceptanceFailure
+// File: sandbox/_EX_10_AcceptanceFailure.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Stop-beyond-LVN module. It does not enter.
+// Non-trading signal: Acceptance-failure exit for a host. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-11 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-10 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
+// Research assumption: ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-11 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-10 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -40,7 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -86,7 +86,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
+// Other: ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +126,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-11
+// logSignal tag: EX-10
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
+// ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
 // IOG is disabled.
 
 
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_11_EX11 : _VolumeProfileFuturesBase
+	public class _EX_10_AcceptanceFailure : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_11_EX11(object _ctx) : base(_ctx) { }
+		public _EX_10_AcceptanceFailure(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			VpExtra c = Composite(1, 5); double best = double.MaxValue; if (c != null) foreach (Node n in c.lvns) best = Math.Min(best, Math.Min(Math.Abs(Bars.Close[0] - n.low), Math.Abs(Bars.Close[0] - n.high))); if (journalOn()) trace(ETraceLevel.Journal, "EX-11 LVN distance " + best.ToString("0.00") + ". Host stop, no order.");
+			VpExtra c = Composite(1, 5); bool back = c != null && Bars.Close[0] < c.vah && Bars.Close[0] > c.val; if (journalOn()) trace(ETraceLevel.Journal, "EX-10 back inside value " + back + ". Host exit, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

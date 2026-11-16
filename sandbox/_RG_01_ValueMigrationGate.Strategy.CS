@@ -7,6 +7,7 @@
 // Study class: _RG_01_ValueMigrationGate
 // File: sandbox/_RG_01_ValueMigrationGate.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.ValueMigration, default Off, on every GX host.
 // Non-trading signal: Value-migration gate. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

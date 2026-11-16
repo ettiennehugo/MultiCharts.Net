@@ -7,6 +7,7 @@
 // Study class: _RG_04_LiveDayType
 // File: sandbox/_RG_04_LiveDayType.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.DayType, default Off, on every GX host.
 // Non-trading signal: Live day-type gate. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

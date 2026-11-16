@@ -7,6 +7,7 @@
 // Study class: _RG_06_HTFTrendState
 // File: sandbox/_RG_06_HTFTrendState.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.Trend, default Off, on every GX host.
 // Non-trading signal: Higher-timeframe trend gate. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

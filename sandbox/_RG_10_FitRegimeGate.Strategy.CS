@@ -1,23 +1,24 @@
 // ## 1. Identity
-// Catalogue ID: RG-09
-// ID mapping: RG-09 -> _RG_09_RG09.Strategy.CS (class _RG_09_RG09).
-// Name: RG-09 three-family filter
+// Catalogue ID: RG-10
+// ID mapping: RG-10 -> _RG_10_FitRegimeGate.Strategy.CS (class _RG_10_FitRegimeGate).
+// Name: RG-10 fit-regime stand-down
 // Header version: 1
-// Rules version: catalogue specification under the RG-09 heading, rewritten 2026-11-15.
-// Study class: _RG_09_RG09
-// File: sandbox/_RG_09_RG09.Strategy.CS
+// Rules version: catalogue specification under the RG-10 heading, rewritten 2026-11-15.
+// Study class: _RG_10_FitRegimeGate
+// File: sandbox/_RG_10_FitRegimeGate.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Three-family filter. Default-off on the host. This file does not enter.
+// Host option: Host option ESandboxGate.FitRegime, default Off, on every GX host.
+// Non-trading signal: Fit-regime stand-down. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the RG-09 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the RG-10 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
+// Research assumption: ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the RG-09 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the RG-10 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +87,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
+// Other: ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +127,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: RG-09
+// logSignal tag: RG-10
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
+// ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
 // IOG is disabled.
 
 
@@ -143,10 +144,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _RG_09_RG09 : _VolumeProfileFuturesBase
+	public class _RG_10_FitRegimeGate : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _RG_09_RG09(object _ctx) : base(_ctx) { }
+		public _RG_10_FitRegimeGate(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -155,7 +156,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			int fam, ranges; dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges); bool pass = fam >= 3; if (journalOn()) trace(ETraceLevel.Journal, "RG-09 pass " + pass + " families " + fam + ". Gate, no order.");
+			double up = dvpRailPrice(1, ELevelKind.DvpSigma, 1); bool stand = Bars.Close[0] > up; if (journalOn()) trace(ETraceLevel.Journal, "RG-10 stand down " + stand + ". Gate, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

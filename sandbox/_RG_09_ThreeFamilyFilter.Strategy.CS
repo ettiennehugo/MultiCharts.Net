@@ -1,23 +1,24 @@
 // ## 1. Identity
-// Catalogue ID: EX-10
-// ID mapping: EX-10 -> _EX_10_EX10.Strategy.CS (class _EX_10_EX10).
-// Name: EX-10 acceptance failure
+// Catalogue ID: RG-09
+// ID mapping: RG-09 -> _RG_09_ThreeFamilyFilter.Strategy.CS (class _RG_09_ThreeFamilyFilter).
+// Name: RG-09 three-family filter
 // Header version: 1
-// Rules version: catalogue specification under the EX-10 heading, rewritten 2026-11-15.
-// Study class: _EX_10_EX10
-// File: sandbox/_EX_10_EX10.Strategy.CS
+// Rules version: catalogue specification under the RG-09 heading, rewritten 2026-11-15.
+// Study class: _RG_09_ThreeFamilyFilter
+// File: sandbox/_RG_09_ThreeFamilyFilter.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Acceptance-failure exit for a host. It does not enter.
+// Host option: Host option ESandboxGate.ThreeFamily, default Off, on every GX host.
+// Non-trading signal: Three-family filter. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-10 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the RG-09 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
+// Research assumption: ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-10 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the RG-09 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -40,7 +41,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 5-minute.
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -86,7 +87,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
+// Other: ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +127,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-10
+// logSignal tag: RG-09
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading exits a host when a 5-minute bar closes back inside broken value. It has no entry. ASSUMPTION: this file journals whether the close is back between the 5-session value edges.
+// ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
 // IOG is disabled.
 
 
@@ -143,19 +144,19 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_10_EX10 : _VolumeProfileFuturesBase
+	public class _RG_09_ThreeFamilyFilter : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_10_EX10(object _ctx) : base(_ctx) { }
+		public _RG_09_ThreeFamilyFilter(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-  base.StartCalc(); }
+ DvpConfig.enabled = true;  base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			VpExtra c = Composite(1, 5); bool back = c != null && Bars.Close[0] < c.vah && Bars.Close[0] > c.val; if (journalOn()) trace(ETraceLevel.Journal, "EX-10 back inside value " + back + ". Host exit, no order.");
+			int fam, ranges; dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges); bool pass = fam >= 3; if (journalOn()) trace(ETraceLevel.Journal, "RG-09 pass " + pass + " families " + fam + ". Gate, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

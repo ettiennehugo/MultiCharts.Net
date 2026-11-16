@@ -1,23 +1,23 @@
 // ## 1. Identity
-// Catalogue ID: EX-12
-// ID mapping: EX-12 -> _EX_12_EX12.Strategy.CS (class _EX_12_EX12).
-// Name: EX-12 CVD divergence exit
+// Catalogue ID: EX-11
+// ID mapping: EX-11 -> _EX_11_StopBeyondLvn.Strategy.CS (class _EX_11_StopBeyondLvn).
+// Name: EX-11 stop beyond the LVN
 // Header version: 1
-// Rules version: catalogue specification under the EX-12 heading, rewritten 2026-11-15.
-// Study class: _EX_12_EX12
-// File: sandbox/_EX_12_EX12.Strategy.CS
+// Rules version: catalogue specification under the EX-11 heading, rewritten 2026-11-15.
+// Study class: _EX_11_StopBeyondLvn
+// File: sandbox/_EX_11_StopBeyondLvn.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: CVD-divergence exit for a host. It does not enter.
+// Non-trading signal: Stop-beyond-LVN module. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-12 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-11 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
+// Research assumption: ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-12 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-11 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +86,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
+// Other: ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +126,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-12
+// logSignal tag: EX-11
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
+// ASSUMPTION: The heading places a host stop beyond the nearest LVN. It has no entry. ASSUMPTION: this file journals the distance from the close to the nearest composite LVN edge.
 // IOG is disabled.
 
 
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_12_EX12 : _VolumeProfileFuturesBase
+	public class _EX_11_StopBeyondLvn : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_12_EX12(object _ctx) : base(_ctx) { }
+		public _EX_11_StopBeyondLvn(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double cvd = CumDelta(0).Value, prev = CumDelta(5).Value; bool diverge = Bars.Close[0] > Bars.Close[5] && cvd < prev; if (journalOn()) trace(ETraceLevel.Journal, "EX-12 CVD diverge " + diverge + ". Host exit, no order.");
+			VpExtra c = Composite(1, 5); double best = double.MaxValue; if (c != null) foreach (Node n in c.lvns) best = Math.Min(best, Math.Min(Math.Abs(Bars.Close[0] - n.low), Math.Abs(Bars.Close[0] - n.high))); if (journalOn()) trace(ETraceLevel.Journal, "EX-11 LVN distance " + best.ToString("0.00") + ". Host stop, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

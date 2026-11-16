@@ -1,23 +1,23 @@
 // ## 1. Identity
-// Catalogue ID: RG-10
-// ID mapping: RG-10 -> _RG_10_RG10.Strategy.CS (class _RG_10_RG10).
-// Name: RG-10 fit-regime stand-down
+// Catalogue ID: EX-12
+// ID mapping: EX-12 -> _EX_12_CvdDivergenceExit.Strategy.CS (class _EX_12_CvdDivergenceExit).
+// Name: EX-12 CVD divergence exit
 // Header version: 1
-// Rules version: catalogue specification under the RG-10 heading, rewritten 2026-11-15.
-// Study class: _RG_10_RG10
-// File: sandbox/_RG_10_RG10.Strategy.CS
+// Rules version: catalogue specification under the EX-12 heading, rewritten 2026-11-15.
+// Study class: _EX_12_CvdDivergenceExit
+// File: sandbox/_EX_12_CvdDivergenceExit.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Fit-regime stand-down. Default-off on the host. This file does not enter.
+// Non-trading signal: CVD-divergence exit for a host. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the RG-10 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-12 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
+// Research assumption: ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the RG-10 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-12 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +86,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
+// Other: ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +126,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: RG-10
+// logSignal tag: EX-12
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading is the module form of KD-04. It has no entry. ASSUMPTION: stand-down is a close beyond the +1 sigma rail.
+// ASSUMPTION: The heading exits a host runner when a new high has a lower CumDelta. It has no entry. ASSUMPTION: this file journals CumDelta against the close of five bars ago and does not send an order.
 // IOG is disabled.
 
 
@@ -143,19 +143,19 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _RG_10_RG10 : _VolumeProfileFuturesBase
+	public class _EX_12_CvdDivergenceExit : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _RG_10_RG10(object _ctx) : base(_ctx) { }
+		public _EX_12_CvdDivergenceExit(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- DvpConfig.enabled = true;  base.StartCalc(); }
+  base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double up = dvpRailPrice(1, ELevelKind.DvpSigma, 1); bool stand = Bars.Close[0] > up; if (journalOn()) trace(ETraceLevel.Journal, "RG-10 stand down " + stand + ". Gate, no order.");
+			double cvd = CumDelta(0).Value, prev = CumDelta(5).Value; bool diverge = Bars.Close[0] > Bars.Close[5] && cvd < prev; if (journalOn()) trace(ETraceLevel.Journal, "EX-12 CVD diverge " + diverge + ". Host exit, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

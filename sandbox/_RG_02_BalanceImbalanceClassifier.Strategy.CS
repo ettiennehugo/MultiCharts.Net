@@ -7,6 +7,7 @@
 // Study class: _RG_02_BalanceImbalanceClassifier
 // File: sandbox/_RG_02_BalanceImbalanceClassifier.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.Balance, default Off, on every GX host.
 // Non-trading signal: Balance classifier. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

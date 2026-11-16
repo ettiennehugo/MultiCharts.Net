@@ -7,6 +7,7 @@
 // Study class: _RG_05_NoiseBandFilter
 // File: sandbox/_RG_05_NoiseBandFilter.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.Noise, default Off, on every GX host.
 // Non-trading signal: Noise-band gate. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

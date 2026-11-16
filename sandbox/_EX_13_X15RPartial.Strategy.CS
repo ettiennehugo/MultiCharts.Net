@@ -7,6 +7,7 @@
 // Study class: _EX_13_X15RPartial
 // File: sandbox/_EX_13_X15RPartial.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxExit.Partial15R, default Off, on every GX host. The host trades 2 contracts when it is on.
 // Non-trading signal: 1.5 R partial. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //

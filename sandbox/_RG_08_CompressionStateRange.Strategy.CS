@@ -7,6 +7,7 @@
 // Study class: _RG_08_CompressionStateRange
 // File: sandbox/_RG_08_CompressionStateRange.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxGate.Compression, default Off, on every GX host.
 // Non-trading signal: Compression gate. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //
