@@ -3,7 +3,7 @@
 // Plain internal sealed classes, MC-free (tests/TickTests). The owner (_CustomSignal) issues the DataLoader 1-tick Trade requests
 // (PG p71-75; Subscribe2RT only on a live chart) and forwards the ticks from the loader thread; this file only buffers there
 // (lock-protected queues). CalcBar consumes on the Data1 closed bar with Aggregate(barStart, barEnd[, ready]).
-// FromTo chart: TickChunkFeed plans one request per calendar day of Data1 bars (first bar - 1 day .. last bar), holds each day
+// FromTo chart: TickChunkFeed plans one request per trading session of Data1 bars (first bar - 1 day .. last bar), holds each day
 // until it completes, releases days in order and answers Ready(barEnd) for the bounded wait (tick-chunk pattern of
 // _VolumeProfileFuturesBase, specs/mcbidask-recalc-chunking-spec.md §5). Other charts: one BarsBack request of historyTicks.
 // Gate (§7): trade-size outputs (histogram, large prints) stay parked until rev 2.7 §E6 (dxFeed size fidelity through
@@ -21,13 +21,15 @@ namespace PowerLanguage.Function
 		public int historyTicks = 2000000;        // DataLoader BarsBack count in 1-tick bars; used only when the chart range is not FromTo
 		public bool realTime = true;              // Subscribe2RT, and only on a live chart (never on a historical backtest)
 		// FromTo chart (tick-chunk pattern of _VolumeProfileFuturesBase, specs/mcbidask-recalc-chunking-spec.md §5): one FromTo request
-		// per calendar day of Data1 bars, from the first bar - 1 day to the last bar (never past it), and a bounded wait in CalcBar.
+		// per trading session of Data1 bars (gap > sessionGapMinutes), from the first bar - 1 day to the last bar (never past it), and a bounded wait in CalcBar.
 		public bool chunkByDay = true;            // false = the single BarsBack request (A/B only)
 		public int chunkWaitMs = 120000;          // bounded wait (historical calc) for the day covering the bar; 0 = no wait
 		public int chunkMaxInFlightDays = 2;      // 1..4 day requests in flight (prefetch)
 		public int chunkSplitOnFail = 4;          // a failed day is re-requested once as this many sub-windows; 0 = no retry
 		public int chunkTimeoutSec = 300;         // an in-flight day silent this long is failed (then split); 0 = no timeout
-		public int batchLines = 20;               // Journal lines for the first N DataLoader callback batches of a pass
+		public int batchLines = 20;               // 'TICK callback' lines for the first N DataLoader callbacks of a pass (completed ones always)
+		public int sessionGapMinutes = 30;        // a gap between Data1 bar closes longer than this starts a new request window (session)
+		public int firstCallbackSec = 30;         // no callback at all this long after the first request: Warning, waits off for the run
 		public double burstZ = 3.0;               // burst flag when max prints/s z >= burstZ
 		public int burstNormLength = 200;         // rolling norm of max prints/s (bars)
 		public int burstMinSamples = 30;
@@ -44,6 +46,8 @@ namespace PowerLanguage.Function
 			if (chunkSplitOnFail < 0) e.Add($"chunkSplitOnFail={chunkSplitOnFail}");
 			if (chunkTimeoutSec < 0) e.Add($"chunkTimeoutSec={chunkTimeoutSec}");
 			if (batchLines < 0) e.Add($"batchLines={batchLines}");
+			if (sessionGapMinutes < 1) e.Add($"sessionGapMinutes={sessionGapMinutes}");
+			if (firstCallbackSec < 1) e.Add($"firstCallbackSec={firstCallbackSec}");
 			if (!(burstZ > 0)) e.Add($"burstZ={burstZ}");
 			if (burstNormLength < 3) e.Add($"burstNormLength={burstNormLength}");
 			if (burstMinSamples < 2 || burstMinSamples > burstNormLength) e.Add($"burstMinSamples={burstMinSamples}");
@@ -253,6 +257,7 @@ namespace PowerLanguage.Function
 		private volatile bool m_allFinished;
 		private DateTime m_first = DateTime.MaxValue, m_last = DateTime.MinValue;
 		private long m_outOfWindow;
+		private int m_emptyDays; private DateTime m_emptyFrom, m_emptyTo;   // sessions that completed with no tick in the window
 		private DateTime m_coverFrom, m_coverTo; private bool m_coverOk;   // calc thread: the last ready window
 		/// <summary>Plan window: (From, To]; To is the last bar of the chart (no request goes past it).</summary>
 		public readonly DateTime From, To;
@@ -260,6 +265,8 @@ namespace PowerLanguage.Function
 		public int NextId { get { lock (m_lock) return m_s.NextId; } }
 		/// <summary>Every day finished (done, failed or given up) and released.</summary>
 		public bool AllFinished { get { return m_allFinished; } }
+		/// <summary>Sessions whose request completed with no tick in the window (no local 1-tick history), and the first one.</summary>
+		public int EmptyDays(out DateTime firstFrom, out DateTime firstTo) { lock (m_lock) { firstFrom = m_emptyFrom; firstTo = m_emptyTo; return m_emptyDays; } }
 
 		public TickChunkFeed(_TickStream stream, List<_OrderFlow.DayChunk> days, int maxInFlightDays, int splitOnFail, int firstId, int batchLines)
 		{
@@ -277,6 +284,47 @@ namespace PowerLanguage.Function
 		/// so every bar's (Time[1], Time[0]] lies in exactly one window and no window reaches past the last bar. Days without bars
 		/// (weekends, holidays) get no request. Non-increasing times are ignored.
 		/// </summary>
+		/// <summary>
+		/// One window per trading session of the Data1 bars: a gap between consecutive bar closes longer than gap (default 30 min)
+		/// ends a session (CME: the 16:00-17:00 CT halt and the weekend; stocks: the overnight). Window = (end of the previous window,
+		/// last close of the session]; the first starts at from (first bar - 1 day), the last ends at the chart's last bar. So on a
+		/// CME chart in Central time a window runs from the previous session's 16:00 close to this session's 16:00 close (the halt
+		/// carries no ticks), the same session cut as the VPF Globex-day chunks. Contiguous and half-open. Label = date of the last bar.
+		/// </summary>
+		public static List<_OrderFlow.DayChunk> PlanSessions(IEnumerable<DateTime> barCloses, DateTime from, TimeSpan gap)
+		{
+			var days = new List<_OrderFlow.DayChunk>();
+			DateTime prevEnd = from, curLast = DateTime.MinValue, last = DateTime.MinValue;
+			foreach (DateTime t in barCloses)
+			{
+				if (t <= last || t <= from) continue;
+				if (curLast != DateTime.MinValue && t - curLast > gap)
+				{
+					days.Add(new _OrderFlow.DayChunk { GlobexDate = curLast.Date, FromEt = prevEnd, ToEt = curLast });
+					prevEnd = curLast;
+				}
+				last = t; curLast = t;
+			}
+			if (curLast != DateTime.MinValue) days.Add(new _OrderFlow.DayChunk { GlobexDate = curLast.Date, FromEt = prevEnd, ToEt = curLast });
+			return days;
+		}
+
+		/// <summary>Fail-fast rule: requests were issued at firstIssueUtc, no callback of any kind has arrived (callbacks == 0), and
+		/// sec seconds have passed.</summary>
+		public static bool NoCallbackTimeout(int callbacks, DateTime firstIssueUtc, DateTime nowUtc, int sec)
+		{
+			return callbacks == 0 && firstIssueUtc != DateTime.MinValue && (nowUtc - firstIssueUtc).TotalSeconds >= sec;
+		}
+
+		/// <summary>The plain-language hint when no 1-tick history came back: MultiCharts reads 1-tick history from the local
+		/// QuoteManager database, so a backtest window must be downloaded there first (owner, 2026-11-16).</summary>
+		public static string MissingHistoryText(string symbol, DateTime from, DateTime to)
+		{
+			return $"no 1-tick history was returned for {symbol} from {from:yyyy-MM-dd HH:mm} to {to:yyyy-MM-dd HH:mm}: the 1-tick data may need " +
+				$"downloading in QuoteManager for that window before the backtest";
+		}
+
+		/// <summary>Calendar-day windows (superseded by PlanSessions for M-TICK; kept for tests and A/B).</summary>
 		public static List<_OrderFlow.DayChunk> PlanDays(IEnumerable<DateTime> barCloses, DateTime from)
 		{
 			var days = new List<_OrderFlow.DayChunk>();
@@ -371,6 +419,7 @@ namespace PowerLanguage.Function
 				}
 				if (!completed) return;
 				m_s.Complete(c, true, buf.ticks.Count, buf);
+				if (buf.ticks.Count == 0 && m_emptyDays++ == 0) { m_emptyFrom = c.ReqFrom; m_emptyTo = c.ReqTo; }
 				m_stream.Note($"TICK chunk done day({c.Day:yyyy-MM-dd}) id({c.Id}) sub({c.Sub}) ticks({buf.ticks.Count}) batches({buf.batches}) first({fmt(buf.first)}) " +
 					$"last({fmt(buf.last)}) window({c.ReqFrom:yyyy-MM-dd HH:mm}..{c.ReqTo:yyyy-MM-dd HH:mm}) outOfWindow({buf.outOfWindow}) sec({(DateTime.UtcNow - c.IssuedAt).TotalSeconds:0.0})");
 				release();

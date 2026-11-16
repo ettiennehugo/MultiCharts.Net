@@ -162,6 +162,11 @@ static class Program
 		feed.OnHistory(issue3[0].Id, new List<TickPrint>(), true);
 		Check(feed.Ready(closes[7], out wid) == false && wid == 0, "empty day: invalid, no wait");
 		Check(feed.AllFinished && feed.Pending() == 0, "all days finished");
+		DateTime ef, et;
+		Check(feed.EmptyDays(out ef, out et) == 1 && ef == issue3[0].ReqFrom && et == issue3[0].ReqTo, "empty session counted (no local 1-tick history), first window kept");
+		string mh = TickChunkFeed.MissingHistoryText("@ES", new DateTime(2024, 12, 1, 16, 0, 0), new DateTime(2024, 12, 6, 16, 0, 0));
+		Check(mh.Contains("no 1-tick history was returned for @ES from 2024-12-01 16:00 to 2024-12-06 16:00") && mh.Contains("downloading in QuoteManager"),
+			"missing-history text names the symbol, the date range and QuoteManager");
 		sf.DrainNotes();
 		Check(jf.Count(x => x.StartsWith("TICK batch day(")) == 3 && jf.Count(x => x.StartsWith("TICK batch lines capped at 3")) == 1, "batch lines: first 3, then one cap line");
 		string sum = feed.SummaryLine("complete");
@@ -204,6 +209,30 @@ static class Program
 		loader.Wait();
 		Check(rdy == true && clock.ElapsedMilliseconds >= 150, $"wait ends when the day completes ({clock.ElapsedMilliseconds} ms)");
 		Check(sw4.Aggregate(closes[0].AddMinutes(-1), closes[0], rdy).prints == 1, "waited bar gets its tick");
+
+
+		// ---- PlanSessions: CME session windows (chart zone Central): prev 16:00 close .. this 16:00 close ----
+		var es = new List<DateTime>();
+		for (var t = new DateTime(2024, 12, 1, 17, 1, 0); t <= new DateTime(2024, 12, 2, 16, 0, 0); t = t.AddMinutes(1)) es.Add(t);   // Sun eve + Mon
+		for (var t = new DateTime(2024, 12, 2, 17, 1, 0); t <= new DateTime(2024, 12, 3, 16, 0, 0); t = t.AddMinutes(1)) es.Add(t);   // Tue session
+		var ses = TickChunkFeed.PlanSessions(es, es[0].AddDays(-1), TimeSpan.FromMinutes(30));
+		Check(ses.Count == 2, $"two sessions, not split at midnight ({ses.Count})");
+		Check(ses[0].FromEt == new DateTime(2024, 11, 30, 17, 1, 0) && ses[0].ToEt == new DateTime(2024, 12, 2, 16, 0, 0) && ses[0].GlobexDate == new DateTime(2024, 12, 2),
+			"Monday session window ends at the 16:00 CT close, labelled Monday");
+		Check(ses[1].FromEt == new DateTime(2024, 12, 2, 16, 0, 0) && ses[1].ToEt == new DateTime(2024, 12, 3, 16, 0, 0), "Tuesday window = Mon 16:00 .. Tue 16:00 (halt carries no ticks)");
+		var es2 = new List<DateTime>(es); es2.Insert(100, es[99]);   // duplicate ignored
+		Check(TickChunkFeed.PlanSessions(es2, es[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "duplicate close ignored");
+		var gap = new List<DateTime> { new DateTime(2024, 12, 2, 9, 0, 0), new DateTime(2024, 12, 2, 9, 30, 0), new DateTime(2024, 12, 2, 10, 1, 0) };
+		Check(TickChunkFeed.PlanSessions(gap, gap[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "a gap over 30 min starts a new window; exactly 30 min does not");
+
+		// ---- fail fast: no callback at all within firstCallbackSec ----
+		var i0 = new DateTime(2026, 1, 1, 12, 0, 0);
+		Check(!TickChunkFeed.NoCallbackTimeout(0, DateTime.MinValue, i0, 30), "nothing issued: no timeout");
+		Check(!TickChunkFeed.NoCallbackTimeout(0, i0, i0.AddSeconds(29), 30), "29 s: keep waiting");
+		Check(TickChunkFeed.NoCallbackTimeout(0, i0, i0.AddSeconds(30), 30), "30 s, no callback: give up");
+		Check(!TickChunkFeed.NoCallbackTimeout(1, i0, i0.AddSeconds(300), 30), "a callback arrived: never the fail-fast");
+		var badc2 = new TickConfig { sessionGapMinutes = 0, firstCallbackSec = 0 }.Validate();
+		Check(badc2 != null && badc2.Contains("sessionGapMinutes=0") && badc2.Contains("firstCallbackSec=0"), "Validate session gap / first callback");
 
 		// ---- CS-7 entry-blocked log: once per trading day and rule ----
 		var dl = new DailyOnceLog(); var d1 = new DateTime(2024, 3, 13); int logged = 0;

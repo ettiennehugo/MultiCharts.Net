@@ -1168,6 +1168,12 @@ static class Program
 					&& OF.ExactBarLength(OF.ExactBarLength(TimeSpan.FromDays(1), long.MaxValue), 2) == TimeSpan.Zero, "TE6 twoBars arithmetic: 5 m -> 10 m, 1 week -> 14 d, overflow -> Zero (staleness off)");
 				string eq2 = MethodBody(cs, "private static List<TickPrint> ticksOf(IEnumerable<Bar> data)") ?? "";
 				Check(eq2.Contains("l.Add(new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume });") && !cs.Contains("tickBarMember") && !cs.Contains("System.Reflection.MemberInfo"), "TE7 M-TICK enqueueTick reads the typed Bar fields; tickBarMember reflection removed");
+				// #142 native smoke: every request window logged toAlwaysIsNow(True); a historical window must clear it, Range assigned last
+				string rw = MethodBody(cs, "protected static void setRequestWindow(ref InstrumentDataRequest req, DateTime from, DateTime to)") ?? "";
+				Check(rw.Contains("rg.ToAlwaysIsNow = false;") && rw.IndexOf("req.Range = rg;") > rw.IndexOf("req.To = to;") && rw.IndexOf("req.Range = rg;") > rw.IndexOf("rg.ToAlwaysIsNow = false;"),
+					"RW1 setRequestWindow clears ToAlwaysIsNow and assigns Range after the outdated From/To properties");
+				string st = MethodBody(cs, "private void startTick()") ?? "";
+				Check(st.Contains("journal = engineSink(ETraceLevel.Info)"), "RW2 M-TICK diagnostics at Info (Journal is filtered at TraceLevel Info)");
 				string ip = MethodBody(cs, "private static bool isInputProperty(System.Reflection.PropertyInfo p)") ?? "";
 				Check(ip.Contains("return Attribute.IsDefined(p, typeof(InputAttribute), true);") && !ip.Contains(".Name"), "TE8 RUN-line inputs: typed InputAttribute (inherit = true), not a type-name compare");
 				Check(cs.Contains("&& Bars.Info.Resolution.Type != EResolution.Day && isFuturesCategory(Bars.Info.Category))")

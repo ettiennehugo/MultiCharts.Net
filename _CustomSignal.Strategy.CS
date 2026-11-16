@@ -1410,7 +1410,7 @@ namespace PowerLanguage.Strategy
 		// ---- M-TICK (§7): lazy DataLoader 1-tick Trade stream for the Data1 symbol; no tick chart stream (§6). ----
 		// History follows the tick-chunk pattern of _VolumeProfileFuturesBase (specs/mcbidask-recalc-chunking-spec.md §4.5, §5):
 		// the request is planned on the first CalcBar (FullSymbolData is read there, not in StartCalc), a FromTo chart gets one FromTo
-		// request per calendar day of Data1 bars from the first bar - 1 day to the last bar (never past it), and CalcBar waits
+		// request per trading session of Data1 bars from the first bar - 1 day to the last bar (never past it), and CalcBar waits
 		// (bounded, TickConfig.chunkWaitMs, historical calc only) for the day covering the bar: callbacks arrive while it sleeps (P-RC7).
 		// No recalc: the wait gives each bar its day's ticks in the same pass, and only the days in flight are held in memory.
 
@@ -1421,8 +1421,13 @@ namespace PowerLanguage.Strategy
 		private TickChunkFeed m_tickFeed;                          // the chunked FromTo history (null: single request)
 		private readonly Dictionary<int, IDataLoaderResult> m_tickLoads = new Dictionary<int, IDataLoaderResult>();   // calc thread
 		private int m_tickIdSeed = 1000;                           // chunk ids increase across passes: stale callbacks find no chunk
-		private int m_tickLastBar = -1, m_tickWaitedId, m_tickBatches;
-		private bool m_tickPlanned, m_tickLive, m_tickSummaryLogged, m_tickLegacyWaited;
+		private int m_tickLastBar = -1, m_tickWaitedId;
+		private int m_tickCallbacks;                                // any DataLoader callback this pass (Interlocked; loader thread)
+		private bool m_tickPlanned, m_tickLive, m_tickSummaryLogged, m_tickLegacyWaited, m_tickWaitOff;
+		private DateTime m_tickFirstIssueUtc;                       // first request of the pass (fail-fast clock)
+		private string m_tickSym; private DateTime m_tickPlanFrom, m_tickPlanTo;   // for the missing-history Warning
+		private int m_tickStalledWaits;                             // waits that ran the full chunkWaitMs without their session finishing
+		private bool m_tickEmptyWarned;
 		private readonly System.Diagnostics.Stopwatch m_tickPumpClock = new System.Diagnostics.Stopwatch();
 
 		/// <summary>M-TICK aggregate of the last closed Data1 bar, or null when M-TICK is off. Check valid; size fields stay
@@ -1435,12 +1440,20 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Recalc spec §4.5: the request window. API dump (P-RC5/P-RC8): InstrumentDataRequest.Range is a DataRequest struct
 		/// field (CreateFromTo sets RequestType FromTo); From/To are properties. Both carry the same window; TimeZone stays as copied
-		/// from Bars.Request (the zone the chart bars use).</summary>
+		/// from Bars.Request (the zone the chart bars use).
+		/// Native smoke of #142 (768db48): every chunk logged range(.. toAlwaysIsNow(True)) after CreateFromTo + From/To, i.e. an
+		/// open-ended request "from .. to now" (holdout data, and so slow that no callback came within 120 s). ToAlwaysIsNow is now
+		/// cleared explicitly, and Range is assigned last so the outdated From/To properties cannot reopen it.</summary>
 		protected static void setRequestWindow(ref InstrumentDataRequest req, DateTime from, DateTime to)
 		{
-			req.Range = DataRequest.CreateFromTo(from, to);
-			req.From = from;
+			req.From = from;   // outdated properties (PG §4.7.4: use Range); set first, Range last
 			req.To = to;
+			DataRequest rg = DataRequest.CreateFromTo(from, to);
+			rg.RequestType = DataRequestType.FromTo;
+			rg.From = from;
+			rg.To = to;
+			rg.ToAlwaysIsNow = false;   // a historical window: never "to now"
+			req.Range = rg;
 		}
 
 		/// <summary>Journal text of a request window: the typed Range fields and the From/To properties.</summary>
@@ -1454,10 +1467,14 @@ namespace PowerLanguage.Strategy
 		private void startTick()
 		{
 			stopTickLoads();
-			m_tickStream = null; m_tickReq = null; m_tickFeed = null; m_tickLastBar = -1; m_tickWaitedId = 0; m_tickBatches = 0;
-			m_tickPlanned = m_tickLive = m_tickSummaryLogged = m_tickLegacyWaited = false;
+			m_tickStream = null; m_tickReq = null; m_tickFeed = null; m_tickLastBar = -1; m_tickWaitedId = 0;
+			m_tickPlanned = m_tickLive = m_tickSummaryLogged = m_tickLegacyWaited = m_tickWaitOff = false;
+			m_tickCallbacks = 0; m_tickFirstIssueUtc = DateTime.MinValue;
+			m_tickSym = null; m_tickPlanFrom = m_tickPlanTo = DateTime.MinValue; m_tickStalledWaits = 0; m_tickEmptyWarned = false;
 			if (!TickConfig.enabled) return;
-			var t = new _TickStream { config = TickConfig, journal = engineSink(ETraceLevel.Journal) };
+			// Info, not Journal: Journal (4) is above Info (3), so at TraceLevel Info every TICK diagnostic was filtered out (native
+			// smoke of 768db48). All trace lines go to the MCSignal CSV; MCJournal_<runId>.csv holds closed trades only.
+			var t = new _TickStream { config = TickConfig, journal = engineSink(ETraceLevel.Info) };
 			string err = t.Configure();
 			if (err != null) throw new ArgumentException(err);
 			m_tickStream = t;   // the request is planned on the first CalcBar (planTick): FullSymbolData is not valid in StartCalc
@@ -1474,12 +1491,14 @@ namespace PowerLanguage.Strategy
 			bool rt = TickConfig.realTime && m_tickLive;              // a historical backtest never subscribes
 			DataRequest cr = Bars.Request.Range;
 			string name = Bars.Info.Name;
+			m_tickSym = name; m_tickPlanFrom = firstBar; m_tickPlanTo = lastBar;
 			if (TickConfig.chunkByDay && cr.RequestType == DataRequestType.FromTo)
 			{
-				List<_OrderFlow.DayChunk> days = TickChunkFeed.PlanDays(barCloses(cur, count), firstBar.AddDays(-1));
-				m_tickFeed = new TickChunkFeed(m_tickStream, days, TickConfig.chunkMaxInFlightDays, TickConfig.chunkSplitOnFail, m_tickIdSeed, TickConfig.batchLines);
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal,
-					$"TICK DataLoader 1-tick Trade request for {name}, chunked days({m_tickFeed.Days}) from({m_tickFeed.From:yyyy-MM-dd HH:mm}) to({m_tickFeed.To:yyyy-MM-dd HH:mm}) " +
+				List<_OrderFlow.DayChunk> days = TickChunkFeed.PlanSessions(barCloses(cur, count), firstBar.AddDays(-1), TimeSpan.FromMinutes(TickConfig.sessionGapMinutes));
+				m_tickFeed = new TickChunkFeed(m_tickStream, days, TickConfig.chunkMaxInFlightDays, TickConfig.chunkSplitOnFail, m_tickIdSeed, 0);   // callback lines: onTickData
+				if (m_tickFeed.Days > 0) { m_tickPlanFrom = m_tickFeed.From; m_tickPlanTo = m_tickFeed.To; }
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info,
+					$"TICK DataLoader 1-tick Trade request for {name}, chunked sessions({m_tickFeed.Days}) gapMin({TickConfig.sessionGapMinutes}) from({m_tickFeed.From:yyyy-MM-dd HH:mm}) to({m_tickFeed.To:yyyy-MM-dd HH:mm}) " +
 					$"firstBar({firstBar:yyyy-MM-dd HH:mm}) lastBar({lastBar:yyyy-MM-dd HH:mm}) waitMs({TickConfig.chunkWaitMs}) maxInFlightDays({TickConfig.chunkMaxInFlightDays}) " +
 					$"timeoutSec({TickConfig.chunkTimeoutSec}) live({m_tickLive}) RT={rt}");
 				pumpTick(true);
@@ -1491,11 +1510,13 @@ namespace PowerLanguage.Strategy
 			req.Subscribe2RT = rt;
 			// historyTicks back from the chart's last bar, never from 'now' (a BarsBack request without To throws on MC17, and one
 			// anchored at now would read past a backtest's end into holdout data).
-			req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks, To = lastBar };
 			req.To = lastBar;
+			req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks, To = lastBar, ToAlwaysIsNow = false };
 			m_tickReq = DataLoader.BeginLoadData(req, onTickData, null);
-			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal,
-				$"TICK DataLoader 1-tick Trade request for {name}, {TickConfig.historyTicks} ticks back to {lastBar:yyyy-MM-dd HH:mm} ({cr.RequestType} chart), live({m_tickLive}) RT={rt}");
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info,
+				$"TICK DataLoader 1-tick Trade request for {name}, {TickConfig.historyTicks} ticks back to {lastBar:yyyy-MM-dd HH:mm} ({cr.RequestType} chart), live({m_tickLive}) RT={rt} " +
+				$"toAlwaysIsNow({req.Range.ToAlwaysIsNow}) zone({req.TimeZone})");
+			m_tickFirstIssueUtc = DateTime.UtcNow;
 		}
 
 		// Data1 bar closes, oldest first (bar b = FullSymbolData.Time[Current - b]).
@@ -1534,6 +1555,7 @@ namespace PowerLanguage.Strategy
 				setRequestWindow(ref req, c.ReqFrom, c.ReqTo);
 				req.Subscribe2RT = c.Rt && m_tickLive && TickConfig.realTime;   // only the last day of a live chart
 				if (info) trace(ETraceLevel.Info, $"TICK chunk start day({c.Day:yyyy-MM-dd}) id({c.Id}) sub({c.Sub}) attempt({c.Attempt}) rt({c.Rt}) subscribe2RT({req.Subscribe2RT}) {requestWindowText(req)}");
+				if (m_tickFirstIssueUtc == DateTime.MinValue) m_tickFirstIssueUtc = DateTime.UtcNow;
 				m_tickLoads[c.Id] = DataLoader.BeginLoadData(req, onTickData, c.Id);   // state: the chunk id (boxed int)
 			}
 		}
@@ -1545,26 +1567,31 @@ namespace PowerLanguage.Strategy
 			if (t == null || r == null) return;
 			TickChunkFeed f = m_tickFeed;
 			int id = f != null && r.State is int ? (int)r.State : 0;
+			int k = System.Threading.Interlocked.Increment(ref m_tickCallbacks);
 			try
 			{
+				List<TickPrint> batch = r.Event == DataLoadedEvent.History ? ticksOf(r.Data) : null;
+				// one line per callback (typed IDataLoaderResult members only): the first batchLines and every completed one, so an
+				// empty or failing result still leaves a trace in the CSV
+				if (k <= TickConfig.batchLines || r.IsCompleted)
+					t.Note($"TICK callback #{k} state({(r.State == null ? "null" : r.State.ToString())}) event({r.Event}) isCompleted({r.IsCompleted}) " +
+						$"data({(batch == null ? "n/a" : batch.Count.ToString())}) first({(batch != null && batch.Count > 0 ? batch[0].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) " +
+						$"last({(batch != null && batch.Count > 0 ? batch[batch.Count - 1].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) rtData({r.RTData.HasValue})");
+				else if (k == TickConfig.batchLines + 1)
+					t.Note($"TICK callback lines capped at {TickConfig.batchLines}; completed callbacks and 'TICK chunk done' lines continue");
 				switch (r.Event)
 				{
 					case DataLoadedEvent.History:
-						if (f != null) { if (id != 0) f.OnHistory(id, ticksOf(r.Data), r.IsCompleted); break; }
-						List<TickPrint> batch = ticksOf(r.Data);
+						if (f != null) { if (id != 0) f.OnHistory(id, batch, r.IsCompleted); break; }
 						t.EnqueueRange(batch);
-						int n = System.Threading.Interlocked.Increment(ref m_tickBatches);
-						if (n <= TickConfig.batchLines)
-							t.Note($"TICK batch n({batch.Count}) first({(batch.Count > 0 ? batch[0].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) " +
-								$"last({(batch.Count > 0 ? batch[batch.Count - 1].t.ToString("yyyy-MM-dd HH:mm:ss.fff") : "-")}) completed({r.IsCompleted})");
-						if (r.IsCompleted) { t.MarkHistoryComplete(); t.Note($"TICK history complete (single request) batches({n})"); }
+						if (r.IsCompleted) { t.MarkHistoryComplete(); t.Note($"TICK history complete (single request) callbacks({k})"); }
 						break;
 					case DataLoadedEvent.RTNewBar:
 						if (!r.RTData.HasValue) break;
 						Bar b = r.RTData.Value;
-						var k = new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume };
-						if (f != null) { if (id != 0) f.OnRealtime(id, k); }
-						else t.Enqueue(k.t, k.p, k.s);
+						var p = new TickPrint { t = b.Time, p = b.Close, s = (double)b.TotalVolume };
+						if (f != null) { if (id != 0) f.OnRealtime(id, p); }
+						else t.Enqueue(p.t, p.p, p.s);
 						break;
 				}
 			}
@@ -1598,7 +1625,7 @@ namespace PowerLanguage.Strategy
 			{
 				int waitId;
 				ready = m_tickFeed.Ready(end, out waitId);
-				if (ready == false && waitId != 0 && waitId != m_tickWaitedId && historical && TickConfig.chunkWaitMs > 0)
+				if (ready == false && waitId != 0 && waitId != m_tickWaitedId && historical && TickConfig.chunkWaitMs > 0 && !m_tickWaitOff)
 				{
 					m_tickWaitedId = waitId;   // one bounded wait per day (a day that times out leaves its bars invalid)
 					ready = tickWait(end, waitId);
@@ -1608,15 +1635,16 @@ namespace PowerLanguage.Strategy
 			{
 				m_tickLegacyWaited = true;   // single request: wait once, at the first closed bar, for the whole history
 				var sw = System.Diagnostics.Stopwatch.StartNew();
-				while (!m_tickStream.HistoryComplete && sw.ElapsedMilliseconds < TickConfig.chunkWaitMs) System.Threading.Thread.Sleep(50);
+				while (!m_tickStream.HistoryComplete && sw.ElapsedMilliseconds < TickConfig.chunkWaitMs && !tickNoCallbackGiveUp()) System.Threading.Thread.Sleep(50);
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"TICK wait history ms({sw.ElapsedMilliseconds}) complete({m_tickStream.HistoryComplete})");
 			}
 			m_tickStream.Aggregate(start, end, ready);
+			tickEmptyWarning();
 			if (m_tickFeed != null && !m_tickSummaryLogged && m_tickFeed.AllFinished)
 			{
 				m_tickSummaryLogged = true;
 				m_tickStream.DrainNotes();
-				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, m_tickFeed.SummaryLine("complete"));
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, m_tickFeed.SummaryLine("complete"));
 			}
 		}
 
@@ -1627,13 +1655,51 @@ namespace PowerLanguage.Strategy
 			bool? ready = false; int id = waitId;
 			while (ready == false && id != 0 && sw.ElapsedMilliseconds < TickConfig.chunkWaitMs)
 			{
+				if (tickNoCallbackGiveUp()) break;
 				System.Threading.Thread.Sleep(50);
 				pumpTick(false);
 				ready = m_tickFeed.Ready(barEnd, out id);
 			}
+			if (ready == false && id != 0 && sw.ElapsedMilliseconds >= TickConfig.chunkWaitMs && ++m_tickStalledWaits >= 2 && !m_tickWaitOff)
+			{
+				// callbacks came, but sessions keep not finishing (e.g. a range with no local data that never completes): stop
+				// waiting after two full waits so the run cannot hang; requests stay open and fill bars if they ever finish
+				m_tickWaitOff = true;
+				m_tickStream.DrainNotes();
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"TICK {m_tickStalledWaits} waits of {TickConfig.chunkWaitMs} ms ended without their session finishing: waits off for this run; " +
+					TickChunkFeed.MissingHistoryText(m_tickSym, m_tickPlanFrom, m_tickPlanTo));
+			}
 			m_tickStream.DrainNotes();
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, $"TICK wait bar({barEnd:yyyy-MM-dd HH:mm}) ms({sw.ElapsedMilliseconds}) ready({(ready.HasValue ? ready.Value.ToString() : "n/a")})");
 			return ready;
+		}
+
+		// Calc thread: fail fast. No DataLoader callback at all within TickConfig.firstCallbackSec of the first request means the
+		// feed is not answering: one Warning, then no more waits this pass (bars stay invalid until ticks arrive, if ever).
+		private bool tickNoCallbackGiveUp()
+		{
+			if (m_tickWaitOff) return true;
+			int cb = System.Threading.Interlocked.CompareExchange(ref m_tickCallbacks, 0, 0);
+			if (!TickChunkFeed.NoCallbackTimeout(cb, m_tickFirstIssueUtc, DateTime.UtcNow, TickConfig.firstCallbackSec)) return false;
+			m_tickWaitOff = true;
+			m_tickStream.DrainNotes();
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"TICK no DataLoader callback within {TickConfig.firstCallbackSec} s of the first request: " +
+				TickChunkFeed.MissingHistoryText(m_tickSym, m_tickPlanFrom, m_tickPlanTo) +
+				$". Waits off for this run, tick outputs invalid until ticks arrive (requests({m_tickLoads.Count + (m_tickReq != null ? 1 : 0)}) open)");
+			return true;
+		}
+
+		// Calc thread: once per run, when a session request completed with no tick in its window (local 1-tick history missing).
+		private void tickEmptyWarning()
+		{
+			if (m_tickEmptyWarned || m_tickFeed == null) return;
+			DateTime ef, et;
+			int n = m_tickFeed.EmptyDays(out ef, out et);
+			if (n == 0) return;
+			m_tickEmptyWarned = true;
+			m_tickStream.DrainNotes();
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"TICK session {ef:yyyy-MM-dd HH:mm}..{et:yyyy-MM-dd HH:mm} completed empty (empty sessions so far {n}): " +
+				TickChunkFeed.MissingHistoryText(m_tickSym, m_tickPlanFrom, m_tickPlanTo) + ". Bars of empty sessions stay invalid");
 		}
 
 		private void stopTickLoads()
@@ -1652,7 +1718,7 @@ namespace PowerLanguage.Strategy
 			if (m_tickStream != null)
 			{
 				m_tickStream.DrainNotes();
-				if (f != null && !m_tickSummaryLogged) engineSink(ETraceLevel.Journal)?.Invoke(f.SummaryLine("at stop"));   // StopCalc runs on the UI thread: engine sink, as the VPF summary
+				if (f != null && !m_tickSummaryLogged) engineSink(ETraceLevel.Info)?.Invoke(f.SummaryLine("at stop"));   // StopCalc runs on the UI thread: engine sink, as the VPF summary
 			}
 			m_tickSummaryLogged = true;
 			m_tickFeed = null; m_tickStream = null;
