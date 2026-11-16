@@ -143,17 +143,22 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _AV_03_AVWAPPinchBreakout : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se; private int m_pinch, m_out; private bool m_done;
+		private IOrderMarket m_le, m_se; private int m_pinch, m_out, m_hiBar = -1, m_loBar = -1; private bool m_done;
 		public _AV_03_AVWAPPinchBreakout(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh | EAvwapAnchor.SwingLow; GxOrderPrefix = "AV03"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV03LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV03SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.smaLength = 50; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			var mgr = AvwapManager; if (mgr == null) return;
 			var hi = mgr.Latest(EAvwapAnchor.SwingHigh); var lo = mgr.Latest(EAvwapAnchor.SwingLow);
 			if (hi == null || lo == null || !hi.Valid || !lo.Valid) return;
+			if (hi.AnchorBar != m_hiBar || lo.AnchorBar != m_loBar)
+			{
+				m_hiBar = hi.AnchorBar; m_loBar = lo.AnchorBar;
+				if (StrategyInfo.MarketPosition == 0) { m_done = false; m_pinch = 0; m_out = 0; }
+			}
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (((int)tod.TotalMinutes) % 60 != 0 || Bars.CurrentBar < 60) return;
 			double atr = 0; for (int k = 0; k < 14; k++) { double h = double.MinValue, l = double.MaxValue; for (int i = 0; i < 60; i++) { h = Math.Max(h, Bars.High[k * 60 + i]); l = Math.Min(l, Bars.Low[k * 60 + i]); } atr += h - l; }

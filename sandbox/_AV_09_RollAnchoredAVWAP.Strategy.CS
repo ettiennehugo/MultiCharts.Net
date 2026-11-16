@@ -144,7 +144,7 @@ namespace PowerLanguage.Strategy
 	public class _AV_09_RollAnchoredAVWAP : _VolumeProfileFuturesBase
 	{
 		private IOrderMarket m_le, m_se, m_lx, m_sx; private IOrderPriced m_ls, m_ss;
-		private DateTime m_day = DateTime.MinValue; private int m_side, m_prev, m_armed; private double m_stop, m_ext, m_prevExt; private bool m_used;
+		private DateTime m_day = DateTime.MinValue; private int m_side, m_prev, m_armed; private double m_stop, m_ext, m_prevExt; private bool m_used, m_counted;
 		public _AV_09_RollAnchoredAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.RollDate;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09LE", EOrderAction.Buy));
@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_used = false; m_armed = m_side != 0 && m_side == m_prev ? m_side : 0; }
+			if (day != m_day) { m_day = day; m_used = false; m_counted = false; m_armed = m_side != 0 && m_side == m_prev ? m_side : 0; }
 			double vwap = CurrentVwap1;
 			int pos = StrategyInfo.MarketPosition;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
@@ -170,8 +170,9 @@ namespace PowerLanguage.Strategy
 				if (pos > 0) m_ls.Send(m_stop); else m_ss.Send(m_stop);
 				return;
 			}
-			if (IsRth() && tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0) && !double.IsNaN(vwap))
+			if (IsRth() && tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0) && !double.IsNaN(vwap) && !m_counted)
 			{
+				m_counted = true;
 				m_prev = m_side; m_prevExt = m_ext;
 				m_side = Bars.Close[0] > vwap ? 1 : -1;
 				m_ext = m_side > 0 ? Session.rthLow : Session.rthHigh;

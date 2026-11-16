@@ -143,15 +143,16 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _AV_02_ImpulseOriginAVWAP : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private bool m_done;
+		private IOrderPriced m_le; private bool m_done; private int m_anchor = -1;
 		public _AV_02_ImpulseOriginAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "AV02"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV02LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			if (a == null || !a.Valid || !(a.Sigma > 0)) return;
+			if (a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; }
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < a.AgeBars) return;
 			double lo = Bars.Low[0], hi = Bars.High[0];

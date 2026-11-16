@@ -145,7 +145,7 @@ namespace PowerLanguage.Strategy
 	{
 		
 		private IOrderMarket m_le, m_lx; private IOrderPriced m_ls;
-		private int m_test = -1; private double m_stop; private bool m_ready, m_used;
+		private int m_test = -1, m_anchor = -1; private double m_stop; private bool m_ready, m_used;
 		public _AV_04_AVWAPHandoffContinuation(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV04LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV04LX", EOrderAction.Sell, OrderExit.FromAll)); m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV04LS", EOrderAction.Sell, OrderExit.FromAll)); }
 		protected override void CalcBar()
@@ -153,6 +153,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			int pos = StrategyInfo.MarketPosition;
+			if (a != null && a.Valid && a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (pos == 0) { m_used = false; m_ready = false; m_test = -1; } }
 			if (pos > 0) { if (a != null && a.Valid && Bars.Close[0] < a.Value) m_lx.Send(); else m_ls.Send(m_stop); return; }
 			if (a == null || !a.Valid || !(a.Sigma > 0) || m_used || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);

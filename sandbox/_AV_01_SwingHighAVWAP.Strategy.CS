@@ -143,7 +143,7 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _AV_01_SwingHighAVWAP : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private bool m_done; private int m_below;
+		private IOrderPriced m_le; private bool m_done, m_reclaim; private int m_below, m_anchor = -1;
 		public _AV_01_SwingHighAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh; GxOrderPrefix = "AV01"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV01LE", EOrderAction.Buy)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.smaLength = 50; DailyConfig.atrLength = 20; base.StartCalc(); }
@@ -153,13 +153,24 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			
 			exitBar();
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			_Avwap a = anchor(EAvwapAnchor.SwingHigh);
 			if (a == null || !a.Valid) return;
+			if (a.AnchorBar != m_anchor)
+			{
+				m_anchor = a.AnchorBar;
+				if (StrategyInfo.MarketPosition == 0) { m_done = false; m_below = 0; m_reclaim = false; }
+			}
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			if (!(Bars.Close[0] > DailyContext.Sma200)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (((int)tod.TotalMinutes) % 60 == 0) { if (Bars.Close[0] < a.Value) m_below++; else m_below = 0; }
-			if (m_below < 10 || Bars.Close[0] <= a.Value) return;
+			bool hour = ((int)tod.TotalMinutes) % 60 == 0;
+			if (hour)
+			{
+				if (Bars.Close[0] < a.Value) { m_below++; m_reclaim = false; }
+				else if (m_below >= 10) m_reclaim = true;
+				else { m_below = 0; m_reclaim = false; }
+			}
+			if (!m_reclaim || Bars.Close[0] <= a.Value) return;
 			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30) return;
 			double lo = Bars.Low[0], prev = Bars.Low[15], hi = Bars.High[0];
 			for (int i = 1; i < 15; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[15 + i]); hi = Math.Max(hi, Bars.High[i]); }

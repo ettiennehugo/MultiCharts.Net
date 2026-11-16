@@ -144,16 +144,17 @@ namespace PowerLanguage.Strategy
 	public class _AV_12_FailedAVWAPReclaim : _VolumeProfileFuturesBase
 	{
 		
-		private IOrderPriced m_se; private int m_above, m_fail; private double m_reclaim; private bool m_done;
+		private IOrderPriced m_se; private int m_above, m_fail, m_anchor = -1; private double m_reclaim; private bool m_done;
 		public _AV_12_FailedAVWAPReclaim(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh | EAvwapAnchor.SwingLow; GxOrderPrefix = "AV12"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV12SE", EOrderAction.SellShort)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			var mgr = AvwapManager; if (mgr == null) return;
 			var hi = mgr.Latest(EAvwapAnchor.SwingHigh); var lo = mgr.Latest(EAvwapAnchor.SwingLow);
 			if (hi == null || lo == null || !hi.Valid || !lo.Valid) return;
+			if (hi.AnchorBar != m_anchor) { m_anchor = hi.AnchorBar; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_above = 0; m_fail = 0; m_reclaim = 0; } }
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (((int)tod.TotalMinutes) % 60 != 0) return;
 			if (Bars.Close[0] > hi.Value) { m_above++; m_reclaim = Math.Max(m_reclaim, Bars.High[0]); m_fail = 0; return; }

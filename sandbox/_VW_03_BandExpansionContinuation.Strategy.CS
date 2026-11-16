@@ -143,7 +143,8 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _VW_03_BandExpansionContinuation : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue; private double m_sig6, m_vwap6;
+		private IOrderMarket m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private readonly List<double> m_sigHist = new List<double>(), m_vwHist = new List<double>();
 		public _VW_03_BandExpansionContinuation(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Session; GxOrderPrefix = "VW03"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "VW03LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "VW03SE", EOrderAction.SellShort)); }
 		protected override void CalcBar()
@@ -153,15 +154,20 @@ namespace PowerLanguage.Strategy
 			
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_sig6 = m_vwap6 = double.NaN; }
+			if (day != m_day) { m_day = day; m_done = false; m_sigHist.Clear(); m_vwHist.Clear(); }
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || double.IsNaN(vwap) || !(sig > 0)) return;
-			if (Bars.CurrentBar > 6 && double.IsNaN(m_sig6)) { m_sig6 = sig; m_vwap6 = vwap; }
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double atr = averageTrueRange(Bars, 5);
-			bool up = vwap - m_vwap6 > 0.15 * atr && sig > m_sig6 * 1.1;
-			bool dn = m_vwap6 - vwap > 0.15 * atr && sig > m_sig6 * 1.1;
+			bool up = false, dn = false;
+			if (m_sigHist.Count >= 6 && atr > 0)
+			{
+				double v6 = m_vwHist[m_vwHist.Count - 6], s6 = m_sigHist[m_sigHist.Count - 6];
+				up = vwap - v6 > 0.15 * atr && sig > s6 * 1.1;
+				dn = v6 - vwap > 0.15 * atr && sig > s6 * 1.1;
+			}
+			m_sigHist.Add(sig); m_vwHist.Add(vwap);
 			bool twoUp = Bars.Close[0] > vwap + 2 * sig && Bars.Close[5] > vwap + 2 * sig;
 			bool twoDn = Bars.Close[0] < vwap - 2 * sig && Bars.Close[5] < vwap - 2 * sig;
 			if (up && twoUp)
@@ -176,8 +182,6 @@ namespace PowerLanguage.Strategy
 				if (!budget(entry, stop)) { m_done = true; return; }
 				arm(false, entry, stop, vwap - 3 * sig, "VW03SE"); m_se.Send(); m_done = true;
 			}
-			m_sig6 = sig; m_vwap6 = vwap;
-
 		}
 		
 		private double widen(bool buy, double entry, double stop)

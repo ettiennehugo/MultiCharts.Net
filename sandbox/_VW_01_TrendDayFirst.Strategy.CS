@@ -143,7 +143,7 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _VW_01_TrendDayFirst : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le; private bool m_done; private DateTime m_day = DateTime.MinValue; private int m_through; private double m_vwapAgo;
+		private IOrderPriced m_le; private bool m_done; private DateTime m_day = DateTime.MinValue; private int m_through; private readonly List<double> m_vwapHist = new List<double>();
 		public _VW_01_TrendDayFirst(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -160,17 +160,19 @@ namespace PowerLanguage.Strategy
 			
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_through = 0; m_vwapAgo = double.NaN; }
+			if (day != m_day) { m_day = day; m_done = false; m_through = 0; m_vwapHist.Clear(); }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			if (double.IsNaN(vwap) || !(sig > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod >= m_rthStart.Add(TimeSpan.FromMinutes(15)) && Math.Sign(Bars.Close[0] - vwap) != Math.Sign(Bars.Close[1] - vwap) && Bars.Close[1] != vwap) m_through++;
-			if (double.IsNaN(m_vwapAgo) && Bars.CurrentBar > 30) m_vwapAgo = vwap;
+			m_vwapHist.Add(vwap);
+			if (m_vwapHist.Count <= 30) return;
+			double vwapAgo = m_vwapHist[m_vwapHist.Count - 31];
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || m_through > 1) return;
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double atr = averageTrueRange(Bars, 5);
-			if (!(atr > 0) || !(vwap - m_vwapAgo > 0.15 * atr)) return;
+			if (!(atr > 0) || !(vwap - vwapAgo > 0.15 * atr)) return;
 			double lo = Bars.Low[0]; for (int i = 1; i < 5; i++) lo = Math.Min(lo, Bars.Low[i]);
 			double prev = Bars.Low[5]; for (int i = 6; i < 10; i++) prev = Math.Min(prev, Bars.Low[i]);
 			if (!(lo > prev) || lo > vwap + 0.25 * sig || Bars.High[0] < vwap - 0.25 * sig) return;
@@ -188,7 +190,7 @@ namespace PowerLanguage.Strategy
 		private void arm(bool buy, double entry, double stop, double target, string name, bool overnight)
 		{
 			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = target == target && Math.Abs(target - entry) > 0 ? ETargetMode.SingleTarget : ETargetMode.None;
+			GxConfig.TargetMode = !double.IsNaN(target) && Math.Abs(target - entry) > 0 ? ETargetMode.SingleTarget : ETargetMode.None;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
 			GxConfig.FinalTargetValue = Math.Abs(target - entry);
 			GxConfig.BreakEven = EBreakEven.Off;
