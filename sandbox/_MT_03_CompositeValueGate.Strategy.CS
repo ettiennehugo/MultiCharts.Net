@@ -148,7 +148,7 @@ namespace PowerLanguage.Strategy
 	public class _MT_03_CompositeValueGate : _PS_08_NarrowIbBreak
 	{
 		private const int N = 20;
-		public _MT_03_CompositeValueGate(object _ctx) : base(_ctx) { }
+		public _MT_03_CompositeValueGate(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{

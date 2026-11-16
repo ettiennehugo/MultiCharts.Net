@@ -163,6 +163,8 @@ namespace PowerLanguage.Strategy
 			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A262LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
@@ -214,7 +216,7 @@ namespace PowerLanguage.Strategy
 				double entry = Bars.Close[0];
 				m_stop = widen(entry, priorLo - 0.5 * atr);
 				if (!budget(entry, m_stop)) { m_done = true; return; }
-				m_le.Send(); m_done = true; m_ls.Send(m_stop);
+				m_le.Send(); m_ls.Send(m_stop);
 			}
 		}
 		private bool classify()

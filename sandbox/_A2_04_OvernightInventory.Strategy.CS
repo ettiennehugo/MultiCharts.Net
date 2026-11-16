@@ -183,6 +183,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);
@@ -220,8 +221,9 @@ namespace PowerLanguage.Strategy
 			double floor = 14 * tick;
 			if (Bars.Close[0] - stop < floor) stop = Bars.Close[0] - floor;
 			double risk = Bars.Close[0] - stop;
-			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
-			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-04 " + day.ToString("yyyy-MM-dd") + " skip: risk budget"); m_done = true; return; }
+			if (!(risk > 0) || 2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{ if (journalOn()) trace(ETraceLevel.Error, "A2-04 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size 2");
 			m_stop = stop; m_target = Bars.Close[0] + risk; m_done = true;
 			m_le.Send(2); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A204LE", Bars.Close[0], m_stop, m_target, null);

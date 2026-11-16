@@ -180,6 +180,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			DateTime et = ToEastern(Bars.Time[0]);
@@ -213,7 +214,6 @@ namespace PowerLanguage.Strategy
 			if (!ok(entry, stop, target, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, target, flat);
 			if (longSide) m_le.Send(2); else m_se.Send(2);
-			m_done = true;
 		}
 
 		private void fail(DateTime et)
@@ -231,7 +231,6 @@ namespace PowerLanguage.Strategy
 			if (!ok(entry, stop, m_poc, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, m_poc, m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
 			if (longSide) m_le.Send(2); else m_se.Send(2);
-			m_done = true;
 		}
 
 		private bool ok(double entry, double stop, double target, bool longSide)
@@ -307,6 +306,22 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

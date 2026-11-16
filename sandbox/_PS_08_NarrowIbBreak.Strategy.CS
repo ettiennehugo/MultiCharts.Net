@@ -169,7 +169,8 @@ namespace PowerLanguage.Strategy
 		private double m_stop = double.NaN, m_target = double.NaN;
 
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
-		public _PS_08_NarrowIbBreak(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		public _PS_08_NarrowIbBreak(object _ctx) : base(_ctx) {  Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{

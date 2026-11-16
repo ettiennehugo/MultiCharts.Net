@@ -169,6 +169,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EDeltaMin), DeltaMin)) throw new ArgumentException("_A2_12_VwapTwapDivergence: DeltaMin is not a defined EDeltaMin");
@@ -181,6 +183,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);

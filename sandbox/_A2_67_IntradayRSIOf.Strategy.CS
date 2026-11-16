@@ -165,6 +165,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = Bars.Time[0].Date;
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			TimeSpan tod = Bars.Time[0].TimeOfDay;

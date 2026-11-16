@@ -182,6 +182,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }

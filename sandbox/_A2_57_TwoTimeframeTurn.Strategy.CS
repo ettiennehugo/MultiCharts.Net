@@ -204,6 +204,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = Clock.ToEastern(Bars.Time[0]).TimeOfDay;
 			TimeSpan flat = flatAt(tradingDayKey(Bars.Time[0]));
 			bool rthWindow = tod >= Cfg.from && tod < Cfg.to && tod < flat;

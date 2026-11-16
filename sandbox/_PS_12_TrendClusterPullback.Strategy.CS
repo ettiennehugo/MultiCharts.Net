@@ -163,6 +163,7 @@ namespace PowerLanguage.Strategy
 		private int m_above;
 		private bool m_valid;
 
+		private bool m_done;
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_12_TrendClusterPullback(object _ctx) : base(_ctx) { }
 
@@ -187,6 +188,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (rollOn(1)) m_cluster = double.NaN;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
@@ -237,5 +240,22 @@ namespace PowerLanguage.Strategy
 			if (journalOn()) journalArm("PS12LE", m_cluster, m_stop, m_target, null);
 			return true;
 		}
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

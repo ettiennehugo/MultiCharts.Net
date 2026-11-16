@@ -169,6 +169,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
@@ -190,7 +191,6 @@ namespace PowerLanguage.Strategy
 			GxConfig.MaxHoldDays = 1;
 			arm(up, entry, stop, up ? m_hi : m_lo, up ? "A246LE" : "A246SE");
 			if (up) m_le.Send(2); else m_se.Send(2);
-			m_done = true;
 		}
 		private double blockAtr(int width, int n)
 		{
@@ -297,6 +297,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

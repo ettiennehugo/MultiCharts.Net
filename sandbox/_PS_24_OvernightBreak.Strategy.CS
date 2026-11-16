@@ -198,6 +198,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_runUp = m_runDn = 0; m_tradedToday = false; }
 			if (rollOn(1)) { m_runUp = m_runDn = 0; m_tradedToday = true; }   // no ON level on the splice day

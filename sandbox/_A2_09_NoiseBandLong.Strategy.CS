@@ -172,6 +172,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			bool check = tod.Seconds == 0 && tod.Minutes % 30 == 0 && tod >= new TimeSpan(9, 30, 0) && tod < new TimeSpan(16, 0, 0);
 			int pos = StrategyInfo.MarketPosition;

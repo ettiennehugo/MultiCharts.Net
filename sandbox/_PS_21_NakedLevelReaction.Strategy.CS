@@ -202,6 +202,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			int barNo = Bars.FullSymbolData.Current;           // 1-based Status Bar #: the unit of asOfBar (NOT Bars.CurrentBar)
 			if (rollOn(1)) { m_lastRollBar = barNo; m_level = double.NaN; m_side = 0; }
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;

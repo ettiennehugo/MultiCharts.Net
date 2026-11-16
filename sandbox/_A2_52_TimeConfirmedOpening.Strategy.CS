@@ -177,6 +177,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_hold = 0; m_orh = m_orl = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			if (pos != 0) { sendExits(pos); return; }
+			if (sandboxBook()) return;
 			if (m_done || rollOn(1) || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			TimeSpan orEnd = m_rthStart.Add(TimeSpan.FromMinutes(15));
@@ -207,7 +208,6 @@ namespace PowerLanguage.Strategy
 			if (!budget(entry, m_stop)) { m_done = true; return; }
 			m_side = buy ? 1 : -1; m_entryBar = Bars.CurrentBar;
 			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
-			m_done = true;
 		}
 		private void sendExits(int pos)
 		{
@@ -231,6 +231,13 @@ namespace PowerLanguage.Strategy
 			if (longSide && entry - stop < floor) return entry - floor;
 			if (!longSide && stop - entry < floor) return entry + floor;
 			return stop;
+		}
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			return false;
 		}
 		private bool budget(double entry, double stop)
 		{

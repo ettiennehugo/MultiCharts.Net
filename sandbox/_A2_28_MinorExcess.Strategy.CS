@@ -168,6 +168,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_muMinor = double.NaN; }
 
@@ -175,6 +177,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = m_inMinor = false; m_side = m_back = 0; m_extreme = double.NaN; loadPrior(day); }
@@ -214,9 +218,8 @@ namespace PowerLanguage.Strategy
 			if (m_side * (entry - structural) < floor) structural = entry - m_side * floor;
 			if (!budgetOk(entry, structural)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-28 skip: risk budget"); m_done = true; return; }
 			string name = m_side > 0 ? "A228LE" : "A228SE";
-			armGx(m_side > 0, entry, structural, m_muMajor, 1555, name);
+			armGx(m_side > 0, entry, structural, m_muMajor, _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), name);
 			if (m_side > 0) m_le.Send(2); else m_se.Send(2);
-			m_done = true;
 		}
 
 		private void loadPrior(DateTime day)
@@ -308,6 +311,22 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

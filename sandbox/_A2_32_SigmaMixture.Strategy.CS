@@ -167,6 +167,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_gmm = new _GmmProfileTracker(tickSize()); }
 
@@ -174,6 +176,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; }
@@ -214,7 +217,6 @@ namespace PowerLanguage.Strategy
 			{ m_done = true; return; }
 			arm(longSide, entry, stop, target);
 			if (longSide) m_le.Send(2); else m_se.Send(2);
-			m_done = true;
 		}
 
 		private void arm(bool longSide, double entry, double stop, double target)
@@ -226,7 +228,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = 1555;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.TimeStopMinutes = 0;
 			ExitMarket mkt = new ExitMarket();
 			mkt.Tick = tickSize();
@@ -273,6 +275,22 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

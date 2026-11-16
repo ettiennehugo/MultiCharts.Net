@@ -161,6 +161,7 @@ namespace PowerLanguage.Strategy
 		private Fvg m_gap;
 		private double m_level, m_br, m_sd;
 
+		private bool m_done;
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _DV_08_FvgHvnAlignment(object _ctx) : base(_ctx) { }
 
@@ -183,6 +184,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			if (rollOn(1)) m_gap = null;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
@@ -218,5 +220,22 @@ namespace PowerLanguage.Strategy
 			m_gap = f; m_level = lv.price; m_br = br; m_sd = sd;
 			if (journalOn()) journalArm("DV08LE", m_level, m_level - sd, m_level + br, null);
 		}
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

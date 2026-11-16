@@ -171,6 +171,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private bool m_done;
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_13_RotationVolumeLevel(object _ctx) : base(_ctx) { }
 
@@ -203,6 +204,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime t = Bars.Time[0], day = GlobexDate(t);
 			TimeSpan tod = ToEastern(t).TimeOfDay, flat = flatAt(day);
 			bool roll = rollOn(1);
@@ -326,5 +329,23 @@ namespace PowerLanguage.Strategy
 			if (cme.RthCloseEt.HasValue && cme.RthCloseEt.Value - Cfg.halfDayExitBefore < f) f = cme.RthCloseEt.Value - Cfg.halfDayExitBefore;
 			return f;
 		}
+
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seLmt.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

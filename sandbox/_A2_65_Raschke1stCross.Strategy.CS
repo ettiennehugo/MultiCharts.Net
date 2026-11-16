@@ -169,6 +169,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar < 60) return;
+			if (sandboxBook()) return;
 			DateTime day = Bars.Time[0].Date;
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
@@ -189,7 +190,13 @@ namespace PowerLanguage.Strategy
 			m_stop = widen(buy, entry, buy ? entry - 2.5 * atr : entry + 2.5 * atr);
 			if (Math.Abs(entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) return;
 			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
-			m_done = true;
+		}
+		private bool sandboxBook()
+		{
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			return false;
 		}
 		private double sma(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }
 		private double osc(int ago) { return sma(17, ago) - sma(50, ago); }

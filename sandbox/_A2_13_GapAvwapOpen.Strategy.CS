@@ -176,6 +176,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EBranch), Branch)) throw new ArgumentException("_A2_13_GapAvwapOpen: Branch is not a defined EBranch");
@@ -187,6 +189,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);
@@ -239,7 +242,8 @@ namespace PowerLanguage.Strategy
 			double floor = 14 * tick;
 			if (side * (Bars.Close[0] - stop) < floor) stop = Bars.Close[0] - side * floor;
 			double risk = Math.Abs(Bars.Close[0] - stop);
-			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "A2-13 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size 2");
 			m_stop = stop; m_target = Bars.Close[0] + side * risk; m_done = true;
 			if (side > 0) { m_le.Send(2); m_lxStp.Send(m_stop); } else { m_se.Send(2); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(side > 0 ? "A213LE" : "A213SE", Bars.Close[0], m_stop, m_target, null);
@@ -258,7 +262,8 @@ namespace PowerLanguage.Strategy
 			VpExtra prior = PriorRthProfile();
 			double target = prior != null ? (m_gapUp ? prior.vah : prior.val) : double.NaN;
 			double risk = Math.Abs(Bars.Close[0] - stop);
-			if (double.IsNaN(target) || side * (target - Bars.Close[0]) <= 0 || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if (double.IsNaN(target) || side * (target - Bars.Close[0]) <= 0 || 2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "A2-13 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size 2");
 			m_stop = stop; m_target = target; m_done = true;
 			if (side > 0) { m_le.Send(2); m_lxStp.Send(m_stop); } else { m_se.Send(2); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(side > 0 ? "A213LE" : "A213SE", Bars.Close[0], m_stop, m_target, null);
