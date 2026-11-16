@@ -157,6 +157,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int clustered = 0; double lo = Bars.Low[0]; for (int k = 1; k < 6 && k * 30 <= Bars.CurrentBar; k++) if (Math.Abs(Bars.Low[k * 30] - lo) <= 0.1 * Math.Max(tickSize(), Bars.High[0] - Bars.Low[0])) clustered++; if (journalOn()) trace(ETraceLevel.Journal, "DV-20 weak-low count " + clustered + ". Veto only, no order.");
 		}

@@ -152,11 +152,15 @@ namespace PowerLanguage.Strategy
 		public _SW_01_WeeklyBalanceBreak(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrLength = 20; WeeklyProfiles.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (sandboxBook()) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_counted = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || CompletedWeeks < 3) return;
 			VpExtra a = Week(1), b = Week(2), c = Week(3), comp = WeeklyComposite(3);
@@ -173,7 +177,7 @@ namespace PowerLanguage.Strategy
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, comp.vah - 0.25 * w);
 			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, entry + w, "SW01LE", 15); m_le.Send(); m_done = true;
+			arm(true, entry, stop, entry + w, "SW01LE", 15); m_le.Send();
 		}
 		private bool overlap(VpExtra x, VpExtra y)
 		{
@@ -249,6 +253,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}
