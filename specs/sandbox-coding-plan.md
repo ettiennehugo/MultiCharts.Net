@@ -284,26 +284,26 @@ The counts are in the table at the end of this file.
 | VX-02 | VRP-filtered short volatility (Cooper VRP rule, futures form) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_02_VRPFilteredShort.Strategy.CS | 10 | coded in batch 10 |
 | VX-03 | Long volatility in backwardation (VX-01's long leg alone) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_03_LongVolatilityIn.Strategy.CS | 10 | coded in batch 10 |
 | VX-04 | Post-spike normalisation short (VIX spike mean reversion) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_04_PostSpikeNormalisation.Strategy.CS | 10 | coded in batch 10 |
-| VX-05 | Long-volatility tail-hedge sleeve (portfolio insurance) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_05_LongVolatilityTail.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| VX-06 | VIX term-structure regime gate for ES hosts (layer) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_06_VIXTermStructure.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| VX-07 | VVIX gate (module) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_07_VVIXGateModule.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| VX-08 | VIX-stretch ES dip-buy (Connors & Alvarez) — layer on SW-02 / canary | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_08_VIXStretchES.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-01 | 200-day trend leverage rotation (Gayed & Bilello) | trading-idea-catalogue.md | entry signal | sandbox/_LE_01_X200DayTrend.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-02 | Volatility-targeted leverage (exposure ∝ target vol / realised vol) | trading-idea-catalogue.md | entry signal | sandbox/_LE_02_VolatilityTargetedLeverage.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-03 | QQQ ↔ TQQQ regime leverage rotation | trading-idea-catalogue.md | entry signal | sandbox/_LE_03_QQQTQQQRegime.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-04 | LETF rebalancing pressure into the close (flow-scaled arm of VW-05) | trading-idea-catalogue.md | entry signal | sandbox/_LE_04_LETFRebalancingPressure.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-05 | Decay-pair short (short TQQQ + SQQQ, or UPRO + SPXU) | trading-idea-catalogue.md | entry signal | sandbox/_LE_05_DecayPairShort.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-06 | Short-term RSI mean reversion on LETFs (Connors-style) | trading-idea-catalogue.md | entry signal | sandbox/_LE_06_ShortTermRSI.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| LE-07 | Inverse-LETF bear-trend hold (SQQQ/SPXU below SMA200) — negative control | trading-idea-catalogue.md | entry signal | sandbox/_LE_07_InverseLETFBear.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_01_EX01.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_02_EX02.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_03_EX03.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_04_EX04.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-05 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_05_EX05.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_06_EX06.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_07_EX07.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-08 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_08_EX08.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
-| EX-09 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_09_EX09.Strategy.CS (name fixed when the batch is written) | 11 | not coded |
+| VX-05 | Long-volatility tail-hedge sleeve (portfolio insurance) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_05_LongVolatilityTail.Strategy.CS | 11 | coded in batch 11 |
+| VX-06 | VIX term-structure regime gate for ES hosts (layer) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_06_VIXTermStructure.Strategy.CS | 11 | coded in batch 11 |
+| VX-07 | VVIX gate (module) | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_07_VVIXGateModule.Strategy.CS | 11 | coded in batch 11 |
+| VX-08 | VIX-stretch ES dip-buy (Connors & Alvarez) — layer on SW-02 / canary | trading-idea-catalogue.md | data-unavailable | sandbox/_VX_08_VIXStretchES.Strategy.CS | 11 | coded in batch 11 |
+| LE-01 | 200-day trend leverage rotation (Gayed & Bilello) | trading-idea-catalogue.md | entry signal | sandbox/_LE_01_X200DayTrend.Strategy.CS | 11 | coded in batch 11 |
+| LE-02 | Volatility-targeted leverage (exposure ∝ target vol / realised vol) | trading-idea-catalogue.md | entry signal | sandbox/_LE_02_VolatilityTargetedLeverage.Strategy.CS | 11 | coded in batch 11 |
+| LE-03 | QQQ ↔ TQQQ regime leverage rotation | trading-idea-catalogue.md | entry signal | sandbox/_LE_03_QQQTQQQRegime.Strategy.CS | 11 | coded in batch 11 |
+| LE-04 | LETF rebalancing pressure into the close (flow-scaled arm of VW-05) | trading-idea-catalogue.md | entry signal | sandbox/_LE_04_LETFRebalancingPressure.Strategy.CS | 11 | coded in batch 11 |
+| LE-05 | Decay-pair short (short TQQQ + SQQQ, or UPRO + SPXU) | trading-idea-catalogue.md | entry signal | sandbox/_LE_05_DecayPairShort.Strategy.CS | 11 | coded in batch 11 |
+| LE-06 | Short-term RSI mean reversion on LETFs (Connors-style) | trading-idea-catalogue.md | entry signal | sandbox/_LE_06_ShortTermRSI.Strategy.CS | 11 | coded in batch 11 |
+| LE-07 | Inverse-LETF bear-trend hold (SQQQ/SPXU below SMA200) — negative control | trading-idea-catalogue.md | entry signal | sandbox/_LE_07_InverseLETFBear.Strategy.CS | 11 | coded in batch 11 |
+| EX-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_01_EX01.Strategy.CS | 11 | coded in batch 11 |
+| EX-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_02_EX02.Strategy.CS | 11 | coded in batch 11 |
+| EX-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_03_EX03.Strategy.CS | 11 | coded in batch 11 |
+| EX-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_04_EX04.Strategy.CS | 11 | coded in batch 11 |
+| EX-05 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_05_EX05.Strategy.CS | 11 | coded in batch 11 |
+| EX-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_06_EX06.Strategy.CS | 11 | coded in batch 11 |
+| EX-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_07_EX07.Strategy.CS | 11 | coded in batch 11 |
+| EX-08 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_08_EX08.Strategy.CS | 11 | coded in batch 11 |
+| EX-09 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_09_EX09.Strategy.CS | 11 | coded in batch 11 |
 | EX-10 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_10_EX10.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | EX-11 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_11_EX11.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
 | EX-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_12_EX12.Strategy.CS (name fixed when the batch is written) | 12 | not coded |
@@ -443,3 +443,17 @@ A file journals and does not send an order only when its catalogue heading has n
 | YV-02 | Chooses a second root by footprint. No second order-flow engine. |
 | YV-05 | Volume gate on a host. No entry. |
 | YV-06 | Stands a host down after losses. No entry. |
+| VX-05 | Long-vol budget. Needs VIX and VVIX. |
+| VX-06 | VIX/VIX3M state gate. Those indexes are missing. |
+| VX-07 | VVIX percentile gate. VVIX is missing. |
+| VX-08 | VIX stretch. VIX is missing. |
+| LE-05 | Paired long and short leveraged funds. Needs borrow and the ETF pair. |
+| EX-01 | HVN target module. GX cannot retarget the next HVN. |
+| EX-02 | Naked-POC target module. No entry. |
+| EX-03 | Balance-width target module. No entry. |
+| EX-04 | AVWAP trail. GX has no AVWAP trail. |
+| EX-05 | Confirmed higher-low trail. GX has no such trail. |
+| EX-06 | Time stop only when open profit is under 0.5 R. GX time stop exits winners too. |
+| EX-07 | Half off at 1 R. GX ScaleOutThenRunner, T1 1 R, scale 50, BreakEven AfterT1. One contract cannot scale. |
+| EX-08 | Target-multiple diagnostic. No entry. |
+| EX-09 | Stagnation exit for a host. No entry. |
