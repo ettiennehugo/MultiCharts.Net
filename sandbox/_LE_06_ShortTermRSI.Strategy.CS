@@ -174,7 +174,7 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			m_stop = widen(true, entry, entry - 2 * atr);
 			if (!budget(entry, m_stop)) { m_done = true; return; }
-			m_le.Send(); m_ls.Send(m_stop);
+			{ if (hostGate(true)) m_le.Send(); } m_ls.Send(m_stop);
 		}
 		private double rsi4()
 		{

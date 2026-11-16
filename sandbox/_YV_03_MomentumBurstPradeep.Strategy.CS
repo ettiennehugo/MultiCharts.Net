@@ -185,7 +185,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(true, entry, stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			m_stop = stop; m_gain = Bars.Close[0] - Session.priorRthClose; m_entry = day;
-			m_le.Send(); m_ls.Send(m_stop);
+			{ if (hostGate(true)) m_le.Send(); } m_ls.Send(m_stop);
 		}
 
 		private double widen(bool buy, double entry, double stop)

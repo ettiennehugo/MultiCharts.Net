@@ -222,19 +222,19 @@ namespace PowerLanguage.Strategy
 			if (Bars.Open[0] >= buy)
 			{
 				int qty = size(Bars.Open[0] - exitLong);
-				if (qty >= 1) m_leM.Send(qty);
+				if (qty >= 1) { if (hostGate(true)) m_leM.Send(qty); }
 			}
 			else if (Bars.Open[0] <= sell)
 			{
 				int qty = size(exitShort - Bars.Open[0]);
-				if (qty >= 1) m_seM.Send(qty);
+				if (qty >= 1) { if (hostGate(false)) m_seM.Send(qty); }
 			}
 			else
 			{
 				int longQty = size(buy - exitLong);
 				int shortQty = size(exitShort - sell);
-				if (longQty >= 1) m_le.Send(buy, longQty);
-				if (shortQty >= 1) m_se.Send(sell, shortQty);
+				if (longQty >= 1) { if (hostGate(true)) m_le.Send(buy, longQty); }
+				if (shortQty >= 1) { if (hostGate(false)) m_se.Send(sell, shortQty); }
 			}
 		}
 		private int size(double distance)
@@ -379,11 +379,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

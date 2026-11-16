@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 			double target = buyBar ? entry + (entry - stop) : entry - (stop - entry);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buyBar, entry, stop, target, buyBar ? "SP05LE" : "SP05SE", 0);
-			if (buyBar) m_le.Send(); else m_se.Send(); m_done = true;
+			if (buyBar) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); } m_done = true;
 		}
 
 		private double widen(bool buy, double entry, double stop)

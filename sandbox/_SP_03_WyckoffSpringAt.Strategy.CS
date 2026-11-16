@@ -192,7 +192,7 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			double stop = widen(true, entry, m_spring - tickSize());
 			if (!(comp.poc > entry) || !budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, comp.poc, "SP03LE", 0); m_le.Send();
+			arm(true, entry, stop, comp.poc, "SP03LE", 0); { if (hostGate(true)) m_le.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

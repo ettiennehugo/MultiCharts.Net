@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 			if (!budget(entry, stop)) { m_done = true; return; }
 			m_flatOverride = 1100;
 			arm(buy, entry, stop, entry, buy ? "TS05LE" : "TS05SE", 0);
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 		private void find(DateTime day)
 		{

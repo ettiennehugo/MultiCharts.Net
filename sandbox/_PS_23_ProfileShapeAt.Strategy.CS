@@ -199,7 +199,7 @@ namespace PowerLanguage.Strategy
 			double target = p ? prior.high + 0.5 * atr : prior.low - 0.5 * atr;
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(p, entry, stop, target, p ? "PS23LE" : "PS23SE", 0);
-			if (!_SandboxRules.Allows(Side, true)) return; honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (p) m_le.Send(entry, m_restQty); else m_se.Send(entry, m_restQty);
+			if (!_SandboxRules.Allows(Side, true)) return; honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (p) { if (hostGate(true)) m_le.Send(entry, m_restQty); } else { if (hostGate(false)) m_se.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -329,11 +329,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

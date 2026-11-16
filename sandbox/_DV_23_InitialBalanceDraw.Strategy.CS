@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 			double target = buy ? Session.ibHigh - tickSize() : Session.ibLow + tickSize();
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "DV23LE" : "DV23SE", 0);
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

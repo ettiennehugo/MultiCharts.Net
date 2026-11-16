@@ -168,7 +168,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0 && !up) { m_lx.Send(); return; }
 			if (pos != 0 || m_done || !IsRth() || !up) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;
-			m_le.Send();
+			{ if (hostGate(true)) m_le.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

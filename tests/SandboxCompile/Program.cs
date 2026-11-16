@@ -86,6 +86,7 @@ static class Program
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
 		GateSourceChecks(files);
+		GateWiringChecks(files);
 		GateRuleProbes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Generated", "bin", "Release", "net8.0", "SandboxLib.dll"));
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
@@ -173,6 +174,35 @@ static class Program
 			Check(warn.Contains("m_gateWarnDay") && warn.Contains("ETraceLevel.Warning"), name + " gateWarn is a Warning once per day");
 		}
 		Check(hosts >= 89, "gate hosts found: " + hosts);
+	}
+
+	// Owner (2026-11-16): every gate study calls its gate before every entry order, side-aware, so a blocked gate skips the
+	// entry. Each Send on an order created with EOrderAction.Buy / SellShort must sit directly behind if (hostGate(true / false)).
+	static void GateWiringChecks(List<string> files)
+	{
+		var entryRx = new Regex(@"(\w+)\s*=\s*OrderCreator\.\w+\(\s*new\s+SOrderParameters\([^;]*?EOrderAction\.(Buy|SellShort)\)");
+		int hosts = 0, sends = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			if (!Regex.IsMatch(code, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)")) continue;
+			hosts++;
+			var side = new Dictionary<string, string>(StringComparer.Ordinal);
+			foreach (Match m in entryRx.Matches(code)) side[m.Groups[1].Value] = m.Groups[2].Value == "Buy" ? "true" : "false";
+			Check(side.Count > 0, name + " has entry orders for the gate to guard");
+			int bad = 0, n = 0;
+			foreach (var kv in side)
+				foreach (Match s in Regex.Matches(code, @"(?<![\w.])" + Regex.Escape(kv.Key) + @"\.Send\("))
+				{
+					n++;
+					string before = code.Substring(0, s.Index).TrimEnd();
+					if (!before.EndsWith("if (hostGate(" + kv.Value + "))", StringComparison.Ordinal)) { bad++; Console.WriteLine("  ungated entry " + name + ": " + kv.Key + ".Send"); }
+				}
+			sends += n;
+			Check(n > 0 && bad == 0, name + " calls hostGate(" + string.Join("/", new List<string>(side.Values).ToArray()) + ") before each of its " + n + " entry order calls");
+		}
+		Check(hosts >= 89, "gate hosts wired: " + hosts + " (entry calls " + sends + ")");
 	}
 
 	static string MethodBody(string code, string signature)

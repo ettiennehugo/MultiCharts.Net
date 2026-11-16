@@ -201,13 +201,13 @@ namespace PowerLanguage.Strategy
 			{
 				double entry = Bars.Close[0], stop = widen(true, entry, vwap + sig);
 				if (!budget(entry, stop)) { m_done = true; return; }
-				arm(true, entry, stop, vwap + 3 * sig, "VW03LE"); m_le.Send();
+				arm(true, entry, stop, vwap + 3 * sig, "VW03LE"); { if (hostGate(true)) m_le.Send(); }
 			}
 			else if (dn && twoDn)
 			{
 				double entry = Bars.Close[0], stop = widen(false, entry, vwap - sig);
 				if (!budget(entry, stop)) { m_done = true; return; }
-				arm(false, entry, stop, vwap - 3 * sig, "VW03SE"); m_se.Send();
+				arm(false, entry, stop, vwap - 3 * sig, "VW03SE"); { if (hostGate(false)) m_se.Send(); }
 			}
 		}
 		

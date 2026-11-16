@@ -186,7 +186,7 @@ namespace PowerLanguage.Strategy
 			m_poc = comp.poc;
 			m_stop = widen(true, entry, comp.poc - 0.25 * atr);
 			if (!budget(entry, m_stop)) { m_armed = true; return; }
-			m_le.Send(); m_armed = true; m_ls.Send(m_stop);
+			{ if (hostGate(true)) m_le.Send(); } m_armed = true; m_ls.Send(m_stop);
 		}
 
 		private double widen(bool buy, double entry, double stop)

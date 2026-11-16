@@ -185,7 +185,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(false, entry, up3 + 0.1 * atr);
 			if (!(poc < entry) || !budget(entry, stop)) { m_done = true; return; }
 			GxConfig.TimeStopBars = 19;
-			arm(false, entry, stop, poc, "KD02SE", 0); m_se.Send(); m_done = true;
+			arm(false, entry, stop, poc, "KD02SE", 0); { if (hostGate(false)) m_se.Send(); } m_done = true;
 		}
 
 		private double widen(bool buy, double entry, double stop)

@@ -187,7 +187,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(buy, entry, buy ? Session.rthLow : Session.rthHigh);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, entry, buy ? "LE04LE" : "LE04SE", 0);
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

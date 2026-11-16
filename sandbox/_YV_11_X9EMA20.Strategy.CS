@@ -214,7 +214,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - m_stop);
 			m_hasTarget = up ? sma200 >= entry + risk : sma200 <= entry - risk && sma200 > 0;
 			m_target = sma200;
-			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) { m_le.Send(entry); m_ls.Send(m_stop); } else { m_se.Send(entry); m_ss.Send(m_stop); }
+			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) { { if (hostGate(true)) m_le.Send(entry); } m_ls.Send(m_stop); } else { { if (hostGate(false)) m_se.Send(entry); } m_ss.Send(m_stop); }
 		}
 		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += lbBar(ago + i).c; return s / n; }
 		private double ema9()
@@ -352,11 +352,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

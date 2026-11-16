@@ -206,7 +206,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(!fadeShort, entry, stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(!fadeShort, entry, stop, fadeShort ? "A253SE" : "A253LE");
-			if (fadeShort) m_se.Send(); else m_le.Send();
+			if (fadeShort) { if (hostGate(false)) m_se.Send(); } else { if (hostGate(true)) m_le.Send(); }
 		}
 		private int floorTicks()
 		{

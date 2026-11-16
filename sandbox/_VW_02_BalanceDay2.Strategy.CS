@@ -201,7 +201,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(buy, entry, stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, vwap, buy ? "VW02LE" : "VW02SE");
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 
 		}
 		

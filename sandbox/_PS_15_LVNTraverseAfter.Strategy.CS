@@ -196,7 +196,7 @@ namespace PowerLanguage.Strategy
 				double target = m_up ? m_hi : m_lo;
 				if (!budget(entry, stop)) { m_done = true; return; }
 				arm(m_up, entry, stop, target, m_up ? "PS15LE" : "PS15SE", 0);
-				if (m_up) m_le.Send(); else m_se.Send();
+				if (m_up) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 			}
 		}
 

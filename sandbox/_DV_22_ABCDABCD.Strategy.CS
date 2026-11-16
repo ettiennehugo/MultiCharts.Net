@@ -187,7 +187,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(false, D, D + 0.15 * atr);
 			double target = D - 0.15 * atr;
 			if (!budget(D, stop)) { m_done = true; return; }
-			honorExit(D, 0); m_restPx = D; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(false, D, stop, target, "DV22SE", 0); m_se.Send(D, m_restQty);
+			honorExit(D, 0); m_restPx = D; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(false, D, stop, target, "DV22SE", 0); { if (hostGate(false)) m_se.Send(D, m_restQty); }
 		}
 		private bool isSwingHigh(int ago) { return lbBar(ago).h >= lbBar(ago - 1).h && lbBar(ago).h >= lbBar(ago - 2).h && lbBar(ago).h >= lbBar(ago + 1).h && lbBar(ago).h >= lbBar(ago + 2).h; }
 		private bool isSwingLow(int ago) { return lbBar(ago).l <= lbBar(ago - 1).l && lbBar(ago).l <= lbBar(ago - 2).l && lbBar(ago).l <= lbBar(ago + 1).l && lbBar(ago).l <= lbBar(ago + 2).l; }
@@ -322,7 +322,7 @@ namespace PowerLanguage.Strategy
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

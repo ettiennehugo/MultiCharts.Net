@@ -251,7 +251,7 @@ namespace PowerLanguage.Strategy
 			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			arm(longSide, entry, stop, target);
-			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
 		private void arm(bool longSide, double entry, double stop, double target)

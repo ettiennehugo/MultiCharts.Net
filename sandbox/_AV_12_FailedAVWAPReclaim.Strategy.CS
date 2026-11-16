@@ -191,7 +191,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(false, entry, m_reclaim + tickSize());
 			if (!(lo.Value < entry) || !budget(entry, stop)) { m_done = true; return; }
 			arm(false, entry, stop, lo.Value, "AV12SE", true);
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); m_se.Send(entry, m_restQty);
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); { if (hostGate(false)) m_se.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -323,7 +323,7 @@ namespace PowerLanguage.Strategy
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

@@ -193,7 +193,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(buy, entry, buy ? entry - 2 * atr : entry + 2 * atr);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, entry, buy ? "YV10LE" : "YV10SE", 1);
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 		private void latch()
 		{

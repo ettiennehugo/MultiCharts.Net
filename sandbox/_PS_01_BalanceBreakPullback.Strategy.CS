@@ -270,8 +270,8 @@ namespace PowerLanguage.Strategy
 			int qty = ExitMode == ESandboxExit.Partial1R || ExitMode == ESandboxExit.Partial15R ? 2 : Cfg.contracts;
 			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "PS-01 multi-contract size " + qty);
 			if (qty > 1 && qty * m_entryRisk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "PS-01 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
-			if (m_side > 0) { m_leStp.Send(m_trigger, qty); m_lxStp.Send(m_stop); }
-			else { m_seStp.Send(m_trigger, qty); m_sxStp.Send(m_stop); }
+			if (m_side > 0) { { if (hostGate(true)) m_leStp.Send(m_trigger, qty); } m_lxStp.Send(m_stop); }
+			else { { if (hostGate(false)) m_seStp.Send(m_trigger, qty); } m_sxStp.Send(m_stop); }
 		}
 
 		// PS-01's own arms (ValueMigration, Balance, Noise, Trend, Compression) keep their rules; the other gates use the shared
@@ -389,11 +389,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leStp.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_leStp.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_seStp.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_seStp.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

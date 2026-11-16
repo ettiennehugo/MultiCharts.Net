@@ -217,7 +217,7 @@ namespace PowerLanguage.Strategy
 			if (up ? m_near - entry < Math.Abs(entry - stop) : entry - m_near < Math.Abs(entry - stop)) { m_done = true; return; }
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(up, entry, stop, m_near, up ? "A245LE" : "A245SE", 0);
-			if (up) m_le.Send(2); else m_se.Send(2);
+			if (up) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 		private double blockExtreme(int minutes, int ago, bool high)
 		{
