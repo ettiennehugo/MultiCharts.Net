@@ -184,7 +184,7 @@ namespace PowerLanguage.Strategy
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
 			double stop = runLow - tickSize();
 			if (entry - stop < ticks * tickSize()) stop = entry - ticks * tickSize();
-			if ((entry - stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if ((entry - stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-68 skip: stop breaches risk budget"); m_done = true; return; }
 			GxConfig.TimeStopBars = 5;
 			arm(entry, stop, entry + 0.5 * run);
 			m_le.Send(); m_done = true;

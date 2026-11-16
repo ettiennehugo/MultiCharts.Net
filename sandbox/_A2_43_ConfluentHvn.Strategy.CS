@@ -148,6 +148,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 		}
 		protected override void StartCalc()

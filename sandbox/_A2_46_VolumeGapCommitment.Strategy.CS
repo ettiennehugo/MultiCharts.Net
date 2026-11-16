@@ -155,6 +155,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create(); RollDetection = ERollDetection.Series;
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			GxOrderPrefix = "A246"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A246LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A246SE", EOrderAction.SellShort));

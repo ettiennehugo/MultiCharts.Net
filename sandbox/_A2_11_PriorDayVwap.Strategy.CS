@@ -164,6 +164,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			GxOrderPrefix = "A211"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);

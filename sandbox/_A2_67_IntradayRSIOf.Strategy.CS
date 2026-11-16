@@ -188,7 +188,7 @@ namespace PowerLanguage.Strategy
 			int ticks = 1;
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
 			if (entry - m_stop < ticks * tickSize()) m_stop = entry - ticks * tickSize();
-			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-67 skip: stop breaches risk budget"); m_done = true; return; }
 			m_le.Send(); m_done = true; m_ls.Send(m_stop);
 		}
 		private double fiveLow(int ago)

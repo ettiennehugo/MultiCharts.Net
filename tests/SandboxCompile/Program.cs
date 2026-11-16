@@ -76,9 +76,84 @@ static class Program
 			else bodies[key] = name;
 		}
 		Check(dup == 0, "CalcBar bodies are unique apart from names, string literals and numeric literals (" + dup + " duplicates)");
+		ConfigChecks(files);
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
+	}
+
+	// Studies whose session-profile reads are left on MC's Volume Profile on purpose (header says so, or the source is mixed).
+	static readonly HashSet<string> McProfileByDesign = new HashSet<string>(StringComparer.Ordinal)
+	{
+		"_A2_45_SinglePrintShelf.Strategy.CS", "_SW_02_SwingPullback.Strategy.CS",
+	};
+
+	// Batch-1 defect classes: a feature is queried but Create never turns its source on, so the query returns null and the
+	// study never trades. The default-off hostGate arms are excluded (see the batch-1 PR). The config may sit in a sandbox
+	// parent class (A2-15 extends PS-01, MT-03 extends PS-08), so the parent's text is included.
+	static void ConfigChecks(List<string> files)
+	{
+		var text = new Dictionary<string, string>(StringComparer.Ordinal);
+		var parent = new Dictionary<string, string>(StringComparer.Ordinal);
+		var byClass = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			text[name] = code;
+			Match m = Regex.Match(code, @"\bpublic\s+class\s+(_\w+)\s*:\s*(_\w+)");
+			if (m.Success) { byClass[m.Groups[1].Value] = name; parent[name] = m.Groups[2].Value; }
+		}
+		// The Own RTH source only reaches Composite / IsBalanced / BalanceRange through the migrationProfiles hook (the futures
+		// base override). The base default is the unchanged MC read, so production studies are not affected.
+		string vpBase = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(files[0])), "_VolumeProfileBase.Strategy.CS"));
+		foreach (string api in new[] { "public VpExtra Composite(int stream, int n)", "public bool IsBalanced(int stream, int n", "public bool BalanceRange(int stream, int n" })
+		{
+			int at = vpBase.IndexOf(api, StringComparison.Ordinal);
+			int next = at < 0 ? -1 : vpBase.IndexOf("public ", at + api.Length, StringComparison.Ordinal);
+			string body = at < 0 ? "" : vpBase.Substring(at, (next < 0 ? vpBase.Length : next) - at);
+			Check(body.Contains("migrationProfiles(stream, n)") && !body.Contains("RecentCompletedProfiles("), api + " reads completed profiles through migrationProfiles");
+		}
+		var ownRx = new Regex(@"DevelopingSource\s*=\s*EDevelopingSource\.Own");
+		var rthRx = new Regex(@"OwnProfileWindow\s*=\s*EOwnProfileWindow\.Rth");
+		var rangeOnRx = new Regex(@"(RangeProfiles|ProfileStats)\.enabled\s*=\s*true");
+		var priorRx = new Regex(@"\b(PriorRthProfile|RthProfile)\s*\(\s*\)");
+		var compRx = new Regex(@"\b(Composite|IsBalanced|BalanceRange|ValueMigrationScore|ValueMigrationState)\s*\(\s*1\b");
+		var rangeRx = new Regex(@"\b(RangeProfile|RangeProfileAfter|RangeProfileBars|OpenRange|SessionBars)\s*\(");
+		foreach (string name in text.Keys)
+		{
+			string own = WithoutMethod(text[name], "hostGate");
+			string chain = text[name];
+			string p;
+			string cur = name;
+			int guard = 0;
+			while (parent.TryGetValue(cur, out p) && byClass.ContainsKey(p) && guard++ < 5) { cur = byClass[p]; chain += text[cur]; }
+			bool ownRth = ownRx.IsMatch(chain) && rthRx.IsMatch(chain);
+			if (priorRx.IsMatch(own))
+				Check(ownRth, name + " reads PriorRthProfile/RthProfile and sets DevelopingSource = Own and OwnProfileWindow = Rth");
+			if (compRx.IsMatch(own) && !McProfileByDesign.Contains(name))
+				Check(ownRth, name + " reads Composite/IsBalanced/ValueMigrationScore on Data1 and sets the Own RTH profile source");
+			if (rangeRx.IsMatch(own))
+				Check(rangeOnRx.IsMatch(chain), name + " queries a range profile and enables RangeProfiles (or ProfileStats)");
+		}
+	}
+
+	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.
+	static string WithoutMethod(string code, string method)
+	{
+		var rx = new Regex(@"\b" + method + @"\s*\([^)]*\)\s*\{");
+		Match m;
+		while ((m = rx.Match(code)).Success)
+		{
+			int depth = 0, end = code.Length - 1;
+			for (int j = m.Index + m.Length - 1; j < code.Length; j++)
+			{
+				if (code[j] == '{') depth++;
+				else if (code[j] == '}' && --depth == 0) { end = j; break; }
+			}
+			code = code.Substring(0, m.Index) + code.Substring(end + 1);
+		}
+		return code;
 	}
 
 	// Comments and quoted names are removed so two placeholders that differ only by an order name still match.
