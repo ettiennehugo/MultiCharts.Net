@@ -260,7 +260,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"VW-05 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = px - a * r;
-			if (a > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (a > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "vwap", vwap.ToString("F2") }, { "priorClose", s.priorRthClose.ToString("F2") }, { "atr30", atr.ToString("F2") } };

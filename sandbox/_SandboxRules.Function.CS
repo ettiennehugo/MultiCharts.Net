@@ -73,6 +73,17 @@ namespace PowerLanguage.Strategy
 			return PastFlat(etTod, "", TimeSpan.Zero);
 		}
 
+		/// <summary>Regular-session start, end, and value end. A futures base passes the three spans to ApplyPit.</summary>
+		public static void PitWindows(string symbol, TimeSpan listedEnd, out TimeSpan start, out TimeSpan end, out TimeSpan valueEnd)
+		{
+			valueEnd = RegularCloseEt(symbol, listedEnd);
+			end = valueEnd;
+			start = new TimeSpan(9, 30, 0);
+			string root = Root(symbol);
+			if (root == "CL") start = new TimeSpan(9, 0, 0);
+			else if (root == "GC" || root == "ZN" || root == "6E") start = new TimeSpan(8, 20, 0);
+		}
+
 		public static void ApplyPit(string name, ref TimeSpan start, ref TimeSpan end, ref TimeSpan valueEnd, TimeSpan listedEnd)
 		{
 			string root = Root(name);

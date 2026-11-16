@@ -204,6 +204,17 @@ namespace PowerLanguage.Strategy
 			EventConfig.classes = EEventClassMask.Macro;
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -216,6 +227,7 @@ namespace PowerLanguage.Strategy
 			EventConfig.enabled = m_filter;   // set before base.StartCalc: the engine is built there
 			HtfStreams = new[] { 2 };         // M-MTF: StartCalc fails loudly if Data2 is missing or another root
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			InstrumentProfile profile = InstrumentProfileOf(1);
 			if (profile == null || !profile.cost.known || profile.costFloorTicks < 1)

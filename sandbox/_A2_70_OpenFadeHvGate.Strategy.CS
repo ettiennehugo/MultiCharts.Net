@@ -212,8 +212,23 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A264ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		private void applySymbolFlat()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Cfg.to = pitValue;
+			TimeSpan flat = pitValue - TimeSpan.FromMinutes(5);
+			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
+			Cfg.flat = flat;
+		}
+
 		protected override void StartCalc()
 		{
+			applySymbolFlat();
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EBandMultiple), Band)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Band is not a defined EBandMultiple");
 			if (!Enum.IsDefined(typeof(EThetaOff), ThetaOff)) throw new ArgumentException("_A2_70_OpenFadeHvGate: ThetaOff is not a defined EThetaOff");
 			if (!Enum.IsDefined(typeof(EReference), Reference)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Reference is not a defined EReference");
@@ -252,9 +267,9 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(2 * m * m_atr, Cfg.costFloorTicks * tick);   // disaster stop 2m x ATR, floored
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-64 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_traded = true; return; }
 			double buyAt = Math.Round((reference - band) / tick) * tick, sellAt = Math.Round((reference + band) / tick) * tick;
-			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). The protective stop
-			// is placed from the fill price on the first closed bar in the trade: a fill-bar spike is unprotected (pitfall).
+			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). Each limit carries its disaster stop.
 			m_leLmt.Send(buyAt, Cfg.contracts); m_seLmt.Send(sellAt, Cfg.contracts);
+			m_lxStp.Send(buyAt - r); m_sxStp.Send(sellAt + r);
 			m_r = r; m_stop = double.NaN;
 		}
 

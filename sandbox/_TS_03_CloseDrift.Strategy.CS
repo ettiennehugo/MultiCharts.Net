@@ -187,11 +187,25 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "TS03SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EVariant), Variant)) throw new ArgumentException("_TS_03_CloseDrift: Variant is not a defined EVariant");
 			HtfStreams = new[] { 2 };
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_ref = m_drift = m_stop = double.NaN; m_day = DateTime.MinValue;
 		}

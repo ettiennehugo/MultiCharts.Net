@@ -38,8 +38,8 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Data1: @ES 30-minute, 24h Globex, dxFeed continuous unadjusted. The clock is Eastern through the CME session adapter.
-// Data2: Not applicable
+// Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. The clock is Eastern through the CME session adapter.
+// Data2: @ES 30-minute, same symbol and session. The midday break is a closed 30-minute bar.
 // Further series: Not applicable
 // Warmup: the morning range of the same session (bars that close after 09:30 and at or before 12:00 ET).
 // Tests use data through 2024-12-31 only.
@@ -158,7 +158,7 @@
 // ## 22. Notes
 // Slot copy: the study's code identifiers are the public class and its constructor. A _TestNN slot is this file with those two tokens renamed to _TestNN. Order names and journal tags stay.
 // Convention: fixed example settings stay in the protected config class, the same shape as the engines-manual example. A multi-value choice this file exposes is a nested public enum on its own [Input]. Catalogue arms the example does not code are not added here.
-// Book arms are inputs. Default Arm CloseBreak, Hold DayFlat and Midday At1200 reproduce the previous trade list. On a 30-minute chart the overnight exit is the first RTH bar, whose close is 10:00, not a 09:31 one-minute bar. Owner 2026-11-15: Midday sweeps 11:30, 12:00 and 12:30.
+// Book arms are inputs. Default Arm CloseBreak, Hold DayFlat and Midday At1200 reproduce the previous trade list. Data1 is 1-minute and Data2 is 30-minute. The overnight exit is the first closed 30-minute RTH bar. Owner 2026-11-15: Midday sweeps 11:30, 12:00 and 12:30.
 using System;
 using System.Collections.Generic;
 using PowerLanguage.Function;
@@ -228,16 +228,41 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A249SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EArm), Arm)) throw new ArgumentException("_A2_49_MiddayBreakout: Arm is not a defined EArm");
 			if (!Enum.IsDefined(typeof(ESessionHold), Hold)) throw new ArgumentException("_A2_49_MiddayBreakout: Hold is not a defined ESessionHold");
 			if (!Enum.IsDefined(typeof(EZone), Zone)) throw new ArgumentException("_A2_49_MiddayBreakout: Zone is not a defined EZone");
 			if (!Enum.IsDefined(typeof(EMidday), Midday)) throw new ArgumentException("_A2_49_MiddayBreakout: Midday is not a defined EMidday");
 			NoEntryBefore = middayAt();
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
+		}
+
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "A2-49 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
 		}
 
 		protected override void CalcBar()
@@ -255,7 +280,7 @@ namespace PowerLanguage.Strategy
 			if (rollOn(1)) m_skipDay = true;                        // the morning range would straddle the splice
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			int pos = StrategyInfo.MarketPosition;
-			if (m_exitNextRth && isRthBar(Bars.Time[0]) && tod > Cfg.rthOpen)
+			if (m_exitNextRth && isRthBar(Bars.Time[0]) && tod > Cfg.rthOpen && IsExist(2) && BarsOfData(2).Status == EBarState.Close)
 			{
 				if (pos > 0) m_lx.Send(); else if (pos < 0) m_sx.Send();
 				m_exitNextRth = false;
@@ -273,21 +298,23 @@ namespace PowerLanguage.Strategy
 			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
 			double tick = tickSize();
+			if (!takeNative()) return;
 			if (Arm == EArm.CloseBreak) closeBreak(pos, tick);
 			else bookArm(pos, tick);
 		}
 
 		private void closeBreak(int pos, double tick)
 		{
-			int side = Bars.Close[0] > m_hi ? +1 : Bars.Close[0] < m_lo ? -1 : 0;
+			double c2 = BarsOfData(2).Close[0];
+			int side = c2 > m_hi ? +1 : c2 < m_lo ? -1 : 0;
 			if (side == 0 || side == Math.Sign(pos)) return;        // SAR: only a break against the current position acts
 			string why;
 			if (!entryAllowed(out why)) { if (journalOn()) logSignal("A2-49", side, Bars.Close[0], double.NaN, new Dictionary<string, string> { { "blocked", why } }, false); return; }
-			double entry = Bars.Close[0];
+			double entry = c2;
 			double r = Math.Max(Cfg.disasterR * (m_hi - m_lo), Cfg.costFloorTicks * tick);   // floor rule
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = entry - side * r;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);   // reverses an open opposite position
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }   // stop with the entry
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "tradesToday", TradesToday.ToString() } };
@@ -299,16 +326,17 @@ namespace PowerLanguage.Strategy
 		/// <summary>Book SR zone (close in the outer fraction of the morning range) and breakout stops at ML-1 / MH+1 tick. A bar that trades through the level is a breakout, not an SR close.</summary>
 		private void bookArm(int pos, double tick)
 		{
+			double c2 = BarsOfData(2).Close[0], h2 = BarsOfData(2).High[0], l2 = BarsOfData(2).Low[0];
 			double width = m_hi - m_lo;
 			if (!(width > 0)) return;
 			double frac = zoneFrac();
 			double lower = m_lo + frac * width, upper = m_hi - frac * width;
-			bool brokeLow = Bars.Low[0] < m_lo, brokeHigh = Bars.High[0] > m_hi;
+			bool brokeLow = l2 < m_lo, brokeHigh = h2 > m_hi;
 			bool sr = Arm == EArm.SrZone || Arm == EArm.Both;
 			bool bo = Arm == EArm.BreakoutStop || Arm == EArm.Both;
 			int side = 0;
 			bool stopEntry = false;
-			double entry = Bars.Close[0];
+			double entry = c2;
 			if (bo && (brokeLow || brokeHigh))
 			{
 				if (brokeHigh && pos <= 0) { side = +1; stopEntry = true; entry = m_hi + tick; }
@@ -316,8 +344,8 @@ namespace PowerLanguage.Strategy
 			}
 			else if (sr)
 			{
-				if (pos <= 0 && !brokeLow && Bars.Close[0] <= lower) { side = +1; entry = Bars.Close[0]; }
-				else if (pos >= 0 && Bars.Close[0] >= upper) { side = -1; entry = Bars.Close[0]; }
+				if (pos <= 0 && !brokeLow && c2 <= lower) { side = +1; entry = c2; }
+				else if (pos >= 0 && c2 >= upper) { side = -1; entry = c2; }
 			}
 			if (side == 0 || side == Math.Sign(pos)) return;
 			string why;
@@ -325,8 +353,8 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.disasterR * width, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = entry - side * r;
-			if (stopEntry) { if (side > 0) m_leLvl.Send(entry, Cfg.contracts); else m_seLvl.Send(entry, Cfg.contracts); }
-			else if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (stopEntry) { if (side > 0) { m_leLvl.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seLvl.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); } }
+			else if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "arm", Arm.ToString() }, { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "zone", frac.ToString("F2") } };

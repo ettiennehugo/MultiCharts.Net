@@ -228,13 +228,27 @@ namespace PowerLanguage.Strategy
 			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "K3ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(ESide), Side)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Side is not a defined ESide");
 			if (!Enum.IsDefined(typeof(ETrend), Trend)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Trend is not a defined ETrend");
 			if (!Enum.IsDefined(typeof(EHold), Hold)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Hold is not a defined EHold");
 			if (ProfitTake || Spike) NeedsDaily = true;
 			m_clock = null;
+			configureSessions();
 			RollDetection = ERollDetection.Series;   // unadjusted series: detect splices
 			base.StartCalc();
 			m_closes.Clear(); m_rthClose = m_rthHigh = m_rthLow = m_atrAtEntry = double.NaN; m_day = m_entryDay = DateTime.MinValue;
