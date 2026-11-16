@@ -953,38 +953,6 @@ namespace PowerLanguage.Function
 			return c;
 		}
 
-		/// <summary>US cash regular close, 16:00 Eastern. Stocks and ETFs (class Stock) always match.
-		/// NYSE, NASDAQ, ARCA, AMEX and BATS match by exact token. Futures never match, so a pit root is not replaced by this close.
-		/// SessionObject has no reliable regular-session flag: only start and end day and time.</summary>
-		public static bool TryUsCashCloseEt(string assetClass, string exchange, out int etHhmm)
-		{
-			etHhmm = 1600;
-			if (string.Equals(assetClass, "Future", StringComparison.OrdinalIgnoreCase)) return false;
-			if (string.Equals(assetClass, "Stock", StringComparison.OrdinalIgnoreCase)) return true;
-			if (string.IsNullOrEmpty(exchange)) return false;
-			var tok = new StringBuilder();
-			string e = exchange.ToUpperInvariant();
-			for (int i = 0; i <= e.Length; i++)
-			{
-				if (i < e.Length && char.IsLetterOrDigit(e[i])) { tok.Append(e[i]); continue; }
-				if (tok.Length == 0) continue;
-				string t = tok.ToString();
-				tok.Clear();
-				if (t == "NYSE" || t == "NASDAQ" || t == "ARCA" || t == "AMEX" || t == "BATS") return true;
-			}
-			return false;
-		}
-
-		/// <summary>Which regular end wins. cash and pit ignore the chart template. chart is the profile RTH split.</summary>
-		public static string FlatByEndKind(string assetClass, string exchange, string root, bool hasChartRth)
-		{
-			int ignored;
-			if (TryUsCashCloseEt(assetClass, exchange, out ignored)) return "cash";
-			if (TryRegularCloseEt(root, out ignored)) return "pit";
-			if (hasChartRth) return "chart";
-			return "";
-		}
-
 		/// <summary>Pit / RTH close in US Eastern, HHMM, for a 24-hour template that has no RTH split.
 		/// CL 14:30 (NYMEX WTI open outcry 9:00 a.m.–2:30 p.m. ET). GC 13:30 (COMEX gold 8:20 a.m.–1:30 p.m. ET).
 		/// ZN and 6E 15:00, which is the 2:00 p.m. Central pit close (CBOT rates, CME FX).</summary>
