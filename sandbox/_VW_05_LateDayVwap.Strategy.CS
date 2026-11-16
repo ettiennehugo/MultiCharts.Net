@@ -204,6 +204,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EEntry), Entry)) throw new ArgumentException("_VW_05_LateDayVwap: Entry is not a defined EEntry");
 			if (AtrLength < 1) throw new ArgumentException("_VW_05_LateDayVwap: AtrLength must be at least 1");
 			HtfStreams = new[] { 2 };

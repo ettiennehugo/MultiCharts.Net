@@ -201,6 +201,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(ELayer), Layer)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Layer is not a defined ELayer");
 			if (!Enum.IsDefined(typeof(ESide), Side)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Side is not a defined ESide");
 			VwapConfig.resetPeriodSlotsOnRoll = Reanchor;

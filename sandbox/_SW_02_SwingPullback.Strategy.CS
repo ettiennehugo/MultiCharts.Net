@@ -180,6 +180,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
 			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
 			base.StartCalc();
