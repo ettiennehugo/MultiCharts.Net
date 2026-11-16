@@ -145,7 +145,11 @@ namespace PowerLanguage.Strategy
 	public class _TS_06_OvernightInventoryCorrection : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_se; private double m_pv, m_vv, m_onHigh; private bool m_done; private DateTime m_day = DateTime.MinValue;
-		public _TS_06_OvernightInventoryCorrection(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
+		public _TS_06_OvernightInventoryCorrection(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "TS06"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "TS06SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -154,11 +158,12 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_pv = m_vv = 0; m_onHigh = 0; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_pv = m_vv = 0; m_onHigh = 0; }
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool overnight = tod >= m_globexOpen || tod < m_rthStart;
 			if (overnight && !IsRth()) { double tp = (Bars.High[0] + Bars.Low[0] + Bars.Close[0]) / 3.0; m_pv += tp * Math.Max(1, Bars.Volume[0]); m_vv += Math.Max(1, Bars.Volume[0]); m_onHigh = Math.Max(m_onHigh, Bars.High[0]); return; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || !(m_vv > 0)) return;
+			if (sandboxBook()) return;
 			VpExtra prior = PriorRthProfile(); double atr = DailyContext.Atr20d;
 			if (prior == null || !(atr > 0)) return;
 			double av = m_pv / m_vv;
@@ -170,7 +175,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(false, entry, m_onHigh);
 			if (!(av < entry) || !budget(entry, stop)) { m_done = true; return; }
 			m_timeStop = 40;
-			arm(false, entry, stop, av, "TS06SE", 0); m_se.Send(entry); m_done = true;
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(false, entry, stop, av, "TS06SE", 0); m_se.Send(entry, m_restQty);
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -202,5 +207,63 @@ namespace PowerLanguage.Strategy
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
+
+		private bool hostGate(bool buy)
+		{
+			if (Gate == ESandboxGate.Off) return true;
+			VpExtra prior = null;
+			try { prior = PriorRthProfile(); } catch (Exception) { }
+			double poc = prior != null ? prior.poc : double.NaN;
+			double hi = Session != null ? Session.rthHigh : Bars.High[0];
+			double lo = Session != null ? Session.rthLow : Bars.Low[0];
+			double atr = averageTrueRange(Bars, 14);
+			double sma = double.NaN;
+			try { sma = DailyContext.Sma200; } catch (Exception) { }
+			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			int fam = 0, ranges = 0;
+			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
+			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			return ok;
+		}
+		private void honorExit(double entry, double risk)
+		{
+			double t1; int pct; bool be;
+			if (!_SandboxRules.ScaleExit(ExitMode, out t1, out pct, out be)) return;
+			int qty = _SandboxRules.ScaleQty(ExitMode, false);
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty);
+			if (qty > 1 && risk > 0 && qty * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{
+				if (journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent");
+				m_done = true; m_restOn = false; return;
+			}
+			GxConfig.TargetMode = pct > 0 ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.RMultiple;
+			GxConfig.T1Value = t1;
+			GxConfig.T1ScalePct = pct;
+			GxConfig.FinalTargetUnit = ETriggerUnit.RMultiple;
+			GxConfig.FinalTargetValue = t1;
+			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+				m_se.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }
