@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the TS-04 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading re-runs PS-01 and PS-24 on a pit-session profile. It has no entry of its own. ASSUMPTION: this file journals the pit window as RthStart to RthStart plus 5 hours and does not send an order.
+// Research assumption: ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -74,7 +74,7 @@
 // Unsuitable: outside that session, and a roll day when the rule skips rolls.
 //
 // ## 15. Dependencies
-// Base class: _VolumeProfileFuturesBase
+// Base class: _PS_01_BalanceBreakPullback
 // Engines enabled: set in Create.
 // Engine settings enabled: set in code. They are not strategy inputs.
 //
@@ -84,7 +84,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading re-runs PS-01 and PS-24 on a pit-session profile. It has no entry of its own. ASSUMPTION: this file journals the pit window as RthStart to RthStart plus 5 hours and does not send an order.
+// Other: ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -131,7 +131,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: The heading re-runs PS-01 and PS-24 on a pit-session profile. It has no entry of its own. ASSUMPTION: this file journals the pit window as RthStart to RthStart plus 5 hours and does not send an order.
+// ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
 // IOG is disabled.
 
 
@@ -141,46 +141,15 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _TS_04_CLGCPit : _VolumeProfileFuturesBase
+	public class _TS_04_CLGCPit : _PS_01_BalanceBreakPullback
 	{
-		private DateTime m_day = DateTime.MinValue;
 		public _TS_04_CLGCPit(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
-		protected override void CalcBar()
+		protected override void configureSessions()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			TimeSpan pitEnd = m_rthStart.Add(TimeSpan.FromHours(5)); if (journalOn()) trace(ETraceLevel.Journal, "TS-04 pit host variant ends " + pitEnd.ToString() + ". No order.");
-		}
-
-		private double widen(bool buy, double entry, double stop)
-		{
-			int ticks = 1;
-			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
-			double floor = ticks * tickSize();
-			if (buy && entry - stop < floor) return entry - floor;
-			if (!buy && stop - entry < floor) return entry + floor;
-			return stop;
-		}
-		private int m_timeStop, m_flatOverride;
-		private bool budget(double a, double b) { double r = Math.Abs(a - b); return r > 0 && r * Bars.Info.BigPointValue <= equityAvailable(0.01); }
-		private void arm(bool buy, double entry, double stop, double target, string name, int holdDays)
-		{
-			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			bool has = Math.Abs(target - entry) > tickSize();
-			GxConfig.TargetMode = has ? ETargetMode.SingleTarget : ETargetMode.None;
-			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
-			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
-			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
-			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
-			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
-			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
-			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
-			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(buy, entry, stop, 1, mkt, name);
+			base.configureSessions();
+			m_rthStart = new TimeSpan(9, 0, 0);
+			m_rthEnd = new TimeSpan(14, 30, 0);
+			m_rthValueEnd = new TimeSpan(14, 30, 0);
 		}
 	}
 }

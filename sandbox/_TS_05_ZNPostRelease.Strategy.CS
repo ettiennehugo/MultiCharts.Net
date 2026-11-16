@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_rel = DateTime.MinValue; m_pv = m_vv = 0; m_side = 0; find(day); }
-			if (m_rel == DateTime.MinValue || StrategyInfo.MarketPosition != 0 || m_done || Bars.Time[0] < m_rel) return;
+			if (m_rel == DateTime.MinValue || StrategyInfo.MarketPosition != 0 || m_done || ToEastern(Bars.Time[0]) < m_rel) return;
 			double tp = (Bars.High[0] + Bars.Low[0] + Bars.Close[0]) / 3.0; m_pv += tp * Math.Max(1, Bars.Volume[0]); m_vv += Math.Max(1, Bars.Volume[0]);
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod < new TimeSpan(8, 40, 0) || tod > new TimeSpan(9, 30, 0) || ((int)tod.TotalMinutes) % 5 != 0) return;

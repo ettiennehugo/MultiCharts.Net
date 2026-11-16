@@ -143,21 +143,21 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SW_01_WeeklyBalanceBreak : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le; private int m_out; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le; private int m_out; private bool m_done, m_counted; private DateTime m_day = DateTime.MinValue;
 		public _SW_01_WeeklyBalanceBreak(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
 		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; WeeklyProfiles.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_counted = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || CompletedWeeks < 3) return;
 			VpExtra a = Week(1), b = Week(2), c = Week(3), comp = WeeklyComposite(3);
 			if (a == null || b == null || c == null || comp == null) return;
 			if (!overlap(a, b) || !overlap(b, c)) return;
 			double atr = DailyContext.Atr20d; if (!(atr > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0) && Bars.Close[0] > comp.vah + 0.1 * atr) m_out++;
+			if (!m_counted && tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0)) { m_counted = true; if (Bars.Close[0] > comp.vah + 0.1 * atr) m_out++; else m_out = 0; }
 			if (m_out < 2 || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(61))) return;
 			double lo = Bars.Low[0], prev = Bars.Low[60], hi = Bars.High[0];
 			for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[60 + i]); hi = Math.Max(hi, Bars.High[i]); }

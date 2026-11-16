@@ -143,26 +143,43 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _PS_03_ConfirmedFailedBreak : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_se; private int m_back; private double m_poke; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private IOrderPriced m_le, m_se; private int m_back, m_beyond; private double m_poke; private bool m_done, m_long, m_have; private DateTime m_day = DateTime.MinValue;
 		public _PS_03_ConfirmedFailedBreak(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS03"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS03SE", EOrderAction.SellShort)); }
+		protected override void Create()
+		{
+			base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS03"; createGxOrders();
+			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS03LE", EOrderAction.Buy));
+			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS03SE", EOrderAction.SellShort));
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_back = 0; m_poke = 0; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_back = m_beyond = 0; m_poke = 0; m_have = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			VpExtra prior = PriorRthProfile(); if (prior == null || !(prior.vah > 0) || !(prior.poc > 0)) return;
+			VpExtra prior = PriorRthProfile(); if (prior == null || !(prior.vah > prior.val)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 5 != 0) return;
-			double hi = Bars.High[0]; for (int i = 1; i < 5; i++) hi = Math.Max(hi, Bars.High[i]);
-			if (hi > prior.vah && Bars.Close[0] <= prior.vah) m_poke = Math.Max(m_poke, hi);
-			if (!(m_poke > 0)) return;
-			if (Bars.Close[0] < prior.vah) m_back++; else m_back = 0;
-			double prev = Bars.High[5]; for (int i = 6; i < 10; i++) prev = Math.Max(prev, Bars.High[i]);
-			if (m_back < 2 || !(hi < prev)) return;
-			double entry = Bars.Low[0] - tickSize();
-			double stop = widen(false, entry, m_poke + tickSize());
-			if (!(prior.poc < entry) || !budget(entry, stop)) { m_done = true; return; }
-			arm(false, entry, stop, prior.poc, "PS03SE", 0); m_se.Send(entry); m_done = true;
+			double hi = Bars.High[0], lo = Bars.Low[0], prevHi = Bars.High[5], prevLo = Bars.Low[5];
+			for (int i = 1; i < 5; i++) { hi = Math.Max(hi, Bars.High[i]); lo = Math.Min(lo, Bars.Low[i]); prevHi = Math.Max(prevHi, Bars.High[5 + i]); prevLo = Math.Min(prevLo, Bars.Low[5 + i]); }
+			double tick = tickSize();
+			if (!m_have && hi > prior.vah + tick) { m_have = true; m_long = false; m_poke = hi; m_beyond = Bars.Close[0] > prior.vah ? 1 : 0; m_back = 0; }
+			else if (!m_have && lo < prior.val - tick) { m_have = true; m_long = true; m_poke = lo; m_beyond = Bars.Close[0] < prior.val ? 1 : 0; m_back = 0; }
+			if (!m_have) return;
+			bool beyond = m_long ? Bars.Close[0] < prior.val : Bars.Close[0] > prior.vah;
+			bool inside = m_long ? Bars.Close[0] > prior.val : Bars.Close[0] < prior.vah;
+			if (beyond) m_beyond++;
+			if (m_beyond > 1) { m_have = false; m_beyond = 0; m_back = 0; return; }
+			if (inside) m_back++; else m_back = 0;
+			if (!m_long) m_poke = Math.Max(m_poke, hi); else m_poke = Math.Min(m_poke, lo);
+			bool swing = m_long ? lo > prevLo : hi < prevHi;
+			if (m_back < 2 || !swing) return;
+			bool buy = m_long;
+			double entry = buy ? hi + tick : lo - tick;
+			double stop = widen(buy, entry, buy ? m_poke - tick : m_poke + tick);
+			double target = buy ? prior.vah : prior.val;
+			if ((buy ? target - entry : entry - target) <= 0 || !budget(entry, stop)) { m_done = true; return; }
+			arm(buy, entry, stop, target, buy ? "PS03LE" : "PS03SE", 0);
+			if (buy) m_le.Send(entry); else m_se.Send(entry);
+			m_done = true;
 		}
 
 		private double widen(bool buy, double entry, double stop)

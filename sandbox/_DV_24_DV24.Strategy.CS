@@ -150,7 +150,10 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double atr = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "DV-24 lives in EX-01. ATR " + atr.ToString("0.00") + ". No order.");
+			VpExtra prior = PriorRthProfile();
+			double dist = prior == null ? 0 : Math.Abs(Bars.Close[0] - prior.poc);
+			double atr = averageTrueRange(Bars, 14);
+			if (journalOn()) trace(ETraceLevel.Journal, "DV-24 lives in EX-01. POC distance " + dist.ToString("0.00") + " ATR " + atr.ToString("0.00") + ". No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

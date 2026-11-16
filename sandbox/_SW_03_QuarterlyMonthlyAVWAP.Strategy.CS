@@ -143,19 +143,20 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SW_03_QuarterlyMonthlyAVWAP : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le; private int m_above; private bool m_done, m_touch; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le; private int m_above; private bool m_done, m_touch, m_counted; private DateTime m_day = DateTime.MinValue;
 		public _SW_03_QuarterlyMonthlyAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Quarter; GxOrderPrefix = "SW03"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW03LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_counted = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			if (double.IsNaN(vwap) || !(sig > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0))
+			if (!m_counted && tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0))
 			{
+				m_counted = true;
 				if (Bars.Close[0] > vwap) m_above++; else m_above = 0;
 				if (m_above >= 10 && Session.rthLow <= vwap + 0.25 * sig && Session.rthLow >= vwap - 0.25 * sig) m_touch = true;
 			}

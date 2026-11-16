@@ -155,8 +155,8 @@ namespace PowerLanguage.Strategy
 			if (prior == null || !(s.priorRthClose > 0) || s.Gap == 0) return;
 			bool up = s.Gap > 0;
 			double half = s.rthOpen - 0.5 * s.Gap;
-			if (up && Bars.Low[0] <= half) { }
-			else if (!up && Bars.High[0] >= s.rthOpen - 0.5 * s.Gap) { }
+			if (up && Bars.Low[0] <= half) m_held = true;
+			else if (!up && Bars.High[0] >= s.rthOpen - 0.5 * s.Gap) m_held = true;
 			else if (sessionClock(Bars.Time[0]) < m_rthStart.Add(TimeSpan.FromMinutes(60))) return;
 			if (up && Bars.Close[0] < prior.vah && Bars.Close[0] > prior.val) m_held = false;
 			if (!up && Bars.Close[0] < prior.vah && Bars.Close[0] > prior.val) m_held = false;
@@ -169,7 +169,7 @@ namespace PowerLanguage.Strategy
 			if (!buy && !sell) return;
 			double entry = buy ? hi + tickSize() : lo - tickSize();
 			double stop = widen(buy, entry, buy ? lo - tickSize() : hi + tickSize());
-			double target = buy ? s.rthOpen + s.Gap : s.rthOpen + s.Gap;
+			double target = s.rthOpen + s.Gap;
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "PS06LE" : "PS06SE", 0);
 			if (buy) m_le.Send(entry); else m_se.Send(entry); m_done = true;
