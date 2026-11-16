@@ -34,7 +34,6 @@
 // Same session after a stop: a daily bar is the session. The next bar may enter if the rules pass. A roll bar does not.
 //
 // ## 7. Instruments
-// Market tag: both
 // Typical: MES and MNQ, also GC. The daily bar is Data2. This file is written for @ES.
 // Validated: Not yet verified
 //

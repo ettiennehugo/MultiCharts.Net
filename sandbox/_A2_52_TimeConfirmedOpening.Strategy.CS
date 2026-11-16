@@ -172,7 +172,7 @@ namespace PowerLanguage.Strategy
 			if (m_done || rollOn(1) || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			TimeSpan orEnd = m_rthStart.Add(TimeSpan.FromMinutes(15));
-			if (tod >= m_rthStart && tod < orEnd)
+			if (tod > m_rthStart && tod <= orEnd)
 			{
 				if (double.IsNaN(m_orh)) { m_orh = Bars.High[0]; m_orl = Bars.Low[0]; }
 				else { m_orh = Math.Max(m_orh, Bars.High[0]); m_orl = Math.Min(m_orl, Bars.Low[0]); }

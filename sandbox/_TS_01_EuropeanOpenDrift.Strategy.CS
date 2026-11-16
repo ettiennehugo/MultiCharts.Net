@@ -34,7 +34,6 @@
 // Same session after a stop: no. The day is already marked done.
 //
 // ## 7. Instruments
-// Market tag: futures-only
 // Typical: MES and MNQ, 30-minute or 60-minute. This file is @ES 1-minute with a 60-minute stream, so the cost unit is ES.
 // Validated: Not yet verified
 //

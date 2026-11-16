@@ -34,7 +34,6 @@
 // Same session after a stop: yes, if a new touch passes the filters.
 //
 // ## 7. Instruments
-// Market tag: futures-only
 // Typical: 6E first, then ES and NQ. The pullback is the 30-minute bar on Data2. This file is the ES port.
 // Validated: Not yet verified
 //

@@ -34,7 +34,6 @@
 // Same session after a stop: no.
 //
 // ## 7. Instruments
-// Market tag: futures-only
 // Typical: ES and NQ. This file is written for @ES.
 // Validated: Not yet verified
 //

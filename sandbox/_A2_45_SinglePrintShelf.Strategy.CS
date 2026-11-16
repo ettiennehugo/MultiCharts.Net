@@ -167,18 +167,21 @@ namespace PowerLanguage.Strategy
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(30))) return;
-			if (((int)tod.TotalMinutes) % 15 != 0) return;
-			double atr = averageTrueRange(Bars, 14);
+			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30 * 15) return;
+			double atr30 = atrOf(30, 14), atr15 = atrOf(15, 14);
 			double vwap = CurrentVwap1;
-			if (!(atr > 0) || double.IsNaN(vwap)) return;
-			if (!pickShelf(atr)) return;
+			if (!(atr30 > 0) || !(atr15 > 0) || double.IsNaN(vwap)) return;
+			if (!pickShelf(atr30)) return;
 			bool up = m_near > Bars.Close[0];
-			bool bos = up ? Bars.Close[0] > Bars.High[1] && Bars.Close[0] > vwap : Bars.Close[0] < Bars.Low[1] && Bars.Close[0] < vwap;
+			if (migrationAgainst(up) || hvnBetween(up)) { m_done = true; return; }
+			double priorHigh = blockExtreme(15, 1, true), priorLow = blockExtreme(15, 1, false);
+			double thisLow = blockExtreme(15, 0, false), thisHigh = blockExtreme(15, 0, true);
+			bool bos = up ? Bars.Close[0] > priorHigh && Bars.Close[0] > vwap : Bars.Close[0] < priorLow && Bars.Close[0] < vwap;
 			if (!bos) return;
 			double entry = Bars.Close[0];
-			double structural = up ? Math.Min(Bars.Low[0], Bars.Low[1]) : Math.Max(Bars.High[0], Bars.High[1]);
+			double structural = up ? Math.Min(thisLow, priorLow) : Math.Max(thisHigh, priorHigh);
 			structural = up ? structural - tickSize() : structural + tickSize();
-			double atrStop = up ? entry - atr : entry + atr;
+			double atrStop = up ? entry - atr15 : entry + atr15;
 			double stop = up ? Math.Min(structural, atrStop) : Math.Max(structural, atrStop);
 			stop = widen(up, entry, stop);
 			if (up ? m_near - entry < Math.Abs(entry - stop) : entry - m_near < Math.Abs(entry - stop)) { m_done = true; return; }
@@ -186,6 +189,44 @@ namespace PowerLanguage.Strategy
 			arm(up, entry, stop, m_near, up ? "A245LE" : "A245SE", 0);
 			if (up) m_le.Send(); else m_se.Send();
 			m_done = true;
+		}
+		private double blockExtreme(int minutes, int ago, bool high)
+		{
+			double v = high ? double.MinValue : double.MaxValue;
+			int from = ago * minutes;
+			for (int i = from; i < from + minutes; i++) v = high ? Math.Max(v, Bars.High[i]) : Math.Min(v, Bars.Low[i]);
+			return v;
+		}
+		private double atrOf(int minutes, int length)
+		{
+			double sum = 0; int n = 0;
+			for (int k = 0; k < length; k++)
+			{
+				double h = blockExtreme(minutes, k, true), l = blockExtreme(minutes, k, false);
+				double prev = k + 1 < Bars.CurrentBar / minutes ? Bars.Close[(k + 1) * minutes] : l;
+				double tr = Math.Max(h - l, Math.Max(Math.Abs(h - prev), Math.Abs(l - prev)));
+				sum += tr; n++;
+			}
+			return n > 0 ? sum / n : 0;
+		}
+		private bool migrationAgainst(bool up)
+		{
+			List<VpExtra> profs = RecentCompletedProfiles(1, 2, Bars.FullSymbolData.Current);
+			if (profs == null || profs.Count < 2) return false;
+			double mid0 = (profs[0].vah + profs[0].val) / 2.0, mid1 = (profs[1].vah + profs[1].val) / 2.0;
+			return up ? mid0 < mid1 : mid0 > mid1;
+		}
+		private bool hvnBetween(bool up)
+		{
+			VpExtra comp = Composite(1, 5);
+			if (comp == null || comp.hvns == null) return false;
+			int n = 0;
+			foreach (Node node in comp.hvns)
+			{
+				bool between = up ? node.peak > Bars.Close[0] && node.peak < m_near : node.peak < Bars.Close[0] && node.peak > m_near;
+				if (between) n++;
+			}
+			return n >= 2;
 		}
 		
 		private bool pickShelf(double atr)
@@ -201,7 +242,9 @@ namespace PowerLanguage.Strategy
 					double near = Math.Abs(Bars.Close[0] - lo) < Math.Abs(Bars.Close[0] - hi) ? lo : hi;
 					double far = near == lo ? hi : lo;
 					double dist = Math.Abs(near - Bars.Close[0]);
-					if (dist < 0.5 * atr || dist > 2.5 * atr) continue;
+					if (dist < 0.5 * atr || dist > 2.5 * atr || Session == null) continue;
+					bool filled = near > Bars.Close[0] ? Session.rthHigh >= near : Session.rthLow > 0 && Session.rthLow <= near;
+					if (filled) continue;
 					if (dist < best) { best = dist; m_near = near; m_far = far; any = true; }
 				}
 			}

@@ -75,7 +75,7 @@ static class Program
 			}
 			else bodies[key] = name;
 		}
-		Check(dup == 0, "CalcBar bodies are unique apart from names and string literals (" + dup + " duplicates)");
+		Check(dup == 0, "CalcBar bodies are unique apart from names, string literals and numeric literals (" + dup + " duplicates)");
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
@@ -102,6 +102,7 @@ static class Program
 		string body = text.Substring(brace, end - brace + 1);
 		body = Regex.Replace(body, @"//[^\n]*", "");
 		body = Regex.Replace(body, "\"[^\"]*\"", "\"\"");
+		body = Regex.Replace(body, @"\d+(?:\.\d+)?", "");
 		body = Regex.Replace(body, @"\s+", "");
 		return body;
 	}

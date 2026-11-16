@@ -34,7 +34,6 @@
 // Same session after a stop: no. The entry clock has passed.
 //
 // ## 7. Instruments
-// Market tag: futures-only
 // Typical: ES, NQ and ZN. This file is written for @ES.
 // Validated: Not yet verified
 //
