@@ -154,6 +154,8 @@ namespace PowerLanguage.Strategy
 		public _DV_09_WeeklyVWAP1(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Week; GxOrderPrefix = "DV09"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
@@ -187,7 +189,7 @@ namespace PowerLanguage.Strategy
 			double target = up ? entry + 0.15 * atr : entry - 0.15 * atr;
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(up, entry, stop, target, up ? "DV09LE" : "DV09SE");
-			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = m_restQty; if (up) m_le.Send(entry); else m_se.Send(entry);
+			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) m_le.Send(entry); else m_se.Send(entry);
 		}
 
 		private double atr30m()

@@ -153,11 +153,14 @@ namespace PowerLanguage.Strategy
 		public _DV_11_VWAPTrendFailure(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Week; GxOrderPrefix = "DV11"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV11LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV11SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (StrategyInfo.MarketPosition != 0 || rollOn(1) || Bars.CurrentBar < 300) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool boundary = ((int)tod.TotalMinutes) % 30 == 0;
