@@ -1256,7 +1256,8 @@ static class Program
 				const string C = "Central Standard Time", E = "Eastern Standard Time";
 				Check(IH.exchangeZoneIdOf("CME") == C && IH.exchangeZoneIdOf("cme") == C && IH.exchangeZoneIdOf("CBOT") == C && IH.exchangeZoneIdOf("ECBOT") == C
 					&& IH.exchangeZoneIdOf("CBT") == C && IH.exchangeZoneIdOf("GLOBEX") == C && IH.exchangeZoneIdOf("CBOE") == C && IH.exchangeZoneIdOf("XCME") == C && IH.exchangeZoneIdOf("XCBT") == C
-					&& IH.exchangeZoneIdOf("NYMEX") == E && IH.exchangeZoneIdOf("COMEX") == E && IH.exchangeZoneIdOf("NYSE") == E && IH.exchangeZoneIdOf("NASDAQ") == E && IH.exchangeZoneIdOf("ARCA") == E,
+					&& IH.exchangeZoneIdOf("NYMEX") == C && IH.exchangeZoneIdOf("COMEX") == C && IH.exchangeZoneIdOf("XNYM") == C && IH.exchangeZoneIdOf("XCEC") == C
+					&& IH.exchangeZoneIdOf("NYSE") == E && IH.exchangeZoneIdOf("NASDAQ") == E && IH.exchangeZoneIdOf("ARCA") == E,
 					"MI-B10 exchangeZoneIdOf: each listed exchange (case-insensitive) maps to its zone");
 				Check(IH.exchangeZoneIdOf("NYSE ARCA") == E && IH.exchangeZoneIdOf("CME-GLOBEX") == C && IH.exchangeZoneIdOf(" CME_MINI ") == C && IH.exchangeZoneIdOf("ESZ24:XCME") == C
 					&& IH.exchangeZoneIdOf("IDEALPRO / NASDAQ") == E,

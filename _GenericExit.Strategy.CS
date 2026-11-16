@@ -63,7 +63,7 @@ namespace PowerLanguage.Function
 		public int TimeStopBars;
 		public int TimeStopMinutes;
 		public ESessionExit SessionExit = ESessionExit.FlatBy;
-		public int FlatByHHMM = 1555;
+		public int FlatByHHMM = -1;
 		public int MaxHoldDays;
 
 		public int NewsExitMinutes;
@@ -912,6 +912,64 @@ namespace PowerLanguage.Function
 			return new DateTime(day.Year, day.Month, day.Day, hour, minute, 0);
 		}
 
+		/// <summary>Five minutes before a regular-session end. The carry-over rule stays in FlatByDeadline.</summary>
+		public static int FlatByFromSessionEnd(int endHhmm) { return MinusMinutes(endHhmm, 5); }
+
+		public struct FlatByChoice
+		{
+			public bool Resolved;
+			public int Hhmm;
+			public string Source;
+		}
+
+		/// <summary>dataReady is false in Create, StartCalc and any call before the first bar has sessions.
+		/// That call stays unresolved and does not fall back to 15:55. kind is rth, pit or sessions once a regular end is known.</summary>
+		public static FlatByChoice ChooseFlatBy(int requested, bool dataReady, string kind, int endHhmm)
+		{
+			var c = new FlatByChoice();
+			if (!dataReady)
+			{
+				c.Resolved = false;
+				c.Hhmm = requested;
+				c.Source = "pending";
+				return c;
+			}
+			c.Resolved = true;
+			if (requested >= 0 && requested <= 2359)
+			{
+				c.Hhmm = requested;
+				c.Source = "explicit";
+				return c;
+			}
+			int hour, minute;
+			if ((kind == "rth" || kind == "pit" || kind == "sessions") && TryClock(endHhmm, out hour, out minute))
+			{
+				c.Hhmm = FlatByFromSessionEnd(endHhmm);
+				c.Source = kind;
+				return c;
+			}
+			c.Hhmm = 1555;
+			c.Source = "fallback";
+			return c;
+		}
+
+		/// <summary>Pit / RTH close in US Eastern, HHMM, for a 24-hour template that has no RTH split.
+		/// CL 14:30 (NYMEX WTI open outcry 9:00 a.m.–2:30 p.m. ET). GC 13:30 (COMEX gold 8:20 a.m.–1:30 p.m. ET).
+		/// ZN and 6E 15:00, which is the 2:00 p.m. Central pit close (CBOT rates, CME FX).</summary>
+		public static bool TryRegularCloseEt(string root, out int hhmm)
+		{
+			hhmm = 0;
+			if (string.IsNullOrEmpty(root)) return false;
+			switch (root)
+			{
+				case "CL": hhmm = 1430; return true;
+				case "GC": hhmm = 1330; return true;
+				case "ZN": hhmm = 1500; return true;
+				case "6E": hhmm = 1500; return true;
+				default: return false;
+			}
+		}
+
 		public static int MinusMinutes(int hhmm, int minutes)
 		{
 			int total = (hhmm / 100) * 60 + (hhmm % 100) - minutes;
@@ -1454,7 +1512,7 @@ namespace PowerLanguage.Strategy
 		[Input] public int TimeStopMinutes { get; set; }
 		// Purpose: session flatten. Default: FlatBy. Units: ESessionExit. Range: the two members. Effect: HoldOvernight keeps the stop. Interactions: FlatByHHMM. Fixed or research-tuned: fixed
 		[Input] public ESessionExit SessionExit { get; set; }
-		// Purpose: flatten clock in the instrument's exchange time zone. Default: 1555. Units: HHMM. Range: 0..2359. Effect: 15:55 Central for CME futures, 15:55 Eastern for NYSE stocks. Interactions: SessionExit. Fixed or research-tuned: research-tuned
+		// Purpose: explicit flat-by clock in the instrument's exchange time zone. Default: -1 (regular session end minus 5 minutes). Units: HHMM. Range: -1 or 0..2359. Effect: a set clock overrides the session. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int FlatByHHMM { get; set; }
 		// Purpose: maximum calendar days in a trade. Default: 0 (off). Units: days. Range: >= 0. Effect: exit on that day count. Interactions: SessionExit. Fixed or research-tuned: research-tuned
 		[Input] public int MaxHoldDays { get; set; }
@@ -1512,7 +1570,7 @@ namespace PowerLanguage.Strategy
 			BreakEven = EBreakEven.AfterT1; BreakEvenUnit = ETriggerUnit.RMultiple; BreakEvenValue = 1.0; BreakEvenOffsetTicks = 1;
 			TrailMode = ETrailMode.Chandelier; TrailStart = ETrailStart.AfterT1; TrailStartUnit = ETriggerUnit.RMultiple; TrailStartValue = 1.0;
 			TrailAtrMult = 3.0; TrailAtrLength = 22; TrailBars = 2; TrailEmaLength = 20;
-			TimeStopBars = 0; TimeStopMinutes = 0; SessionExit = ESessionExit.FlatBy; FlatByHHMM = 1555; MaxHoldDays = 0; NewsExitMinutes = 0;
+			TimeStopBars = 0; TimeStopMinutes = 0; SessionExit = ESessionExit.FlatBy; FlatByHHMM = -1; MaxHoldDays = 0; NewsExitMinutes = 0;
 			RollExit = ERollExit.FlattenBeforeSplice; AddStopMode = EAddStopMode.RaiseToAddLow; ExitControl = EExitControl.None;
 			ControlExitBarsM1 = 30; ControlExitBarsM5 = 12; ControlExitBarsM15 = 8; ControlExitBarsH1 = 6; ControlExitBarsD1 = 5;
 			InitialStopIdx = -1; T1UnitIdx = -1; FinalTargetUnitIdx = -1; BreakEvenIdx = -1; BreakEvenUnitIdx = -1; TrailModeIdx = -1; TrailStartIdx = -1; TrailStartUnitIdx = -1;
@@ -1574,6 +1632,7 @@ namespace PowerLanguage.Strategy
 			gxNoteOrder();
 			if (m_wrap != null) gxAttachSession(m_wrap, m_wrapPos);
 			base.CalcBar();
+			if (m_wrap != null) gxResolveFlatBy(m_wrap.Config, FlatByHHMM);
 			if (m_inert || m_wrap == null) return;
 			if (!m_started && Bars.Status == EBarState.Close)
 			{
