@@ -4,7 +4,7 @@
 
 ## Owner decisions (2026-11-15 20:06 ET)
 
-1. Flat-by is five minutes before that market's regular close, in its own exchange zone. The close comes from the session template when that end is a daytime session, otherwise from the sandbox table: ES/NQ 16:00 ET (flat 14:55 CT), CL 14:30 ET (flat 14:25), GC 13:30 ET (flat 13:25), ZN and 6E 15:00 ET, stocks 16:00 ET (flat 15:55). An earlier catalogue clock is still an Eastern time converted by `_SandboxRules.FlatBy`. The GX zone map is unchanged.
+1. Flat-by is five minutes before that market's regular close, in its own exchange zone. The close comes from the session template when that end is a daytime session, otherwise from the sandbox table: ES/NQ 16:00 ET (flat 14:55 CT), CL 14:30 ET (flat 13:25 CT once NYMEX is Central), GC 13:30 ET (flat 12:25 CT once COMEX is Central), ZN and 6E 15:00 ET, stocks 16:00 ET (flat 15:55). An earlier catalogue clock is still an Eastern time converted by `_SandboxRules.FlatBy`. PR #141 maps NYMEX, COMEX, XNYM and XCEC to Central; this sandbox helper follows that map.
 2. Every GX host carries `ESandboxGate` and `ESandboxExit`, both default Off. The gate values are ValueMigration (RG-01), Balance (RG-02), DayType (RG-04), Noise (RG-05), Trend (RG-06), Compression (RG-08), ThreeFamily (RG-09) and FitRegime (RG-10). The exit values are HvnTarget (EX-01), NakedPoc (EX-02), BalanceWidth (EX-03), Partial1R (EX-07), FixedR (EX-08), Partial15R (EX-13), BreakEven3R (A2-73) and FreeRoll (A2-74). RG-07 is the trading subclass of A2-56, not a second switch. EX-04, EX-05, EX-06, EX-09, EX-10, EX-11 and EX-12 are not GX modes; their files journal the host condition. A scale exit uses 2 contracts.
 3. `RollDetection` is turned off in `StartCalc` when the instrument is not a future.
 4. Data1 is 1-minute. Data2 is the idea's native timeframe, declared on the `// Chart:` line. A file that emulates a higher bar requires Data2 and logs an Error when it is missing.
@@ -21,7 +21,7 @@ Deleted, because the catalogue merges them or says they do not exist: DV-04, DV-
 
 Analyst's count is 291 distinct IDs. This file lists all 291. The count by family matches that list: A2 79, PS 26, DV 24, EX 13, AV 13, YV 12, KD 11, OF 10, RG 10, SP 9, PF 8, VX 8, VW 8, TS 7, L2 7, MT 7, LE 7, VPF 6, VP 6, SW 6, CS 5, VPB 5, IX 3, EV 1.
 
-Ten signals are already in `sandbox/` from PR 124. PR 126 on `cursor/sandbox-extend` adds arms to those same ten files. This plan does not edit them.
+Ten signals were already in `sandbox/` from PR 124. The owner decisions apply to those ten as well: chart header, roll detection off for a non-future, and the protective stop on the entry bar.
 
 `_GenericExit` is on the GX branch (PRs 120, 122, 125), not on this branch. New files keep their own exit orders, and those orders are sent only from `sendExits`. `tests/SandboxCompile` does a semantic C# 7.3 compile of every sandbox strategy together with `_CustomSignal`, the volume-profile bases, and the engines, against MC stubs. The `TradeManager` using is aliased the same way as `tests/GxMcCompile`. MultiCharts reference assemblies are not in this environment. Native F7 on the MiniPC is still required. The check copies sources into `tests/SandboxCompile/Generated` and does not add a `Compile Include` for `sandbox/`, so RepoLint stays green.
 
@@ -377,9 +377,9 @@ Batch 2 in this update is the remaining engines-manual examples. Rows that the f
 | 1 | 20 | A2-29, A2-50, A2-51, A2-57, A2-58, AV-11, PS-01, PS-02, PS-05, PS-07, PS-08, PS-13, PS-19, PS-21, PS-22, PS-24, OF-01, OF-07, MT-01, MT-02 |
 | 4 | 16 | A2-45, A2-46, A2-48, A2-52, A2-53, A2-54, A2-59, A2-60, A2-61, A2-62, A2-65, A2-66, A2-67, A2-68, A2-72, A2-73 |
 | 5 | 19 | A2-74, A2-75, A2-76, A2-77, A2-79, AV-01, AV-02, AV-03, AV-04, AV-05, AV-06, AV-07, AV-09, AV-10, AV-12, AV-13, VW-01, VW-02, VW-03 |
-| 6 | 18 | VW-04, VW-06, VW-07, DV-01, DV-04, DV-05, DV-06, DV-07, DV-09, DV-10, DV-11, DV-12, DV-13, DV-14, DV-16, DV-17, DV-18, DV-19 |
-| 7 | 20 | DV-20, DV-21, DV-22, DV-23, DV-24, TS-02, TS-04, TS-05, TS-06, TS-07, SW-01, SW-03, SW-04, SW-05, SW-06, PS-03, PS-04, PS-06, PS-09, PS-10 |
-| 8 | 18 | PS-11, PS-14, PS-15, PS-16, PS-17, PS-18, PS-20, PS-23, PS-25, PS-26, OF-02, OF-03, OF-04, OF-05, OF-06, OF-08, OF-09, OF-10 |
+| 6 | 9 | VW-04, VW-06, VW-07, DV-01, DV-06, DV-07, DV-09, DV-11, DV-16 |
+| 7 | 18 | DV-20, DV-22, DV-23, TS-02, TS-04, TS-05, TS-06, TS-07, SW-01, SW-03, SW-04, SW-05, SW-06, PS-03, PS-04, PS-06, PS-09, PS-10 |
+| 8 | 17 | PS-11, PS-14, PS-15, PS-16, PS-17, PS-18, PS-20, PS-23, PS-25, OF-02, OF-03, OF-04, OF-05, OF-06, OF-08, OF-09, OF-10 |
 | 9 | 20 | MT-04, MT-05, MT-06, MT-07, SP-01, SP-02, SP-03, SP-04, SP-05, SP-06, SP-07, SP-08, SP-09, KD-01, KD-02, KD-03, KD-04, KD-05, KD-06, KD-07 |
 | 10 | 19 | KD-09, KD-10, KD-11, YV-01, YV-02, YV-03, YV-04, YV-05, YV-06, YV-07, YV-08, YV-09, YV-10, YV-11, YV-12, VX-01, VX-02, VX-03, VX-04 |
 | 11 | 20 | VX-05, VX-06, VX-07, VX-08, LE-01, LE-02, LE-03, LE-04, LE-05, LE-06, LE-07, EX-01, EX-02, EX-03, EX-04, EX-05, EX-06, EX-07, EX-08, EX-09 |
