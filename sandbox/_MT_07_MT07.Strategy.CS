@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -150,7 +151,8 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status == EBarState.Close)
 			{
 				TimeSpan tod = sessionClock(Bars.Time[0]);
-				if (((int)tod.TotalMinutes) % 60 == 0)
+				if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			if (((int)tod.TotalMinutes) % 60 == 0)
 				{
 					double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0);
 					if (!double.IsNaN(vah) && Bars.Close[0] > vah) m_htf++;
