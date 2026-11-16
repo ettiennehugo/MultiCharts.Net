@@ -1,0 +1,266 @@
+// ## 1. Identity
+// Catalogue ID: A2-28
+// ID mapping: A2-28 -> _A2_28_MinorExcess.Strategy.CS (class _A2_28_MinorExcess).
+// Name: A2-28 minor-component excess rejection
+// Header version: 1
+// Rules version: catalogue text, coded 2026-11-15 after main 9107598.
+// Study class: _A2_28_MinorExcess
+// File: sandbox/_A2_28_MinorExcess.Strategy.CS
+// Stage: sandbox
+// Owner approval: Not yet verified
+//
+// ## 2. Provenance
+// Source: specs/trading-idea-catalogue.md heading for A2-28.
+// Taken from the source: the Rules or Analyst 2 specification under that heading.
+// Research assumption: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+//
+// ## 3. Hypothesis
+// Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
+// Link: specs/trading-idea-catalogue.md, the A2-28 heading. Do not paste the entry.
+//
+// ## 4. Trade walkthrough
+// Trigger: the catalogue rule, on a closed bar.
+// Management: one contract.
+// Exit: see section 13.
+//
+// ## 5. Timing
+// Signal evaluated: closed bar only, after base.CalcBar.
+// Order sent: market next bar when this file trades.
+// Can fill: the next bar. IOG is disabled.
+//
+// ## 6. Position and re-entry
+// Position: flat or one.
+// Re-entry: one attempt per session where the file trades.
+// Same session after a stop: no new entry that session.
+//
+// ## 7. Instruments
+// Typical: ES or NQ as the catalogue says. Other roots are Not yet verified.
+// Validated: Not yet verified
+//
+// ## 8. Data
+// Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
+// Data2: named in section 22, or Not applicable.
+// Further series: Not applicable
+// Warmup: the statistic named in the rule.
+//
+// ## 9. Entry and filters
+// All of these must be true: the catalogue setup, and the 1 percent budget when an order is sent.
+// Skip when: the statistic is not ready, or the budget fails.
+//
+// ## 10. Position sizing and risk
+// Size: 1 contract where this file trades. journalArm is written by exitPlan when GX is used.
+// Risk limit: skip when 1 contract times the stop distance times BigPointValue exceeds 1 percent of equity.
+// Size is never shrunk to fit a stop: yes.
+//
+// ## 11. Orders, execution, and costs
+// Entry order: the order name in Create, when this file trades.
+// Exit orders: see section 13.
+// Fill assumption: next bar for a market order. IOG is off.
+// Costs: MultiCharts commission and slippage. This file does not set a fee or a slippage number.
+//
+// ## 12. Trade management
+// While open: exitBar, or sendExits, as section 13 says.
+//
+// ## 13. Exits
+// Exit orders: GX exitPlan on the entry bar and exitBar on each later closed bar. sendExits is not used.
+// Hard stop: the catalogue stop when this file trades.
+// Target: the catalogue target when GX or sendExits names one.
+// Time exit: the catalogue flat time.
+// Invalidation: the catalogue skip.
+//
+// ## 14. Regimes
+// Suitable: the catalogue window.
+// Unsuitable: outside that window.
+//
+// ## 15. Dependencies
+// Base class: _VolumeProfileFuturesBase
+// Engines enabled: those set in Create or StartCalc.
+// Engine settings enabled: set in code. They are not strategy inputs.
+//
+// ## 16. Pitfalls
+// Lookahead: orders from a closed bar.
+// Repaint: Not applicable.
+// Survivorship: Not applicable
+// Rolls: RollDetection Series where this file trades.
+// Data quality: Not yet verified on a chart.
+// Other: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+//
+// ## 17. Parameters
+// This file declares no strategy [Input] besides the inherited TraceLevel.
+// Input: none
+// Purpose: Not applicable
+// Default: Not applicable
+// Units: Not applicable
+// Range: Not applicable
+// Effect: Not applicable
+// Interactions: Not applicable
+// Fixed or research-tuned: Not applicable
+//
+// ## 18. Acceptance policy
+// Policy: catalogue-default
+// Predeclared before any result was read: yes, 2026-11-15. No result for this file has been read.
+// catalogue-default: judge this file by its catalogue kill, catalogue section 2.3 and the A2 generic kill. The stricter stated rule decides. This header does not change the catalogue.
+// big-winner-trend: Not applied
+// When 1 percent of winning trades is not a whole number, remove K = max(1, ceil(0.01 times the number of winning trades)). If there are no winning trades, remove none.
+//
+// ## 19. Validation
+// Status: Not yet verified
+// Evidence: Not yet verified
+// Window used: a run, when one exists, uses data through 2024-12-31 only.
+// Holdout (W-M and W-D Jan 2025-Oct 2026; W-T last 125 sessions) stays unviewed. Do not put those results here.
+//
+// ## 20. Edge monitoring
+// A person reads this section. It does not place orders and it does not change parameters.
+// Expectancy: Not yet verified
+//   Formula: win_rate * avg_win - loss_rate * avg_loss, same cost model as section 11.
+// Observations: Not yet verified
+// Drift: Not yet verified
+// Warning: Not yet verified
+// Pause: Not yet verified
+// Review: Not yet verified
+// Uncertainty: no run yet; the ASSUMPTION in section 16; the holdout still sealed.
+// No automatic retune. No autonomous live trading. A later parameter change is a new set, written offline.
+//
+// ## 21. Log diagnostics
+// journalArm name: the entry order name, when an entry is sent.
+// logSignal tag: A2-28
+// Skip / flatten lines: the trace strings in the file.
+// How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
+//
+// ## 22. Notes
+// Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
+// ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+// IOG is disabled.
+
+
+using System;
+using System.Collections.Generic;
+using PowerLanguage.Function;
+
+namespace PowerLanguage.Strategy
+{
+	[IOGMode(IOGMode.Disabled)]
+	public class _A2_28_MinorExcess : _VolumeProfileFuturesBase
+	{
+		private IOrderMarket m_le, m_se;
+		private DateTime m_day = DateTime.MinValue, m_b5 = DateTime.MinValue;
+		private double m_muMinor, m_sdMinor, m_muMajor, m_edge, m_extreme;
+		private int m_side, m_back;
+		private bool m_done, m_inMinor;
+		private double m_5c;
+
+		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { }
+
+		protected override void Create()
+		{
+			base.Create();
+			RollDetection = ERollDetection.Series;
+			ProfileStats.enabled = true;
+			GxOrderPrefix = "A228"; createGxOrders();
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A228LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A228SE", EOrderAction.SellShort));
+		}
+
+		protected override void StartCalc() { base.StartCalc(); m_muMinor = double.NaN; }
+
+		protected override void CalcBar()
+		{
+			base.CalcBar();
+			if (Bars.Status != EBarState.Close) return;
+			exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; m_done = m_inMinor = false; m_side = m_back = 0; m_extreme = double.NaN; loadPrior(day); }
+			if (StrategyInfo.MarketPosition != 0 || m_done || double.IsNaN(m_muMinor) || !IsRth()) return;
+			double edge = m_muMinor - m_side * m_sdMinor;
+			bool inside = m_side > 0 ? Bars.High[0] >= m_muMinor - m_sdMinor : Bars.Low[0] <= m_muMinor + m_sdMinor;
+			if (inside) { m_inMinor = true; m_extreme = double.IsNaN(m_extreme) ? (m_side > 0 ? Bars.Low[0] : Bars.High[0]) : (m_side > 0 ? Math.Min(m_extreme, Bars.Low[0]) : Math.Max(m_extreme, Bars.High[0])); }
+			step5(ToEastern(Bars.Time[0]), edge);
+		}
+
+		private void step5(DateTime et, double edge)
+		{
+			int slot = (et.Hour * 60 + et.Minute) / 5;
+			DateTime b = et.Date.AddMinutes(slot * 5);
+			if (m_b5 == DateTime.MinValue) { m_b5 = b; m_5c = Bars.Close[0]; return; }
+			if (b == m_b5) { m_5c = Bars.Close[0]; return; }
+			bool back = m_side > 0 ? m_5c > edge : m_5c < edge;
+			m_back = m_inMinor && back ? m_back + 1 : 0;
+			if (m_back >= 2)
+			{
+				bool trig = m_side > 0 ? Bars.Close[0] > m_5c : Bars.Close[0] < m_5c;
+				if (trig) enter();
+			}
+			m_b5 = b; m_5c = Bars.Close[0];
+		}
+
+		private void enter()
+		{
+			double tick = tickSize();
+			double atr = averageTrueRange(Bars, 14);
+			if (!(atr > 0) || double.IsNaN(m_extreme)) { m_done = true; return; }
+			double entry = Bars.Close[0];
+			double structural = m_side > 0 ? m_extreme - tick : m_extreme + tick;
+			double cap = entry - m_side * 1.2 * atr;
+			if (m_side * (entry - structural) > m_side * (entry - cap)) structural = cap;
+			double floor = 14 * tick;
+			if (m_side * (entry - structural) < floor) structural = entry - m_side * floor;
+			if (!budgetOk(entry, structural)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-28 skip: risk budget"); m_done = true; return; }
+			string name = m_side > 0 ? "A228LE" : "A228SE";
+			armGx(m_side > 0, entry, structural, m_muMajor, 1555, name);
+			if (m_side > 0) m_le.Send(); else m_se.Send();
+			m_done = true;
+		}
+
+		private void loadPrior(DateTime day)
+		{
+			m_muMinor = double.NaN; m_side = 0;
+			DateTime prev = DateTime.MinValue;
+			int maxAgo = Math.Min(2000, Bars.CurrentBar);
+			for (int ago = 0; ago < maxAgo; ago++)
+			{
+				RingBar rb = ringBarOf(1, ago);
+				if (rb.tradingDay < day && rb.tradingDay != DateTime.MinValue) { prev = rb.tradingDay; break; }
+			}
+			if (prev == DateTime.MinValue) return;
+			List<RingBar> bars = SessionBars(prev, true);
+			if (bars == null || bars.Count < 30) return;
+			double[] p, v;
+			if (!_ProfileStats.Histogram(bars, null, tickSize(), 2, out p, out v)) return;
+			ProfileMixtureResult mix = _ProfileStats.ProfileMixture(p, v, 2, _ProfileStats.MixtureSeed(prev), EGmmNeff.Bars, bars.Count, tickSize());
+			if (mix == null || mix.K != 2) return;
+			int minor = mix.pi[0] <= mix.pi[1] ? 0 : 1;
+			int major = 1 - minor;
+			if (mix.pi[minor] > 0.30) return;
+			m_muMinor = mix.mu[minor]; m_sdMinor = mix.sd[minor]; m_muMajor = mix.mu[major];
+			m_side = mix.mu[minor] < mix.mu[major] ? 1 : -1;
+		}
+
+		private bool budgetOk(double entry, double stop)
+		{
+			double risk = Math.Abs(entry - stop);
+			return risk > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
+		}
+
+		private void armGx(bool longSide, double entry, double stop, double target, int flatHHMM, string name)
+		{
+			GxConfig.InitialStop = EInitialStop.EntryProvided;
+			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
+			GxConfig.FinalTargetValue = Math.Abs(target - entry);
+			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.TrailMode = ETrailMode.None;
+			GxConfig.SessionExit = ESessionExit.FlatBy;
+			GxConfig.FlatByHHMM = flatHHMM;
+			GxConfig.TimeStopBars = 0;
+			GxConfig.TimeStopMinutes = 0;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+			ExitMarket mkt = new ExitMarket();
+			mkt.Tick = tickSize();
+			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
+			mkt.EntryStop = stop;
+			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1; mkt.ResolutionLabel = "1 min";
+			exitPlan(longSide, entry, stop, 1, mkt, name);
+		}
+	}
+}
