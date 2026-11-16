@@ -154,11 +154,16 @@ namespace PowerLanguage.Strategy
 			DateTime day = Bars.Time[0].Date;
 			int pos = StrategyInfo.MarketPosition;
 			if (pos > 0) { m_ls.Send(m_stop); if (day != m_entry) m_held++; if (m_held >= 4 || Bars.Close[0] < Bars.Open[0] - 0.5 * m_gain) m_lx.Send(); return; }
-			if (day != m_day) { if (m_cl.Count == 0 || m_cl[m_cl.Count - 1] != Session.priorRthClose) { } m_day = day; m_done = false; m_held = 0; }
+			if (day != m_day)
+			{
+				if (Session.priorRthClose > 0 && (m_cl.Count == 0 || m_cl[m_cl.Count - 1] != Session.priorRthClose)) m_cl.Add(Session.priorRthClose);
+				m_day = day; m_done = false; m_held = 0;
+			}
 			if (m_done || !IsRth() || !(Session.priorRthClose > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod > m_rthStart.Add(TimeSpan.FromMinutes(15))) return;
-			double priorMove = Session.priorRthHigh > 0 && Session.priorRthLow > 0 ? (Session.priorRthHigh - Session.priorRthLow) / Session.priorRthClose : 1;
+			double priorMove = 1;
+			if (m_cl.Count >= 2 && m_cl[m_cl.Count - 2] > 0) priorMove = Math.Abs(m_cl[m_cl.Count - 1] - m_cl[m_cl.Count - 2]) / m_cl[m_cl.Count - 2];
 			if (priorMove >= 0.02) return;
 			double up = (Bars.Close[0] - Session.priorRthClose) / Session.priorRthClose;
 			if (up < 0.04 || up > 0.06) return;
