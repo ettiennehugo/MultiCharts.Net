@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			HtfStreams = new[] { 2 };
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
 			m_last5 = m_day = DateTime.MinValue; m_runUp = m_runDn = 0; m_tradedToday = false;
 			m_stop = m_target = double.NaN;
 		}

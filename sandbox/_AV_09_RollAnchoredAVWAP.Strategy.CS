@@ -159,11 +159,14 @@ namespace PowerLanguage.Strategy
 			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09SX", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV09LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_ss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV09SS", EOrderAction.BuyToCover, OrderExit.FromAll)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "AV-09 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -192,8 +195,8 @@ namespace PowerLanguage.Strategy
 			}
 			if (m_used || m_armed == 0 || !IsRth() || rollOn(1) || double.IsNaN(vwap)) return;
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(120)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(121))) return;
-			double hourLo = Bars.Low[0], hourHi = Bars.High[0], prevLo = Bars.Low[60], prevHi = Bars.High[60];
-			for (int i = 1; i < 60; i++) { hourLo = Math.Min(hourLo, Bars.Low[i]); hourHi = Math.Max(hourHi, Bars.High[i]); prevLo = Math.Min(prevLo, Bars.Low[60 + i]); prevHi = Math.Max(prevHi, Bars.High[60 + i]); }
+			double hourLo = Bars.Low[0], hourHi = Bars.High[0], prevLo = lbBar(60).l, prevHi = lbBar(60).h;
+			for (int i = 1; i < 60; i++) { hourLo = Math.Min(hourLo, lbBar(i).l); hourHi = Math.Max(hourHi, lbBar(i).h); prevLo = Math.Min(prevLo, lbBar(60 + i).l); prevHi = Math.Max(prevHi, lbBar(60 + i).h); }
 			bool buy = m_armed > 0 && hourLo > prevLo && Bars.Close[0] > vwap;
 			bool sell = m_armed < 0 && hourHi < prevHi && Bars.Close[0] < vwap;
 			if (!buy && !sell) return;

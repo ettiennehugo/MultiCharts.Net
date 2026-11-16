@@ -148,11 +148,14 @@ namespace PowerLanguage.Strategy
 		private int m_unables;
 		public _A2_59_KaufmanCostUnables(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-59 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -175,7 +178,7 @@ namespace PowerLanguage.Strategy
 			double s = 0;
 			for (int i = ago; i < ago + 14; i++)
 			{
-				double tr = Math.Max(Bars.High[i] - Bars.Low[i], Math.Max(Math.Abs(Bars.High[i] - Bars.Close[i + 1]), Math.Abs(Bars.Low[i] - Bars.Close[i + 1])));
+				double tr = Math.Max(lbBar(i).h - lbBar(i).l, Math.Max(Math.Abs(lbBar(i).h - lbBar(i + 1).c), Math.Abs(lbBar(i).l - lbBar(i + 1).c)));
 				s += tr;
 			}
 			return s / 14;

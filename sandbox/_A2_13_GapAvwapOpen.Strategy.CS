@@ -183,7 +183,8 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EBranch), Branch)) throw new ArgumentException("_A2_13_GapAvwapOpen: Branch is not a defined EBranch");
 			NeedsDaily = true;
-			base.StartCalc();
+			DailyConfig.atrRestartOnRoll = false;   // Analyst MC17: the reseed after each quarterly roll left Atr20d NaN ~20 sessions per roll (173 days); PR #46 DECIDED: ATR carries on across rolls
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
 		}
 
 		protected override void CalcBar()

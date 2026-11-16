@@ -157,11 +157,14 @@ namespace PowerLanguage.Strategy
 			RangeProfiles.enabled = true;   // the leg profile is RangeProfileAfter; null while RangeProfiles is off
 		}
 
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(ESkewMin), SkewMin)) throw new ArgumentException("_A2_15_LegSkew: SkewMin is not a defined ESkewMin");
 			if (!Enum.IsDefined(typeof(ESkewBand), Band)) throw new ArgumentException("_A2_15_LegSkew: Band is not a defined ESkewBand");
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-15 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 
 		protected override bool legSkewAllows(int side)
@@ -183,9 +186,9 @@ namespace PowerLanguage.Strategy
 			int n = Math.Min(Bars.CurrentBar, 500);
 			for (int i = 0; i < n; i++)
 			{
-				if (Bars.Time[i] < m_acceptTime) break;
-				double v = Bars.Volume[i] > 0 ? Bars.Volume[i] : 1;
-				num += Bars.Close[i] * v; den += v;
+				if (lbBar(i).time < m_acceptTime) break;
+				double v = lbBar(i).v > 0 ? lbBar(i).v : 1;
+				num += lbBar(i).c * v; den += v;
 			}
 			return den > 0 ? num / den : double.NaN;
 		}

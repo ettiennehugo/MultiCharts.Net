@@ -156,11 +156,14 @@ namespace PowerLanguage.Strategy
 			GxOrderPrefix = "A268"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A268LE", EOrderAction.Buy));
 		}
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-68 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -173,10 +176,10 @@ namespace PowerLanguage.Strategy
 			double body = Math.Abs(Bars.Close[0] - Bars.Open[0]);
 			double range = Bars.High[0] - Bars.Low[0];
 			if (!(range > 0) || body > 0.1 * range) return;
-			for (int i = 1; i <= 5; i++) if (!(Bars.Close[i] < Bars.Open[i])) return;
+			for (int i = 1; i <= 5; i++) if (!(lbBar(i).c < lbBar(i).o)) return;
 			if (!(rsi(10) < 10)) return;
 			double runLow = Bars.Low[1];
-			for (int i = 2; i <= 5; i++) runLow = Math.Min(runLow, Bars.Low[i]);
+			for (int i = 2; i <= 5; i++) runLow = Math.Min(runLow, lbBar(i).l);
 			double run = Bars.High[5] - runLow;
 			if (!(run > 0)) return;
 			double entry = Bars.Close[0];
@@ -194,7 +197,7 @@ namespace PowerLanguage.Strategy
 			double up = 0, dn = 0;
 			for (int i = 1; i <= n; i++)
 			{
-				double ch = Bars.Close[i] - Bars.Close[i + 1];
+				double ch = lbBar(i).c - lbBar(i + 1).c;
 				if (ch > 0) up += ch; else dn -= ch;
 			}
 			if (up + dn == 0) return 50;

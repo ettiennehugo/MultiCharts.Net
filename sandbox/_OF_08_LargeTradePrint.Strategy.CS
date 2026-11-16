@@ -148,18 +148,21 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _OF_08_LargeTradePrint(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "OF-08 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vol = Bars.Volume[0], mean = 0;
-			for (int i = 1; i <= 20 && i <= Bars.CurrentBar; i++) mean += Bars.Volume[i];
+			for (int i = 1; i <= 20 && i <= Bars.CurrentBar; i++) mean += lbBar(i).v;
 			mean = mean / 20.0;
 			if (journalOn()) trace(ETraceLevel.Journal, "OF-08 volume " + vol.ToString("0") + " versus mean " + mean.ToString("0") + " is not a print size. No order.");
 		}

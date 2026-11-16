@@ -155,11 +155,14 @@ namespace PowerLanguage.Strategy
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A266LX", EOrderAction.Sell, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A266LS", EOrderAction.Sell, OrderExit.FromAll));
 		}
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-66 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -184,7 +187,7 @@ namespace PowerLanguage.Strategy
 			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) return;
 			m_le.Send(); m_used = true; m_state = 0; m_ls.Send(m_stop);
 		}
-		private double sma(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }
+		private double sma(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += lbBar(ago + i).c; return s / n; }
 		private double oscAt(int ago) { return sma(11, ago) - sma(80, ago); }
 		private double slowK()
 		{

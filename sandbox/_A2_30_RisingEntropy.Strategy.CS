@@ -250,7 +250,9 @@ namespace PowerLanguage.Strategy
 			if (!same) { m_p2Hi = m_p1Hi; m_p2Lo = m_p1Lo; m_p1Hi = s.priorRthHigh; m_p1Lo = s.priorRthLow; m_p1Close = s.priorRthClose; }
 			if (double.IsNaN(m_p2Hi)) return;
 			m_hi = Math.Max(m_p1Hi, m_p2Hi); m_lo = Math.Min(m_p1Lo, m_p2Lo);
-			if (journalOn()) trace(ETraceLevel.Journal, $"A2-30 {GlobexDate(Bars.Time[0]):yyyy-MM-dd} balance {m_lo:F2}-{m_hi:F2} (prior two RTH sessions)");
+			// Analyst MC17: 515 lines over 502 sessions came from Globex dates with no RTH (holidays) re-logging the carried balance;
+			// log only when a new RTH session has shifted the balance, so there is at most one line per trading day.
+			if (!same && journalOn()) trace(ETraceLevel.Journal, $"A2-30 {GlobexDate(Bars.Time[0]):yyyy-MM-dd} balance {m_lo:F2}-{m_hi:F2} (prior two RTH sessions)");
 		}
 	}
 }

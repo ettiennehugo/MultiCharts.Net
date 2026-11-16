@@ -151,19 +151,22 @@ namespace PowerLanguage.Strategy
 
 		public _OF_04_AbsorptionAtAn(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; GxOrderPrefix = "OF04"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "OF04LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "OF04SE", EOrderAction.SellShort)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); requireRing(1, 2000, "OF-04 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 25) return;
-			double mean = 0; for (int i = 1; i <= 20; i++) mean += Bars.Volume[i]; mean /= 20;
-			double ss = 0; for (int i = 1; i <= 20; i++) ss += (Bars.Volume[i] - mean) * (Bars.Volume[i] - mean);
+			double mean = 0; for (int i = 1; i <= 20; i++) mean += lbBar(i).v; mean /= 20;
+			double ss = 0; for (int i = 1; i <= 20; i++) ss += (lbBar(i).v - mean) * (lbBar(i).v - mean);
 			double sd = Math.Sqrt(ss / 20);
 			if (!(sd > 0) || (Bars.Volume[0] - mean) / sd < 2) return;
 			if (Math.Abs(Bars.Close[0] - Bars.Open[0]) > 2 * tickSize()) return;

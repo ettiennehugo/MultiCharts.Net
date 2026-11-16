@@ -147,6 +147,8 @@ namespace PowerLanguage.Strategy
 		public enum EArm { Acceptance, Failed }
 		[Input] public EArm Arm { get; set; }
 		private IOrderMarket m_le, m_se;
+		private IOrderMarket m_lxFlat, m_sxFlat;   // Analyst MC17: closes every contract still open at flat-by or from an earlier day
+		private DateTime m_entryDay = DateTime.MinValue, m_openSkipDay = DateTime.MinValue;
 		private DateTime m_day = DateTime.MinValue, m_event = DateTime.MinValue;
 		private bool m_done, m_built, m_out;
 		private int m_outCount, m_back;
@@ -167,6 +169,8 @@ namespace PowerLanguage.Strategy
 			GxOrderPrefix = "A235"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A235LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A235SE", EOrderAction.SellShort));
+			m_lxFlat = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A235FLX", EOrderAction.Sell));
+			m_sxFlat = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A235FSX", EOrderAction.BuyToCover));
 		}
 
 		protected override void StartCalc()
@@ -188,6 +192,14 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			DateTime et = ToEastern(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = m_built = m_out = false; m_outCount = m_back = 0; m_event = findEvent(day); }
+			int posNow = StrategyInfo.MarketPosition;
+			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
+			{   // Analyst MC17: the entry is 2 contracts and the GX plan is 1, so close every remaining contract at flat-by or the next day
+				if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
+				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
+			}
+			if (posNow != 0 && m_entryDay != day && m_openSkipDay != day)
+			{ m_openSkipDay = day; if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} entry skipped: position still open ({posNow} from {m_entryDay:yyyy-MM-dd})"); }
 			if (m_done || StrategyInfo.MarketPosition != 0 || m_event == DateTime.MinValue) return;
 			if (!m_built)
 			{
@@ -218,7 +230,7 @@ namespace PowerLanguage.Strategy
 			int flat = m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			if (!ok(entry, stop, target, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, target, flat);
-			if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
 		}
 
 		private void fail(DateTime et)
@@ -235,7 +247,7 @@ namespace PowerLanguage.Strategy
 			double stop = longSide ? Bars.Low[0] - tick : Bars.High[0] + tick;
 			if (!ok(entry, stop, m_poc, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, m_poc, m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
-			if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
 		}
 
 		private bool ok(double entry, double stop, double target, bool longSide)
@@ -317,8 +329,11 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }

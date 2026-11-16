@@ -154,11 +154,14 @@ namespace PowerLanguage.Strategy
 
 		public _AV_04_AVWAPHandoffContinuation(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV04LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV04LX", EOrderAction.Sell, OrderExit.FromAll)); m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV04LS", EOrderAction.Sell, OrderExit.FromAll)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "AV-04 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -173,11 +176,11 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 60 != 0) return;
-			double lo = Bars.Low[0]; for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) lo = Math.Min(lo, Bars.Low[i]);
+			double lo = Bars.Low[0]; for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) lo = Math.Min(lo, lbBar(i).l);
 			if (Math.Abs(lo - a.Value) <= 0.25 * a.Sigma) m_test = 0;
 			else if (m_test >= 0) m_test++;
-			if (m_test > 0 && m_test <= 10 && Bars.Close[0] > Bars.High[60]) m_ready = true;
-			if (!m_ready || !(lo <= a.Value + 0.25 * a.Sigma) || !(lo > Bars.Low[60])) return;
+			if (m_test > 0 && m_test <= 10 && Bars.Close[0] > lbBar(60).h) m_ready = true;
+			if (!m_ready || !(lo <= a.Value + 0.25 * a.Sigma) || !(lo > lbBar(60).l)) return;
 			double entry = Bars.Close[0];
 			m_stop = widen(true, entry, a.Band(-1));
 			if (!budget(entry, m_stop)) { m_used = true; return; }

@@ -148,17 +148,20 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _YV_05_AbsoluteParticipationGate(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "YV-05 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsRth() || ((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 100) return; var vols = new List<double>(); for (int k = 1; k <= 20; k++) { double v = 0; for (int i = 0; i < 5; i++) v += Bars.Volume[k * 5 + i]; vols.Add(v); } vols.Sort(); double bar = 0; for (int i = 0; i < 5; i++) bar += Bars.Volume[i]; bool pass = bar >= vols[10]; if (journalOn()) trace(ETraceLevel.Journal, "YV-05 5m volume gate " + pass + ". No order.");
+			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsRth() || ((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 100) return; var vols = new List<double>(); for (int k = 1; k <= 20; k++) { double v = 0; for (int i = 0; i < 5; i++) v += lbBar(k * 5 + i).v; vols.Add(v); } vols.Sort(); double bar = 0; for (int i = 0; i < 5; i++) bar += lbBar(i).v; bool pass = bar >= vols[10]; if (journalOn()) trace(ETraceLevel.Journal, "YV-05 5m volume gate " + pass + ". No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)
