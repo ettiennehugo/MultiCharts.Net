@@ -35,6 +35,9 @@ for name in functions + bases:
 for path in sorted((root / "sandbox").glob("_*.Strategy.CS")):
     (src / path.name).write_text(path.read_text())
     names.append("src/" + path.name)
+for path in sorted((root / "sandbox").glob("_*.Function.CS")):
+    (src / path.name).write_text(path.read_text())
+    names.append("src/" + path.name)
 names.insert(0, "src/CustomSignal.cs")
 
 includes = "\n".join('    <Compile Include="%s" />' % n for n in names)

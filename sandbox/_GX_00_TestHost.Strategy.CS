@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart the analyst loads. No second series.
 // Data2: Not applicable
 // Further series: Not applicable
