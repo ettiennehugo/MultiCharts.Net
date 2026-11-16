@@ -153,6 +153,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS03"; createGxOrders();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03SE", EOrderAction.SellShort));
 		}

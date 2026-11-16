@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _PS_23_ProfileShapeAt(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS23"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS23LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS23SE", EOrderAction.SellShort)); }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS23"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS23LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS23SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 

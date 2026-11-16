@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 		private double m_num, m_den, m_stop, m_target, m_failExtreme, m_failTrigger, m_atr;
 		private int m_below, m_atrN;
 		private DateTime m_day = DateTime.MinValue, m_b5 = DateTime.MinValue;
-		private bool m_gapUp, m_tradable, m_failed, m_done, m_holdDead;
+		private bool m_gapUp, m_tradable, m_gapChecked, m_failed, m_done, m_holdDead;
 		private double m_5c, m_prev5c, m_5h, m_5l, m_prevTr;
 
 		[Input] public ESandboxSide Side { get; set; }
@@ -162,6 +162,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A213LE", EOrderAction.Buy));
@@ -194,6 +195,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) newDay(day);
+			if (!m_gapChecked && IsRth()) checkGap(day);
 			if (IsRth()) { double typ = (Bars.High[0] + Bars.Low[0] + Bars.Close[0]) / 3.0; double v = Bars.Volume[0] > 0 ? Bars.Volume[0] : 1; m_num += typ * v; m_den += v; }
 			step5(et);
 			double av = m_den > 0 ? m_num / m_den : double.NaN;
@@ -221,11 +223,20 @@ namespace PowerLanguage.Strategy
 		private void newDay(DateTime day)
 		{
 			m_day = day; m_num = m_den = 0; m_below = 0; m_done = m_failed = m_holdDead = false; m_failExtreme = double.NaN;
+			m_tradable = m_gapUp = m_gapChecked = false;
+		}
+
+		// The rollover bar (18:00 ET) has no RTH open yet, so the gap is read on the first RTH bar of the day.
+		private void checkGap(DateTime day)
+		{
 			SessionStats s = Session;
+			if (s == null || !(s.rthOpen > 0)) return;
+			m_gapChecked = true;
 			VpExtra prior = PriorRthProfile();
 			double atr = DailyContext != null ? DailyContext.Atr20d : double.NaN;
-			m_tradable = s != null && prior != null && atr > 0 && s.rthOpen > 0 && Math.Abs(s.Gap) >= 0.5 * atr && (s.rthOpen > prior.vah || s.rthOpen < prior.val);
-			m_gapUp = s != null && s.Gap > 0;
+			m_tradable = prior != null && atr > 0 && Math.Abs(s.Gap) >= 0.5 * atr && (s.rthOpen > prior.vah || s.rthOpen < prior.val);
+			m_gapUp = s.Gap > 0;
+			if (journalOn()) trace(ETraceLevel.Journal, $"A2-13 {day:yyyy-MM-dd} gap {s.Gap:F2} open {s.rthOpen:F2} priorVA {(prior != null ? prior.val : double.NaN):F2}-{(prior != null ? prior.vah : double.NaN):F2} atr20d {atr:F2} tradable {m_tradable}");
 		}
 
 		private void hold(TimeSpan tod, double av, int side)
@@ -262,7 +273,8 @@ namespace PowerLanguage.Strategy
 			VpExtra prior = PriorRthProfile();
 			double target = prior != null ? (m_gapUp ? prior.vah : prior.val) : double.NaN;
 			double risk = Math.Abs(Bars.Close[0] - stop);
-			if (double.IsNaN(target) || side * (target - Bars.Close[0]) <= 0 || 2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "A2-13 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (double.IsNaN(target) || side * (target - Bars.Close[0]) <= 0) { if (journalOn()) trace(ETraceLevel.Journal, "A2-13 skip: prior VA target missing or not ahead of the entry"); m_done = true; return; }
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "A2-13 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size 2");
 			m_stop = stop; m_target = target; m_done = true;
 			if (side > 0) { m_le.Send(2); m_lxStp.Send(m_stop); } else { m_se.Send(2); m_sxStp.Send(m_stop); }

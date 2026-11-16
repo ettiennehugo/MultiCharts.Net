@@ -151,6 +151,12 @@ namespace PowerLanguage.Strategy
 
 		public _A2_15_LegSkew(object _ctx) : base(_ctx) { SkewMin = ESkewMin.T03; Band = ESkewBand.Favourable; }
 
+		protected override void Create()
+		{
+			base.Create();
+			RangeProfiles.enabled = true;   // the leg profile is RangeProfileAfter; null while RangeProfiles is off
+		}
+
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(ESkewMin), SkewMin)) throw new ArgumentException("_A2_15_LegSkew: SkewMin is not a defined ESkewMin");

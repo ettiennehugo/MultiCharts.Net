@@ -161,6 +161,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			RangeProfiles.enabled = true;   // RangeProfileAfter returns null while RangeProfiles is off
 			RollDetection = ERollDetection.Series;
 			EventConfig.enabled = true;
 			GxOrderPrefix = "A235"; createGxOrders();
@@ -191,8 +192,10 @@ namespace PowerLanguage.Strategy
 			if (!m_built)
 			{
 				if (et < m_event.AddMinutes(20)) return;
-				VpExtra prof = RangeProfileAfter(1, m_event.AddMinutes(1), m_event.AddMinutes(20));
-				if (prof == null || !(prof.vah > prof.val)) { m_done = true; return; }
+				DateTime evBar = SessionClock.FromEastern(m_event);   // m_event is ET wall clock; the bar ring is in chart time
+				VpExtra prof = RangeProfileAfter(1, evBar.AddMinutes(1), evBar.AddMinutes(20));
+				if (prof == null || !(prof.vah > prof.val)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} skip: no event profile T+1..T+20"); m_done = true; return; }
+				if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} event {m_event:HH:mm} profile VAL {prof.val:F2} POC {prof.poc:F2} VAH {prof.vah:F2}");
 				m_vah = prof.vah; m_val = prof.val; m_poc = prof.poc; m_built = true;
 			}
 			if (Arm == EArm.Acceptance) accept(et); else fail(et);
@@ -239,7 +242,10 @@ namespace PowerLanguage.Strategy
 		{
 			double risk = Math.Abs(entry - stop);
 			double room = longSide ? target - entry : entry - target;
-			return risk > 0 && room > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
+			if (!(risk > 0) || !(room > 0)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-35 skip: no room to the target"); return false; }
+			if (journalOn()) trace(ETraceLevel.Warning, "A2-35 multi-contract size 2");   // entries are sent with Send(2)
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "A2-35 skipped: multi-contract risk exceeds 1 percent"); return false; }
+			return true;
 		}
 
 		private void plan(bool longSide, double entry, double stop, double target, int flat)

@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _YV_01_X30mBalanceVA(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV01LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; GxOrderPrefix = "YV01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV01LE", EOrderAction.Buy)); }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

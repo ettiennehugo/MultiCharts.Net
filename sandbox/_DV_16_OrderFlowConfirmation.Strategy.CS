@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 		
 		private DateTime m_day = DateTime.MinValue;
 		public _DV_16_OrderFlowConfirmation(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _SP_01_FailedDoubleTop(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP01LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "SP01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP01LE", EOrderAction.Buy)); }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

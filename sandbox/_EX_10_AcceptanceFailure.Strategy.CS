@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _EX_10_AcceptanceFailure(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 

@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _PS_16_LVNSlowApproach(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS16"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS16LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS16SE", EOrderAction.SellShort)); }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS16"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS16LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS16SE", EOrderAction.SellShort)); }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

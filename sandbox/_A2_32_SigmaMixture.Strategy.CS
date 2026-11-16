@@ -149,6 +149,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		private bool m_fed, m_done;
 		private int m_up, m_dn;
+		private double m_upLvl = double.NaN, m_dnLvl = double.NaN;   // the nearest centre above / below, frozen while a break run is counting
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
@@ -179,7 +180,7 @@ namespace PowerLanguage.Strategy
 			if (sandboxBook()) return;
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; }
+			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; m_upLvl = m_dnLvl = double.NaN; }
 			SessionStats s = Session;
 			if (s != null && s.rthComplete && !m_fed)
 			{
@@ -200,9 +201,14 @@ namespace PowerLanguage.Strategy
 				if (lv > c && (double.IsNaN(above) || lv < above)) above = lv;
 				if (lv < c && (double.IsNaN(below) || lv > below)) below = lv;
 			}
-			m_up = !double.IsNaN(above) && c > above ? m_up + 1 : 0;
-			m_dn = !double.IsNaN(below) && c < below ? m_dn + 1 : 0;
+			// A break is two closes beyond the centre that was nearest before the run began (the prior bar's nearest level).
+			// Comparing with the nearest level to this close can never be true, because that level is beyond the close.
+			m_up = !double.IsNaN(m_upLvl) && c > m_upLvl ? m_up + 1 : 0;
+			m_dn = !double.IsNaN(m_dnLvl) && c < m_dnLvl ? m_dn + 1 : 0;
+			if (m_up == 0) m_upLvl = above;
+			if (m_dn == 0) m_dnLvl = below;
 			if (m_up < 2 && m_dn < 2) return;
+			if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} break {(m_up >= 2 ? "above " + m_upLvl.ToString("F2") : "below " + m_dnLvl.ToString("F2"))} close {c:F2}");
 			bool longSide = m_up >= 2;
 			double entry = c;
 			double tick = tickSize();
@@ -213,8 +219,11 @@ namespace PowerLanguage.Strategy
 			if ((longSide ? entry - stop : stop - entry) < floor) stop = entry - (longSide ? floor : -floor);
 			double target = longSide ? above : below;
 			double risk = Math.Abs(entry - stop);
-			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
-			{ m_done = true; return; }
+			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk)
+			{ if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} skip: next centre under 1.2R or missing"); m_done = true; return; }
+			if (journalOn()) trace(ETraceLevel.Warning, "A2-32 multi-contract size 2");
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			arm(longSide, entry, stop, target);
 			if (longSide) m_le.Send(2); else m_se.Send(2);
 		}

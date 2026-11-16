@@ -148,7 +148,7 @@ namespace PowerLanguage.Strategy
 		
 		private DateTime m_day = DateTime.MinValue;
 		public _AV_10_AVWAPProfileConfluence(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
