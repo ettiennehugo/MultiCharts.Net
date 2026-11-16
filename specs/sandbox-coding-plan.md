@@ -4,7 +4,7 @@
 
 ## Owner decisions (2026-11-15 20:06 ET)
 
-1. Flat-by is five minutes before that market's regular close, in its own exchange zone. A US stock or ETF (NYSE, ARCA, NASDAQ, AMEX, BATS, or category Stock) is 09:30–16:00 ET and does not use the session template's end. Other closes come from the session template when that end is a daytime session, otherwise from the sandbox table: ES/NQ 16:00 ET (flat 14:55 CT), CL 14:30 ET (flat 13:25 CT once NYMEX is Central), GC 13:30 ET (flat 12:25 CT once COMEX is Central), ZN and 6E 15:00 ET. An earlier catalogue clock is still an Eastern time converted by `_SandboxRules.FlatBy`. PR #141 maps NYMEX, COMEX, XNYM and XCEC to Central; this sandbox helper follows that map. GX #141 hard-codes the same 16:00 ET stock close.
+1. Flat-by is five minutes before that market's regular close, in its own exchange zone. The close comes from the session template when that end is a daytime session, otherwise from the sandbox table: ES/NQ 16:00 ET (flat 14:55 CT), CL 14:30 ET (flat 13:25 CT once NYMEX is Central), GC 13:30 ET (flat 12:25 CT once COMEX is Central), ZN and 6E 15:00 ET, stocks 16:00 ET (flat 15:55). An earlier catalogue clock is still an Eastern time converted by `_SandboxRules.FlatBy`. PR #141 maps NYMEX, COMEX, XNYM and XCEC to Central; this sandbox helper follows that map.
 2. Every GX host carries `ESandboxGate` and `ESandboxExit`, both default Off. The gate values are ValueMigration (RG-01), Balance (RG-02), DayType (RG-04), Noise (RG-05), Trend (RG-06), Compression (RG-08), ThreeFamily (RG-09) and FitRegime (RG-10). The exit values are HvnTarget (EX-01), NakedPoc (EX-02), BalanceWidth (EX-03), Partial1R (EX-07), FixedR (EX-08), Partial15R (EX-13), BreakEven3R (A2-73) and FreeRoll (A2-74). RG-07 is the trading subclass of A2-56, not a second switch. EX-04, EX-05, EX-06, EX-09, EX-10, EX-11 and EX-12 are not GX modes; their files journal the host condition. A scale exit uses 2 contracts.
 3. `RollDetection` is turned off in `StartCalc` when the instrument is not a future.
 4. Data1 is 1-minute. Data2 is the idea's native timeframe, declared on the `// Chart:` line. A file that emulates a higher bar requires Data2 and logs an Error when it is missing.
@@ -12,7 +12,7 @@
 6. The fill key is the day plus the swing anchor when the file has one. A new anchor the same day can trade. The same anchor can trade the next day.
 7. Files whose heading says the other side is a mirror take `ESandboxSide`, default Both. A2-27, AV-11 and OF-01 code the side that was missing.
 8. VX files do not trade. They log an Error that VIX data is unavailable. HV20 is not a substitute.
-9. CL, GC, ZN and 6E use the pit table in `_SandboxRules.ApplyPit` when the chart name matches. A US stock or ETF uses 09:30–16:00 ET. Other symbols keep the base session.
+9. CL, GC, ZN and 6E use the pit table in `_SandboxRules.ApplyPit` when the chart name matches. Other symbols keep the base session.
 10. A2-04, A2-13, A2-28, A2-32, A2-35, A2-45, A2-46 and PS-03 trade 2 contracts. A Warning is logged when that size is used, and an Error when the two-contract risk exceeds 1 percent. The same Warning and Error apply when a GX host's scale exit is on.
 11. A2-53 keeps a plain protective stop. The catalogue note says the sandbox does not stop-and-reverse.
 12. An own-exit file sends its protective stop on the same bar as the entry. GX hosts leave the stop to GX.
