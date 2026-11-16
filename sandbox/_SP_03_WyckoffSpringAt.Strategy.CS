@@ -143,12 +143,14 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_03_WyckoffSpringAt : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le; private double m_spring; private int m_armed; private bool m_done;
+		private IOrderMarket m_le; private double m_spring; private int m_armed; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_03_WyckoffSpringAt(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP03"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP03LE", EOrderAction.Buy)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_armed = 0; } }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 40) return;
 			VpExtra comp = Composite(1, 5); if (comp == null || !(comp.val > 0)) return;

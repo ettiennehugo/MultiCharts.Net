@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the SP-09 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a bullish gap is a bar whose low is above the high of the bar two back. The zone is that high to this low. The first later 1-minute higher low that trades into the zone buys. The stop is the start of the zone. The target is 1 R. The gap is only used inside the RTH session and is forgotten at the next session.
+// Research assumption: ASSUMPTION: ASSUMPTION: the trade is a short. A trigger bar is inside the window when its Eastern close is in [H:50, H+1:10) during RTH, and not after 15:30. A bearish 5-minute gap must still be open, a 1-minute bar must trade above an equal high, and the sell limit rests at that gap's near edge. The stop is the sweep high. The target is the nearer equal 5-minute low.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -84,7 +84,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a bullish gap is a bar whose low is above the high of the bar two back. The zone is that high to this low. The first later 1-minute higher low that trades into the zone buys. The stop is the start of the zone. The target is 1 R. The gap is only used inside the RTH session and is forgotten at the next session.
+// Other: ASSUMPTION: ASSUMPTION: the trade is a short. A trigger bar is inside the window when its Eastern close is in [H:50, H+1:10) during RTH, and not after 15:30. A bearish 5-minute gap must still be open, a 1-minute bar must trade above an equal high, and the sell limit rests at that gap's near edge. The stop is the sweep high. The target is the nearer equal 5-minute low.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -131,7 +131,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: a bullish gap is a bar whose low is above the high of the bar two back. The zone is that high to this low. The first later 1-minute higher low that trades into the zone buys. The stop is the start of the zone. The target is 1 R. The gap is only used inside the RTH session and is forgotten at the next session.
+// ASSUMPTION: ASSUMPTION: the trade is a short. A trigger bar is inside the window when its Eastern close is in [H:50, H+1:10) during RTH, and not after 15:30. A bearish 5-minute gap must still be open, a 1-minute bar must trade above an equal high, and the sell limit rests at that gap's near edge. The stop is the sweep high. The target is the nearer equal 5-minute low.
 // IOG is disabled.
 
 
@@ -143,23 +143,38 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_09_ClockWindowEqual : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le; private double m_gapLo, m_gapHi; private bool m_gap, m_done; private DateTime m_day = DateTime.MinValue;
+		private IOrderPriced m_se; private double m_limit, m_stopPx, m_target; private int m_life, m_window = -1; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_09_ClockWindowEqual(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP09"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP09LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP09"; createGxOrders(); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "SP09SE", EOrderAction.SellShort)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_gap = m_done = false; }
-			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 5) return;
-			if (!m_gap && Bars.Low[0] > Bars.High[2]) { m_gap = true; m_gapLo = Bars.High[2]; m_gapHi = Bars.Low[0]; return; }
-			if (!m_gap) return;
-			if (!(Bars.Low[0] <= m_gapHi && Bars.Low[0] >= m_gapLo && Bars.Low[0] > Bars.Low[1] && Bars.Close[0] > m_gapLo)) return;
-			double entry = Bars.Close[0];
-			double stop = widen(true, entry, m_gapLo);
-			double target = entry + (entry - stop);
-			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, target, "SP09LE", 0); m_le.Send(); m_done = true;
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_life = 0; m_window = -1; }
+			if (StrategyInfo.MarketPosition != 0) return;
+			if (m_life > 0) { m_se.Send(m_limit); m_life--; if (m_life == 0) m_done = true; return; }
+			if (m_done || !IsRth() || Bars.CurrentBar < 40) return;
+			DateTime et = ToEastern(Bars.Time[0]);
+			int minute = et.Minute, hour = et.Hour;
+			bool window = (minute >= 50 || minute < 10) && hour >= 9 && hour < 16 && !(hour > 15 || (hour == 15 && minute >= 30));
+			if (!window) return;
+			int id = hour * 60 + (minute >= 50 ? 50 : -10);
+			if (id == m_window) return;
+			double atr = averageTrueRange(Bars, 14); if (!(atr > 0)) return;
+			double gapNear = blockHigh(0), gapFar = blockLow(2);
+			if (!(gapNear < gapFar)) return;
+			double swept = blockHigh(1), earlier = blockHigh(3);
+			if (!(Math.Abs(swept - earlier) <= 0.10 * atr) || !(Bars.High[0] > swept + tickSize())) return;
+			double lowA = blockLow(1), lowB = blockLow(3);
+			if (!(Math.Abs(lowA - lowB) <= 0.10 * atr)) return;
+			m_limit = gapNear;
+			m_stopPx = widen(false, m_limit, Math.Max(Bars.High[0], swept) + tickSize());
+			m_target = Math.Max(lowA, lowB) - tickSize();
+			if (!(m_target < m_limit) || !budget(m_limit, m_stopPx)) { m_window = id; return; }
+			arm(false, m_limit, m_stopPx, m_target, "SP09SE", 0);
+			m_se.Send(m_limit); m_window = id; m_life = 2;
 		}
+		private double blockHigh(int ago) { double h = double.MinValue; for (int i = ago * 5; i < ago * 5 + 5; i++) h = Math.Max(h, Bars.High[i]); return h; }
+		private double blockLow(int ago) { double l = double.MaxValue; for (int i = ago * 5; i < ago * 5 + 5; i++) l = Math.Min(l, Bars.Low[i]); return l; }
 
 		private double widen(bool buy, double entry, double stop)
 		{

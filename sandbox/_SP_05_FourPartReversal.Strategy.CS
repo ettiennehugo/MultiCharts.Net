@@ -143,21 +143,20 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _SP_05_FourPartReversal : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se; private bool m_armLong, m_done; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _SP_05_FourPartReversal(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP05"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP05LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP05SE", EOrderAction.SellShort)); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = m_armLong = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
-			if (m_armLong || !m_armLong && m_done) { }
 			double atr = averageTrueRange(Bars, 5); VpExtra prior = PriorRthProfile();
 			if (!(atr > 0) || prior == null) return;
 			double span = Bars.High[0] - Bars.Low[0];
 			double delta = CumDelta(0).Value - CumDelta(1).Value;
 			bool wide = span >= 1.5 * atr && Math.Abs(Bars.Close[0] - prior.vah) <= atr;
-			bool sellBar = wide && Bars.Close[0] <= Bars.Low[0] + 0.25 * span && delta < 0 && Bars.Close[0] > Bars.Open[0];
+			bool sellBar = wide && Bars.Close[0] <= Bars.Low[0] + 0.25 * span && delta < 0;
 			bool buyBar = wide && Bars.Close[0] >= Bars.High[0] - 0.25 * span && delta > 0 && Bars.Close[0] < Bars.Open[0];
 			if (!sellBar && !buyBar) return;
 			if (double.IsNaN(delta)) return;
