@@ -4442,6 +4442,9 @@ namespace PowerLanguage.Strategy
 					end = ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), end, findTz("Eastern Standard Time"), p.exchangeZone);
 				return ExitSession.FlatByFromSessionEnd(end);
 			}
+			int pitEt;
+			if (p.exchangeZone != null && ExitSession.TryRegularCloseEt(p.root, out pitEt))
+				return ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), pitEt, findTz("Eastern Standard Time"), p.exchangeZone));
 			if (p.exchangeSessions == null || p.exchangeSessions.Length == 0) return -1;
 			TimeSpan latest = TimeSpan.MinValue;
 			bool any = false;

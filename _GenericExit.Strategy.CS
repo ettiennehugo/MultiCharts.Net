@@ -915,6 +915,23 @@ namespace PowerLanguage.Function
 		/// <summary>Five minutes before a regular-session end. The carry-over rule stays in FlatByDeadline.</summary>
 		public static int FlatByFromSessionEnd(int endHhmm) { return MinusMinutes(endHhmm, 5); }
 
+		/// <summary>Pit / RTH close in US Eastern, HHMM, for a 24-hour template that has no RTH split.
+		/// CL 14:30 (NYMEX WTI open outcry 9:00 a.m.–2:30 p.m. ET). GC 13:30 (COMEX gold 8:20 a.m.–1:30 p.m. ET).
+		/// ZN and 6E 15:00, which is the 2:00 p.m. Central pit close (CBOT rates, CME FX).</summary>
+		public static bool TryRegularCloseEt(string root, out int hhmm)
+		{
+			hhmm = 0;
+			if (string.IsNullOrEmpty(root)) return false;
+			switch (root)
+			{
+				case "CL": hhmm = 1430; return true;
+				case "GC": hhmm = 1330; return true;
+				case "ZN": hhmm = 1500; return true;
+				case "6E": hhmm = 1500; return true;
+				default: return false;
+			}
+		}
+
 		public static int MinusMinutes(int hhmm, int minutes)
 		{
 			int total = (hhmm / 100) * 60 + (hhmm % 100) - minutes;

@@ -598,6 +598,17 @@ static class Program
 		e.Open(p, true, 5000, 5000, 4900, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
 		Check(e.Manage(p, Quiet(true, new DateTime(2024, 6, 3, 14, 54, 0))).Reason == null, "14:54 Central holds");
 		Check(e.Manage(p, Quiet(true, new DateTime(2024, 6, 3, 14, 55, 0))).Reason == "FLATBY", "14:55 Central is the CME session-end flat-by");
+		int clEt, gcEt, znEt, euroEt;
+		Check(ExitSession.TryRegularCloseEt("CL", out clEt) && clEt == 1430, "CL pit close is 14:30 Eastern");
+		Check(ExitSession.TryRegularCloseEt("GC", out gcEt) && gcEt == 1330, "GC pit close is 13:30 Eastern");
+		Check(ExitSession.TryRegularCloseEt("ZN", out znEt) && znEt == 1500, "ZN pit close is 15:00 Eastern, 14:00 Central");
+		Check(ExitSession.TryRegularCloseEt("6E", out euroEt) && euroEt == 1500, "6E pit close is 15:00 Eastern, 14:00 Central");
+		Check(!ExitSession.TryRegularCloseEt("ES", out clEt), "ES uses its RTH split, not the pit table");
+		var day = new DateTime(2024, 6, 3);
+		Check(ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(day, 1430, et, ct)) == 1325, "CL flattens at 13:25 Central");
+		Check(ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(day, 1330, et, ct)) == 1225, "GC flattens at 12:25 Central");
+		Check(ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(day, 1500, et, ct)) == 1355, "ZN and 6E flatten at 13:55 Central");
+		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 13, 30, 0), 1325) == new DateTime(2024, 6, 4, 13, 25, 0), "a CL entry after 13:25 Central is held to the next session");
 	}
 
 	static void EmbeddedFillAnchorsStop()
@@ -1212,6 +1223,7 @@ static class Program
 		Check(src.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0 && gx.IndexOf("OrdersAfter(", StringComparison.Ordinal) >= 0, "embedded and the wrapper keep a stop working after a partial T1");
 		Check(gx.IndexOf("bar.TimeEt = gxExchangeTime(Bars.Time[0])", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxExchangeTime(Bars.Time[0]), 0)", StringComparison.Ordinal) >= 0, "the wrapper converts the bar and the entry to the exchange clock");
 		Check(gx.IndexOf("FlatByHHMM = -1", StringComparison.Ordinal) >= 0 && src.IndexOf("gxResolveFlatBy(", StringComparison.Ordinal) >= 0 && src.IndexOf("case \"NYMEX\": case \"COMEX\": case \"XNYM\": case \"XCEC\":", StringComparison.Ordinal) >= 0, "the default flat-by is the session end minus 5, and NYMEX/COMEX are Central");
+		Check(gx.IndexOf("TryRegularCloseEt", StringComparison.Ordinal) >= 0 && src.IndexOf("TryRegularCloseEt(p.root", StringComparison.Ordinal) >= 0, "a 24-hour template with no RTH split uses the pit close");
 		Check(src.IndexOf("EXIT PARTIAL", StringComparison.Ordinal) < 0 && gx.IndexOf("EXIT PARTIAL ", StringComparison.Ordinal) >= 0 && gx.IndexOf("plan.WorkingStop || d.StopChanged || d.PartialQty > 0", StringComparison.Ordinal) >= 0, "a partial is its own line and the wrapper still sends the runner stop");
 		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
 		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");
