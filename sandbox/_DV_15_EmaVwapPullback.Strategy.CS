@@ -34,12 +34,13 @@
 // Same session after a stop: yes, if a new touch passes the filters.
 //
 // ## 7. Instruments
-// Typical: 6E first, then ES and NQ, on 30-minute bars. This file is the ES port.
+// Typical: 6E first, then ES and NQ. The pullback is the 30-minute bar on Data2. This file is the ES port.
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Data1: @ES 30-minute, 24h Globex, dxFeed continuous unadjusted. Session VWAP is slot 1 on Data1.
-// Data2: Not applicable
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
+// Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. Session VWAP is slot 1 on Data1.
+// Data2: @ES 30-minute, same symbol and session. The EMA, the side count, and the pullback are that bar.
 // Further series: Not applicable. ATR20d is M-DAILY aggregated from Data1.
 // Warmup: 20 closes for the EMA seed path (the code waits emaLength bars) and a valid daily ATR20d. The slope needs eight stored VWAP values.
 // Tests use data through 2024-12-31 only.
@@ -214,6 +215,9 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EVwapSlot), VwapSlot)) throw new ArgumentException("_DV_15_EmaVwapPullback: VwapSlot is not a defined EVwapSlot");
 			if (!Enum.IsDefined(typeof(ESlopeMin), SlopeMin)) throw new ArgumentException("_DV_15_EmaVwapPullback: SlopeMin is not a defined ESlopeMin");
 			if (!Enum.IsDefined(typeof(EBracketFrac), Bracket)) throw new ArgumentException("_DV_15_EmaVwapPullback: Bracket is not a defined EBracketFrac");
@@ -224,14 +228,48 @@ namespace PowerLanguage.Strategy
 			m_ema = double.NaN; m_emaBars = 0; m_sideRun = 0; m_side = 0; m_vwap.Clear(); m_vwapDay = DateTime.MinValue;
 		}
 
+		private double m_restPx;
+		private bool m_restBuy, m_restOn, m_filledSetup;
+		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
+		private DateTime m_orderDay = DateTime.MinValue;
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "DV-15 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			double c = Bars.Close[0], tick = tickSize();
+			double tick = tickSize();
+			int pos = StrategyInfo.MarketPosition;
+			DateTime dayNow = GlobexDate(Bars.Time[0]);
+			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = 0; }
+			TimeSpan todNow = ToEastern(Bars.Time[0]).TimeOfDay;
+			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(todNow, Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			if (pos != 0)
+			{
+				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
+				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
+				return;
+			}
+			if (step == ERest.Resend)
+			{
+				if (m_restBuy) { m_leLmt.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { m_seLmt.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+			}
+			if (!takeNative()) return;
+			double c = BarsOfData(2).Close[0];
 			double k = 2.0 / (Cfg.emaLength + 1);
 			m_ema = double.IsNaN(m_ema) ? c : m_ema + k * (c - m_ema); m_emaBars++;
-			int prevSide = m_side, prevRun = m_sideRun;              // side state up to the previous bar
+			int prevSide = m_side, prevRun = m_sideRun;              // side state up to the previous 30-minute bar
 			int s = Math.Sign(c - m_ema);
 			m_sideRun = s != 0 && s == m_side ? m_sideRun + 1 : 1; m_side = s;
 			DateTime day = GlobexDate(Bars.Time[0]);
@@ -240,26 +278,21 @@ namespace PowerLanguage.Strategy
 				: day != m_vwapDay;
 			if (resetVwap) { m_vwapDay = VwapSlot == EVwapSlot.Week ? day.AddDays(-(((int)day.DayOfWeek + 6) % 7)) : day; m_vwap.Clear(); }
 			if (Vwap1Active) m_vwap.Add(CurrentVwap1);
-
-			int pos = StrategyInfo.MarketPosition;
-			if (pos != 0)
-			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
-				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
-				return;
-			}
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (!IsRth() || tod < Cfg.firstEntry || tod > Cfg.lastEntry || m_emaBars < Cfg.emaLength || rollOn(1)) return;
 			if (m_vwap.Count <= Cfg.slopeBars || DailyContext == null || !DailyContext.Valid) return;
 			int side = prevRun >= Cfg.sideBars ? prevSide : 0;                                      // side established BEFORE this bar
-			if (side == 0 || !(Bars.Low[0] <= m_ema && Bars.High[0] >= m_ema)) return;                // touch
+			if (side == 0 || !(BarsOfData(2).Low[0] <= m_ema && BarsOfData(2).High[0] >= m_ema)) return;   // touch
 			double vw = m_vwap[m_vwap.Count - 1], slope = vw - m_vwap[m_vwap.Count - 1 - Cfg.slopeBars];
 			double atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (!(atr > 0) || Math.Sign(slope) != side || Math.Abs(slope) < slopeMin() * atr || Math.Sign(c - vw) != side) return;
 			double d = Math.Max(bracketFrac() * DailyContext.Atr20d, Cfg.costFloorTicks * tick);
 			if (!(d > 0) || overRiskBudget(d)) { if (journalOn()) trace(ETraceLevel.Journal, $"DV-15 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: bracket {d / tick:F0} ticks breaches risk budget"); return; }
 			double entry = Math.Round(m_ema / tick) * tick;
+			int anchor = (int)Math.Round(entry / tick);
+			if (m_filledSetup && m_fillAnchor == anchor) return;          // one fill of this limit per day
 			m_stop = entry - side * d; m_target = entry + side * d;      // 1:1 bracket
+			m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = anchor;
 			if (side > 0) { m_leLmt.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
 			else { m_seLmt.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) logSignal("DV-15", side, entry, m_stop, new Dictionary<string, string> { { "vwap", vw.ToString("F2") }, { "slope", slope.ToString("F2") } }, true);

@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted.
 // Data2: @ES 60-minute, same symbol and session. HtfStreams is { 2 }.
 // Further series: Not applicable
@@ -203,8 +204,20 @@ namespace PowerLanguage.Strategy
 			EventConfig.classes = EEventClassMask.Macro;
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EVariant), Variant)) throw new ArgumentException("_TS_01_EuropeanOpenDrift: Variant is not a defined EVariant");
 			if (AtrLength < 1) throw new ArgumentException("_TS_01_EuropeanOpenDrift: AtrLength must be at least 1");
 			bool narrow = Variant == EVariant.Window0200To0300 || Variant == EVariant.Window0200To0300EventFilter;
@@ -214,6 +227,7 @@ namespace PowerLanguage.Strategy
 			EventConfig.enabled = m_filter;   // set before base.StartCalc: the engine is built there
 			HtfStreams = new[] { 2 };         // M-MTF: StartCalc fails loudly if Data2 is missing or another root
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			InstrumentProfile profile = InstrumentProfileOf(1);
 			if (profile == null || !profile.cost.known || profile.costFloorTicks < 1)
@@ -228,6 +242,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = Clock.ToEastern(Bars.Time[0]);
 			DateTime day = tradingDayKey(Bars.Time[0]);   // the 01:30 ET bar belongs to the Globex day that opened 18:00 ET the evening before
 			TimeSpan tod = et.TimeOfDay;

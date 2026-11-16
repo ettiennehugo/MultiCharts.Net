@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. Session VWAP is slot 1 on Data1.
 // Data2: @ES 30-minute, same symbol and session. HtfStreams is { 2 }.
 // Further series: Not applicable
@@ -204,6 +205,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EEntry), Entry)) throw new ArgumentException("_VW_05_LateDayVwap: Entry is not a defined EEntry");
 			if (AtrLength < 1) throw new ArgumentException("_VW_05_LateDayVwap: AtrLength must be at least 1");
 			HtfStreams = new[] { 2 };
@@ -260,7 +262,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"VW-05 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = px - a * r;
-			if (a > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (a > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "vwap", vwap.ToString("F2") }, { "priorClose", s.priorRthClose.ToString("F2") }, { "atr30", atr.ToString("F2") } };
@@ -271,6 +273,7 @@ namespace PowerLanguage.Strategy
 
 		private double atr30()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return double.NaN; }
 			int n = AtrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;
 			double sum = 0;

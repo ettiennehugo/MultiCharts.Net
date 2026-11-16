@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted.
 // Data2: @ES 5-minute, same symbol and session. HtfStreams is { 2 }.
 // Further series: Not applicable
@@ -187,11 +188,25 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "TS03SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EVariant), Variant)) throw new ArgumentException("_TS_03_CloseDrift: Variant is not a defined EVariant");
 			HtfStreams = new[] { 2 };
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_ref = m_drift = m_stop = double.NaN; m_day = DateTime.MinValue;
 		}
@@ -251,6 +266,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>ATR(14) of closed Data2 bars. Data2 is the 5-minute stream, so this is the catalogue's ATR5, length 14.</summary>
 		private double atr14Of5Minute()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return double.NaN; }
 			int n = Cfg.atrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;
 			double sum = 0;

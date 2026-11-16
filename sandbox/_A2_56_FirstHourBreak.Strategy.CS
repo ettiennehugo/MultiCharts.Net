@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. Eastern clock through the CME session adapter.
 // Data2: Not applicable
 // Further series: Not applicable
@@ -213,13 +214,27 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A256SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+
+		protected virtual void configureSessions()
+		{
+			TimeSpan pitStart, pitEnd, pitValue;
+			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			Clock.RthStart = pitStart;
+			Clock.RthEnd = pitEnd;
+			Clock.RthValueEnd = pitValue;
+		}
+
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(ESetup), Setup)) throw new ArgumentException("_A2_56_FirstHourBreak: Setup is not a defined ESetup");
 			if (!Enum.IsDefined(typeof(EHold), Hold)) throw new ArgumentException("_A2_56_FirstHourBreak: Hold is not a defined EHold");
 			if (Setup == ESetup.LbrRsi) { NeedsDaily = true; DailyConfig.lbrRsiLength = 3; }
 			MaxTradesPerDay = Reentry ? 2 : 1;
 			m_clock = null;
+			configureSessions();
 			base.StartCalc();
 			m_day = DateTime.MinValue; m_fhH = m_fhL = m_stop = m_mark = double.NaN; m_skip = false;
 			m_retried = m_carried = m_carryChecked = false; m_lastSide = 0;
@@ -286,8 +301,8 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(buy - sell, Cfg.costFloorTicks * tick);   // either side risks the first-hour range (+2 ticks), floored
 			if (overRiskBudget(r)) { if (!m_skip && journalOn()) trace(ETraceLevel.Journal, $"A2-56 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_skip = true; return; }
 			if (m_lastSide != 0) m_retried = true;
-			if (buyOk) m_leStp.Send(buy, Cfg.contracts);
-			if (sellOk) m_seStp.Send(sell, Cfg.contracts);
+			if (buyOk) { m_leStp.Send(buy, Cfg.contracts); m_lxStp.Send(sell); }
+			if (sellOk) { m_seStp.Send(sell, Cfg.contracts); m_sxStp.Send(buy); }
 			if (journalOn() && Bars.High[0] < buy && Bars.Low[0] > sell && tod == Cfg.fhEnd + TimeSpan.FromMinutes(1))
 			{
 				var ctx = new Dictionary<string, string> { { "fhHigh", m_fhH.ToString("F2") }, { "fhLow", m_fhL.ToString("F2") } };

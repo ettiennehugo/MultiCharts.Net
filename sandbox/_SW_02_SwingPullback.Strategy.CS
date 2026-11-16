@@ -34,13 +34,14 @@
 // Same session after a stop: a daily bar is the session. The next bar may enter if the rules pass. A roll bar does not.
 //
 // ## 7. Instruments
-// Typical: MES and MNQ, also GC, on daily bars. This file is written for @ES daily.
+// Typical: MES and MNQ, also GC. The daily bar is Data2. This file is written for @ES.
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Data1: @ES daily, RTH session template, dxFeed continuous unadjusted. Roll gaps sit inside the 200-bar average.
-// Data2: Not applicable
-// Further series: Not applicable. The swing-low AVWAP is built on Data1.
+// Chart: Data1 = 1-minute. Data2 = daily.
+// Data1: @ES 1-minute, RTH session template, dxFeed continuous unadjusted.
+// Data2: @ES daily, same symbol. The average, RSI, ATR, and hold are daily bars. Roll gaps sit inside the 200-bar average.
+// Further series: Not applicable. The swing-low AVWAP is built on Data2.
 // Warmup: 201 daily bars before an entry is considered (CurrentBar > smaLong + 1).
 // Tests use daily data through 2024-12-31 only.
 //
@@ -180,23 +181,37 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
 			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
 			base.StartCalc();
 			m_stop = double.NaN; m_entryBar = -1;
 		}
 
+		private int m_nativeSeen = -1;
+		private bool takeNative()
+		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "SW-02 Data2 missing"); return false; }
+			if (BarsOfData(2).Status != EBarState.Close) return false;
+			int bar = BarsOfData(2).CurrentBar;
+			if (bar == m_nativeSeen) return false;
+			m_nativeSeen = bar;
+			return true;
+		}
+
 		protected override void CalcBar()
 		{
 			base.CalcBar();
-			if (Bars.Status != EBarState.Close || Bars.CurrentBar <= Cfg.smaLong + 1) return;
-			double c = Bars.Close[0];
+			if (Bars.Status != EBarState.Close) return;
 			int pos = StrategyInfo.MarketPosition;
+			if (pos > 0) m_lxStp.Send(m_stop);
+			if (!takeNative() || BarsOfData(2).CurrentBar <= Cfg.smaLong + 1) return;
+			double c = BarsOfData(2).Close[0];
+			int dailyBar = BarsOfData(2).CurrentBar;
 			if (pos > 0)
 			{
-				if (m_entryBar < 0) m_entryBar = Bars.CurrentBar;
-				if (c > sma(Cfg.smaExit) || Bars.CurrentBar - m_entryBar >= Cfg.maxHoldBars) { m_lx.Send(); return; }
-				m_lxStp.Send(m_stop);
+				if (m_entryBar < 0) m_entryBar = dailyBar;
+				if (c > sma(Cfg.smaExit) || dailyBar - m_entryBar >= Cfg.maxHoldBars) m_lx.Send();
 				return;
 			}
 			m_entryBar = -1;
@@ -217,12 +232,12 @@ namespace PowerLanguage.Strategy
 				if (double.IsNaN(vah) || c > vah) { if (journalOn()) logSignal("SW-02", +1, c, double.NaN, new Dictionary<string, string> { { "vah", double.IsNaN(vah) ? "na" : vah.ToString("F2") } }, false); return; }
 				av = vah;
 			}
-			double tick = tickSize(), atr = averageTrueRange(Bars, Cfg.atrLength);
+			double tick = tickSize(), atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
 			if (!(atr > 0)) return;
 			double r = Math.Max(Cfg.disasterAtr * atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"SW-02 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = c - r;
-			m_le.Send(Cfg.contracts);
+			m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop);
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "filter", Filter.ToString() }, { "rsi2", rsi(Cfg.rsiLength).ToString("F1") }, { "atr20", atr.ToString("F2") }, { "level", Filter == EFilter.None ? "off" : double.IsNaN(av) ? "na" : av.ToString("F2") } };
@@ -231,13 +246,13 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[i]; return s / n; }
+		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += BarsOfData(2).Close[i]; return s / n; }
 
 		/// <summary>Cutler RSI (simple averages) over n closes; 50 when flat.</summary>
 		private double rsi(int n)
 		{
 			double up = 0, dn = 0;
-			for (int i = 0; i < n; i++) { double d = Bars.Close[i] - Bars.Close[i + 1]; if (d > 0) up += d; else dn -= d; }
+			for (int i = 0; i < n; i++) { double d = BarsOfData(2).Close[i] - BarsOfData(2).Close[i + 1]; if (d > 0) up += d; else dn -= d; }
 			return up + dn == 0 ? 50.0 : 100.0 * up / (up + dn);
 		}
 

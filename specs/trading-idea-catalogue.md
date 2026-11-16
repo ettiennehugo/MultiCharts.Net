@@ -3105,6 +3105,7 @@ Source: `/workspace/trading-ideas-analyst2.md` **Rev 6** (79 ideas A2-01…A2-79
   - **Kill:** the best element adds < 0.03R over plain ORB; **or** < 70% of combinations profitable net; **or** generic criteria.
 
 #### A2-53 · RTH gap fade with stop-and-reverse at the day's extreme (negative canary)
+- **Sandbox (Ettienne, 2026-11-15 20:06 ET):** the sandbox uses a plain protective stop. It does not stop-and-reverse. Judge the non-reversing version.
 - **Implementation status (v2.4):** **Implemented** — G0-b canary A2_53 in `_Gate0` / `_TestGate0` (PR #20; [#30](https://github.com/ettiennehugo/MultiCharts.Net/pull/30)). Not run in MC.
 - **Family · Source:** IM (intraday mechanical, Kaufman) · Analyst 2 Rev 6 · Kaufman Ch 16, "Fading the Opening Range": big S&P pit session, gap ≥ 0.50%. On the designated bar, fade the gap, with a stop-and-reverse at the day's extreme at entry time; exit at the close. **30m, 2000–May 2011: > 1,600 trades, +$32/trade gross.** Kaufman: needs a volatility filter. Ch 15: the open is the most likely daily extreme, and after big gaps the low (high) is at the open on up (down) gaps. That cuts **against** fading big gaps. **Grade:** B− (gross; the net edge is likely ≤ 0).
 - **Evidence:** **C (gross; net expected ≤ 0)** · **original A2 grade: B− (gross; the net edge is likely ≤ 0)** (rescaled per §3.12).

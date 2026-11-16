@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart the analyst loads. No second series.
 // Data2: Not applicable
 // Further series: Not applicable
@@ -168,6 +169,8 @@ namespace PowerLanguage.Strategy
 		private int m_wait;
 		private bool m_nextLong = true;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
 		public _GX_00_TestHost(object _ctx) : base(_ctx)
 		{
 			EmbedEngine = true;
@@ -225,5 +228,8 @@ namespace PowerLanguage.Strategy
 			else if (!gxArmEntry(longSide, entry, structural, planned)) return;
 			if (longSide) m_le.Send(); else m_se.Send();
 		}
+
+
+
 	}
 }

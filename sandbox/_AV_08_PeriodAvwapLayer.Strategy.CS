@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted.
 // Data2: Not applicable
 // Further series: Not applicable. Week and month VWAP are slots on Data1.
@@ -201,6 +202,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(ELayer), Layer)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Layer is not a defined ELayer");
 			if (!Enum.IsDefined(typeof(ESide), Side)) throw new ArgumentException("_AV_08_PeriodAvwapLayer: Side is not a defined ESide");
 			VwapConfig.resetPeriodSlotsOnRoll = Reanchor;
