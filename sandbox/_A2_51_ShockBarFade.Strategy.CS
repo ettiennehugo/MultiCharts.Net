@@ -165,6 +165,7 @@ namespace PowerLanguage.Strategy
 		private int m_shockBar = -1, m_side;
 		private double m_shockTr, m_stop;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_51_ShockBarFade(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -229,7 +230,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.disasterTr * tr, floor);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} skip: disaster stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_shockBar = Bars.CurrentBar; m_shockTr = tr; m_stop = c - side * r;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} shock TR {tr:F2} = {tr / med:F2} x median; fade {(side > 0 ? "long" : "short")}");
 		}
 

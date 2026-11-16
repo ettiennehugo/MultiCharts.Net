@@ -171,6 +171,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_13_RotationVolumeLevel(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -231,7 +232,7 @@ namespace PowerLanguage.Strategy
 				justArmed = false;
 				// entries 09:45-15:30 ET only (and before an early-close flat time): the limit sent on this close works on the next bar
 				bool window = tod >= Cfg.from && tod < Cfg.to && tod < flat;
-				if (window) { if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); }
+				if (window) { if (m_side > 0) m_leLmt.Send(m_level, Cfg.contracts); else m_seLmt.Send(m_level, Cfg.contracts); } m_lxStp.Send(m_stop); m_sxStp.Send(m_stop);
 			}
 		}
 		// true only on the bar that armed the level: that 1m bar belongs to the breakout, so its own range must not count

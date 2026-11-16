@@ -150,6 +150,7 @@ namespace PowerLanguage.Strategy
 	public class _RG_07_ExclusionGate : _A2_56_FirstHourBreak
 	{
 		private IOrderMarket m_flatL, m_flatS;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _RG_07_ExclusionGate(object _ctx) : base(_ctx) { }
 
 		protected override void Create()

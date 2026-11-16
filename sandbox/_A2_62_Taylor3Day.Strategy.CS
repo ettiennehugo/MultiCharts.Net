@@ -151,6 +151,7 @@ namespace PowerLanguage.Strategy
 		private double m_runHi, m_runLo, m_runCl, m_stop, m_buyHigh;
 		private int m_since = -1;
 		private bool m_seen, m_done, m_buying;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_62_Taylor3Day(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -172,7 +173,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day)
 			{
 				if (m_seen) { m_hi.Add(m_runHi); m_lo.Add(m_runLo); m_cl.Add(m_runCl); }
-				m_day = day; m_seen = false; m_done = false; m_runHi = double.MinValue; m_runLo = double.MaxValue; m_buying = classify();
+				m_day = day; m_seen = false; m_done = false; m_filledSetup = false; m_restOn = false; m_runHi = double.MinValue; m_runLo = double.MaxValue; m_buying = classify();
 			}
 			int pos = StrategyInfo.MarketPosition;
 			if (IsRth())
@@ -196,6 +197,7 @@ namespace PowerLanguage.Strategy
 			}
 			m_entryDay = DateTime.MinValue;
 			if (m_done || !m_buying || rollOn(1) || m_lo.Count < 1) return;
+			if (sandboxBook()) return;
 			double priorLo = m_lo[m_lo.Count - 1], priorHi = m_hi[m_hi.Count - 1], priorCl = m_cl[m_cl.Count - 1];
 			double atr = DailyContext.Atr20d;
 			if (!(atr > 0)) return;
@@ -205,14 +207,14 @@ namespace PowerLanguage.Strategy
 			{
 				m_stop = widen(priorLo, priorLo - 0.5 * atr);
 				if (!budget(priorLo, m_stop)) { m_done = true; return; }
-				m_buyHigh = 0; m_ll.Send(priorLo); m_done = true; return;
+				m_restPx = priorLo; m_restBuy = true; m_restOn = true; m_restQty = 1; m_buyHigh = 0; m_ll.Send(priorLo); return;
 			}
 			if (Session.rthOpen < priorCl && clock >= m_rthStart.Add(TimeSpan.FromMinutes(5)) && clock < m_rthStart.Add(TimeSpan.FromMinutes(6)))
 			{
 				double entry = Bars.Close[0];
 				m_stop = widen(entry, priorLo - 0.5 * atr);
 				if (!budget(entry, m_stop)) { m_done = true; return; }
-				m_le.Send(); m_done = true;
+				m_le.Send(); m_done = true; m_ls.Send(m_stop);
 			}
 		}
 		private bool classify()
@@ -239,5 +241,22 @@ namespace PowerLanguage.Strategy
 		{
 			return Math.Abs(entry - stop) * Bars.Info.BigPointValue <= equityAvailable(0.01);
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

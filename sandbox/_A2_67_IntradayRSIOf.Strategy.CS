@@ -146,6 +146,7 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_lx;
 		private IOrderPriced m_ls;
 		private double m_stop; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_67_IntradayRSIOf(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -165,7 +166,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = Bars.Time[0].Date;
-			if (day != m_day) { m_day = day; m_done = false; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			TimeSpan tod = Bars.Time[0].TimeOfDay;
 			bool boundary = ((int)tod.TotalMinutes) % 5 == 0;
 			int pos = StrategyInfo.MarketPosition;
@@ -187,7 +188,7 @@ namespace PowerLanguage.Strategy
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
 			if (entry - m_stop < ticks * tickSize()) m_stop = entry - ticks * tickSize();
 			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
-			m_le.Send(); m_done = true;
+			m_le.Send(); m_done = true; m_ls.Send(m_stop);
 		}
 		private double fiveLow(int ago)
 		{

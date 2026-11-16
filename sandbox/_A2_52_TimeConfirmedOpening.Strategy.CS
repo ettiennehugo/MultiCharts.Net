@@ -149,6 +149,7 @@ namespace PowerLanguage.Strategy
 		private double m_orh = double.NaN, m_orl = double.NaN, m_stop, m_target;
 		private int m_hold, m_entryBar, m_side;
 		private bool m_done;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_52_TimeConfirmedOpening(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -173,7 +174,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_hold = 0; m_orh = m_orl = double.NaN; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_hold = 0; m_orh = m_orl = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			if (pos != 0) { sendExits(pos); return; }
 			if (m_done || rollOn(1) || !IsRth()) return;
@@ -205,7 +206,7 @@ namespace PowerLanguage.Strategy
 			m_target = buy ? entry + w : entry - w;
 			if (!budget(entry, m_stop)) { m_done = true; return; }
 			m_side = buy ? 1 : -1; m_entryBar = Bars.CurrentBar;
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
 			m_done = true;
 		}
 		private void sendExits(int pos)

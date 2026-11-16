@@ -148,6 +148,7 @@ namespace PowerLanguage.Strategy
 		private readonly Dictionary<int, List<double>> m_hist = new Dictionary<int, List<double>>();
 		private int m_lastSlot = -1;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_09_NoiseBandLong(object _ctx) : base(_ctx) { }
 
 		protected override void Create()

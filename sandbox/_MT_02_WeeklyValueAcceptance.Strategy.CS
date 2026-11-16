@@ -164,6 +164,7 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _MT_02_WeeklyValueAcceptance(object _ctx) : base(_ctx) { AcceptanceDays = EAcceptanceDays.Two; }
 
 		protected override void Create()
@@ -242,7 +243,7 @@ namespace PowerLanguage.Strategy
 			double r = Bars.Close[0] - m_stop;   // R from the planned (signal-close) entry
 			if (r < Cfg.costFloorTicks * tickSize()) { r = Cfg.costFloorTicks * tickSize(); m_stop = Bars.Close[0] - r; }   // catalogue 2.1: widen to the cost floor
 			if (overRiskBudget(r)) { m_doneWeek = true; journal($"skip: stop {r / tickSize():F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }   // not resized
-			m_le.Send(Cfg.contracts); m_doneWeek = true;
+			m_le.Send(Cfg.contracts); m_doneWeek = true; m_lxStp.Send(m_stop);
 			var ctx = new Dictionary<string, string> { { "vah", m_vah.ToString() }, { "height", m_height.ToString() }, { "atr20d", atr.ToString("F2") }, { "accept", m_accept.ToString() } };
 			if (journalOn()) { journalArm("MT02LE", Bars.Close[0], m_stop, m_target, ctx); logSignal("MT-02", +1, Bars.Close[0], m_stop, ctx, true); }
 		}

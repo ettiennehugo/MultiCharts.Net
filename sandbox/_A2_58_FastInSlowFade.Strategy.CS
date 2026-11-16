@@ -162,7 +162,9 @@ namespace PowerLanguage.Strategy
 		private double m_slowPrev = double.NaN, m_fastPrev = double.NaN, m_stop;
 		private int m_slowDir, m_fastDir;
 
-		public _A2_58_FastInSlowFade(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _A2_58_FastInSlowFade(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -227,7 +229,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.stopAtr * atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-58 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_stop = c - side * r;                                    // approximate: from the signal close, not the fill
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(side > 0 ? "A258LE" : "A258SE", c, m_stop, double.NaN, null);
 		}
 

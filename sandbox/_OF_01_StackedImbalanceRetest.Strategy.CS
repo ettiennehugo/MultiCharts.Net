@@ -156,13 +156,17 @@ namespace PowerLanguage.Strategy
 		}
 		protected Of01Config Cfg { get; } = new Of01Config();
 
-		private IOrderPriced m_leLmt, m_lxStp, m_lxLmt;
-		private IOrderMarket m_lx;
+		private IOrderPriced m_leLmt, m_seLmt, m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
+		private IOrderMarket m_lx, m_sx;
+		private bool m_buyRun = true;
 		private DateTime m_day = DateTime.MinValue;
 		private bool m_zone, m_armed, m_used;
 		private double m_zLo, m_zHi, m_stop, m_target;
 
-		public _OF_01_StackedImbalanceRetest(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		private bool m_done;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _OF_01_StackedImbalanceRetest(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
@@ -171,9 +175,13 @@ namespace PowerLanguage.Strategy
 			OrderFlowEnabled = true;                          // lazy: footprints only exist when enabled
 			FlatBy = Cfg.flat;
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "OF01LE", EOrderAction.Buy));
+			m_seLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "OF01SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "OF01LX", EOrderAction.Sell));
+			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "OF01SX", EOrderAction.BuyToCover));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "OF01LS", EOrderAction.Sell, OrderExit.FromAll));
+			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "OF01SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "OF01LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "OF01ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
 		protected override void StartCalc() {
@@ -192,8 +200,9 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				m_used = true;
-				if (mustFlatten()) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
+				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
+				else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
 				return true;
 			
 			}
@@ -203,25 +212,64 @@ namespace PowerLanguage.Strategy
 			double atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (m_zone && !m_used)
 			{
-				if (!m_armed && h >= m_zHi + Cfg.awayAtr * atr) m_armed = true;
-				else if (m_armed && l <= m_zHi) { m_used = true; m_zone = false; return; }   // the retest happened without a fill: first retest only
-				if (m_armed && !mustFlatten()) { m_leLmt.Send(m_zHi, Cfg.contracts); return; }
+				if (m_buyRun)
+				{
+					if (!m_armed && h >= m_zHi + Cfg.awayAtr * atr) m_armed = true;
+					else if (m_armed && l <= m_zHi) { m_used = true; m_zone = false; return; }
+					if (m_armed && !mustFlatten() && _SandboxRules.Allows(Side, true))
+					{ m_leLmt.Send(m_zHi, Cfg.contracts); m_lxStp.Send(m_stop); return; }
+				}
+				else
+				{
+					if (!m_armed && l <= m_zLo - Cfg.awayAtr * atr) m_armed = true;
+					else if (m_armed && h >= m_zLo) { m_used = true; m_zone = false; return; }
+					if (m_armed && !mustFlatten() && _SandboxRules.Allows(Side, false))
+					{ m_seLmt.Send(m_zLo, Cfg.contracts); m_sxStp.Send(m_stop); return; }
+				}
 			}
 			if (m_zone || m_used || h - l <= 0 || (c - l) / (h - l) < 1 - Cfg.closeTopFrac) return;
 			_OrderFlow.StackedResult s = StackedImbalances(0, Cfg.ratio, Cfg.minVol, Cfg.minStack);
 			if (!s.Found || s.Quality > _OrderFlow.FlowQuality.High) return;
 			foreach (double[] run in s.Runs)
 			{
-				if (run[3] <= 0) continue;                      // buy runs first, low -> high: take the lowest
-				double stop = run[0] - tick, entry = run[1];
-				if (entry - stop < Cfg.costFloorTicks * tick) stop = entry - Cfg.costFloorTicks * tick;
-				double r = entry - stop;
-				if (Cfg.contracts * r * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
-				{ if (journalOn()) trace(ETraceLevel.Journal, $"OF-01 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: risk budget"); return; }
-				m_zLo = run[0]; m_zHi = run[1]; m_stop = stop; m_target = entry + Cfg.targetR * r; m_zone = true; m_armed = false;
-				if (journalOn()) journalArm("OF01LE", entry, m_stop, m_target, null);
+				bool buyRun = run[3] > 0;
+				if (buyRun && !_SandboxRules.Allows(Side, true)) continue;
+				if (!buyRun && !_SandboxRules.Allows(Side, false)) continue;
+				double stop = buyRun ? run[0] - tick : run[1] + tick;
+				double entry = buyRun ? run[1] : run[0];
+				double risk = Math.Abs(entry - stop);
+				if (risk < Cfg.costFloorTicks * tick)
+				{
+					stop = buyRun ? entry - Cfg.costFloorTicks * tick : entry + Cfg.costFloorTicks * tick;
+					risk = Cfg.costFloorTicks * tick;
+				}
+				if (Cfg.contracts * risk * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction))
+				{ if (journalOn()) trace(ETraceLevel.Journal, "OF-01 " + Bars.Time[0].ToString("yyyy-MM-dd HH:mm") + " skip: risk budget"); return; }
+				m_buyRun = buyRun;
+				m_zLo = run[0]; m_zHi = run[1]; m_stop = stop;
+				m_target = buyRun ? entry + Cfg.targetR * risk : entry - Cfg.targetR * risk;
+				m_zone = true; m_armed = false;
+				if (journalOn()) journalArm(buyRun ? "OF01LE" : "OF01SE", entry, m_stop, m_target, null);
 				return;
 			}
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+			}
+			return true;
+		}
+
 	}
 }

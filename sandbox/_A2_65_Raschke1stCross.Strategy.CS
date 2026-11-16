@@ -146,7 +146,9 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_ls, m_ss;
 		private double m_stop; private bool m_done; private DateTime m_day = DateTime.MinValue;
-		public _A2_65_Raschke1stCross(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _A2_65_Raschke1stCross(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 		protected override void Create()
 		{
 			base.Create(); RollDetection = ERollDetection.Series;
@@ -168,7 +170,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close || Bars.CurrentBar < 60) return;
 			DateTime day = Bars.Time[0].Date;
-			if (day != m_day) { m_day = day; m_done = false; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
 			double o0 = osc(0), o1 = osc(1), t0 = trend(0), t1 = trend(1);
 			bool crossUp = o1 <= t1 && o0 > t0;
@@ -186,7 +188,7 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			m_stop = widen(buy, entry, buy ? entry - 2.5 * atr : entry + 2.5 * atr);
 			if (Math.Abs(entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) return;
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
 			m_done = true;
 		}
 		private double sma(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }

@@ -168,6 +168,7 @@ namespace PowerLanguage.Strategy
 		private int m_touchBar, m_side, m_armBar;
 		private bool m_done;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _DV_02_FailedLevelFlip(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -211,6 +212,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !(m_br > 0) || !IsRth()) return;
+			if (sandboxBook()) return;
 			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			if (m_side != 0)                                           // armed: work the limit at L until the session ends
 			{
@@ -242,7 +244,7 @@ namespace PowerLanguage.Strategy
 
 		private void newDay(DateTime day)
 		{
-			m_day = day; m_done = false; m_touchBar = m_side = 0;
+			m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_touchBar = m_side = 0;
 			VpExtra prior = PriorRthProfile();
 			double atr = DailyContext != null ? DailyContext.Atr20d : double.NaN;
 			m_br = atr > 0 ? Cfg.f * atr : double.NaN;
@@ -252,5 +254,24 @@ namespace PowerLanguage.Strategy
 			if (!pocGate(day, prior.poc, ref m_br, out gw)) { if (journalOn()) trace(ETraceLevel.Journal, $"DV-02 {day:yyyy-MM-dd} gate: {gw}"); m_done = true; return; }
 			m_sd = Math.Max(m_br, Cfg.costFloorTicks * tickSize());   // stop = max(structural bracket, 14-tick floor); the target stays f x ATR20d
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leLmt.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seLmt.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

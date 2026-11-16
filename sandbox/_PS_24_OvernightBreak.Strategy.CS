@@ -167,6 +167,7 @@ namespace PowerLanguage.Strategy
 		private int m_runUp, m_runDn; private bool m_tradedToday;
 		private double m_stop = double.NaN, m_target = double.NaN;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_24_OvernightBreak(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -238,7 +239,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Abs(entry - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-24 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_tradedToday = true; return; }
 			m_stop = stop; m_target = entry + side * Cfg.targetR * r; m_tradedToday = true;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "on", level.ToString("F2") }, { "atr5", atr.ToString("F2") }, { "vscore", vs.Value.ToString() } };

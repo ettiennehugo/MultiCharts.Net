@@ -168,6 +168,7 @@ namespace PowerLanguage.Strategy
 		private int m_up, m_dn;
 		private double m_stop = double.NaN, m_target = double.NaN;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_08_NarrowIbBreak(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -189,7 +190,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			base.StartCalc();
-			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_up = m_dn = 0;
+			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0;
 			m_stop = m_target = double.NaN;
 		}
 
@@ -198,7 +199,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_ibLogged = m_narrow = m_done = false; m_up = m_dn = 0; }
+			if (day != m_day) { m_day = day; m_ibLogged = m_narrow = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; }
 			if (rollOn(1)) m_done = true;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay, flat = flatAt(day);
 			int pos = StrategyInfo.MarketPosition;
@@ -236,7 +237,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Abs(entry - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = stop; m_target = edge + side * Cfg.targetIb * ib;
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "ib", ib.ToString("F2") }, { "edge", edge.ToString("F2") } };

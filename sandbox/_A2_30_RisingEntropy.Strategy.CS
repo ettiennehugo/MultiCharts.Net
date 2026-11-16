@@ -153,6 +153,7 @@ namespace PowerLanguage.Strategy
 		private bool m_alert, m_done;
 		private DateTime m_alertAt = DateTime.MinValue;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_30_RisingEntropy(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -183,7 +184,7 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_side = 0; m_prevH = double.NaN; }
+			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			bool inside = !double.IsNaN(m_hi) && Bars.Close[0] < m_hi && Bars.Close[0] > m_lo;
 			bool sendExits()
@@ -209,7 +210,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
 			m_stop = stop; m_target = m_side > 0 ? m_hi + range : m_lo - range; m_done = true;
-			if (m_side > 0) m_le.Send(); else m_se.Send();
+			if (m_side > 0) { m_le.Send(); m_lxStp.Send(m_stop); } else { m_se.Send(); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(m_side > 0 ? "A230LE" : "A230SE", entry, m_stop, m_target, null);
 		}
 

@@ -156,6 +156,7 @@ namespace PowerLanguage.Strategy
 		private bool m_done, m_latched;
 		private double m_bHigh, m_bLow, m_bClose;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_04_OvernightInventory(object _ctx) : base(_ctx) { InventoryAtr = EInventoryAtr.A05; }
 
 		protected override void Create()
@@ -163,7 +164,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(11, 30, 0);
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A204LE", EOrderAction.Buy));
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A204LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A204LX", EOrderAction.Sell));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A204LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A204LT", EOrderAction.Sell, OrderExit.FromAll));
@@ -222,7 +223,7 @@ namespace PowerLanguage.Strategy
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-04 " + day.ToString("yyyy-MM-dd") + " skip: risk budget"); m_done = true; return; }
 			m_stop = stop; m_target = Bars.Close[0] + risk; m_done = true;
-			m_le.Send();
+			m_le.Send(2); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A204LE", Bars.Close[0], m_stop, m_target, null);
 		}
 

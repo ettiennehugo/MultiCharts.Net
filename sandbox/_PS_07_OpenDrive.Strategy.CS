@@ -165,6 +165,7 @@ namespace PowerLanguage.Strategy
 		private int m_slots, m_side;
 		private bool m_done;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_07_OpenDrive(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -187,7 +188,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			base.StartCalc();
-			m_day = DateTime.MinValue; m_side = 0; m_done = false; m_trigger = m_stop = double.NaN;
+			m_day = DateTime.MinValue; m_side = 0; m_done = false; m_filledSetup = false; m_restOn = false; m_trigger = m_stop = double.NaN;
 		}
 
 		protected override void CalcBar()
@@ -195,7 +196,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_hi = double.MinValue; m_lo = double.MaxValue; m_medSum = 0; m_slots = 0; m_side = 0; m_done = false; m_trigger = double.NaN; }
+			if (day != m_day) { m_day = day; m_hi = double.MinValue; m_lo = double.MaxValue; m_medSum = 0; m_slots = 0; m_side = 0; m_done = false; m_filledSetup = false; m_restOn = false; m_trigger = double.NaN; }
 			if (rollOn(1)) m_done = true;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			int pos = StrategyInfo.MarketPosition;
@@ -211,6 +212,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !IsRth()) return;
+			if (sandboxBook()) return;
 			if (tod > new TimeSpan(9, 30, 0) && tod <= Cfg.driveEnd)
 			{
 				m_hi = Math.Max(m_hi, Bars.High[0]); m_lo = Math.Min(m_lo, Bars.Low[0]);
@@ -232,7 +234,7 @@ namespace PowerLanguage.Strategy
 				if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-07 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget"); m_done = true; return; }
 				if (journalOn()) journalArm(m_side > 0 ? "PS07LE" : "PS07SE", m_trigger, m_stop, double.NaN, null);
 			}
-			if (m_side > 0) m_leStp.Send(m_trigger, Cfg.contracts); else m_seStp.Send(m_trigger, Cfg.contracts);
+			if (m_side > 0) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seStp.Send(m_trigger, Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
 
 
@@ -246,5 +248,24 @@ namespace PowerLanguage.Strategy
 		}
 
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seStp.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

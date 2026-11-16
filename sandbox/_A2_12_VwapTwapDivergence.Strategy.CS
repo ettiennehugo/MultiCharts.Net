@@ -154,6 +154,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue, m_bucket = DateTime.MinValue;
 		private bool m_done;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_12_VwapTwapDivergence(object _ctx) : base(_ctx) { DeltaMin = EDeltaMin.D025; }
 
 		protected override void Create()
@@ -183,7 +184,7 @@ namespace PowerLanguage.Strategy
 			DateTime et = ToEastern(Bars.Time[0]);
 			TimeSpan tod = et.TimeOfDay;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = false; m_twapNum = 0; m_twapN = 0; }
+			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_twapNum = 0; m_twapN = 0; }
 			if (IsRth()) { m_twapNum += Bars.Close[0]; m_twapN++; }
 			stepAtr(et);
 			double vwap = CurrentVwap1;
@@ -207,7 +208,7 @@ namespace PowerLanguage.Strategy
 			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-12 " + day.ToString("yyyy-MM-dd") + " skip: risk budget"); m_done = true; return; }
 			m_stop = stop; m_done = true;
-			m_le.Send();
+			m_le.Send(); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A212LE", Bars.Close[0], m_stop, double.NaN, null);
 		}
 

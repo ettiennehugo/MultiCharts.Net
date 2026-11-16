@@ -7,6 +7,7 @@
 // Study class: _A2_73_BreakevenStopAt
 // File: sandbox/_A2_73_BreakevenStopAt.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxExit.BreakEven3R, default Off, on every GX host.
 // Non-trading signal: Breakeven overlay. The host turns it on. This file does not enter.
 // Owner approval: Not yet verified
 //

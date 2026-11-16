@@ -168,11 +168,11 @@ namespace PowerLanguage.Strategy
 		protected DateTime m_acceptTime = DateTime.MinValue;
 		private double m_trigger = double.NaN, m_stop, m_target, m_entryRisk;
 
-		public enum EHostGate { Off, Migration, Balance, Noise, Trend, Compression }
-		public enum EHostExit { Host, Partial1R, Partial15R, BreakEven3R }
-		[Input] public EHostGate Gate { get; set; }
-		[Input] public EHostExit ExitMode { get; set; }
-		public _PS_01_BalanceBreakPullback(object _ctx) : base(_ctx) { Gate = EHostGate.Off; ExitMode = EHostExit.Host; }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _PS_01_BalanceBreakPullback(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off;  Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
@@ -222,6 +222,7 @@ namespace PowerLanguage.Strategy
 			if (pos != 0 && sendExits()) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_balanced || !(m_w > 0) || !IsRth() || tod > Cfg.to) return;
+			if (sandboxBook()) return;
 			if (m_side == 0)
 			{
 				if (tod < Cfg.from) return;
@@ -251,7 +252,7 @@ namespace PowerLanguage.Strategy
 			if (double.IsNaN(m_trigger)) return;
 			if (!legSkewAllows(m_side)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-01 {day:yyyy-MM-dd} skip: leg skew gate"); m_done = true; return; }
 			if (!hostGate(m_side > 0)) { if (journalOn()) trace(ETraceLevel.Journal, "PS-01 gate " + Gate + " blocked"); return; }
-			int qty = ExitMode == EHostExit.Partial1R || ExitMode == EHostExit.Partial15R ? 2 : Cfg.contracts;
+			int qty = ExitMode == ESandboxExit.Partial1R || ExitMode == ESandboxExit.Partial15R ? 2 : Cfg.contracts;
 			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "PS-01 multi-contract size " + qty);
 			if (qty > 1 && qty * m_entryRisk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "PS-01 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			if (m_side > 0) { m_leStp.Send(m_trigger, qty); m_lxStp.Send(m_stop); }
@@ -260,24 +261,24 @@ namespace PowerLanguage.Strategy
 
 		private bool hostGate(bool buy)
 		{
-			if (Gate == EHostGate.Off) return true;
+			if (Gate == ESandboxGate.Off) return true;
 			if (Session == null) return false;
 			VpExtra prior = PriorRthProfile();
-			if (Gate == EHostGate.Migration)
+			if (Gate == ESandboxGate.ValueMigration)
 			{
 				if (prior == null) return false;
 				return buy ? Bars.Close[0] >= prior.poc : Bars.Close[0] <= prior.poc;
 			}
 			double atr = averageTrueRange(Bars, 14);
-			if (Gate == EHostGate.Balance) return atr > 0 && (Session.rthHigh - Session.rthLow) < atr;
-			if (Gate == EHostGate.Noise) return atr > 0 && (Bars.High[0] - Bars.Low[0]) < atr;
-			if (Gate == EHostGate.Trend) return !double.IsNaN(DailyContext.Sma200) && (buy ? Session.priorRthClose > DailyContext.Sma200 : Session.priorRthClose < DailyContext.Sma200);
-			if (Gate == EHostGate.Compression) return !double.IsNaN(DailyContext.Atr20d) && (Session.rthHigh - Session.rthLow) < 0.6 * DailyContext.Atr20d;
+			if (Gate == ESandboxGate.Balance) return atr > 0 && (Session.rthHigh - Session.rthLow) < atr;
+			if (Gate == ESandboxGate.Noise) return atr > 0 && (Bars.High[0] - Bars.Low[0]) < atr;
+			if (Gate == ESandboxGate.Trend) return !double.IsNaN(DailyContext.Sma200) && (buy ? Session.priorRthClose > DailyContext.Sma200 : Session.priorRthClose < DailyContext.Sma200);
+			if (Gate == ESandboxGate.Compression) return !double.IsNaN(DailyContext.Atr20d) && (Session.rthHigh - Session.rthLow) < 0.6 * DailyContext.Atr20d;
 			return true;
 		}
 		private void newDay(DateTime day)
 		{
-			m_day = day; m_done = false; m_up = m_dn = m_side = 0; m_trigger = double.NaN; m_acceptTime = DateTime.MinValue;
+			m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = m_side = 0; m_trigger = double.NaN; m_acceptTime = DateTime.MinValue;
 			VpExtra comp = Composite(1, Cfg.n);                       // the n completed RTH profiles before today
 			m_balanced = comp != null && IsBalanced(1, Cfg.n, Cfg.balanceOverlap);
 			int? v = ValueMigrationScore(1, Cfg.n, 0.10, 20, false);  // completed sessions only (as of the prior close)
@@ -289,5 +290,24 @@ namespace PowerLanguage.Strategy
 		protected virtual bool legSkewAllows(int side) { return true; }
 
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seStp.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

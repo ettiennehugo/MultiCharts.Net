@@ -161,6 +161,7 @@ namespace PowerLanguage.Strategy
 		private Fvg m_gap;
 		private double m_level, m_br, m_sd;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _DV_08_FvgHvnAlignment(object _ctx) : base(_ctx) { }
 
 		protected override void Create()

@@ -155,15 +155,17 @@ namespace PowerLanguage.Strategy
 		private bool m_gapUp, m_tradable, m_failed, m_done, m_holdDead;
 		private double m_5c, m_prev5c, m_5h, m_5l, m_prevTr;
 
-		public _A2_13_GapAvwapOpen(object _ctx) : base(_ctx) { Branch = EBranch.Hold; }
+		[Input] public ESandboxSide Side { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		public _A2_13_GapAvwapOpen(object _ctx) : base(_ctx) { Branch = EBranch.Hold;  Side = ESandboxSide.Both; }
 
 		protected override void Create()
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);
-			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A213LE", EOrderAction.Buy));
-			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A213SE", EOrderAction.SellShort));
+			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A213LE", EOrderAction.Buy));
+			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A213SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A213LX", EOrderAction.Sell));
 			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A213SX", EOrderAction.BuyToCover));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A213LS", EOrderAction.Sell, OrderExit.FromAll));
@@ -239,7 +241,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(Bars.Close[0] - stop);
 			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
 			m_stop = stop; m_target = Bars.Close[0] + side * risk; m_done = true;
-			if (side > 0) m_le.Send(); else m_se.Send();
+			if (side > 0) { m_le.Send(2); m_lxStp.Send(m_stop); } else { m_se.Send(2); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(side > 0 ? "A213LE" : "A213SE", Bars.Close[0], m_stop, m_target, null);
 		}
 
@@ -258,7 +260,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(Bars.Close[0] - stop);
 			if (double.IsNaN(target) || side * (target - Bars.Close[0]) <= 0 || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
 			m_stop = stop; m_target = target; m_done = true;
-			if (side > 0) m_le.Send(); else m_se.Send();
+			if (side > 0) { m_le.Send(2); m_lxStp.Send(m_stop); } else { m_se.Send(2); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(side > 0 ? "A213LE" : "A213SE", Bars.Close[0], m_stop, m_target, null);
 		}
 

@@ -154,6 +154,7 @@ namespace PowerLanguage.Strategy
 		private double m_lowBelow, m_stop, m_target, m_entry;
 		private bool m_ready;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_14_WeeklyAvwapReclaim(object _ctx) : base(_ctx) { DaysBelow = EDaysBelow.Two; }
 
 		protected override void Create()
@@ -206,7 +207,7 @@ namespace PowerLanguage.Strategy
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-14 skip: risk budget"); m_below = 0; m_ready = false; return; }
 			m_stop = stop; m_target = Bars.Close[0] + 2 * risk; m_held = 0; m_below = 0; m_ready = false;
-			m_le.Send();
+			m_le.Send(); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A214LE", Bars.Close[0], m_stop, m_target, null);
 		}
 

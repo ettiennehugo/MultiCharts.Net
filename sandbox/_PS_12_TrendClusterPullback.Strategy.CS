@@ -163,6 +163,7 @@ namespace PowerLanguage.Strategy
 		private int m_above;
 		private bool m_valid;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_12_TrendClusterPullback(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -204,7 +205,7 @@ namespace PowerLanguage.Strategy
 				if (m_above >= Cfg.validCloses) m_valid = arm();
 				return;
 			}
-			m_leLmt.Send(m_cluster, Cfg.contracts);
+			m_leLmt.Send(m_cluster, Cfg.contracts); m_lxStp.Send(m_stop);
 			if (Bars.Low[0] <= m_cluster) m_cluster = double.NaN;                      // first touch consumed (filled or not)
 		}
 

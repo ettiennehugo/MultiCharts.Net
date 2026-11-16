@@ -150,6 +150,7 @@ namespace PowerLanguage.Strategy
 		private readonly double[] m_nlr = new double[6];
 		private int m_fill, m_side;
 		private double m_stop;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_60_MeyersNormalisedRange(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -204,7 +205,7 @@ namespace PowerLanguage.Strategy
 			m_stop = widen(buy, entry, m_stop);
 			if (!budget(entry, m_stop)) return;
 			m_side = buy ? 1 : -1;
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
 		}
 		private void holdStop(int pos) { if (pos > 0) m_ls.Send(m_stop); else m_ss.Send(m_stop); }
 		private int floorTicks()

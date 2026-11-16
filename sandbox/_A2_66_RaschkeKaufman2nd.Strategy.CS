@@ -146,6 +146,7 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_lx;
 		private IOrderPriced m_ls;
 		private int m_state; private double m_stop; private bool m_used;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_66_RaschkeKaufman2nd(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -181,7 +182,7 @@ namespace PowerLanguage.Strategy
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
 			if (entry - m_stop < ticks * tickSize()) m_stop = entry - ticks * tickSize();
 			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) return;
-			m_le.Send(); m_used = true; m_state = 0;
+			m_le.Send(); m_used = true; m_state = 0; m_ls.Send(m_stop);
 		}
 		private double sma(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }
 		private double oscAt(int ago) { return sma(11, ago) - sma(80, ago); }

@@ -164,6 +164,7 @@ namespace PowerLanguage.Strategy
 		private int m_side, m_inside;
 		private double m_vah, m_val, m_poc, m_trigger = double.NaN, m_stop;
 
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _PS_05_RejectedRepricingOpen(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -191,7 +192,7 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_opened = m_done = false; m_side = m_inside = 0; m_trigger = double.NaN; }
+			if (day != m_day) { m_day = day; m_opened = m_done = false; m_filledSetup = false; m_restOn = false; m_side = m_inside = 0; m_trigger = double.NaN; }
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
@@ -205,6 +206,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos != 0 && sendExits()) return;
 			if (m_done || !IsRth()) return;
+			if (sandboxBook()) return;
 			SessionStats s = Session;
 			double tick = tickSize(), c = Bars.Close[0];
 			if (!m_opened)
@@ -232,7 +234,26 @@ namespace PowerLanguage.Strategy
 				m_trigger = trig; m_stop = stop;
 				if (journalOn()) journalArm(m_side > 0 ? "PS05LE" : "PS05SE", m_trigger, m_stop, m_poc, null);
 			}
-			if (m_side > 0) m_leStp.Send(m_trigger, Cfg.contracts); else m_seStp.Send(m_trigger, Cfg.contracts);
+			if (m_side > 0) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seStp.Send(m_trigger, Cfg.contracts); m_sxStp.Send(m_stop); }
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_leStp.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_seStp.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }

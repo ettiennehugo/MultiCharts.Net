@@ -147,6 +147,8 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_lx, m_sx;
 		private DateTime m_day = DateTime.MinValue, m_entryDay = DateTime.MinValue;
 		private double m_stop; private int m_side; private bool m_armed;
+		private bool m_done;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_54_UpGapPullback(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -188,7 +190,7 @@ namespace PowerLanguage.Strategy
 			double floor = Math.Max(atr, floorTicks() * tickSize());
 			if (up && m_stop - s.priorRthClose < floor) m_stop = s.priorRthClose + floor;
 			if (!up && s.priorRthClose - m_stop < floor) m_stop = s.priorRthClose - floor;
-			if (up) m_se.Send(s.priorRthClose - tickSize()); else m_le.Send(s.priorRthClose + tickSize());
+			if (up) { m_se.Send(s.priorRthClose - tickSize()); m_ls.Send(m_stop); } else { m_le.Send(s.priorRthClose + tickSize()); m_ss.Send(m_stop); }
 			m_armed = true;
 		}
 		private void sendExits(int pos, DateTime day)
@@ -206,5 +208,24 @@ namespace PowerLanguage.Strategy
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) return p.costFloorTicks; } catch (Exception) { }
 			return 1;
 		}
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Exchange);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+				m_le.Send(m_restPx, m_restQty);
+			}
+			else
+			{
+				m_se.Send(m_restPx, m_restQty);
+			}
+			return true;
+		}
+
 	}
 }
