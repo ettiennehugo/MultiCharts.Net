@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the example's chart, dxFeed continuous unadjusted. Tests use data through 2024-12-31 only.
 // Data2: the example's second series, or Not applicable when the example has none.
 // Further series: Not applicable unless the example names one.
