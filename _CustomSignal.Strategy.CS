@@ -4442,6 +4442,19 @@ namespace PowerLanguage.Strategy
 				throw;
 			}
 			if (p == null) return -1;
+			string pick = ExitSession.FlatByEndKind(InstrumentText.ClassName(p.assetClass), p.exchange, p.root, p.exchangeRth != null);
+			if (pick == "cash")
+			{
+				kind = "rth";
+				if (p.exchangeZone == null) return 1600;
+				return ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), 1600, findTz("Eastern Standard Time"), p.exchangeZone);
+			}
+			int pitEt;
+			if (pick == "pit" && p.exchangeZone != null && ExitSession.TryRegularCloseEt(p.root, out pitEt))
+			{
+				kind = "pit";
+				return ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), pitEt, findTz("Eastern Standard Time"), p.exchangeZone);
+			}
 			if (p.exchangeRth != null)
 			{
 				int end = p.exchangeRth.valueEnd.Hours * 100 + p.exchangeRth.valueEnd.Minutes;
@@ -4449,12 +4462,6 @@ namespace PowerLanguage.Strategy
 					end = ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), end, findTz("Eastern Standard Time"), p.exchangeZone);
 				kind = "rth";
 				return end;
-			}
-			int pitEt;
-			if (p.exchangeZone != null && ExitSession.TryRegularCloseEt(p.root, out pitEt))
-			{
-				kind = "pit";
-				return ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), pitEt, findTz("Eastern Standard Time"), p.exchangeZone);
 			}
 			if (p.exchangeSessions == null || p.exchangeSessions.Length == 0) return -1;
 			TimeSpan latest = TimeSpan.MinValue;
