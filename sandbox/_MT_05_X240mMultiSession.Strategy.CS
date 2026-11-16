@@ -156,6 +156,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); requireRing(1, 2000, "MT-05 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
@@ -230,20 +231,65 @@ namespace PowerLanguage.Strategy
 		private bool hostGate(bool buy)
 		{
 			if (Gate == ESandboxGate.Off) return true;
-			VpExtra prior = null;
-			try { prior = PriorRthProfile(); } catch (Exception) { }
-			double poc = prior != null ? prior.poc : double.NaN;
-			double hi = Session != null ? Session.rthHigh : Bars.High[0];
-			double lo = Session != null ? Session.rthLow : Bars.Low[0];
-			double atr = averageTrueRange(Bars, 14);
-			double sma = double.NaN;
-			try { sma = DailyContext.Sma200; } catch (Exception) { }
-			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
-			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			string notReady;
+			try
+			{
+				SessionStats s = Session;
+				if (s != null) { hi = s.rthHigh; lo = s.rthLow; prev = s.priorRthClose; }
+				atr = averageTrueRange(Bars, 14);
+				if (Gate == ESandboxGate.ValueMigration) { VpExtra prior = PriorRthProfile(); if (prior != null) poc = prior.poc; }
+				if (_SandboxRules.GateReadsDaily(Gate) && NeedsDaily) { _DailyContext d = DailyContext; if (d != null) sma = d.Sma200; }
+				if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+				notReady = _SandboxRules.GateNotReady(Gate, poc, sma, prev, atr, DvpConfig.enabled);
+			}
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
 			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
-			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			gateLog(ok, buy);
 			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, false, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void honorExit(double entry, double risk)
 		{
