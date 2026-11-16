@@ -7,6 +7,7 @@
 // Study class: _VX_05_LongVolatilityTail
 // File: sandbox/_VX_05_LongVolatilityTail.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: VIX is not on this feed.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -146,14 +148,16 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _VX_05_LongVolatilityTail(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
-		protected override void StartCalc() { NeedsDaily = true; DailyConfig.hvLengths = new[] { 20 }; base.StartCalc(); }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; DailyConfig.hvLengths = new[] { 20 }; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double hv = DailyContext.Hv(20);
 			bool calm = hv > 0 && hv < 0.15;
-			if (journalOn()) trace(ETraceLevel.Journal, "VX-05 HV20 under 15 percent " + calm + ". Not a VIX percentile. No order.");
+			if (journalOn()) trace(ETraceLevel.Error, "VX-05 HV20 under 15 percent " + calm + ". VIX data is unavailable. No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -178,7 +182,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange);
 			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
