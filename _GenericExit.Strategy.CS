@@ -915,6 +915,44 @@ namespace PowerLanguage.Function
 		/// <summary>Five minutes before a regular-session end. The carry-over rule stays in FlatByDeadline.</summary>
 		public static int FlatByFromSessionEnd(int endHhmm) { return MinusMinutes(endHhmm, 5); }
 
+		public struct FlatByChoice
+		{
+			public bool Resolved;
+			public int Hhmm;
+			public string Source;
+		}
+
+		/// <summary>dataReady is false in Create, StartCalc and any call before the first bar has sessions.
+		/// That call stays unresolved and does not fall back to 15:55. kind is rth, pit or sessions once a regular end is known.</summary>
+		public static FlatByChoice ChooseFlatBy(int requested, bool dataReady, string kind, int endHhmm)
+		{
+			var c = new FlatByChoice();
+			if (!dataReady)
+			{
+				c.Resolved = false;
+				c.Hhmm = requested;
+				c.Source = "pending";
+				return c;
+			}
+			c.Resolved = true;
+			if (requested >= 0 && requested <= 2359)
+			{
+				c.Hhmm = requested;
+				c.Source = "explicit";
+				return c;
+			}
+			int hour, minute;
+			if ((kind == "rth" || kind == "pit" || kind == "sessions") && TryClock(endHhmm, out hour, out minute))
+			{
+				c.Hhmm = FlatByFromSessionEnd(endHhmm);
+				c.Source = kind;
+				return c;
+			}
+			c.Hhmm = 1555;
+			c.Source = "fallback";
+			return c;
+		}
+
 		/// <summary>Pit / RTH close in US Eastern, HHMM, for a 24-hour template that has no RTH split.
 		/// CL 14:30 (NYMEX WTI open outcry 9:00 a.m.–2:30 p.m. ET). GC 13:30 (COMEX gold 8:20 a.m.–1:30 p.m. ET).
 		/// ZN and 6E 15:00, which is the 2:00 p.m. Central pit close (CBOT rates, CME FX).</summary>
@@ -1594,6 +1632,7 @@ namespace PowerLanguage.Strategy
 			gxNoteOrder();
 			if (m_wrap != null) gxAttachSession(m_wrap, m_wrapPos);
 			base.CalcBar();
+			if (m_wrap != null) gxResolveFlatBy(m_wrap.Config, FlatByHHMM);
 			if (m_inert || m_wrap == null) return;
 			if (!m_started && Bars.Status == EBarState.Close)
 			{
@@ -1661,7 +1700,7 @@ namespace PowerLanguage.Strategy
 			c.TargetMode = TargetMode; c.T1Unit = T1Unit; c.T1Value = T1Value; c.T1ScalePct = T1ScalePct; c.FinalTargetUnit = FinalTargetUnit; c.FinalTargetValue = FinalTargetValue; c.SingleLotMode = SingleLotMode;
 			c.BreakEven = BreakEven; c.BreakEvenUnit = BreakEvenUnit; c.BreakEvenValue = BreakEvenValue; c.BreakEvenOffsetTicks = BreakEvenOffsetTicks;
 			c.TrailMode = TrailMode; c.TrailStart = TrailStart; c.TrailStartUnit = TrailStartUnit; c.TrailStartValue = TrailStartValue; c.TrailAtrMult = TrailAtrMult; c.TrailAtrLength = TrailAtrLength; c.TrailBars = TrailBars; c.TrailEmaLength = TrailEmaLength;
-			c.TimeStopBars = TimeStopBars; c.TimeStopMinutes = TimeStopMinutes; c.SessionExit = SessionExit; c.FlatByHHMM = gxResolveFlatBy(FlatByHHMM); c.MaxHoldDays = MaxHoldDays; c.NewsExitMinutes = NewsExitMinutes;
+			c.TimeStopBars = TimeStopBars; c.TimeStopMinutes = TimeStopMinutes; c.SessionExit = SessionExit; c.FlatByHHMM = FlatByHHMM; c.MaxHoldDays = MaxHoldDays; c.NewsExitMinutes = NewsExitMinutes;
 			c.RollExit = RollExit; c.AddStopMode = AddStopMode; c.ExitControl = ExitControl;
 			c.ControlExitBarsM1 = ControlExitBarsM1; c.ControlExitBarsM5 = ControlExitBarsM5; c.ControlExitBarsM15 = ControlExitBarsM15; c.ControlExitBarsH1 = ControlExitBarsH1; c.ControlExitBarsD1 = ControlExitBarsD1;
 			c.InitialStopIdx = InitialStopIdx; c.T1UnitIdx = T1UnitIdx; c.FinalTargetUnitIdx = FinalTargetUnitIdx; c.BreakEvenIdx = BreakEvenIdx; c.BreakEvenUnitIdx = BreakEvenUnitIdx; c.TrailModeIdx = TrailModeIdx; c.TrailStartIdx = TrailStartIdx; c.TrailStartUnitIdx = TrailStartUnitIdx;

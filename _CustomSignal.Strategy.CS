@@ -1723,6 +1723,8 @@ namespace PowerLanguage.Strategy
 		private bool m_gxZoneWarned;
 		private bool m_gxFlatWarned;
 		private bool m_gxFlatByCaptured;
+		private bool m_gxFlatResolved;
+		private int m_gxFlatHhmm;
 		private int m_gxFlatByRequest = -1;
 		private double m_gxStopDist;
 		private double m_gxFillStopDl;
@@ -2430,6 +2432,8 @@ namespace PowerLanguage.Strategy
 			m_gxZoneWarned = false;
 			m_gxFlatWarned = false;
 			m_gxFlatByCaptured = false;
+			m_gxFlatResolved = false;
+			m_gxFlatHhmm = 0;
 			m_gxFlatByRequest = -1;
 			m_gxStopDist = 0;
 			m_gxFillStopDl = 0;
@@ -2453,6 +2457,7 @@ namespace PowerLanguage.Strategy
 		{
 			noteCalcThread();   // cached for trace() off the calc thread (StopCalc runs on the UI thread)
 			if (m_instrPending) profilesFirstBar();   // M-INSTR PR-M3/M4: S1 re-check (enforced) + INSTR lines, before the RUN line (profileHash)
+			if (m_gx != null) gxApplyFlatBy();   // sessions exist on this bar; StartCalc must not resolve flat-by
 			// CS-3: one RUN line per run on the first calculated bar (Info level and above)
 			if (!m_runLogged)
 			{
@@ -4312,6 +4317,7 @@ namespace PowerLanguage.Strategy
 			m_gxCfg = cfg;
 			m_gxFlatByCaptured = true;
 			m_gxFlatByRequest = cfg.FlatByHHMM;
+			m_gxFlatResolved = false;
 			if (m_gx != null) m_gx.Config = cfg;
 		}
 
@@ -4364,6 +4370,7 @@ namespace PowerLanguage.Strategy
 			if (mkt.FloorTicks == 0) mkt.FloorTicks = gxFloorTicks();
 			mkt.EntryStop = structuralStop;
 			ensureGx(mkt);
+			gxApplyFlatBy();
 			createGxOrders();
 			double stop = m_gx.InitialStop(longSide, plannedEntry, mkt);
 			m_gxMkt = mkt;
@@ -4411,22 +4418,22 @@ namespace PowerLanguage.Strategy
 			return ExitSession.ToExchangeClock(barTime, p.barZone, p.exchangeZone);
 		}
 
-		/// <summary>-1 derives the flat-by clock: regular session end minus 5 minutes, in the exchange zone. Any other HHMM is that clock.</summary>
-		protected int gxResolveFlatBy(int requested)
+		/// <summary>False until this CalcBar has a bar time and the first-bar session read has finished. StartCalc is not ready.</summary>
+		bool gxFlatByReady()
 		{
-			if (requested >= 0 && requested <= 2359) return requested;
-			int derived = gxDerivedFlatByHhmm();
-			if (derived >= 0 && derived <= 2359) return derived;
-			if (!m_gxFlatWarned)
+			if (m_instrPending) return false;
+			try
 			{
-				m_gxFlatWarned = true;
-				trace(ETraceLevel.Error, "EXIT Error: GX flat-by has no regular session - using 15:55 exchange time");
+				if (Bars == null || Bars.Time[0] == DateTime.MinValue) return false;
 			}
-			return 1555;
+			catch (Exception) { return false; }
+			return true;
 		}
 
-		int gxDerivedFlatByHhmm()
+		/// <summary>Regular-session end in the exchange zone, before the 5-minute lead. kind is rth, pit or sessions.</summary>
+		int gxRegularEndHhmm(out string kind)
 		{
+			kind = "";
 			InstrumentProfile p = null;
 			try { p = InstrumentProfileOf(1); }
 			catch (Exception ex)
@@ -4440,11 +4447,15 @@ namespace PowerLanguage.Strategy
 				int end = p.exchangeRth.valueEnd.Hours * 100 + p.exchangeRth.valueEnd.Minutes;
 				if (p.exchangeRth.source == ERthSource.EquityIndexLegacy && p.exchangeZone != null)
 					end = ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), end, findTz("Eastern Standard Time"), p.exchangeZone);
-				return ExitSession.FlatByFromSessionEnd(end);
+				kind = "rth";
+				return end;
 			}
 			int pitEt;
 			if (p.exchangeZone != null && ExitSession.TryRegularCloseEt(p.root, out pitEt))
-				return ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), pitEt, findTz("Eastern Standard Time"), p.exchangeZone));
+			{
+				kind = "pit";
+				return ExitSession.ExchangeHhmm(new DateTime(2024, 6, 3), pitEt, findTz("Eastern Standard Time"), p.exchangeZone);
+			}
 			if (p.exchangeSessions == null || p.exchangeSessions.Length == 0) return -1;
 			TimeSpan latest = TimeSpan.MinValue;
 			bool any = false;
@@ -4460,7 +4471,40 @@ namespace PowerLanguage.Strategy
 					if (!any || p.exchangeSessions[i].EndTime > latest) { latest = p.exchangeSessions[i].EndTime; any = true; }
 			}
 			if (!any) return -1;
-			return ExitSession.FlatByFromSessionEnd(latest.Hours * 100 + latest.Minutes);
+			kind = "sessions";
+			return latest.Hours * 100 + latest.Minutes;
+		}
+
+		/// <summary>Resolve once, on a real bar. A call before that leaves FlatByHHMM untouched and logs nothing.</summary>
+		protected void gxResolveFlatBy(ExitConfig cfg, int requested)
+		{
+			if (m_gxFlatResolved)
+			{
+				if (cfg != null) cfg.FlatByHHMM = m_gxFlatHhmm;
+				return;
+			}
+			bool ready = gxFlatByReady();
+			string kind = "";
+			int end = -1;
+			if (ready && (requested < 0 || requested > 2359)) end = gxRegularEndHhmm(out kind);
+			ExitSession.FlatByChoice choice = ExitSession.ChooseFlatBy(requested, ready, kind, end);
+			if (!choice.Resolved) return;
+			m_gxFlatResolved = true;
+			m_gxFlatHhmm = choice.Hhmm;
+			if (cfg != null) cfg.FlatByHHMM = choice.Hhmm;
+			string tz = "?";
+			try
+			{
+				InstrumentProfile p = InstrumentProfileOf(1);
+				if (p != null && p.exchangeZone != null) tz = p.exchangeZone.Id;
+			}
+			catch (Exception) { }
+			if (choice.Source == "fallback" && !m_gxFlatWarned)
+			{
+				m_gxFlatWarned = true;
+				trace(ETraceLevel.Error, "EXIT Error: GX flat-by has no regular session - using 15:55 exchange time");
+			}
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "GX FLATBY resolved(" + choice.Hhmm.ToString("0000", CultureInfo.InvariantCulture) + ") tz(" + tz + ") source(" + choice.Source + ")");
 		}
 
 		void gxApplyFlatBy()
@@ -4471,7 +4515,7 @@ namespace PowerLanguage.Strategy
 				m_gxFlatByCaptured = true;
 				m_gxFlatByRequest = m_gx.Config.FlatByHHMM;
 			}
-			m_gx.Config.FlatByHHMM = gxResolveFlatBy(m_gxFlatByRequest);
+			gxResolveFlatBy(m_gx.Config, m_gxFlatByRequest);
 		}
 
 		/// <summary>Built-in stop, dollars per contract, so the fill bar is protected at the fill ± the planned distance for the whole position.</summary>

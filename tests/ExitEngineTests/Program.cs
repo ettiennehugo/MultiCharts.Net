@@ -609,6 +609,16 @@ static class Program
 		Check(ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(day, 1330, et, ct)) == 1225, "GC flattens at 12:25 Central");
 		Check(ExitSession.FlatByFromSessionEnd(ExitSession.ExchangeHhmm(day, 1500, et, ct)) == 1355, "ZN and 6E flatten at 13:55 Central");
 		Check(ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 13, 30, 0), 1325) == new DateTime(2024, 6, 4, 13, 25, 0), "a CL entry after 13:25 Central is held to the next session");
+		ExitSession.FlatByChoice early = ExitSession.ChooseFlatBy(-1, false, "", 0);
+		Check(!early.Resolved && early.Hhmm == -1 && early.Source == "pending", "a call before the first bar does not fall back to 15:55");
+		ExitSession.FlatByChoice esChoice = ExitSession.ChooseFlatBy(-1, true, "rth", 1500);
+		Check(esChoice.Resolved && esChoice.Hhmm == 1455 && esChoice.Source == "rth", "once the RTH end is known, ES resolves to 14:55");
+		ExitSession.FlatByChoice clChoice = ExitSession.ChooseFlatBy(-1, true, "pit", 1330);
+		Check(clChoice.Resolved && clChoice.Hhmm == 1325 && clChoice.Source == "pit", "a pit close resolves only after data is ready");
+		ExitSession.FlatByChoice forced = ExitSession.ChooseFlatBy(1555, true, "rth", 1500);
+		Check(forced.Resolved && forced.Hhmm == 1555 && forced.Source == "explicit", "an explicit clock is kept once data is ready");
+		ExitSession.FlatByChoice none = ExitSession.ChooseFlatBy(-1, true, "", 0);
+		Check(none.Resolved && none.Hhmm == 1555 && none.Source == "fallback", "the 15:55 fallback is only after data is ready and no regular session exists");
 	}
 
 	static void EmbeddedFillAnchorsStop()
@@ -1224,6 +1234,15 @@ static class Program
 		Check(gx.IndexOf("bar.TimeEt = gxExchangeTime(Bars.Time[0])", StringComparison.Ordinal) >= 0 && gx.IndexOf("gxExchangeTime(Bars.Time[0]), 0)", StringComparison.Ordinal) >= 0, "the wrapper converts the bar and the entry to the exchange clock");
 		Check(gx.IndexOf("FlatByHHMM = -1", StringComparison.Ordinal) >= 0 && src.IndexOf("gxResolveFlatBy(", StringComparison.Ordinal) >= 0 && src.IndexOf("case \"NYMEX\": case \"COMEX\": case \"XNYM\": case \"XCEC\":", StringComparison.Ordinal) >= 0, "the default flat-by is the session end minus 5, and NYMEX/COMEX are Central");
 		Check(gx.IndexOf("TryRegularCloseEt", StringComparison.Ordinal) >= 0 && src.IndexOf("TryRegularCloseEt(p.root", StringComparison.Ordinal) >= 0, "a 24-hour template with no RTH split uses the pit close");
+		int wrapStart = gx.IndexOf("protected override void StartCalc()", StringComparison.Ordinal);
+		int wrapCalc = gx.IndexOf("protected override void CalcBar()", wrapStart, StringComparison.Ordinal);
+		string wrapStartBody = wrapStart >= 0 && wrapCalc > wrapStart ? gx.Substring(wrapStart, wrapCalc - wrapStart) : "";
+		int copyAt = gx.IndexOf("private void CopyConfig(", StringComparison.Ordinal);
+		int copyEnd = gx.IndexOf("private ExitMarket Market()", copyAt, StringComparison.Ordinal);
+		string copyBody = copyAt >= 0 && copyEnd > copyAt ? gx.Substring(copyAt, copyEnd - copyAt) : "";
+		Check(wrapStartBody.IndexOf("gxResolveFlatBy(", StringComparison.Ordinal) < 0 && wrapStartBody.IndexOf("ChooseFlatBy(", StringComparison.Ordinal) < 0, "wrapper StartCalc does not resolve flat-by");
+		Check(copyBody.IndexOf("c.FlatByHHMM = FlatByHHMM;", StringComparison.Ordinal) >= 0 && copyBody.IndexOf("gxResolveFlatBy(", StringComparison.Ordinal) < 0, "CopyConfig keeps the raw FlatByHHMM");
+		Check(src.IndexOf("GX FLATBY resolved(", StringComparison.Ordinal) >= 0 && src.IndexOf("source(\" + choice.Source + \")", StringComparison.Ordinal) >= 0, "the first bar logs the resolved flat-by");
 		Check(src.IndexOf("EXIT PARTIAL", StringComparison.Ordinal) < 0 && gx.IndexOf("EXIT PARTIAL ", StringComparison.Ordinal) >= 0 && gx.IndexOf("plan.WorkingStop || d.StopChanged || d.PartialQty > 0", StringComparison.Ordinal) >= 0, "a partial is its own line and the wrapper still sends the runner stop");
 		Check(src.IndexOf("gxPublishFillR()", StringComparison.Ordinal) >= 0 && src.IndexOf("m_gxPos.InitialRPrice * m_gxMkt.Bpv", StringComparison.Ordinal) >= 0, "pm.R$ is the actual initial-stop dollars per contract");
 		Check(host.IndexOf("exitPlan(longSide, entry, structural, 1,", StringComparison.Ordinal) >= 0, "the embedded host arms qtyCode 1 and lets the MM size");
