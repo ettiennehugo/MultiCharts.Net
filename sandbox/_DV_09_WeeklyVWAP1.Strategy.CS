@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -148,7 +149,9 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_upper = new List<double>(), m_lower = new List<double>();
 		public _DV_09_WeeklyVWAP1(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Week; GxOrderPrefix = "DV09"; createGxOrders(); m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09LE", EOrderAction.Buy)); m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV09SE", EOrderAction.SellShort)); }
-		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
@@ -157,6 +160,7 @@ namespace PowerLanguage.Strategy
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || Bars.CurrentBar < 300) return;
 			if (day.DayOfWeek == DayOfWeek.Monday || day.DayOfWeek == DayOfWeek.Tuesday) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 30 != 0) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1, atr = DailyContext.Atr20d;
 			if (double.IsNaN(vwap) || !(sig > 0) || !(atr > 0)) return;
@@ -214,7 +218,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.HoldOvernight;
 			GxConfig.MaxHoldDays = 5; GxConfig.TimeStopMinutes = 0;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }

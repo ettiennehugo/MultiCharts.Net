@@ -7,6 +7,7 @@
 // Study class: _DV_16_OrderFlowConfirmation
 // File: sandbox/_DV_16_OrderFlowConfirmation.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Order-flow layer on a host level. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -146,6 +148,12 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _DV_16_OrderFlowConfirmation(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close || !IsRth()) return;
@@ -176,7 +184,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.HoldOvernight;
 			GxConfig.MaxHoldDays = 5; GxConfig.TimeStopMinutes = 0;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
