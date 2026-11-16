@@ -165,10 +165,13 @@ namespace PowerLanguage.Strategy
 			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "YV11ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
@@ -207,7 +210,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - m_stop);
 			m_hasTarget = up ? sma200 >= entry + risk : sma200 <= entry - risk && sma200 > 0;
 			m_target = sma200;
-			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = m_restQty; if (up) { m_le.Send(entry); m_ls.Send(m_stop); } else { m_se.Send(entry); m_ss.Send(m_stop); }
+			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) { m_le.Send(entry); m_ls.Send(m_stop); } else { m_se.Send(entry); m_ss.Send(m_stop); }
 		}
 		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }
 		private double ema9()

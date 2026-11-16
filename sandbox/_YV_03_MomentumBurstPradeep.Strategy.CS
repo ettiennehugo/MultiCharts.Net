@@ -153,9 +153,15 @@ namespace PowerLanguage.Strategy
 
 		public _YV_03_MomentumBurstPradeep(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV03LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV03LX", EOrderAction.Sell, OrderExit.FromAll)); m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV03LS", EOrderAction.Sell, OrderExit.FromAll)); }
+		protected override void StartCalc()
+		{
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			DateTime day = Bars.Time[0].Date;
 			int pos = StrategyInfo.MarketPosition;
 			if (pos > 0) { m_ls.Send(m_stop); if (day != m_entry) m_held++; if (m_held >= 4 || Bars.Close[0] < Bars.Open[0] - 0.5 * m_gain) m_lx.Send(); return; }
@@ -178,7 +184,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(true, entry, stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			m_stop = stop; m_gain = Bars.Close[0] - Session.priorRthClose; m_entry = day;
-			m_le.Send(); m_done = true; m_ls.Send(m_stop);
+			m_le.Send(); m_ls.Send(m_stop);
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -249,6 +255,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

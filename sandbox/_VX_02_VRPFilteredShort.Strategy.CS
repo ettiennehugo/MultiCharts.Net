@@ -146,7 +146,8 @@ namespace PowerLanguage.Strategy
 	public class _VX_02_VRPFilteredShort : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _VX_02_VRPFilteredShort(object _ctx) : base(_ctx) { }
+		[Input] public ESandboxSide Side { get; set; }
+		public _VX_02_VRPFilteredShort(object _ctx) : base(_ctx) {  Side = ESandboxSide.Both; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc() {
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

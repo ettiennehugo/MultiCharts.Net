@@ -153,11 +153,14 @@ namespace PowerLanguage.Strategy
 		public _YV_12_PriorDayHigh(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV12"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 20) return;
 			if (sandboxBook()) return;
@@ -179,7 +182,7 @@ namespace PowerLanguage.Strategy
 			if ((sell && !(target < entry)) || (!sell && !(target > entry)) || !budget(entry, stop)) { m_done = true; return; }
 			m_timeStop = 30;
 			arm(!sell, entry, stop, target, sell ? "YV12SE" : "YV12LE", 0);
-			m_restPx = entry; m_restBuy = sell; m_restOn = true; m_restQty = m_restQty; if (sell) m_se.Send(entry); else m_le.Send(entry);
+			m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = 1; if (sell) m_se.Send(entry); else m_le.Send(entry);
 		}
 
 		private double widen(bool buy, double entry, double stop)
