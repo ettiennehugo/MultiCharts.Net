@@ -157,6 +157,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double hl = Bars.Low[0]; for (int i = 1; i < 5; i++) hl = Math.Min(hl, Bars.Low[i]); if (journalOn()) trace(ETraceLevel.Journal, "EX-05 five-bar low " + hl.ToString("0.00") + ". Not a GX trail. No order.");
 		}

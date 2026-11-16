@@ -154,11 +154,14 @@ namespace PowerLanguage.Strategy
 		public _LE_03_QQQTQQQRegime(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE03LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE03LX", EOrderAction.Sell, OrderExit.FromAll)); }
 		protected override void StartCalc() {
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.hvLengths = new[] { 20 }; DailyConfig.smaLength = 200; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			if (sandboxBook()) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { remember(); m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			bool trend = Session.priorRthClose > DailyContext.Sma200 && DailyContext.Sma200 > 0;
 			bool quiet = m_hv.Count >= 20 && DailyContext.Hv(20) < median();
@@ -166,7 +169,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0 && !(trend && quiet)) { m_lx.Send(); return; }
 			if (pos != 0 || m_done || !IsRth() || !(trend && quiet)) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;
-			m_le.Send(); m_done = true;
+			m_le.Send();
 		}
 		private void remember() { double hv = DailyContext.Hv(20); if (hv > 0) m_hv.Add(hv); }
 		private double median() { var c = new List<double>(m_hv); c.Sort(); return c[c.Count / 2]; }
@@ -239,6 +242,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}
