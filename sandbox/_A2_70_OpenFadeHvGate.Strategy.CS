@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. Daily context is aggregated from Data1. There is no daily stream.
 // Data2: Not applicable
 // Further series: Not applicable

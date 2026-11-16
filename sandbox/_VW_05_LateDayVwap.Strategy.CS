@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. Session VWAP is slot 1 on Data1.
 // Data2: @ES 30-minute, same symbol and session. HtfStreams is { 2 }.
 // Further series: Not applicable
@@ -272,6 +273,7 @@ namespace PowerLanguage.Strategy
 
 		private double atr30()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return double.NaN; }
 			int n = AtrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;
 			double sum = 0;

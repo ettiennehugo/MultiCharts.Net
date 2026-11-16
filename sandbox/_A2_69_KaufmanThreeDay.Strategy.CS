@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: @ES 1-minute, CME Globex, dxFeed continuous unadjusted. Eastern clock through the CME session adapter.
 // Data2: Not applicable
 // Further series: Not applicable

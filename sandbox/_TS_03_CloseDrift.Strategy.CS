@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted.
 // Data2: @ES 5-minute, same symbol and session. HtfStreams is { 2 }.
 // Further series: Not applicable
@@ -265,6 +266,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>ATR(14) of closed Data2 bars. Data2 is the 5-minute stream, so this is the catalogue's ATR5, length 14.</summary>
 		private double atr14Of5Minute()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return double.NaN; }
 			int n = Cfg.atrLength;
 			if (BarsOfData(2).CurrentBar < n + 2) return double.NaN;
 			double sum = 0;

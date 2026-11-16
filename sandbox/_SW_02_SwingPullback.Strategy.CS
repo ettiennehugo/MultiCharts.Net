@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = daily.
 // Data1: @ES 1-minute, RTH session template, dxFeed continuous unadjusted.
 // Data2: @ES daily, same symbol. The average, RSI, ATR, and hold are daily bars. Roll gaps sit inside the 200-bar average.
 // Further series: Not applicable. The swing-low AVWAP is built on Data2.

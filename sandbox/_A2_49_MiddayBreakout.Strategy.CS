@@ -38,6 +38,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: @ES 1-minute, 24h Globex, dxFeed continuous unadjusted. The clock is Eastern through the CME session adapter.
 // Data2: @ES 30-minute, same symbol and session. The midday break is a closed 30-minute bar.
 // Further series: Not applicable
@@ -82,7 +83,7 @@
 // Repaint: Not applicable
 // Survivorship: Not applicable
 // Rolls: Series. A splice day does not trade the morning range.
-// Data quality: on a 30-minute chart the 12:00 bar is the last bar of the range. An early close moves FlatBy. Not yet verified on a chart.
+// Data quality: Data1 is 1-minute. The morning range is the 1-minute bars that close through midday. An early close moves FlatBy. Not yet verified on a chart.
 // Other: mustFlatten is false when the position is flat, so the cover order is sent only while short.
 //
 // ## 17. Parameters
@@ -201,6 +202,9 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		private double m_hi = double.NaN, m_lo = double.NaN, m_stop = double.NaN;
 		private bool m_skipDay, m_exitNextRth;
+		private double m_restPx;
+		private bool m_restBuy, m_restOn, m_filledSetup;
+		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 
 		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
 
@@ -252,6 +256,7 @@ namespace PowerLanguage.Strategy
 			configureSessions();
 			base.StartCalc();
 			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
+			m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
 		}
 
 		private int m_nativeSeen = -1;
@@ -274,6 +279,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool held = StrategyInfo.MarketPosition != 0;
 				m_day = day; m_hi = m_lo = double.NaN; m_skipDay = false;
+				m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
 				FlatBy = Hold == ESessionHold.Overnight ? (TimeSpan?)null : flatAt(day);
 				m_exitNextRth = Hold == ESessionHold.Overnight && held;
 			}
@@ -295,6 +301,13 @@ namespace PowerLanguage.Strategy
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
+			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd);
+			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			if (step == ERest.Resend)
+			{
+				if (m_restBuy) { m_leLvl.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { m_seLvl.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+			}
 			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
 			double tick = tickSize();
@@ -353,7 +366,12 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.disasterR * width, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = entry - side * r;
-			if (stopEntry) { if (side > 0) { m_leLvl.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seLvl.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); } }
+			if (stopEntry)
+			{
+				if (m_filledSetup && m_fillAnchor == side) return;   // one fill of this breakout anchor per day
+				m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = side;
+				if (side > 0) { m_leLvl.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seLvl.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
+			}
 			else if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
