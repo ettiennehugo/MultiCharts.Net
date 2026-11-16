@@ -154,12 +154,14 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double atr = averageTrueRange(Bars, 5); if (!(atr > 0)) return;
 			if (m_have) m_since++;
+			double barHi = Bars.High[0], barLo = Bars.Low[0];
+			for (int i = 1; i < 5; i++) { barHi = Math.Max(barHi, Bars.High[i]); barLo = Math.Min(barLo, Bars.Low[i]); }
 			if (!m_have && volZ() >= 2)
 			{
-				double span = Bars.High[0] - Bars.Low[0];
-				bool atHigh = Bars.High[0] >= Session.rthHigh && span > 0 && Bars.Close[0] <= Bars.Low[0] + 0.3 * span;
-				bool atLow = Bars.Low[0] <= Session.rthLow && span > 0 && Bars.Close[0] >= Bars.High[0] - 0.3 * span;
-				if (atHigh || atLow) { m_have = true; m_up = atLow; m_level = m_up ? Bars.Low[0] : Bars.High[0]; m_since = 0; }
+				double span = barHi - barLo;
+				bool atHigh = barHi >= Session.rthHigh && span > 0 && Bars.Close[0] <= barLo + 0.3 * span;
+				bool atLow = barLo <= Session.rthLow && span > 0 && Bars.Close[0] >= barHi - 0.3 * span;
+				if (atHigh || atLow) { m_have = true; m_up = atLow; m_level = m_up ? barLo : barHi; m_since = 0; }
 			}
 			if (!m_have || m_since < 12) return;
 			double rng = 0; for (int i = 0; i < 3; i++) rng += Bars.High[i * 5] - Bars.Low[i * 5];
@@ -174,11 +176,20 @@ namespace PowerLanguage.Strategy
 			arm(fadeBuy, entry, stop, target, fadeBuy ? "PS14LE" : "PS14SE", 0);
 			if (fadeBuy) m_le.Send(); else m_se.Send(); m_done = true;
 		}
+		private double blockVolume(int ago)
+		{
+			double v = 0; int from = ago * 5;
+			for (int i = from; i < from + 5; i++) v += Bars.Volume[i];
+			return v;
+		}
 		private double volZ()
 		{
-			double mean = 0; for (int i = 1; i <= 20; i++) mean += Bars.Volume[i]; mean /= 20;
-			double ss = 0; for (int i = 1; i <= 20; i++) ss += (Bars.Volume[i] - mean) * (Bars.Volume[i] - mean);
-			double sd = Math.Sqrt(ss / 20); return sd > 0 ? (Bars.Volume[0] - mean) / sd : 0;
+			if (Bars.CurrentBar < 5 * 21) return 0;
+			double cur = blockVolume(0), mean = 0;
+			for (int k = 1; k <= 20; k++) mean += blockVolume(k);
+			mean /= 20;
+			double ss = 0; for (int k = 1; k <= 20; k++) { double d = blockVolume(k) - mean; ss += d * d; }
+			double sd = Math.Sqrt(ss / 20); return sd > 0 ? (cur - mean) / sd : 0;
 		}
 
 		private double widen(bool buy, double entry, double stop)

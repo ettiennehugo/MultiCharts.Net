@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 			double atr = averageTrueRange(Bars, 14);
 			if (double.IsNaN(vah) || double.IsNaN(up2) || !(atr > 0)) return;
 			if (Bars.Close[0] > vah + 0.10 * atr) m_hold++; else m_hold = 0;
-			if (m_hold < 2) return;
+			if (m_hold < 2 || !htfAccepted()) return;
 			double entry = Math.Max(Bars.High[0], Bars.High[1]) + tickSize();
 			double stop = widen(true, entry, Math.Min(Math.Min(Bars.Low[0], Bars.Low[1]), vah - 0.5 * atr));
 			if (!(up2 > entry) || !budget(entry, stop)) { m_done = true; return; }
@@ -165,6 +165,7 @@ namespace PowerLanguage.Strategy
 			arm(true, entry, stop, up2, "PS25LE", 0); m_le.Send(entry); m_done = true;
 		}
 
+		protected virtual bool htfAccepted() { return true; }
 		private double widen(bool buy, double entry, double stop)
 		{
 			int ticks = 1;
