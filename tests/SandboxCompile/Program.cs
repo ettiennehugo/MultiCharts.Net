@@ -80,6 +80,7 @@ static class Program
 		LookbackChecks(files);
 		OwnSourceChecks(files);
 		BookChecks(files);
+		AtrRollChecks(files);
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
@@ -143,11 +144,12 @@ static class Program
 
 	// Analyst MC17 run (A2-15 aborted): the sandbox workspaces use MaxBarsBack 49, so a Data1 series read Bars.X[i] with a
 	// computed index (or a literal past 49) aborts the study. Deep Data1 history comes from the engine ring through lbBar().
-	// Data2 reads with a computed index are listed with their bound. The ten original files are not edited and are reported.
+	// Computed-index reads that stay within 49 are listed with their bound. Owner 2026-11-16: the original ten are checked too.
 	const int SandboxMaxBarsBack = 49;
-	static readonly Dictionary<string, string> Data2Lookback = new Dictionary<string, string>(StringComparer.Ordinal)
+	static readonly Dictionary<string, string> BoundedLookback = new Dictionary<string, string>(StringComparer.Ordinal)
 	{
-		{ "_A2_58_FastInSlowFade.Strategy.CS", @"\bslow\s*=\s*(\d+)" },   // sma(Cfg.slow) on Data2; Cfg.fast is smaller
+		{ "_A2_58_FastInSlowFade.Strategy.CS", @"\bslow\s*=\s*(\d+)" },        // sma(Cfg.slow) on Data2; Cfg.fast is smaller
+		{ "_AV_08_PeriodAvwapLayer.Strategy.CS", @"\bhostLookback\s*=\s*(\d+)" }, // Bars.High/Low[1..Cfg.hostLookback] on Data1
 	};
 	static void LookbackChecks(List<string> files)
 	{
@@ -159,32 +161,30 @@ static class Program
 			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
 			var bad = new List<string>();
 			bool d2computed = false;
+			bool computed = false;
 			foreach (Match m in d1.Matches(code))
 			{
 				int lit;
-				if (int.TryParse(m.Groups[2].Value, out lit) && lit <= SandboxMaxBarsBack) continue;
-				bad.Add(m.Value);
+				if (int.TryParse(m.Groups[2].Value, out lit)) { if (lit > SandboxMaxBarsBack) bad.Add(m.Value); continue; }
+				if (BoundedLookback.ContainsKey(name)) computed = true; else bad.Add(m.Value);
 			}
 			foreach (Match m in dn.Matches(code))
 			{
 				int lit;
-				if (!int.TryParse(m.Groups[2].Value, out lit)) d2computed = true;
+				if (!int.TryParse(m.Groups[2].Value, out lit)) { d2computed = true; computed = true; }
 				else if (lit > SandboxMaxBarsBack) bad.Add(m.Value);
-			}
-			if (OriginalTen.Contains(name))
-			{
-				if (bad.Count > 0 || d2computed) Console.WriteLine("NOTE " + name + " (original ten, not edited) reads series history by a computed index; it needs MaxBarsBack above 49 if the bound exceeds it");
-				continue;
 			}
 			Check(bad.Count == 0, name + " reads Data1 history only within MaxBarsBack " + SandboxMaxBarsBack + " (deeper reads go through lbBar): " + string.Join(", ", bad.ToArray()));
 			if (code.Contains("lbBar("))
 				Check(Regex.IsMatch(code, @"requireRing\(\s*1\s*,"), name + " uses lbBar and asks for a Data1 ring in StartCalc");
-			if (d2computed)
+			if (code.Contains("d2Bar("))
+				Check(Regex.IsMatch(code, @"requireRing\(\s*2\s*,"), name + " uses d2Bar and asks for a Data2 ring in StartCalc");
+			if (computed)
 			{
 				string rx;
-				Match b = Data2Lookback.TryGetValue(name, out rx) ? Regex.Match(code, rx) : Match.Empty;
+				Match b = BoundedLookback.TryGetValue(name, out rx) ? Regex.Match(code, rx) : Match.Empty;
 				int bound;
-				Check(b.Success && int.TryParse(b.Groups[1].Value, out bound) && bound <= SandboxMaxBarsBack, name + " reads Data2 history by a computed index with a known bound within MaxBarsBack");
+				Check(b.Success && int.TryParse(b.Groups[1].Value, out bound) && bound <= SandboxMaxBarsBack, name + " reads history by a computed index with a known bound within MaxBarsBack");
 			}
 		}
 	}
@@ -239,6 +239,23 @@ static class Program
 			else if (code[j] == '}' && --depth == 0) return code.Substring(brace, j - brace + 1);
 		}
 		return code.Substring(brace);
+	}
+
+	// Owner 2026-11-16: every sandbox study that reads DailyContext.Atr20d carries the 20-day ATR over the roll
+	// (DailyConfig.atrRestartOnRoll = false, PR #46); the default reseed left Atr20d NaN ~20 sessions after each roll.
+	// Reads inside the default-off hostGate arms are excluded (PS-01's Compression arm).
+	static void AtrRollChecks(List<string> files)
+	{
+		int readers = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = WithoutMethod(Regex.Replace(File.ReadAllText(path), @"//[^\n]*", ""), "hostGate");
+			if (!Regex.IsMatch(code, @"\bAtr20d\b")) continue;
+			readers++;
+			Check(Regex.IsMatch(code, @"DailyConfig\.atrRestartOnRoll\s*=\s*false\s*;"), name + " reads Atr20d and sets DailyConfig.atrRestartOnRoll = false");
+		}
+		Check(readers >= 32, "Atr20d readers found: " + readers);
 	}
 
 	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.
