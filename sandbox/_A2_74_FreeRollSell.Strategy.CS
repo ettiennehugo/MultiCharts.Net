@@ -7,6 +7,7 @@
 // Study class: _A2_74_FreeRollSell
 // File: sandbox/_A2_74_FreeRollSell.Strategy.CS
 // Stage: sandbox
+// Host option: Host option ESandboxExit.FreeRoll, default Off, on every GX host. The host trades 2 contracts when it is on.
 // Non-trading signal: Free-roll scale. The host turns it on. This file does not enter.
 // Owner approval: Not yet verified
 //
