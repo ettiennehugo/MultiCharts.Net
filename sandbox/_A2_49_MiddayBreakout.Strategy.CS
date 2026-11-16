@@ -237,7 +237,7 @@ namespace PowerLanguage.Strategy
 		{
 			TimeSpan pitStart, pitEnd, pitValue;
 			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
-			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, Bars.Info.Exchange, Bars.Info.Category, out pitStart, out pitEnd, out pitValue);
 			Clock.RthStart = pitStart;
 			Clock.RthEnd = pitEnd;
 			Clock.RthValueEnd = pitValue;
@@ -301,7 +301,7 @@ namespace PowerLanguage.Strategy
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
-			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd);
+			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd, Bars.Info.Exchange, Bars.Info.Category);
 			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (step == ERest.Resend)
 			{

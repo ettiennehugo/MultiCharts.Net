@@ -217,7 +217,7 @@ namespace PowerLanguage.Strategy
 		{
 			TimeSpan pitStart, pitEnd, pitValue;
 			TimeSpan listed = Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero;
-			_SandboxRules.PitWindows(Bars.Info.Name, listed, out pitStart, out pitEnd, out pitValue);
+			_SandboxRules.PitWindows(Bars.Info.Name, listed, Bars.Info.Exchange, Bars.Info.Category, out pitStart, out pitEnd, out pitValue);
 			Cfg.to = pitValue;
 			TimeSpan flat = pitValue - TimeSpan.FromMinutes(5);
 			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
@@ -227,7 +227,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			applySymbolFlat();
-			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero, Bars.Info.Exchange, Bars.Info.Category);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EBandMultiple), Band)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Band is not a defined EBandMultiple");
