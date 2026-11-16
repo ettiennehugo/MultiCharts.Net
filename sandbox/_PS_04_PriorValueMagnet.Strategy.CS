@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -146,7 +147,9 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_se; private int m_inside; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		public _PS_04_PriorValueMagnet(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS04"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS04LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS04SE", EOrderAction.SellShort)); }
-		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; EventConfig.enabled = true; base.StartCalc(); }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; DailyConfig.atrLength = 20; EventConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
@@ -159,6 +162,7 @@ namespace PowerLanguage.Strategy
 			if (s.rthOpen > prior.vah || s.rthOpen < prior.val) return;
 			if (blocked(day)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 30 == 0 && Bars.Close[0] <= prior.vah && Bars.Close[0] >= prior.val) m_inside++;
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(61)) || m_inside < 2) return;
 			bool buy = prior.poc >= Bars.Close[0];
@@ -198,7 +202,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
-			GxConfig.FlatByHHMM = m_flatOverride > 0 ? m_flatOverride : m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange);
 			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
