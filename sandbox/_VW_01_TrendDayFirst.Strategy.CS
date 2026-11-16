@@ -213,7 +213,7 @@ namespace PowerLanguage.Strategy
 			double target = Session.rthHigh;
 			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
 			arm(true, entry, stop, target, "VW01LE", false);
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); m_le.Send(entry, m_restQty);
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 		
 		
@@ -355,7 +355,7 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{

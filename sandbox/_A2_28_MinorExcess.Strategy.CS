@@ -233,7 +233,7 @@ namespace PowerLanguage.Strategy
 			if (!budgetOk(entry, structural)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-28 skip: risk budget"); m_done = true; return; }
 			string name = m_side > 0 ? "A228LE" : "A228SE";
 			armGx(m_side > 0, entry, structural, m_muMajor, _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), name);
-			if (m_side > 0) m_le.Send(2); else m_se.Send(2);
+			if (m_side > 0) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
 		private void loadPrior(DateTime day)

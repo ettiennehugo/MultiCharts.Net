@@ -202,7 +202,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(buy, entry, stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, entry, buy ? "AV06LE" : "AV06SE", false);
-			if (buy) m_le.Send(); else m_se.Send();
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 		private void find()
 		{

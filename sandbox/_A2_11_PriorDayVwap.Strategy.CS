@@ -236,7 +236,7 @@ namespace PowerLanguage.Strategy
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-11 " + day.ToString("yyyy-MM-dd") + " skip: target or risk"); m_done = true; return; }
 			m_stop = stop; m_target = target; m_done = true;
 			takeGx(true, Bars.Close[0], m_stop, m_target, "A211LE");
-			m_le.Send();
+			{ if (hostGate(true)) m_le.Send(); }
 			if (journalOn()) journalArm("A211LE", Bars.Close[0], m_stop, m_target, null);
 		}
 

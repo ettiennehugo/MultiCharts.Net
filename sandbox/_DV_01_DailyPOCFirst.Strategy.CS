@@ -194,7 +194,7 @@ namespace PowerLanguage.Strategy
 			double target = buy ? entry + 0.15 * atr : entry - 0.15 * atr;
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "DV01LE" : "DV01SE", false);
-			if (buy) m_le.Send(entry); else m_se.Send(entry);
+			if (buy) { if (hostGate(true)) m_le.Send(entry); } else { if (hostGate(false)) m_se.Send(entry); }
 		}
 		private double atrBlocks(int minutes, int length)
 		{
@@ -347,11 +347,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

@@ -194,7 +194,7 @@ namespace PowerLanguage.Strategy
 			double target = buy ? entry + (entry - stop) : entry - (stop - entry);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "OF04LE" : "OF04SE", 0);
-			if (buy) m_le.Send(); else m_se.Send(); m_done = true;
+			if (buy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); } m_done = true;
 		}
 
 		private double widen(bool buy, double entry, double stop)

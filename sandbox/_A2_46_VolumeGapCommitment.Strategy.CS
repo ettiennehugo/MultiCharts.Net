@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			if (!budget(entry, stop)) { m_done = true; return; }
 			GxConfig.MaxHoldDays = 1;
 			arm(up, entry, stop, up ? m_hi : m_lo, up ? "A246LE" : "A246SE");
-			if (up) m_le.Send(2); else m_se.Send(2);
+			if (up) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 		private double blockAtr(int width, int n)
 		{

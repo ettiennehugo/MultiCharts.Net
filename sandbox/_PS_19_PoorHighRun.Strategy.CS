@@ -252,7 +252,7 @@ namespace PowerLanguage.Strategy
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-19 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_stop = stop; m_target = c + side * Cfg.targetR * r;
 			takeGx(side > 0, Bars.Close[0], m_stop, m_target, side > 0 ? "PS19LE" : "PS19SE");
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { if (hostGate(true)) m_le.Send(Cfg.contracts); } else { if (hostGate(false)) m_se.Send(Cfg.contracts); }
 			if (journalOn()) journalArm(side > 0 ? "PS19LE" : "PS19SE", c, stop, m_target, null);
 		}
 

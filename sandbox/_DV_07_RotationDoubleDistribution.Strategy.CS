@@ -191,7 +191,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(!sell, entry, sell ? entry + 0.15 * atr : entry - 0.15 * atr);
 			if ((sell && !(mid < entry)) || (!sell && !(mid > entry)) || !budget(entry, stop)) { m_done = true; return; }
 			arm(!sell, entry, stop, mid, sell ? "DV07SE" : "DV07LE", false);
-			m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = 1; if (sell) m_se.Send(entry); else m_le.Send(entry);
+			m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = 1; if (sell) { if (hostGate(false)) m_se.Send(entry); } else { if (hostGate(true)) m_le.Send(entry); }
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -320,11 +320,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

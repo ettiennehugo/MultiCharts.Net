@@ -250,7 +250,7 @@ namespace PowerLanguage.Strategy
 				m_stop = stop; m_target = target;
 				logSignal("PS22", side, c, stop, null, true);
 				takeGx(side > 0, Bars.Close[0], m_stop, m_target, side > 0 ? "PS22LE" : "PS22SE");
-				if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+				if (side > 0) { if (hostGate(true)) m_le.Send(Cfg.contracts); } else { if (hostGate(false)) m_se.Send(Cfg.contracts); }
 				return;
 			}
 		}

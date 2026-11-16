@@ -198,7 +198,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(true, entry, vwap - sig);
 			double peak = Bars.High[0]; for (int i = 1; i < Math.Min(Bars.CurrentBar, 60 * 390); i++) peak = Math.Max(peak, lbBar(i).h);
 			if (!(peak > entry) || !budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, peak, "SW03LE", 10); m_le.Send();
+			arm(true, entry, stop, peak, "SW03LE", 10); { if (hostGate(true)) m_le.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

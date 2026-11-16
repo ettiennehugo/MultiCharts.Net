@@ -180,7 +180,7 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_life = 0; m_window = -1; }
 			if (StrategyInfo.MarketPosition != 0) return;
-			if (m_life > 0) { m_se.Send(m_limit); m_life--; if (m_life == 0) return; }
+			if (m_life > 0) { { if (hostGate(false)) m_se.Send(m_limit); } m_life--; if (m_life == 0) return; }
 			if (sandboxBook()) return;
 			if (m_done || !IsRth() || Bars.CurrentBar < 40) return;
 			DateTime et = ToEastern(Bars.Time[0]);
@@ -201,7 +201,7 @@ namespace PowerLanguage.Strategy
 			m_target = Math.Max(lowA, lowB) - tickSize();
 			if (!(m_target < m_limit) || !budget(m_limit, m_stopPx)) { m_window = id; return; }
 			arm(false, m_limit, m_stopPx, m_target, "SP09SE", 0);
-			honorExit(m_limit, Math.Abs(m_limit - m_stopPx)); m_restPx = m_limit; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); m_se.Send(m_limit, m_restQty); m_window = id; m_life = 2;
+			honorExit(m_limit, Math.Abs(m_limit - m_stopPx)); m_restPx = m_limit; m_restBuy = false; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); { if (hostGate(false)) m_se.Send(m_limit, m_restQty); } m_window = id; m_life = 2;
 		}
 		private double blockHigh(int ago) { double h = double.MinValue; for (int i = ago * 5; i < ago * 5 + 5; i++) h = Math.Max(h, lbBar(i).h); return h; }
 		private double blockLow(int ago) { double l = double.MaxValue; for (int i = ago * 5; i < ago * 5 + 5; i++) l = Math.Min(l, lbBar(i).l); return l; }
@@ -336,7 +336,7 @@ namespace PowerLanguage.Strategy
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

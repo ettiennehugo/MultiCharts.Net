@@ -175,7 +175,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (m_done || !IsRth() || !trend || multiple < 1) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;
-			m_entryHv = hv; m_le.Send();
+			m_entryHv = hv; { if (hostGate(true)) m_le.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

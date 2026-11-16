@@ -188,7 +188,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(true, entry, Bars.Low[0] - tickSize());
 			double target = entry + 1.5 * (entry - stop);
 			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, target, "YV01LE", 0); m_le.Send();
+			arm(true, entry, stop, target, "YV01LE", 0); { if (hostGate(true)) m_le.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

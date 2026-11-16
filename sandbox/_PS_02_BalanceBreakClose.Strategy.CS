@@ -250,7 +250,7 @@ namespace PowerLanguage.Strategy
 			m_stop = stop; m_target = side > 0 ? m_vah + Cfg.targetW * m_w : m_val - Cfg.targetW * m_w;
 			if (journalOn()) journalArm(side > 0 ? "PS02LE" : "PS02SE", c, m_stop, m_target, null);
 			takeGx(side > 0, c, m_stop, m_target, side > 0 ? "PS02LE" : "PS02SE");
-			if (side > 0) m_le.Send(Cfg.contracts); else m_se.Send(Cfg.contracts);
+			if (side > 0) { if (hostGate(true)) m_le.Send(Cfg.contracts); } else { if (hostGate(false)) m_se.Send(Cfg.contracts); }
 		}
 
 		private void takeGx(bool longSide, double entry, double stop, double target, string name)

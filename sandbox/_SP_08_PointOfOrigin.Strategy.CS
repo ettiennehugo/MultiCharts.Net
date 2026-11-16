@@ -197,7 +197,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(true, entry, m_origin - 0.5 * m_range);
 			double target = m_break + m_range;
 			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "SP08LE", 0); m_le.Send(entry, m_restQty);
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "SP08LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -327,7 +327,7 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{

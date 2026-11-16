@@ -192,7 +192,7 @@ namespace PowerLanguage.Strategy
 			if (!budget(entry, stop)) { m_done = true; return; }
 			m_flatOverride = 800;
 			arm(up, entry, stop, target, up ? "TS02LE" : "TS02SE", 0);
-			if (up) m_le.Send(); else m_se.Send();
+			if (up) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

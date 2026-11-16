@@ -245,7 +245,7 @@ namespace PowerLanguage.Strategy
 			int flat = m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			if (!ok(entry, stop, target, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, target, flat);
-			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
 		private void fail(DateTime et)
@@ -262,7 +262,7 @@ namespace PowerLanguage.Strategy
 			double stop = longSide ? Bars.Low[0] - tick : Bars.High[0] + tick;
 			if (!ok(entry, stop, m_poc, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, m_poc, m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
-			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
 		private bool ok(double entry, double stop, double target, bool longSide)

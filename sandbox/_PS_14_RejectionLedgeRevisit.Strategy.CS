@@ -204,7 +204,7 @@ namespace PowerLanguage.Strategy
 			double target = fadeBuy ? entry + (entry - stop) : entry - (stop - entry);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(fadeBuy, entry, stop, target, fadeBuy ? "PS14LE" : "PS14SE", 0);
-			if (fadeBuy) m_le.Send(); else m_se.Send();
+			if (fadeBuy) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 		}
 		private double blockVolume(int ago)
 		{

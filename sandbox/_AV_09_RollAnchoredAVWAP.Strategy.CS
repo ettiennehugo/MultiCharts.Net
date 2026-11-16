@@ -204,7 +204,7 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			m_stop = widen(buy, entry, buy ? Math.Min(m_ext, m_prevExt) : Math.Max(m_ext, m_prevExt));
 			if (!budget(entry, m_stop)) { m_used = true; return; }
-			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
+			if (buy) { { if (hostGate(true)) m_le.Send(); } m_ls.Send(m_stop); } else { { if (hostGate(false)) m_se.Send(); } m_ss.Send(m_stop); }
 			m_used = true;
 
 		}

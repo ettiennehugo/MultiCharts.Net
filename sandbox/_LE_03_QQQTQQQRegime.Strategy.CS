@@ -170,7 +170,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0 && !(trend && quiet)) { m_lx.Send(); return; }
 			if (pos != 0 || m_done || !IsRth() || !(trend && quiet)) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;
-			m_le.Send();
+			{ if (hostGate(true)) m_le.Send(); }
 		}
 		private void remember() { double hv = DailyContext.Hv(20); if (hv > 0) m_hv.Add(hv); }
 		private double median() { var c = new List<double>(m_hv); c.Sort(); return c[c.Count / 2]; }

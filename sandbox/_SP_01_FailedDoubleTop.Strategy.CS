@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(true, entry, blockLow(0));
 			double target = entry + Math.Abs(h1 - h2) + pull;
 			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, target, "SP01LE", 0); m_le.Send();
+			arm(true, entry, stop, target, "SP01LE", 0); { if (hostGate(true)) m_le.Send(); }
 		}
 		private double blockHigh(int ago) { double h = double.MinValue; for (int i = ago * 15; i < ago * 15 + 15; i++) h = Math.Max(h, lbBar(i).h); return h; }
 		private double blockLow(int ago) { double l = double.MaxValue; for (int i = ago * 15; i < ago * 15 + 15; i++) l = Math.Min(l, lbBar(i).l); return l; }

@@ -192,7 +192,7 @@ namespace PowerLanguage.Strategy
 			arm(!m_sell, m_limit, m_stop, vwap, m_sell ? "DV11SE" : "DV11LE");
 			m_arm = 8; sendLimit();
 		}
-		private void sendLimit() { if (m_sell) m_se.Send(m_limit); else m_le.Send(m_limit); }
+		private void sendLimit() { if (m_sell) { if (hostGate(false)) m_se.Send(m_limit); } else { if (hostGate(true)) m_le.Send(m_limit); } }
 
 		private double widen(bool buy, double entry, double stop)
 		{
@@ -320,11 +320,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_se.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

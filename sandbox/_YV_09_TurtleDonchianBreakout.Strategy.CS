@@ -180,7 +180,7 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			m_stop = widen(true, entry, lowest(10));
 			if (!budget(entry, m_stop)) { m_done = true; return; }
-			m_le.Send(); m_done = true; m_ls.Send(m_stop);
+			{ if (hostGate(true)) m_le.Send(); } m_done = true; m_ls.Send(m_stop);
 		}
 		private double highest(int n) { double h = double.MinValue; int c = m_hi.Count; for (int i = c - n; i < c; i++) h = Math.Max(h, m_hi[i]); return h; }
 		private double lowest(int n) { double l = double.MaxValue; int c = m_lo.Count; for (int i = c - n; i < c; i++) l = Math.Min(l, m_lo[i]); return l; }

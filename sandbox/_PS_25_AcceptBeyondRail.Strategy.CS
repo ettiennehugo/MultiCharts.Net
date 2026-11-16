@@ -186,7 +186,7 @@ namespace PowerLanguage.Strategy
 			double stop = widen(true, entry, Math.Min(Math.Min(Bars.Low[0], Bars.Low[1]), vah - 0.5 * atr));
 			if (!(up2 > entry) || !budget(entry, stop)) { m_done = true; return; }
 			GxConfig.TimeStopBars = 41;
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, up2, "PS25LE", 0); m_le.Send(entry, m_restQty);
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, up2, "PS25LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
 		protected virtual bool htfAccepted() { return true; }
@@ -317,7 +317,7 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{

@@ -204,7 +204,7 @@ namespace PowerLanguage.Strategy
 			if ((entry - stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-68 skip: stop breaches risk budget"); m_done = true; return; }
 			GxConfig.TimeStopBars = 5;
 			arm(entry, stop, entry + 0.5 * run);
-			m_le.Send(); m_done = true;
+			{ if (hostGate(true)) m_le.Send(); } m_done = true;
 		}
 		private double rsi(int n)
 		{

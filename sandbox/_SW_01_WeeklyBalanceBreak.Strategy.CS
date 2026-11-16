@@ -194,7 +194,7 @@ namespace PowerLanguage.Strategy
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, comp.vah - 0.25 * w);
 			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(true, entry, stop, entry + w, "SW01LE", 15); m_le.Send();
+			arm(true, entry, stop, entry + w, "SW01LE", 15); { if (hostGate(true)) m_le.Send(); }
 		}
 		private bool overlap(VpExtra x, VpExtra y)
 		{
