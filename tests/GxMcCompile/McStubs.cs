@@ -153,12 +153,15 @@ namespace PowerLanguage
 	public enum ETM_OrderAction { eTM_OA_Buy, eTM_OA_Sell }
 	public enum DataLoadedEvent { History, RTNewBar }
 	public enum RequestQuoteField { Trade }
-	public enum DataRequestType { BarsBack }
+	public enum DataRequestType { BarsBack, DaysBack, FromTo }
 
-	public class DataRequest
+	public struct DataRequest
 	{
 		public DataRequestType RequestType;
 		public int Count;
+		public DateTime From, To;
+		public bool ToAlwaysIsNow;
+		public static DataRequest CreateFromTo(DateTime from, DateTime to) { return new DataRequest { RequestType = DataRequestType.FromTo, From = from, To = to }; }
 	}
 
 	public class InstrumentDataRequest
@@ -167,6 +170,8 @@ namespace PowerLanguage
 		public RequestQuoteField QuoteField;
 		public bool Subscribe2RT;
 		public DataRequest Range;
+		public DateTime From { get; set; }
+		public DateTime To { get; set; }
 	}
 
 	public class SessionObject

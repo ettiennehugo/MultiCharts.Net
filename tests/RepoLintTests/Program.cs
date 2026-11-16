@@ -239,7 +239,7 @@ static class Program
 	{
 		string code = Regex.Replace(text ?? "", @"//[^\n]*", "");
 		var r = new List<string>();
-		foreach (Match m in Regex.Matches(code, @"\bpublic\s+class\s+(_\w+)")) r.Add(m.Groups[1].Value);
+		foreach (Match m in Regex.Matches(code, @"\bpublic\s+(?:(?:static|sealed|abstract|partial)\s+)*class\s+(_\w+)")) r.Add(m.Groups[1].Value);
 		return r;
 	}
 

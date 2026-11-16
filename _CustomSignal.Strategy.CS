@@ -1431,9 +1431,20 @@ namespace PowerLanguage.Strategy
 			req.Resolution = new Resolution(EResolution.Tick, 1);
 			req.QuoteField = RequestQuoteField.Trade;
 			req.Subscribe2RT = TickConfig.realTime;
-			req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks };
+			// Anchor the tick window to the chart's own range, never to 'now' (a BarsBack request without To throws on MC17,
+			// and one anchored at now would read past a backtest's end into holdout data). A FromTo chart gets the same window
+			// (from one day early, for the first bar's opening ticks); any other chart gets historyTicks back from its end.
+			DataRequest cr = Bars.Request.Range;
+			DateTime to = cr.ToAlwaysIsNow ? DateTime.Now : cr.To;
+			bool fromTo = cr.RequestType == DataRequestType.FromTo && cr.From > DateTime.MinValue;
+			if (fromTo) req.Range = DataRequest.CreateFromTo(cr.From.AddDays(-1), to);
+			else req.Range = new DataRequest { RequestType = DataRequestType.BarsBack, Count = TickConfig.historyTicks, To = to };
+			req.To = to;
+			if (fromTo) req.From = cr.From.AddDays(-1);
 			m_tickReq = DataLoader.BeginLoadData(req, onTickData, null);
-			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, {TickConfig.historyTicks} ticks back, RT={TickConfig.realTime}");
+			if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, fromTo
+				? $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, from {cr.From.AddDays(-1):yyyy-MM-dd} to {to:yyyy-MM-dd HH:mm}, RT={TickConfig.realTime}"
+				: $"TICK DataLoader 1-tick Trade request for {Bars.Info.Name}, {TickConfig.historyTicks} ticks back to {to:yyyy-MM-dd HH:mm}, RT={TickConfig.realTime}");
 		}
 
 		/// <summary>DataLoader callback (separate thread, PG p72): buffer only.</summary>
