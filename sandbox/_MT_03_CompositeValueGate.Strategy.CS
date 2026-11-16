@@ -157,6 +157,12 @@ namespace PowerLanguage.Strategy
 			OwnProfileWindow = EOwnProfileWindow.Rth;
 		}
 
+		protected override void CalcBar()
+		{
+			if (Bars.Status == EBarState.Close && !IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "MT-03 Data2 missing"); return; }
+			base.CalcBar();
+		}
+
 		protected override bool hostGate(int side, out string why)
 		{
 			why = null;
