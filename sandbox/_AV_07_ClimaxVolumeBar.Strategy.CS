@@ -163,6 +163,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (sandboxBook()) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_pv = m_vv = 0; m_dir = 0; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
@@ -191,7 +192,7 @@ namespace PowerLanguage.Strategy
 			double target = buy ? entry + 1.5 * (entry - stop) : entry - 1.5 * (stop - entry);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(buy, entry, stop, target, buy ? "AV07LE" : "AV07SE", false);
-			if (buy) m_le.Send(); else m_se.Send(); m_done = true;
+			if (buy) m_le.Send(); else m_se.Send();
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -260,6 +261,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}

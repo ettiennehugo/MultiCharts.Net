@@ -157,6 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			base.CalcBar(); if (Bars.Status != EBarState.Close || !IsRth() || Bars.CurrentBar < 40) return;
 			TimeSpan t = sessionClock(Bars.Time[0]); if (((int)t.TotalMinutes) % 5 != 0) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
