@@ -187,34 +187,34 @@ The counts are in the table at the end of this file.
 | DV-17 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_17_DV17.Strategy.CS | 6 | coded in batch 6 |
 | DV-18 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_18_DV18.Strategy.CS | 6 | coded in batch 6 |
 | DV-19 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_19_DV19.Strategy.CS | 6 | coded in batch 6 |
-| DV-20 | Stop-loss-cluster (weak low/high) veto | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_20_StopLossCluster.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| DV-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_21_DV21.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| DV-22 | ABCD (AB = CD) | trading-idea-catalogue.md | entry signal | sandbox/_DV_22_ABCDABCD.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| DV-23 | Initial-balance draw trade (guest: Dan McKen, Funded Trader Academy, not Dale) | trading-idea-catalogue.md | entry signal | sandbox/_DV_23_InitialBalanceDraw.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| DV-24 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_24_DV24.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| DV-20 | Stop-loss-cluster (weak low/high) veto | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_DV_20_StopLossCluster.Strategy.CS | 7 | coded in batch 7 |
+| DV-21 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_21_DV21.Strategy.CS | 7 | coded in batch 7 |
+| DV-22 | ABCD (AB = CD) | trading-idea-catalogue.md | entry signal | sandbox/_DV_22_ABCDABCD.Strategy.CS | 7 | coded in batch 7 |
+| DV-23 | Initial-balance draw trade (guest: Dan McKen, Funded Trader Academy, not Dale) | trading-idea-catalogue.md | entry signal | sandbox/_DV_23_InitialBalanceDraw.Strategy.CS | 7 | coded in batch 7 |
+| DV-24 | (no heading; id is cited in the source) | trading-idea-catalogue.md | entry signal | sandbox/_DV_24_DV24.Strategy.CS | 7 | coded in batch 7 |
 | TS-01 | European-open overnight drift (long MES 01:30–04:30 ET) | trading-idea-catalogue.md | entry signal | sandbox/_TS_01_EuropeanOpenDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| TS-02 | London-open break of the Asia range (CL/GC) with an Asia AVWAP filter | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_TS_02_LondonOpenBreak.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| TS-02 | London-open break of the Asia range (CL/GC) with an Asia AVWAP filter | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_TS_02_LondonOpenBreak.Strategy.CS | 7 | coded in batch 7 |
 | TS-03 | Close regime: 15:30–16:00 MOC drift then reversion | trading-idea-catalogue.md | entry signal | sandbox/_TS_03_CloseDrift.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| TS-04 | CL/GC pit-session profile (port of the PS ideas) | trading-idea-catalogue.md | entry signal | sandbox/_TS_04_CLGCPit.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| TS-05 | ZN post-release AVWAP acceptance (08:30 data) | trading-idea-catalogue.md | entry signal | sandbox/_TS_05_ZNPostRelease.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| TS-06 | Overnight inventory correction at the open | trading-idea-catalogue.md | entry signal | sandbox/_TS_06_OvernightInventoryCorrection.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| TS-07 | Opening-noise observation window (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_TS_07_OpeningNoiseObservation.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| SW-01 | Weekly balance break (3–6-week composite) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_SW_01_WeeklyBalanceBreak.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| TS-04 | CL/GC pit-session profile (port of the PS ideas) | trading-idea-catalogue.md | entry signal | sandbox/_TS_04_CLGCPit.Strategy.CS | 7 | coded in batch 7 |
+| TS-05 | ZN post-release AVWAP acceptance (08:30 data) | trading-idea-catalogue.md | entry signal | sandbox/_TS_05_ZNPostRelease.Strategy.CS | 7 | coded in batch 7 |
+| TS-06 | Overnight inventory correction at the open | trading-idea-catalogue.md | entry signal | sandbox/_TS_06_OvernightInventoryCorrection.Strategy.CS | 7 | coded in batch 7 |
+| TS-07 | Opening-noise observation window (filter test) | trading-idea-catalogue.md | entry signal | sandbox/_TS_07_OpeningNoiseObservation.Strategy.CS | 7 | coded in batch 7 |
+| SW-01 | Weekly balance break (3–6-week composite) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_SW_01_WeeklyBalanceBreak.Strategy.CS | 7 | coded in batch 7 |
 | SW-02 | RSI(2) dip-buy with a profile/AVWAP location filter | trading-idea-catalogue.md | entry signal | sandbox/_SW_02_SwingPullback.Strategy.CS | done | coded in sandbox on main (PR 124). PR 126 extends it. This plan does not edit that file. |
-| SW-03 | Quarterly/monthly AVWAP swing pullback | trading-idea-catalogue.md | entry signal | sandbox/_SW_03_QuarterlyMonthlyAVWAP.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| SW-04 | Multi-day P-profile hold (Levy "will it move within 3 days?") | trading-idea-catalogue.md | entry signal | sandbox/_SW_04_MultiDayP.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| SW-05 | Composite gap-and-go (out of a 20-day composite) | trading-idea-catalogue.md | entry signal | sandbox/_SW_05_CompositeGapAnd.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| SW-06 | Weekly IB (Mon–Tue range) breakout with acceptance | trading-idea-catalogue.md | entry signal | sandbox/_SW_06_WeeklyIBMon.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| SW-03 | Quarterly/monthly AVWAP swing pullback | trading-idea-catalogue.md | entry signal | sandbox/_SW_03_QuarterlyMonthlyAVWAP.Strategy.CS | 7 | coded in batch 7 |
+| SW-04 | Multi-day P-profile hold (Levy "will it move within 3 days?") | trading-idea-catalogue.md | entry signal | sandbox/_SW_04_MultiDayP.Strategy.CS | 7 | coded in batch 7 |
+| SW-05 | Composite gap-and-go (out of a 20-day composite) | trading-idea-catalogue.md | entry signal | sandbox/_SW_05_CompositeGapAnd.Strategy.CS | 7 | coded in batch 7 |
+| SW-06 | Weekly IB (Mon–Tue range) breakout with acceptance | trading-idea-catalogue.md | entry signal | sandbox/_SW_06_WeeklyIBMon.Strategy.CS | 7 | coded in batch 7 |
 | PS-01 | Accepted balance break → first-pullback higher low (ABB-HL) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_01_BalanceBreakPullback.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | PS-02 | Balance break at acceptance close (K4 end-to-end spec) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_PS_02_BalanceBreakClose.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| PS-03 | Confirmed failed break of value → rotation to the opposite edge | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_03_ConfirmedFailedBreak.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| PS-04 | Prior-value magnet on a small newsless gap (Keller IX-1) | trading-idea-catalogue.md | entry signal | sandbox/_PS_04_PriorValueMagnet.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| PS-03 | Confirmed failed break of value → rotation to the opposite edge | keller-b5-p6p7-entries-analyst2.md, trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_03_ConfirmedFailedBreak.Strategy.CS | 7 | coded in batch 7 |
+| PS-04 | Prior-value magnet on a small newsless gap (Keller IX-1) | trading-idea-catalogue.md | entry signal | sandbox/_PS_04_PriorValueMagnet.Strategy.CS | 7 | coded in batch 7 |
 | PS-05 | Rejected repricing open (Keller IX-3 · Spec 3) | trading-idea-catalogue.md | entry signal | sandbox/_PS_05_RejectedRepricingOpen.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| PS-06 | Defeated adjustment → continuation (Keller IX-2) | trading-idea-catalogue.md | entry signal | sandbox/_PS_06_DefeatedAdjustmentContinuation.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| PS-06 | Defeated adjustment → continuation (Keller IX-2) | trading-idea-catalogue.md | entry signal | sandbox/_PS_06_DefeatedAdjustmentContinuation.Strategy.CS | 7 | coded in batch 7 |
 | PS-07 | Open-drive / one-way open: first-pullback continuation | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_07_OpenDrive.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | PS-08 | IB extension with acceptance (narrow-IB tier) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_PS_08_NarrowIbBreak.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| PS-09 | IB C-period failure → IB midpoint | trading-idea-catalogue.md | entry signal | sandbox/_PS_09_IBCPeriod.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
-| PS-10 | Developing-POC migration join (VAH-as-support pullback) | trading-idea-catalogue.md | entry signal | sandbox/_PS_10_DevelopingPOCMigration.Strategy.CS (name fixed when the batch is written) | 7 | not coded |
+| PS-09 | IB C-period failure → IB midpoint | trading-idea-catalogue.md | entry signal | sandbox/_PS_09_IBCPeriod.Strategy.CS | 7 | coded in batch 7 |
+| PS-10 | Developing-POC migration join (VAH-as-support pullback) | trading-idea-catalogue.md | entry signal | sandbox/_PS_10_DevelopingPOCMigration.Strategy.CS | 7 | coded in batch 7 |
 | PS-11 | Unratified new extreme (POC refuses to follow) → confirmed fade | trading-idea-catalogue.md | entry signal | sandbox/_PS_11_UnratifiedNewExtreme.Strategy.CS (name fixed when the batch is written) | 8 | not coded |
 | PS-12 | Trend-cluster pullback (first touch of an in-trend volume cluster) | trading-idea-catalogue.md | entry signal | sandbox/_PS_12_TrendClusterPullback.Strategy.CS | 2 | coded in batch 2 |
 | PS-13 | Volume-accumulation breakout: first-touch retest | trading-idea-catalogue.md | entry signal | sandbox/_PS_13_RotationVolumeLevel.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
@@ -417,3 +417,8 @@ A file journals and does not send an order only when its catalogue heading has n
 | DV-17 | Merged into OF-08. No second entry. |
 | DV-18 | Merged into OF-05. No second entry. |
 | DV-19 | Merged into OF-06. No second entry. |
+| TS-04 | Re-runs PS-01 and PS-24 on a pit profile. No entry of its own. |
+| TS-07 | Opening-noise blackout for other entries. No entry. |
+| DV-20 | Weak-low veto for a host level. No entry. |
+| DV-21 | Merged into DV-02. No second entry. |
+| DV-24 | Merged into EX-01. No second entry. |
