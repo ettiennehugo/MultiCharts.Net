@@ -2,7 +2,7 @@ using System;
 
 namespace PowerLanguage.Strategy
 {
-	/// <summary>Sandbox-only decisions from 2026-11-15 20:06 ET. Not a study. GX reads FlatByHHMM in the exchange zone, so 1555 is 15:55 there.</summary>
+	/// <summary>Sandbox-only decisions. GX reads FlatByHHMM in the exchange zone. The flat is five minutes before that market's regular close.</summary>
 	public enum ESandboxSide { Long, Short, Both }
 
 	public enum ESandboxGate
@@ -19,13 +19,38 @@ namespace PowerLanguage.Strategy
 
 	public static class _SandboxRules
 	{
-		public const int Flat1555 = 1555;
+		/// <summary>Regular close in US Eastern. The named pits and index futures come from the sandbox table. Anything else uses a daytime session-template end, then 16:00 ET (a stock close).</summary>
+		public static TimeSpan RegularCloseEt(string symbol, TimeSpan listedSessionEnd)
+		{
+			string root = Root(symbol);
+			if (root == "CL") return new TimeSpan(14, 30, 0);
+			if (root == "GC") return new TimeSpan(13, 30, 0);
+			if (root == "ZN" || root == "6E") return new TimeSpan(15, 0, 0);
+			if (root == "ES" || root == "NQ" || root == "MES" || root == "MNQ" || root == "YM" || root == "RTY")
+				return new TimeSpan(16, 0, 0);
+			if (listedSessionEnd > new TimeSpan(12, 0, 0) && listedSessionEnd < new TimeSpan(17, 0, 0))
+				return listedSessionEnd;
+			return new TimeSpan(16, 0, 0);
+		}
 
-		/// <summary>0 means the standard 15:55 exchange flat. Any other value is an Eastern catalogue clock converted into the exchange zone.</summary>
+		public static TimeSpan DaytimeEnd(TimeSpan listedEnd)
+		{
+			if (listedEnd > new TimeSpan(12, 0, 0) && listedEnd < new TimeSpan(17, 0, 0)) return listedEnd;
+			return TimeSpan.Zero;
+		}
+
+		/// <summary>A positive override is an Eastern catalogue clock. Zero is five minutes before the regular close, in the exchange zone.</summary>
+		public static int FlatBy(int etOverrideHhmm, string exchange, string symbol, TimeSpan listedSessionEnd)
+		{
+			if (etOverrideHhmm > 0) return EtToExchangeHhmm(etOverrideHhmm, exchange);
+			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd) - TimeSpan.FromMinutes(5);
+			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
+			return EtToExchangeHhmm(flat.Hours * 100 + flat.Minutes, exchange);
+		}
+
 		public static int FlatBy(int etOverrideHhmm, string exchange)
 		{
-			if (etOverrideHhmm <= 0) return Flat1555;
-			return EtToExchangeHhmm(etOverrideHhmm, exchange);
+			return FlatBy(etOverrideHhmm, exchange, "", TimeSpan.Zero);
 		}
 
 		public static int EtToExchangeHhmm(int etHhmm, string exchange)
@@ -33,20 +58,33 @@ namespace PowerLanguage.Strategy
 			return Shift(etHhmm, -LagMinutes(exchange));
 		}
 
-		/// <summary>sessionClock is Eastern. True once that Eastern clock has reached 15:55 in the exchange zone.</summary>
+		/// <summary>sessionClock is Eastern. True once that clock is within five minutes of the regular close, and before 18:00 ET.</summary>
+		public static bool PastFlat(TimeSpan etTod, string symbol, TimeSpan listedSessionEnd)
+		{
+			TimeSpan flat = RegularCloseEt(symbol, listedSessionEnd) - TimeSpan.FromMinutes(5);
+			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
+			int now = etTod.Hours * 100 + etTod.Minutes;
+			int limit = flat.Hours * 100 + flat.Minutes;
+			return now >= limit && now < 1800;
+		}
+
 		public static bool PastFlat(TimeSpan etTod, string exchange)
 		{
-			int now = etTod.Hours * 100 + etTod.Minutes;
-			int limit = Shift(Flat1555, LagMinutes(exchange));
-			return now >= limit && now < 1800;
+			return PastFlat(etTod, "", TimeSpan.Zero);
+		}
+
+		public static void ApplyPit(string name, ref TimeSpan start, ref TimeSpan end, ref TimeSpan valueEnd, TimeSpan listedEnd)
+		{
+			string root = Root(name);
+			if (root == "CL") { start = new TimeSpan(9, 0, 0); end = new TimeSpan(14, 30, 0); }
+			else if (root == "GC") { start = new TimeSpan(8, 20, 0); end = new TimeSpan(13, 30, 0); }
+			else if (root == "ZN" || root == "6E") { start = new TimeSpan(8, 20, 0); end = new TimeSpan(15, 0, 0); }
+			valueEnd = RegularCloseEt(name, listedEnd);
 		}
 
 		public static void ApplyPit(string name, ref TimeSpan start, ref TimeSpan end, ref TimeSpan valueEnd)
 		{
-			string root = Root(name);
-			if (root == "CL") { start = new TimeSpan(9, 0, 0); end = new TimeSpan(14, 30, 0); valueEnd = end; }
-			else if (root == "GC") { start = new TimeSpan(8, 20, 0); end = new TimeSpan(13, 30, 0); valueEnd = end; }
-			else if (root == "ZN" || root == "6E") { start = new TimeSpan(8, 20, 0); end = new TimeSpan(15, 0, 0); valueEnd = end; }
+			ApplyPit(name, ref start, ref end, ref valueEnd, valueEnd);
 		}
 
 		public static bool GateAllows(ESandboxGate gate, bool buy, double close, double priorPoc, double sessionHigh, double sessionLow, double atr, double sma, double priorClose, int families)
