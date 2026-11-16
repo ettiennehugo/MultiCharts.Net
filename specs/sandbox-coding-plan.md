@@ -5,17 +5,17 @@
 ## Owner decisions (2026-11-15 20:06 ET)
 
 1. Flat-by is 15:55 in the exchange zone (`_SandboxRules.Flat1555`). An earlier catalogue clock is Eastern and is converted by `_SandboxRules.FlatBy`. NYMEX and COMEX stay Eastern, matching the GX zone map. That is 15:55 ET there, not Central.
-2. RG gates and the GX scale exits are default-off inputs on `_PS_01_BalanceBreakPullback` (`EHostGate.Off`, `EHostExit.Host`). The RG and EX files still journal the rule and do not enter.
+2. Every GX host carries `ESandboxGate` and `ESandboxExit`, both default Off. The gate values are ValueMigration (RG-01), Balance (RG-02), DayType (RG-04), Noise (RG-05), Trend (RG-06), Compression (RG-08), ThreeFamily (RG-09) and FitRegime (RG-10). The exit values are HvnTarget (EX-01), NakedPoc (EX-02), BalanceWidth (EX-03), Partial1R (EX-07), FixedR (EX-08), Partial15R (EX-13), BreakEven3R (A2-73) and FreeRoll (A2-74). RG-07 is the trading subclass of A2-56, not a second switch. EX-04, EX-05, EX-06, EX-09, EX-10, EX-11 and EX-12 are not GX modes; their files journal the host condition. A scale exit uses 2 contracts.
 3. `RollDetection` is turned off in `StartCalc` when the instrument is not a future.
 4. Data1 is 1-minute. Data2 is the idea's native timeframe, declared on the `// Chart:` line. A file that emulates a higher bar requires Data2 and logs an Error when it is missing.
-5. A priced entry is resent while its signal is still true. One fill per session.
-6. A new swing anchor, and a new session, clears the once-only latch. That is one trade per anchor per day.
-7. `ESandboxSide` exists for a host that codes both sides. The default is Both.
+5. A priced stop or limit entry is stored and resent each bar until 15:55 exchange time, or until the file's own clock window ends. One fill of that setup per day. A market entry is not a resting order.
+6. The fill key is the day plus the swing anchor when the file has one. A new anchor the same day can trade. The same anchor can trade the next day.
+7. Files whose heading says the other side is a mirror take `ESandboxSide`, default Both. A2-27, AV-11 and OF-01 code the side that was missing.
 8. VX files do not trade. They log an Error that VIX data is unavailable. HV20 is not a substitute.
 9. CL, GC, ZN and 6E use the pit table in `_SandboxRules.ApplyPit` when the chart name matches. Other symbols keep the base session.
-10. A host exit of Partial1R or Partial15R uses 2 contracts, logs a Warning, and logs an Error if that risk exceeds 1 percent of equity.
+10. A2-04, A2-13, A2-28, A2-32, A2-35, A2-45, A2-46 and PS-03 trade 2 contracts. A Warning is logged when that size is used, and an Error when the two-contract risk exceeds 1 percent. The same Warning and Error apply when a GX host's scale exit is on.
 11. A2-53 keeps a plain protective stop. The catalogue note says the sandbox does not stop-and-reverse.
-12. PS-01 sends the protective stop on the same bar as the entry stop.
+12. An own-exit file sends its protective stop on the same bar as the entry. GX hosts leave the stop to GX.
 
 Deleted, because the catalogue merges them or says they do not exist: DV-04, DV-05, DV-10, DV-12, DV-13, DV-14, DV-17, DV-18, DV-19, DV-21, DV-24, PS-26. Their hosts are PS-12, PS-14, VW-08, AV-02, AV-11, AV-08, OF-08, OF-05, OF-06, DV-02, EX-01. There is no PS-26.
 
@@ -235,7 +235,7 @@ The counts are in the table at the end of this file.
 | PS-22 | Composite LVN-edge rejection vs HVN-ceiling veto | trading-idea-catalogue.md | entry signal | sandbox/_PS_22_LvnEdgeRejection.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | PS-23 | Profile shape at the close → next-session tilt | trading-idea-catalogue.md | entry signal | sandbox/_PS_23_ProfileShapeAt.Strategy.CS | 8 | coded in batch 8 |
 | PS-24 | Overnight high/low break-and-go at RTH | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_PS_24_OvernightBreak.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
-| PS-25 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_PS_25_PS25.Strategy.CS | 8 | coded in batch 8 |
+| PS-25 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md | entry signal | sandbox/_PS_25_AcceptBeyondRail.Strategy.CS | 8 | coded in batch 8 |
 | OF-01 | Stacked-imbalance origin: first retest continuation | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_OF_01_StackedImbalanceRetest.Strategy.CS | 1 | coded in this plan's first PR, port of the engines-manual example |
 | OF-02 | Delta-z ratification of the breakout bar (layer) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_OF_02_DeltaZRatification.Strategy.CS | 8 | coded in batch 8 |
 | OF-03 | Anchored CVD flip at a failed break (layer) | trading-idea-catalogue.md | entry signal | sandbox/_OF_03_AnchoredCVDFlip.Strategy.CS | 8 | coded in batch 8 |
@@ -252,7 +252,7 @@ The counts are in the table at the end of this file.
 | MT-04 | 60m swing-AVWAP + 5m HL entry | trading-idea-catalogue.md | entry signal | sandbox/_MT_04_X60mSwingAVWAP.Strategy.CS | 9 | coded in batch 9 |
 | MT-05 | 240m multi-session LVN as pullback zone | trading-idea-catalogue.md | entry signal | sandbox/_MT_05_X240mMultiSession.Strategy.CS | 9 | coded in batch 9 |
 | MT-06 | Daily failed auction (excess / poor extreme) + intraday trigger | trading-idea-catalogue.md, video-ideas-2026-11-10-additions.md | entry signal | sandbox/_MT_06_DailyFailedAuction.Strategy.CS | 9 | coded in batch 9 |
-| MT-07 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_MT_07_MT07.Strategy.CS | 9 | coded in batch 9 |
+| MT-07 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | entry signal | sandbox/_MT_07_HtfDetrendedRail.Strategy.CS | 9 | coded in batch 9 |
 | SP-01 | Failed double top → upside breakout (T4) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | entry signal | sandbox/_SP_01_FailedDoubleTop.Strategy.CS | 9 | coded in batch 9 |
 | SP-02 | Double top at VAH with second-test divergence (T2, control) | trading-idea-catalogue.md | entry signal | sandbox/_SP_02_DoubleTopAt.Strategy.CS | 9 | coded in batch 9 |
 | SP-03 | Wyckoff spring at composite VAL with a test (T3) | trading-idea-catalogue.md | entry signal | sandbox/_SP_03_WyckoffSpringAt.Strategy.CS | 9 | coded in batch 9 |
@@ -300,18 +300,18 @@ The counts are in the table at the end of this file.
 | LE-05 | Decay-pair short (short TQQQ + SQQQ, or UPRO + SPXU) | trading-idea-catalogue.md | entry signal | sandbox/_LE_05_DecayPairShort.Strategy.CS | 11 | coded in batch 11 |
 | LE-06 | Short-term RSI mean reversion on LETFs (Connors-style) | trading-idea-catalogue.md | entry signal | sandbox/_LE_06_ShortTermRSI.Strategy.CS | 11 | coded in batch 11 |
 | LE-07 | Inverse-LETF bear-trend hold (SQQQ/SPXU below SMA200) — negative control | trading-idea-catalogue.md | entry signal | sandbox/_LE_07_InverseLETFBear.Strategy.CS | 11 | coded in batch 11 |
-| EX-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_01_EX01.Strategy.CS | 11 | coded in batch 11 |
-| EX-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_02_EX02.Strategy.CS | 11 | coded in batch 11 |
-| EX-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_03_EX03.Strategy.CS | 11 | coded in batch 11 |
-| EX-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_04_EX04.Strategy.CS | 11 | coded in batch 11 |
-| EX-05 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_05_EX05.Strategy.CS | 11 | coded in batch 11 |
-| EX-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_06_EX06.Strategy.CS | 11 | coded in batch 11 |
-| EX-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_07_EX07.Strategy.CS | 11 | coded in batch 11 |
-| EX-08 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_08_EX08.Strategy.CS | 11 | coded in batch 11 |
-| EX-09 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_09_EX09.Strategy.CS | 11 | coded in batch 11 |
-| EX-10 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_10_EX10.Strategy.CS | 12 | coded in batch 12 |
-| EX-11 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_11_EX11.Strategy.CS | 12 | coded in batch 12 |
-| EX-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_12_EX12.Strategy.CS | 12 | coded in batch 12 |
+| EX-01 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_01_HvnTarget.Strategy.CS | 11 | coded in batch 11 |
+| EX-02 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_02_NakedPocTarget.Strategy.CS | 11 | coded in batch 11 |
+| EX-03 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_03_BalanceWidthTarget.Strategy.CS | 11 | coded in batch 11 |
+| EX-04 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_04_AvwapTrail.Strategy.CS | 11 | coded in batch 11 |
+| EX-05 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, keller-b5-p6p7-entries-analyst2.md, keller-b5-rev3.1-addendum.md, trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_05_HigherLowTrail.Strategy.CS | 11 | coded in batch 11 |
+| EX-06 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_06_StagnationTimeStop.Strategy.CS | 11 | coded in batch 11 |
+| EX-07 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_07_HalfOffAt1R.Strategy.CS | 11 | coded in batch 11 |
+| EX-08 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_08_FixedRTarget.Strategy.CS | 11 | coded in batch 11 |
+| EX-09 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_09_StagnationExit.Strategy.CS | 11 | coded in batch 11 |
+| EX-10 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_10_AcceptanceFailure.Strategy.CS | 12 | coded in batch 12 |
+| EX-11 | (no heading; id is cited in the source) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | exit | sandbox/_EX_11_StopBeyondLvn.Strategy.CS | 12 | coded in batch 12 |
+| EX-12 | (no heading; id is cited in the source) | trading-idea-catalogue.md | exit | sandbox/_EX_12_CvdDivergenceExit.Strategy.CS | 12 | coded in batch 12 |
 | EX-13 | 1.5R partial, deep-pullback breakeven, trail under the initiative print (module) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md, video-ideas-2026-11-10-additions.md | exit | sandbox/_EX_13_X15RPartial.Strategy.CS | 12 | coded in batch 12 |
 | RG-01 | Value-migration gate (V-score) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_01_ValueMigrationGate.Strategy.CS | 12 | coded in batch 12 |
 | RG-02 | Balance/imbalance classifier + entropy skip | trading-idea-catalogue.md | regime-filter | sandbox/_RG_02_BalanceImbalanceClassifier.Strategy.CS | 12 | coded in batch 12 |
@@ -321,8 +321,8 @@ The counts are in the table at the end of this file.
 | RG-06 | HTF trend state (TSMOM + 60m structure) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | regime-filter | sandbox/_RG_06_HTFTrendState.Strategy.CS | 12 | coded in batch 12 |
 | RG-07 | Event, roll and thin-session exclusions | trading-idea-catalogue.md | regime-filter | sandbox/_RG_07_ExclusionGate.Strategy.CS | 2 | coded in batch 2 |
 | RG-08 | Compression state (range/ATR) | trading-idea-catalogue.md | regime-filter | sandbox/_RG_08_CompressionStateRange.Strategy.CS | 12 | coded in batch 12 |
-| RG-09 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_09_RG09.Strategy.CS | 12 | coded in batch 12 |
-| RG-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_10_RG10.Strategy.CS | 12 | coded in batch 12 |
+| RG-09 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_09_ThreeFamilyFilter.Strategy.CS | 12 | coded in batch 12 |
+| RG-10 | (no heading; id is cited in the source) | keller-b5-catalogue-additions.md, trading-idea-catalogue.md | regime-filter | sandbox/_RG_10_FitRegimeGate.Strategy.CS | 12 | coded in batch 12 |
 | PF-01 | Trend + carry core (parallel track) | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_01_TrendCarryCore.Strategy.CS | 12 | coded in batch 12 |
 | PF-02 | Regime-complementary intraday sleeves | trading-idea-catalogue.md | sizing-portfolio | sandbox/_PF_02_RegimeComplementaryIntraday.Strategy.CS | 12 | coded in batch 12 |
 | PF-03 | Cross-market diversification & hidden-beta monitor | trading-idea-catalogue.md, video-ideas-2026-11-08-additions.md | sizing-portfolio | sandbox/_PF_03_XmktBetaMonitor.Strategy.CS | 2 | coded in batch 2 |
@@ -508,6 +508,21 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 
 | ID | Class | Market tag |
 |---|---|---|
+| PS-01 | `_PS_01_BalanceBreakPullback` | futures-only |
+| A2-15 | `_A2_15_LegSkew` | both |
+| TS-04 | `_TS_04_CLGCPit` | futures-only |
+| DV-02 | `_DV_02_FailedLevelFlip` | futures-only |
+| A2-25 | `_A2_25_PocStabilityGate` | both |
+| A2-26 | `_A2_25_PocStabilityGate` | both |
+| OF-07 | `_OF_07_BurstExtremeBreak` | futures-only |
+| A2-78 | `_A2_78_DailyKillSwitch` | both |
+| PS-08 | `_PS_08_NarrowIbBreak` | futures-only |
+| MT-03 | `_MT_03_CompositeValueGate` | both |
+| PS-25 | `_PS_25_AcceptBeyondRail` | futures-only |
+| MT-07 | `_MT_07_HtfDetrendedRail` | futures-only |
+| KD-05 | `_KD_05_HTFDetrendedRail` | futures-only |
+| A2-56 | `_A2_56_FirstHourBreak` | futures-only |
+| RG-07 | `_RG_07_ExclusionGate` | both |
 | A2-04 | `_A2_04_OvernightInventory` | futures-only |
 | A2-09 | `_A2_09_NoiseBandLong` | futures-only |
 | A2-11 | `_A2_11_PriorDayVwap` | futures-only |
@@ -523,6 +538,11 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | A2-34 | `_A2_34_VtTarget` | futures-only |
 | A2-35 | `_A2_35_EventReformation` | futures-only |
 | A2-36 | `_A2_36_GammaFilter` | both |
+
+### Slot batch 2 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
 | A2-37 | `_A2_37_DislocationFilter` | both |
 | A2-38 | `_A2_38_MetaorderDrift` | both |
 | A2-40 | `_A2_40_CostModel` | both |
@@ -536,13 +556,6 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | A2-52 | `_A2_52_TimeConfirmedOpening` | futures-only |
 | A2-53 | `_A2_53_RTHGapFade` | futures-only |
 | A2-54 | `_A2_54_UpGapPullback` | futures-only |
-| A2-56 | `_A2_56_FirstHourBreak` | futures-only |
-| RG-07 | `_RG_07_ExclusionGate` | both |
-
-### Slot batch 2 (30)
-
-| ID | Class | Market tag |
-|---|---|---|
 | A2-57 | `_A2_57_TwoTimeframeTurn` | futures-only |
 | A2-58 | `_A2_58_FastInSlowFade` | futures-only |
 | A2-59 | `_A2_59_KaufmanCostUnables` | futures-only |
@@ -560,6 +573,11 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | A2-74 | `_A2_74_FreeRollSell` | both |
 | A2-75 | `_A2_75_RollingHitRate` | both |
 | A2-76 | `_A2_76_SellIntoThe` | both |
+
+### Slot batch 3 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
 | A2-77 | `_A2_77_FailedFollowThrough` | both |
 | A2-79 | `_A2_79_IntradayVolatilityContraction` | futures-only |
 | AV-01 | `_AV_01_SwingHighAVWAP` | futures-only |
@@ -573,17 +591,9 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | AV-09 | `_AV_09_RollAnchoredAVWAP` | futures-only |
 | AV-10 | `_AV_10_AVWAPProfileConfluence` | futures-only |
 | AV-11 | `_AV_11_BreakAvwapPullback` | futures-only |
-
-### Slot batch 3 (20)
-
-| ID | Class | Market tag |
-|---|---|---|
 | AV-12 | `_AV_12_FailedAVWAPReclaim` | futures-only |
 | AV-13 | `_AV_13_AVWAPStretchExit` | futures-only |
 | DV-01 | `_DV_01_DailyPOCFirst` | futures-only |
-| DV-02 | `_DV_02_FailedLevelFlip` | futures-only |
-| A2-25 | `_A2_25_PocStabilityGate` | both |
-| A2-26 | `_A2_25_PocStabilityGate` | both |
 | DV-06 | `_DV_06_EndOfTrend` | futures-only |
 | DV-07 | `_DV_07_RotationDoubleDistribution` | futures-only |
 | DV-08 | `_DV_08_FvgHvnAlignment` | both |
@@ -594,29 +604,28 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | DV-20 | `_DV_20_StopLossCluster` | futures-only |
 | DV-22 | `_DV_22_ABCDABCD` | futures-only |
 | DV-23 | `_DV_23_InitialBalanceDraw` | futures-only |
-| EX-01 | `_EX_01_EX01` | both |
-| EX-02 | `_EX_02_EX02` | both |
-| EX-03 | `_EX_03_EX03` | both |
-| EX-04 | `_EX_04_EX04` | both |
+| EX-01 | `_EX_01_HvnTarget` | both |
+| EX-02 | `_EX_02_NakedPocTarget` | both |
+| EX-03 | `_EX_03_BalanceWidthTarget` | both |
+| EX-04 | `_EX_04_AvwapTrail` | both |
 
 ### Slot batch 4 (30)
 
 | ID | Class | Market tag |
 |---|---|---|
-| EX-05 | `_EX_05_EX05` | both |
-| EX-06 | `_EX_06_EX06` | both |
-| EX-07 | `_EX_07_EX07` | both |
-| EX-08 | `_EX_08_EX08` | both |
-| EX-09 | `_EX_09_EX09` | both |
-| EX-10 | `_EX_10_EX10` | futures-only |
-| EX-11 | `_EX_11_EX11` | futures-only |
-| EX-12 | `_EX_12_EX12` | futures-only |
+| EX-05 | `_EX_05_HigherLowTrail` | both |
+| EX-06 | `_EX_06_StagnationTimeStop` | both |
+| EX-07 | `_EX_07_HalfOffAt1R` | both |
+| EX-08 | `_EX_08_FixedRTarget` | both |
+| EX-09 | `_EX_09_StagnationExit` | both |
+| EX-10 | `_EX_10_AcceptanceFailure` | futures-only |
+| EX-11 | `_EX_11_StopBeyondLvn` | futures-only |
+| EX-12 | `_EX_12_CvdDivergenceExit` | futures-only |
 | EX-13 | `_EX_13_X15RPartial` | both |
 | KD-01 | `_KD_01_AcceptBeyondRail` | futures-only |
 | KD-02 | `_KD_02_BandStretchFade` | futures-only |
 | KD-03 | `_KD_03_ThreeFamilyConfluence` | futures-only |
 | KD-04 | `_KD_04_DetrendedFitRegime` | futures-only |
-| KD-05 | `_KD_05_HTFDetrendedRail` | futures-only |
 | KD-06 | `_KD_06_BandAcceptanceBreakout` | futures-only |
 | KD-07 | `_KD_07_NoFadeVeto` | futures-only |
 | KD-08 | `_KD_08_ForwardConeDiagnostic` | both |
@@ -633,12 +642,12 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | LE-01 | `_LE_01_X200DayTrend` | both |
 | LE-02 | `_LE_02_VolatilityTargetedLeverage` | both |
 | LE-03 | `_LE_03_QQQTQQQRegime` | both |
+| LE-04 | `_LE_04_LETFRebalancingPressure` | futures-only |
 
-### Slot batch 5 (29)
+### Slot batch 5 (30)
 
 | ID | Class | Market tag |
 |---|---|---|
-| LE-04 | `_LE_04_LETFRebalancingPressure` | futures-only |
 | LE-05 | `_LE_05_DecayPairShort` | stock-only |
 | LE-06 | `_LE_06_ShortTermRSI` | both |
 | LE-07 | `_LE_07_InverseLETFBear` | both |
@@ -647,15 +656,12 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | MT-04 | `_MT_04_X60mSwingAVWAP` | futures-only |
 | MT-05 | `_MT_05_X240mMultiSession` | futures-only |
 | MT-06 | `_MT_06_DailyFailedAuction` | futures-only |
-| MT-07 | `_MT_07_MT07` | futures-only |
 | OF-01 | `_OF_01_StackedImbalanceRetest` | futures-only |
 | OF-02 | `_OF_02_DeltaZRatification` | futures-only |
 | OF-03 | `_OF_03_AnchoredCVDFlip` | futures-only |
 | OF-04 | `_OF_04_AbsorptionAtAn` | futures-only |
 | OF-05 | `_OF_05_CVDDivergenceAt` | futures-only |
 | OF-06 | `_OF_06_UnfinishedAuctionVeto` | futures-only |
-| OF-07 | `_OF_07_BurstExtremeBreak` | futures-only |
-| A2-78 | `_A2_78_DailyKillSwitch` | both |
 | OF-08 | `_OF_08_LargeTradePrint` | futures-only |
 | OF-09 | `_OF_09_WeeklyBias30m` | futures-only |
 | OF-10 | `_OF_10_ESVsNQ` | futures-only |
@@ -667,21 +673,17 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | PF-06 | `_PF_06_PortfolioVolatilityTargeting` | both |
 | PF-07 | `_PF_07_MetaLabellingThe` | both |
 | PF-08 | `_PF_08_DonchianTurtleDaily` | futures-only |
-
-### Slot batch 6 (29)
-
-| ID | Class | Market tag |
-|---|---|---|
-| PS-01 | `_PS_01_BalanceBreakPullback` | futures-only |
-| A2-15 | `_A2_15_LegSkew` | both |
 | PS-02 | `_PS_02_BalanceBreakClose` | futures-only |
 | PS-03 | `_PS_03_ConfirmedFailedBreak` | futures-only |
 | PS-04 | `_PS_04_PriorValueMagnet` | futures-only |
 | PS-05 | `_PS_05_RejectedRepricingOpen` | futures-only |
 | PS-06 | `_PS_06_DefeatedAdjustmentContinuation` | futures-only |
+
+### Slot batch 6 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
 | PS-07 | `_PS_07_OpenDrive` | futures-only |
-| PS-08 | `_PS_08_NarrowIbBreak` | futures-only |
-| MT-03 | `_MT_03_CompositeValueGate` | both |
 | PS-09 | `_PS_09_IBCPeriod` | futures-only |
 | PS-10 | `_PS_10_DevelopingPOCMigration` | futures-only |
 | PS-11 | `_PS_11_UnratifiedNewExtreme` | futures-only |
@@ -698,25 +700,24 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | PS-22 | `_PS_22_LvnEdgeRejection` | futures-only |
 | PS-23 | `_PS_23_ProfileShapeAt` | futures-only |
 | PS-24 | `_PS_24_OvernightBreak` | futures-only |
-| PS-25 | `_PS_25_PS25` | futures-only |
 | RG-01 | `_RG_01_ValueMigrationGate` | futures-only |
 | RG-02 | `_RG_02_BalanceImbalanceClassifier` | futures-only |
-
-### Slot batch 7 (30)
-
-| ID | Class | Market tag |
-|---|---|---|
 | RG-04 | `_RG_04_LiveDayType` | futures-only |
 | RG-05 | `_RG_05_NoiseBandFilter` | both |
 | RG-06 | `_RG_06_HTFTrendState` | both |
 | RG-08 | `_RG_08_CompressionStateRange` | both |
-| RG-09 | `_RG_09_RG09` | futures-only |
-| RG-10 | `_RG_10_RG10` | futures-only |
+| RG-09 | `_RG_09_ThreeFamilyFilter` | futures-only |
+| RG-10 | `_RG_10_FitRegimeGate` | futures-only |
 | SP-01 | `_SP_01_FailedDoubleTop` | futures-only |
 | SP-02 | `_SP_02_DoubleTopAt` | futures-only |
 | SP-03 | `_SP_03_WyckoffSpringAt` | futures-only |
 | SP-04 | `_SP_04_LowerHighAfter` | futures-only |
 | SP-05 | `_SP_05_FourPartReversal` | futures-only |
+
+### Slot batch 7 (30)
+
+| ID | Class | Market tag |
+|---|---|---|
 | SP-06 | `_SP_06_FirstHigherLow` | futures-only |
 | SP-07 | `_SP_07_FailedFailureRe` | futures-only |
 | SP-08 | `_SP_08_PointOfOrigin` | futures-only |
@@ -730,17 +731,11 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | TS-01 | `_TS_01_EuropeanOpenDrift` | futures-only |
 | TS-02 | `_TS_02_LondonOpenBreak` | futures-only |
 | TS-03 | `_TS_03_CloseDrift` | futures-only |
-| TS-04 | `_TS_04_CLGCPit` | futures-only |
 | TS-05 | `_TS_05_ZNPostRelease` | futures-only |
 | TS-06 | `_TS_06_OvernightInventoryCorrection` | futures-only |
 | TS-07 | `_TS_07_OpeningNoiseObservation` | futures-only |
 | VW-01 | `_VW_01_TrendDayFirst` | futures-only |
 | VW-02 | `_VW_02_BalanceDay2` | futures-only |
-
-### Slot batch 8 (25)
-
-| ID | Class | Market tag |
-|---|---|---|
 | VW-03 | `_VW_03_BandExpansionContinuation` | futures-only |
 | VW-04 | `_VW_04_FailedVWAPDefence` | futures-only |
 | VW-05 | `_VW_05_LateDayVwap` | futures-only |
@@ -753,6 +748,11 @@ Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the sam
 | VX-05 | `_VX_05_LongVolatilityTail` | futures-only |
 | VX-06 | `_VX_06_VIXTermStructure` | futures-only |
 | VX-07 | `_VX_07_VVIXGateModule` | futures-only |
+
+### Slot batch 8 (13)
+
+| ID | Class | Market tag |
+|---|---|---|
 | VX-08 | `_VX_08_VIXStretchES` | futures-only |
 | YV-01 | `_YV_01_X30mBalanceVA` | futures-only |
 | YV-02 | `_YV_02_CrossIndexFlow` | futures-only |

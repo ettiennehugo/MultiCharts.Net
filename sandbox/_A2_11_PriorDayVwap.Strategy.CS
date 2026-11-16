@@ -155,7 +155,11 @@ namespace PowerLanguage.Strategy
 		private bool m_latched, m_accepted, m_haveHl, m_done, m_wasComplete;
 		private double m_15c, m_5h, m_5l, m_5c;
 
-		public _A2_11_PriorDayVwap(object _ctx) : base(_ctx) { AcceptBars = EAcceptBars.Two; }
+		[Input] public ESandboxGate Gate { get; set; }
+		[Input] public ESandboxExit ExitMode { get; set; }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+
+		public _A2_11_PriorDayVwap(object _ctx) : base(_ctx) { AcceptBars = EAcceptBars.Two;  Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
@@ -185,7 +189,7 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			DateTime et = ToEastern(Bars.Time[0]);
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_hl = m_hlHigh = double.NaN; }
+			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_filledSetup = false; m_restOn = false; m_hl = m_hlHigh = double.NaN; }
 			SessionStats s = Session;
 			if (s != null && s.rthComplete && !m_wasComplete && !double.IsNaN(CurrentVwap1)) m_pd = CurrentVwap1;
 			m_wasComplete = s != null && s.rthComplete;
@@ -261,5 +265,45 @@ namespace PowerLanguage.Strategy
 			{ m_haveHl = true; m_hl = m_5l; m_hlHigh = m_5h; }
 			m_prev5Low = m_5l; m_prev5High = m_5h;
 		}
+
+		private bool hostGate(bool buy)
+		{
+			if (Gate == ESandboxGate.Off) return true;
+			VpExtra prior = null;
+			try { prior = PriorRthProfile(); } catch (Exception) { }
+			double poc = prior != null ? prior.poc : double.NaN;
+			double hi = Session != null ? Session.rthHigh : Bars.High[0];
+			double lo = Session != null ? Session.rthLow : Bars.Low[0];
+			double atr = averageTrueRange(Bars, 14);
+			double sma = double.NaN;
+			try { sma = DailyContext.Sma200; } catch (Exception) { }
+			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			int fam = 0, ranges = 0;
+			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
+			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			return ok;
+		}
+		private void honorExit(double entry, double risk)
+		{
+			double t1; int pct; bool be;
+			if (!_SandboxRules.ScaleExit(ExitMode, out t1, out pct, out be)) return;
+			int qty = _SandboxRules.ScaleQty(ExitMode, false);
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty);
+			if (qty > 1 && risk > 0 && qty * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{
+				if (journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent");
+				m_done = true; m_restOn = false; return;
+			}
+			GxConfig.TargetMode = pct > 0 ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.RMultiple;
+			GxConfig.T1Value = t1;
+			GxConfig.T1ScalePct = pct;
+			GxConfig.FinalTargetUnit = ETriggerUnit.RMultiple;
+			GxConfig.FinalTargetValue = t1;
+			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
+			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
 	}
 }
