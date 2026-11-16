@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -146,7 +147,9 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_le; private bool m_done, m_reclaim; private int m_below, m_anchor = -1;
 		public _AV_01_SwingHighAVWAP(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh; GxOrderPrefix = "AV01"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV01LE", EOrderAction.Buy)); }
-		protected override void StartCalc() { NeedsDaily = true; DailyConfig.smaLength = 50; DailyConfig.atrLength = 20; base.StartCalc(); }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; DailyConfig.smaLength = 50; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -171,6 +174,7 @@ namespace PowerLanguage.Strategy
 				else { m_below = 0; m_reclaim = false; }
 			}
 			if (!m_reclaim || Bars.Close[0] <= a.Value) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30) return;
 			double lo = Bars.Low[0], prev = Bars.Low[15], hi = Bars.High[0];
 			for (int i = 1; i < 15; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[15 + i]); hi = Math.Max(hi, Bars.High[i]); }
@@ -208,7 +212,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = Math.Abs(target - entry);
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = hold ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.MaxHoldDays = hold ? 10 : 0;
 			GxConfig.TimeStopMinutes = 0; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();

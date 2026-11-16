@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -153,6 +154,12 @@ namespace PowerLanguage.Strategy
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW01LE", EOrderAction.Buy));
 			GxOrderPrefix = "VW01"; createGxOrders();
 		}
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -170,6 +177,7 @@ namespace PowerLanguage.Strategy
 			if (m_vwapHist.Count <= 30) return;
 			double vwapAgo = m_vwapHist[m_vwapHist.Count - 31];
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || m_through > 1) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double atr = averageTrueRange(Bars, 5);
 			if (!(atr > 0) || !(vwap - vwapAgo > 0.15 * atr)) return;
@@ -196,7 +204,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = overnight ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.MaxHoldDays = overnight ? 10 : 0;
 			GxConfig.TimeStopMinutes = 0;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;

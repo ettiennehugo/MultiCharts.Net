@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -153,6 +154,12 @@ namespace PowerLanguage.Strategy
 			m_sx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09SX", EOrderAction.BuyToCover, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV09LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_ss = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV09SS", EOrderAction.BuyToCover, OrderExit.FromAll)); }
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -170,7 +177,7 @@ namespace PowerLanguage.Strategy
 				if (pos > 0) m_ls.Send(m_stop); else m_ss.Send(m_stop);
 				return;
 			}
-			if (IsRth() && tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0) && !double.IsNaN(vwap) && !m_counted)
+			if (IsRth() && _SandboxRules.PastFlat(tod, Bars.Info.Exchange) && !double.IsNaN(vwap) && !m_counted)
 			{
 				m_counted = true;
 				m_prev = m_side; m_prevExt = m_ext;
@@ -211,7 +218,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = Math.Abs(target - entry);
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = hold ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.MaxHoldDays = hold ? 10 : 0;
 			GxConfig.TimeStopMinutes = 0; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
