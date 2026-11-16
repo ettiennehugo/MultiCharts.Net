@@ -383,15 +383,37 @@ Batch 2 in this update is the remaining engines-manual examples. Rows that the f
 
 ## Market tags
 
-Each sandbox header has `Market tag: futures-only`, `stock-only`, or `both`. Futures-only ideas use the futures session API (`IsRth`, `m_rthValueEnd`). Both and stock-only ideas use `Bars.Sessions` and never a hard-coded symbol, session clock, or tick floor. The floor is `InstrumentProfile.costFloorTicks`. Batches 1-3 were tagged from the code they already contain. New files are tagged with the idea.
+Each new sandbox header has `Market tag: futures-only`, `stock-only`, or `both`. Futures-only ideas use the futures session API (`IsRth`, `m_rthValueEnd`). Both and stock-only ideas use `Bars.Sessions` and never a hard-coded symbol, session clock, or tick floor. The floor is `InstrumentProfile.costFloorTicks`. Batches 1-3 were tagged from the code they already contain. New files are tagged with the idea.
+
+The ten files from the merged PR 126 are not edited by this stack. Their tags live here:
+
+| ID | Class | Market tag |
+|---|---|---|
+| A2-49 | `_A2_49_MiddayBreakout` | futures-only |
+| A2-56 | `_A2_56_FirstHourBreak` | futures-only |
+| A2-64 | `_A2_70_OpenFadeHvGate` | futures-only |
+| A2-69 | `_A2_69_KaufmanThreeDay` | futures-only |
+| A2-70 | `_A2_70_OpenFadeHvGate` | futures-only |
+| AV-08 | `_AV_08_PeriodAvwapLayer` | futures-only |
+| DV-15 | `_DV_15_EmaVwapPullback` | futures-only |
+| SW-02 | `_SW_02_SwingPullback` | both |
+| TS-01 | `_TS_01_EuropeanOpenDrift` | futures-only |
+| TS-03 | `_TS_03_CloseDrift` | futures-only |
+| VW-05 | `_VW_05_LateDayVwap` | futures-only |
 
 ## Non-trading rows
 
-A file journals and does not send an order only when its catalogue heading has no entry. SandboxCompile rejects two sandbox signals whose CalcBar bodies match once comments, whitespace and quoted names are removed.
+A file journals and does not send an order only when its catalogue heading has no entry. SandboxCompile rejects two sandbox signals whose CalcBar bodies match once comments, whitespace, quoted names and numeric literals are removed.
 
 | ID | Reason |
 |---|---|
+| A2-29 | Entropy day-type gate. No entry. |
+| A2-31 | KL-divergence acceptance gate. No entry. |
+| A2-34 | V/T urgency target module. No entry. |
 | A2-36 | No GEX series and no VIX series. The heading cannot be traded on this feed. |
+| A2-37 | Cross-instrument dislocation filter. No entry. |
+| A2-43 | Confluent-HVN veto. No entry. |
+| A2-50 | Opening relative-volume gate. No entry. |
 | A2-38 | Trade-size entropy is not in `_TickStream`. |
 | A2-40 | Cost note. It does not set Commission or Slippage and it has no entry. |
 | A2-48 | The heading says the module never opens a trade. It journals poor highs and poor lows. |
@@ -404,6 +426,8 @@ A file journals and does not send an order only when its catalogue heading has n
 | A2-76 | Climax exit for an open host winner. No entry. |
 | A2-77 | Follow-through checkpoint for a host. No entry. GX time stop does not test open profit. |
 | A2-79 | Contraction gate for a host. No entry. |
+| KD-08 | Forward-cone diagnostic. No entry. |
+| PF-03 | Cross-market beta monitor. No entry. |
 | AV-10 | Compares host events that already have an entry. No entry of its own. |
 | AV-13 | Stretch scale for a host anchor. No entry. |
 | VW-07 | Location filter for other entries. No standalone trade. No ETH type on EVwapType. |
@@ -485,7 +509,7 @@ A file journals and does not send an order only when its catalogue heading has n
 
 ## Slot batches
 
-Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the same batch as its parent. A2-26 is the KDE veto inside `_A2_25_PocStabilityGate`, so it is copied with A2-25 and does not take a second slot. Copy a batch by placing each file in its own `_Test` slot and renaming only the class, with the parent present in that same set.
+Each batch is at most 30 studies, one per `_Test` slot. A subclass is in the same batch as its parent where the batches below allow it. A2-26 is the KDE veto inside `_A2_25_PocStabilityGate`, so it is copied with A2-25 and does not take a second slot. Copy a batch by placing each file in its own `_Test` slot and renaming only the class. When a child declares `: _Parent`, that base must be renamed to the parent's `_TestNN` class, or the original parent class must stay compiled in the same project. TS-04 extends PS-01, MT-07 extends PS-25, and KD-05 extends MT-07, so those copies need the parent class under its slot name.
 
 ### Slot batch 1 (30)
 

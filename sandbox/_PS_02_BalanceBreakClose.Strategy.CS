@@ -22,7 +22,7 @@
 // Trigger: the worked example's entry, on a closed bar.
 // Management: the example's stop, if it has one, re-sent while the position is open. Size stays 1 contract.
 // Exit: the example's target, stop or time exit. Not the GX wrapper. GX is specified and not yet in the build.
-// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
+// Exit orders go through exitPlan and exitBar.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // The worked example class was _Ex27CompositeBreakMarket.
-// IOG is disabled. GX exitPlan is not called because _GenericExit is not in this build. The example's own exits remain.
+// IOG is disabled. Exits go through exitPlan and exitBar.
 
 // Manual v4 example 27 - PS-02 balance break, market entry after acceptance (long side shown; short mirrors).
 // Filter: as PS-01 (IsBalanced(RTH, n = 3, 0.6)) + V-score aligned (>= +1 long, <= -1 short) + composite entropy Hnorm <= 0.93.
@@ -196,15 +196,6 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) newDay(day);
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition;
-						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
-			bool sendExits()
-			{
-				m_done = true;
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
-				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
-				return true;
-			
-			}
 			exitBar();
 			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;

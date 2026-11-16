@@ -20,8 +20,8 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: sendExits re-sends the stop and the target while the position is open. Size stays 1 contract.
-// Exit: the catalogue stop, target or time exit, sent only from sendExits. Not the GX wrapper.
+// Management: exitBar re-sends the stop and the target while the position is open. Size stays 1 contract.
+// Exit: the catalogue stop and target, sent through exitPlan and exitBar.
 //
 // ## 5. Timing
 // Signal evaluated: closed bar only. CalcBar returns unless Bars.Status is EBarState.Close, after base.CalcBar.
@@ -56,18 +56,18 @@
 //
 // ## 11. Orders, execution, and costs
 // Entry order: the order name in Create.
-// Exit orders: sent only from sendExits.
+// Exit orders: exitPlan and exitBar.
 // Fill assumption: next bar for a market order. A stop or limit rests until filled. IOG is off.
 // Costs: MultiCharts commission and slippage. This file does not set a fee or a slippage number. Not yet verified
 //
 // ## 12. Trade management
-// While open: sendExits re-sends the stop and the target. Nothing else is added.
+// While open: exitBar re-sends the stop and the target. Nothing else is added.
 //
 // ## 13. Exits
-// Exit orders are sent only from sendExits. Replacing that method with exitPlan is the GX move.
+// Exit orders go through exitPlan and exitBar.
 // Hard stop: the catalogue stop, widened to 14 ticks when the rule places a stop.
 // Target: the catalogue target, or Not applicable.
-// Time exit: the catalogue flat time, via FlatBy and mustFlatten inside sendExits.
+// Time exit: the catalogue flat time, via the GX FlatBy clock.
 // Invalidation: the catalogue skip rules.
 //
 // ## 14. Regimes
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // ASSUMPTION: Chart is 1-minute. pdVWAP is CurrentVwap1 (Vwap1Type Session) latched when Session.rthComplete first becomes true. 15-minute and 5-minute closes are built from Data1 bar-end times, not from extra series. A higher low is the first 5-minute bar whose low is above both pdVWAP and the prior 5-minute low. The 1-minute break of structure is a 1-minute close above that 5-minute bar's high. The target is the nearer of prior RTH high and prior VAH, and the trade is skipped when that distance is under 1R.
-// IOG is disabled. GX exitPlan is not called. Exit orders are sent only from sendExits.
+// IOG is disabled. Exits go through exitPlan and exitBar.
 
 
 using System;
@@ -188,12 +188,6 @@ namespace PowerLanguage.Strategy
 			if (s != null && s.rthComplete && !m_wasComplete && !double.IsNaN(CurrentVwap1)) m_pd = CurrentVwap1;
 			m_wasComplete = s != null && s.rthComplete;
 			int pos = StrategyInfo.MarketPosition;
-			bool sendExits()
-			{
-				if (mustFlatten()) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
-				return false;
-			}
 			exitBar();
 			if (pos > 0) return;
 			if (pos != 0 || m_done || rollOn(1) || !(m_pd > 0) || s == null || !(s.rthOpen > 0) || s.rthOpen >= m_pd) return;
