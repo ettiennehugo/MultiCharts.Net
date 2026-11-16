@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 		public _AV_01_SwingHighAVWAP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh; GxOrderPrefix = "AV01"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV01LE", EOrderAction.Buy)); }
 		protected override void StartCalc() {
-			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero, Bars.Info.Exchange, Bars.Info.Category);
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.smaLength = 50; DailyConfig.atrLength = 20; base.StartCalc(); }
@@ -219,7 +219,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = Math.Abs(target - entry);
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = hold ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd, Bars.Info.Category);
+			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.MaxHoldDays = hold ? 10 : 0;
 			GxConfig.TimeStopMinutes = 0; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
@@ -273,7 +273,7 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			int anchor = m_anchor;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, Bars.Info.Exchange, Bars.Info.Category);
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
