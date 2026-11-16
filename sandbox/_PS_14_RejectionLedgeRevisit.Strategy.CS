@@ -160,6 +160,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (sandboxBook()) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_have = m_done = false; m_filledSetup = false; m_restOn = false; m_since = 0; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 30) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
@@ -186,7 +187,7 @@ namespace PowerLanguage.Strategy
 			double target = fadeBuy ? entry + (entry - stop) : entry - (stop - entry);
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(fadeBuy, entry, stop, target, fadeBuy ? "PS14LE" : "PS14SE", 0);
-			if (fadeBuy) m_le.Send(); else m_se.Send(); m_done = true;
+			if (fadeBuy) m_le.Send(); else m_se.Send();
 		}
 		private double blockVolume(int ago)
 		{
@@ -271,6 +272,23 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetValue = t1;
 			if (be) GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
+		}
+
+
+		private bool sandboxBook()
+		{
+			int anchor = 0;
+			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			if (step == ERest.Done) { m_done = true; return true; }
+			if (step != ERest.Resend) return false;
+			if (m_restBuy)
+			{
+			}
+			else
+			{
+			}
+			return true;
 		}
 
 	}
