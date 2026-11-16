@@ -223,7 +223,7 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EBracketFrac), Bracket)) throw new ArgumentException("_DV_15_EmaVwapPullback: Bracket is not a defined EBracketFrac");
 			Vwap1Type = VwapSlot == EVwapSlot.Week ? EVwapType.Week : EVwapType.Session;
 			Vwap1DataStream = 1;
-			NeedsDaily = true;                                      // before base.StartCalc (M-DAILY is built there)
+			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                                      // before base.StartCalc (M-DAILY is built there)
 			base.StartCalc();
 			m_ema = double.NaN; m_emaBars = 0; m_sideRun = 0; m_side = 0; m_vwap.Clear(); m_vwapDay = DateTime.MinValue;
 		}

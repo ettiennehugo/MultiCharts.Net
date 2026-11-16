@@ -171,7 +171,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			RollDetection = ERollDetection.Series;
-			NeedsDaily = true;                               // Atr20d (NaN for ~20 sessions after each roll: those weeks are skipped)
+			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                               // Atr20d (NaN for ~20 sessions after each roll: those weeks are skipped)
 			WeeklyProfiles.enabled = true;                   // source RthSessions, rollPolicy Reset, minSessions 3
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "MT02LE", EOrderAction.Buy));
 			m_lxTime = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "MT02LX", EOrderAction.Sell, OrderExit.FromAll));
