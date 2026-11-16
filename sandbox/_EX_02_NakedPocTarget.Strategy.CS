@@ -1,23 +1,24 @@
 // ## 1. Identity
-// Catalogue ID: EX-06
-// ID mapping: EX-06 -> _EX_06_EX06.Strategy.CS (class _EX_06_EX06).
-// Name: EX-06 decay time stop
+// Catalogue ID: EX-02
+// ID mapping: EX-02 -> _EX_02_NakedPocTarget.Strategy.CS (class _EX_02_NakedPocTarget).
+// Name: EX-02 naked POC target
 // Header version: 1
-// Rules version: catalogue specification under the EX-06 heading, rewritten 2026-11-15.
-// Study class: _EX_06_EX06
-// File: sandbox/_EX_06_EX06.Strategy.CS
+// Rules version: catalogue specification under the EX-02 heading, rewritten 2026-11-15.
+// Study class: _EX_02_NakedPocTarget
+// File: sandbox/_EX_02_NakedPocTarget.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Time stop only when open profit is under 0.5 R. It does not enter.
+// Host option: Host option ESandboxExit.NakedPoc, default Off, on every GX host. This file journals the naked POC.
+// Non-trading signal: Naked-POC target module. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-06 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-02 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
+// Research assumption: ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-06 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-02 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +87,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
+// Other: ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +127,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-06
+// logSignal tag: EX-02
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
+// ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
 // IOG is disabled.
 
 
@@ -143,10 +144,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_06_EX06 : _VolumeProfileFuturesBase
+	public class _EX_02_NakedPocTarget : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_06_EX06(object _ctx) : base(_ctx) { }
+		public _EX_02_NakedPocTarget(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc()
 		{
@@ -158,7 +159,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			int tBars = 0; if (journalOn()) trace(ETraceLevel.Journal, "EX-06 time stop needs a host median. Placeholder T " + tBars + ". No order.");
+			double poc = double.NaN; foreach (VpExtra e in NakedPocs(1)) if (e.poc > Bars.Close[0] && (double.IsNaN(poc) || e.poc < poc)) poc = e.poc; if (journalOn()) trace(ETraceLevel.Journal, "EX-02 naked POC " + poc.ToString("0.00") + ". Host target, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

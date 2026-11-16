@@ -1,11 +1,11 @@
 // ## 1. Identity
 // Catalogue ID: EX-04
-// ID mapping: EX-04 -> _EX_04_EX04.Strategy.CS (class _EX_04_EX04).
+// ID mapping: EX-04 -> _EX_04_AvwapTrail.Strategy.CS (class _EX_04_AvwapTrail).
 // Name: EX-04 AVWAP trail
 // Header version: 1
 // Rules version: catalogue specification under the EX-04 heading, rewritten 2026-11-15.
-// Study class: _EX_04_EX04
-// File: sandbox/_EX_04_EX04.Strategy.CS
+// Study class: _EX_04_AvwapTrail
+// File: sandbox/_EX_04_AvwapTrail.Strategy.CS
 // Stage: sandbox
 // Non-trading signal: AVWAP trail. GX has no AVWAP trail. It does not enter.
 // Owner approval: Not yet verified
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_04_EX04 : _VolumeProfileFuturesBase
+	public class _EX_04_AvwapTrail : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_04_EX04(object _ctx) : base(_ctx) { }
+		public _EX_04_AvwapTrail(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; }
 		protected override void StartCalc()
 		{

@@ -1,23 +1,23 @@
 // ## 1. Identity
-// Catalogue ID: EX-07
-// ID mapping: EX-07 -> _EX_07_EX07.Strategy.CS (class _EX_07_EX07).
-// Name: EX-07 half off at 1 R
+// Catalogue ID: EX-06
+// ID mapping: EX-06 -> _EX_06_StagnationTimeStop.Strategy.CS (class _EX_06_StagnationTimeStop).
+// Name: EX-06 decay time stop
 // Header version: 1
-// Rules version: catalogue specification under the EX-07 heading, rewritten 2026-11-15.
-// Study class: _EX_07_EX07
-// File: sandbox/_EX_07_EX07.Strategy.CS
+// Rules version: catalogue specification under the EX-06 heading, rewritten 2026-11-15.
+// Study class: _EX_06_StagnationTimeStop
+// File: sandbox/_EX_06_StagnationTimeStop.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Half off at 1 R. Default-off on the host. This file does not enter.
+// Non-trading signal: Time stop only when open profit is under 0.5 R. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-07 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-06 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
+// Research assumption: ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-07 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-06 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +86,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
+// Other: ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +126,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-07
+// logSignal tag: EX-06
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
+// ASSUMPTION: The heading exits after T bars when open profit is under 0.5 R. GX TimeStopBars exits winners too. ASSUMPTION: T is not frozen here because it depends on a host's development sample. This file does not send an order.
 // IOG is disabled.
 
 
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_07_EX07 : _VolumeProfileFuturesBase
+	public class _EX_06_StagnationTimeStop : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_07_EX07(object _ctx) : base(_ctx) { }
+		public _EX_06_StagnationTimeStop(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc()
 		{
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double oneR = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "EX-07 GX ScaleOutThenRunner T1 1 R. A 1 ATR stand-in is " + oneR.ToString("0.00") + ". No order.");
+			double atr = averageTrueRange(Bars, 14); double openP = Bars.Close[0] - Bars.Open[0]; bool eligible = atr > 0 && Math.Abs(openP) < 0.5 * atr; int bars = Bars.CurrentBar; if (journalOn()) trace(ETraceLevel.Journal, "EX-06 time stop eligible " + eligible + " open profit " + openP.ToString("0.00") + " under half ATR " + atr.ToString("0.00") + " at bar " + bars + ". No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

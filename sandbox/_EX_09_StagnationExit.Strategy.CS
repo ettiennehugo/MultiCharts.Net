@@ -1,23 +1,23 @@
 // ## 1. Identity
-// Catalogue ID: EX-02
-// ID mapping: EX-02 -> _EX_02_EX02.Strategy.CS (class _EX_02_EX02).
-// Name: EX-02 naked POC target
+// Catalogue ID: EX-09
+// ID mapping: EX-09 -> _EX_09_StagnationExit.Strategy.CS (class _EX_09_StagnationExit).
+// Name: EX-09 stagnation exit
 // Header version: 1
-// Rules version: catalogue specification under the EX-02 heading, rewritten 2026-11-15.
-// Study class: _EX_02_EX02
-// File: sandbox/_EX_02_EX02.Strategy.CS
+// Rules version: catalogue specification under the EX-09 heading, rewritten 2026-11-15.
+// Study class: _EX_09_StagnationExit
+// File: sandbox/_EX_09_StagnationExit.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Naked-POC target module. It does not enter.
+// Non-trading signal: Stagnation exit for a host. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-02 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-09 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
+// Research assumption: ASSUMPTION: The heading exits a host trade that has not moved. It has no entry. ASSUMPTION: this file journals whether the last three bar ranges overlap by comparing the tightest high with the widest low, and does not send an order.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-02 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-09 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +86,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
+// Other: ASSUMPTION: The heading exits a host trade that has not moved. It has no entry. ASSUMPTION: this file journals whether the last three bar ranges overlap by comparing the tightest high with the widest low, and does not send an order.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +126,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-02
+// logSignal tag: EX-09
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: The heading is a target module. ASSUMPTION: this file journals the nearest naked POC above the close from NakedPocs and does not send an order.
+// ASSUMPTION: The heading exits a host trade that has not moved. It has no entry. ASSUMPTION: this file journals whether the last three bar ranges overlap by comparing the tightest high with the widest low, and does not send an order.
 // IOG is disabled.
 
 
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_02_EX02 : _VolumeProfileFuturesBase
+	public class _EX_09_StagnationExit : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_02_EX02(object _ctx) : base(_ctx) { }
+		public _EX_09_StagnationExit(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc()
 		{
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double poc = double.NaN; foreach (VpExtra e in NakedPocs(1)) if (e.poc > Bars.Close[0] && (double.IsNaN(poc) || e.poc < poc)) poc = e.poc; if (journalOn()) trace(ETraceLevel.Journal, "EX-02 naked POC " + poc.ToString("0.00") + ". Host target, no order.");
+			double hi = Math.Min(Bars.High[0], Math.Min(Bars.High[1], Bars.High[2])); double lo = Math.Max(Bars.Low[0], Math.Max(Bars.Low[1], Bars.Low[2])); bool overlap = hi > lo; if (journalOn()) trace(ETraceLevel.Journal, "EX-09 three-bar overlap " + overlap + ". Host exit, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

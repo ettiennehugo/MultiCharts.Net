@@ -1,11 +1,11 @@
 // ## 1. Identity
 // Catalogue ID: EX-05
-// ID mapping: EX-05 -> _EX_05_EX05.Strategy.CS (class _EX_05_EX05).
+// ID mapping: EX-05 -> _EX_05_HigherLowTrail.Strategy.CS (class _EX_05_HigherLowTrail).
 // Name: EX-05 structural higher-low trail
 // Header version: 1
 // Rules version: catalogue specification under the EX-05 heading, rewritten 2026-11-15.
-// Study class: _EX_05_EX05
-// File: sandbox/_EX_05_EX05.Strategy.CS
+// Study class: _EX_05_HigherLowTrail
+// File: sandbox/_EX_05_HigherLowTrail.Strategy.CS
 // Stage: sandbox
 // Non-trading signal: Higher-low trail. GX has no such trail. It does not enter.
 // Owner approval: Not yet verified
@@ -143,10 +143,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_05_EX05 : _VolumeProfileFuturesBase
+	public class _EX_05_HigherLowTrail : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_05_EX05(object _ctx) : base(_ctx) { }
+		public _EX_05_HigherLowTrail(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc()
 		{

@@ -1,23 +1,24 @@
 // ## 1. Identity
-// Catalogue ID: EX-08
-// ID mapping: EX-08 -> _EX_08_EX08.Strategy.CS (class _EX_08_EX08).
-// Name: EX-08 target-multiple ablation
+// Catalogue ID: EX-07
+// ID mapping: EX-07 -> _EX_07_HalfOffAt1R.Strategy.CS (class _EX_07_HalfOffAt1R).
+// Name: EX-07 half off at 1 R
 // Header version: 1
-// Rules version: catalogue specification under the EX-08 heading, rewritten 2026-11-15.
-// Study class: _EX_08_EX08
-// File: sandbox/_EX_08_EX08.Strategy.CS
+// Rules version: catalogue specification under the EX-07 heading, rewritten 2026-11-15.
+// Study class: _EX_07_HalfOffAt1R
+// File: sandbox/_EX_07_HalfOffAt1R.Strategy.CS
 // Stage: sandbox
-// Non-trading signal: Target-multiple diagnostic. It does not enter.
+// Host option: Host option ESandboxExit.Partial1R, default Off, on every GX host. The host trades 2 contracts when it is on.
+// Non-trading signal: Half off at 1 R. Default-off on the host. This file does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
-// Source: specs/trading-idea-catalogue.md, the EX-08 heading and its Analyst 2 specification.
+// Source: specs/trading-idea-catalogue.md, the EX-07 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: The heading is a diagnostic of target multiples. It does not pick a multiple and it does not enter. ASSUMPTION: this file journals the 14-bar ATR as the R unit a host would multiply.
+// Research assumption: ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
-// Link: specs/trading-idea-catalogue.md, the EX-08 heading. Do not paste the entry.
+// Link: specs/trading-idea-catalogue.md, the EX-07 heading. Do not paste the entry.
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
@@ -86,7 +87,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The heading is a diagnostic of target multiples. It does not pick a multiple and it does not enter. ASSUMPTION: this file journals the 14-bar ATR as the R unit a host would multiply.
+// Other: ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -126,14 +127,14 @@
 //
 // ## 21. Log diagnostics
 // journalArm name: the entry order name when an entry is sent.
-// logSignal tag: EX-08
+// logSignal tag: EX-07
 // Skip / flatten lines: the trace strings in this file.
 // How to turn logging on: engines manual section 1.5 (TraceLevel Journal). Do not paste that section.
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: The heading is a diagnostic of target multiples. It does not pick a multiple and it does not enter. ASSUMPTION: this file journals the 14-bar ATR as the R unit a host would multiply.
+// ASSUMPTION: The heading scales half at 1 R and moves the stop to breakeven. GX expresses that as ScaleOutThenRunner, T1Value 1, T1ScalePct 50, BreakEven AfterT1. One contract cannot scale. This file does not send an order.
 // IOG is disabled.
 
 
@@ -143,10 +144,10 @@ using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
 	[IOGMode(IOGMode.Disabled)]
-	public class _EX_08_EX08 : _VolumeProfileFuturesBase
+	public class _EX_07_HalfOffAt1R : _VolumeProfileFuturesBase
 	{
 		private DateTime m_day = DateTime.MinValue;
-		public _EX_08_EX08(object _ctx) : base(_ctx) { }
+		public _EX_07_HalfOffAt1R(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
 		protected override void StartCalc()
 		{
@@ -158,7 +159,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double r = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "EX-08 R unit " + r.ToString("0.00") + " for b in 0.5 to 2. Diagnostic, no order.");
+			double oneR = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "EX-07 GX ScaleOutThenRunner T1 1 R. A 1 ATR stand-in is " + oneR.ToString("0.00") + ". No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)
