@@ -39,7 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
 // Data2: Not applicable. Higher-timeframe bars are built from Data1.
 // Further series: Not applicable
@@ -161,6 +161,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			base.StartCalc();
 		}

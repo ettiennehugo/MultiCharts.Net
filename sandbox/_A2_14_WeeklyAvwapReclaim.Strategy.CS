@@ -168,6 +168,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EDaysBelow), DaysBelow)) throw new ArgumentException("_A2_14_WeeklyAvwapReclaim: DaysBelow is not a defined EDaysBelow");
 			NeedsDaily = true;
 			Vwap1Type = EVwapType.Week; Vwap1DataStream = 1;

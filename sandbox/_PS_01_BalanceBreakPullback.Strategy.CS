@@ -168,7 +168,11 @@ namespace PowerLanguage.Strategy
 		protected DateTime m_acceptTime = DateTime.MinValue;
 		private double m_trigger = double.NaN, m_stop, m_target, m_entryRisk;
 
-		public _PS_01_BalanceBreakPullback(object _ctx) : base(_ctx) { }
+		public enum EHostGate { Off, Migration, Balance, Noise, Trend, Compression }
+		public enum EHostExit { Host, Partial1R, Partial15R, BreakEven3R }
+		[Input] public EHostGate Gate { get; set; }
+		[Input] public EHostExit ExitMode { get; set; }
+		public _PS_01_BalanceBreakPullback(object _ctx) : base(_ctx) { Gate = EHostGate.Off; ExitMode = EHostExit.Host; }
 
 		protected override void Create()
 		{
@@ -187,7 +191,13 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "PS01ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; }
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+			m_day = DateTime.MinValue;
+		}
 
 		protected override void CalcBar()
 		{
@@ -240,9 +250,31 @@ namespace PowerLanguage.Strategy
 			}
 			if (double.IsNaN(m_trigger)) return;
 			if (!legSkewAllows(m_side)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-01 {day:yyyy-MM-dd} skip: leg skew gate"); m_done = true; return; }
-			if (m_side > 0) m_leStp.Send(m_trigger, Cfg.contracts); else m_seStp.Send(m_trigger, Cfg.contracts);
+			if (!hostGate(m_side > 0)) { if (journalOn()) trace(ETraceLevel.Journal, "PS-01 gate " + Gate + " blocked"); return; }
+			int qty = ExitMode == EHostExit.Partial1R || ExitMode == EHostExit.Partial15R ? 2 : Cfg.contracts;
+			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "PS-01 multi-contract size " + qty);
+			if (qty > 1 && qty * m_entryRisk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "PS-01 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (m_side > 0) { m_leStp.Send(m_trigger, qty); m_lxStp.Send(m_stop); }
+			else { m_seStp.Send(m_trigger, qty); m_sxStp.Send(m_stop); }
 		}
 
+		private bool hostGate(bool buy)
+		{
+			if (Gate == EHostGate.Off) return true;
+			if (Session == null) return false;
+			VpExtra prior = PriorRthProfile();
+			if (Gate == EHostGate.Migration)
+			{
+				if (prior == null) return false;
+				return buy ? Bars.Close[0] >= prior.poc : Bars.Close[0] <= prior.poc;
+			}
+			double atr = averageTrueRange(Bars, 14);
+			if (Gate == EHostGate.Balance) return atr > 0 && (Session.rthHigh - Session.rthLow) < atr;
+			if (Gate == EHostGate.Noise) return atr > 0 && (Bars.High[0] - Bars.Low[0]) < atr;
+			if (Gate == EHostGate.Trend) return !double.IsNaN(DailyContext.Sma200) && (buy ? Session.priorRthClose > DailyContext.Sma200 : Session.priorRthClose < DailyContext.Sma200);
+			if (Gate == EHostGate.Compression) return !double.IsNaN(DailyContext.Atr20d) && (Session.rthHigh - Session.rthLow) < 0.6 * DailyContext.Atr20d;
+			return true;
+		}
 		private void newDay(DateTime day)
 		{
 			m_day = day; m_done = false; m_up = m_dn = m_side = 0; m_trigger = double.NaN; m_acceptTime = DateTime.MinValue;

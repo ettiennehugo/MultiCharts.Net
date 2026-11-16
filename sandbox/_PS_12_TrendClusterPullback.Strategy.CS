@@ -178,7 +178,9 @@ namespace PowerLanguage.Strategy
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "PS12LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_cluster = double.NaN; }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_cluster = double.NaN; }
 
 		protected override void CalcBar()
 		{

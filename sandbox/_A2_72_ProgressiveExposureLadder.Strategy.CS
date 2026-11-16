@@ -7,6 +7,7 @@
 // Study class: _A2_72_ProgressiveExposureLadder
 // File: sandbox/_A2_72_ProgressiveExposureLadder.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Size ladder. It journals the steps and does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable

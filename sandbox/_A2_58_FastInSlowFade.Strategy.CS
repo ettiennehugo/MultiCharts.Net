@@ -184,6 +184,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			m_clock = null;
 			base.StartCalc();
 			m_slowPrev = m_fastPrev = double.NaN; m_slowDir = m_fastDir = 0;

@@ -186,6 +186,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			base.StartCalc();
 			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_up = m_dn = 0;
 			m_stop = m_target = double.NaN;

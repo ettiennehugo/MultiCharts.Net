@@ -7,6 +7,7 @@
 // Study class: _A2_40_CostModel
 // File: sandbox/_A2_40_CostModel.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cost note. It does not set a fee and it does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable

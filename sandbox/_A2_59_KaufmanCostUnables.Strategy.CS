@@ -7,6 +7,7 @@
 // Study class: _A2_59_KaufmanCostUnables
 // File: sandbox/_A2_59_KaufmanCostUnables.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cost audit. It does not set a fee.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -146,6 +148,12 @@ namespace PowerLanguage.Strategy
 		private int m_unables;
 		public _A2_59_KaufmanCostUnables(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();

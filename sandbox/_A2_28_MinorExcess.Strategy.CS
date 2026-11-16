@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -162,7 +163,9 @@ namespace PowerLanguage.Strategy
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A228SE", EOrderAction.SellShort));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_muMinor = double.NaN; }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_muMinor = double.NaN; }
 
 		protected override void CalcBar()
 		{

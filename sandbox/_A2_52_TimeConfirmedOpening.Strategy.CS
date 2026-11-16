@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -161,6 +162,12 @@ namespace PowerLanguage.Strategy
 			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A252LT", EOrderAction.Sell, OrderExit.FromAll));
 			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A252ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -204,7 +211,7 @@ namespace PowerLanguage.Strategy
 		private void sendExits(int pos)
 		{
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			bool flat = tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0);
+			bool flat = _SandboxRules.PastFlat(tod, Bars.Info.Exchange);
 			double openPts = (Bars.Close[0] - StrategyInfo.AvgEntryPrice) * pos;
 			bool failed = Bars.CurrentBar - m_entryBar >= 15 && openPts <= 0;
 			if (flat || failed) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }

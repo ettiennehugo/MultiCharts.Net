@@ -7,6 +7,7 @@
 // Study class: _A2_50_OpeningRvGate
 // File: sandbox/_A2_50_OpeningRvGate.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Opening relative-volume gate. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -185,6 +186,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			TodMetrics = ETodMetric.Volume;
 			TodSessions = Cfg.ssbSessions;
 			TodMinSessions = Cfg.ssbSessions;        // no SSB until 20 completed sessions

@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -151,6 +152,12 @@ namespace PowerLanguage.Strategy
 			GxOrderPrefix = "A268"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A268LE", EOrderAction.Buy));
 		}
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -204,7 +211,7 @@ namespace PowerLanguage.Strategy
 				TimeSpan e = Bars.Sessions[Bars.Sessions.Count - 1].EndTime;
 				hhmm = e.Hours * 100 + e.Minutes;
 			}
-			GxConfig.FlatByHHMM = hhmm;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.TimeStopMinutes = 0;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket();

@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -154,6 +155,8 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			NeedsDaily = true;
 			DailyConfig.hvLengths = new[] { 6, 100 };
 			base.StartCalc();
@@ -209,7 +212,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.TimeStopMinutes = 0;
 			ExitMarket mkt = new ExitMarket();
 			mkt.Tick = tickSize();

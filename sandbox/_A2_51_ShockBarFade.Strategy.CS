@@ -181,7 +181,9 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A251SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_shockBar = -1; m_side = 0; }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_shockBar = -1; m_side = 0; }
 
 		protected override void CalcBar()
 		{

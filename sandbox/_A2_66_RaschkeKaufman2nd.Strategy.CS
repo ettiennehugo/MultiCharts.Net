@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -152,6 +153,12 @@ namespace PowerLanguage.Strategy
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A266LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A266LX", EOrderAction.Sell, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A266LS", EOrderAction.Sell, OrderExit.FromAll));
+		}
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
 		}
 		protected override void CalcBar()
 		{

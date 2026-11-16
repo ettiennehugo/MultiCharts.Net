@@ -188,6 +188,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			HtfStreams = new[] { 2 };
 			base.StartCalc();
 			if (!TrackNakedPoc) throw new ArgumentException("_PS_21_NakedLevelReaction: TrackNakedPoc must be true");

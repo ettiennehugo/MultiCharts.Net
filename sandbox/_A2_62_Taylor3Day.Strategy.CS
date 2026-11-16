@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -160,7 +161,9 @@ namespace PowerLanguage.Strategy
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A262LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A262LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
-		protected override void StartCalc() { NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -187,7 +190,7 @@ namespace PowerLanguage.Strategy
 				{
 					m_lt.Send(m_buyHigh);
 					TimeSpan tod = sessionClock(Bars.Time[0]);
-					if (tod >= m_rthValueEnd && tod < new TimeSpan(17, 0, 0)) m_lx.Send();
+					if (_SandboxRules.PastFlat(tod, Bars.Info.Exchange)) m_lx.Send();
 				}
 				return;
 			}

@@ -185,6 +185,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			HtfStreams = new[] { 2 };
 			base.StartCalc();
 			m_last5 = m_day = DateTime.MinValue; m_runUp = m_runDn = 0; m_tradedToday = false;

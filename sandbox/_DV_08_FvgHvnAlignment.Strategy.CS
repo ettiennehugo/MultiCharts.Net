@@ -174,7 +174,9 @@ namespace PowerLanguage.Strategy
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "DV08LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { NeedsDaily = true; base.StartCalc(); m_gap = null; }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ NeedsDaily = true; base.StartCalc(); m_gap = null; }
 
 		protected override void CalcBar()
 		{

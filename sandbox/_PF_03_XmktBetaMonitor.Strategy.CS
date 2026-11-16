@@ -7,6 +7,7 @@
 // Study class: _PF_03_XmktBetaMonitor
 // File: sandbox/_PF_03_XmktBetaMonitor.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Cross-market beta monitor. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -160,6 +161,12 @@ namespace PowerLanguage.Strategy
 			XmktLegs.Add(new XmktLegConfig { role = "SPX", dataStream = 2, returnBars = 1, corrLength = 60, rsLength = 60 });
 		}
 
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();

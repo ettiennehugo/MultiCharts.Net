@@ -180,6 +180,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EAcceptanceDays), AcceptanceDays)) throw new ArgumentException("_MT_02_WeeklyValueAcceptance: AcceptanceDays is not a defined EAcceptanceDays");
 			HtfStreams = new[] { 2 };
 			base.StartCalc();

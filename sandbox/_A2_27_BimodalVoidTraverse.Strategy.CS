@@ -182,7 +182,9 @@ namespace PowerLanguage.Strategy
 			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A227LT", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_day = DateTime.MinValue; m_lastPos = 0; }
+		protected override void StartCalc() {
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+ base.StartCalc(); m_day = DateTime.MinValue; m_lastPos = 0; }
 
 		protected override void CalcBar()
 		{

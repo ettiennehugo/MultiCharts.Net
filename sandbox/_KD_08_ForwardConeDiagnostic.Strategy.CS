@@ -7,6 +7,7 @@
 // Study class: _KD_08_ForwardConeDiagnostic
 // File: sandbox/_KD_08_ForwardConeDiagnostic.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Forward-cone diagnostic. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance

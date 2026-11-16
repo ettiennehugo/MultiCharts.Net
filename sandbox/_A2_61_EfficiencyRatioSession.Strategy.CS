@@ -7,6 +7,7 @@
 // Study class: _A2_61_EfficiencyRatioSession
 // File: sandbox/_A2_61_EfficiencyRatioSession.Strategy.CS
 // Stage: sandbox
+// Non-trading signal: Efficiency-ratio router. It does not enter.
 // Owner approval: Not yet verified
 //
 // ## 2. Provenance
@@ -39,6 +40,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -150,6 +152,12 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_hist = new List<double>();
 		public _A2_61_EfficiencyRatioSession(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -158,6 +166,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) { m_day = day; m_logged = false; m_open = double.NaN; m_fives.Clear(); }
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (double.IsNaN(m_open) && tod >= m_rthStart) m_open = Bars.Open[0];
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 == 0) m_fives.Add(Bars.Close[0]);
 			TimeSpan mark = m_rthStart.Add(TimeSpan.FromMinutes(90));
 			if (m_logged || tod < mark || tod > mark.Add(TimeSpan.FromMinutes(1)) || m_fives.Count < 18 || !(m_open > 0)) return;

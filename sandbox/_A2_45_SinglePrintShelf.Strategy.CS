@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute. Data2 = 15-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
 // Data2: Not applicable unless CalcBar reads it.
 // Further series: Not applicable
@@ -156,6 +157,12 @@ namespace PowerLanguage.Strategy
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A245LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A245SE", EOrderAction.SellShort));
 		}
+		protected override void StartCalc()
+		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd);
+			base.StartCalc();
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -167,6 +174,7 @@ namespace PowerLanguage.Strategy
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(30))) return;
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30 * 15) return;
 			double atr30 = atrOf(30, 14), atr15 = atrOf(15, 14);
 			double vwap = CurrentVwap1;
@@ -279,7 +287,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.BreakEven = EBreakEven.Off;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
-			GxConfig.FlatByHHMM = m_rthValueEnd.Hours * 100 + m_rthValueEnd.Minutes;
+			GxConfig.FlatByHHMM = _SandboxRules.Flat1555;
 			GxConfig.MaxHoldDays = holdDays;
 			GxConfig.TimeStopMinutes = 0;
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;

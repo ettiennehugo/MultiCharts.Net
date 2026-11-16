@@ -39,6 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
+// Chart: Data1 = 1-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
 // Data2: named in section 22, or Not applicable.
 // Further series: Not applicable
@@ -165,6 +166,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+
 			if (!Enum.IsDefined(typeof(EArm), Arm)) throw new ArgumentException("_A2_35_EventReformation: Arm is not a defined EArm");
 			base.StartCalc();
 		}
@@ -202,7 +205,7 @@ namespace PowerLanguage.Strategy
 			double floor = 14 * tick;
 			if ((longSide ? entry - stop : stop - entry) < floor) stop = entry - (longSide ? floor : -floor);
 			double target = longSide ? m_vah + height : m_val - height;
-			int flat = m_event.Hour < 12 ? 1130 : 1555;
+			int flat = m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.Flat1555;
 			if (!ok(entry, stop, target, longSide)) { m_done = true; return; }
 			plan(longSide, entry, stop, target, flat);
 			if (longSide) m_le.Send(); else m_se.Send();
@@ -222,7 +225,7 @@ namespace PowerLanguage.Strategy
 			double tick = tickSize();
 			double stop = longSide ? Bars.Low[0] - tick : Bars.High[0] + tick;
 			if (!ok(entry, stop, m_poc, longSide)) { m_done = true; return; }
-			plan(longSide, entry, stop, m_poc, m_event.Hour < 12 ? 1130 : 1555);
+			plan(longSide, entry, stop, m_poc, m_event.Hour < 12 ? _SandboxRules.EtToExchangeHhmm(1130, Bars.Info.Exchange) : _SandboxRules.Flat1555);
 			if (longSide) m_le.Send(); else m_se.Send();
 			m_done = true;
 		}
