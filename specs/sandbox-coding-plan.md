@@ -4,7 +4,7 @@
 
 ## Owner decisions (2026-11-15 20:06 ET)
 
-1. Flat-by is 15:55 in the exchange zone (`_SandboxRules.Flat1555`). An earlier catalogue clock is Eastern and is converted by `_SandboxRules.FlatBy`. NYMEX and COMEX stay Eastern, matching the GX zone map. That is 15:55 ET there, not Central.
+1. Flat-by is five minutes before that market's regular close, in its own exchange zone. The close comes from the session template when that end is a daytime session, otherwise from the sandbox table: ES/NQ 16:00 ET (flat 14:55 CT), CL 14:30 ET (flat 14:25), GC 13:30 ET (flat 13:25), ZN and 6E 15:00 ET, stocks 16:00 ET (flat 15:55). An earlier catalogue clock is still an Eastern time converted by `_SandboxRules.FlatBy`. The GX zone map is unchanged.
 2. Every GX host carries `ESandboxGate` and `ESandboxExit`, both default Off. The gate values are ValueMigration (RG-01), Balance (RG-02), DayType (RG-04), Noise (RG-05), Trend (RG-06), Compression (RG-08), ThreeFamily (RG-09) and FitRegime (RG-10). The exit values are HvnTarget (EX-01), NakedPoc (EX-02), BalanceWidth (EX-03), Partial1R (EX-07), FixedR (EX-08), Partial15R (EX-13), BreakEven3R (A2-73) and FreeRoll (A2-74). RG-07 is the trading subclass of A2-56, not a second switch. EX-04, EX-05, EX-06, EX-09, EX-10, EX-11 and EX-12 are not GX modes; their files journal the host condition. A scale exit uses 2 contracts.
 3. `RollDetection` is turned off in `StartCalc` when the instrument is not a future.
 4. Data1 is 1-minute. Data2 is the idea's native timeframe, declared on the `// Chart:` line. A file that emulates a higher bar requires Data2 and logs an Error when it is missing.
