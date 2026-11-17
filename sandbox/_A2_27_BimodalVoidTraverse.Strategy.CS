@@ -221,7 +221,7 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				m_done = true;
-				bool flat = mustFlatten() || (Bars.Time[0] - m_entryTime).TotalMinutes >= Cfg.timeStopMin;
+				bool flat = (mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (Bars.Time[0] - m_entryTime).TotalMinutes >= Cfg.timeStopMin;
 				if (pos > 0)
 				{
 					if (flat) { m_lx.Send(); return true; }

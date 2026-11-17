@@ -186,7 +186,7 @@ namespace PowerLanguage.Strategy
 				if (pos > 0) m_ls.Send(m_stop); else m_ss.Send(m_stop);
 				return;
 			}
-			if (IsRth() && _SandboxRules.PastFlat(tod, Bars.Info.Name, m_rthValueEnd) && !double.IsNaN(vwap) && !m_counted)
+			if (IsRth() && _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd) && !double.IsNaN(vwap) && !m_counted)
 			{
 				m_counted = true;
 				m_prev = m_side; m_prevExt = m_ext;

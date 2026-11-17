@@ -83,6 +83,51 @@ namespace PowerLanguage.Strategy
 			return PastFlat(etTod, "", TimeSpan.Zero);
 		}
 
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): the session end on this bar's Globex trading date, in ET. The regular
+		/// close, or the CME calendar's earlier Globex halt (holiday 13:00, Good Friday / mourning 09:15 / 09:30) or early RTH close (13:15),
+		/// from _CmeHolidays.Rules (the M8 / VPF-6 table, keyed on the Globex trade date).</summary>
+		public static TimeSpan SessionEndEt(DateTime globexDate, string symbol, TimeSpan listedSessionEnd)
+		{
+			TimeSpan end = RegularCloseEt(symbol, listedSessionEnd);
+			PowerLanguage.Function._CmeHolidays.Rules.Day d = PowerLanguage.Function._CmeHolidays.Rules.Get(globexDate);
+			if (d.HaltEt.HasValue && d.HaltEt.Value < end) end = d.HaltEt.Value;
+			if (d.RthCloseEt.HasValue && d.RthCloseEt.Value < end) end = d.RthCloseEt.Value;
+			return end;
+		}
+
+		/// <summary>The flat-by cutoff for this ET bar time: that day's session end minus five minutes. False on the evening part of a
+		/// Globex date (at or after 18:00 ET the bar belongs to the next date) and on weekend bars.</summary>
+		public static bool PastFlat(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
+		{
+			DateTime gx = PowerLanguage.Function._CmeSessionClock.GlobexTradingDayEt(barEt);
+			if (barEt.Date != gx.Date) return false;
+			TimeSpan flat = SessionEndEt(gx, symbol, listedSessionEnd) - TimeSpan.FromMinutes(5);
+			if (flat < TimeSpan.Zero) flat += TimeSpan.FromDays(1);
+			int now = barEt.Hour * 100 + barEt.Minute;
+			int limit = flat.Hours * 100 + flat.Minutes;
+			return now >= limit && now < 1800;
+		}
+
+		/// <summary>True on a day whose session ends before the regular close (early close, holiday halt, abbreviated session) once the
+		/// bar is at or past that day's end minus five minutes. GX resolves one FlatByHHMM per run, so the sandbox flattens these days
+		/// itself; on a regular day this is false and GX's flat-by is unchanged.</summary>
+		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd, out string why)
+		{
+			why = null;
+			DateTime gx = PowerLanguage.Function._CmeSessionClock.GlobexTradingDayEt(barEt);
+			if (barEt.Date != gx.Date) return false;
+			TimeSpan regular = RegularCloseEt(symbol, listedSessionEnd), end = SessionEndEt(gx, symbol, listedSessionEnd);
+			if (end >= regular || !PastFlat(barEt, symbol, listedSessionEnd)) return false;
+			why = PowerLanguage.Function._CmeHolidays.Rules.Get(gx).Name + " session ends " + end.ToString(@"hh\:mm") + " ET";
+			return true;
+		}
+
+		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
+		{
+			string why;
+			return EarlyFlatDue(barEt, symbol, listedSessionEnd, out why);
+		}
+
 		/// <summary>Regular-session start, end, and value end. A futures base passes the three spans to ApplyPit.</summary>
 		public static void PitWindows(string symbol, TimeSpan listedEnd, out TimeSpan start, out TimeSpan end, out TimeSpan valueEnd)
 		{

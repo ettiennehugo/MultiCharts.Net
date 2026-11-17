@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 // Naming and header checks. The semantic C# 7.3 compile is Generated/SandboxLib.csproj,
@@ -81,6 +82,9 @@ static class Program
 		OwnSourceChecks(files);
 		BookChecks(files);
 		AtrRollChecks(files);
+		CalendarKeyChecks(files);
+		EarlyFlatChecks(files);
+		RuntimeFlatChecks(root);
 
 		Console.WriteLine("SandboxCompile: semantic compile succeeded; " + s_pass + " checks passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
@@ -256,6 +260,82 @@ static class Program
 			Check(Regex.IsMatch(code, @"DailyConfig\.atrRestartOnRoll\s*=\s*false\s*;"), name + " reads Atr20d and sets DailyConfig.atrRestartOnRoll = false");
 		}
 		Check(readers >= 32, "Atr20d readers found: " + readers);
+	}
+
+	static string Src(List<string> files, string stem)
+	{
+		foreach (string p in files) if (Path.GetFileName(p).StartsWith(stem, StringComparison.Ordinal)) return Regex.Replace(File.ReadAllText(p), @"//[^\n]*", "");
+		return "";
+	}
+
+	// Analyst MC17 (A2-30 balance lines dated on exchange holidays): a no-RTH Globex date (holiday halt, abbreviated Good Friday)
+	// is not a trading day for prior-RTH bookkeeping, held-day counts or the A2-14 daily close; AV-05 reads its gap on the first RTH bar.
+	static void CalendarKeyChecks(List<string> files)
+	{
+		Check(Regex.IsMatch(Src(files, "_A2_30_"), @"if \(IsNoRthDay\(day\)\) m_hi = m_lo = double\.NaN; else remember\(\);"), "A2-30 skips remember() on a no-RTH Globex date");
+		Check(Src(files, "_LE_06_").Contains("Session.priorRthClose > 0 && !IsNoRthDay(day)"), "LE-06 does not add the carried prior close on a no-RTH date");
+		Check(Src(files, "_SW_04_").Contains("if (!IsNoRthDay(day)) m_held++;"), "SW-04 counts RTH days held");
+		string av5 = Src(files, "_AV_05_");
+		Check(av5.Contains("if (m_alive && !IsNoRthDay(day)) m_held++;"), "AV-05 counts RTH days held");
+		Check(Regex.IsMatch(av5, @"if \(!m_gapChecked && IsRth\(\) && Session != null && Session\.rthOpen > 0\)"), "AV-05 reads the gap on the first RTH bar, not at the rollover");
+		string a14 = Src(files, "_A2_14_");
+		Check(a14.IndexOf("IsNoRthDay(Bars.Time[0].Date)", StringComparison.Ordinal) >= 0 && a14.IndexOf("IsNoRthDay(Bars.Time[0].Date)", StringComparison.Ordinal) < a14.IndexOf("m_closes.Insert(0", StringComparison.Ordinal), "A2-14 does not treat a holiday session bar as a daily close");
+		string a15 = Src(files, "_A2_15_");
+		Check(a15.Contains("averageTrueRange(BarsOfData(2), 14)") && !a15.Contains("averageTrueRange(Bars, 14)"), "A2-15 ATR5 is ATR(14) of the 5-minute Data2 stream");
+		Check(Regex.Matches(a15, @"skewLine\(").Count >= 5, "A2-15 writes a skew journal line for every evaluated setup");
+		Check(a15.Contains("legWindow(side, out t0, out t1)") && a15.Contains("RangeProfile(1, t0, t1)"), "A2-15 leg is origin to extreme, not acceptance to now");
+		Check(Src(files, "_A2_35_").Contains("if (_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return;"), "A2-35 sends no entry after that day's flat-by cutoff");
+	}
+
+	static readonly HashSet<string> NoEtClock = new HashSet<string>(StringComparer.Ordinal) { "_A2_49_MiddayBreakout.Strategy.CS", "_A2_57_TwoTimeframeTurn.Strategy.CS" };
+
+	// Analyst MC17 (A2-35 held over Good Friday 2023): the flat-by cutoff is that day's session end minus 5 minutes.
+	static void EarlyFlatChecks(List<string> files)
+	{
+		int gx = 0, mf = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			bool futures = Regex.IsMatch(code, @"class _\w+ : (?!_CustomSignal\b|_VolumeProfileBase\b)\w+");
+			if (!NoEtClock.Contains(name))
+				Check(!Regex.IsMatch(code, @"_SandboxRules\.PastFlat\((sessionClock|tod\b|todNow\b)"), name + " uses the date-aware PastFlat");
+			if (!futures) continue;
+			if (code.Contains("ESessionExit.FlatBy") && code.Contains("exitBar();"))
+			{
+				gx++;
+				Check(code.Contains("exitBar(); sandboxEarlyFlat();") && code.Contains("private void sandboxEarlyFlat()") && code.Contains("_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0])"), name + " closes at an early session end after exitBar()");
+			}
+			int bare = Regex.Matches(code, @"mustFlatten\(\)").Count, paired = Regex.Matches(code, @"\(mustFlatten\(\) \|\| _SandboxRules\.EarlyFlatDue\(").Count;
+			if (bare > 0) { mf++; Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue"); }
+		}
+		Check(gx >= 73, "GX FlatBy studies with exitBar found: " + gx);
+		Check(mf >= 15, "mustFlatten studies found: " + mf);
+	}
+
+	// Runs _SandboxRules from the semantic-compile assembly (reflection, so this project keeps no reference to it).
+	static void RuntimeFlatChecks(string root)
+	{
+		string bin = Path.Combine(root, "tests", "SandboxCompile", "Generated", "bin");
+		string dll = null; DateTime best = DateTime.MinValue;
+		if (Directory.Exists(bin)) foreach (string p in Directory.GetFiles(bin, "SandboxLib.dll", SearchOption.AllDirectories)) { DateTime w = File.GetLastWriteTimeUtc(p); if (w > best) { best = w; dll = p; } }
+		Check(dll != null, "SandboxLib.dll found for the runtime flat-by checks");
+		if (dll == null) return;
+		Type r = Assembly.LoadFrom(dll).GetType("PowerLanguage.Strategy._SandboxRules");
+		Check(r != null, "_SandboxRules type loaded");
+		if (r == null) return;
+		MethodInfo past = r.GetMethod("PastFlat", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		MethodInfo early = r.GetMethod("EarlyFlatDue", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		MethodInfo end = r.GetMethod("SessionEndEt", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		Func<int, int, int, int, int, bool> P = (y, mo, d, h, mi) => (bool)past.Invoke(null, new object[] { new DateTime(y, mo, d, h, mi, 0), "ES", TimeSpan.Zero });
+		Func<int, int, int, int, int, bool> E = (y, mo, d, h, mi) => (bool)early.Invoke(null, new object[] { new DateTime(y, mo, d, h, mi, 0), "ES", TimeSpan.Zero });
+		Func<int, int, int, TimeSpan> End = (y, mo, d) => (TimeSpan)end.Invoke(null, new object[] { new DateTime(y, mo, d), "ES", TimeSpan.Zero });
+		Check(End(2023, 4, 7) == new TimeSpan(9, 15, 0), "Good Friday 2023 session ends 09:15 ET (" + End(2023, 4, 7) + ")");
+		Check(!P(2023, 4, 7, 9, 9) && P(2023, 4, 7, 9, 10) && E(2023, 4, 7, 9, 10), "Good Friday 2023 flat-by 09:10 ET");
+		Check(End(2024, 1, 15) == new TimeSpan(13, 0, 0) && E(2024, 1, 15, 12, 55) && !E(2024, 1, 15, 12, 54), "MLK 2024 halt 13:00 ET, flat-by 12:55 ET");
+		Check(End(2024, 11, 29) == new TimeSpan(13, 15, 0) && E(2024, 11, 29, 13, 10) && !P(2024, 11, 29, 13, 9), "day after Thanksgiving 2024 flat-by 13:10 ET");
+		Check(End(2024, 6, 3) == new TimeSpan(16, 0, 0) && P(2024, 6, 3, 15, 55) && !P(2024, 6, 3, 15, 54) && !E(2024, 6, 3, 15, 56), "regular day flat-by 15:55 ET, no early flat");
+		Check(!P(2023, 4, 6, 18, 30) && !E(2023, 4, 6, 18, 30), "the 18:00 ET evening belongs to the next Globex date");
 	}
 
 	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.
