@@ -258,7 +258,7 @@ namespace PowerLanguage.Function
 		private DateTime m_first = DateTime.MaxValue, m_last = DateTime.MinValue;
 		private long m_outOfWindow;
 		private readonly bool m_live;
-		private int m_emptyDays; private DateTime m_emptyFrom, m_emptyTo;   // sessions that completed with no tick in the window
+		private readonly List<EmptySessionWindow> m_emptySessions = new List<EmptySessionWindow>();   // sessions that completed with no tick in the window
 		private DateTime m_coverFrom, m_coverTo; private bool m_coverOk;   // calc thread: the last ready window
 		/// <summary>Plan window: (From, To]; To is the last bar of the chart (no request goes past it).</summary>
 		public readonly DateTime From, To;
@@ -266,8 +266,31 @@ namespace PowerLanguage.Function
 		public int NextId { get { lock (m_lock) return m_s.NextId; } }
 		/// <summary>Every day finished (done, failed or given up) and released.</summary>
 		public bool AllFinished { get { return m_allFinished; } }
+		/// <summary>A session request that completed with no tick in its window.</summary>
+		internal struct EmptySessionWindow
+		{
+			public readonly DateTime From, To;
+			public EmptySessionWindow(DateTime from, DateTime to) { From = from; To = to; }
+		}
+
+		public const int EmptySessionWarningCap = 10;
+
 		/// <summary>Sessions whose request completed with no tick in the window (no local 1-tick history), and the first one.</summary>
-		public int EmptyDays(out DateTime firstFrom, out DateTime firstTo) { lock (m_lock) { firstFrom = m_emptyFrom; firstTo = m_emptyTo; return m_emptyDays; } }
+		public int EmptyDays(out DateTime firstFrom, out DateTime firstTo)
+		{
+			lock (m_lock)
+			{
+				if (m_emptySessions.Count == 0) { firstFrom = firstTo = DateTime.MinValue; return 0; }
+				firstFrom = m_emptySessions[0].From; firstTo = m_emptySessions[0].To;
+				return m_emptySessions.Count;
+			}
+		}
+
+		/// <summary>A copy of every session that completed with no tick, in completion order.</summary>
+		public List<EmptySessionWindow> EmptySessions()
+		{
+			lock (m_lock) return new List<EmptySessionWindow>(m_emptySessions);
+		}
 
 		/// <param name="live">The chart is live. The scheduler marks the last day as the real-time tail (Rt); on a non-live
 		/// chart there is no tail, so every chunk is issued with Rt = false (native smoke d798d42: the 12-06 chunk logged rt(True)
@@ -327,6 +350,32 @@ namespace PowerLanguage.Function
 		{
 			return $"no 1-tick history was returned for {symbol} from {from:yyyy-MM-dd HH:mm} to {to:yyyy-MM-dd HH:mm}: the 1-tick data may need " +
 				$"downloading in QuoteManager for that window before the backtest";
+		}
+
+		/// <summary>One Warning for a session that completed with no ticks. from/to are that session's request window.</summary>
+		public static string EmptySessionWarning(string symbol, DateTime from, DateTime to, int emptySoFar)
+		{
+			return $"TICK session {from:yyyy-MM-dd HH:mm}..{to:yyyy-MM-dd HH:mm} completed empty (empty sessions so far {emptySoFar}): " +
+				MissingHistoryText(symbol, from, to) + ". Bars of empty sessions stay invalid";
+		}
+
+		/// <summary>After EmptySessionWarningCap per-session Warnings, one summary for the rest of the run.</summary>
+		public static string EmptySessionsCappedWarning(int emptyDays)
+		{
+			return $"TICK {emptyDays} sessions completed empty; further per-session Warnings suppressed. Bars of empty sessions stay invalid";
+		}
+
+		/// <summary>The Warning lines a run should emit: one per empty session up to the cap, then one summary if the cap was exceeded.</summary>
+		public static List<string> EmptySessionWarnings(string symbol, IList<EmptySessionWindow> sessions, int cap = EmptySessionWarningCap)
+		{
+			var lines = new List<string>();
+			if (sessions == null || sessions.Count == 0) return lines;
+			if (cap < 0) cap = 0;
+			int shown = sessions.Count < cap ? sessions.Count : cap;
+			for (int i = 0; i < shown; i++)
+				lines.Add(EmptySessionWarning(symbol, sessions[i].From, sessions[i].To, i + 1));
+			if (sessions.Count > cap) lines.Add(EmptySessionsCappedWarning(sessions.Count));
+			return lines;
 		}
 
 		/// <summary>Calendar-day windows (superseded by PlanSessions for M-TICK; kept for tests and A/B).</summary>
@@ -423,8 +472,10 @@ namespace PowerLanguage.Function
 					m_stream.Note($"TICK batch lines capped at {m_batchLines}; one 'TICK chunk done' line per day follows");
 				}
 				if (!completed) return;
-				m_s.Complete(c, true, buf.ticks.Count, buf);
-				if (buf.ticks.Count == 0 && m_emptyDays++ == 0) { m_emptyFrom = c.ReqFrom; m_emptyTo = c.ReqTo; }
+				// A second isCompleted History callback (native empty windows fire two with data(0)) must not
+				// complete, count, or release again. Complete returns null when the chunk is no longer InFlight.
+				if (m_s.Complete(c, true, buf.ticks.Count, buf) == null) return;
+				if (buf.ticks.Count == 0) m_emptySessions.Add(new EmptySessionWindow(c.ReqFrom, c.ReqTo));
 				m_stream.Note($"TICK chunk done day({c.Day:yyyy-MM-dd}) id({c.Id}) sub({c.Sub}) ticks({buf.ticks.Count}) batches({buf.batches}) first({fmt(buf.first)}) " +
 					$"last({fmt(buf.last)}) window({c.ReqFrom:yyyy-MM-dd HH:mm}..{c.ReqTo:yyyy-MM-dd HH:mm}) outOfWindow({buf.outOfWindow}) sec({(DateTime.UtcNow - c.IssuedAt).TotalSeconds:0.0})");
 				release();
@@ -511,7 +562,7 @@ namespace PowerLanguage.Function
 			lock (m_lock)
 			{
 				m_s.Summary(out done, out failed, out skipped, out ticks, out late);
-				return $"TICK history {what} days({Days}) done({done}) failed({failed}) pending({m_s.Pending()}) ticks({ticks}) first({fmt(m_first)}) last({fmt(m_last)}) " +
+				return $"TICK history {what} days({Days}) done({done}) failed({failed}) empty({m_emptySessions.Count}) pending({m_s.Pending()}) ticks({ticks}) first({fmt(m_first)}) last({fmt(m_last)}) " +
 					$"planTo({To:yyyy-MM-dd HH:mm:ss}) outOfWindow({m_outOfWindow}) batches({m_batches})";
 			}
 		}

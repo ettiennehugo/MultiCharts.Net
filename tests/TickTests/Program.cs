@@ -170,8 +170,16 @@ static class Program
 		sf.DrainNotes();
 		Check(jf.Count(x => x.StartsWith("TICK batch day(")) == 3 && jf.Count(x => x.StartsWith("TICK batch lines capped at 3")) == 1, "batch lines: first 3, then one cap line");
 		string sum = feed.SummaryLine("complete");
-		Check(sum.Contains("days(3) done(3) failed(0) pending(0) ticks(4)") && sum.Contains("last(2024-12-30 08:30:30.000)") && sum.Contains("planTo(2024-12-31 16:00:00)")
-			&& sum.Contains("outOfWindow(2)"), "summary line: counts, last tick <= plan end");
+		Check(sum.Contains("days(3) done(3) failed(0) empty(1) pending(0) ticks(4)") && sum.Contains("last(2024-12-30 08:30:30.000)") && sum.Contains("planTo(2024-12-31 16:00:00)")
+			&& sum.Contains("outOfWindow(2)"), "summary line: counts including empty(1), last tick <= plan end");
+		// a second isCompleted callback on the empty day (native empty windows fire two) must not recount or re-release
+		int doneEmpty = jf.Count(x => x.StartsWith("TICK chunk done") && x.Contains($"id({issue3[0].Id})"));
+		feed.OnHistory(issue3[0].Id, new List<TickPrint>(), true);
+		sf.DrainNotes();
+		DateTime ef2, et2;
+		Check(doneEmpty == 1 && jf.Count(x => x.StartsWith("TICK chunk done") && x.Contains($"id({issue3[0].Id})")) == 1, "duplicate empty completion: one chunk done line");
+		Check(feed.EmptyDays(out ef2, out et2) == 1 && ef2 == ef && et2 == et, "duplicate empty completion is not counted twice");
+		Check(feed.SummaryLine("complete").Contains("empty(1)") && feed.AllFinished && feed.Pending() == 0, "duplicate completion does not reopen or double-advance the plan");
 		// stale callbacks (earlier pass ids) are ignored
 		feed.OnHistory(5, new List<TickPrint> { TP(closes[7]) }, true);
 		Check(feed.SummaryLine("x").Contains("ticks(4)"), "unknown chunk id ignored");
@@ -234,6 +242,59 @@ static class Program
 		Check(TickChunkFeed.PlanSessions(es2, es[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "duplicate close ignored");
 		var gap = new List<DateTime> { new DateTime(2024, 12, 2, 9, 0, 0), new DateTime(2024, 12, 2, 9, 30, 0), new DateTime(2024, 12, 2, 10, 1, 0) };
 		Check(TickChunkFeed.PlanSessions(gap, gap[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "a gap over 30 min starts a new window; exactly 30 min does not");
+
+		// ---- empty sessions: idempotent completion, per-session Warnings, empty(n) in the summary ----
+		var daysE = new List<_OrderFlow.DayChunk>();
+		DateTime ePrev = new DateTime(2024, 6, 1, 17, 1, 0);
+		for (int i = 0; i < 12; i++)
+		{
+			DateTime eEnd = new DateTime(2024, 6, 3, 16, 0, 0).AddDays(i);
+			daysE.Add(new _OrderFlow.DayChunk { GlobexDate = eEnd.Date, FromEt = ePrev, ToEt = eEnd });
+			ePrev = eEnd;
+		}
+		var je = new List<string>();
+		var se = S(null, je);
+		var fe = new TickChunkFeed(se, daysE, 2, 0, 3000, 0, false);
+		int issuedE = 0;
+		while (issuedE < daysE.Count)
+		{
+			var nxt = fe.Next(DateTime.UtcNow);
+			if (nxt.Count == 0) break;
+			foreach (var c in nxt)
+			{
+				fe.OnHistory(c.Id, new List<TickPrint>(), true);
+				fe.OnHistory(c.Id, new List<TickPrint>(), true);   // native empty window: a second isCompleted callback
+				issuedE++;
+			}
+		}
+		se.DrainNotes();
+		DateTime e1f, e1t;
+		Check(issuedE == 12 && fe.EmptyDays(out e1f, out e1t) == 12 && e1f == daysE[0].FromEt && e1t == daysE[0].ToEt,
+			"12 empty sessions counted once each (duplicates ignored), first window kept");
+		var emptyList = fe.EmptySessions();
+		Check(emptyList.Count == 12 && emptyList[1].From == daysE[1].FromEt && emptyList[1].To == daysE[1].ToEt
+			&& emptyList[11].From == daysE[11].FromEt && emptyList[11].To == daysE[11].ToEt, "empty session list is in order, each window its own");
+		Check(je.Count(x => x.StartsWith("TICK chunk done")) == 12, "one chunk done line per session despite duplicate completions");
+		string sumE = fe.SummaryLine("complete");
+		Check(sumE.Contains("days(12) done(12) failed(0) empty(12) pending(0) ticks(0)") && fe.AllFinished, "summary reports empty(12) on an all-empty plan");
+
+		var warns = TickChunkFeed.EmptySessionWarnings("@ES", emptyList);
+		Check(warns.Count == 11, "10 per-session Warnings plus one summary");
+		Check(warns[0].Contains("TICK session 2024-06-01 17:01..2024-06-03 16:00 completed empty (empty sessions so far 1)")
+			&& warns[0].Contains("no 1-tick history was returned for @ES from 2024-06-01 17:01 to 2024-06-03 16:00")
+			&& warns[0].Contains("downloading in QuoteManager")
+			&& !warns[0].Contains("2024-06-14"), "first Warning names session 1's window, not the whole plan");
+		Check(warns[1].Contains("empty sessions so far 2")
+			&& warns[1].Contains($"from {daysE[1].FromEt:yyyy-MM-dd HH:mm} to {daysE[1].ToEt:yyyy-MM-dd HH:mm}")
+			&& warns[1].Contains($"TICK session {daysE[1].FromEt:yyyy-MM-dd HH:mm}..{daysE[1].ToEt:yyyy-MM-dd HH:mm}"),
+			"second Warning is session 2, count 2");
+		Check(warns[9].Contains("empty sessions so far 10")
+			&& warns[9].Contains($"from {daysE[9].FromEt:yyyy-MM-dd HH:mm} to {daysE[9].ToEt:yyyy-MM-dd HH:mm}"),
+			"tenth Warning is session 10");
+		Check(warns[10] == TickChunkFeed.EmptySessionsCappedWarning(12) && warns[10].Contains("12 sessions completed empty"),
+			"one summary Warning after the cap, with the full empty count");
+		Check(TickChunkFeed.EmptySessionWarnings("@ES", emptyList.GetRange(0, 5)).Count == 5, "five empty sessions: five Warnings, no summary");
+		Check(TickChunkFeed.EmptySessionWarnings("@ES", emptyList.GetRange(0, 10)).Count == 10, "exactly the cap: no summary");
 
 		// ---- fail fast: no callback at all within firstCallbackSec ----
 		var i0 = new DateTime(2026, 1, 1, 12, 0, 0);

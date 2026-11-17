@@ -1427,7 +1427,9 @@ namespace PowerLanguage.Strategy
 		private DateTime m_tickFirstIssueUtc;                       // first request of the pass (fail-fast clock)
 		private string m_tickSym; private DateTime m_tickPlanFrom, m_tickPlanTo;   // for the missing-history Warning
 		private int m_tickStalledWaits;                             // waits that ran the full chunkWaitMs without their session finishing
-		private bool m_tickEmptyWarned;
+		private int m_tickEmptyWarned;                          // per-session empty Warnings issued this pass
+		private int m_tickEmptySeen;                            // empty sessions already warned (or skipped past the cap)
+		private bool m_tickEmptySummaryWarned;
 		private readonly System.Diagnostics.Stopwatch m_tickPumpClock = new System.Diagnostics.Stopwatch();
 
 		/// <summary>M-TICK aggregate of the last closed Data1 bar, or null when M-TICK is off. Check valid; size fields stay
@@ -1470,7 +1472,8 @@ namespace PowerLanguage.Strategy
 			m_tickStream = null; m_tickReq = null; m_tickFeed = null; m_tickLastBar = -1; m_tickWaitedId = 0;
 			m_tickPlanned = m_tickLive = m_tickSummaryLogged = m_tickLegacyWaited = m_tickWaitOff = false;
 			m_tickCallbacks = 0; m_tickFirstIssueUtc = DateTime.MinValue;
-			m_tickSym = null; m_tickPlanFrom = m_tickPlanTo = DateTime.MinValue; m_tickStalledWaits = 0; m_tickEmptyWarned = false;
+			m_tickSym = null; m_tickPlanFrom = m_tickPlanTo = DateTime.MinValue; m_tickStalledWaits = 0;
+			m_tickEmptyWarned = 0; m_tickEmptySeen = 0; m_tickEmptySummaryWarned = false;
 			if (!TickConfig.enabled) return;
 			// Info, not Journal: Journal (4) is above Info (3), so at TraceLevel Info every TICK diagnostic was filtered out (native
 			// smoke of 768db48). All trace lines go to the MCSignal CSV; MCJournal_<runId>.csv holds closed trades only.
@@ -1689,17 +1692,29 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
-		// Calc thread: once per run, when a session request completed with no tick in its window (local 1-tick history missing).
-		private void tickEmptyWarning()
+		// Calc thread: one Warning per session that completed with no tick in its window (local 1-tick history missing),
+		// naming that session's own window. After EmptySessionWarningCap lines, one summary Warning (at AllFinished or stop).
+		private void tickEmptyWarning(bool ending = false)
 		{
-			if (m_tickEmptyWarned || m_tickFeed == null) return;
-			DateTime ef, et;
-			int n = m_tickFeed.EmptyDays(out ef, out et);
-			if (n == 0) return;
-			m_tickEmptyWarned = true;
-			m_tickStream.DrainNotes();
-			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, $"TICK session {ef:yyyy-MM-dd HH:mm}..{et:yyyy-MM-dd HH:mm} completed empty (empty sessions so far {n}): " +
-				TickChunkFeed.MissingHistoryText(m_tickSym, m_tickPlanFrom, m_tickPlanTo) + ". Bars of empty sessions stay invalid");
+			if (m_tickFeed == null) return;
+			List<TickChunkFeed.EmptySessionWindow> all = m_tickFeed.EmptySessions();
+			if (all.Count == 0) return;
+			bool drained = false;
+			while (m_tickEmptySeen < all.Count)
+			{
+				TickChunkFeed.EmptySessionWindow e = all[m_tickEmptySeen];
+				m_tickEmptySeen++;
+				if (m_tickEmptyWarned >= TickChunkFeed.EmptySessionWarningCap) continue;
+				m_tickEmptyWarned++;
+				if (!drained) { m_tickStream.DrainNotes(); drained = true; }
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, TickChunkFeed.EmptySessionWarning(m_tickSym, e.From, e.To, m_tickEmptySeen));
+			}
+			if (!m_tickEmptySummaryWarned && all.Count > TickChunkFeed.EmptySessionWarningCap && (m_tickFeed.AllFinished || ending))
+			{
+				m_tickEmptySummaryWarned = true;
+				if (!drained) m_tickStream.DrainNotes();
+				if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, TickChunkFeed.EmptySessionsCappedWarning(all.Count));
+			}
 		}
 
 		private void stopTickLoads()
@@ -1714,6 +1729,7 @@ namespace PowerLanguage.Strategy
 		private void stopTick()
 		{
 			TickChunkFeed f = m_tickFeed;
+			if (f != null) tickEmptyWarning(true);
 			stopTickLoads();
 			if (m_tickStream != null)
 			{
