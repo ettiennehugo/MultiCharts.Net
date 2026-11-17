@@ -178,6 +178,16 @@ static class Program
 
 		// failure: split into sub-windows, Ready waits on the sub-chunk; RT day on a live chart stays open
 		var sg = S();
+		// non-live chart: no chunk is the RT tail (native smoke d798d42 logged rt(True) on the last day); a live chart keeps it
+		{
+			var fn = new TickChunkFeed(S(), days, 3, 4, 5000, 0, false);
+			var all = new List<_OrderFlow.TickChunk>(fn.Next(DateTime.UtcNow));
+			Check(all.Count == days.Count && all.All(c => !c.Rt), "non-live chart: every chunk rt(False), including the last session");
+			var fl = new TickChunkFeed(S(), days, 3, 4, 6000, 0, true);
+			var al = fl.Next(DateTime.UtcNow);
+			Check(al.Count == days.Count && al.Last().Rt && al.Take(al.Count - 1).All(c => !c.Rt), "live chart: only the last session is the RT tail");
+		}
+
 		var f2 = new TickChunkFeed(sg, days.Take(1).ToList(), 1, 2, 2000, 0);
 		var i2 = f2.Next(DateTime.UtcNow);
 		f2.OnFail(i2[0].Id, "boom");

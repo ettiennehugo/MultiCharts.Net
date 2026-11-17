@@ -257,6 +257,7 @@ namespace PowerLanguage.Function
 		private volatile bool m_allFinished;
 		private DateTime m_first = DateTime.MaxValue, m_last = DateTime.MinValue;
 		private long m_outOfWindow;
+		private readonly bool m_live;
 		private int m_emptyDays; private DateTime m_emptyFrom, m_emptyTo;   // sessions that completed with no tick in the window
 		private DateTime m_coverFrom, m_coverTo; private bool m_coverOk;   // calc thread: the last ready window
 		/// <summary>Plan window: (From, To]; To is the last bar of the chart (no request goes past it).</summary>
@@ -268,9 +269,13 @@ namespace PowerLanguage.Function
 		/// <summary>Sessions whose request completed with no tick in the window (no local 1-tick history), and the first one.</summary>
 		public int EmptyDays(out DateTime firstFrom, out DateTime firstTo) { lock (m_lock) { firstFrom = m_emptyFrom; firstTo = m_emptyTo; return m_emptyDays; } }
 
-		public TickChunkFeed(_TickStream stream, List<_OrderFlow.DayChunk> days, int maxInFlightDays, int splitOnFail, int firstId, int batchLines)
+		/// <param name="live">The chart is live. The scheduler marks the last day as the real-time tail (Rt); on a non-live
+		/// chart there is no tail, so every chunk is issued with Rt = false (native smoke d798d42: the 12-06 chunk logged rt(True)
+		/// with subscribe2RT(False)).</param>
+		public TickChunkFeed(_TickStream stream, List<_OrderFlow.DayChunk> days, int maxInFlightDays, int splitOnFail, int firstId, int batchLines, bool live = true)
 		{
 			m_stream = stream;
+			m_live = live;
 			m_batchLines = Math.Max(0, batchLines);
 			m_s = new _OrderFlow.TickChunkScheduler(days, new[] { 0 }, maxInFlightDays, splitOnFail, firstId);
 			Days = days.Count;
@@ -353,7 +358,7 @@ namespace PowerLanguage.Function
 			lock (m_lock)
 			{
 				List<_OrderFlow.TickChunk> issue = m_s.Next(DateTime.MinValue, false, null);
-				foreach (_OrderFlow.TickChunk c in issue) { c.ReqFrom = c.FromEt; c.ReqTo = c.ToEt; c.IssuedAt = utcNow; }
+				foreach (_OrderFlow.TickChunk c in issue) { c.ReqFrom = c.FromEt; c.ReqTo = c.ToEt; c.IssuedAt = utcNow; if (!m_live) c.Rt = false; }
 				return issue;
 			}
 		}

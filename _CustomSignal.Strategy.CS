@@ -1495,7 +1495,7 @@ namespace PowerLanguage.Strategy
 			if (TickConfig.chunkByDay && cr.RequestType == DataRequestType.FromTo)
 			{
 				List<_OrderFlow.DayChunk> days = TickChunkFeed.PlanSessions(barCloses(cur, count), firstBar.AddDays(-1), TimeSpan.FromMinutes(TickConfig.sessionGapMinutes));
-				m_tickFeed = new TickChunkFeed(m_tickStream, days, TickConfig.chunkMaxInFlightDays, TickConfig.chunkSplitOnFail, m_tickIdSeed, 0);   // callback lines: onTickData
+				m_tickFeed = new TickChunkFeed(m_tickStream, days, TickConfig.chunkMaxInFlightDays, TickConfig.chunkSplitOnFail, m_tickIdSeed, 0, m_tickLive);   // callback lines: onTickData; rt only on a live chart
 				if (m_tickFeed.Days > 0) { m_tickPlanFrom = m_tickFeed.From; m_tickPlanTo = m_tickFeed.To; }
 				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info,
 					$"TICK DataLoader 1-tick Trade request for {name}, chunked sessions({m_tickFeed.Days}) gapMin({TickConfig.sessionGapMinutes}) from({m_tickFeed.From:yyyy-MM-dd HH:mm}) to({m_tickFeed.To:yyyy-MM-dd HH:mm}) " +
