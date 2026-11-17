@@ -164,11 +164,14 @@ namespace PowerLanguage.Strategy
 			m_lt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "YV11LT", EOrderAction.Sell, OrderExit.FromAll));
 			m_st = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "YV11ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); requireRing(1, 2000, "YV-11 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
 		protected override void CalcBar()
 		{
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
@@ -179,7 +182,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (pos != 0)
 			{
-				bool flat = _SandboxRules.PastFlat(tod, Bars.Info.Name, m_rthValueEnd);
+				bool flat = _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 				bool lost = (pos > 0 && Bars.Close[0] < sma) || (pos < 0 && Bars.Close[0] > sma);
 				if (flat || lost) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 				if (pos > 0) { m_ls.Send(m_stop); if (m_hasTarget) m_lt.Send(m_target); }
@@ -188,7 +191,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (m_done || !IsRth() || tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || ((int)tod.TotalMinutes) % 5 != 0) return;
 			if (sandboxBook()) return;
-			double atr = 0; for (int k = 0; k < 14; k++) { double h = double.MinValue, l = double.MaxValue; for (int i = 0; i < 5; i++) { h = Math.Max(h, Bars.High[k * 5 + i]); l = Math.Min(l, Bars.Low[k * 5 + i]); } atr += h - l; }
+			double atr = 0; for (int k = 0; k < 14; k++) { double h = double.MinValue, l = double.MaxValue; for (int i = 0; i < 5; i++) { h = Math.Max(h, lbBar(k * 5 + i).h); l = Math.Min(l, lbBar(k * 5 + i).l); } atr += h - l; }
 			atr /= 14; if (!(atr > 0)) return;
 			double sma5 = smaN(20, 5);
 			double slope = (sma - sma5) / 5.0;
@@ -212,11 +215,11 @@ namespace PowerLanguage.Strategy
 			m_target = sma200;
 			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) { m_le.Send(entry); m_ls.Send(m_stop); } else { m_se.Send(entry); m_ss.Send(m_stop); }
 		}
-		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += Bars.Close[ago + i]; return s / n; }
+		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += lbBar(ago + i).c; return s / n; }
 		private double ema9()
 		{
 			double k = 2.0 / 10.0, e = Bars.Close[30];
-			for (int i = 29; i >= 0; i--) e = Bars.Close[i] * k + e * (1 - k);
+			for (int i = 29; i >= 0; i--) e = lbBar(i).c * k + e * (1 - k);
 			return e;
 		}
 
@@ -291,10 +294,13 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

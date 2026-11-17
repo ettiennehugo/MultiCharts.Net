@@ -209,7 +209,7 @@ namespace PowerLanguage.Strategy
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
 			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				int since = (IsExist(2) ? BarsOfData(2).CurrentBar : Bars.CurrentBar) - m_shockBar;   // 1 = next 5-minute bar
 				if (since == 1)
 				{

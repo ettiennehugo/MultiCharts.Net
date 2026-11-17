@@ -147,7 +147,8 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
 		private readonly List<double> m_slopes = new List<double>();
-		private double m_hi, m_lo, m_prevH, m_stop, m_target, m_hNow;
+		private double m_hi = double.NaN, m_lo = double.NaN, m_prevH, m_stop, m_target, m_hNow;
+		private double m_p1Hi = double.NaN, m_p1Lo = double.NaN, m_p1Close = double.NaN, m_p2Hi = double.NaN, m_p2Lo = double.NaN;
 		private DateTime m_day = DateTime.MinValue;
 		private int m_side;
 		private bool m_alert, m_done;
@@ -185,12 +186,12 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
+			if (day != m_day) { if (IsNoRthDay(day)) m_hi = m_lo = double.NaN; else remember(); m_day = day;   /* Analyst MC17: a no-RTH Globex date (holiday halt, abbreviated Good Friday) is not a trading day; the next RTH date logs the balance */ m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			bool inside = !double.IsNaN(m_hi) && Bars.Close[0] < m_hi && Bars.Close[0] > m_lo;
 			bool sendExits()
 			{
-				if (mustFlatten() || inside) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || inside) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
 				return false;
 			}
@@ -209,7 +210,7 @@ namespace PowerLanguage.Strategy
 			double floor = 14 * tick;
 			if (m_side * (entry - stop) < floor) stop = entry - m_side * floor;
 			double risk = Math.Abs(entry - stop);
-			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-30 {m_day:yyyy-MM-dd} skip: stop {risk / tick:F0} ticks breaches risk budget"); m_done = true; return; }
 			m_stop = stop; m_target = m_side > 0 ? m_hi + range : m_lo - range; m_done = true;
 			if (m_side > 0) { m_le.Send(); m_lxStp.Send(m_stop); } else { m_se.Send(); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(m_side > 0 ? "A230LE" : "A230SE", entry, m_stop, m_target, null);
@@ -237,14 +238,21 @@ namespace PowerLanguage.Strategy
 			m_prevH = e.Hnorm;
 		}
 
+		// Called on the first bar of a new Globex day, after the session stats rolled: priorRth* is the last completed RTH
+		// session. The balance is that session and the one before it. A no-RTH day carries the same prior forward, so it is
+		// not counted twice. NaN until two RTH sessions are known.
 		private void remember()
 		{
+			m_hi = m_lo = double.NaN;
 			SessionStats s = Session;
-			if (s == null || !(s.rthHigh > 0)) return;
-			if (double.IsNaN(m_hi)) { m_hi = s.rthHigh; m_lo = s.rthLow; return; }
-			m_hi = Math.Max(m_hi, s.priorRthHigh > 0 ? s.priorRthHigh : m_hi);
-			m_lo = Math.Min(m_lo, s.priorRthLow > 0 ? s.priorRthLow : m_lo);
-			m_hi = Math.Max(m_hi, s.rthHigh); m_lo = Math.Min(m_lo, s.rthLow);
+			if (s == null || !(s.priorRthHigh > 0) || !(s.priorRthLow > 0)) return;
+			bool same = s.priorRthHigh == m_p1Hi && s.priorRthLow == m_p1Lo && s.priorRthClose == m_p1Close;
+			if (!same) { m_p2Hi = m_p1Hi; m_p2Lo = m_p1Lo; m_p1Hi = s.priorRthHigh; m_p1Lo = s.priorRthLow; m_p1Close = s.priorRthClose; }
+			if (double.IsNaN(m_p2Hi)) return;
+			m_hi = Math.Max(m_p1Hi, m_p2Hi); m_lo = Math.Min(m_p1Lo, m_p2Lo);
+			// Analyst MC17: 515 lines over 502 sessions came from Globex dates with no RTH (holidays) re-logging the carried balance;
+			// log only when a new RTH session has shifted the balance, so there is at most one line per trading day.
+			if (!same && journalOn()) trace(ETraceLevel.Journal, $"A2-30 {GlobexDate(Bars.Time[0]):yyyy-MM-dd} balance {m_lo:F2}-{m_hi:F2} (prior two RTH sessions)");
 		}
 	}
 }

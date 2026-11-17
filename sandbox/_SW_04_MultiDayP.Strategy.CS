@@ -152,12 +152,12 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _SW_04_MultiDayP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW04LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW04LX", EOrderAction.Sell, OrderExit.FromAll)); m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SW04LS", EOrderAction.Sell, OrderExit.FromAll)); }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW04LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW04LX", EOrderAction.Sell, OrderExit.FromAll)); m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SW04LS", EOrderAction.Sell, OrderExit.FromAll)); }
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
@@ -169,7 +169,7 @@ namespace PowerLanguage.Strategy
 				if (day != m_entry) { /* counted on the day change below */ }
 				m_ls.Send(m_stop);
 				if (Bars.Close[0] < m_poc || m_held >= 3) m_lx.Send();
-				if (day != m_day) { m_day = day; m_held++; }
+				if (day != m_day) { m_day = day; if (!IsNoRthDay(day)) m_held++; }   // Analyst MC17: count RTH trading days held, not holiday Globex dates
 				return;
 			}
 			if (day != m_day) { m_day = day; m_armed = false; m_entry = DateTime.MinValue; m_held = 0; }

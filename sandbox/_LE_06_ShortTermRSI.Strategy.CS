@@ -157,12 +157,12 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { if (Session.priorRthClose > 0) m_cl.Add(Session.priorRthClose); m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { if (Session.priorRthClose > 0 && !IsNoRthDay(day)) m_cl.Add(Session.priorRthClose);   /* Analyst MC17: a no-RTH holiday date carries the same prior close; adding it twice duplicated that close */ m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			double rsi = rsi4();
 			int pos = StrategyInfo.MarketPosition;
 			if (pos > 0) { m_ls.Send(m_stop); if (rsi > 55) m_lx.Send(); return; }
@@ -254,10 +254,13 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

@@ -233,7 +233,7 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EBandMultiple), Band)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Band is not a defined EBandMultiple");
 			if (!Enum.IsDefined(typeof(EThetaOff), ThetaOff)) throw new ArgumentException("_A2_70_OpenFadeHvGate: ThetaOff is not a defined EThetaOff");
 			if (!Enum.IsDefined(typeof(EReference), Reference)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Reference is not a defined EReference");
-			NeedsDaily = true;                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
+			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
 			DailyConfig.atrLength = Cfg.atrLength; DailyConfig.hvLengths = new[] { Cfg.hvLength };
 			base.StartCalc();
 			m_lastDaily = m_day = DateTime.MinValue; m_gateOff = false; m_atr = m_hv = m_stop = double.NaN; m_traded = false;

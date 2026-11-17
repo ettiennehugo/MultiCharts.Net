@@ -2,7 +2,7 @@
 // Catalogue ID: A2-15
 // ID mapping: A2-15 -> _A2_15_LegSkew.Strategy.CS (class _A2_15_LegSkew).
 // Name: A2-15 breakout-leg POC versus leg AVWAP
-// Header version: 1
+// Header version: 2 (Analyst MC17 2026-11-16: leg window and ATR5 units)
 // Rules version: catalogue text, coded 2026-11-15. There is no engines-manual example for this id.
 // Study class: _A2_15_LegSkew
 // File: sandbox/_A2_15_LegSkew.Strategy.CS
@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-15.
 // Taken from the source: the Rules line of that heading.
-// Research assumption: ASSUMPTION: This is a gate on PS-01, not a second entry. Leg POC is RangeProfileAfter from the acceptance bar to now. Leg AVWAP is the volume-weighted close of those same bars. ATR5 is averageTrueRange(Bars, 14); the host chart is the PS-01 chart. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
+// Research assumption: ASSUMPTION: This is a gate on PS-01, not a second entry. The breakout leg runs from its swing origin (the lowest low for a long, highest high for a short, of today's RTH Data1 bars up to the acceptance bar) to the leg extreme (the highest high for a long, lowest low for a short, from the acceptance bar to now); the pullback after the extreme is not part of the leg. Leg POC is RangeProfile over those bars, leg AVWAP the volume-weighted close of the same bars. ATR5 is ATR(14) of the 5-minute Data2 stream (catalogue units), not of the 1-minute host bars. Every evaluated setup writes one journal line with the skew, threshold and direction. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series, unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: This is a gate on PS-01, not a second entry. Leg POC is RangeProfileAfter from the acceptance bar to now. Leg AVWAP is the volume-weighted close of those same bars. ATR5 is averageTrueRange(Bars, 14); the host chart is the PS-01 chart. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
+// Other: ASSUMPTION: This is a gate on PS-01, not a second entry. The breakout leg runs from its swing origin (the lowest low for a long, highest high for a short, of today's RTH Data1 bars up to the acceptance bar) to the leg extreme (the highest high for a long, lowest low for a short, from the acceptance bar to now); the pullback after the extreme is not part of the leg. Leg POC is RangeProfile over those bars, leg AVWAP the volume-weighted close of the same bars. ATR5 is ATR(14) of the 5-minute Data2 stream (catalogue units), not of the 1-minute host bars. Every evaluated setup writes one journal line with the skew, threshold and direction. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
 //
 // ## 17. Parameters
 // Each [Input] below is one of this strategy's own parameters. TraceLevel stays on the base.
@@ -131,7 +131,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: This is a gate on PS-01, not a second entry. Leg POC is RangeProfileAfter from the acceptance bar to now. Leg AVWAP is the volume-weighted close of those same bars. ATR5 is averageTrueRange(Bars, 14); the host chart is the PS-01 chart. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
+// ASSUMPTION: This is a gate on PS-01, not a second entry. The breakout leg runs from its swing origin (the lowest low for a long, highest high for a short, of today's RTH Data1 bars up to the acceptance bar) to the leg extreme (the highest high for a long, lowest low for a short, from the acceptance bar to now); the pullback after the extreme is not part of the leg. Leg POC is RangeProfile over those bars, leg AVWAP the volume-weighted close of the same bars. ATR5 is ATR(14) of the 5-minute Data2 stream (catalogue units), not of the 1-minute host bars. Every evaluated setup writes one journal line with the skew, threshold and direction. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
 // IOG is disabled. GX exitPlan is not called. Exit orders are sent only from sendExits.
 
 
@@ -151,35 +151,93 @@ namespace PowerLanguage.Strategy
 
 		public _A2_15_LegSkew(object _ctx) : base(_ctx) { SkewMin = ESkewMin.T03; Band = ESkewBand.Favourable; }
 
+		protected override void Create()
+		{
+			base.Create();
+			RangeProfiles.enabled = true;   // the leg profile is RangeProfileAfter; null while RangeProfiles is off
+		}
+
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!Enum.IsDefined(typeof(ESkewMin), SkewMin)) throw new ArgumentException("_A2_15_LegSkew: SkewMin is not a defined ESkewMin");
 			if (!Enum.IsDefined(typeof(ESkewBand), Band)) throw new ArgumentException("_A2_15_LegSkew: Band is not a defined ESkewBand");
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-15 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 
 		protected override bool legSkewAllows(int side)
 		{
-			if (m_acceptTime == DateTime.MinValue || side == 0) return false;
-			VpExtra leg = RangeProfileAfter(1, m_acceptTime, Bars.Time[0]);
-			double avwap = legVwap();
-			double atr = averageTrueRange(Bars, 14);
-			if (leg == null || !(leg.poc > 0) || double.IsNaN(avwap) || !(atr > 0)) return false;
+			string dir = side > 0 ? "long" : "short";
+			string day = GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd");
+			if (m_acceptTime == DateTime.MinValue || side == 0) { skewLine(day, dir, "no acceptance bar", false); return false; }
+			DateTime t0, t1;
+			if (!legWindow(side, out t0, out t1)) { skewLine(day, dir, "leg window not in the ring", false); return false; }
+			VpExtra leg = RangeProfile(1, t0, t1);
+			double avwap = legVwap(t0, t1);
+			double atr = IsExist(2) ? averageTrueRange(BarsOfData(2), 14) : double.NaN;   // catalogue ATR5 = ATR(14) of 5-minute bars
+			if (leg == null || !(leg.poc > 0) || double.IsNaN(avwap) || !(atr > 0))
+			{
+				skewLine(day, dir, $"no value (poc {(leg == null ? double.NaN : leg.poc):F2} avwap {avwap:F2} atr5 {atr:F2})", false);
+				return false;
+			}
 			double skew = (avwap - leg.poc) / atr;
-			if (Band == ESkewBand.Neutral) return Math.Abs(skew) <= 0.2;
-			double thr = SkewMin == ESkewMin.T05 ? 0.5 : 0.3;
-			return side > 0 ? skew > thr : skew < -thr;
+			bool pass;
+			string rule;
+			if (Band == ESkewBand.Neutral) { pass = Math.Abs(skew) <= 0.2; rule = "|skew| <= 0.20"; }
+			else
+			{
+				double thr = SkewMin == ESkewMin.T05 ? 0.5 : 0.3;
+				pass = side > 0 ? skew > thr : skew < -thr;
+				rule = side > 0 ? $"skew > +{thr:F2}" : $"skew < -{thr:F2}";
+			}
+			skewLine(day, dir, $"leg {t0:HH:mm}-{t1:HH:mm} poc {leg.poc:F2} avwap {avwap:F2} atr5 {atr:F2} skew {skew:+0.00;-0.00} vs {rule} ({Band})", pass);
+			return pass;
 		}
 
-		private double legVwap()
+		private void skewLine(string day, string dir, string what, bool pass)
 		{
-			double num = 0, den = 0;
-			int n = Math.Min(Bars.CurrentBar, 500);
+			if (journalOn()) trace(ETraceLevel.Journal, $"A2-15 {day} {dir} {what}: {(pass ? "pass" : "reject")}");
+		}
+
+		/// <summary>The breakout leg: from its swing origin (today's RTH extreme against the trade up to the acceptance bar) to the leg
+		/// extreme in the trade direction since acceptance. Times are Data1 bar times; false when the ring does not reach the origin.</summary>
+		private bool legWindow(int side, out DateTime t0, out DateTime t1)
+		{
+			t0 = t1 = DateTime.MinValue;
+			RingBar now = lbBar(0);
+			if (now.time == DateTime.MinValue) return false;
+			double best0 = double.NaN, best1 = double.NaN;
+			int n = Math.Min(Bars.CurrentBar, 2000);
 			for (int i = 0; i < n; i++)
 			{
-				if (Bars.Time[i] < m_acceptTime) break;
-				double v = Bars.Volume[i] > 0 ? Bars.Volume[i] : 1;
-				num += Bars.Close[i] * v; den += v;
+				RingBar b = lbBar(i);
+				if (b.time == DateTime.MinValue || b.tradingDay != now.tradingDay) break;
+				if (b.time >= m_acceptTime)
+				{
+					double x = side > 0 ? b.h : b.l;
+					if (double.IsNaN(best1) || (side > 0 ? x >= best1 : x <= best1)) { best1 = x; t1 = b.time; }   // ties keep the earlier bar
+					if (b.time > m_acceptTime) continue;
+				}
+				if (!b.rth) break;
+				double y = side > 0 ? b.l : b.h;
+				if (double.IsNaN(best0) || (side > 0 ? y < best0 : y > best0)) { best0 = y; t0 = b.time; }
+			}
+			return t0 != DateTime.MinValue && t1 != DateTime.MinValue && t0 <= t1;
+		}
+
+		private double legVwap(DateTime t0, DateTime t1)
+		{
+			double num = 0, den = 0;
+			int n = Math.Min(Bars.CurrentBar, 2000);
+			for (int i = 0; i < n; i++)
+			{
+				RingBar b = lbBar(i);
+				if (b.time == DateTime.MinValue || b.time < t0) break;
+				if (b.time > t1) continue;
+				double v = b.v > 0 ? b.v : 1;
+				num += b.c * v; den += v;
 			}
 			return den > 0 ? num / den : double.NaN;
 		}

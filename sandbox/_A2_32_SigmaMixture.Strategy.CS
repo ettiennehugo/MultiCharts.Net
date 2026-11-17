@@ -145,10 +145,13 @@ namespace PowerLanguage.Strategy
 	public class _A2_32_SigmaMixture : _VolumeProfileFuturesBase
 	{
 		private IOrderMarket m_le, m_se;
+		private IOrderMarket m_lxFlat, m_sxFlat;   // Analyst MC17: closes every contract still open at flat-by or from an earlier day
+		private DateTime m_entryDay = DateTime.MinValue, m_openSkipDay = DateTime.MinValue;
 		private _GmmProfileTracker m_gmm;
 		private DateTime m_day = DateTime.MinValue;
 		private bool m_fed, m_done;
 		private int m_up, m_dn;
+		private double m_upLvl = double.NaN, m_dnLvl = double.NaN;   // the nearest centre above / below, frozen while a break run is counting
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
@@ -164,6 +167,8 @@ namespace PowerLanguage.Strategy
 			GxOrderPrefix = "A232"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A232LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A232SE", EOrderAction.SellShort));
+			m_lxFlat = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A232FLX", EOrderAction.Sell));
+			m_sxFlat = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A232FSX", EOrderAction.BuyToCover));
 		}
 
 		protected override void StartCalc() {
@@ -172,14 +177,35 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  base.StartCalc(); m_gmm = new _GmmProfileTracker(tickSize()); }
 
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-32 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
-			exitBar();
+			exitBar(); sandboxEarlyFlat();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; }
+			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; m_upLvl = m_dnLvl = double.NaN; }
+			int posNow = StrategyInfo.MarketPosition;
+			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
+			{   // Analyst MC17: the entry is 2 contracts and the GX plan is 1, so close every remaining contract at flat-by or the next day
+				if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
+				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
+			}
+			if (posNow != 0 && m_entryDay != day && m_openSkipDay != day)
+			{ m_openSkipDay = day; if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} entry skipped: position still open ({posNow} from {m_entryDay:yyyy-MM-dd})"); }
 			SessionStats s = Session;
 			if (s != null && s.rthComplete && !m_fed)
 			{
@@ -200,9 +226,14 @@ namespace PowerLanguage.Strategy
 				if (lv > c && (double.IsNaN(above) || lv < above)) above = lv;
 				if (lv < c && (double.IsNaN(below) || lv > below)) below = lv;
 			}
-			m_up = !double.IsNaN(above) && c > above ? m_up + 1 : 0;
-			m_dn = !double.IsNaN(below) && c < below ? m_dn + 1 : 0;
+			// A break is two closes beyond the centre that was nearest before the run began (the prior bar's nearest level).
+			// Comparing with the nearest level to this close can never be true, because that level is beyond the close.
+			m_up = !double.IsNaN(m_upLvl) && c > m_upLvl ? m_up + 1 : 0;
+			m_dn = !double.IsNaN(m_dnLvl) && c < m_dnLvl ? m_dn + 1 : 0;
+			if (m_up == 0) m_upLvl = above;
+			if (m_dn == 0) m_dnLvl = below;
 			if (m_up < 2 && m_dn < 2) return;
+			if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} break {(m_up >= 2 ? "above " + m_upLvl.ToString("F2") : "below " + m_dnLvl.ToString("F2"))} close {c:F2}");
 			bool longSide = m_up >= 2;
 			double entry = c;
 			double tick = tickSize();
@@ -213,10 +244,13 @@ namespace PowerLanguage.Strategy
 			if ((longSide ? entry - stop : stop - entry) < floor) stop = entry - (longSide ? floor : -floor);
 			double target = longSide ? above : below;
 			double risk = Math.Abs(entry - stop);
-			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
-			{ m_done = true; return; }
+			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk)
+			{ if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} skip: next centre under 1.2R or missing"); m_done = true; return; }
+			if (journalOn()) trace(ETraceLevel.Warning, "A2-32 multi-contract size 2");
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			arm(longSide, entry, stop, target);
-			if (longSide) m_le.Send(2); else m_se.Send(2);
+			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
 		}
 
 		private void arm(bool longSide, double entry, double stop, double target)
@@ -278,9 +312,12 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
