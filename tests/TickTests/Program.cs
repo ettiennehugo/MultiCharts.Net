@@ -12,6 +12,8 @@ static class Program
 	static bool Near(double a, double b, double eps = 1e-9) { return Math.Abs(a - b) < eps; }
 	static readonly DateTime T0 = new DateTime(2024, 3, 13, 9, 30, 0);
 
+	static TickPrint TP(DateTime t, double p = 1, double sz = 1) { return new TickPrint { t = t, p = p, s = sz }; }
+
 	static _TickStream S(Action<TickConfig> f = null, List<string> j = null)
 	{
 		var c = new TickConfig { enabled = true, burstNormLength = 10, burstMinSamples = 5 }; if (f != null) f(c);
@@ -93,6 +95,223 @@ static class Program
 		}
 		prod.Wait();
 		Check(counted == total, $"producer/consumer: every tick counted once ({counted})");
+
+
+		// ---- legacy coverage: a bar before the first tick is never valid with zero prints ----
+		var s6 = S(); s6.Enqueue(T0.AddMinutes(10).AddSeconds(5), 1, 1); s6.MarkHistoryComplete();
+		Check(!s6.Aggregate(T0, T0.AddMinutes(1)).valid, "bar before the stream's first tick: invalid (was valid with 0 prints)");
+		Check(s6.Aggregate(T0.AddMinutes(10), T0.AddMinutes(11)).valid, "bar holding the first tick: valid");
+		// caller-decided coverage
+		var s7 = S(); s7.Enqueue(T0.AddSeconds(5), 1, 1);
+		Check(s7.Aggregate(T0, T0.AddMinutes(1), true).valid && s7.Last.prints == 1, "ready=true: valid without a later tick");
+		Check(!s7.Aggregate(T0.AddMinutes(1), T0.AddMinutes(2), false).valid, "ready=false: invalid");
+		Check(s7.Aggregate(T0.AddMinutes(2), T0.AddMinutes(3), true).valid && s7.Last.prints == 0, "ready=true, no tick in the bar: valid, 0 prints");
+
+		// ---- new TickConfig fields ----
+		var badc = new TickConfig { chunkWaitMs = -1, chunkMaxInFlightDays = 5, chunkSplitOnFail = -1, chunkTimeoutSec = -1, batchLines = -1 }.Validate();
+		Check(badc != null && badc.Contains("chunkWaitMs=-1") && badc.Contains("chunkMaxInFlightDays=5") && badc.Contains("chunkSplitOnFail=-1")
+			&& badc.Contains("chunkTimeoutSec=-1") && badc.Contains("batchLines=-1"), "Validate names the chunk settings");
+		var defc = new TickConfig();
+		Check(defc.Validate() == null && defc.chunkByDay && defc.chunkWaitMs == 120000 && defc.chunkMaxInFlightDays == 2 && defc.realTime, "chunk defaults");
+
+		// ---- PlanDays: calendar days of bar closes, first bar - 1 day .. last bar, contiguous half-open windows ----
+		// 1m bars Fri 2024-12-27 15:58..16:00, Mon 12-30 08:31..08:32, Tue 12-31 15:59..16:00 (bar zone); a duplicate is ignored
+		var closes = new List<DateTime> {
+			new DateTime(2024, 12, 27, 15, 58, 0), new DateTime(2024, 12, 27, 15, 59, 0), new DateTime(2024, 12, 27, 16, 0, 0),
+			new DateTime(2024, 12, 30, 8, 31, 0), new DateTime(2024, 12, 30, 8, 32, 0), new DateTime(2024, 12, 30, 8, 32, 0),
+			new DateTime(2024, 12, 31, 15, 59, 0), new DateTime(2024, 12, 31, 16, 0, 0) };
+		DateTime firstFrom = closes[0].AddDays(-1);
+		var days = TickChunkFeed.PlanDays(closes, firstFrom);
+		Check(days.Count == 3, $"one window per bar date, weekend skipped ({days.Count})");
+		Check(days[0].FromEt == firstFrom && days[0].ToEt == closes[2], "first window: (first bar - 1 day, last close of the date]");
+		Check(days[1].FromEt == days[0].ToEt && days[2].FromEt == days[1].ToEt, "windows contiguous (no gap, no overlap)");
+		Check(days[2].ToEt == new DateTime(2024, 12, 31, 16, 0, 0), "last window ends at the chart's last bar 2024-12-31 16:00 (not 00:00, not later)");
+		Check(TickChunkFeed.PlanDays(new List<DateTime>(), firstFrom).Count == 0, "no bars: no window");
+
+		// ---- the feed: issue, buffer, release in order, ready / wait logic ----
+		var jf = new List<string>();
+		var sf = S(c => { }, jf);
+		var feed = new TickChunkFeed(sf, days, 2, 4, 1000, 3);
+		Check(feed.From == firstFrom && feed.To == closes[7] && feed.Days == 3 && !feed.AllFinished, "feed window = plan");
+		var issue = feed.Next(DateTime.UtcNow);
+		Check(issue.Count == 2 && issue[0].ReqFrom == days[0].FromEt && issue[0].ReqTo == days[0].ToEt && issue[1].DayIndex == 1, "two days in flight (prefetch), window = plan");
+		Check(feed.Next(DateTime.UtcNow).Count == 0, "no third day while two are in flight");
+		int wid;
+		Check(feed.Ready(closes[0], out wid) == false && wid == issue[0].Id, "bar of an in-flight day: not ready, wait on its chunk");
+		Check(feed.Ready(closes[7].AddMinutes(1), out wid) == null, "after the plan: stream rule (null)");
+		// day 2 completes first: held until day 1 is done (release in day order)
+		feed.OnHistory(issue[1].Id, new List<TickPrint> { TP(closes[3].AddSeconds(-30)) }, true);
+		Check(feed.Ready(closes[3], out wid) == false && wid == issue[1].Id, "day 2 done before day 1: not released yet, still a wait");
+		// day 1 in two batches; one tick after the window end and one at the window start are excluded and counted
+		feed.OnHistory(issue[0].Id, new List<TickPrint> { TP(firstFrom), TP(closes[0].AddSeconds(-20)), TP(closes[0].AddSeconds(-10)) }, false);
+		Check(feed.Ready(closes[0], out wid) == false, "partial day: not ready");
+		feed.OnHistory(issue[0].Id, new List<TickPrint> { TP(closes[2]), TP(closes[2].AddSeconds(1)) }, true);
+		Check(feed.TakeWake() && !feed.TakeWake(), "a completed day wakes the pump once");
+		Check(feed.Ready(closes[0], out wid) == true && wid == 0, "day 1 released: ready");
+		Check(feed.Ready(closes[4], out wid) == true, "day 2 released after day 1: ready");
+		var rr = sf.Aggregate(closes[0].AddMinutes(-1), closes[0], feed.Ready(closes[0], out wid));
+		Check(rr.valid && rr.prints == 2, $"bar (15:57,15:58]: two ticks ({rr.prints})");
+		rr = sf.Aggregate(closes[1], closes[2], feed.Ready(closes[2], out wid));
+		Check(rr.valid && rr.prints == 1, "last bar of day 1: the tick at its close counts; the one after the window never reaches the stream");
+		Check(jf.Any(x => x.StartsWith("TICK chunk done day(2024-12-27)") && x.Contains("ticks(3)") && x.Contains("batches(2)") && x.Contains("outOfWindow(2)")
+			&& x.Contains("last(2024-12-27 16:00:00.000)")), "chunk done line: ticks, batches, first/last, outOfWindow");
+		// day 3: empty response = missing data (not a quiet day), no wait
+		var issue3 = feed.Next(DateTime.UtcNow);
+		Check(issue3.Count == 1 && issue3[0].DayIndex == 2 && issue3[0].ReqTo == closes[7], "day 3 issued after a slot frees; ends at the last bar");
+		Check(!feed.ShouldEnd(issue3[0].Id, false) && feed.ShouldEnd(issue[0].Id, false), "end finished requests only");
+		feed.OnHistory(issue3[0].Id, new List<TickPrint>(), true);
+		Check(feed.Ready(closes[7], out wid) == false && wid == 0, "empty day: invalid, no wait");
+		Check(feed.AllFinished && feed.Pending() == 0, "all days finished");
+		DateTime ef, et;
+		Check(feed.EmptyDays(out ef, out et) == 1 && ef == issue3[0].ReqFrom && et == issue3[0].ReqTo, "empty session counted (no local 1-tick history), first window kept");
+		string mh = TickChunkFeed.MissingHistoryText("@ES", new DateTime(2024, 12, 1, 16, 0, 0), new DateTime(2024, 12, 6, 16, 0, 0));
+		Check(mh.Contains("no 1-tick history was returned for @ES from 2024-12-01 16:00 to 2024-12-06 16:00") && mh.Contains("downloading in QuoteManager"),
+			"missing-history text names the symbol, the date range and QuoteManager");
+		sf.DrainNotes();
+		Check(jf.Count(x => x.StartsWith("TICK batch day(")) == 3 && jf.Count(x => x.StartsWith("TICK batch lines capped at 3")) == 1, "batch lines: first 3, then one cap line");
+		string sum = feed.SummaryLine("complete");
+		Check(sum.Contains("days(3) done(3) failed(0) empty(1) pending(0) ticks(4)") && sum.Contains("last(2024-12-30 08:30:30.000)") && sum.Contains("planTo(2024-12-31 16:00:00)")
+			&& sum.Contains("outOfWindow(2)"), "summary line: counts including empty(1), last tick <= plan end");
+		// a second isCompleted callback on the empty day (native empty windows fire two) must not recount or re-release
+		int doneEmpty = jf.Count(x => x.StartsWith("TICK chunk done") && x.Contains($"id({issue3[0].Id})"));
+		feed.OnHistory(issue3[0].Id, new List<TickPrint>(), true);
+		sf.DrainNotes();
+		DateTime ef2, et2;
+		Check(doneEmpty == 1 && jf.Count(x => x.StartsWith("TICK chunk done") && x.Contains($"id({issue3[0].Id})")) == 1, "duplicate empty completion: one chunk done line");
+		Check(feed.EmptyDays(out ef2, out et2) == 1 && ef2 == ef && et2 == et, "duplicate empty completion is not counted twice");
+		Check(feed.SummaryLine("complete").Contains("empty(1)") && feed.AllFinished && feed.Pending() == 0, "duplicate completion does not reopen or double-advance the plan");
+		// stale callbacks (earlier pass ids) are ignored
+		feed.OnHistory(5, new List<TickPrint> { TP(closes[7]) }, true);
+		Check(feed.SummaryLine("x").Contains("ticks(4)"), "unknown chunk id ignored");
+
+		// failure: split into sub-windows, Ready waits on the sub-chunk; RT day on a live chart stays open
+		var sg = S();
+		// non-live chart: no chunk is the RT tail (native smoke d798d42 logged rt(True) on the last day); a live chart keeps it
+		{
+			var fn = new TickChunkFeed(S(), days, 3, 4, 5000, 0, false);
+			var all = new List<_OrderFlow.TickChunk>(fn.Next(DateTime.UtcNow));
+			Check(all.Count == days.Count && all.All(c => !c.Rt), "non-live chart: every chunk rt(False), including the last session");
+			var fl = new TickChunkFeed(S(), days, 3, 4, 6000, 0, true);
+			var al = fl.Next(DateTime.UtcNow);
+			Check(al.Count == days.Count && al.Last().Rt && al.Take(al.Count - 1).All(c => !c.Rt), "live chart: only the last session is the RT tail");
+		}
+
+		var f2 = new TickChunkFeed(sg, days.Take(1).ToList(), 1, 2, 2000, 0);
+		var i2 = f2.Next(DateTime.UtcNow);
+		f2.OnFail(i2[0].Id, "boom");
+		var subs = f2.Next(DateTime.UtcNow);
+		Check(subs.Count == 2 && subs[0].Sub == 1 && subs[1].ReqTo == days[0].ToEt, "failed day split in two sub-windows");
+		Check(f2.Ready(closes[2], out wid) == false && wid == subs[1].Id, "wait follows the sub-window covering the bar");
+		f2.OnHistory(subs[0].Id, new List<TickPrint> { TP(subs[0].ReqTo) }, true);
+		f2.OnHistory(subs[1].Id, new List<TickPrint> { TP(closes[2]) }, true);
+		Check(f2.Ready(closes[2], out wid) == true && f2.AllFinished, "sub-windows done: ready");
+		Check(!f2.ShouldEnd(subs[1].Id, true) && f2.ShouldEnd(subs[1].Id, false), "a live chart keeps its done RT day open; a historical one ends it");
+		f2.OnRealtime(subs[1].Id, TP(closes[2].AddMinutes(1)));
+		Check(sg.Aggregate(closes[2], closes[2].AddMinutes(1), f2.Ready(closes[2].AddMinutes(1), out wid)).prints == 1, "RT tick after the released RT day reaches the stream");
+
+		// timeout: an in-flight day silent past timeoutSec fails (and splits)
+		var f3 = new TickChunkFeed(S(), days.Take(1).ToList(), 1, 4, 3000, 0);
+		var i3 = f3.Next(DateTime.UtcNow);
+		Check(f3.Timeouts(DateTime.UtcNow, 300).Count == 0, "no timeout before timeoutSec");
+		var tl = f3.Timeouts(DateTime.UtcNow.AddSeconds(301), 300);
+		Check(tl.Count == 1 && tl[0].Contains("next(split4)") && f3.Next(DateTime.UtcNow).Count == 4, "silent day timed out and split");
+
+		// bounded wait: the loader thread completes the day while the calc thread polls (the P-RC7 pattern)
+		var sw4 = S();
+		var f4 = new TickChunkFeed(sw4, days.Take(1).ToList(), 1, 4, 4000, 0);
+		var i4 = f4.Next(DateTime.UtcNow);
+		var loader = Task.Run(() => { System.Threading.Thread.Sleep(150); f4.OnHistory(i4[0].Id, new List<TickPrint> { TP(closes[0].AddSeconds(-1)) }, false);
+			System.Threading.Thread.Sleep(50); f4.OnHistory(i4[0].Id, new List<TickPrint> { TP(closes[2]) }, true); });
+		var clock = System.Diagnostics.Stopwatch.StartNew(); bool? rdy = false; int wid4 = i4[0].Id;
+		while (rdy == false && wid4 != 0 && clock.ElapsedMilliseconds < 5000) { System.Threading.Thread.Sleep(20); rdy = f4.Ready(closes[0], out wid4); }
+		loader.Wait();
+		Check(rdy == true && clock.ElapsedMilliseconds >= 150, $"wait ends when the day completes ({clock.ElapsedMilliseconds} ms)");
+		Check(sw4.Aggregate(closes[0].AddMinutes(-1), closes[0], rdy).prints == 1, "waited bar gets its tick");
+
+
+		// ---- PlanSessions: CME session windows (chart zone Central): prev 16:00 close .. this 16:00 close ----
+		var es = new List<DateTime>();
+		for (var t = new DateTime(2024, 12, 1, 17, 1, 0); t <= new DateTime(2024, 12, 2, 16, 0, 0); t = t.AddMinutes(1)) es.Add(t);   // Sun eve + Mon
+		for (var t = new DateTime(2024, 12, 2, 17, 1, 0); t <= new DateTime(2024, 12, 3, 16, 0, 0); t = t.AddMinutes(1)) es.Add(t);   // Tue session
+		var ses = TickChunkFeed.PlanSessions(es, es[0].AddDays(-1), TimeSpan.FromMinutes(30));
+		Check(ses.Count == 2, $"two sessions, not split at midnight ({ses.Count})");
+		Check(ses[0].FromEt == new DateTime(2024, 11, 30, 17, 1, 0) && ses[0].ToEt == new DateTime(2024, 12, 2, 16, 0, 0) && ses[0].GlobexDate == new DateTime(2024, 12, 2),
+			"Monday session window ends at the 16:00 CT close, labelled Monday");
+		Check(ses[1].FromEt == new DateTime(2024, 12, 2, 16, 0, 0) && ses[1].ToEt == new DateTime(2024, 12, 3, 16, 0, 0), "Tuesday window = Mon 16:00 .. Tue 16:00 (halt carries no ticks)");
+		var es2 = new List<DateTime>(es); es2.Insert(100, es[99]);   // duplicate ignored
+		Check(TickChunkFeed.PlanSessions(es2, es[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "duplicate close ignored");
+		var gap = new List<DateTime> { new DateTime(2024, 12, 2, 9, 0, 0), new DateTime(2024, 12, 2, 9, 30, 0), new DateTime(2024, 12, 2, 10, 1, 0) };
+		Check(TickChunkFeed.PlanSessions(gap, gap[0].AddDays(-1), TimeSpan.FromMinutes(30)).Count == 2, "a gap over 30 min starts a new window; exactly 30 min does not");
+
+		// ---- empty sessions: idempotent completion, per-session Warnings, empty(n) in the summary ----
+		var daysE = new List<_OrderFlow.DayChunk>();
+		DateTime ePrev = new DateTime(2024, 6, 1, 17, 1, 0);
+		for (int i = 0; i < 12; i++)
+		{
+			DateTime eEnd = new DateTime(2024, 6, 3, 16, 0, 0).AddDays(i);
+			daysE.Add(new _OrderFlow.DayChunk { GlobexDate = eEnd.Date, FromEt = ePrev, ToEt = eEnd });
+			ePrev = eEnd;
+		}
+		var je = new List<string>();
+		var se = S(null, je);
+		var fe = new TickChunkFeed(se, daysE, 2, 0, 3000, 0, false);
+		int issuedE = 0;
+		while (issuedE < daysE.Count)
+		{
+			var nxt = fe.Next(DateTime.UtcNow);
+			if (nxt.Count == 0) break;
+			foreach (var c in nxt)
+			{
+				fe.OnHistory(c.Id, new List<TickPrint>(), true);
+				fe.OnHistory(c.Id, new List<TickPrint>(), true);   // native empty window: a second isCompleted callback
+				issuedE++;
+			}
+		}
+		se.DrainNotes();
+		DateTime e1f, e1t;
+		Check(issuedE == 12 && fe.EmptyDays(out e1f, out e1t) == 12 && e1f == daysE[0].FromEt && e1t == daysE[0].ToEt,
+			"12 empty sessions counted once each (duplicates ignored), first window kept");
+		var emptyList = fe.EmptySessions();
+		Check(emptyList.Count == 12 && emptyList[1].From == daysE[1].FromEt && emptyList[1].To == daysE[1].ToEt
+			&& emptyList[11].From == daysE[11].FromEt && emptyList[11].To == daysE[11].ToEt, "empty session list is in order, each window its own");
+		Check(je.Count(x => x.StartsWith("TICK chunk done")) == 12, "one chunk done line per session despite duplicate completions");
+		string sumE = fe.SummaryLine("complete");
+		Check(sumE.Contains("days(12) done(12) failed(0) empty(12) pending(0) ticks(0)") && fe.AllFinished, "summary reports empty(12) on an all-empty plan");
+
+		var warns = TickChunkFeed.EmptySessionWarnings("@ES", emptyList);
+		Check(warns.Count == 11, "10 per-session Warnings plus one summary");
+		Check(warns[0].Contains("TICK session 2024-06-01 17:01..2024-06-03 16:00 completed empty (empty sessions so far 1)")
+			&& warns[0].Contains("no 1-tick history was returned for @ES from 2024-06-01 17:01 to 2024-06-03 16:00")
+			&& warns[0].Contains("downloading in QuoteManager")
+			&& !warns[0].Contains("2024-06-14"), "first Warning names session 1's window, not the whole plan");
+		Check(warns[1].Contains("empty sessions so far 2")
+			&& warns[1].Contains($"from {daysE[1].FromEt:yyyy-MM-dd HH:mm} to {daysE[1].ToEt:yyyy-MM-dd HH:mm}")
+			&& warns[1].Contains($"TICK session {daysE[1].FromEt:yyyy-MM-dd HH:mm}..{daysE[1].ToEt:yyyy-MM-dd HH:mm}"),
+			"second Warning is session 2, count 2");
+		Check(warns[9].Contains("empty sessions so far 10")
+			&& warns[9].Contains($"from {daysE[9].FromEt:yyyy-MM-dd HH:mm} to {daysE[9].ToEt:yyyy-MM-dd HH:mm}"),
+			"tenth Warning is session 10");
+		Check(warns[10] == TickChunkFeed.EmptySessionsCappedWarning(12) && warns[10].Contains("12 sessions completed empty"),
+			"one summary Warning after the cap, with the full empty count");
+		Check(TickChunkFeed.EmptySessionWarnings("@ES", emptyList.GetRange(0, 5)).Count == 5, "five empty sessions: five Warnings, no summary");
+		Check(TickChunkFeed.EmptySessionWarnings("@ES", emptyList.GetRange(0, 10)).Count == 10, "exactly the cap: no summary");
+
+		// ---- fail fast: no callback at all within firstCallbackSec ----
+		var i0 = new DateTime(2026, 1, 1, 12, 0, 0);
+		Check(!TickChunkFeed.NoCallbackTimeout(0, DateTime.MinValue, i0, 30), "nothing issued: no timeout");
+		Check(!TickChunkFeed.NoCallbackTimeout(0, i0, i0.AddSeconds(29), 30), "29 s: keep waiting");
+		Check(TickChunkFeed.NoCallbackTimeout(0, i0, i0.AddSeconds(30), 30), "30 s, no callback: give up");
+		Check(!TickChunkFeed.NoCallbackTimeout(1, i0, i0.AddSeconds(300), 30), "a callback arrived: never the fail-fast");
+		var badc2 = new TickConfig { sessionGapMinutes = 0, firstCallbackSec = 0 }.Validate();
+		Check(badc2 != null && badc2.Contains("sessionGapMinutes=0") && badc2.Contains("firstCallbackSec=0"), "Validate session gap / first callback");
+
+		// ---- CS-7 entry-blocked log: once per trading day and rule ----
+		var dl = new DailyOnceLog(); var d1 = new DateTime(2024, 3, 13); int logged = 0;
+		for (int i = 0; i < 300; i++) if (dl.ShouldLog(d1, "at/after FlatBy(15:55:00)")) logged++;
+		Check(logged == 1 && dl.Suppressed == 299, "same rule, same day: one line");
+		Check(dl.ShouldLog(d1, "DailyLossStopR(2) reached: -2.10 R") && !dl.ShouldLog(d1, "DailyLossStopR(2) reached: -2.40 R"), "rule key ignores changing numbers");
+		Check(dl.ShouldLog(d1.AddDays(1), "at/after FlatBy(15:55:00)"), "new trading day: logged again");
+		Check(DailyOnceLog.RuleOf("at/after FlatBy(15:55:00)") == "at/after FlatBy" && DailyOnceLog.RuleOf("plain") == "plain", "RuleOf");
 
 		// Reset clears everything
 		s.Reset(); Check(!s.HistoryComplete && !s.Last.valid, "Reset");

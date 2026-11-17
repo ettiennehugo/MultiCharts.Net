@@ -785,23 +785,8 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		// Recalc spec §4.5: the request window. API dump (P-RC5/P-RC8): InstrumentDataRequest.Range is a DataRequest struct field
-		// (CreateFromTo sets RequestType FromTo); From/To are properties. Both carry the same window; TimeZone stays as copied from
-		// Bars.Request (the zone the chart bars and the session clock use).
-		private static void setRequestWindow(ref InstrumentDataRequest req, DateTime from, DateTime to)
-		{
-			req.Range = DataRequest.CreateFromTo(from, to);
-			req.From = from;
-			req.To = to;
-		}
-
-		// Calc thread only (journal text of a request window: the typed Range fields and the From/To properties).
-		private static string requestWindowText(InstrumentDataRequest req)
-		{
-			DataRequest rg = req.Range;
-			return $"range(type({rg.RequestType}) from({rg.From:yyyy-MM-dd HH:mm}) to({rg.To:yyyy-MM-dd HH:mm}) toAlwaysIsNow({rg.ToAlwaysIsNow})) " +
-				$"from({req.From:yyyy-MM-dd HH:mm}) to({req.To:yyyy-MM-dd HH:mm}) zone({req.TimeZone})";
-		}
+		// Recalc spec §4.5: the request window (setRequestWindow) and its journal text (requestWindowText) live in _CustomSignal,
+		// shared with M-TICK.
 
 		// Recalc spec §4.2: replay the cache when it holds this request's completed history (no new request; a tail request on a
 		// live chart), otherwise clear it and request the full window. Calc thread only.
@@ -849,8 +834,7 @@ namespace PowerLanguage.Strategy
 			if (live) startMcLevelLoader(tailFrom, DateTime.Now.AddDays(1), "tail");
 		}
 
-		// Calc thread: a live chart (real-time calc, or the last bar within a day of now) subscribes RT.
-		private bool chartIsLive(DateTime lastBar) { return Environment.IsRealTimeCalc || lastBar >= DateTime.Now.AddDays(-1); }
+		// chartIsLive(lastBar): _CustomSignal (shared with M-TICK).
 
 		// Spec S1 ingestion: one more request, a copy of Bars.Request with ChartType McBidAskChartType (FootPrint). PROBES P-BA2..P-BA4 open;
 		// Data2 / RTData2 / BarPriceLevels / PriceLevel are read through the typed API.
