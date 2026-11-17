@@ -50,3 +50,9 @@
 ## Batch 1 validation (@ES 1m, 2023-01-01 to 2024-12-31, main 770d14e)
 
 29 rows (`_Test1`–`_Test29`; A2-25 and A2-26 share `_Test5`). Produced by `Parse-SlotResults.ps1` v2 on the MiniPC (`C:\Share\MultiCharts\SandboxBatch01`) from `%LOCALAPPDATA%\MCSignalLogs`. Parser v1 fixes: run symbol was taken from the first trace line (blank before INSTR), so every BPV lookup failed and every trading slot was failed on the MC-profit cross-check; that check now fails only on a real mismatch. The trace scan is now compiled C#.
+
+## PR #144 reruns on 51bd1ae (2026-11-16)
+
+Eight slots rerun on #144 head 51bd1ae (ATR carry-over over the quarterly roll, MaxBarsBack-49 ring lookback, Own-source re-apply, daily re-arm): `_Test2` A2-15, `_Test4` DV-02, `_Test5` A2-25+A2-26, `_Test19` A2-13, `_Test20` A2-14, `_Test24` A2-30, `_Test26` A2-32, `_Test28` A2-35. Parsed with `Parse-SlotResults.v3.ps1 -Since '2026-11-16 18:55' -Commit 51bd1ae`; evidence checks against Coder's expected lines are in each row's notes. The other 21 rows keep their earlier commit (de2378a or 770d14e); ten of them (`_Test1`, 3, 6, 7, 9, 10, 11, 12, 17, 22) are marked STALE because their study or host class changed in fdc5cf8 and need a rerun.
+
+Status totals after this update: **20 pass, 4 fail (`_Test6`, `_Test7` pending PR #142; `_Test24` A2-30 holiday-dated balance lines; `_Test28` A2-35 Good Friday position held over the weekend), 4 by-design-0, 1 blocked**.
