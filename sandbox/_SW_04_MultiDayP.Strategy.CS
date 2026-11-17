@@ -169,7 +169,7 @@ namespace PowerLanguage.Strategy
 				if (day != m_entry) { /* counted on the day change below */ }
 				m_ls.Send(m_stop);
 				if (Bars.Close[0] < m_poc || m_held >= 3) m_lx.Send();
-				if (day != m_day) { m_day = day; m_held++; }
+				if (day != m_day) { m_day = day; if (!IsNoRthDay(day)) m_held++; }   // Analyst MC17: count RTH trading days held, not holiday Globex dates
 				return;
 			}
 			if (day != m_day) { m_day = day; m_armed = false; m_entry = DateTime.MinValue; m_held = 0; }

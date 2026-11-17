@@ -224,7 +224,7 @@ namespace PowerLanguage.Strategy
 			{
 				m_done = true;
 				bool nativeInv = IsExist(2) && BarsOfData(2).Status == EBarState.Close && (pos > 0 ? BarsOfData(2).Close[0] < m_vah - d : BarsOfData(2).Close[0] > m_val + d);
-				if (mustFlatten() || nativeInv) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }  // hard invalidation is a closed 5-minute bar
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || nativeInv) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }  // hard invalidation is a closed 5-minute bar
 				double e = StrategyInfo.AvgEntryPrice;
 				if (pos > 0 ? Bars.High[0] >= e + m_entryRisk : Bars.Low[0] <= e - m_entryRisk) m_stop = pos > 0 ? Math.Max(m_stop, e) : Math.Min(m_stop, e);   // BE at +1R
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
@@ -311,7 +311,7 @@ namespace PowerLanguage.Strategy
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
 			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

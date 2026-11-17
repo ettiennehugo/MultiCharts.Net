@@ -201,7 +201,7 @@ namespace PowerLanguage.Strategy
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
 			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
 				portfolioStop(m_stop);                        // M-PORT: no-op outside Portfolio Trader
 			

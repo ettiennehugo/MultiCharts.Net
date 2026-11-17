@@ -205,7 +205,7 @@ namespace PowerLanguage.Strategy
 			if (Branch == EBranch.Fail) side = -side;
 			bool sendExits()
 			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (Branch == EBranch.Hold && pos != 0)
 				{
 					double r = Math.Abs(StrategyInfo.AvgEntryPrice - m_stop);

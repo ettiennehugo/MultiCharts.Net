@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			bool bucketEnd = et.Minute % 30 == 0;
 			bool sendExits()
 			{
-				if (mustFlatten() || (bucketEnd && !double.IsNaN(vwap) && Bars.Close[0] < vwap)) { m_lx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (bucketEnd && !double.IsNaN(vwap) && Bars.Close[0] < vwap)) { m_lx.Send(); return true; }
 				m_lxStp.Send(m_stop);
 				return false;
 			}

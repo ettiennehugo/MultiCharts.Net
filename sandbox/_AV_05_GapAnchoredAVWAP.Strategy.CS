@@ -145,7 +145,8 @@ namespace PowerLanguage.Strategy
 	public class _AV_05_GapAnchoredAVWAP : _VolumeProfileFuturesBase
 	{
 		
-		private IOrderMarket m_le, m_se; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le, m_se; private bool m_gapChecked;
+		private DateTime m_day = DateTime.MinValue;
 		private double m_pv, m_vv, m_fill; private int m_dir, m_held; private bool m_done, m_alive;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
@@ -161,21 +162,41 @@ namespace PowerLanguage.Strategy
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; base.StartCalc(); requireRing(1, 2000, "AV-05 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "AV-05 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
 			if (sandboxBook()) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day)
 			{
-				m_day = day; m_done = false; m_filledSetup = false; m_restOn = false;
-				if (m_alive) m_held++;
+				m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_gapChecked = false;
+				if (m_alive && !IsNoRthDay(day)) m_held++;   // Analyst MC17: count RTH trading days, not holiday Globex dates
+			}
+			// Analyst MC17: the gap is read on the first RTH bar. At the 18:00 rollover Session.rthOpen is 0, so Gap was always 0 and
+			// the study never armed (the A2-13 defect class).
+			if (!m_gapChecked && IsRth() && Session != null && Session.rthOpen > 0)
+			{
+				m_gapChecked = true;
 				SessionStats s = Session;
 				double atr = DailyContext.Atr20d;
 				if (!m_alive && !rollOn(1) && atr > 0 && s.priorRthClose > 0 && Math.Abs(s.Gap) >= 0.75 * atr)
 				{
 					m_dir = s.Gap > 0 ? 1 : -1; m_fill = m_dir > 0 ? s.priorRthHigh : s.priorRthLow;
 					m_pv = m_vv = 0; m_held = 0; m_alive = true;
+					if (journalOn()) trace(ETraceLevel.Journal, $"AV-05 {day:yyyy-MM-dd} gap {s.Gap:F2} (0.75 x atr20d {0.75 * atr:F2}) armed {(m_dir > 0 ? "long" : "short")}");
 				}
 			}
 			if (!m_alive || !IsRth()) return;
@@ -275,7 +296,7 @@ namespace PowerLanguage.Strategy
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
 			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

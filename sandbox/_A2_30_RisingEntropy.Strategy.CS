@@ -186,12 +186,12 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (day != m_day) { remember(); m_day = day; m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
+			if (day != m_day) { if (IsNoRthDay(day)) m_hi = m_lo = double.NaN; else remember(); m_day = day;   /* Analyst MC17: a no-RTH Globex date (holiday halt, abbreviated Good Friday) is not a trading day; the next RTH date logs the balance */ m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
 			int pos = StrategyInfo.MarketPosition;
 			bool inside = !double.IsNaN(m_hi) && Bars.Close[0] < m_hi && Bars.Close[0] > m_lo;
 			bool sendExits()
 			{
-				if (mustFlatten() || inside) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || inside) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
 				return false;
 			}

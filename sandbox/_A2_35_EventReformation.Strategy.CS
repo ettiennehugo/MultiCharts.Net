@@ -183,17 +183,30 @@ namespace PowerLanguage.Strategy
 			base.StartCalc();
 		}
 
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-35 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
-			exitBar();
+			exitBar(); sandboxEarlyFlat();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			DateTime et = ToEastern(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = m_built = m_out = false; m_outCount = m_back = 0; m_event = findEvent(day); }
 			int posNow = StrategyInfo.MarketPosition;
-			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
+			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
 			{   // Analyst MC17: the entry is 2 contracts and the GX plan is 1, so close every remaining contract at flat-by or the next day
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
 				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
@@ -210,6 +223,7 @@ namespace PowerLanguage.Strategy
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-35 {day:yyyy-MM-dd} event {m_event:HH:mm} profile VAL {prof.val:F2} POC {prof.poc:F2} VAH {prof.vah:F2}");
 				m_vah = prof.vah; m_val = prof.val; m_poc = prof.poc; m_built = true;
 			}
+			if (_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return;   // Analyst MC17: no entry after that day's flat-by cutoff (Good Friday 2023 ended 09:15 ET)
 			if (Arm == EArm.Acceptance) accept(et); else fail(et);
 		}
 
@@ -334,7 +348,7 @@ namespace PowerLanguage.Strategy
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
 			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
