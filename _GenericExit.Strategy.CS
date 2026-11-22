@@ -153,6 +153,8 @@ namespace PowerLanguage.Function
 		public string RiskFlag = "";
 		/// <summary>Set when the flat-by that fired was moved earlier by that day's early close or holiday halt. EXIT CLOSE appends it.</summary>
 		public string FlatNote;
+		/// <summary>Set when MaxHoldDays closed the trade (TIME): the session count and the cutoff date. EXIT CLOSE appends it.</summary>
+		public string HoldNote;
 		public string T1PlanSource = "";
 		public double PlannedStop;
 		public double PlannedRPrice;
@@ -737,7 +739,7 @@ namespace PowerLanguage.Function
 			p.DisasterCalling = false; p.BeDone = false; p.T1Filled = false; p.TrailOn = false; p.T1Skipped = false; p.FinalSkipped = false;
 			p.GapThroughStop = longSide ? fill <= initialStop : fill >= initialStop;
 			p.TrailThroughNext = false; p.AddCount = 0; p.RealizedDollars = 0; p.SegmentRealized = 0; p.ClosedSegmentR = 0;
-			p.MaeTradeDollars = 0; p.MaeOpenDollars = 0; p.RiskFlag = ""; p.FlatNote = null;
+			p.MaeTradeDollars = 0; p.MaeOpenDollars = 0; p.RiskFlag = ""; p.FlatNote = null; p.HoldNote = null;
 			p.Lots.Clear(); p.Lots.Add(new ExitLot { Fill = fill, Qty = qty });
 			p.SegmentQty = qty;
 			p.PlannedRPrice = Math.Abs(plannedEntry - plannedStop);
@@ -1077,6 +1079,54 @@ namespace PowerLanguage.Function
 		/// it from the instrument profile (InstrumentFlatCalendar). Off-MC tests set it directly.</summary>
 		public Func<DateTime, FlatDay> FlatCalendar;
 
+		/// <summary>Exchange time to its trading date. Null is the calendar date. The host sets the CME Globex rule (RolloverTradingDate at
+		/// 17:00 CT) for CME calendars, so an evening bar belongs to the next trading date.</summary>
+		public Func<DateTime, DateTime> TradingDate;
+
+		/// <summary>The trading date of exchange time t when a new session opens at rolloverHhmm (exchange clock): at or after it the
+		/// time belongs to the next date. Saturday and Sunday roll to Monday (the Sunday-evening Globex open). rolloverHhmm &lt; 0 = none.</summary>
+		public static DateTime RolloverTradingDate(DateTime t, int rolloverHhmm)
+		{
+			DateTime d = t.Date;
+			if (rolloverHhmm >= 0 && Hhmm(t) >= rolloverHhmm) d = d.AddDays(1);
+			while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) d = d.AddDays(1);
+			return d;
+		}
+
+		public struct HoldCutoff
+		{
+			public DateTime At;
+			/// <summary>The entry session's trading date and the Nth trading date after it, whose cutoff is At.</summary>
+			public DateTime EntrySession, Session;
+			public string EarlyReason;
+		}
+
+		/// <summary>Owner 2026-11-22 11:53 CT, about MaxHoldDays: "I mean hold till next session close". MaxHoldDays N counts trading
+		/// sessions: the exit is due at the flat-by cutoff (CutoffFor: session end minus 5, early-close and halt aware) of the Nth open
+		/// trading date after the entry session. The entry session is tradingDate(entry) (an evening Globex entry belongs to the next
+		/// date, so N = 1 is the date after that). Weekends and calendar-closed dates are not sessions.</summary>
+		public static HoldCutoff HoldDeadline(DateTime entry, int sessions, int flatByHHMM, Func<DateTime, FlatDay> calendar, Func<DateTime, DateTime> tradingDate)
+		{
+			var r = new HoldCutoff { At = DateTime.MaxValue };
+			int hour, minute;
+			if (entry == DateTime.MinValue || sessions < 1 || !TryClock(flatByHHMM, out hour, out minute)) return r;
+			DateTime start = tradingDate != null ? tradingDate(entry).Date : entry.Date;
+			r.EntrySession = start;
+			int count = 0;
+			for (int i = 1; i <= sessions * 3 + 15; i++)
+			{
+				DateTime d = start.AddDays(i);
+				if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+				FlatDay info = calendar != null ? calendar(d) : FlatDay.Regular;
+				if (info.Closed) continue;
+				if (++count < sessions) continue;
+				FlatCutoff c = CutoffFor(d, flatByHHMM, info);
+				r.At = c.At; r.Session = d; r.EarlyReason = c.EarlyReason;
+				return r;
+			}
+			return r;
+		}
+
 		public bool TimeHit(ExitPosition p, DateTime barEt)
 		{
 			if (Config.TimeStopBars > 0 && p.ClosedBars >= Config.TimeStopBars) return true;
@@ -1087,7 +1137,24 @@ namespace PowerLanguage.Function
 			}
 			if (Config.MaxHoldDays > 0 && p.FillTime != DateTime.MinValue)
 			{
-				if ((barEt.Date - p.FillTime.Date).TotalDays >= Config.MaxHoldDays) return true;
+				int n = Config.MaxHoldDays;
+				string unit = n == 1 ? " session" : " sessions";
+				if (MappedTf == "D1")
+				{
+					// Daily or longer: N bars of the chart, the fill bar counted (the same count as TimeStopBars).
+					if (p.ClosedBars < n) return false;
+					p.HoldNote = n.ToString(CultureInfo.InvariantCulture) + (n == 1 ? " bar" : " bars");
+					return true;
+				}
+				int hour, minute;
+				if (!TryClock(Config.FlatByHHMM, out hour, out minute))
+					return (barEt.Date - p.FillTime.Date).TotalDays >= n;   // no resolved cutoff yet: the old calendar-day count
+				HoldCutoff h = HoldDeadline(p.FillTime, n, Config.FlatByHHMM, FlatCalendar, TradingDate);
+				if (barEt < h.At) return false;
+				p.HoldNote = n.ToString(CultureInfo.InvariantCulture) + unit + " after " + h.EntrySession.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+					+ ", cutoff " + h.At.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+					+ (h.EarlyReason != null ? " (" + h.EarlyReason + ")" : "");
+				return true;
 			}
 			return false;
 		}
@@ -1417,7 +1484,8 @@ namespace PowerLanguage.Function
 				+ " plannedRiskPct=" + pp + " plannedRiskPctPeak=" + pk + " actualRiskPct=" + ap + " actualToPlanned=" + ra
 				+ " realizedPnlPct=" + rp + " mae=$" + Money(p.MaeTradeDollars) + " maeScope=" + maeScope
 				+ " equity=$" + Money(p.EquityAtEntry) + (flag.Length > 0 ? " riskFlag=" + flag : "")
-				+ (reason == "FLATBY" && !string.IsNullOrEmpty(p.FlatNote) ? " - flat-by early close: " + p.FlatNote : "");
+				+ (reason == "FLATBY" && !string.IsNullOrEmpty(p.FlatNote) ? " - flat-by early close: " + p.FlatNote : "")
+				+ (reason == "TIME" && !string.IsNullOrEmpty(p.HoldNote) ? " - max hold: " + p.HoldNote : "");
 		}
 
 		/// <summary>A scale-out that leaves a runner. EXIT CLOSE is only for the bar the position goes flat.</summary>

@@ -42,6 +42,7 @@ static class Program
 		FlatByExchangeClock();
 		FlatByFromRegularSession();
 		FlatByEarlyClose();
+		MaxHoldSessions();
 		EmbeddedFillAnchorsStop();
 		Control();
 		Idx();
@@ -470,7 +471,9 @@ static class Program
 		var ph2 = new ExitPosition();
 		hold.Open(ph2, false, 5000, 5000, 5100, 1, 0.25, 50, 100000, "SE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
 		Check(hold.Manage(ph2, Quiet(false, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == null, "MaxHoldDays 2 holds on day 1");
-		Check(hold.Manage(ph2, Quiet(false, new DateTime(2024, 6, 5, 10, 0, 0))).Reason == "TIME", "MaxHoldDays 2 exits on day 2");
+		// Owner 2026-11-22 11:53 CT ("I mean hold till next session close"): N sessions end at the Nth next session's cutoff.
+		Check(hold.Manage(ph2, Quiet(false, new DateTime(2024, 6, 5, 10, 0, 0))).Reason == null, "MaxHoldDays 2 holds into session 2");
+		Check(hold.Manage(ph2, Quiet(false, new DateTime(2024, 6, 5, 15, 55, 0))).Reason == "TIME", "MaxHoldDays 2 exits at session 2's cutoff");
 
 		var news = Eng(c => c.NewsExitMinutes = 10);
 		Check(!ExitSession.NewsWindow(0, 10, 1) && !ExitSession.NewsWindow(11, 10, 1) && ExitSession.NewsWindow(10, 10, 1) && !ExitSession.NewsWindow(double.NaN, 10, 1), "news window 0 < m < N+B");
@@ -753,6 +756,114 @@ static class Program
 		var pd = new ExitPosition();
 		ed.Open(pd, true, 5000, 5000, 4900, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 15, 0, 0), 0);
 		Check(ed.Manage(pd, Quiet(true, new DateTime(2023, 4, 7, 15, 0, 0))).Reason == null, "daily bars ignore the early close");
+	}
+
+	// Owner 2026-11-22 11:53 CT, about MaxHoldDays: "I mean hold till next session close". The Globex trading date opens at 17:00 CT.
+	static DateTime GlobexCt(DateTime t) { return ExitSession.RolloverTradingDate(t, 1700); }
+
+	static ExitSession HoldEng(int n, int flatBy, Func<DateTime, ExitSession.FlatDay> cal, Func<DateTime, DateTime> td, ExitMarket? mkt = null)
+	{
+		var e = Eng(c => { c.SessionExit = ESessionExit.HoldOvernight; c.MaxHoldDays = n; c.FlatByHHMM = flatBy; }, mkt);
+		e.FlatCalendar = cal; e.TradingDate = td;
+		return e;
+	}
+
+	static void MaxHoldSessions()
+	{
+		Func<DateTime, ExitSession.FlatDay> cme = CmeEquityCt, nyse = NyseEt;
+		Func<DateTime, DateTime> gx = GlobexCt;
+		// trading dates
+		Check(GlobexCt(new DateTime(2024, 6, 3, 10, 0, 0)) == new DateTime(2024, 6, 3), "an RTH bar is its own trading date");
+		Check(GlobexCt(new DateTime(2024, 6, 3, 16, 0, 0)) == new DateTime(2024, 6, 3), "the 16:00 CT close is still today's date");
+		Check(GlobexCt(new DateTime(2024, 6, 3, 17, 1, 0)) == new DateTime(2024, 6, 4), "a 17:01 CT evening bar is the next trading date");
+		Check(GlobexCt(new DateTime(2024, 6, 2, 17, 1, 0)) == new DateTime(2024, 6, 3) && GlobexCt(new DateTime(2024, 6, 7, 17, 30, 0)) == new DateTime(2024, 6, 10), "Sunday evening is Monday; a Friday evening time rolls to Monday");
+		Check(ExitSession.RolloverTradingDate(new DateTime(2024, 6, 3, 17, 30, 0), -1) == new DateTime(2024, 6, 3), "no rollover is the calendar date");
+		// deadline arithmetic
+		var h = ExitSession.HoldDeadline(new DateTime(2024, 6, 3, 10, 0, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 6, 4, 14, 55, 0) && h.EntrySession == new DateTime(2024, 6, 3), "ES N=1 Monday 10:00 closes Tuesday 14:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 6, 3, 17, 30, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 6, 5, 14, 55, 0) && h.EntrySession == new DateTime(2024, 6, 4), "ES N=1 Monday-evening entry (Tuesday's session) closes Wednesday 14:55 CT, not Tuesday");
+		Check(ExitSession.HoldDeadline(new DateTime(2024, 6, 3, 10, 0, 0), 1, 1455, cme, null).At == new DateTime(2024, 6, 4, 14, 55, 0), "no trading-date rule uses the calendar date");
+		// weekend
+		h = ExitSession.HoldDeadline(new DateTime(2024, 6, 7, 10, 0, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 6, 10, 14, 55, 0), "ES N=1 Friday entry closes Monday 14:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 6, 7, 10, 0, 0), 3, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 6, 12, 14, 55, 0), "ES N=3 Friday entry closes Wednesday 14:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 6, 9, 17, 5, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 6, 11, 14, 55, 0) && h.EntrySession == new DateTime(2024, 6, 10), "ES N=1 Sunday-evening entry (Monday's session) closes Tuesday 14:55 CT");
+		// Good Friday 2023 (abbreviated, 08:15 CT) and Good Friday 2024 (closed)
+		h = ExitSession.HoldDeadline(new DateTime(2023, 4, 6, 10, 0, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2023, 4, 7, 8, 10, 0) && h.EarlyReason.StartsWith("Good Friday"), "ES N=1 Thursday entry closes Good Friday 2023 08:10 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2023, 4, 6, 10, 0, 0), 3, 1455, cme, gx);
+		Check(h.At == new DateTime(2023, 4, 11, 14, 55, 0), "ES N=3 Thursday entry counts Good Friday 2023 and closes Tuesday 14:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 3, 28, 10, 0, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 4, 1, 14, 55, 0), "ES N=1 skips the closed Good Friday 2024: Monday 14:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 3, 27, 10, 0, 0), 3, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 4, 2, 14, 55, 0), "ES N=3 Wednesday entry: Thu, Mon, Tue (Good Friday 2024 skipped)");
+		// MLK 2024 (12:00 CT halt)
+		h = ExitSession.HoldDeadline(new DateTime(2024, 1, 12, 10, 0, 0), 1, 1455, cme, gx);
+		Check(h.At == new DateTime(2024, 1, 15, 11, 55, 0) && h.EarlyReason.StartsWith("Martin Luther King"), "ES N=1 Friday entry closes MLK 2024 11:55 CT");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 1, 11, 17, 30, 0), 3, 1455, cme, gx);
+		Check(h.EntrySession == new DateTime(2024, 1, 12) && h.At == new DateTime(2024, 1, 17, 14, 55, 0), "ES N=3 Thursday-evening entry (Friday's session): MLK, Tue, Wed 14:55 CT");
+		// SPY (no evening session, Eastern)
+		h = ExitSession.HoldDeadline(new DateTime(2024, 11, 27, 10, 0, 0), 1, 1555, nyse, null);
+		Check(h.At == new DateTime(2024, 11, 29, 12, 55, 0) && h.EarlyReason.StartsWith("Day after Thanksgiving"), "SPY N=1 Wednesday entry skips Thanksgiving and closes the half day 12:55 ET");
+		h = ExitSession.HoldDeadline(new DateTime(2024, 11, 27, 10, 0, 0), 3, 1555, nyse, null);
+		Check(h.At == new DateTime(2024, 12, 3, 15, 55, 0), "SPY N=3 Wednesday entry: Fri, Mon, Tue 15:55 ET");
+
+		foreach (bool lng in new[] { true, false })
+		{
+			string side = lng ? "L" : "S";
+			// ES N=1 across a weekend, through Manage: the overnight and Monday's midnight bars hold.
+			var e = HoldEng(1, 1455, cme, gx);
+			var p = new ExitPosition();
+			e.Open(p, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 7, 10, 0, 0), 0);
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 7, 14, 55, 0))).Reason == null, side + " N=1 HoldOvernight does not flatten the entry day");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 9, 17, 1, 0))).Reason == null, side + " N=1 Sunday evening holds");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 10, 0, 1, 0))).Reason == null, side + " N=1 just after midnight holds (the old rule closed here)");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2024, 6, 10, 14, 54, 0))).Reason == null, side + " N=1 Monday 14:54 CT holds");
+			ExitDecision d = e.Manage(p, Quiet(lng, new DateTime(2024, 6, 10, 14, 55, 0)));
+			Check(d.Reason == "TIME" && p.HoldNote != null, side + " N=1 Monday 14:55 CT is TIME");
+			string line = e.CloseLine(p, "TIME", 5000, 50, 0, "bar");
+			Check(line.EndsWith(" - max hold: 1 session after 2024-06-07, cutoff 2024-06-10 14:55"), side + " EXIT CLOSE names the hold: " + line.Substring(Math.Max(0, line.Length - 70)));
+			// ES N=1 evening entry
+			var ev = HoldEng(1, 1455, cme, gx);
+			var pv = new ExitPosition();
+			ev.Open(pv, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 17, 30, 0), 0);
+			Check(ev.Manage(pv, Quiet(lng, new DateTime(2024, 6, 4, 14, 55, 0))).Reason == null, side + " N=1 evening entry holds through its own session's cutoff");
+			Check(ev.Manage(pv, Quiet(lng, new DateTime(2024, 6, 5, 14, 55, 0))).Reason == "TIME", side + " N=1 evening entry closes the following date's cutoff");
+			// ES N=3 across Good Friday 2023
+			var g3 = HoldEng(3, 1455, cme, gx);
+			var pg = new ExitPosition();
+			g3.Open(pg, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 10, 0, 0), 0);
+			Check(g3.Manage(pg, Quiet(lng, new DateTime(2023, 4, 7, 8, 10, 0))).Reason == null, side + " N=3 holds through Good Friday's cutoff");
+			Check(g3.Manage(pg, Quiet(lng, new DateTime(2023, 4, 11, 14, 54, 0))).Reason == null, side + " N=3 Tuesday 14:54 holds");
+			Check(g3.Manage(pg, Quiet(lng, new DateTime(2023, 4, 11, 14, 55, 0))).Reason == "TIME", side + " N=3 Tuesday 14:55 CT is TIME");
+			// ES N=1 into Good Friday 2023 / MLK 2024: the early cutoff, and the first bar at or after it
+			var gf = HoldEng(1, 1455, cme, gx);
+			var pf = new ExitPosition();
+			gf.Open(pf, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 10, 0, 0), 0);
+			Check(gf.Manage(pf, Quiet(lng, new DateTime(2023, 4, 7, 8, 0, 0))).Reason == null, side + " N=1 Good Friday 08:00 holds");
+			Check(gf.Manage(pf, Quiet(lng, new DateTime(2023, 4, 9, 17, 30, 0))).Reason == "TIME" && pf.HoldNote.Contains("Good Friday"), side + " N=1 Good Friday: the next bar after 08:10 CT exits");
+			var ml = HoldEng(1, 1455, cme, gx);
+			var pm = new ExitPosition();
+			ml.Open(pm, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 1, 12, 10, 0, 0), 0);
+			Check(ml.Manage(pm, Quiet(lng, new DateTime(2024, 1, 15, 11, 54, 0))).Reason == null && ml.Manage(pm, Quiet(lng, new DateTime(2024, 1, 15, 11, 55, 0))).Reason == "TIME", side + " N=1 MLK 2024 closes 11:55 CT");
+			// SPY N=1
+			var sp = HoldEng(1, 1555, nyse, null);
+			var ps = new ExitPosition();
+			sp.Open(ps, lng, 5000, 5000, lng ? 4900 : 5100, 10, 0.01, 1, 100000, "LE", new DateTime(2024, 6, 3, 15, 0, 0), 0);
+			Check(sp.Manage(ps, Quiet(lng, new DateTime(2024, 6, 4, 9, 31, 0))).Reason == null, side + " SPY N=1 next open holds (the old rule closed here)");
+			Check(sp.Manage(ps, Quiet(lng, new DateTime(2024, 6, 4, 15, 55, 0))).Reason == "TIME", side + " SPY N=1 closes the next session at 15:55 ET");
+		}
+		// Daily bars: N bars of the chart, the fill bar counted.
+		var daily = Mkt();
+		daily.BarKind = EGxBarKind.Day; daily.DailyOrLonger = true; daily.ResolutionLabel = "1 day"; daily.BarMinutes = 1440;
+		var ed = HoldEng(3, 1455, cme, gx, daily);
+		var pd = new ExitPosition();
+		ed.Open(pd, true, 5000, 5000, 4900, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 6, 0, 0, 0), 0);
+		Check(ed.Manage(pd, Quiet(true, new DateTime(2024, 6, 6, 0, 0, 0))).Reason == null && ed.Manage(pd, Quiet(true, new DateTime(2024, 6, 7, 0, 0, 0))).Reason == null, "daily N=3 holds bars 1 and 2");
+		Check(ed.Manage(pd, Quiet(true, new DateTime(2024, 6, 10, 0, 0, 0))).Reason == "TIME" && pd.HoldNote == "3 bars", "daily N=3 exits on bar 3 across the weekend");
 	}
 
 	static void EmbeddedFillAnchorsStop()
@@ -1351,6 +1462,7 @@ static class Program
 		Check(inputs.Length == 48, "48 inputs");
 		int apply = src.IndexOf("void gxApplyFlatBy()", StringComparison.Ordinal);
 		Check(apply >= 0 && src.IndexOf("gxAttachFlatCalendar(m_gx);", apply, StringComparison.Ordinal) > apply, "embedded GX attaches the flat-by calendar after resolving");
+		Check(src.IndexOf("if (s.TradingDate == null) s.TradingDate = gxTradingDate;", StringComparison.Ordinal) >= 0 && src.IndexOf("ExitSession.RolloverTradingDate(exchangeTime, roll)", StringComparison.Ordinal) >= 0, "the host attaches the Globex trading-date rule for MaxHoldDays sessions");
 		Check(gx.IndexOf("gxResolveFlatBy(m_wrap.Config, FlatByHHMM); gxAttachFlatCalendar(m_wrap);", StringComparison.Ordinal) >= 0, "the wrapper attaches the flat-by calendar after resolving");
 		Check(src.IndexOf("InstrumentFlatCalendar.Of(p.calendar, day)", StringComparison.Ordinal) >= 0 && src.IndexOf("ExitSession.ExchangeHhmm(day, et, findTz(\"Eastern Standard Time\"), p.exchangeZone)", StringComparison.Ordinal) >= 0, "the host reads the profile calendar and moves its ET end into the exchange zone");
 		Check(gx.IndexOf("PortfolioPublish { get { return false; } }", StringComparison.Ordinal) >= 0, "wrapper does not publish pm.ver");

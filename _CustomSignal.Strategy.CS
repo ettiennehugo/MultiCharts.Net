@@ -4800,6 +4800,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (s == null || !m_gxFlatResolved) return;
 			if (s.FlatCalendar == null) s.FlatCalendar = gxFlatDay;
+			if (s.TradingDate == null) s.TradingDate = gxTradingDate;
 			if (m_gxFlatCalLogged) return;
 			m_gxFlatCalLogged = true;
 			string cal = "?";
@@ -4810,6 +4811,19 @@ namespace PowerLanguage.Strategy
 			}
 			catch (Exception) { }
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "GX FLATBY calendar(" + cal + ") - early closes and holiday halts move that day's cutoff to its session end minus 5");
+		}
+
+		/// <summary>ExitSession.TradingDate (owner 2026-11-22 11:53 CT, MaxHoldDays counts sessions). CME calendars open the next Globex
+		/// trading date at 17:00 CT (18:00 ET in the exchange zone), so an evening bar belongs to the next date. Other calendars
+		/// (NYSE stocks, no evening session) use the exchange calendar date.</summary>
+		DateTime gxTradingDate(DateTime exchangeTime)
+		{
+			InstrumentProfile p = null;
+			try { p = InstrumentProfileOf(1); } catch (Exception) { p = null; }
+			int roll = -1;
+			if (p != null && (p.calendar == ECalendar.CmeEquityIndex || InstrumentCalendars.IsProduct(p.calendar)))
+				roll = p.exchangeZone != null ? ExitSession.ExchangeHhmm(exchangeTime.Date, 1800, findTz("Eastern Standard Time"), p.exchangeZone) : 1800;
+			return ExitSession.RolloverTradingDate(exchangeTime, roll);
 		}
 
 		/// <summary>One exchange-zone trading date for ExitSession.FlatCalendar: the InstrumentFlatCalendar day, its ET end moved into the
