@@ -255,6 +255,20 @@ namespace PowerLanguage.Strategy
 			return Rest(position, ref prev, ref filled, ref fillAnchor, anchor, ref restOn, windowOpen);
 		}
 
+		/// <summary>Owner 2026-11-22 16:39 CT (A2-28): "use T1 halfway between entry and mu_major when the void is behind entry".
+		/// T1 distance in points from the entry: the midpoint of entry and target rounded to the tick, kept at least one tick beyond the
+		/// entry and one tick short of the target (the correct side). NaN when the target is less than two ticks away.</summary>
+		public static double MidT1Points(bool longSide, double entry, double target, double tick)
+		{
+			if (!(tick > 0) || double.IsNaN(entry) || double.IsNaN(target)) return double.NaN;
+			long ticks = (long)Math.Round((longSide ? target - entry : entry - target) / tick);
+			if (ticks < 2) return double.NaN;
+			long half = (long)Math.Round(ticks / 2.0, MidpointRounding.AwayFromZero);
+			if (half < 1) half = 1;
+			if (half > ticks - 1) half = ticks - 1;
+			return half * tick;
+		}
+
 		public static bool Allows(ESandboxSide side, bool buy)
 		{
 			if (side == ESandboxSide.Both) return true;

@@ -355,6 +355,8 @@ static class Program
 		Check(code("MT_07").Contains("dvpRailPrice(2, ELevelKind.DvpVah, 0)") && Regex.IsMatch(code("MT_07"), @"DvpConfig\.streams\s*=\s*new\[\]\s*\{\s*1\s*,\s*2\s*\}") && code("PS_25").Contains("htfStep();"), "MT_07 tests the 60m close against the 60m DVP stream's VAH after the engines step");
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
 		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
+		Check(code("A2_28").Contains("_SandboxRules.MidT1Points(longSide, entry, target, tickSize())") && code("A2_28").Contains("t1Src = \"mid\"") && code("A2_28").Contains("\" source \" + t1Src")
+			&& raw["A2_28"].Contains("A2-28: use T1 halfway between entry and mu_major when the void is behind entry"), "A2_28 T1 falls back to the entry / mu_major midpoint (owner 2026-11-22 16:39 CT), journals its source, header quotes the decision");
 		Check(code("A2_04").Contains("tod.Minutes % 5 == 0 && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen"), "A2_04 sVWAP trail tests 5-minute closes");
 		// Analyst #152 recheck: GX re-resolves a host's per-trade modes while flat; A2-28 journals its plan once per trade; the DVP
 		// lattice pivot/BOS facts are Verbose; DVP RUN fits counts the windows fitted; LE-01 journals its daily state.
@@ -742,6 +744,17 @@ static class Program
 			Check(Why(new DateTime(2024, 1, 15, 12, 55, 0)).EndsWith(" session ends 13:00 ET") && !Why(new DateTime(2024, 1, 15, 12, 55, 0)).StartsWith("regular"), "MLK 2024 flat-by reason names the halt");
 		}
 		WiredStudyFlatProbes(r);
+		// Owner 2026-11-22 16:39 CT (A2-28): T1 halfway between entry and mu_major when the void is behind the entry.
+		MethodInfo mid = r.GetMethod("MidT1Points");
+		Check(mid != null, "_SandboxRules.MidT1Points exists");
+		if (mid != null)
+		{
+			Func<bool, double, double, double> M = (lg, en, tg) => (double)mid.Invoke(null, new object[] { lg, en, tg, 0.25 });
+			Check(Math.Abs(M(true, 5000, 5010) - 5.0) < 1e-9 && Math.Abs(M(false, 5000, 4990) - 5.0) < 1e-9, "A2-28 mid T1: long and short midpoints, on the target side");
+			Check(Math.Abs(M(true, 5000, 5010.25) - 5.25) < 1e-9 && Math.Abs(M(false, 5000, 4989.75) - 5.25) < 1e-9, "A2-28 mid T1: an odd tick count rounds the midpoint to the tick");
+			Check(Math.Abs(M(true, 5000, 5000.5) - 0.25) < 1e-9, "A2-28 mid T1: a 2-tick target gives T1 one tick beyond the entry, one tick short of mu_major");
+			Check(double.IsNaN(M(true, 5000, 5000.25)) && double.IsNaN(M(true, 5000, 4995)) && double.IsNaN(M(false, 5000, 5005)), "A2-28 mid T1: none when mu_major is under 2 ticks away or behind the entry");
+		}
 	}
 
 	// Behaviour of the flat-by path a wired study runs (owner 2026-11-22). Every wired study's arm() sets SessionExit = FlatBy and

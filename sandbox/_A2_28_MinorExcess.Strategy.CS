@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: two contracts (coding-plan decision 10): T1 (50 percent) at the void minimum, the other lot at mu_major. After T1 the runner's stop moves to entry (GX BreakEven AfterT1; owner decision 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1").
+// Management: two contracts (coding-plan decision 10): T1 (50 percent) at the void minimum, the other lot at mu_major. When the void is not between the entry and mu_major, T1 is the midpoint of entry and mu_major rounded to the tick (owner decision 2026-11-22 16:39 CT: "A2-28: use T1 halfway between entry and mu_major when the void is behind entry"). After T1 the runner's stop moves to entry (GX BreakEven AfterT1; owner decision 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1").
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -296,10 +296,17 @@ namespace PowerLanguage.Strategy
 			// lies between the entry and mu_major, the other lot at mu_major.
 			double t1 = longSide ? m_void - entry : entry - m_void, fin = Math.Abs(target - entry);
 			bool scale = !double.IsNaN(m_void) && t1 > 0 && t1 < fin;
+			string t1Src = "void";
+			if (!scale)
+			{   // Owner 2026-11-22 16:39 CT: "A2-28: use T1 halfway between entry and mu_major when the void is behind entry"
+				t1 = _SandboxRules.MidT1Points(longSide, entry, target, tickSize());
+				scale = !double.IsNaN(t1) && t1 > 0 && t1 < fin;
+				t1Src = "mid";
+			}
 			// Coder 2026-11-22 (Analyst #152 recheck): one line per trade at entry with every level the plan uses.
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-28 plan " + (longSide ? "long" : "short") + " entry " + entry.ToString("0.00") + " stop " + stop.ToString("0.00")
 				+ " muMinor " + m_muMinor.ToString("0.00") + " sdMinor " + m_sdMinor.ToString("0.00") + " void " + m_void.ToString("0.00") + " muMajor " + target.ToString("0.00")
-				+ (scale ? " T1 " + (longSide ? entry + t1 : entry - t1).ToString("0.00") + " (1 lot, then the runner's stop to entry)" : " T1 none: void not between the entry and mu_major, both lots at mu_major"));
+				+ (scale ? " T1 " + (longSide ? entry + t1 : entry - t1).ToString("0.00") + " source " + t1Src + " (1 lot, then the runner's stop to entry)" : " T1 none: void not between the entry and mu_major and mu_major under 2 ticks away, both lots at mu_major"));
 			GxConfig.TargetMode = scale ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
 			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = scale ? t1 : 0; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
