@@ -362,6 +362,10 @@ static class Program
 		Check(code("PS_25").Contains("GxConfig.TimeStopBars = ds == 1 ? 41 : 0; m_timeStop = ds == 1 ? 0 : 41 * sigMin;"), "PS_25 41-bar time stop counts signal-stream bars (MT-07: 41 x 15 minutes)");
 		Check(Regex.IsMatch(MethodBody(code("MT_07"), @"override\s+string\s+targetBlock\s*\(\s*double\s+target\s*\)"), @"dvpHtfNextRailDistAtr\(HtfDs, 1\)[\s\S]*target <= htfRail \? null"), "MT_07 the 15m target rail lies inside the 60m next-rail distance (catalogue MT-07)");
 		Check(raw["MT_07"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream)."), "MT_07 header: Data2 15m, Data3 60m");
+		// KD-05 is MT-07 (it inherits the code): same 1m / 15m / 60m chart, no override of the streams it reads.
+		Check(Regex.IsMatch(code("KD_05"), @"class\s+_KD_05_HTFDetrendedRail\s*:\s*_MT_07_HtfDetrendedRail") && raw["KD_05"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream).")
+			&& raw["KD_05"].Contains("// Data2: the same instrument on 15-minute bars") && raw["KD_05"].Contains("// Further series: Data3 = the same instrument on 60-minute bars") && !raw["KD_05"].Contains("Data2 = 60-minute"), "KD_05 header: the MT-07 chart, Data2 15m, Data3 60m");
+		Check(!Regex.IsMatch(code("KD_05"), @"signalDs|targetBlock|htfStep|htfAccepted|DvpConfig\.streams|HtfClosedBar|dvpRailPrice") && code("KD_05").Contains("if (!IsExist(2) || !IsExist(3))"), "KD_05 reads Data2 / Data3 exactly as MT-07 (no override), and requires both");
 		// Analyst LE-01 recheck: 'days' is ring occupancy (cap 253); the journal prints the uncapped count and the ring.
 		Check(code("LE_01").Contains("DailyContext.DaysSeen + \" (ring \" + DailyContext.Days + \"/\" + DailyContext.Capacity"), "LE_01 journals the uncapped day count and the ring occupancy");
 		// Resting-order windows use the GX date-aware cutoff (#146), not _SandboxRules.PastFlat.
