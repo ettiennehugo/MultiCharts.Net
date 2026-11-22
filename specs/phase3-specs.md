@@ -1,6 +1,6 @@
 # Phase 3 specs: VP helpers, small items, M-GMM
 
-**Rev 1, 2026-10-21 (ET).** Written for Coder. Checked against `github.com/ettiennehugo/MultiCharts.Net` `main` @ `e37a933` (PR #17 merged). MC API facts are taken from the Programming Guide (`/workspace/mc-docs/01M5BF386FDT0VH0AYQBMXHEF2.pdf`, "PG"). Anything the PG does not state is marked **PROBE**.
+**Rev 1.1, 2026-11-22 (CT): Confirmed by Ettienne 2026-11-22** (decision 1 of 2026-11-22). §0.3 now states the roll rule: the CME roll-date table is the roll, the gap is a confirmation journal, and an off-table gap is a Warning. The S4 Series window note and the A-ROLL trace window are updated for the holdout. Docs only; nothing else in this file changed. **Rev 1, 2026-10-21 (ET).** Written for Coder. Checked against `github.com/ettiennehugo/MultiCharts.Net` `main` @ `e37a933` (PR #17 merged). MC API facts are taken from the Programming Guide (`/workspace/mc-docs/01M5BF386FDT0VH0AYQBMXHEF2.pdf`, "PG"). Anything the PG does not state is marked **PROBE**.
 
 **Sources:** `trading-idea-catalogue.md` (§2.4a and the Needs lines), `specs/missing-functionality-specs.md` rev 4 ("MFS"), `specs/missing-functionality-review-analyst1.md`, `reviews/analyst-base-class-spec.md` rev 2.7 ("BCS"), `specs/m-port-spec.md`, and `trading-ideas-analyst2.md` ("A2").
 
@@ -35,6 +35,8 @@ Many helpers below need closed OHLCV of a stream for arbitrary past windows. Max
 
 ### 0.3 Roll detection moves into `_CustomSignal` (needed by S4 and S5)
 See S4. All helpers below call `rollOn(ds)`. After S4, that works on any base.
+
+**Roll rule (rev 1.1, Confirmed by Ettienne 2026-11-22).** On futures a roll is the known CME roll date from the table: `RollDetection = ERollDetection.Table`, with `RollDates` filled from the instrument profile (`fillProfileRollDates`). A session-open gap > k × ATR on a table date is journaled as **confirmation only**. A gap > k × ATR on a date that is not in the table is journaled as a **Warning** and is not a roll. k = 1.0 × daily ATR(20), and an empty table throws (Confirmed by Ettienne 2026-11-22 (via Educator card)). Details, the journal lines and the empty-table rule are in `specs/m-instr-spec.md` rev 2.6.1 §7.1; MFS rev 6 §0.3 says the same. `Series` (S4 item 1) stays in the code for tests and diagnostics only. After PR #51 its window is the rule week, not days 1–21, and on 1m @ES 2016–2024 it misses U18 / U19 / U21.
 
 ### 0.4 Deterministic PRNG (`_Rng`)
 The bootstrap, KDE restarts, GMM k-means++ and the AVWAP P2 placebo need random numbers that are reproducible across .NET runtimes. `System.Random`'s algorithm is a runtime implementation detail and must **not** be used.
@@ -658,7 +660,7 @@ The catalogue files these under "M-GMM (deferred)" (A2-25, A2-26) or lists them 
 4. The Data2 pending flag fires on the first Data2 close at or after the Data1 roll.
 5. Off gives no rolls.
 
-**MC trace (A-ROLL).** A `_CustomSignal`-derived strategy on `@ES` 1m with Data2 60m, over the roll days in the RollDates table for 2025–26. The journal shows `AV invalidated (roll)` and the PA OnRoll lines on both streams.
+**MC trace (A-ROLL).** A `_CustomSignal`-derived strategy on `@ES` 1m with Data2 60m, over the roll days in the RollDates table for 2023–2024 (rev 1.1: the original 2025–26 window falls inside the holdout and must not be used). The journal shows `AV invalidated (roll)` and the PA OnRoll lines on both streams.
 
 ---
 

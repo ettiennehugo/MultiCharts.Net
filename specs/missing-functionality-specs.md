@@ -1,6 +1,6 @@
 ---
 title: "Missing-functionality module specs (PRICEACTION, M-AVWAP, M-MTF, M-TOD, M-DAILY, M-XMKT, M-TICK, M-PORT)"
-subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · IBKR execution — rev 5, 2026-11-02 (ET)"
+subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · IBKR execution — rev 6, 2026-11-22 (CT)"
 ---
 
 # Changelog
@@ -11,6 +11,7 @@ subtitle: "MultiCharts .NET (C#) · dxFeed data (unadjusted @ES continuous) · I
 | 2 | 2026-10-21 | Incorporated Analyst 1 review (`specs/missing-functionality-review-analyst1.md`): added **M-TICK**; listed M-GMM, M-GEX, M-COST, VP helpers as deferred/out of scope; **roll handling** for unadjusted `@ES` (VPF-4 detector, roll-gap removal, AVWAP invalidation, ATR reset, PT+IBKR symbol mapping); **zero new `[Input]`s** — all settings are protected properties (`PriceActionConfig` etc.); `ETraceLevel.Journal` facts with times, not bar numbers; per-FlowQuality-tier delta-z norms; unsupported MC claims turned into probes (function-object laziness, `FullSymbolData.Current` → `CurrentBar`, bar-end stamping, per-series MaxBarsBack); GV statement corrected (UM p488); PMMS fed by named values; PG p53–54 IOG-off caveat; `EVwapType` extended only with Week/Month/Quarter/RollDate, no `AnchoredEvent`/`AvwapMode`, event manager in `_CustomSignal` via protected `AvwapEvents`; `_PriceActionEngine` rev 2 fixes; 1m/15m acceptance trace; extended Data2 probe. |
 | 3 | 2026-10-21 | **M-SWING renamed PRICEACTION** and widened to the full PriceAction scope; all items of `specs/priceaction-improvements.md` (H1–H9, M1–M10, L1–L6) folded into §1 with a review-item → engine → test mapping (§1.7); engine file `_PriceActionEngine.Function.CS` **supersedes `_SwingEngine.Function.CS`** (removed); `SwingConfig` → `PriceActionConfig` (protected, `enabled=false`); cross-refs (AVWAP lazy dependency, XMKT leader swing, §0 examples) updated. `/workspace/PriceAction` untouched. |
 | 4 | 2026-10-21 | User decisions: PRICEACTION defaults stay at PriceAction-library parity; added `EPriceActionPreset {Library, Futures}`, `PriceActionConfig.ApplyPreset()`, `PriceActionConfig.Futures()/Library()` (§1.1); `_VolumeProfileFuturesBase` uses the Futures preset (specified in §1.8, code change deferred until `_CustomSignal` hosts `PriceActionConfig`); Q5 and Q6 resolved; library fixes submitted upstream as PRs #1–#10 (§1.9). |
+| 6 | 2026-11-22 | **Confirmed by Ettienne 2026-11-22** (decision 1 of 2026-11-22: roll rule = CME roll-date table). §0.3 rewritten: the roll is the table date; the gap > k×ATR on that date is journaled as confirmation only, and a large gap on a date not in the table is a Warning. This replaces rev 2.7's "gap **and** table". §9 Q2 updated. The detector modes and the rule detail are in `specs/m-instr-spec.md` rev 2.6 §7.1. Docs only. |
 | 5 | 2026-11-02 | §3 M-MTF: Probe P2 answered (a)-(e) with run ids; closed rule (Close, or None with Time <= Data1 time) replaces `Status == Close ? 0 : 1`; RHM must be on; session-template Warning (MC-1439); §9 P2 row answered. |
 
 Source module list: `trading-idea-catalogue.md` lines 165–178. Citations: **PG** = MC .NET Programming Guide v1.0 (`mc-docs/01M5BF386FDT0VH0AYQBMXHEF2.pdf`, printed pages), **PT** = Portfolio Trader Manual (`mc-docs/01M5BF39CB6Q6Z75MKY9GA3DF8.pdf`), **UM** = MC User Manual. Base rules: `reviews/analyst-base-class-spec.md` rev 2.7 (D7 minimal inputs; validate once in StartCalc; VPB-9 helper-file convention, `_VpVwapEngine.Function.CS`).
@@ -61,7 +62,7 @@ Source module list: `trading-idea-catalogue.md` lines 165–178. Citations: **PG
 
 ## 0.3 Roll handling (unadjusted dxFeed `@ES`, rev 2.7)
 
-Continuous data is **unadjusted, always** (Rev 2.2 Q3). `Bars.Info.Name` does not change on `@ES`, so roll is detected with the **rev 2.7 VPF-4 detector**: session-open gap > k×ATR **and** the date is in the known dxFeed roll-date table. The base exposes `rollOn(ds)` = true on the first bar of the new contract for stream ds. On a roll:
+Continuous data is **unadjusted, always** (Rev 2.2 Q3). `Bars.Info.Name` does not change on `@ES`. **Roll rule (rev 6, Confirmed by Ettienne 2026-11-22):** a roll is the known CME roll date from the table: `RollDetection = ERollDetection.Table`, with `RollDates` from the instrument profile (`fillProfileRollDates`; ES = `EventRules.RollDate`). A session-open gap > k × ATR on that date is **journaled as confirmation only**: it never vetoes, moves or adds a roll. A gap > k × ATR on a date that is **not** in the table is **journaled as a Warning** and is not a roll. k = 1.0 × daily ATR(20) (Confirmed by Ettienne 2026-11-22 (via Educator card)); see `specs/m-instr-spec.md` rev 2.6.1 §7.1. *Superseded:* rev 2.7's "session-open gap > k×ATR **and** the date is in the table". Main never shipped that AND rule. It ships the modes Off / Series / Table / SeriesOrTable (default Off). Series is now a diagnostic only: on 1m @ES 2016–2024 it misses U18 / U19 / U21 and keys M17 / Z19 one Globex day after the table date (`tests/RollTests`, manual App F Known issue 1). The base exposes `rollOn(ds)` = true on the first bar of the new contract for stream ds. On a roll:
 
 - `_PriceActionEngine.OnRoll()`: clear swings and structure (old price space), reset the TR/ATR ring, skip the splice-bar TR.
 - `_DailyContext`: roll-gap removal — difference-adjust prior closes for level series (SMA200, prev H/L/C), ratio for returns (TSMOM, RSI2 change), skip the splice day's TR in ATR20d; `GapPct` uses the adjusted prior close.
@@ -310,7 +311,7 @@ Extra `BarsOfData(n)` series on the chart (NQ for ES, ZN, VIX …), **bar resolu
 | P4 | rev 2.7 §E6: trade-size fidelity via DataLoader (gates M-TICK size ideas) | Open |
 | P5 | .NET PMM signal API and named-value functions | **Resolved 2026-10-21** (§11, `m-port-spec.md`); live checks → P5b |
 | Q1 | VPF-5 delta API for M-TOD delta z | To implement (rev 2.7) |
-| Q2 | VPF-4 roll-date table source/maintenance and k for the gap test | Per rev 2.7; confirm values |
+| Q2 | VPF-4 roll-date table source/maintenance and k for the gap test | Table source: Confirmed by Ettienne 2026-11-22 (CME roll dates from the instrument profile, `m-instr-spec` §7.1). k = 1.0 × daily ATR(20), Confirmed by Ettienne 2026-11-22 (via Educator card) (confirmation and Warning journal only). |
 | Q3 | `_PriceActionEngine` must pass CS-0 compile; run the §1 acceptance trace | Coder |
 | Q4 | Catalogue text for M-MTF ("build HTF internally") to be updated by its owner | Catalogue owner |
 | Q5 | PRICEACTION defaults | **Resolved (rev 4):** library parity by default; Futures preset used by `_VolumeProfileFuturesBase` (§1.1, §1.8) |
