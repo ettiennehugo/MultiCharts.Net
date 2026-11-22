@@ -122,6 +122,17 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		/// <summary>The reason every sandbox flat-by exit journals: that Globex date's session end in ET, named by the CME calendar on an
+		/// early close or holiday halt, otherwise "regular". A study that flattens with its own orders (YV-11) uses this, so its line
+		/// reads like the GX path's sandboxEarlyFlat line.</summary>
+		public static string FlatByReason(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
+		{
+			DateTime gx = PowerLanguage.Function._CmeSessionClock.GlobexTradingDayEt(barEt);
+			TimeSpan regular = RegularCloseEt(symbol, listedSessionEnd), end = SessionEndEt(gx, symbol, listedSessionEnd);
+			string name = end < regular ? PowerLanguage.Function._CmeHolidays.Rules.Get(gx).Name : "regular";
+			return name + " session ends " + end.ToString(@"hh\:mm") + " ET";
+		}
+
 		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
 		{
 			string why;

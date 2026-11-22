@@ -396,10 +396,23 @@ static class Program
 
 	static readonly HashSet<string> NoEtClock = new HashSet<string>(StringComparer.Ordinal) { "_A2_49_MiddayBreakout.Strategy.CS", "_A2_57_TwoTimeframeTurn.Strategy.CS" };
 
+	// Owner 2026-11-22 ("wire flat-by into all 78"): the GX FlatBy studies whose idea is multi-day or overnight by its catalogue
+	// entry. Their arm() template still selects FlatBy, which is the wrong setting, so they are listed for the owner and are not wired.
+	// Remove a name once the owner has ruled (HoldOvernight, or FlatBy and wire it).
+	static readonly HashSet<string> FlatByReview = new HashSet<string>(StringComparer.Ordinal)
+	{
+		"AV-04", "AV-09", "LE-01", "LE-02", "LE-03", "LE-05", "LE-06", "LE-07", "PF-01", "PF-08",
+		"SW-04", "VX-01", "VX-02", "VX-03", "VX-04", "VX-05", "VX-08", "YV-03", "YV-09",
+	};
+
+	static string StudyId(string name) { string[] p = name.Split('_'); return p.Length > 2 ? p[1] + "-" + p[2] : name; }
+
 	// Analyst MC17 (A2-35 held over Good Friday 2023): the flat-by cutoff is that day's session end minus 5 minutes.
+	// Owner 2026-11-22: every futures study that selects GX FlatBy reaches the flat-by path from CalcBar (exitBar, then
+	// sandboxEarlyFlat for early closes and holiday halts), unless it is listed in FlatByReview.
 	static void EarlyFlatChecks(List<string> files)
 	{
-		int gx = 0, mf = 0;
+		int gx = 0, mf = 0, review = 0, flatBy = 0, own = 0;
 		foreach (string path in files)
 		{
 			string name = Path.GetFileName(path);
@@ -408,15 +421,51 @@ static class Program
 			if (!NoEtClock.Contains(name))
 				Check(!Regex.IsMatch(code, @"_SandboxRules\.PastFlat\((sessionClock|tod\b|todNow\b)"), name + " uses the date-aware PastFlat");
 			if (!futures) continue;
+			string id = StudyId(name);
+			if (code.Contains("ESessionExit.FlatBy"))
+			{
+				flatBy++;
+				if (FlatByReview.Contains(id))
+				{
+					review++;
+					Check(!code.Contains("exitBar();"), name + " is on the multi-day review list, so it is not wired to GX flat-by");
+				}
+				else
+				{
+					string calc = MethodBody(code, @"void\s+CalcBar\s*\(\s*\)");
+					Check(calc.Contains("exitBar(); sandboxEarlyFlat();"), name + " selects GX FlatBy and CalcBar reaches exitBar(); sandboxEarlyFlat();");
+					int at = calc.IndexOf("exitBar(); sandboxEarlyFlat();", StringComparison.Ordinal);
+					Match entry = Regex.Match(calc, @"hostGate\(|(?<![\w.])arm\(");
+					Check(at >= 0 && (!entry.Success || at < entry.Index), name + " runs the flat-by path before any entry or GX arm in CalcBar");
+				}
+			}
 			if (code.Contains("ESessionExit.FlatBy") && code.Contains("exitBar();"))
 			{
 				gx++;
 				Check(code.Contains("exitBar(); sandboxEarlyFlat();") && code.Contains("private void sandboxEarlyFlat()") && code.Contains("_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0])"), name + " closes at an early session end after exitBar()");
+				string early = MethodBody(code, @"void\s+sandboxEarlyFlat\s*\(\s*\)");
+				Check(early.Contains("gxNoteExit(\"FLATBY\")") && early.Contains("gxSendExit(\"FLATBY\"") && early.Contains("ETraceLevel.Journal") && early.Contains("\"" + id + " \""), name + " journals its early flat-by as " + id + " and exits through GX as FLATBY");
+			}
+			// A study that flattens with its own orders at the cutoff never arms GX, so the two paths cannot both send an exit.
+			if (code.Contains("ESessionExit.FlatBy") && Regex.IsMatch(code, @"bool flat = _SandboxRules\.PastFlat\("))
+			{
+				own++;
+				int arms = Regex.Matches(code, @"(?<![\w.])arm\(").Count - Regex.Matches(code, @"void arm\(").Count;
+				Check(arms == 0, name + " flattens with its own orders and never arms GX (" + arms + " arm calls)");
+				Check(code.Contains("flat-by: \" + _SandboxRules.FlatByReason("), name + " journals its own flat-by exit with the shared reason");
 			}
 			int bare = Regex.Matches(code, @"mustFlatten\(\)").Count, paired = Regex.Matches(code, @"\(mustFlatten\(\) \|\| _SandboxRules\.EarlyFlatDue\(").Count;
-			if (bare > 0) { mf++; Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue"); }
+			if (bare > 0)
+			{
+				mf++;
+				Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue");
+				Check(!code.Contains("ESessionExit.FlatBy") || !code.Contains("sandboxEarlyFlat"), name + " has its own mustFlatten, so it does not also run sandboxEarlyFlat");
+			}
 		}
-		Check(gx >= 73, "GX FlatBy studies with exitBar found: " + gx);
+		Check(flatBy == 151, "futures studies that select GX FlatBy: " + flatBy);
+		Check(gx == 132, "GX FlatBy studies with exitBar: " + gx + " (73 before, 59 wired by the owner's 2026-11-22 ruling)");
+		Check(review == FlatByReview.Count && gx + review == flatBy, "multi-day FlatBy studies left for the owner: " + review);
+		Check(own == 1, "own-order flat-by studies that select GX FlatBy (YV-11): " + own);
 		Check(mf >= 15, "mustFlatten studies found: " + mf);
 	}
 
@@ -443,6 +492,61 @@ static class Program
 		Check(End(2024, 11, 29) == new TimeSpan(13, 15, 0) && E(2024, 11, 29, 13, 10) && !P(2024, 11, 29, 13, 9), "day after Thanksgiving 2024 flat-by 13:10 ET");
 		Check(End(2024, 6, 3) == new TimeSpan(16, 0, 0) && P(2024, 6, 3, 15, 55) && !P(2024, 6, 3, 15, 54) && !E(2024, 6, 3, 15, 56), "regular day flat-by 15:55 ET, no early flat");
 		Check(!P(2023, 4, 6, 18, 30) && !E(2023, 4, 6, 18, 30), "the 18:00 ET evening belongs to the next Globex date");
+
+		// Shared journal reason (sandboxEarlyFlat names the day; YV-11's own-order flat uses FlatByReason).
+		MethodInfo reason = r.GetMethod("FlatByReason", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		Check(reason != null, "_SandboxRules.FlatByReason found");
+		if (reason != null)
+		{
+			Func<DateTime, string> Why = t => (string)reason.Invoke(null, new object[] { t, "ES", TimeSpan.Zero });
+			Check(Why(new DateTime(2024, 6, 3, 15, 55, 0)) == "regular session ends 16:00 ET", "regular-day flat-by reason: " + Why(new DateTime(2024, 6, 3, 15, 55, 0)));
+			Check(Why(new DateTime(2023, 4, 7, 9, 10, 0)).StartsWith("Good Friday") && Why(new DateTime(2023, 4, 7, 9, 10, 0)).EndsWith(" session ends 09:15 ET"), "Good Friday 2023 flat-by reason: " + Why(new DateTime(2023, 4, 7, 9, 10, 0)));
+			Check(Why(new DateTime(2024, 1, 15, 12, 55, 0)).EndsWith(" session ends 13:00 ET") && !Why(new DateTime(2024, 1, 15, 12, 55, 0)).StartsWith("regular"), "MLK 2024 flat-by reason names the halt");
+		}
+		WiredStudyFlatProbes(r);
+	}
+
+	// Behaviour of the flat-by path a wired study runs (owner 2026-11-22). Every wired study's arm() sets SessionExit = FlatBy and
+	// FlatByHHMM = _SandboxRules.FlatBy(0 or its override, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd); exitBar() lets GX
+	// close at the first FlatByHHMM after the fill, and sandboxEarlyFlat() closes at an early session end minus 5 minutes.
+	// Representative: OF-08 and RG-04 on @ES 1-minute (CME, Central exchange clock), Good Friday 2023 and a regular day.
+	static void WiredStudyFlatProbes(Type rules)
+	{
+		Type es = rules.Assembly.GetType("PowerLanguage.Function.ExitSession");
+		MethodInfo flatBy = rules.GetMethod("FlatBy", new[] { typeof(int), typeof(string), typeof(string), typeof(TimeSpan) });
+		MethodInfo deadline = es == null ? null : es.GetMethod("FlatByDeadline", new[] { typeof(DateTime), typeof(int) });
+		MethodInfo early = rules.GetMethod("EarlyFlatDue", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		Check(es != null && flatBy != null && deadline != null && early != null, "GX ExitSession.FlatByDeadline and _SandboxRules.FlatBy load from SandboxLib");
+		if (es == null || flatBy == null || deadline == null || early == null) return;
+		TimeZoneInfo et = Tz("Eastern Standard Time", "America/New_York"), ct = Tz("Central Standard Time", "America/Chicago");
+		foreach (string study in new[] { "OF-08", "RG-04" })
+		{
+			int hhmm = (int)flatBy.Invoke(null, new object[] { 0, "CME", "@ES", TimeSpan.Zero });
+			Check(hhmm == 1455, study + " on @ES (CME): GX FlatByHHMM is 14:55 exchange time, 15:55 ET (" + hhmm + ")");
+			// The flat-by the study's GX position gets: GX's deadline in exchange time, or the early-close cutoff when that comes first.
+			Func<DateTime, DateTime> Flat = fillCt =>
+			{
+				DateTime gx = (DateTime)deadline.Invoke(null, new object[] { fillCt, hhmm });
+				for (DateTime b = fillCt.AddMinutes(1); b < gx; b = b.AddMinutes(1))
+				{
+					DateTime bEt = TimeZoneInfo.ConvertTime(b, ct, et);
+					if ((bool)early.Invoke(null, new object[] { bEt, "@ES", TimeSpan.Zero })) return b;
+				}
+				return gx;
+			};
+			Check(Flat(new DateTime(2024, 6, 3, 10, 0, 0)) == new DateTime(2024, 6, 3, 14, 55, 0), study + " regular day 2024-06-03: a 10:00 CT fill flattens at 14:55 CT (15:55 ET)");
+			Check(Flat(new DateTime(2024, 6, 3, 15, 10, 0)) == new DateTime(2024, 6, 4, 14, 55, 0), study + " a fill after the cutoff (15:10 CT) is held to the next session's 14:55 CT");
+			Check(Flat(new DateTime(2023, 4, 7, 7, 0, 0)) == new DateTime(2023, 4, 7, 8, 10, 0), study + " Good Friday 2023: a 07:00 CT fill flattens at 08:10 CT (09:10 ET), not 14:55");
+			Check(Flat(new DateTime(2023, 4, 6, 15, 10, 0)) == new DateTime(2023, 4, 7, 8, 10, 0), study + " a Thursday 2023-04-06 fill after the cutoff is flattened at Good Friday's 08:10 CT cutoff");
+			Check(Flat(new DateTime(2024, 11, 29, 9, 0, 0)) == new DateTime(2024, 11, 29, 12, 10, 0), study + " day after Thanksgiving 2024: flattens at 12:10 CT (13:10 ET)");
+		}
+	}
+
+	static TimeZoneInfo Tz(string windowsId, string iana)
+	{
+		try { return TimeZoneInfo.FindSystemTimeZoneById(windowsId); }
+		catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById(iana); }
+		catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById(iana); }
 	}
 
 	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.

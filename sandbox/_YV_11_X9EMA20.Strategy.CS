@@ -173,10 +173,22 @@ namespace PowerLanguage.Strategy
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
  NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); requireRing(1, 2000, "YV-11 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "YV-11 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return; exitBar(); sandboxEarlyFlat();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
 			double sma = smaN(20, 0), ema = ema9();
@@ -185,6 +197,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool flat = _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 				bool lost = (pos > 0 && Bars.Close[0] < sma) || (pos < 0 && Bars.Close[0] > sma);
+				if (flat && journalOn()) trace(ETraceLevel.Journal, "YV-11 " + day.ToString("yyyy-MM-dd") + " flat-by: " + _SandboxRules.FlatByReason(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd) + ", closing " + Math.Abs(pos));
 				if (flat || lost) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 				if (pos > 0) { m_ls.Send(m_stop); if (m_hasTarget) m_lt.Send(m_target); }
 				else { m_ss.Send(m_stop); if (m_hasTarget) m_st.Send(m_target); }
