@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: two contracts (coding-plan decision 10; catalogue "T1 1 R; runner trails at sVWAP"). sendExits re-sends the stop on both lots and the 1 R T1 limit on one lot while both are open; the runner exits on the stop, a close below sVWAP from 10:00, or the 11:30 flat.
+// Management: two contracts (coding-plan decision 10; catalogue "T1 1 R; runner trails at sVWAP"). sendExits re-sends the stop on both lots and the 1 R T1 limit on one lot while both are open; the runner exits on the stop, a 5-minute close (Data1 bar ending on a 5-minute boundary; Data2 is 30-minute) below sVWAP from 10:00, or the 11:30 flat.
 // Exit: the catalogue stop, target or time exit, sent only from sendExits. Not the GX wrapper.
 //
 // ## 5. Timing
@@ -223,7 +223,9 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			bool sendExits()
 			{
-				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (tod >= new TimeSpan(10, 0, 0) && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen)) { m_lx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (tod >= new TimeSpan(10, 0, 0) && tod.Minutes % 5 == 0 && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen)) { m_lx.Send(); return true; }
+				// Coder 2026-11-22 (catalogue "runner trails at sVWAP from 10:00 (exit on a 5m close below)"): the trail tests 5-minute closes,
+				// the 1-minute bar ending on a 5-minute boundary (Data2 is 30-minute, so 5m closes come from Data1); it tested every 1-minute close.
 				// Coder 2026-11-22 (Analyst native retest of #152; catalogue "T1 1 R; runner trails at sVWAP"): T1 takes one of the two lots at
 				// 1 R; the runner stays on the stop, the sVWAP trail and the 11:30 flat. The target exited both lots.
 				m_lxStp.Send(m_stop); if (Math.Abs(StrategyInfo.MarketPosition) >= 2) m_lxLmt.Send(m_target, 1);

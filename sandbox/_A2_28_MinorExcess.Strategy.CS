@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: two contracts (coding-plan decision 10): T1 (50 percent) at the void minimum, the other lot at mu_major.
+// Management: two contracts (coding-plan decision 10): T1 (50 percent) at the void minimum, the other lot at mu_major. After T1 the runner's stop moves to entry (GX BreakEven AfterT1; owner decision 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1").
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -301,7 +301,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = scale ? t1 : 0; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
 			GxConfig.FinalTargetValue = fin;
-			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.BreakEven = scale ? EBreakEven.AfterT1 : EBreakEven.Off;   // Owner 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1" (as A2-45)
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = flatHHMM;

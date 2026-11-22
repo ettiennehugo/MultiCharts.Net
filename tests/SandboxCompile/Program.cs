@@ -354,6 +354,8 @@ static class Program
 		Check(code("A2_04").Contains("m_lxLmt.Send(m_target, 1)") && code("A2_04").Contains("Contracts.UserSpecified, \"A204LT\"") && !Regex.IsMatch(raw["A2_04"], @"Size(:| stays) 1 contract"), "A2_04 2 lots: T1 one lot at 1 R, the runner on the stop / sVWAP / 11:30 flat, header agrees");
 		Check(code("MT_07").Contains("dvpRailPrice(2, ELevelKind.DvpVah, 0)") && Regex.IsMatch(code("MT_07"), @"DvpConfig\.streams\s*=\s*new\[\]\s*\{\s*1\s*,\s*2\s*\}") && code("PS_25").Contains("htfStep();"), "MT_07 tests the 60m close against the 60m DVP stream's VAH after the engines step");
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
+		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
+		Check(code("A2_04").Contains("tod.Minutes % 5 == 0 && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen"), "A2_04 sVWAP trail tests 5-minute closes");
 		// Item 2: a stop on the fill bar still counts as a fill. Every Rest() call passes today's entry count.
 		foreach (var kv in src)
 			foreach (Match rm in Regex.Matches(kv.Value, @"_SandboxRules\.Rest\(([^;]*)\);"))
