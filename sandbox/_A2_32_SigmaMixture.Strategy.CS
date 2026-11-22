@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-32.
 // Taken from the source: the Rules or Analyst 2 specification under that heading.
-// Research assumption: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// Research assumption: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series where this file trades.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// Other: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -131,7 +131,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 // IOG is disabled.
 
 
