@@ -41,6 +41,7 @@ static class Program
 		FlatByAfterEntry();
 		FlatByExchangeClock();
 		FlatByFromRegularSession();
+		FlatByEarlyClose();
 		EmbeddedFillAnchorsStop();
 		Control();
 		Idx();
@@ -619,6 +620,139 @@ static class Program
 		Check(forced.Resolved && forced.Hhmm == 1555 && forced.Source == "explicit", "an explicit clock is kept once data is ready");
 		ExitSession.FlatByChoice none = ExitSession.ChooseFlatBy(-1, true, "", 0);
 		Check(none.Resolved && none.Hhmm == 1555 && none.Source == "fallback", "the 15:55 fallback is only after data is ready and no regular session exists");
+	}
+
+	// Owner 2026-11-22 "Yes, fix GX for early closes". The fake calendars carry the real exchange-zone ends that
+	// InstrumentFlatCalendar returns (InstrumentTests pins those): CME equity in Central, NYSE in Eastern.
+	static ExitSession.FlatDay CmeEquityCt(DateTime d)
+	{
+		if (d == new DateTime(2023, 4, 7)) return new ExitSession.FlatDay { EndHhmm = 815, Reason = "Good Friday (abbreviated), session ends 08:15 CT" };
+		if (d == new DateTime(2024, 1, 15)) return new ExitSession.FlatDay { EndHhmm = 1200, Reason = "Martin Luther King Jr. Day, session ends 12:00 CT" };
+		if (d == new DateTime(2024, 11, 28)) return new ExitSession.FlatDay { EndHhmm = 1200, Reason = "Thanksgiving, session ends 12:00 CT" };
+		if (d == new DateTime(2024, 11, 29)) return new ExitSession.FlatDay { EndHhmm = 1215, Reason = "Day after Thanksgiving, session ends 12:15 CT" };
+		if (d == new DateTime(2024, 3, 29)) return new ExitSession.FlatDay { Closed = true, EndHhmm = -1, Reason = "Good Friday" };
+		return ExitSession.FlatDay.Regular;
+	}
+
+	static ExitSession.FlatDay NyseEt(DateTime d)
+	{
+		if (d == new DateTime(2024, 11, 28) || d == new DateTime(2024, 7, 4)) return new ExitSession.FlatDay { Closed = true, EndHhmm = -1, Reason = "NYSE holiday" };
+		if (d == new DateTime(2024, 11, 29)) return new ExitSession.FlatDay { EndHhmm = 1300, Reason = "Day after Thanksgiving, session ends 13:00 ET" };
+		if (d == new DateTime(2024, 7, 3)) return new ExitSession.FlatDay { EndHhmm = 1300, Reason = "Independence Day eve, session ends 13:00 ET" };
+		return ExitSession.FlatDay.Regular;
+	}
+
+	static ExitSession CalEng(int flatBy, Func<DateTime, ExitSession.FlatDay> cal)
+	{
+		var e = Eng(c => c.FlatByHHMM = flatBy);
+		e.FlatCalendar = cal;
+		return e;
+	}
+
+	static void FlatByEarlyClose()
+	{
+		Func<DateTime, ExitSession.FlatDay> cme = CmeEquityCt, nyse = NyseEt;
+		// cutoff arithmetic
+		var gf = ExitSession.FlatByCutoff(new DateTime(2023, 4, 6, 10, 0, 0), 1455, cme);
+		Check(gf.At == new DateTime(2023, 4, 6, 14, 55, 0) && gf.EarlyReason == null, "the Thursday before Good Friday 2023 keeps 14:55 CT");
+		gf = ExitSession.FlatByCutoff(new DateTime(2023, 4, 6, 15, 0, 0), 1455, cme);
+		Check(gf.At == new DateTime(2023, 4, 7, 8, 10, 0) && gf.EarlyReason.StartsWith("Good Friday"), "an entry after Thursday's cutoff is due 08:10 CT on Good Friday 2023");
+		gf = ExitSession.FlatByCutoff(new DateTime(2023, 4, 6, 17, 30, 0), 1455, cme);
+		Check(gf.At == new DateTime(2023, 4, 7, 8, 10, 0), "a Thursday-evening Globex entry is due 08:10 CT on Good Friday 2023");
+		var mlk = ExitSession.FlatByCutoff(new DateTime(2024, 1, 12, 15, 0, 0), 1455, cme);
+		Check(mlk.At == new DateTime(2024, 1, 15, 11, 55, 0) && mlk.EarlyReason.StartsWith("Martin Luther King"), "a Friday after-cutoff entry is due 11:55 CT on MLK 2024 (12:00 CT halt), not on the weekend");
+		var mlkEve = ExitSession.FlatByCutoff(new DateTime(2024, 1, 14, 17, 0, 0), 1455, cme);
+		Check(mlkEve.At == new DateTime(2024, 1, 15, 11, 55, 0), "a Sunday-evening entry is due 11:55 CT on MLK 2024");
+		var mlkLate = ExitSession.FlatByCutoff(new DateTime(2024, 1, 15, 11, 55, 0), 1455, cme);
+		Check(mlkLate.At == new DateTime(2024, 1, 16, 14, 55, 0) && mlkLate.EarlyReason == null, "an entry at the MLK cutoff waits for Tuesday 14:55 CT");
+		var tg = ExitSession.FlatByCutoff(new DateTime(2024, 11, 27, 15, 0, 0), 1455, cme);
+		Check(tg.At == new DateTime(2024, 11, 28, 11, 55, 0), "a Wednesday after-cutoff entry is due 11:55 CT on Thanksgiving 2024 (12:00 CT halt)");
+		var tg1 = ExitSession.FlatByCutoff(new DateTime(2024, 11, 29, 9, 0, 0), 1455, cme);
+		Check(tg1.At == new DateTime(2024, 11, 29, 12, 10, 0) && tg1.EarlyReason.StartsWith("Day after Thanksgiving"), "ES on the day after Thanksgiving 2024 is due 12:10 CT");
+		var reg = ExitSession.FlatByCutoff(new DateTime(2024, 6, 3, 10, 0, 0), 1455, cme);
+		Check(reg.At == new DateTime(2024, 6, 3, 14, 55, 0) && reg.EarlyReason == null && reg.At == ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 10, 0, 0), 1455), "a regular day is unchanged");
+		var regLate = ExitSession.FlatByCutoff(new DateTime(2024, 6, 3, 15, 0, 0), 1455, cme);
+		Check(regLate.At == new DateTime(2024, 6, 4, 14, 55, 0) && regLate.At == ExitSession.FlatByDeadline(new DateTime(2024, 6, 3, 15, 0, 0), 1455), "a regular weekday after-cutoff entry is unchanged");
+		var closed = ExitSession.FlatByCutoff(new DateTime(2024, 3, 28, 15, 0, 0), 1455, cme);
+		Check(closed.At == new DateTime(2024, 4, 1, 14, 55, 0), "a full Good Friday close (2024) is skipped: Thursday after-cutoff entry is due Monday 14:55 CT");
+		Check(ExitSession.FlatByCutoff(new DateTime(2024, 6, 3, 10, 0, 0), 1455, null).At == new DateTime(2024, 6, 3, 14, 55, 0), "no calendar is the old one-clock deadline");
+		// explicit override: the earlier time wins
+		Check(ExitSession.FlatByCutoff(new DateTime(2024, 11, 29, 9, 0, 0), 1000, cme).At == new DateTime(2024, 11, 29, 10, 0, 0), "an explicit FlatByHHMM 10:00 before the early close is kept");
+		var ovr = ExitSession.FlatByCutoff(new DateTime(2024, 11, 29, 9, 0, 0), 1400, cme);
+		Check(ovr.At == new DateTime(2024, 11, 29, 12, 10, 0) && ovr.EarlyReason != null, "an explicit FlatByHHMM 14:00 after the early close gives way to 12:10 CT");
+		// stocks: NYSE half day in Eastern
+		var spy = ExitSession.FlatByCutoff(new DateTime(2024, 11, 29, 10, 0, 0), 1555, nyse);
+		Check(spy.At == new DateTime(2024, 11, 29, 12, 55, 0) && spy.EarlyReason.StartsWith("Day after Thanksgiving"), "a stock on the day after Thanksgiving 2024 is due 12:55 ET");
+		var spyTg = ExitSession.FlatByCutoff(new DateTime(2024, 11, 27, 15, 56, 0), 1555, nyse);
+		Check(spyTg.At == new DateTime(2024, 11, 29, 12, 55, 0), "a stock entry after Wednesday's cutoff skips Thanksgiving and is due 12:55 ET Friday");
+		var spyLate = ExitSession.FlatByCutoff(new DateTime(2024, 11, 29, 12, 58, 0), 1555, nyse);
+		Check(spyLate.At == new DateTime(2024, 12, 2, 15, 55, 0) && spyLate.EarlyReason == null, "a stock entry after the half-day cutoff is held to Monday 15:55 ET");
+		var j3 = ExitSession.FlatByCutoff(new DateTime(2024, 7, 3, 13, 30, 0), 1555, nyse);
+		Check(j3.At == new DateTime(2024, 7, 5, 15, 55, 0), "a stock entry after the Jul 3 2024 half day skips Jul 4 and is due Friday 15:55 ET");
+
+		foreach (bool lng in new[] { true, false })
+		{
+			string side = lng ? "L" : "S";
+			// Good Friday 2023 ES: held from Thursday evening, flattened at 08:10 CT, not carried over the weekend.
+			var e = CalEng(1455, cme);
+			var p = new ExitPosition();
+			e.Open(p, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 15, 30, 0), 0);
+			Check(e.Manage(p, Quiet(lng, new DateTime(2023, 4, 6, 18, 0, 0))).Reason == null, side + " Good Friday: Thursday evening holds");
+			Check(e.Manage(p, Quiet(lng, new DateTime(2023, 4, 7, 8, 9, 0))).Reason == null, side + " Good Friday: 08:09 CT holds");
+			ExitDecision d = e.Manage(p, Quiet(lng, new DateTime(2023, 4, 7, 8, 10, 0)));
+			Check(d.Reason == "FLATBY" && p.FlatNote != null && p.FlatNote.StartsWith("Good Friday"), side + " Good Friday: 08:10 CT is FLATBY with the early-close note");
+			string line = e.CloseLine(p, "FLATBY", 5000, 50, 0, "bar");
+			Check(line.StartsWith("EXIT CLOSE ") && line.EndsWith(" - flat-by early close: Good Friday (abbreviated), session ends 08:15 CT"), side + " EXIT CLOSE names the early close");
+			// The session's last bar is before the cutoff: the first bar at or after it (Sunday's open) exits.
+			var e2 = CalEng(1455, cme);
+			var p2 = new ExitPosition();
+			e2.Open(p2, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 15, 30, 0), 0);
+			Check(e2.Manage(p2, Quiet(lng, new DateTime(2023, 4, 7, 8, 0, 0))).Reason == null, side + " Good Friday 30-min: the 08:00 bar is before the cutoff");
+			Check(e2.Manage(p2, Quiet(lng, new DateTime(2023, 4, 9, 17, 30, 0))).Reason == "FLATBY", side + " Good Friday 30-min: the next bar at or after the cutoff exits");
+			// MLK 2024 holiday halt.
+			var e3 = CalEng(1455, cme);
+			var p3 = new ExitPosition();
+			e3.Open(p3, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 1, 14, 17, 5, 0), 0);
+			Check(e3.Manage(p3, Quiet(lng, new DateTime(2024, 1, 15, 11, 54, 0))).Reason == null, side + " MLK: 11:54 CT holds");
+			Check(e3.Manage(p3, Quiet(lng, new DateTime(2024, 1, 15, 11, 55, 0))).Reason == "FLATBY" && p3.FlatNote.StartsWith("Martin Luther King"), side + " MLK: 11:55 CT is FLATBY");
+			// Day after Thanksgiving 2024 ES.
+			var e4 = CalEng(1455, cme);
+			var p4 = new ExitPosition();
+			e4.Open(p4, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 11, 29, 9, 0, 0), 0);
+			Check(e4.Manage(p4, Quiet(lng, new DateTime(2024, 11, 29, 12, 9, 0))).Reason == null, side + " TG+1 ES: 12:09 CT holds");
+			Check(e4.Manage(p4, Quiet(lng, new DateTime(2024, 11, 29, 12, 10, 0))).Reason == "FLATBY", side + " TG+1 ES: 12:10 CT is FLATBY");
+			// A regular day is unchanged and carries no note.
+			var e5 = CalEng(1455, cme);
+			var p5 = new ExitPosition();
+			e5.Open(p5, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
+			Check(e5.Manage(p5, Quiet(lng, new DateTime(2024, 6, 3, 14, 54, 0))).Reason == null, side + " regular: 14:54 CT holds");
+			Check(e5.Manage(p5, Quiet(lng, new DateTime(2024, 6, 3, 14, 55, 0))).Reason == "FLATBY" && p5.FlatNote == null, side + " regular: 14:55 CT is FLATBY without a note");
+			Check(e5.CloseLine(p5, "FLATBY", 5000, 50, 0, "bar").IndexOf("early close", StringComparison.Ordinal) < 0, side + " regular EXIT CLOSE has no early-close text");
+			// Stock early close (SPY 2024-11-29).
+			var e6 = CalEng(1555, nyse);
+			var p6 = new ExitPosition();
+			e6.Open(p6, lng, 5000, 5000, lng ? 4900 : 5100, 10, 0.01, 1, 100000, "LE", new DateTime(2024, 11, 29, 9, 45, 0), 0);
+			Check(e6.Manage(p6, Quiet(lng, new DateTime(2024, 11, 29, 12, 54, 0))).Reason == null, side + " SPY TG+1: 12:54 ET holds");
+			Check(e6.Manage(p6, Quiet(lng, new DateTime(2024, 11, 29, 12, 55, 0))).Reason == "FLATBY" && p6.FlatNote.StartsWith("Day after Thanksgiving"), side + " SPY TG+1: 12:55 ET is FLATBY");
+			// After-cutoff entry on an early day stays open to the next session's cutoff.
+			var e7 = CalEng(1555, nyse);
+			var p7 = new ExitPosition();
+			e7.Open(p7, lng, 5000, 5000, lng ? 4900 : 5100, 10, 0.01, 1, 100000, "LE", new DateTime(2024, 11, 29, 12, 58, 0), 0);
+			Check(e7.Manage(p7, Quiet(lng, new DateTime(2024, 11, 29, 12, 59, 0))).Reason == null, side + " after-cutoff entry on the half day is held");
+			Check(e7.Manage(p7, Quiet(lng, new DateTime(2024, 12, 2, 9, 31, 0))).Reason == null, side + " ... through Monday's open");
+			Check(e7.Manage(p7, Quiet(lng, new DateTime(2024, 12, 2, 15, 55, 0))).Reason == "FLATBY" && p7.FlatNote == null, side + " ... to Monday 15:55 ET");
+			// A new position on the same ExitPosition clears the note.
+			e.Open(p, lng, 5000, 5000, lng ? 4900 : 5100, 1, 0.25, 50, 100000, "LE", new DateTime(2024, 6, 3, 10, 0, 0), 0);
+			Check(p.FlatNote == null, side + " Open clears the flat-by note");
+		}
+		// Daily bars stay unchanged on an early day.
+		var daily = Mkt();
+		daily.BarKind = EGxBarKind.Day; daily.DailyOrLonger = true; daily.ResolutionLabel = "1 day"; daily.BarMinutes = 1440;
+		var ed = Eng(c => c.FlatByHHMM = 1455, daily);
+		ed.FlatCalendar = cme;
+		var pd = new ExitPosition();
+		ed.Open(pd, true, 5000, 5000, 4900, 1, 0.25, 50, 100000, "LE", new DateTime(2023, 4, 6, 15, 0, 0), 0);
+		Check(ed.Manage(pd, Quiet(true, new DateTime(2023, 4, 7, 15, 0, 0))).Reason == null, "daily bars ignore the early close");
 	}
 
 	static void EmbeddedFillAnchorsStop()
@@ -1215,6 +1349,10 @@ static class Program
 		foreach (string name in inputs)
 			Check(gx.IndexOf("[Input] public ", StringComparison.Ordinal) >= 0 && gx.IndexOf(" " + name + " { get; set; }", StringComparison.Ordinal) >= 0, "wrapper input " + name);
 		Check(inputs.Length == 48, "48 inputs");
+		int apply = src.IndexOf("void gxApplyFlatBy()", StringComparison.Ordinal);
+		Check(apply >= 0 && src.IndexOf("gxAttachFlatCalendar(m_gx);", apply, StringComparison.Ordinal) > apply, "embedded GX attaches the flat-by calendar after resolving");
+		Check(gx.IndexOf("gxResolveFlatBy(m_wrap.Config, FlatByHHMM); gxAttachFlatCalendar(m_wrap);", StringComparison.Ordinal) >= 0, "the wrapper attaches the flat-by calendar after resolving");
+		Check(src.IndexOf("InstrumentFlatCalendar.Of(p.calendar, day)", StringComparison.Ordinal) >= 0 && src.IndexOf("ExitSession.ExchangeHhmm(day, et, findTz(\"Eastern Standard Time\"), p.exchangeZone)", StringComparison.Ordinal) >= 0, "the host reads the profile calendar and moves its ET end into the exchange zone");
 		Check(gx.IndexOf("PortfolioPublish { get { return false; } }", StringComparison.Ordinal) >= 0, "wrapper does not publish pm.ver");
 		Check(gx.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && gx.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0, "wrapper has no entry order");
 		Check(csproj.IndexOf("_GX_00_TestHost", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox\\", StringComparison.Ordinal) < 0 && csproj.IndexOf("sandbox/", StringComparison.Ordinal) < 0, "test host is not in PLStudies.csproj");

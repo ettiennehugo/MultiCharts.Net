@@ -1990,6 +1990,8 @@ namespace PowerLanguage.Strategy
 		private bool m_gxFlatWarned;
 		private bool m_gxFlatByCaptured;
 		private bool m_gxFlatResolved;
+		private bool m_gxFlatCalLogged;
+		private Dictionary<DateTime, ExitSession.FlatDay> m_gxFlatDays;
 		private int m_gxFlatHhmm;
 		private int m_gxFlatByRequest = -1;
 		private double m_gxStopDist;
@@ -2700,6 +2702,8 @@ namespace PowerLanguage.Strategy
 			m_gxFlatWarned = false;
 			m_gxFlatByCaptured = false;
 			m_gxFlatResolved = false;
+			m_gxFlatCalLogged = false;
+			m_gxFlatDays = null;
 			m_gxFlatHhmm = 0;
 			m_gxFlatByRequest = -1;
 			m_gxStopDist = 0;
@@ -4787,6 +4791,51 @@ namespace PowerLanguage.Strategy
 				m_gxFlatByRequest = m_gx.Config.FlatByHHMM;
 			}
 			gxResolveFlatBy(m_gx.Config, m_gxFlatByRequest);
+			gxAttachFlatCalendar(m_gx);
+		}
+
+		/// <summary>Owner 2026-11-22 ("Yes, fix GX for early closes"): once flat-by is resolved, the engine reads each trading date's
+		/// early close / holiday halt from the instrument's calendar, so the cutoff is the earliest of FlatByHHMM and that day's end minus 5.</summary>
+		protected void gxAttachFlatCalendar(ExitSession s)
+		{
+			if (s == null || !m_gxFlatResolved) return;
+			if (s.FlatCalendar == null) s.FlatCalendar = gxFlatDay;
+			if (m_gxFlatCalLogged) return;
+			m_gxFlatCalLogged = true;
+			string cal = "?";
+			try
+			{
+				InstrumentProfile p = InstrumentProfileOf(1);
+				if (p != null) cal = InstrumentText.CalendarName(p.calendar);
+			}
+			catch (Exception) { }
+			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "GX FLATBY calendar(" + cal + ") - early closes and holiday halts move that day's cutoff to its session end minus 5");
+		}
+
+		/// <summary>One exchange-zone trading date for ExitSession.FlatCalendar: the InstrumentFlatCalendar day, its ET end moved into the
+		/// exchange zone. Cached per date.</summary>
+		ExitSession.FlatDay gxFlatDay(DateTime day)
+		{
+			day = day.Date;
+			ExitSession.FlatDay f;
+			if (m_gxFlatDays == null) m_gxFlatDays = new Dictionary<DateTime, ExitSession.FlatDay>();
+			if (m_gxFlatDays.TryGetValue(day, out f)) return f;
+			f = ExitSession.FlatDay.Regular;
+			InstrumentProfile p = null;
+			try { p = InstrumentProfileOf(1); } catch (Exception) { p = null; }
+			if (p != null)
+			{
+				InstrumentFlatCalendar.Day r = InstrumentFlatCalendar.Of(p.calendar, day);
+				if (r.Closed) f = new ExitSession.FlatDay { Closed = true, EndHhmm = -1, Reason = r.Name };
+				else if (r.EndEt.HasValue)
+				{
+					int et = r.EndEt.Value.Hours * 100 + r.EndEt.Value.Minutes;
+					int x = p.exchangeZone != null ? ExitSession.ExchangeHhmm(day, et, findTz("Eastern Standard Time"), p.exchangeZone) : et;
+					f = new ExitSession.FlatDay { EndHhmm = x, Reason = (r.Name ?? "early close") + ", session ends " + (x / 100).ToString("00", CultureInfo.InvariantCulture) + ":" + (x % 100).ToString("00", CultureInfo.InvariantCulture) + " " + ExitSession.ZoneLabel(p.exchangeZone) };
+				}
+			}
+			m_gxFlatDays[day] = f;
+			return f;
 		}
 
 		/// <summary>Built-in stop, dollars per contract, so the fill bar is protected at the fill ± the planned distance for the whole position.</summary>
