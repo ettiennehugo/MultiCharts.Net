@@ -56,3 +56,11 @@
 Eight slots rerun on #144 head 51bd1ae (ATR carry-over over the quarterly roll, MaxBarsBack-49 ring lookback, Own-source re-apply, daily re-arm): `_Test2` A2-15, `_Test4` DV-02, `_Test5` A2-25+A2-26, `_Test19` A2-13, `_Test20` A2-14, `_Test24` A2-30, `_Test26` A2-32, `_Test28` A2-35. Parsed with `Parse-SlotResults.v3.ps1 -Since '2026-11-16 18:55' -Commit 51bd1ae`; evidence checks against Coder's expected lines are in each row's notes. The other 21 rows keep their earlier commit (de2378a or 770d14e); ten of them (`_Test1`, 3, 6, 7, 9, 10, 11, 12, 17, 22) are marked STALE because their study or host class changed in fdc5cf8 and need a rerun.
 
 Status totals after this update: **20 pass, 4 fail (`_Test6`, `_Test7` pending PR #142; `_Test24` A2-30 holiday-dated balance lines; `_Test28` A2-35 Good Friday position held over the weekend), 4 by-design-0, 1 blocked**.
+
+## PR #152 reruns (c068c60, A2-32 at 03686df; 2026-11-22)
+
+Eleven slots rerun on PR #152 head c068c60 staged over main 2e1a397 GX files, with `_Test26` A2-32 replaced by 03686df (2 contracts, owner decision 2026-11-22): `_Test3` TS-04, `_Test10` PS-25, `_Test11` MT-07, `_Test15` A2-04, `_Test16` A2-09, `_Test17` A2-11, `_Test20` A2-14, `_Test22` A2-28, `_Test24` A2-30, `_Test26` A2-32, `_Test28` A2-35. Parsed with `Parse-SlotResults.ps1 -Since '2026-11-22 13:50'`, then judged against Coder's #152 retest list (items 3, 4, 5, flat-by 14:55 CT = 15:55 ET, re-entry) from the journals; evidence is in each row's notes. Commit column: `pr152 c068c60 / A2-32 03686df`.
+
+New fails: `_Test10` PS-25 run incomplete (no RUN-END, stopped at 2023-09-08; per-bar DVP FIT/RAIL Journal lines); `_Test17` A2-11 and `_Test26` A2-32 each took one entry at 15:01 CT after the 14:55 CT flat-by; `_Test22` A2-28 and `_Test28` A2-35 each re-entered once after a fill-bar stop on the same session/event. `_Test24` A2-30 (holiday-dated lines) and `_Test28` A2-35 (Good Friday weekend hold) earlier fails are fixed. `_Test20` A2-14 is rare-0 at $50k (all 36 daily setups over the 1 pct budget on ES).
+
+Status totals after this update: **17 pass, 7 fail (`_Test6`, `_Test7` pending PR #142; `_Test10`, `_Test17`, `_Test22`, `_Test26`, `_Test28` per above), 4 by-design-0, 1 blocked**.
