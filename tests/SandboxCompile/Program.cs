@@ -280,7 +280,7 @@ static class Program
 		Check(MethodBody(a235, @"void\s+accept\s*\(\s*DateTime\s+et\s*\)").Contains("et.Minute % 5 != 0"), "A2_35 acceptance counts 5-minute closes only");
 		Check(a235.Contains("m_le.Send(2)") && Regex.IsMatch(a235, @"\b2\s*\*\s*risk") && Regex.IsMatch(a235, @"exitPlan\([^;]*,\s*2,\s*mkt"), "A2_35 enters 2 contracts (catalogue T1 50 percent), budgets 2 and plans 2 lots");
 		string a232 = code("A2_32");
-		Check(a232.Contains("m_le.Send(1)") && !Regex.IsMatch(a232, @"\.Send\(2\)") && !Regex.IsMatch(a232, @"(?<![\d.])2\s*\*\s*risk") && a232.Contains("Minute % 15 != 0"), "A2_32 enters 1 contract (single target), budgets 1, counts 15-minute closes");
+		Check(a232.Contains("m_le.Send(2)") && !Regex.IsMatch(a232, @"\.Send\(1\)") && Regex.IsMatch(a232, @"(?<![\d.])2\s*\*\s*risk") && Regex.IsMatch(a232, @"exitPlan\([^;]*,\s*2,\s*mkt") && a232.Contains("ETargetMode.ScaleOutThenRunner") && a232.Contains("Minute % 15 != 0"), "A2_32 enters 2 contracts (owner 2026-11-22), budgets 2, plans 2 lots (T1 + runner), counts 15-minute closes");
 		// A study that sends 2 contracts plans 2 lots in GX (it planned 1 and left a contract without exits).
 		foreach (string k in src.Keys)
 			if (Regex.IsMatch(src[k], @"\.Send\(2\)") && src[k].Contains("exitPlan("))

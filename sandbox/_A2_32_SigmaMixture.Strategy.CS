@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: one contract.
+// Management: two contracts (owner decision 2026-11-22 14:03 ET, coding-plan decision 10): T1 (lot 1) at the next component centre, lot 2 a runner to the centre beyond, stop to entry after T1.
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -50,8 +50,8 @@
 // Skip when: the statistic is not ready, or the budget fails.
 //
 // ## 10. Position sizing and risk
-// Size: 1 contract where this file trades. journalArm is written by exitPlan when GX is used.
-// Risk limit: skip when 1 contract times the stop distance times BigPointValue exceeds 1 percent of equity.
+// Size: 2 contracts where this file trades (owner decision 2026-11-22: "Make A2-32 2 contracts"). journalArm is written by exitPlan when GX is used.
+// Risk limit: skip when 2 contracts times the stop distance times BigPointValue exceeds 1 percent of equity.
 // Size is never shrunk to fit a stop: yes.
 //
 // ## 11. Orders, execution, and costs
@@ -189,7 +189,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; m_upLvl = m_dnLvl = double.NaN; }
 			int posNow = StrategyInfo.MarketPosition;
 			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
-			{   // Analyst MC17: close any remaining contract at flat-by or the next day (Coder 2026-11-22: the entry is now 1 contract, the same as the GX plan)
+			{   // Analyst MC17: close any remaining contract at flat-by or the next day (Coder 2026-11-22: the GX plan now covers both contracts; this stays as a backstop)
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
 				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
 			}
@@ -236,19 +236,31 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk)
 			{ if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} skip: next centre under 1.2R or missing"); m_done = true; return; }
-			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01))   // Coder 2026-11-22: size 1 (catalogue single target, header), budget on 1 contract
-			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: risk exceeds 1 percent"); m_done = true; return; }
-			arm(longSide, entry, stop, target);
-			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(1); } else { if (hostGate(false)) m_se.Send(1); }
+			// Owner decision 2026-11-22 14:03 ET ("Make A2-32 2 contracts", coding-plan decision 10): 2 contracts, budget on both.
+			if (journalOn()) trace(ETraceLevel.Warning, "A2-32 multi-contract size 2");
+			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
+			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			double runner = double.NaN;   // the next component centre beyond the target, for the second lot
+			for (int i = 0; i < sig.levels.Length; i++)
+			{
+				double lv = sig.levels[i];
+				if (longSide ? lv > target && (double.IsNaN(runner) || lv < runner) : lv < target && (double.IsNaN(runner) || lv > runner)) runner = lv;
+			}
+			arm(longSide, entry, stop, target, runner);
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
-		private void arm(bool longSide, double entry, double stop, double target)
-		{
+		private void arm(bool longSide, double entry, double stop, double target, double runner)
+		{   // Owner decision 2026-11-22 (2 contracts): 2 lots, the same pattern as A2-28 / A2-45. T1 (50 percent, lot 1) is the catalogue's
+			// single target (the next component centre); lot 2 runs to the next centre beyond it when there is one (otherwise it has no
+			// price target), with the stop moved to entry after T1 and the 15:55 flat-by.
 			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			double t1 = Math.Abs(target - entry), fin = double.IsNaN(runner) ? 0 : Math.Abs(runner - entry);
+			GxConfig.TargetMode = ETargetMode.ScaleOutThenRunner;
+			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = t1; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.FinalTargetValue = fin > t1 ? fin : 0;
+			GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
@@ -258,7 +270,7 @@ namespace PowerLanguage.Strategy
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
 			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(longSide, entry, stop, 1, mkt, longSide ? "A232LE" : "A232SE");
+			exitPlan(longSide, entry, stop, 2, mkt, longSide ? "A232LE" : "A232SE");   // the plan covers both contracts sent with Send(2)
 		}
 
 		private bool hostGate(bool buy)
