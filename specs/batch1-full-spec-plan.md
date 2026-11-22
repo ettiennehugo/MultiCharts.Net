@@ -1,6 +1,6 @@
 # Batch 1: full-spec rebuild plan (GX-5), one PR per strategy
 
-**Rev 1, Sunday 22 Nov 2026 (CT).** Prepared by Analyst (Grok Bot) for Coder. **Decision 3 of 2026-11-22, Confirmed by Ettienne 2026-11-22** (*"Yes, confirm all four decisions as written."*, about 12:20 ET, relayed to Analyst): the batch-1 strategies must be the **full spec versions** in `specs/strategies/` (01 PS-02, 02 PS-01, 03 VW-01, 04 AV-02, 05 AV-01, 06 OF-01; Rev 1.6–1.7, shared rules in the programme overview R1.8 / 1.9), not the engines-manual worked-example ports now in `sandbox/`. That includes **GX-5**: one PR per strategy, each with an equivalence re-check (`specs/generic-exit-manager-spec.md` §8.6). Docs only; code is Coder's.
+**Rev 1.1, Sunday 22 Nov 2026 (ET).** Coder's review (12:38 ET) and Ettienne's 12:41 ET answers folded in, each Coder point re-checked against `bd0eeb5`, `4135815` (#145) and `f7b2c56` (#147 tip): §0 hostGate attribution corrected (#145); §7 corrected (#146 is a draft at `6d05819`, not merged); check D's baseline is now an open decision for Ettienne; AV-02's overnight hold is being fixed by Coder on #147; Coder's size estimates added (§7); OF-01 stays ≤ 2024-12-31 (**Confirmed by Ettienne 2026-11-22 (via Educator card)**). **Rev 1, Sunday 22 Nov 2026 (CT).** Prepared by Analyst (Grok Bot) for Coder. **Decision 3 of 2026-11-22, Confirmed by Ettienne 2026-11-22** (*"Yes, confirm all four decisions as written."*, about 12:20 ET, relayed to Analyst): the batch-1 strategies must be the **full spec versions** in `specs/strategies/` (01 PS-02, 02 PS-01, 03 VW-01, 04 AV-02, 05 AV-01, 06 OF-01; Rev 1.6–1.7, shared rules in the programme overview R1.8 / 1.9), not the engines-manual worked-example ports now in `sandbox/`. That includes **GX-5**: one PR per strategy, each with an equivalence re-check (`specs/generic-exit-manager-spec.md` §8.6). Docs only; code is Coder's.
 
 **Basis.** Every gap below was checked against the code on `origin/main` @ `bd0eeb5`; line numbers are on that commit. The source was Educator's map (`educator-notes/spec-code-map.md` §4). Where I could not confirm a map claim, or confirmed it with a correction, the entry says so. The strategy specs themselves are **not edited**. I found no internal inconsistency that needs a spec change. The notes in §8 are cross-document points only.
 
@@ -16,17 +16,20 @@ Shared gaps, verified at bd0eeb5 on all six files:
 - **Stale headers:** PS-01 L133–134 says GX is "not in this build", but GX is on main.
 
 Each PR:
-1. A **new file** with the spec's class name, so the sandbox port stays as the equivalence baseline: `_PS_02_BalanceBreakClose` already matches, so its PR rewrites in place and keeps the port at a tagged commit. The others are `_PS_01_BalanceBreakPullback` (matches), `_VW_01_TrendDayVwapPullback`, `_AV_02_ImpulseAvwapHigherLow`, `_AV_01_SwingHighAvwapReclaim` and `_OF_01_StackedImbalanceRetest` (matches). Lifecycle stays `sandbox` (header §1), and the files stay out of `PLStudies.csproj` unless Ettienne promotes them.
+1. A **new file** with the spec's class name, so the sandbox port stays available as a reference (whether it is the check-D baseline is open, see check D): `_PS_02_BalanceBreakClose` already matches, so its PR rewrites in place and keeps the port at a tagged commit. The others are `_PS_01_BalanceBreakPullback` (matches), `_VW_01_TrendDayVwapPullback`, `_AV_02_ImpulseAvwapHigherLow`, `_AV_01_SwingHighAvwapReclaim` and `_OF_01_StackedImbalanceRetest` (matches). Lifecycle stays `sandbox` (header §1), and the files stay out of `PLStudies.csproj` unless Ettienne promotes them.
 2. Rules exactly as the spec's §4 / §5 / §5a. Inputs as §8 and §8.1 (typed enums; default constructor = primary rule). Logging as §9. Coder checklist §12.
 3. Prerequisites: the roll and cost-floor engine tasks T-R1, T-C1 and T-C2 (`specs/sandbox-roll-floor-migration.md`) are merged first. GX flat-by early close (#146) is merged first for the intraday strategies. The enum-input MiniPC check (Prog §9 item 1) is recorded.
-4. Rebase on #144 / #145 / #147 once they merge: they edit the same six sandbox files. For example, #147 adds a `hostGate` call to AV-02.
+4. Rebase on #144 / #145 / #147 once they merge: they edit the same six sandbox files. For example, #145 (`4135815`) adds the `hostGate` calls before AV-02's entry orders (none on `bd0eeb5` or #144 `2df89f0`; the call sites appear in #145 and are kept on `f7b2c56`).
 
 ### Acceptance and equivalence checks (every PR)
 
 - **A. Off-MC unit tests** for the MC-free parts: the state machine, the split rule, same-bar precedence (Prog §9 item 5).
 - **B. Native compile** on the MiniPC (F7 only; one temporary `Compile Include`, not committed).
 - **C. Determinism:** two identical chart runs give identical normalised journals.
-- **D. GX-5 equivalence re-check** (GX spec §8.6; Analyst, MiniPC, ≤ 2024 data). The engine version must match the strategy's own hand-coded version trade for trade, long and short: same entries, exit bars, exit prices, exit reasons and R. Every difference is explained and fixed before the hand-coded path is retired. The hand-coded reference is the spec's own exit logic. The manual-example sandbox port is a *different* strategy, so the port-vs-spec comparison is reported only as a delta list. It is not a pass/fail.
+- **D. GX-5 equivalence re-check: baseline OPEN, Ettienne to decide** (GX spec §8.6; Analyst, MiniPC, ≤ 2024 data). GX spec §8.6 says the engine version must match "the hand-coded version" trade for trade (same entries, exit bars, exit prices, exit reasons and R), assuming each strategy already had a hand-coded PR #117 §7 exit. **No such hand-coded full-spec exit exists** (Coder review, verified: §8.6 replaces "its hand-coded PR #117 §7 exits"; the sandbox ports are manual-example strategies, already partly on GX `SingleTarget` or on local `sendExits`, see §0). Options:
+  - **D1. Hand-coded baseline:** each PR first builds the full-spec strategy with hand-coded exits, then the GX version, and matches them trade for trade as §8.6 says. Faithful to §8.6, but each PR needs both versions, which roughly doubles the work (§7 sizes).
+  - **D2. Port behaviour plus spec-rule assertions:** build only the GX version. Compare it with the current sandbox file's behaviour as an explained delta list (entries that should match do; every difference is traced to a spec rule), and add assertions for each spec exit rule from the journal (T1 at 1 W for half, trail / runner rules, flat-by, failed-break, `T1-SKIPPED`). Cheaper, but not the trade-for-trade equivalence §8.6 describes, so §8.6 would need a one-line amendment.
+  Until Ettienne picks one, check D is defined by that choice; checks A–C and E–F are unaffected.
 - **E. Spec acceptance** (§11 of each spec): 0 Errors except the expected `skipped: multi-contract risk exceeds 1 percent`; the journal lines of §9 are present; floors per market; Table rolls with the confirmation journal.
 - **F. Portfolio Trader one-row reconciliation** against the chart, with Bar Magnifier off. PT has none, and decision 4 makes off the default.
 
@@ -63,7 +66,7 @@ Each PR:
 - Shared items as in §0.
 
 **PR scope:** GX migration (GX-5) plus `BalancePoc` stop, runner and spec inputs. Reuse PS-02's break / acceptance state machine (Prog §9 item 2).
-**Specific checks:** stop = comp.poc ∓ `StopBufferTicks`, widened to the floor; runner target logged; GX equivalence vs the spec's hand-coded exit.
+**Specific checks:** stop = comp.poc ∓ `StopBufferTicks`, widened to the floor; runner target logged; check D per Ettienne's baseline choice.
 
 ## 3. VW-01: `_VW_01_TrendDayFirst` → `_VW_01_TrendDayVwapPullback` (spec 03, Rev 1.7)
 
@@ -81,7 +84,7 @@ Each PR:
 
 ## 4. AV-02: `_AV_02_ImpulseOriginAVWAP` → `_AV_02_ImpulseAvwapHigherLow` (spec 04, Rev 1.7)
 
-**Overnight holding: verified.** The spec's batch-1 scope is the **intraday arm** only (spec L16): entries 09:45–15:00 ET (L37), flat at the 15:45 ET bar, "No overnight" (L46), and `TradesPerDay` (owner-approved enum). The sandbox port calls `arm(true, entry, stop, peak, "AV02LE", true)` (L182). With `hold = true`, `arm` sets `GxConfig.SessionExit = ESessionExit.HoldOvernight` and `MaxHoldDays = 10` (L195–210). The port therefore holds overnight for up to 10 days against an intraday spec. It also has no entry window and no trades-per-day cap. AV-02 is **not** one of the 19 studies Ettienne switched to hold overnight in #147. On the #147 tip `f7b2c56` it still passes `hold = true`, so the overnight hold is a port artefact, not an owner ruling.
+**Overnight holding: verified.** The spec's batch-1 scope is the **intraday arm** only (spec L16): entries 09:45–15:00 ET (L37), flat at the 15:45 ET bar, "No overnight" (L46), and `TradesPerDay` (owner-approved enum). The sandbox port calls `arm(true, entry, stop, peak, "AV02LE", true)` (L182). With `hold = true`, `arm` sets `GxConfig.SessionExit = ESessionExit.HoldOvernight` and `MaxHoldDays = 10` (L195–210). The port therefore holds overnight for up to 10 days against an intraday spec. It also has no entry window and no trades-per-day cap. AV-02 is **not** one of the 19 studies Ettienne switched to hold overnight in #147. On the #147 tip `f7b2c56` it still passes `hold = true`, so the overnight hold is a port artefact, not an owner ruling. **Coder (review 2026-11-22) is fixing this on #147** as part of the flat-by fix Ettienne asked for, so the port should stop holding overnight once that #147 head lands; re-check the `arm` call then. AV-01's overnight hold is correct for its spec (Coder agrees).
 
 **Other gaps (verified):**
 - The anchor is `AvwapManager.Latest(SwingLow)` (an approximation). Spec: impulse origin from a confirmed ≥ 3 ATR PRICEACTION swing.
@@ -123,17 +126,21 @@ Each PR:
 
 **PR scope:** spec §4 zone store (life, `MinAwayBars` arming, first-test-spent logic including ETH, and the limit working on the test bar); 30m aggregator; `DaleHvn` target; aggression trail; variant K; GX migration.
 **Specific checks:** a unit test per first-test path: armed bar, then a limit-working test bar, then fill / no fill → spent; ETH test → spent; no limit on the previous bar → the test is logged as `missed-no-order`. One trade per zone at most.
-**Window:** the spec's W-T runs from 2024-10-28 to the day before the rolling cut (2025-04-30 as of 2026-11-10, Prog §5.1). **This plan stops at 2024-12-31**, about 45 sessions, because current working practice is no 2025+ data. Extending OF-01 into 2025 needs Ettienne's explicit go-ahead (open question).
+**Window:** the spec's W-T runs from 2024-10-28 to the day before the rolling cut (2025-04-30 as of 2026-11-10, Prog §5.1). **This plan stops at 2024-12-31**, about 45 sessions; the rest stays held out (**Confirmed by Ettienne 2026-11-22 (via Educator card)**).
 
 ---
 
 ## 7. PR order
 
-1. Engine prerequisites T-C1 → T-C2, and T-R1 (roll journal). #146 is merged.
+1. Engine prerequisites T-C1 → T-C2, and T-R1 (roll journal). #146 (GX flat-by early close) is **not merged**: it is a draft PR at `6d05819` and must be merged by Ettienne before the intraday strategies' PRs.
 2. PS-02 → PS-01 (shared break detector) → VW-01 → AV-02 → AV-01 (programme overview §1 order, GX §8.6 "simplest exits first").
 3. OF-01 last, after the @ES bid/ask corpus is verified in QuoteManager (spec §10).
 
 Each PR is opened only after the previous one merged. Analyst runs checks D–F after each.
+
+**Rough sizes (Coder's estimates, 2026-11-22):** PS-02 1–2 d; PS-01 1–2 d; VW-01 about 2 d; AV-02 about 2 d; AV-01 2–3 d; OF-01 3+ d. Each roughly doubles if check D needs a hand-coded baseline (option D1).
+
+**Open for Ettienne:** the check-D baseline, D1 or D2.
 
 ## 8. Cross-document notes (no strategy spec edited)
 - AV-01 spec L60 ("Bar Magnifier 1m on Data1") and OF-01 L54 ("tick detail inside the verified tick window") predate decision 4 (Bar Magnifier off by default). Under programme overview rev 1.9 those become the labelled magnifier sensitivity runs.
