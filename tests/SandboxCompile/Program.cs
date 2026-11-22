@@ -366,6 +366,7 @@ static class Program
 		Check(Regex.IsMatch(code("KD_05"), @"class\s+_KD_05_HTFDetrendedRail\s*:\s*_MT_07_HtfDetrendedRail") && raw["KD_05"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream).")
 			&& raw["KD_05"].Contains("// Data2: the same instrument on 15-minute bars") && raw["KD_05"].Contains("// Further series: Data3 = the same instrument on 60-minute bars") && !raw["KD_05"].Contains("Data2 = 60-minute"), "KD_05 header: the MT-07 chart, Data2 15m, Data3 60m");
 		Check(!Regex.IsMatch(code("KD_05"), @"signalDs|targetBlock|htfStep|htfAccepted|DvpConfig\.streams|HtfClosedBar|dvpRailPrice") && code("KD_05").Contains("if (!IsExist(2) || !IsExist(3))"), "KD_05 reads Data2 / Data3 exactly as MT-07 (no override), and requires both");
+		Check(code("PS_25").Contains("+ \" time stop 41 bars = \" + (41 * sigMin) + \" min\")"), "PS_25 plan line shows the time stop (41 bars = 41 min on Data1, 615 min for MT-07 / KD-05)");
 		// Analyst LE-01 recheck: 'days' is ring occupancy (cap 253); the journal prints the uncapped count and the ring.
 		Check(code("LE_01").Contains("DailyContext.DaysSeen + \" (ring \" + DailyContext.Days + \"/\" + DailyContext.Capacity"), "LE_01 journals the uncapped day count and the ring occupancy");
 		// Resting-order windows use the GX date-aware cutoff (#146), not _SandboxRules.PastFlat.

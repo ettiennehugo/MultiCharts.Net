@@ -196,7 +196,8 @@ namespace PowerLanguage.Strategy
 			{
 				double s1 = dvpRailPrice(ds, ELevelKind.DvpSigma, 1);
 				trace(ETraceLevel.Journal, GxOrderPrefix + " plan Data" + ds + " (" + sigMin + "m) entry " + entry.ToString("0.00") + " stop " + stop.ToString("0.00") + " vah " + vah.ToString("0.00")
-					+ " target +2 sigma " + up2.ToString("0.00") + " (" + (up2 - entry).ToString("0.00") + " pts, sigma " + (up2 - s1).ToString("0.00") + ", atr " + atr.ToString("0.00") + ")");
+					+ " target +2 sigma " + up2.ToString("0.00") + " (" + (up2 - entry).ToString("0.00") + " pts, sigma " + (up2 - s1).ToString("0.00") + ", atr " + atr.ToString("0.00") + ")"
+					+ " time stop 41 bars = " + (41 * sigMin) + " min");   // Coder 2026-11-22 (Analyst follow-up): the clock GX was given
 			}
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, up2, "PS25LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
