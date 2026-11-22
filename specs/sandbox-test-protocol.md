@@ -5,6 +5,8 @@
 **Requested by Ettienne, 2026-11-12 07:36 ET (verbatim):** *"I'll want to systematically test all those signals by moving their code to one of the _Test** signals. Test them thoroughly and document the results. We can create more _Test** signals, say 30 so we can test larger batches of signals at a time."*
 Earlier the same morning Ettienne said: test and development strategies live in `sandbox/` and are not in `PLStudies.csproj`; concrete strategies go in the studies folder.
 
+**Rev 1.3, 2026-11-22 (CT), Confirmed by Ettienne 2026-11-22 (decision 4 of 2026-11-22):** Bar Magnifier is **off** by default for sandbox runs (Fills row); battery item 6 now reruns with the magnifier **on** as the sensitivity check. Results recorded before rev 1.3 with the magnifier on keep that label in the results CSV. Docs only. The per-run magnifier record is manual (Coder review 2026-11-22, verified): there is no code hook. Note: the frozen `_A2_63_RegimeGate` header still says "1m Bar Magnifier" in its SETUP comment (L35); the study is frozen, so it is not edited, and its pinned runs keep their own setting.
+
 **Rev 1.2, 2026-11-12 08:08 ET:** the `_Test1` order-flow probe moved unchanged to `_McBidAskProbe.Strategy.CS` and the `_Test6` A2-63 regime-gate harness moved unchanged to `_A2_63_RegimeGate.Strategy.CS` (both at the repo root, each with its own `Compile Include`, owner-approved). `_Test1` and `_Test6` are now inert free slots. See §9 item 10.
 
 **Rev 1.1, 2026-11-12 08:06 ET (owner answers):** `_Test3` class renamed to `_Test3`; `_Test1` released as a free slot; starting capital $50,000; sandbox signals are standardized by Coder before testing (owner 08:03 ET). See §9.
@@ -147,7 +149,7 @@ Every step writes its evidence into the signal's result block (§6). The battery
 | Date range | **dated** From/To, To ≤ 2024-12-31, set before OK. Windows: W-M development = first verified full month Jun/Jul 2016 → 2022-12-31; validation = 2023-01-01 → 2024-12-31. SW-02 (daily) W-D: development 2000–2015, validation 2016–2024 |
 | Data coverage | If @ES minute history on the MiniPC still starts 26 Dec 2022 (overview §5.2 caveat), every 1m/30m run is an **engineering smoke test**, not development evidence. Record the first bar date actually loaded |
 | Costs | ES: commission **$2.25 per contract per side**, slippage **$6.25 per contract per side** (= $17.00 round trip, overview §4). NQ $2.24 + $2.50, CL $2.36 + $5.00, 6E $2.46 + $3.125 if another instrument is run |
-| Fills | Bar Magnifier **on**, 1-minute detail for bars above 1m (30m, daily). Limits fill on trade-through only. IOG **off** (none of the ten signals declares IOG) |
+| Fills | Bar Magnifier **off** (rev 1.3, Confirmed by Ettienne 2026-11-22; programme overview rev 1.9 §4, GX §8.7). Limits fill on trade-through only. IOG **off** (none of the ten signals declares IOG). Record the magnifier setting on every run, **by hand** in the result block's `Settings` line: it is a Strategy Properties setting, and no study code reads or journals it (no code hook: on `bd0eeb5`, `git grep -i magnifier` finds comments plus the order-flow `IogMagnifierOneTick` flag (`_VolumeProfileFuturesBase` L601), which a study sets by hand and which does not read the MultiCharts setting) |
 | Size / capital | Size as coded (1 contract). Initial capital: **$50,000** (Ettienne, 2026-11-12 08:06 ET). Record it. The sandbox signals skip a trade when 1 contract × stop × big point value > 1% of equity: at $50,000 that is **$500 risk**, so on ES ($50/point, $12.50/tick) a stop wider than **10 points = 40 ticks** is skipped and journaled |
 | Max bars back | Auto-detect, or the value the signal's warm-up needs; record it |
 | Inputs | `TraceLevel = Journal`. All other inputs at defaults unless the step says otherwise |
@@ -180,7 +182,7 @@ Every step writes its evidence into the signal's result block (§6). The battery
 3. **Decision bar before fill bar.** For every trade, entry fill time > the close time of the bar that armed it (`ARM`/`journalArm` time). For Data2 users (TS-01, TS-03, VW-05): the HTF value used was from a Data2 bar whose close ≤ the Data1 decision bar close (`HtfClosedBar`).
 4. **IOG.** Properties show IOG off. If a spec ever needs IOG, its setting is recorded and the run repeated with Bar Magnifier off to show the difference.
 5. **Fill bar.** Count trades whose fill bar crossed the coded stop level while the stop was not yet working. Known unprotected fill bars: DV-15 and A2-64/A2-70 (headers say so). Report the count and the extra loss versus a stop at the coded level. Also count ambiguous bars (stop and target both touched) and confirm stop-first scoring (overview §4).
-6. **Bar Magnifier sensitivity.** Rerun with Bar Magnifier off; report the change in trades and net. A large change is a note, not a fail.
+6. **Bar Magnifier sensitivity.** Rerun with Bar Magnifier **on** (1-minute detail for bars above 1m); report the change in trades and net. A large change is a note, not a fail. (Rev 1.3: the primary run is magnifier off.)
 - **Pass:** 1–3 clean; 5 reported.
 
 **(f) Performance summary (≤ 2024 only).** From the journal (preferred) or the Strategy Performance Report, development window, then validation window as a separate row:
@@ -202,7 +204,7 @@ Then an edge note against overview §6 (net PF ≥ 1.20 and positive expectancy;
 ### <ID> — <Name>   (slot _TestNN, batch <B>)
 Source: sandbox/<file> @ <commit> (blob <blob>); slot diff check: identical except class rename [yes/no]
 Chart: <symbol> <bar size> <session template> | Data2: <...> | From <date> To <date ≤ 2024-12-31> | first bar loaded <date>
-Settings: commission $/side, slippage $/side, Bar Magnifier <on 1m/off>, IOG off, capital $<n>, MaxBarsBack <n>, inputs <non-default only>
+Settings: commission $/side, slippage $/side, Bar Magnifier <off (default)/on 1m>, IOG off, capital $<n>, MaxBarsBack <n>, inputs <non-default only>
 Runs: <runId list with step letter>
 (a) Compile: <PASS/FAIL> <first error if any>
 (b) Run: <PASS/FAIL> bars <n>, trades <n>, Warnings <n by text>, Errors <n>
