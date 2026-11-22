@@ -105,3 +105,25 @@ Results:
 - **Errors**: the only Errors are A2-32's 26 expected multi-contract 1 percent risk skips. Nothing is dated 2025 or later.
 
 Status totals after this update: **22 pass, 3 fail (`_Test6`, `_Test7` pending PR #142; `_Test22` pending the rebased #152 head), 4 by-design-0, 1 blocked, 0 pending**.
+
+## PR #152 rechecks on a71c9a8 (2026-11-22)
+
+Set1 staged at 18:39 ET straight from the a71c9a8 tip (rebased stack on main 2e1a397, fast-forward of 3c6e32c; no merge needed): the batch-1 slots plus `_Test30` LE-01, roots `_CustomSignal` 4e3bef96, `_GenericExit` 6907986e, `_DvpEngine` 365836cd, `_SandboxRules` 8f87cbbf and `_DailyContext` 73c23e95. F7 at 18:40:13 ET; runs 18:41-18:52 ET MiniPC clock (17:41-17:52 CT). Rerun: `_Test22` A2-28, `_Test10` PS-25, `_Test30` LE-01, `_Test11` MT-07 (workspace changed in-session to Data1 1m + Data2 15m + Data3 60m, as the new header requires).
+
+Results:
+- **A2-28** (now pass): 64 plan lines, 53 'source mid', 8 'source void', 3 'T1 none'.
+  - Every 'source mid' T1 equals the entry/mu_major midpoint rounded to the tick (53 of 53, checked in ticks).
+  - T1 fills on 26 of 64 trades (22 mid, 4 void); it was 0 of 64 on fdc6a95 / 69fc801.
+  - After T1 the runner exits 10 at mu_major, 1 at flat-by and 15 on its stop: 14 at entry +/-1 tick (break-even), 1 four ticks through entry on the bar after T1 (gap fill).
+- **PS-25**: all 201 trades identical to e03f6d1 (0 diffs in times, side, qty, exit order or fills); the new 'plan Data1 (1m)' line is present.
+- **MT-07**: plan lines read 'Data2 (15m)'. 3 trades (was 36): 2 target, 1 stop.
+  - Target exits on the bar after entry: 0 of 2 (was 13 of 22); median target distance 11.5 ticks (was 5.5).
+  - 6 '+2 sigma target beyond the 60m next rail' skips, 48 '+2 sigma rail not above the entry', 20 risk-budget skips.
+  - The time stop is 41 x the Data2 bar minutes (615 with 15m); it is not printed and no trade reached it (longest hold 74 min).
+  - KD-05 (`_Test12`) inherits this code, but its header and B01v2 workspace still say Data2 = 60m.
+- **LE-01**: the daily line now reads 'days N (ring R/253)'. N rises every day with no stall: 253 on 2023-12-22, 254 on 2023-12-26, 516 on 2024-12-31.
+  - Same closed trade as before; 'pos 1' every day from 2023-11-07 to 2024-12-31, so the 2023-11-06 long is still open at RUN-END.
+- **Early closes**: no entry, plan or order activity after the date-aware cutoff on 2023-07-03, 2023-11-24, 2024-07-03, 2024-11-29 or 2024-12-24 in any of the four runs; no activity at all on Good Friday 2023-04-07. None of these four studies enters in the evening session, so the evening-entry check needs the hold studies in Set2.
+- **Errors**: only A2-28's 13 expected multi-contract 1 percent risk skips. Nothing is dated 2025 or later.
+
+Status totals after this update: **23 pass, 2 fail (`_Test6`, `_Test7` pending PR #142), 4 by-design-0, 1 blocked, 0 pending**.
