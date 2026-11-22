@@ -109,8 +109,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>True on a day whose session ends before the regular close (early close, holiday halt, abbreviated session) once the
-		/// bar is at or past that day's end minus five minutes. GX resolves one FlatByHHMM per run, so the sandbox flattens these days
-		/// itself; on a regular day this is false and GX's flat-by is unchanged.</summary>
+		/// bar is at or past that day's end minus five minutes. The studies' own mustFlatten() exits use this; GX-managed positions get
+		/// the early close from GX itself (PR #146). On a regular day this is false.</summary>
 		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd, out string why)
 		{
 			why = null;
@@ -122,9 +122,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
-		/// <summary>The reason every sandbox flat-by exit journals: that Globex date's session end in ET, named by the CME calendar on an
-		/// early close or holiday halt, otherwise "regular". A study that flattens with its own orders (YV-11) uses this, so its line
-		/// reads like the GX path's sandboxEarlyFlat line.</summary>
+		/// <summary>The reason a sandbox study that flattens with its own orders (YV-11) journals: that Globex date's session end in ET,
+		/// named by the CME calendar on an early close or holiday halt, otherwise "regular". GX-managed studies journal FLATBY in GX's
+		/// EXIT CLOSE line instead.</summary>
 		public static string FlatByReason(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
 		{
 			DateTime gx = PowerLanguage.Function._CmeSessionClock.GlobexTradingDayEt(barEt);
