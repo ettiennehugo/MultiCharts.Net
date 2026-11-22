@@ -1147,18 +1147,25 @@ namespace PowerLanguage.Function
 			/// (FromEt &lt; closeEt &lt;= ToEt; the RT chunk also covers everything after) is Done and released.</summary>
 			public bool ReadyAt(DateTime closeEt)
 			{
-				foreach (var l in m_byStream)
+				for (int si = 0; si < m_byStream.Length; si++)
 				{
-					TickChunk cover = null;
-					foreach (var c in l)
-					{
-						if (c.Replaced) continue;
-						if (c.FromEt >= closeEt) break;
-						if (closeEt <= c.ToEt || c.Rt) { cover = c; break; }
-					}
+					TickChunk cover = CoverAt(si, closeEt);
 					if (cover == null || cover.State != ChunkState.Done || !cover.Released) return false;
 				}
 				return m_byStream.Length > 0;
+			}
+
+			/// <summary>The live chunk of stream index si covering the bar closing at closeEt (FromEt &lt; closeEt &lt;= ToEt; the RT chunk
+			/// also covers everything after), or null. Shared by ReadyAt and the M-TICK chunk feed.</summary>
+			public TickChunk CoverAt(int si, DateTime closeEt)
+			{
+				foreach (var c in m_byStream[si])
+				{
+					if (c.Replaced) continue;
+					if (c.FromEt >= closeEt) break;
+					if (closeEt <= c.ToEt || c.Rt) return c;
+				}
+				return null;
 			}
 
 			/// <summary>Chunks not finished, or finished Done but not yet released.</summary>
