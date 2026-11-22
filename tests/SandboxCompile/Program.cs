@@ -247,7 +247,7 @@ static class Program
 		}
 		Func<string, string> code = k => src.ContainsKey(k) ? src[k] : "";
 		// Data2 = native timeframe: these read closed Data2 bars.
-		foreach (string k in new[] { "YV_12", "A2_76", "A2_79", "MT_07", "SP_08", "DV_11", "A2_04" })
+		foreach (string k in new[] { "YV_12", "A2_76", "A2_79", "SP_08", "DV_11", "A2_04" })
 			Check(code(k).Contains("HtfClosedBar(2,"), k + " reads closed Data2 bars (HtfClosedBar(2, ...))");
 		Check(Regex.IsMatch(code("YV_12"), @"atr14\s*=\s*nativeAtr\(14\)") && Regex.IsMatch(code("YV_12"), @"span\s*>=\s*1\.0\s*\*\s*atr14"), "YV_12 signal bar range >= 1.0 x ATR14 of the Data2 5m bars");
 		// Recalc reuse: StartCalc clears the per-pass history.
@@ -353,7 +353,15 @@ static class Program
 			}
 		}
 		Check(code("A2_04").Contains("m_lxLmt.Send(m_target, 1)") && code("A2_04").Contains("Contracts.UserSpecified, \"A204LT\"") && !Regex.IsMatch(raw["A2_04"], @"Size(:| stays) 1 contract"), "A2_04 2 lots: T1 one lot at 1 R, the runner on the stop / sVWAP / 11:30 flat, header agrees");
-		Check(code("MT_07").Contains("dvpRailPrice(2, ELevelKind.DvpVah, 0)") && Regex.IsMatch(code("MT_07"), @"DvpConfig\.streams\s*=\s*new\[\]\s*\{\s*1\s*,\s*2\s*\}") && code("PS_25").Contains("htfStep();"), "MT_07 tests the 60m close against the 60m DVP stream's VAH after the engines step");
+		Check(code("MT_07").Contains("private const int HtfDs = 3;") && code("MT_07").Contains("dvpRailPrice(HtfDs, ELevelKind.DvpVah, 0)") && code("MT_07").Contains("HtfClosedBar(HtfDs, 0,") && Regex.IsMatch(code("MT_07"), @"DvpConfig\.streams\s*=\s*new\[\]\s*\{\s*2\s*,\s*3\s*\}") && code("PS_25").Contains("htfStep();"), "MT_07 tests the 60m (Data3) close against the 60m DVP stream's VAH after the engines step");
+		// Analyst MT-07 retest (22 of 36 on the +2 sigma target, 13 on the bar after entry): PS-25 runs on the 15m Data2 stream in MT-07.
+		Check(Regex.IsMatch(code("MT_07"), @"override\s+int\s+signalDs\(\)\s*\{\s*return\s+2;\s*\}") && code("PS_25").Contains("protected virtual int signalDs() { return 1; }")
+			&& code("PS_25").Contains("dvpRailPrice(ds, ELevelKind.DvpVah, 0)") && code("PS_25").Contains("dvpRailPrice(ds, ELevelKind.DvpSigma, 2)") && code("PS_25").Contains("HtfClosedBar(ds, ago,")
+			&& code("PS_25").Contains("if (ds > 1 && !newSignalBar(ds)) return;") && code("PS_25").Contains("double atr = ds == 1 ? averageTrueRange(Bars, 14) : sigAtr(ds, 14);")
+			&& code("PS_25").Contains("GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;") && code("PS_25").Contains("arm(true, entry, stop, up2, \"PS25LE\", 0)"), "MT_07 PS-25 rails, ATR, acceptance closes and +2 sigma target come from the 15m Data2 stream; the target is the rail price, in points from the entry");
+		Check(code("PS_25").Contains("GxConfig.TimeStopBars = ds == 1 ? 41 : 0; m_timeStop = ds == 1 ? 0 : 41 * sigMin;"), "PS_25 41-bar time stop counts signal-stream bars (MT-07: 41 x 15 minutes)");
+		Check(Regex.IsMatch(MethodBody(code("MT_07"), @"override\s+string\s+targetBlock\s*\(\s*double\s+target\s*\)"), @"dvpHtfNextRailDistAtr\(HtfDs, 1\)[\s\S]*target <= htfRail \? null"), "MT_07 the 15m target rail lies inside the 60m next-rail distance (catalogue MT-07)");
+		Check(raw["MT_07"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream)."), "MT_07 header: Data2 15m, Data3 60m");
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
 		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
 		Check(code("A2_28").Contains("_SandboxRules.MidT1Points(longSide, entry, target, tickSize())") && code("A2_28").Contains("t1Src = \"mid\"") && code("A2_28").Contains("\" source \" + t1Src")

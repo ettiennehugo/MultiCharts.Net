@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the MT-07 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
+// Research assumption: ASSUMPTION: This file is PS-25 on the 15-minute Data2 stream (catalogue MT-07: "15m PS-25 entries"). It sends that entry only after two 60-minute closes (closed Data3 60-minute bars) have held beyond the 60-minute (Data3) DVP stream's VAH, and only when the 15-minute +2 sigma target lies inside the 60-minute next-rail distance (DvpConfig.streams 2 and 3).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -39,10 +39,10 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 60-minute.
+// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream). Same symbol and session template.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: the same instrument on 60-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
-// Further series: Not applicable
+// Data2: the same instrument on 15-minute bars (owner rule: Data2 = native timeframe, the 15m entry stream). The PS-25 rule reads closed Data2 bars only (HtfClosedBar(2, ...) via signalDs).
+// Further series: Data3 = the same instrument on 60-minute bars, the HTF acceptance stream, read through HtfClosedBar(3, ...).
 // Warmup: the average or profile the rule names.
 //
 // ## 9. Entry and filters
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// No exit orders. This file does not open a position.
+// Exit orders: GX, inherited from PS-25. Stop and the 15m +2 sigma target (rail price minus entry, in points). Time stop 41 Data2 bars (41 x 15 = 615 minutes). Flat at the session value end.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
+// Other: ASSUMPTION: This file is PS-25 on the 15-minute Data2 stream (catalogue MT-07: "15m PS-25 entries"). It sends that entry only after two 60-minute closes (closed Data3 60-minute bars) have held beyond the 60-minute (Data3) DVP stream's VAH, and only when the 15-minute +2 sigma target lies inside the 60-minute next-rail distance (DvpConfig.streams 2 and 3).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
+// ASSUMPTION: This file is PS-25 on the 15-minute Data2 stream (catalogue MT-07: "15m PS-25 entries"). It sends that entry only after two 60-minute closes (closed Data3 60-minute bars) have held beyond the 60-minute (Data3) DVP stream's VAH, and only when the 15-minute +2 sigma target lies inside the 60-minute next-rail distance (DvpConfig.streams 2 and 3).
 // IOG is disabled.
 
 
@@ -145,18 +145,19 @@ namespace PowerLanguage.Strategy
 	public class _MT_07_HtfDetrendedRail : _PS_25_AcceptBeyondRail
 	{
 		private int m_htf;
-		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
-		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		// Coder 2026-11-22: the 60m HTF stream (Data3) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data3 bar; nativeBar(ago) is the ago-th closed Data3 bar; nativeAtr(n) is the mean true range of the last n closed bars.
 		private DateTime m_nativeTime = DateTime.MinValue;
-		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private const int HtfDs = 3;   // Coder 2026-11-22: Data3 = 60m HTF; Data2 = the 15m PS-25 signal stream (catalogue MT-07)
+		private bool nativeReady(int ago) { return IsExist(HtfDs) && BarsOfData(HtfDs).CurrentBar > ago + 2; }
 		private bool newNativeBar()
 		{
 			if (!nativeReady(0)) return false;
-			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			DateTime t; double o, h, l, c, v; HtfClosedBar(HtfDs, 0, out t, out o, out h, out l, out c, out v);
 			if (t == m_nativeTime) return false;
 			m_nativeTime = t; return true;
 		}
-		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(HtfDs, ago, out t, out o, out h, out l, out c, out v); }
 		private double nativeAtr(int n)
 		{
 			if (!nativeReady(n)) return double.NaN;
@@ -179,21 +180,34 @@ namespace PowerLanguage.Strategy
 
 		// Coder 2026-11-22 (Analyst native retest of #152: 29 trades 2023-02-07..2023-12-08, none in 2024; catalogue MT-07 "the 60m M-DVP
 		// stream, from its last closed HTF bar, shows the same-direction acceptance state (close beyond its VAH for >= 2 HTF bars)"):
-		// the 60-minute close is now tested against the 60-minute (Data2) DVP stream's VAH, not the 1-minute Data1 rail, and the count
+		// the 60-minute close is now tested against the 60-minute (Data3 since the 15m fix; was Data2) DVP stream's VAH, not the 1-minute Data1 rail, and the count
 		// steps after the engines (PS-25 htfStep), not before them. The state change is journalled once per change.
-		protected override void Create() { base.Create(); DvpConfig.streams = new[] { 1, 2 }; }
+		protected override void Create() { base.Create(); DvpConfig.streams = new[] { 2, 3 }; }
 		private int m_htfLogState = -1;
 		protected override void htfStep()
 		{
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			if (!IsExist(HtfDs)) { if (m_htfLogState != -2) { m_htfLogState = -2; if (journalOn()) trace(ETraceLevel.Error, "Data3 (60m) missing"); } return; }
 			if (!newNativeBar()) return;
 			double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
-			double vah = dvpRailPrice(2, ELevelKind.DvpVah, 0);
+			double vah = dvpRailPrice(HtfDs, ELevelKind.DvpVah, 0);
 			if (!double.IsNaN(vah) && c > vah) m_htf++;
 			else m_htf = 0;
 			int st = double.IsNaN(vah) ? 0 : m_htf >= 2 ? 2 : 1;
 			if (st != m_htfLogState) { m_htfLogState = st; if (journalOn()) trace(ETraceLevel.Journal, "MT-07 60m DVP " + (st == 0 ? "no fit (warm-up or the window crosses a roll)" : st == 2 ? "accepted above VAH " + vah.ToString("0.00") : "not accepted, VAH " + vah.ToString("0.00"))); }
 		}
 		protected override bool htfAccepted() { return m_htf >= 2; }
+		// Coder 2026-11-22 (Analyst MT-07 retest: 22 of 36 trades on the +2 sigma target, 13 filled on the bar after entry): the PS-25
+		// rule now runs on the 15m stream (signalDs), not on 1-minute bars whose 240-bar fit made sigma a few points; and the catalogue's
+		// "the 15m target rail lies inside the HTF next-rail distance" is applied: the target may not sit beyond the nearest 60m rail
+		// above Data1 C(t-1). No 60m rail above (NaN distance) leaves the target free.
+		protected override int signalDs() { return 2; }
+		protected override string targetBlock(double target)
+		{
+			double dist = dvpHtfNextRailDistAtr(HtfDs, 1);
+			DvpSnapshot s = dvpSnapshot(HtfDs);
+			if (double.IsNaN(dist) || s == null || !(s.atr > 0)) return null;
+			double htfRail = Bars.Close[1] + dist * s.atr;
+			return target <= htfRail ? null : "+2 sigma target " + target.ToString("0.00") + " beyond the 60m next rail " + htfRail.ToString("0.00");
+		}
 	}
 }
