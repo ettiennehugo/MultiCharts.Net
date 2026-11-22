@@ -561,6 +561,49 @@ namespace PowerLanguage.Function
 		}
 	}
 
+	/// <summary>GX date-aware flat-by (owner 2026-11-22: "Yes, fix GX for early closes"). One trading date of the profile's calendar:
+	/// Closed, or the early session end in US Eastern (the earlier of the holiday halt and the early RTH close), null on a regular day.
+	/// CmeEquityIndex reads _CmeHolidays.Rules.Get (VPF-6, any year). CmeRates / CmeFx / CmeEnergy / CmeMetals read the M8 product
+	/// table for 2016-2026 and are regular outside it. Nyse / NyseStandIn read the NYSE closures and the 13:00 ET half days
+	/// (_NyseHolidays.Rules). Observed / None have no holiday calendar and are always regular.</summary>
+	public static class InstrumentFlatCalendar
+	{
+		public struct Day
+		{
+			public bool Closed;
+			public TimeSpan? EndEt;
+			public string Name;
+		}
+
+		public static Day Of(ECalendar c, DateTime date)
+		{
+			DateTime d = date.Date;
+			switch (c)
+			{
+				case ECalendar.CmeEquityIndex:
+					return FromCme(_CmeHolidays.Rules.Get(d));
+				case ECalendar.CmeRates: case ECalendar.CmeFx: case ECalendar.CmeEnergy: case ECalendar.CmeMetals:
+					if (!_CmeHolidays.Rules.Product.Covers(d)) return new Day();
+					return FromCme(_CmeHolidays.Rules.Product.Of(d, InstrumentCalendars.ProductGroup(c)));
+				case ECalendar.Nyse: case ECalendar.NyseStandIn:
+					if (_NyseHolidays.Rules.Holidays(d.Year).Contains(d)) return new Day { Closed = true, Name = "NYSE holiday" };
+					string name;
+					TimeSpan? early = _NyseHolidays.Rules.EarlyCloseEt(d, out name);
+					return new Day { EndEt = early, Name = name };
+				default:
+					return new Day();
+			}
+		}
+
+		static Day FromCme(_CmeHolidays.Rules.Day r)
+		{
+			if (r.Closed) return new Day { Closed = true, Name = r.Name };
+			TimeSpan? end = r.HaltEt;
+			if (r.RthCloseEt.HasValue && (!end.HasValue || r.RthCloseEt.Value < end.Value)) end = r.RthCloseEt;
+			return new Day { EndEt = end, Name = end.HasValue ? r.Name : null };
+		}
+	}
+
 	/// <summary>§8.2 expiry / roll rule arithmetic. isBusinessDay is injected and REQUIRED (R6 / §6.4 S4: no silent weekday fallback;
 	/// a missing calendar refuses with reason 'calendar'). Callers pass InstrumentCalendars.Require(profile.calendar) (= the profile's
 	/// isBusinessDay); CL/GC/ZN/6E use the NYSE stand-in until PR-M8. Contract = (year, month).</summary>

@@ -61,6 +61,21 @@ namespace PowerLanguage.Function
 				return list;
 			}
 
+			/// <summary>NYSE 13:00 ET early close (NYSE rule 7.2 half days), or null: the day after Thanksgiving, and Jul 3 / Dec 24
+			/// when they fall Monday-Thursday (a Friday Jul 3 or Dec 24 is the observed holiday or a full day). The weekly MultiCharts
+			/// session template cannot carry these dates, so GX flat-by reads them here.</summary>
+			public static TimeSpan? EarlyCloseEt(DateTime date, out string name)
+			{
+				DateTime d = date.Date;
+				name = null;
+				if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) return null;
+				if (d == NthWeekday(d.Year, 11, DayOfWeek.Thursday, 4).AddDays(1)) name = "Day after Thanksgiving";
+				else if (d.Month == 12 && d.Day == 24 && d.DayOfWeek <= DayOfWeek.Thursday) name = "Christmas Eve";
+				else if (d.Month == 7 && d.Day == 3 && d.DayOfWeek <= DayOfWeek.Thursday) name = "Independence Day eve";
+				if (name == null || Holidays(d.Year).Contains(d)) { name = null; return null; }
+				return new TimeSpan(13, 0, 0);
+			}
+
 			/// <summary>Saturday → Friday, Sunday → Monday.</summary>
 			public static DateTime Observed(DateTime holiday)
 			{

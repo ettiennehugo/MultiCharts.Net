@@ -1096,9 +1096,41 @@ static class Program
 		Check(es.costFloorTicks == 14 && mes.costFloorTicks == 20 && es.ProfileHash() == "020deca78d6392b7", "M7 profile floors and ES pin " + es.ProfileHash());
 	}
 
+	// GX date-aware flat-by (owner 2026-11-22): the per-date session end GX reads from the profile calendar, in ET.
+	static void FlatCalendar()
+	{
+		InstrumentFlatCalendar.Day d;
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEquityIndex, new DateTime(2023, 4, 7));
+		Check(!d.Closed && d.EndEt == new TimeSpan(9, 15, 0) && d.Name.StartsWith("Good Friday"), "ES Good Friday 2023 ends 09:15 ET (08:15 CT)");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEquityIndex, new DateTime(2024, 1, 15));
+		Check(!d.Closed && d.EndEt == new TimeSpan(13, 0, 0) && d.Name.StartsWith("Martin Luther King"), "ES MLK 2024 halts 13:00 ET (12:00 CT)");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEquityIndex, new DateTime(2024, 11, 29));
+		Check(!d.Closed && d.EndEt == new TimeSpan(13, 15, 0), "ES day after Thanksgiving 2024 ends 13:15 ET (12:15 CT)");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEquityIndex, new DateTime(2024, 3, 29));
+		Check(d.Closed, "ES Good Friday 2024 is closed");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEquityIndex, new DateTime(2024, 6, 3));
+		Check(!d.Closed && d.EndEt == null && d.Name == null, "ES regular day has no early end");
+		d = InstrumentFlatCalendar.Of(ECalendar.Nyse, new DateTime(2024, 11, 29));
+		Check(!d.Closed && d.EndEt == new TimeSpan(13, 0, 0) && d.Name == "Day after Thanksgiving", "stock day after Thanksgiving 2024 ends 13:00 ET");
+		d = InstrumentFlatCalendar.Of(ECalendar.Nyse, new DateTime(2024, 11, 28));
+		Check(d.Closed, "stock Thanksgiving 2024 is closed");
+		d = InstrumentFlatCalendar.Of(ECalendar.Nyse, new DateTime(2024, 6, 3));
+		Check(!d.Closed && d.EndEt == null, "stock regular day");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeEnergy, new DateTime(2024, 1, 15));
+		Check(!d.Closed && d.EndEt == new TimeSpan(14, 30, 0), "CL MLK 2024 halts 13:30 CT (product table)");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeRates, new DateTime(2024, 11, 29));
+		Check(!d.Closed && d.EndEt == new TimeSpan(13, 15, 0), "ZN day after Thanksgiving 2024 ends 12:15 CT");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeMetals, new DateTime(2023, 4, 7));
+		Check(d.Closed, "GC Good Friday 2023 is closed (product table)");
+		d = InstrumentFlatCalendar.Of(ECalendar.CmeFx, new DateTime(2015, 11, 27));
+		Check(!d.Closed && d.EndEt == null, "a product calendar outside 2016-2026 is regular");
+		d = InstrumentFlatCalendar.Of(ECalendar.Observed, new DateTime(2024, 11, 29));
+		Check(!d.Closed && d.EndEt == null, "Observed has no holiday calendar");
+	}
+
 	static int Main()
 	{
-		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly, M6fCluster, M7Floor })
+		foreach (var t in new Action[] { T2Roots, T3Checks, T4Expiry, T5Digest, T6Windows, T7TradingDay, T8Derived, FxCrypto, T9Costs, T11Texts, T13Hash, T16SessionEnds, T12Lines, M3Wiring, D2ExchangeTime, M6aWindow, M6eWeekly, M6fCluster, M7Floor, FlatCalendar })
 		{
 			try { t(); } catch (Exception ex) { Check(false, t.Method.Name + " threw " + ex.GetType().Name + ": " + ex.Message); }
 		}

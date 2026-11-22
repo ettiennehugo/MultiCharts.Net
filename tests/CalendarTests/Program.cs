@@ -132,6 +132,14 @@ static class Program
 
 		ProductRows();
 
+		// GX flat-by (owner 2026-11-22): NYSE 13:00 ET half days, Monday-Thursday Jul 3 / Dec 24 and the day after Thanksgiving.
+		string nm;
+		foreach (DateTime d in new[] { D(2023, 7, 3), D(2023, 11, 24), D(2024, 7, 3), D(2024, 11, 29), D(2024, 12, 24), D(2019, 12, 24), D(2025, 7, 3), D(2025, 12, 24) })
+			Check(Nyse.EarlyCloseEt(d, out nm) == H1300 && nm != null, "NYSE 13:00 half day " + d.ToString("yyyy-MM-dd"));
+		foreach (DateTime d in new[] { D(2024, 6, 3), D(2021, 12, 24), D(2020, 7, 3), D(2022, 7, 1), D(2023, 12, 22), D(2026, 7, 3), D(2024, 11, 28), D(2022, 12, 24) })
+			Check(Nyse.EarlyCloseEt(d, out nm) == null && nm == null, "NYSE full day or holiday " + d.ToString("yyyy-MM-dd"));
+		Check(Nyse.EarlyCloseEt(D(2024, 11, 29), out nm) == H1300 && nm == "Day after Thanksgiving", "NYSE half day name");
+
 		Console.WriteLine("calendar tests: " + s_pass + " passed, " + s_fail + " failed");
 		return s_fail == 0 ? 0 : 1;
 	}

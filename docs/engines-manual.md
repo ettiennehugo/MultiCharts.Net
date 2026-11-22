@@ -7014,6 +7014,8 @@ All lines below are printed to the PowerLanguage .NET Editor Output. `{…}` are
 
 **Journal.** The extra CS-1 columns (planned risk, whole-trade MAE, `t1Skipped`, `t1PlanSource`) are appended only after `exitPlan` has been called. A run that never calls it keeps the previous journal header.
 
+**Flat-by.** `FlatBy` flattens 5 minutes before the market's regular session ends, in the exchange zone (CME equity 14:55 CT, NYSE 15:55 ET, CL 13:25 CT, GC 12:25 CT, ZN / 6E 13:55 CT); `FlatByHHMM` 0..2359 overrides. It is date-aware (owner 2026-11-22): on an early close or holiday halt the cutoff is that day's session end minus 5 minutes when that is earlier (ES Good Friday 2023 08:10 CT, ES MLK 2024 11:55 CT, ES day after Thanksgiving 12:10 CT, stocks 12:55 ET on NYSE half days). The dates come from the profile calendar (`InstrumentFlatCalendar`: `_CmeHolidays.Rules`, the M8 product table, `_NyseHolidays.Rules.EarlyCloseEt`). An entry after a cutoff is held to the next open date's cutoff; weekends and closed dates are skipped. The exit fires on the first bar at or after the cutoff, and its `EXIT CLOSE` line ends ` - flat-by early close: <day>, session ends HH:MM CT`. Daily bars do not flatten (spec §4.6).
+
 **Wrapper.** `_GenericExit` is the chart and Portfolio Trader exit signal (48 Inputs, prefix `GX`). It publishes `PortfolioPublish => false` and sends only exits. `sandbox/_GX_00_TestHost` is the A-check entry. It is not in `PLStudies.csproj`.
 
 `_StopsAndTargets`, `_Stops_And_Targets`, `_ExitStatic`, `_StpOrLim_Exit` and `_ExitHalfRiskHalfRoll` are superseded by this engine. Their code is unchanged and they stay compiled.

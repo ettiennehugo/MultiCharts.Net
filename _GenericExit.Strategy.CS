@@ -151,6 +151,8 @@ namespace PowerLanguage.Function
 		public double SegmentOneR;
 		public double ClosedSegmentR;
 		public string RiskFlag = "";
+		/// <summary>Set when the flat-by that fired was moved earlier by that day's early close or holiday halt. EXIT CLOSE appends it.</summary>
+		public string FlatNote;
 		public string T1PlanSource = "";
 		public double PlannedStop;
 		public double PlannedRPrice;
@@ -735,7 +737,7 @@ namespace PowerLanguage.Function
 			p.DisasterCalling = false; p.BeDone = false; p.T1Filled = false; p.TrailOn = false; p.T1Skipped = false; p.FinalSkipped = false;
 			p.GapThroughStop = longSide ? fill <= initialStop : fill >= initialStop;
 			p.TrailThroughNext = false; p.AddCount = 0; p.RealizedDollars = 0; p.SegmentRealized = 0; p.ClosedSegmentR = 0;
-			p.MaeTradeDollars = 0; p.MaeOpenDollars = 0; p.RiskFlag = "";
+			p.MaeTradeDollars = 0; p.MaeOpenDollars = 0; p.RiskFlag = ""; p.FlatNote = null;
 			p.Lots.Clear(); p.Lots.Add(new ExitLot { Fill = fill, Qty = qty });
 			p.SegmentQty = qty;
 			p.PlannedRPrice = Math.Abs(plannedEntry - plannedStop);
@@ -887,6 +889,16 @@ namespace PowerLanguage.Function
 			return x.Hour * 100 + x.Minute;
 		}
 
+		/// <summary>Short journal label for an exchange zone: CT, ET, or the zone id.</summary>
+		public static string ZoneLabel(TimeZoneInfo z)
+		{
+			if (z == null) return "exchange time";
+			string id = z.Id ?? "";
+			if (id == "Central Standard Time" || id == "America/Chicago") return "CT";
+			if (id == "Eastern Standard Time" || id == "America/New_York") return "ET";
+			return id;
+		}
+
 		public static bool TryClock(int hhmm, out int hour, out int minute)
 		{
 			hour = hhmm / 100;
@@ -910,6 +922,61 @@ namespace PowerLanguage.Function
 			int hour, minute;
 			if (!TryClock(hhmm, out hour, out minute)) return DateTime.MaxValue;
 			return new DateTime(day.Year, day.Month, day.Day, hour, minute, 0);
+		}
+
+		/// <summary>One exchange-zone trading date from the market's holiday calendar. Closed = no session that date. EndHhmm is the
+		/// early session end (the earlier of the holiday halt and the early RTH close) in the exchange zone, or -1 on a regular day.
+		/// Reason names the day for the journal, e.g. "Good Friday (abbreviated), session ends 08:15 CT".</summary>
+		public struct FlatDay
+		{
+			public bool Closed;
+			public int EndHhmm;
+			public string Reason;
+			public static FlatDay Regular { get { return new FlatDay { EndHhmm = -1 }; } }
+		}
+
+		public struct FlatCutoff
+		{
+			public DateTime At;
+			/// <summary>Null on a regular cutoff. Otherwise the FlatDay.Reason of the early day that moved it.</summary>
+			public string EarlyReason;
+		}
+
+		/// <summary>The flat-by cutoff on one trading date: the earlier of flatByHHMM and that date's early end minus 5 minutes.
+		/// An explicit FlatByHHMM override is the flatByHHMM here, so the earlier of the override and the early close wins.</summary>
+		public static FlatCutoff CutoffFor(DateTime day, int flatByHHMM, FlatDay info)
+		{
+			var c = new FlatCutoff { At = CutoffOn(day, flatByHHMM) };
+			if (info.EndHhmm < 0) return c;
+			int early = FlatByFromSessionEnd(info.EndHhmm);
+			int hour, minute;
+			if (!TryClock(early, out hour, out minute)) return c;
+			DateTime at = CutoffOn(day, early);
+			if (at < c.At) { c.At = at; c.EarlyReason = string.IsNullOrEmpty(info.Reason) ? "early close" : info.Reason; }
+			return c;
+		}
+
+		/// <summary>Date-aware FlatByDeadline (owner 2026-11-22: "Yes, fix GX for early closes"). The first cutoff strictly after the
+		/// entry, walking exchange-zone dates from the entry date: Saturdays, Sundays and calendar-closed dates have no cutoff, and each
+		/// open date's cutoff is CutoffFor. An entry at or after a date's cutoff waits for the next open date's cutoff (the 2026-11-12
+		/// rule). The exit then fires on the first bar at or after that time, which on a short session can be the next session's first
+		/// bar. A null calendar is the old one-clock FlatByDeadline.</summary>
+		public static FlatCutoff FlatByCutoff(DateTime entry, int flatByHHMM, Func<DateTime, FlatDay> calendar)
+		{
+			var none = new FlatCutoff { At = DateTime.MaxValue };
+			int hour, minute;
+			if (entry == DateTime.MinValue || !TryClock(flatByHHMM, out hour, out minute)) return none;
+			if (calendar == null) return new FlatCutoff { At = FlatByDeadline(entry, flatByHHMM) };
+			for (int i = 0; i < 15; i++)
+			{
+				DateTime day = entry.Date.AddDays(i);
+				if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+				FlatDay info = calendar(day);
+				if (info.Closed) continue;
+				FlatCutoff c = CutoffFor(day, flatByHHMM, info);
+				if (c.At > entry) return c;
+			}
+			return new FlatCutoff { At = FlatByDeadline(entry, flatByHHMM) };
 		}
 
 		/// <summary>Five minutes before a regular-session end. The carry-over rule stays in FlatByDeadline.</summary>
@@ -991,14 +1058,24 @@ namespace PowerLanguage.Function
 			if (p == null || p.FillTime == DateTime.MinValue) return false;
 			// Owner 2026-11-12 15:28 ET, clock amended 2026-11-15: FillTime and TimeEt are already in the
 			// instrument's exchange zone. FlatByHHMM and RthCloseHHMM are clocks in that same zone.
-			DateTime deadline = FlatByDeadline(p.FillTime, Config.FlatByHHMM);
+			// Owner 2026-11-22: the cutoff is per trading date (FlatCalendar): the earliest of the regular flat-by, that date's
+			// holiday halt and its early close, each minus 5 minutes.
+			FlatCutoff cut = FlatByCutoff(p.FillTime, Config.FlatByHHMM, FlatCalendar);
+			DateTime deadline = cut.At;
+			string why = cut.EarlyReason;
 			if (bar.EarlyClose && bar.RthCloseHHMM > 0)
 			{
 				DateTime earlyAt = CutoffOn(bar.TimeEt.Date, MinusMinutes(bar.RthCloseHHMM, 5));
-				if (earlyAt > p.FillTime && earlyAt < deadline) deadline = earlyAt;
+				if (earlyAt > p.FillTime && earlyAt < deadline) { deadline = earlyAt; why = "early close"; }
 			}
-			return bar.TimeEt >= deadline;
+			bool hit = bar.TimeEt >= deadline;
+			p.FlatNote = hit ? why : null;
+			return hit;
 		}
+
+		/// <summary>The exchange-zone holiday calendar for date-aware flat-by. Null keeps one FlatByHHMM for every date. The host sets
+		/// it from the instrument profile (InstrumentFlatCalendar). Off-MC tests set it directly.</summary>
+		public Func<DateTime, FlatDay> FlatCalendar;
 
 		public bool TimeHit(ExitPosition p, DateTime barEt)
 		{
@@ -1339,7 +1416,8 @@ namespace PowerLanguage.Function
 				+ " reason=" + reason + " R=" + Ratio2(r) + " Rorig=" + (double.IsNaN(ro) ? "" : Ratio2(ro))
 				+ " plannedRiskPct=" + pp + " plannedRiskPctPeak=" + pk + " actualRiskPct=" + ap + " actualToPlanned=" + ra
 				+ " realizedPnlPct=" + rp + " mae=$" + Money(p.MaeTradeDollars) + " maeScope=" + maeScope
-				+ " equity=$" + Money(p.EquityAtEntry) + (flag.Length > 0 ? " riskFlag=" + flag : "");
+				+ " equity=$" + Money(p.EquityAtEntry) + (flag.Length > 0 ? " riskFlag=" + flag : "")
+				+ (reason == "FLATBY" && !string.IsNullOrEmpty(p.FlatNote) ? " - flat-by early close: " + p.FlatNote : "");
 		}
 
 		/// <summary>A scale-out that leaves a runner. EXIT CLOSE is only for the bar the position goes flat.</summary>
@@ -1632,7 +1710,7 @@ namespace PowerLanguage.Strategy
 			gxNoteOrder();
 			if (m_wrap != null) gxAttachSession(m_wrap, m_wrapPos);
 			base.CalcBar();
-			if (m_wrap != null) gxResolveFlatBy(m_wrap.Config, FlatByHHMM);
+			if (m_wrap != null) { gxResolveFlatBy(m_wrap.Config, FlatByHHMM); gxAttachFlatCalendar(m_wrap); }
 			if (m_inert || m_wrap == null) return;
 			if (!m_started && Bars.Status == EBarState.Close)
 			{
