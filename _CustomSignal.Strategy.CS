@@ -4831,6 +4831,21 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>One exchange-zone trading date for ExitSession.FlatCalendar: the InstrumentFlatCalendar day, its ET end moved into the
 		/// exchange zone. Cached per date.</summary>
+		/// <summary>Coder 2026-11-22 (stack rebased onto #146/#151): the entry side of the GX date-aware flat-by. True from that trading
+		/// date's cutoff (ExitSession.CutoffFor: the earlier of flatByHHMM and the date's early close / holiday halt minus 5 minutes,
+		/// from the instrument calendar) until the next trading date opens (gxTradingDate rollover, 17:00 CT on CME). Closed dates have
+		/// no cutoff. The sandbox entry guards (hostGate entryCutoff, entryOpen) use this, so an entry is never sent on a bar at or
+		/// after the cutoff GX itself flattens at. flatByHHMM is in the exchange zone.</summary>
+		protected bool gxPastFlatCutoff(int flatByHHMM)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return false; }
+			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
+			ExitSession.FlatDay f = gxFlatDay(ex.Date);
+			if (f.Closed) return false;
+			return ex >= ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At;
+		}
+
 		ExitSession.FlatDay gxFlatDay(DateTime day)
 		{
 			day = day.Date;

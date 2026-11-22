@@ -272,7 +272,7 @@ namespace PowerLanguage.Strategy
 
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
-		private bool entryOpen() { return !_SandboxRules.PastFlat(Clock.ToEastern(Bars.Time[0]), Bars.Info.Name, Clock.RthValueEnd); }
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();

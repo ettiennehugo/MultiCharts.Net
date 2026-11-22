@@ -237,7 +237,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_cutoffLogDay = DateTime.MinValue;
 		private bool entryCutoff()
 		{
-			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return false;
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
 			return true;

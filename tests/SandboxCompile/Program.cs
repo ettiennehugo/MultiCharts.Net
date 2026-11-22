@@ -310,6 +310,7 @@ static class Program
 			{
 				if (holdHosts.Contains(kv.Key)) { Check(Regex.IsMatch(c, @"SessionExit\s*=\s*ESessionExit\.HoldOvernight"), kv.Key + " is exempt from the cutoff guard only because GX holds it overnight"); continue; }
 				string hg = MethodBody(c, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)");
+				Check(MethodBody(c, @"bool\s+entryCutoff\s*\(\s*\)").Contains("!gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))") && !MethodBody(c, @"bool\s+entryCutoff\s*\(\s*\)").Contains("PastFlat("), kv.Key + " entryCutoff uses the GX date-aware cutoff (#146), not a duplicate");
 				Check(Regex.IsMatch(hg, @"\)\s*\{\s*if\s*\(\s*entryCutoff\(\)\s*\)\s*return\s+false;"), kv.Key + " hostGate refuses entries on or after the flat-by cutoff bar");
 				cutHosts++;
 				continue;
@@ -317,7 +318,7 @@ static class Program
 			var entries = new HashSet<string>();
 			foreach (Match em in Regex.Matches(c, @"(m_\w+)\s*=\s*OrderCreator\.\w+\(new SOrderParameters\([^;]*EOrderAction\.(?:Buy|SellShort)\)")) entries.Add(em.Groups[1].Value);
 			if (entries.Count == 0 || overnightOwn.Contains(kv.Key)) continue;
-			Check(c.Contains("bool entryOpen()") && c.Contains("_SandboxRules.PastFlat("), kv.Key + " has the flat-by entry cutoff");
+			Check(Regex.IsMatch(c, @"bool entryOpen\(\) \{ return !gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\)\); \}"), kv.Key + " has the flat-by entry cutoff (GX date-aware cutoff, #146)");
 			foreach (string e in entries)
 				Check(!Regex.IsMatch(c, @"(?<![\w.?])" + e + @"\.Send\("), kv.Key + " " + e + " is sent only through entryOpen()");
 			cutOwn++;
@@ -367,6 +368,8 @@ static class Program
 			string dvp = File.ReadAllText(Path.Combine(root, "_DvpEngine.Function.CS"));
 			string plan = MethodBody(cs, @"protected\s+double\s+exitPlan\s*\([^)]*\)");
 			Check(gx.Contains("public bool Reconfigure()") && Regex.IsMatch(plan, @"MarketPosition\s*==\s*0\s*&&\s*m_gx\.Reconfigure\(\)") && plan.IndexOf("m_gx.Reconfigure()") < plan.IndexOf("m_gx.InitialStop("), "GX exitPlan re-resolves the host's modes while flat (A2-28 T1 / BreakEven)");
+			string pf = MethodBody(cs, @"protected\s+bool\s+gxPastFlatCutoff\s*\(\s*int\s+flatByHHMM\s*\)");
+			Check(pf.Contains("ExitSession.CutoffFor(ex.Date, flatByHHMM, f)") && pf.Contains("gxFlatDay(ex.Date)") && pf.Contains("gxTradingDate(ex) != ex.Date") && pf.Contains("f.Closed"), "the entry cutoff is GX's date-aware CutoffFor (#146) with the trading-date rollover");
 			Check(cs.Contains("label = \"PA\" + ds + \"-DVP-S\" + str, journal = engineSink(ETraceLevel.Verbose)"), "DVP lattice PA pivot / BOS journal is Verbose");
 			Check(dvp.Contains("\") fits(\" + (Config.journalFits ? I(FitLines) : \"off\")"), "DVP RUN fits reads off, not 0, when the FIT journal is off");
 			Check(raw["A2_28"].Contains("\"A2-28 plan \"") && raw["A2_28"].Contains("\" muMajor \"") && raw["A2_28"].Contains("\" void \""), "A2_28 journals entry / stop / void / T1 / mu_major once per trade");
