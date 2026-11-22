@@ -362,6 +362,8 @@ static class Program
 		Check(code("PS_25").Contains("GxConfig.TimeStopBars = ds == 1 ? 41 : 0; m_timeStop = ds == 1 ? 0 : 41 * sigMin;"), "PS_25 41-bar time stop counts signal-stream bars (MT-07: 41 x 15 minutes)");
 		Check(Regex.IsMatch(MethodBody(code("MT_07"), @"override\s+string\s+targetBlock\s*\(\s*double\s+target\s*\)"), @"dvpHtfNextRailDistAtr\(HtfDs, 1\)[\s\S]*target <= htfRail \? null"), "MT_07 the 15m target rail lies inside the 60m next-rail distance (catalogue MT-07)");
 		Check(raw["MT_07"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream)."), "MT_07 header: Data2 15m, Data3 60m");
+		// Analyst LE-01 recheck: 'days' is ring occupancy (cap 253); the journal prints the uncapped count and the ring.
+		Check(code("LE_01").Contains("DailyContext.DaysSeen + \" (ring \" + DailyContext.Days + \"/\" + DailyContext.Capacity"), "LE_01 journals the uncapped day count and the ring occupancy");
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
 		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
 		Check(code("A2_28").Contains("_SandboxRules.MidT1Points(longSide, entry, target, tickSize())") && code("A2_28").Contains("t1Src = \"mid\"") && code("A2_28").Contains("\" source \" + t1Src")

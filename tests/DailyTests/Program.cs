@@ -70,6 +70,21 @@ static class Program
 		for (int i = 21; i < days.Count; i++) atr = (atr * 19 + tr(days, i)) / 20;
 		Check(Near(d.Atr20d, atr, 1e-6) && d.Valid, "Wilder ATR20d (seed = SMA of first 20 TR)");
 		Check(Near(d.Sma200, days.Skip(100).Average(x => x[3]), 1e-6), "SMA200 of daily closes");
+		// Analyst LE-01 recheck 2026-11-22: 'days' stopped at 253 over Christmas 2023. Days is ring occupancy (cap 253 = 252 + 1); the
+		// SMA200 keeps rolling after the cap and DaysSeen keeps counting.
+		Check(d.Capacity == 253 && d.Days == 253 && d.DaysSeen == 300, "Days caps at the ring capacity 253; DaysSeen counts every day (" + d.Days + "/" + d.Capacity + ", " + d.DaysSeen + ")");
+		{
+			var g = Ctx(); var gd = Days(260, 7); double prevSma = double.NaN; bool rolls = true;
+			for (int i = 0; i < gd.Count; i++)
+			{
+				DateTime dt = D0.AddDays(i + i / 5 * 2 + (i == 255 ? 1 : 0) + (i > 255 ? 1 : 0));   // weekdays only, one holiday gap after day 254
+				g.AddDay(dt, gd[i][0], gd[i][1], gd[i][2], gd[i][3]);
+				if (i >= 253) { double want = gd.Skip(i - 199).Take(200).Average(x => x[3]); rolls &= Near(g.Sma200, want, 1e-6) && g.Sma200 != prevSma && g.Days == 253 && g.DaysSeen == i + 1; }
+				prevSma = g.Sma200;
+			}
+			Check(rolls, "past the cap, over a holiday gap: SMA200 = mean of the last 200 closes each day, Days stays 253, DaysSeen rises");
+			g.Reset(); Check(g.Days == 0 && g.DaysSeen == 0, "Reset clears Days and DaysSeen");
+		}
 		Check(Near(d.Tsmom(252), days[299][3] / days[47][3] - 1, 1e-12) && Near(d.Tsmom(63), days[299][3] / days[236][3] - 1, 1e-12), "TSMOM(n) = C/C[n] - 1");
 		double up = 0, dn = 0;
 		for (int i = 1; i <= 2; i++) { double ch = days[i][3] - days[i - 1][3]; up += Math.Max(ch, 0); dn += Math.Max(-ch, 0); }
