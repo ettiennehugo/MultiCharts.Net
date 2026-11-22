@@ -356,6 +356,20 @@ static class Program
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
 		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
 		Check(code("A2_04").Contains("tod.Minutes % 5 == 0 && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen"), "A2_04 sVWAP trail tests 5-minute closes");
+		// Analyst #152 recheck: GX re-resolves a host's per-trade modes while flat; A2-28 journals its plan once per trade; the DVP
+		// lattice pivot/BOS facts are Verbose; DVP RUN fits counts the windows fitted; LE-01 journals its daily state.
+		{
+			string root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(files[0]), ".."));
+			string cs = File.ReadAllText(Path.Combine(root, "_CustomSignal.Strategy.CS"));
+			string gx = File.ReadAllText(Path.Combine(root, "_GenericExit.Strategy.CS"));
+			string dvp = File.ReadAllText(Path.Combine(root, "_DvpEngine.Function.CS"));
+			string plan = MethodBody(cs, @"protected\s+double\s+exitPlan\s*\([^)]*\)");
+			Check(gx.Contains("public bool Reconfigure()") && Regex.IsMatch(plan, @"MarketPosition\s*==\s*0\s*&&\s*m_gx\.Reconfigure\(\)") && plan.IndexOf("m_gx.Reconfigure()") < plan.IndexOf("m_gx.InitialStop("), "GX exitPlan re-resolves the host's modes while flat (A2-28 T1 / BreakEven)");
+			Check(cs.Contains("label = \"PA\" + ds + \"-DVP-S\" + str, journal = engineSink(ETraceLevel.Verbose)"), "DVP lattice PA pivot / BOS journal is Verbose");
+			Check(dvp.Contains("\") fits(\" + (Config.journalFits ? I(FitLines) : \"off\")"), "DVP RUN fits reads off, not 0, when the FIT journal is off");
+			Check(raw["A2_28"].Contains("\"A2-28 plan \"") && raw["A2_28"].Contains("\" muMajor \"") && raw["A2_28"].Contains("\" void \""), "A2_28 journals entry / stop / void / T1 / mu_major once per trade");
+			Check(raw["LE_01"].Contains("m_stateDay") && raw["LE_01"].Contains("\" sma200 \""), "LE_01 journals its daily rule state once per day");
+		}
 		// Item 2: a stop on the fill bar still counts as a fill. Every Rest() call passes today's entry count.
 		foreach (var kv in src)
 			foreach (Match rm in Regex.Matches(kv.Value, @"_SandboxRules\.Rest\(([^;]*)\);"))

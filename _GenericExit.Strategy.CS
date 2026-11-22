@@ -506,6 +506,28 @@ namespace PowerLanguage.Function
 			}
 		}
 
+		/// <summary>Coder 2026-11-22 (Analyst #152 recheck: A2-28 never filled T1): Start resolves Effective and the feature gates
+		/// (T1On, FinalOn, BreakEven, trail) once per run, so an embedded host that sets GxConfig per trade (TargetMode, BreakEven,
+		/// T1ScalePct, ...) kept the first trade's modes for the whole run. exitPlan calls this while flat: it re-resolves from the
+		/// current Config and re-applies the gates. Returns true when a mode changed; that change gets one START line.</summary>
+		public bool Reconfigure()
+		{
+			var scratch = new List<string>();
+			ExitEffective e = ExitEffective.Resolve(Config, scratch);
+			if (InvalidReason(e.InitialStop, Config, Config.Embedded) != null) e.InitialStop = EInitialStop.AtrMultiple;
+			string pkg = ExitEffective.Hash(e, Config);
+			if (pkg == Package) return false;
+			bool t1 = T1On, fin = FinalOn, beT = BeUsesTrigger, beOff = BeDisabled, trT = TrailUsesTrigger;
+			ExitEffective was = Effective; bool first = Package == null;
+			Effective = e;
+			Package = pkg;
+			ApplyFeatureGates();
+			bool changed = first || t1 != T1On || fin != FinalOn || beT != BeUsesTrigger || beOff != BeDisabled || trT != TrailUsesTrigger
+				|| was.TargetMode != e.TargetMode || was.BreakEven != e.BreakEven || was.TrailMode != e.TrailMode || was.SingleLotMode != e.SingleLotMode;
+			if (changed) { NoteFallbacks(); Log.Add(StartLine(Config, Effective, Package)); }
+			return changed;
+		}
+
 		void ApplyFeatureGates()
 		{
 			T1On = Effective.TargetMode == ETargetMode.ScaleOutThenRunner && Config.T1ScalePct > 0;

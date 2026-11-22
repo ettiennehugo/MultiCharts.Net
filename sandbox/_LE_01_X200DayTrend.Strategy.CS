@@ -145,7 +145,7 @@ namespace PowerLanguage.Strategy
 	public class _LE_01_X200DayTrend : _VolumeProfileFuturesBase
 	{
 		private IOrderMarket m_le, m_lx;
-		private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private bool m_done; private DateTime m_day = DateTime.MinValue, m_stateDay = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
@@ -165,6 +165,14 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			bool up = Session.priorRthClose > DailyContext.Sma200 && DailyContext.Sma200 > 0;
 			int pos = StrategyInfo.MarketPosition;
+			// Coder 2026-11-22 (Analyst #152 recheck: 1 trade, none after 2023-10-19): the daily state the rule reads, once per trading day.
+			if (day != m_stateDay)
+			{
+				m_stateDay = day;
+				double sma = DailyContext.Sma200, prc = Session.priorRthClose;
+				if (journalOn()) trace(ETraceLevel.Journal, "LE-01 " + day.ToString("yyyy-MM-dd") + " priorRthClose " + prc.ToString("0.00") + " sma200 " + sma.ToString("0.00") + " days " + DailyContext.Days + " up " + up + " pos " + pos + " done " + m_done);
+				if ((double.IsNaN(sma) || double.IsNaN(prc)) && DailyContext.Days >= 200 && traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "LE-01 " + day.ToString("yyyy-MM-dd") + " daily state not ready (NaN) with " + DailyContext.Days + " days: no entry");
+			}
 			if (pos > 0 && !up) { m_lx.Send(); return; }
 			if (pos != 0 || m_done || !IsRth() || !up) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;

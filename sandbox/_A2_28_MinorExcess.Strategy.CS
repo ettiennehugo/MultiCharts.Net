@@ -296,7 +296,10 @@ namespace PowerLanguage.Strategy
 			// lies between the entry and mu_major, the other lot at mu_major.
 			double t1 = longSide ? m_void - entry : entry - m_void, fin = Math.Abs(target - entry);
 			bool scale = !double.IsNaN(m_void) && t1 > 0 && t1 < fin;
-			if (!scale && journalOn()) trace(ETraceLevel.Journal, "A2-28 void " + m_void + " not between the entry and mu_major: both lots at mu_major");
+			// Coder 2026-11-22 (Analyst #152 recheck): one line per trade at entry with every level the plan uses.
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-28 plan " + (longSide ? "long" : "short") + " entry " + entry.ToString("0.00") + " stop " + stop.ToString("0.00")
+				+ " muMinor " + m_muMinor.ToString("0.00") + " sdMinor " + m_sdMinor.ToString("0.00") + " void " + m_void.ToString("0.00") + " muMajor " + target.ToString("0.00")
+				+ (scale ? " T1 " + (longSide ? entry + t1 : entry - t1).ToString("0.00") + " (1 lot, then the runner's stop to entry)" : " T1 none: void not between the entry and mu_major, both lots at mu_major"));
 			GxConfig.TargetMode = scale ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
 			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = scale ? t1 : 0; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;

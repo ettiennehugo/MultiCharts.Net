@@ -735,7 +735,7 @@ namespace PowerLanguage.Strategy
 			bool shared = pa != null;
 			if (pa == null)
 			{
-				pa = new _PriceActionEngine { config = c, label = "PA" + ds + "-DVP-S" + str, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+				pa = new _PriceActionEngine { config = c, label = "PA" + ds + "-DVP-S" + str, journal = engineSink(ETraceLevel.Verbose),   /* Coder 2026-11-22 (Analyst #152 recheck: 99% of the MT-07/PS-25 log): the DVP lattice pivot / BOS facts are Verbose */ warnOnce = engineSink(ETraceLevel.Warning) };
 				string perr = pa.Configure();
 				if (perr != null) throw new ArgumentException(perr);
 			}
@@ -4646,6 +4646,9 @@ namespace PowerLanguage.Strategy
 			mkt.EntryStop = structuralStop;
 			ensureGx(mkt);
 			gxApplyFlatBy();
+			// Coder 2026-11-22 (Analyst #152 recheck: A2-28 0 T1 fills): a host that changes GxConfig between trades gets those modes
+			// on this trade, not the modes the engine resolved at its first exitPlan.
+			if (StrategyInfo.MarketPosition == 0 && m_gx.Reconfigure()) gxEmitLog();
 			createGxOrders();
 			double stop = m_gx.InitialStop(longSide, plannedEntry, mkt);
 			m_gxMkt = mkt;
