@@ -81,6 +81,8 @@ static class Program
 		LookbackChecks(files);
 		OwnSourceChecks(files);
 		BookChecks(files);
+		BookOrderChecks(files);
+		BugfixBatchChecks(files);
 		AtrRollChecks(files);
 		CalendarKeyChecks(files);
 		EarlyFlatChecks(files);
@@ -204,6 +206,98 @@ static class Program
 			Check(n > 0 && bad == 0, name + " calls hostGate(" + string.Join("/", new List<string>(side.Values).ToArray()) + ") before each of its " + n + " entry order calls");
 		}
 		Check(hosts >= 89, "gate hosts wired: " + hosts + " (entry calls " + sends + ")");
+	}
+
+	// Coder 2026-11-22 (owner rule: one attempt per anchor per day). _SandboxRules.Rest() only sees a fill if it runs on the
+	// bar the position opens. A position early-return before sandboxBook() hid every fill, so after a same-day exit the book
+	// resent the old entry. Every study with a resting book calls sandboxBook() in CalcBar before any position early-return.
+	static readonly Regex PosGateRx = new Regex(@"if\s*\((?:[^;{()]|\([^;{()]*\))*(?:StrategyInfo\.MarketPosition|\bpos)\s*(?:!=|>|<)\s*0");
+	static void BookOrderChecks(List<string> files)
+	{
+		int books = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			if (OriginalTen.Contains(name)) continue;
+			string code = Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "");
+			if (!code.Contains("_SandboxRules.Rest(") || !Regex.IsMatch(code, @"\bm_restOn\s*=\s*true")) continue;
+			string calc = WithoutMethod(MethodBody(code, @"void\s+CalcBar\s*\(\s*\)"), "sendExits");   // a local exit function is not a return
+			if (calc.Length == 0) continue;
+			books++;
+			int book = calc.IndexOf("sandboxBook()", StringComparison.Ordinal);
+			Match gate = PosGateRx.Match(calc);
+			Check(book >= 0 && (!gate.Success || book < gate.Index), name + " calls sandboxBook() in CalcBar before any position early-return");
+		}
+		Check(books >= 38, "resting-book studies checked for sandboxBook order: " + books);
+	}
+
+	// Coder 2026-11-22 (bugfix batch on #147): pins for each fix so a later edit cannot quietly undo it.
+	static void BugfixBatchChecks(List<string> files)
+	{
+		var src = new Dictionary<string, string>();
+		var raw = new Dictionary<string, string>();
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			Match m = Regex.Match(name, @"^_([A-Z0-9]+_[0-9]+)_");
+			if (!m.Success) continue;
+			string text = File.ReadAllText(path);
+			raw[m.Groups[1].Value] = text;
+			src[m.Groups[1].Value] = Regex.Replace(text, @"//[^\n]*", "");
+		}
+		Func<string, string> code = k => src.ContainsKey(k) ? src[k] : "";
+		// Data2 = native timeframe: these read closed Data2 bars.
+		foreach (string k in new[] { "YV_12", "A2_76", "A2_79", "MT_07", "SP_08", "DV_11", "A2_04" })
+			Check(code(k).Contains("HtfClosedBar(2,"), k + " reads closed Data2 bars (HtfClosedBar(2, ...))");
+		Check(Regex.IsMatch(code("YV_12"), @"atr14\s*=\s*nativeAtr\(14\)") && Regex.IsMatch(code("YV_12"), @"span\s*>=\s*1\.0\s*\*\s*atr14"), "YV_12 signal bar range >= 1.0 x ATR14 of the Data2 5m bars");
+		// Recalc reuse: StartCalc clears the per-pass history.
+		var clears = new[] { new[] { "A2_09", "m_hist.Clear()" }, new[] { "A2_14", "m_closes.Clear()" }, new[] { "A2_30", "m_slopes.Clear()" },
+			new[] { "A2_37", "m_spread.Clear()" }, new[] { "A2_61", "m_hist.Clear()" }, new[] { "A2_61", "m_fives.Clear()" }, new[] { "A2_11", "m_wasComplete = false" }, new[] { "A2_62", "m_hi.Clear()" }, new[] { "A2_62", "m_cl.Clear()" } };
+		foreach (string[] c in clears)
+			Check(MethodBody(code(c[0]), @"void\s+StartCalc\s*\(\s*\)").Contains(c[1]), c[0] + " StartCalc resets " + c[1]);
+		Check(raw.ContainsKey("A2_14") && raw["A2_14"].Contains("// Chart: Data1 = 1-minute (owner rule). The daily swing builds its daily bars"), "A2_14 header: Data1 1-minute, daily bars built from it");
+		Check(code("A2_14").Contains("private void dailyClose(int pos)") && Regex.IsMatch(MethodBody(code("A2_14"), @"void\s+dailyClose\s*\(\s*int\s+pos\s*\)"), @"m_held\+\+") && !Regex.IsMatch(MethodBody(code("A2_14"), @"void\s+CalcBar\s*\(\s*\)"), @"m_held\+\+|m_closes\.Insert"), "A2_14 counts held days and daily closes once per trading day, not per 1m bar");
+		Check(Regex.IsMatch(code("VW_04"), @"if \(day != m_day\) \{[^}]*m_restOn = m_filledSetup = false"), "VW_04 new day clears the resting book");
+		// Daily checks run on the first RTH bar, not the first Globex bar.
+		foreach (string k in new[] { "TS_07", "RG_01", "RG_02", "RG_04", "RG_05", "RG_06", "RG_08", "RG_09", "RG_10", "YV_02", "A2_43" })
+		{
+			string calc = MethodBody(code(k), @"void\s+CalcBar\s*\(\s*\)");
+			int rth = calc.IndexOf("if (!IsRth()) return;", StringComparison.Ordinal), day = calc.IndexOf("GlobexDate(Bars.Time[0])", StringComparison.Ordinal);
+			Check(rth >= 0 && day > rth, k + " latches its daily check on the first RTH bar");
+		}
+		// Resting-book side and resend fixes.
+		foreach (string k in new[] { "PS_09", "PS_23" })
+			Check(code(k).Contains("m_restBuy") && !Regex.IsMatch(code(k), @"m_restBuy\s*=\s*true"), k + " rests the side it entered, not always a buy");
+		foreach (string k in new[] { "AV_11", "A2_62", "A2_54" })
+		{
+			string book = MethodBody(code(k), @"bool\s+sandboxBook\s*\(\s*\)");
+			int rs = book.IndexOf("ERest.Resend", StringComparison.Ordinal);
+			Check(rs >= 0 && book.IndexOf(".Send(", rs, StringComparison.Ordinal) > rs, k + " sandboxBook resend sends the entry");
+		}
+		Check(MethodBody(code("A2_54"), @"void\s+CalcBar\s*\(\s*\)").Contains("sandboxBook()"), "A2_54 CalcBar runs its resting book");
+		// A2-35 (catalogue Rev 6): acceptance on 5m closes, size 1 with the 1 percent budget on 1 contract.
+		string a235 = code("A2_35");
+		Check(MethodBody(a235, @"void\s+accept\s*\(\s*DateTime\s+et\s*\)").Contains("et.Minute % 5 != 0"), "A2_35 acceptance counts 5-minute closes only");
+		Check(a235.Contains("m_le.Send(2)") && Regex.IsMatch(a235, @"\b2\s*\*\s*risk") && Regex.IsMatch(a235, @"exitPlan\([^;]*,\s*2,\s*mkt"), "A2_35 enters 2 contracts (catalogue T1 50 percent), budgets 2 and plans 2 lots");
+		string a232 = code("A2_32");
+		Check(a232.Contains("m_le.Send(1)") && !Regex.IsMatch(a232, @"\.Send\(2\)") && !Regex.IsMatch(a232, @"(?<![\d.])2\s*\*\s*risk") && a232.Contains("Minute % 15 != 0"), "A2_32 enters 1 contract (single target), budgets 1, counts 15-minute closes");
+		// A study that sends 2 contracts plans 2 lots in GX (it planned 1 and left a contract without exits).
+		foreach (string k in src.Keys)
+			if (Regex.IsMatch(src[k], @"\.Send\(2\)") && src[k].Contains("exitPlan("))
+				Check(!Regex.IsMatch(src[k], @"exitPlan\([^;]*,\s*1,\s*mkt"), k + " plans as many GX lots as it sends");
+		Check(Regex.IsMatch(code("A2_45"), @"GxConfig\.T1ScalePct = 60") && code("A2_45").Contains("m_far, up ?"), "A2_45 runs the second lot to the far shelf edge");
+		Check(Regex.IsMatch(code("A2_28"), @"2\s*\*\s*risk") && code("A2_28").Contains("double edge = m_muMinor + m_side * m_sdMinor;"), "A2_28 budgets 2 contracts and tests its own side's edge");
+		foreach (string k in new[] { "YV_11", "A2_28", "A2_11", "A2_61", "A2_30", "A2_09", "A2_46", "PS_09" })
+			Check(code(k).Contains("HtfClosedBar(2,"), k + " reads closed Data2 bars (HtfClosedBar(2, ...))");
+		Check(raw.ContainsKey("A2_46") && raw["A2_46"].Contains("// Chart: Data1 = 1-minute. Data2 = 5-minute"), "A2_46 declares Data2 = 5-minute");
+		Check(raw.ContainsKey("PS_09") && raw["PS_09"].Contains("// Chart: Data1 = 1-minute. Data2 = 30-minute"), "PS_09 declares Data2 = 30-minute");
+		string yv11 = MethodBody(code("YV_11"), @"void\s+CalcBar\s*\(\s*\)");
+		Check(!Regex.IsMatch(yv11, @"if\s*\(\s*!IsExist\(2\)\s*\)\s*\{[^}]*return;"), "YV_11 runs its exits when Data2 is missing");
+		Check(code("DV_01").Contains("mins >= -5 && mins < 10") && code("DV_01").Contains("GxConfig.NewsExitMinutes = 5") && code("DV_01").Contains("GxMinutesToNews = minutesToNews(day)"), "DV_01 news blackout [-5, +10] and GX NEWS flatten");
+		Check(!code("TS_04").Contains("new TimeSpan(9, 0, 0)") && !code("TS_04").Contains("configureSessions"), "TS_04 takes its pit clock from ApplyPit, not a hard-coded CL clock");
+		Check(Regex.IsMatch(MethodBody(code("OF_01"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seLmt\.Send\(") && MethodBody(code("OF_01"), @"void\s+CalcBar\s*\(\s*\)").Contains("sandboxBook()"), "OF_01 runs its book and resends the short limit");
+		Check(Regex.Matches(MethodBody(code("A2_37"), @"void\s+CalcBar\s*\(\s*\)"), @"IsExist\(2\)").Count == 1, "A2_37 has one reachable Data2 guard");
+		Check(Regex.IsMatch(code("AV_11"), @"m_seStp\.Send\(") && Regex.IsMatch(MethodBody(code("AV_11"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seStp\.Send\("), "AV_11 resend covers the short side");
 	}
 
 	static string MethodBody(string code, string signature)
@@ -387,7 +481,8 @@ static class Program
 		Check(av5.Contains("if (m_alive && !IsNoRthDay(day)) m_held++;"), "AV-05 counts RTH days held");
 		Check(Regex.IsMatch(av5, @"if \(!m_gapChecked && IsRth\(\) && Session != null && Session\.rthOpen > 0\)"), "AV-05 reads the gap on the first RTH bar, not at the rollover");
 		string a14 = Src(files, "_A2_14_");
-		Check(a14.IndexOf("IsNoRthDay(Bars.Time[0].Date)", StringComparison.Ordinal) >= 0 && a14.IndexOf("IsNoRthDay(Bars.Time[0].Date)", StringComparison.Ordinal) < a14.IndexOf("m_closes.Insert(0", StringComparison.Ordinal), "A2-14 does not treat a holiday session bar as a daily close");
+		// Coder 2026-11-22: A2-14 now builds daily bars from Data1 and keys the holiday test on the Globex trading date (m_day).
+		Check(a14.IndexOf("IsNoRthDay(m_day)", StringComparison.Ordinal) >= 0 && a14.IndexOf("IsNoRthDay(m_day)", StringComparison.Ordinal) < a14.IndexOf("m_closes.Insert(0", StringComparison.Ordinal), "A2-14 does not treat a holiday session bar as a daily close");
 		string a15 = Src(files, "_A2_15_");
 		Check(a15.Contains("averageTrueRange(BarsOfData(2), 14)") && !a15.Contains("averageTrueRange(Bars, 14)"), "A2-15 ATR5 is ATR(14) of the 5-minute Data2 stream");
 		Check(Regex.Matches(a15, @"skewLine\(").Count >= 5, "A2-15 writes a skew journal line for every evaluated setup");
@@ -490,7 +585,7 @@ static class Program
 	// "Hold up to N sessions" / "MaxHoldDays is N" with N >= 2, or the owner's five approved holds above.
 	static void HoldChecks(List<string> files)
 	{
-		int holds = 0, byHeader = 0, approved = 0;
+		int holds = 0, byHeader = 0, approved = 0; int maxHold1 = 0;
 		var headerHold = new Regex(@"^// Exit orders:[^\n]*?(?:Hold up to (\d+) sessions|MaxHoldDays is (\d+))", RegexOptions.Multiline);
 		foreach (string path in files)
 		{
@@ -522,7 +617,15 @@ static class Program
 			if (approved5) approved++;
 			Check(owner || header || approved5, name + " selects a GX hold (HoldOvernight) but is not an approved multi-day study");
 			if (approved5) Check(text.Contains("owner decision 2026-11-22: keep holding overnight") && !text.Contains("Flat at the session value end") && !text.Contains("flat at the next session's value end"), name + " header describes the overnight hold and cites the owner's ruling");
+			// GX PR #151: MaxHoldDays counts trading sessions, so the 1-day hold ends at the next trading session's flat-by cutoff.
+			if (approved5 && text.Contains("MaxHoldDays 1 closes it"))
+			{
+				maxHold1++;
+				Check(text.Contains("MaxHoldDays 1 closes it at the next trading session's flat-by cutoff (session end minus 5 minutes, early-close aware; an evening entry belongs to the next trading date)")
+					&& !text.Contains("first bar dated the next calendar day"), name + " header describes MaxHoldDays 1 in trading sessions (GX #151)");
+			}
 		}
+		Check(maxHold1 == 3, "MaxHoldDays 1 hold headers (A2-46, SW-05, YV-10): " + maxHold1);
 		string av2 = Src(files, "_AV_02_");
 		Check(av2.Contains("arm(true, entry, stop, peak, \"AV02LE\", false);") && !av2.Contains("\"AV02LE\", true)"), "AV-02 is intraday: arm(..., false) selects GX FlatBy");
 		Check(holds == 35 && byHeader == 11 && approved == HoldApprovedByOwner.Count, "hold studies: " + holds + " (19 owner multi-day, " + byHeader + " multi-day by header, " + approved + " intraday-window holds approved by the owner)");

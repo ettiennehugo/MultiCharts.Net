@@ -167,8 +167,8 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_filledSetup = false; m_restOn = false; m_touched = false; } }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
-			if (sandboxBook()) return;
 			VpExtra comp = Composite(1, 5); if (comp == null || comp.lvns == null || comp.lvns.Count == 0 || comp.hvns == null || comp.hvns.Count == 0) return;
 			Node lv = comp.lvns[0]; foreach (Node n in comp.lvns) if (n.high - n.low > lv.high - lv.low) lv = n;
 			if (Math.Abs(lv.low - m_lvn) > tickSize()) { m_lvn = lv.low; m_touched = false; if (StrategyInfo.MarketPosition == 0) m_done = false; m_filledSetup = false; m_restOn = false; }

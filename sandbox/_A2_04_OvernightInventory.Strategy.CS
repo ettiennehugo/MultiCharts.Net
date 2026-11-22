@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-04.
 // Taken from the source: the Rules line of that heading.
-// Research assumption: ASSUMPTION: Chart is 5-minute. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of 30-minute true range built from the 5-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
+// Research assumption: ASSUMPTION: Data1 is 1-minute (owner rule); the 09:35 and 09:40 5-minute bars are built from it. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of the closed Data2 30-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
-// Data2: Not applicable. Higher-timeframe bars are built from Data1.
+// Data2: 30-minute, read for ATR30 (closed bars, M-MTF rule). The 5-minute bars are built from Data1.
 // Further series: Not applicable
 // Warmup: the ATR or average named in the rule.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series, unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Chart is 5-minute. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of 30-minute true range built from the 5-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
+// Other: ASSUMPTION: Data1 is 1-minute (owner rule); the 09:35 and 09:40 5-minute bars are built from it. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of the closed Data2 30-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
 //
 // ## 17. Parameters
 // Each [Input] below is one of this strategy's own parameters. TraceLevel stays on the base.
@@ -131,7 +131,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: Chart is 5-minute. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of 30-minute true range built from the 5-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
+// ASSUMPTION: Data1 is 1-minute (owner rule); the 09:35 and 09:40 5-minute bars are built from it. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of the closed Data2 30-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
 // IOG is disabled. GX exitPlan is not called. Exit orders are sent only from sendExits.
 
 
@@ -152,9 +152,31 @@ namespace PowerLanguage.Strategy
 		private double m_onNum, m_onDen, m_rthNum, m_rthDen, m_oVwap, m_onClose, m_atr, m_prevBucketClose;
 		private double m_stop, m_target, m_open5Low;
 		private int m_atrCount;
-		private DateTime m_bucket = DateTime.MinValue, m_day = DateTime.MinValue;
+		private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		private bool m_done, m_latched;
-		private double m_bHigh, m_bLow, m_bClose;
 
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_04_OvernightInventory(object _ctx) : base(_ctx) { InventoryAtr = EInventoryAtr.A05; }
@@ -176,7 +198,7 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EInventoryAtr), InventoryAtr)) throw new ArgumentException("_A2_04_OvernightInventory: InventoryAtr is not a defined EInventoryAtr");
 			base.StartCalc();
-			m_day = DateTime.MinValue; m_atr = double.NaN; m_atrCount = 0; m_prevBucketClose = double.NaN;
+			m_day = DateTime.MinValue; m_atr = double.NaN; m_atrCount = 0; m_prevBucketClose = double.NaN; m_nativeTime = DateTime.MinValue;
 		}
 
 		protected override void CalcBar()
@@ -211,11 +233,15 @@ namespace PowerLanguage.Strategy
 			double ov = m_onNum / m_onDen;
 			bool inventory = m_onClose - ov > thr * m_atr;
 			bool openDrive = s.rthOpen >= s.ethHigh - 0.25 * m_atr;
-			double prevClose = Bars.Close[1], prevLow = Bars.Low[1];
-			bool twoAbove = Bars.Close[0] > ov && prevClose > ov && Bars.Low[0] >= prevLow;
+			// Coder 2026-11-22: Data1 is 1-minute, so the 09:35 and 09:40 5-minute bars are built from it (1-minute bars 09:31-09:35 and
+			// 09:36-09:40). Close[1] / Low[1] were the 09:39 minute, not the 09:35 bar.
+			double lowB = Math.Min(Math.Min(Math.Min(Bars.Low[0], Bars.Low[1]), Math.Min(Bars.Low[2], Bars.Low[3])), Bars.Low[4]);
+			double prevLow = Math.Min(Math.Min(Math.Min(Bars.Low[5], Bars.Low[6]), Math.Min(Bars.Low[7], Bars.Low[8])), Bars.Low[9]);
+			double prevClose = Bars.Close[5];
+			bool twoAbove = Bars.Close[0] > ov && prevClose > ov && lowB >= prevLow;
 			if (!(inventory && openDrive && twoAbove)) { m_done = true; return; }
 			double tick = tickSize();
-			double structural = Math.Min(Bars.Low[0], prevLow) - tick;
+			double structural = Math.Min(lowB, prevLow) - tick;
 			double cap = Bars.Close[0] - 0.6 * m_atr;
 			double stop = Math.Max(structural, cap);
 			double floor = 14 * tick;
@@ -231,15 +257,14 @@ namespace PowerLanguage.Strategy
 
 		private void stepAtr(DateTime et)
 		{
-			DateTime bucket = new DateTime(et.Year, et.Month, et.Day, et.Hour, et.Minute < 30 ? 0 : 30, 0);
-			if (m_bucket == DateTime.MinValue) { m_bucket = bucket; m_bHigh = Bars.High[0]; m_bLow = Bars.Low[0]; m_bClose = Bars.Close[0]; return; }
-			if (bucket == m_bucket) { m_bHigh = Math.Max(m_bHigh, Bars.High[0]); m_bLow = Math.Min(m_bLow, Bars.Low[0]); m_bClose = Bars.Close[0]; return; }
-			double tr = m_bHigh - m_bLow;
-			if (m_prevBucketClose > 0) tr = Math.Max(tr, Math.Max(Math.Abs(m_bHigh - m_prevBucketClose), Math.Abs(m_bLow - m_prevBucketClose)));
+			// Coder 2026-11-22: the 30-minute true range is read from the closed Data2 30-minute bars (it was rebuilt from Data1 clock buckets).
+			if (!newNativeBar()) return;
+			double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
+			double tr = h - l;
+			if (m_prevBucketClose > 0) tr = Math.Max(tr, Math.Max(Math.Abs(h - m_prevBucketClose), Math.Abs(l - m_prevBucketClose)));
 			m_atrCount++;
 			m_atr = m_atrCount == 1 || double.IsNaN(m_atr) ? tr : (m_atr * 13.0 + tr) / 14.0;
-			m_prevBucketClose = m_bClose;
-			m_bucket = bucket; m_bHigh = Bars.High[0]; m_bLow = Bars.Low[0]; m_bClose = Bars.Close[0];
+			m_prevBucketClose = c;
 		}
 	}
 }

@@ -166,8 +166,8 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool overnight = tod >= m_globexOpen || tod < m_rthStart;
 			if (overnight && !IsRth()) { double tp = (Bars.High[0] + Bars.Low[0] + Bars.Close[0]) / 3.0; m_pv += tp * Math.Max(1, Bars.Volume[0]); m_vv += Math.Max(1, Bars.Volume[0]); m_onHigh = Math.Max(m_onHigh, Bars.High[0]); return; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || !(m_vv > 0)) return;
-			if (sandboxBook()) return;
 			VpExtra prior = PriorRthProfile(); double atr = DailyContext.Atr20d;
 			if (prior == null || !(atr > 0)) return;
 			double av = m_pv / m_vv;

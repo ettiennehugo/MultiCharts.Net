@@ -174,8 +174,8 @@ namespace PowerLanguage.Strategy
 				m_anchor = a.AnchorBar;
 				if (StrategyInfo.MarketPosition == 0) { m_done = false; m_filledSetup = false; m_restOn = false; m_below = 0; m_reclaim = false; }
 			}
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
-			if (sandboxBook()) return;
 			if (!(Bars.Close[0] > DailyContext.Sma200)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool hour = ((int)tod.TotalMinutes) % 60 == 0;

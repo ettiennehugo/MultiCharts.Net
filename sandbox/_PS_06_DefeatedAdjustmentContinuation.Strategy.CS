@@ -144,7 +144,7 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _PS_06_DefeatedAdjustmentContinuation : _VolumeProfileFuturesBase
 	{
-		private IOrderPriced m_le, m_se; private bool m_done, m_held; private DateTime m_day = DateTime.MinValue;
+		private IOrderPriced m_le, m_se; private bool m_done, m_held, m_vaClose; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
@@ -166,23 +166,22 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_held = true; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_held = false; m_vaClose = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			SessionStats s = Session; VpExtra prior = PriorRthProfile();
 			if (prior == null || !(s.priorRthClose > 0) || s.Gap == 0) return;
 			bool up = s.Gap > 0;
 			double half = s.rthOpen - 0.5 * s.Gap;
-			if (up && Bars.Low[0] <= half) m_held = true;
-			else if (!up && Bars.High[0] >= s.rthOpen - 0.5 * s.Gap) m_held = true;
-			else if (sessionClock(Bars.Time[0]) < m_rthStart.Add(TimeSpan.FromMinutes(60))) return;
-			if (up && Bars.Close[0] < prior.vah && Bars.Close[0] > prior.val) m_held = false;
-			if (!up && Bars.Close[0] < prior.vah && Bars.Close[0] > prior.val) m_held = false;
+			// Coder 2026-11-22: m_held is the 50% retrace by RthStart + 60 (it started true, so no retrace was needed, and a later
+			// retrace re-set it after a value-area close); m_vaClose is a 5-minute close inside the prior value area, which ends the setup.
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_held || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || ((int)tod.TotalMinutes) % 5 != 0) return;
+			if (tod <= m_rthStart.Add(TimeSpan.FromMinutes(60)) && (up ? Bars.Low[0] <= half : Bars.High[0] >= half)) m_held = true;
+			if (((int)tod.TotalMinutes) % 5 == 0 && Bars.Close[0] < prior.vah && Bars.Close[0] > prior.val) m_vaClose = true;
+			if (!m_held || m_vaClose || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || ((int)tod.TotalMinutes) % 5 != 0) return;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0], prevHi = Bars.High[5];
 			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); prevHi = Math.Max(prevHi, lbBar(5 + i).h); }
-			bool buy = up && lo > prev && !(s.rthLow > half);
+			bool buy = up && lo > prev;
 			bool sell = !up && hi < prevHi;
 			if (!buy && !sell) return;
 			double entry = buy ? hi + tickSize() : lo - tickSize();

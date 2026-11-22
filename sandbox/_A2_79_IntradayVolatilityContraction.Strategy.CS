@@ -42,7 +42,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -147,6 +147,29 @@ namespace PowerLanguage.Strategy
 	{
 		
 		private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		public _A2_79_IntradayVolatilityContraction(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
@@ -162,15 +185,18 @@ namespace PowerLanguage.Strategy
 		{
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); if (!IsRth() || Bars.CurrentBar < 40) return;
-			TimeSpan t = sessionClock(Bars.Time[0]); if (((int)t.TotalMinutes) % 5 != 0) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			double r1 = 0, r2 = 0, v1 = 0, v2 = 0;
-			for (int i = 0; i < 5; i++) { r1 = Math.Max(r1, lbBar(i).h - lbBar(i).l); v1 += lbBar(i).v; r2 = Math.Max(r2, lbBar(5 + i).h - lbBar(5 + i).l); v2 += lbBar(5 + i).v; }
+			// Coder 2026-11-22: r1 / r2 are the ranges of the last two closed Data2 5-minute bars and the baseline is the mean range and
+			// volume of the 14 closed 5-minute bars before them (it used 1-minute ranges as if they were 5-minute bars).
+			if (!newNativeBar() || !nativeReady(16)) return;
+			// Coder 2026-11-22: every closed RTH 5-minute bar is tested (it tested only the first stamp of each day)
+			double o, h, l, c, v1, v2, r1, r2;
+			nativeBar(0, out o, out h, out l, out c, out v1); r1 = h - l;
+			nativeBar(1, out o, out h, out l, out c, out v2); r2 = h - l;
 			double atr = 0, baseVol = 0;
-			for (int k = 2; k < 16; k++) { atr += lbBar(k * 5).h - lbBar(k * 5).l; baseVol += lbBar(k * 5).v; }
+			for (int k = 2; k < 16; k++) { double kv; nativeBar(k, out o, out h, out l, out c, out kv); atr += h - l; baseVol += kv; }
 			atr /= 14; baseVol /= 14;
-			bool gate = r1 <= 0.75 * r2 && r1 <= 0.75 * atr && baseVol > 0 && v1 <= 0.85 * baseVol * 5;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-79 contraction gate " + gate + ". No order.");
+			bool gate = r1 <= 0.75 * r2 && r1 <= 0.75 * atr && baseVol > 0 && v1 <= 0.85 * baseVol;
+			if (gate && journalOn()) trace(ETraceLevel.Journal, "A2-79 contraction gate True. No order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

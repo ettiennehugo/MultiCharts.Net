@@ -168,8 +168,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_tests = 0; m_open = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || m_open == DateTime.MinValue) return;
-			if (sandboxBook()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			VpExtra dev = RangeProfileAfter(1, m_open, Bars.Time[0]); if (dev == null || !(dev.vah > 0)) return;

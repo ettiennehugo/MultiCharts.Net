@@ -166,7 +166,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; m_hi.Clear(); m_lo.Clear(); m_cl.Clear(); m_seen = false; m_day = DateTime.MinValue; /* Coder 2026-11-22: a recalc reuses this object, so the day history is cleared */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -184,6 +184,7 @@ namespace PowerLanguage.Strategy
 				m_runHi = Math.Max(m_runHi, Bars.High[0]); m_runLo = Math.Min(m_runLo, Bars.Low[0]); m_runCl = Bars.Close[0];
 			}
 			else if (pos == 0) return;
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (pos > 0)
 			{
 				if (m_entryDay == DateTime.MinValue) m_entryDay = day;
@@ -199,7 +200,6 @@ namespace PowerLanguage.Strategy
 			}
 			m_entryDay = DateTime.MinValue;
 			if (m_done || !m_buying || rollOn(1) || m_lo.Count < 1) return;
-			if (sandboxBook()) return;
 			double priorLo = m_lo[m_lo.Count - 1], priorHi = m_hi[m_hi.Count - 1], priorCl = m_cl[m_cl.Count - 1];
 			double atr = DailyContext.Atr20d;
 			if (!(atr > 0)) return;
@@ -254,11 +254,11 @@ namespace PowerLanguage.Strategy
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
+			// Coder 2026-11-22: the buy limit at the prior low is resent every bar for the day (house rule 5); the branch was empty,
+			// so the limit was cancelled after its first bar. Long only: there is no short resting order.
 			if (m_restBuy)
 			{
-			}
-			else
-			{
+				m_ll.Send(m_restPx, m_restQty);
 			}
 			return true;
 		}

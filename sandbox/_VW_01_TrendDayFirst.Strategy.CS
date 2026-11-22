@@ -177,8 +177,8 @@ namespace PowerLanguage.Strategy
 			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_through = 0; m_vwapHist.Clear(); }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			if (double.IsNaN(vwap) || !(sig > 0)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);

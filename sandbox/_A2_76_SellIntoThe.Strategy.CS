@@ -42,7 +42,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -147,6 +147,29 @@ namespace PowerLanguage.Strategy
 	{
 		
 		private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		public _A2_76_SellIntoThe(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
@@ -163,13 +186,16 @@ namespace PowerLanguage.Strategy
 		{
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 100) return; exitBar();
-			TimeSpan t = Bars.Time[0].TimeOfDay; if (((int)t.TotalMinutes) % 5 != 0) return;
-			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
-			double range = Bars.High[0] - Bars.Low[0], mean = 0;
-			for (int k = 1; k <= 20; k++) mean += lbBar(k * 5).h - lbBar(k * 5).l;
+			// Coder 2026-11-22: the climax bar is the last closed Data2 5-minute bar against the mean range of the 20 closed 5-minute
+			// bars before it (it compared one 1-minute range with 1-minute ranges taken every 5 minutes).
+			if (!newNativeBar() || !nativeReady(20)) return;
+			if (!IsRth()) return;   // Coder 2026-11-22: every closed RTH 5-minute bar is tested (it tested only the first :05 stamp of each calendar day)
+			double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
+			double range = h - l, mean = 0;
+			for (int k = 1; k <= 20; k++) { double ko, kh, kl, kc, kv; nativeBar(k, out ko, out kh, out kl, out kc, out kv); mean += kh - kl; }
 			mean /= 20;
-			bool climax = mean > 0 && range >= 2 * mean && Bars.Close[0] > Bars.Open[0];
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-76 climax bar " + climax + ". Exit module, no order.");
+			bool climax = mean > 0 && range >= 2 * mean && c > o;
+			if (climax && journalOn()) trace(ETraceLevel.Journal, "A2-76 climax bar True. Exit module, no order.");
 		}
 
 		private double widen(bool buy, double entry, double stop)

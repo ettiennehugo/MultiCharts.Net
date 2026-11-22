@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the A2-45 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: one contract, so the 60 percent scale at the near edge is the GX target and the runner to the far edge is not sent. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
+// Research assumption: ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: two contracts (coding-plan decision 10): GX takes T1 (60 percent, 1 lot) at the near edge minus 1 tick, moves the stop to entry, and runs the other lot to the far edge minus 1 tick. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: see CalcBar. Closed bar only.
-// Management: one contract when this file trades. Size is never cut to fit the stop.
+// Management: two contracts when this file trades (T1 lot and runner). Size is never cut to fit the stop.
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX exitPlan (stop and the near-edge target) and exitBar. Flat at the session value end.
+// Exit orders: GX exitPlan (stop, T1 at the near edge, runner to the far edge, break-even after T1) and exitBar. Flat at the session value end.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: one contract, so the 60 percent scale at the near edge is the GX target and the runner to the far edge is not sent. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
+// Other: ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: two contracts (coding-plan decision 10): GX takes T1 (60 percent, 1 lot) at the near edge minus 1 tick, moves the stop to entry, and runs the other lot to the far edge minus 1 tick. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: one contract, so the 60 percent scale at the near edge is the GX target and the runner to the far edge is not sent. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
+// ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: two contracts (coding-plan decision 10): GX takes T1 (60 percent, 1 lot) at the near edge minus 1 tick, moves the stop to entry, and runs the other lot to the far edge minus 1 tick. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
 // IOG is disabled.
 
 
@@ -204,7 +204,7 @@ namespace PowerLanguage.Strategy
 			stop = widen(up, entry, stop);
 			if (up ? m_near - entry < Math.Abs(entry - stop) : entry - m_near < Math.Abs(entry - stop)) { m_done = true; return; }
 			if (!budget(entry, stop)) { m_done = true; return; }
-			arm(up, entry, stop, m_near, up ? "A245LE" : "A245SE", 0);
+			arm(up, entry, stop, m_near, m_far, up ? "A245LE" : "A245SE", 0);
 			if (up) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 		private double blockExtreme(int minutes, int ago, bool high)
@@ -286,14 +286,18 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			int qty = 2; if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size " + qty); bool ok = risk > 0 && qty * risk * Bars.Info.BigPointValue <= equityAvailable(0.01); if (!ok && journalOn()) trace(ETraceLevel.Error, "skipped: multi-contract risk exceeds 1 percent"); return ok;
 		}
-		private void arm(bool longSide, double entry, double stop, double target, string name, int holdDays)
-		{
+		private void arm(bool longSide, double entry, double stop, double near, double far, string name, int holdDays)
+		{   // Coder 2026-11-22 (catalogue: "T1 = 60% at E_n - 1 tick; runner to the far edge E_f - 1 tick; stop to entry after T1"): the
+			// 2-contract entry (coding-plan decision 10) is planned as 2 lots, T1 (60 percent, 1 lot) at the near edge and the runner at the far edge.
+			double tick = tickSize();
+			double t1 = Math.Abs((longSide ? near - tick : near + tick) - entry), fin = Math.Abs((longSide ? far - tick : far + tick) - entry);
 			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = target > 0 || target < 0 ? ETargetMode.SingleTarget : ETargetMode.None;
+			bool runner = fin > t1 && t1 > 0;
+			GxConfig.TargetMode = runner ? ETargetMode.ScaleOutThenRunner : t1 > 0 ? ETargetMode.SingleTarget : ETargetMode.None;
+			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = t1; GxConfig.T1ScalePct = 60;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			if (!(GxConfig.FinalTargetValue > 0)) GxConfig.TargetMode = ETargetMode.None;
-			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.FinalTargetValue = runner ? fin : t1;
+			GxConfig.BreakEven = runner ? EBreakEven.AfterT1 : EBreakEven.Off;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
@@ -305,7 +309,7 @@ namespace PowerLanguage.Strategy
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
 			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(longSide, entry, stop, 1, mkt, name);
+			exitPlan(longSide, entry, stop, 2, mkt, name);   // the plan covers both contracts sent with Send(2)
 		}
 
 

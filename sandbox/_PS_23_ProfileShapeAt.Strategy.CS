@@ -166,8 +166,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_hold = 0; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			VpExtra prior = PriorRthProfile(); double atr = DailyContext.Atr20d;
 			if (prior == null || !(atr > 0) || !(prior.poc > 0)) return;
 			var shape = ProfileShape(prior);
@@ -187,7 +187,7 @@ namespace PowerLanguage.Strategy
 			double target = p ? prior.high + 0.5 * atr : prior.low - 0.5 * atr;
 			if (!budget(entry, stop)) { m_done = true; return; }
 			arm(p, entry, stop, target, p ? "PS23LE" : "PS23SE", 0);
-			if (!_SandboxRules.Allows(Side, true)) return; honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (p) { if (hostGate(true)) m_le.Send(entry, m_restQty); } else { if (hostGate(false)) m_se.Send(entry, m_restQty); }
+			if (!_SandboxRules.Allows(Side, p)) return; honorExit(entry, 0); m_restPx = entry; m_restBuy = p; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (p) { if (hostGate(true)) m_le.Send(entry, m_restQty); } else { if (hostGate(false)) m_se.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

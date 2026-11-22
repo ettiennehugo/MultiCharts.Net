@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-15 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// Research assumption: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// Other: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 // IOG is disabled.
 
 
@@ -144,7 +144,7 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _PS_15_LVNTraverseAfter : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se; private int m_step; private double m_lo, m_hi; private bool m_done, m_up; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le, m_se; private int m_step, m_bars; private double m_lo, m_hi, m_prev5 = double.NaN; private bool m_done, m_up; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
@@ -163,25 +163,38 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (sandboxBook()) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_step = 0; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_step = 0; m_prev5 = double.NaN; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
+			double c5 = Bars.Close[0], prev5 = m_prev5; m_prev5 = c5;   // this and the previous RTH 5-minute close
 			VpExtra comp = Composite(1, 5);
 			if (comp == null || comp.lvns == null || comp.lvns.Count == 0) return;
 			double atr = averageTrueRange(Bars, 5); if (!(atr > 0)) return;
 			Node best = comp.lvns[0]; double width = 0;
 			foreach (Node n in comp.lvns) { double w = n.high - n.low; if (w > width) { width = w; best = n; } }
 			if (width < 0.5 * atr) return;
-			double mid = (best.low + best.high) / 2.0;
-			bool up = Bars.Close[0] > best.high;
-			bool dn = Bars.Close[0] < best.low;
-			if (m_step == 0 && (up || dn)) { m_step = 1; m_up = up; m_lo = best.low; m_hi = best.high; return; }
-			if (m_step == 1 && ((m_up && Bars.Close[0] > mid) || (!m_up && Bars.Close[0] < mid)))
+			// Coder 2026-11-22: the traverse runs from outside the LVN through its near edge toward the far edge. A 5-minute close
+			// crosses the near edge from outside (prior 5-minute close below the low for a long), then a close beyond the midpoint within
+			// three 5-minute bars enters. The stop is back across the near edge and the target is the far edge, ahead of the entry.
+			// Before, the first step was a close already beyond the far edge, so the far-edge target sat behind the market.
+			if (m_step == 1 && ++m_bars > 3) m_step = 0;
+			if (m_step == 0)
 			{
-				double entry = Bars.Close[0];
-				double stop = widen(m_up, entry, m_up ? m_lo : m_hi);
+				if (double.IsNaN(prev5)) return;
+				bool up = prev5 < best.low && c5 > best.low;
+				bool dn = prev5 > best.high && c5 < best.high;
+				if (!up && !dn) return;
+				m_step = 1; m_bars = 0; m_up = up; m_lo = best.low; m_hi = best.high;
+				return;   // the midpoint close comes on a later 5-minute bar
+			}
+			double mid = (m_lo + m_hi) / 2.0;
+			if ((m_up && c5 > mid) || (!m_up && c5 < mid))
+			{
+				double entry = c5;
 				double target = m_up ? m_hi : m_lo;
+				if (m_up ? !(target > entry) : !(target < entry)) { m_step = 0; return; }   // already at or past the far edge: no traverse left
+				double stop = widen(m_up, entry, m_up ? m_lo - tickSize() : m_hi + tickSize());
 				if (!budget(entry, stop)) { m_done = true; return; }
 				arm(m_up, entry, stop, target, m_up ? "PS15LE" : "PS15SE", 0);
 				if (m_up) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }

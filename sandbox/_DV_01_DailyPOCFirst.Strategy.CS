@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop and target are both 0.15 times Atr20d. Flat at the session value end. An open trade is not flattened by the news blackout inside GX; the blackout only blocks the entry.
+// Exit orders: GX. Stop and target are both 0.15 times Atr20d. Flat at the session value end. GX NEWS flattens an open trade 5 minutes before a CPI / NFP / FOMC release, and no entry is sent from 5 minutes before to 10 minutes after it (catalogue blackout [-5, +10]).
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -163,8 +163,10 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
+			GxMinutesToNews = minutesToNews(day);   // Coder 2026-11-22 (catalogue: "quit your trades 5 minutes before"): GX NEWS flattens an open trade
+			exitBar();
 			if (day != m_day) { m_day = day; m_away = m_done = false; m_filledSetup = false; m_restOn = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			if (sandboxBook()) return;
@@ -204,9 +206,21 @@ namespace PowerLanguage.Strategy
 			{
 				if (r.kind != EEventKind.Cpi && r.kind != EEventKind.Nfp && r.kind != EEventKind.FomcDecision) continue;
 				double mins = (ToEastern(Bars.Time[0]) - r.etTime).TotalMinutes;
-				if (mins > -10 && mins < 5) return true;
+				if (mins >= -5 && mins < 10) return true;   // Coder 2026-11-22: catalogue blackout [-5, +10] minutes around the release (it was [-10, +5))
 			}
 			return false;
+		}
+		private double minutesToNews(DateTime day)
+		{   // minutes from this bar to the next CPI / NFP / FOMC release today; NaN when none is ahead
+			if (EventCalendar == null) return double.NaN;
+			double best = double.NaN;
+			foreach (EventRec r in EventCalendar.EventsOn(day))
+			{
+				if (r.kind != EEventKind.Cpi && r.kind != EEventKind.Nfp && r.kind != EEventKind.FomcDecision) continue;
+				double mins = (r.etTime - ToEastern(Bars.Time[0])).TotalMinutes;
+				if (mins > 0 && (double.IsNaN(best) || mins < best)) best = mins;
+			}
+			return best;
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -230,6 +244,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.SessionExit = hold ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.MaxHoldDays = hold ? 5 : 0; GxConfig.TimeStopMinutes = 0;
+			GxConfig.NewsExitMinutes = 5;   // Coder 2026-11-22: flatten 5 minutes before a tier-1 release (catalogue blackout [-5, +10])
 			GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }

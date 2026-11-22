@@ -168,8 +168,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_open = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1) || m_open == DateTime.MinValue) return;
-			if (sandboxBook()) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(90)) || double.IsNaN(vwap) || !(sig > 0)) return;

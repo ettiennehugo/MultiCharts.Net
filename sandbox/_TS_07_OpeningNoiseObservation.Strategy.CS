@@ -25,7 +25,7 @@
 // Exit: see section 13.
 //
 // ## 5. Timing
-// Signal evaluated: closed bar only, after base.CalcBar.
+// Signal evaluated: closed bar only, after base.CalcBar; the daily check runs once, on the first RTH bar of the trading day (09:30 ET open).
 // Order sent: the order type named in the catalogue (market next bar, stop, or limit).
 // Can fill: the next bar, or later for a resting stop or limit. IOG is disabled.
 //
@@ -154,11 +154,15 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			base.StartCalc();
 		}
+		private bool m_noiseEnded;
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
-			bool noise = IsRth() && sessionClock(Bars.Time[0]) < m_rthStart.Add(TimeSpan.FromMinutes(15)); if (journalOn()) trace(ETraceLevel.Journal, "TS-07 opening noise " + noise + ". Filter only, no order.");
+			if (!IsRth()) return;   // Coder 2026-11-22: the daily check runs on the first RTH bar (09:30 ET open), not the first Globex bar (18:00 ET), so it sees the session
+			DateTime day = GlobexDate(Bars.Time[0]);
+			bool noise = sessionClock(Bars.Time[0]) < m_rthStart.Add(TimeSpan.FromMinutes(15));
+			if (day != m_day) { m_day = day; m_noiseEnded = false; if (journalOn()) trace(ETraceLevel.Journal, "TS-07 opening noise " + noise + ". Filter only, no order."); }
+			if (!noise && !m_noiseEnded) { m_noiseEnded = true; if (journalOn()) trace(ETraceLevel.Journal, "TS-07 opening noise False (the 15-minute window after the RTH open has ended). Filter only, no order."); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

@@ -172,20 +172,21 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_back = m_beyond = 0; m_poke = 0; m_have = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			VpExtra prior = PriorRthProfile(); if (prior == null || !(prior.vah > prior.val)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double hi = Bars.High[0], lo = Bars.Low[0], prevHi = Bars.High[5], prevLo = Bars.Low[5];
 			for (int i = 1; i < 5; i++) { hi = Math.Max(hi, lbBar(i).h); lo = Math.Min(lo, lbBar(i).l); prevHi = Math.Max(prevHi, lbBar(5 + i).h); prevLo = Math.Min(prevLo, lbBar(5 + i).l); }
 			double tick = tickSize();
-			if (!m_have && hi > prior.vah + tick) { m_have = true; m_long = false; m_poke = hi; m_beyond = Bars.Close[0] > prior.vah ? 1 : 0; m_back = 0; }
-			else if (!m_have && lo < prior.val - tick) { m_have = true; m_long = true; m_poke = lo; m_beyond = Bars.Close[0] < prior.val ? 1 : 0; m_back = 0; }
+			bool pokeBar = false;   // Coder 2026-11-22: the poke bar's own close beyond is counted once (it was counted twice, so a one-close poke cancelled)
+			if (!m_have && hi > prior.vah + tick) { m_have = true; pokeBar = true; m_long = false; m_poke = hi; m_beyond = Bars.Close[0] > prior.vah ? 1 : 0; m_back = 0; }
+			else if (!m_have && lo < prior.val - tick) { m_have = true; pokeBar = true; m_long = true; m_poke = lo; m_beyond = Bars.Close[0] < prior.val ? 1 : 0; m_back = 0; }
 			if (!m_have) return;
 			bool beyond = m_long ? Bars.Close[0] < prior.val : Bars.Close[0] > prior.vah;
 			bool inside = m_long ? Bars.Close[0] > prior.val : Bars.Close[0] < prior.vah;
-			if (beyond) m_beyond++;
+			if (beyond && !pokeBar) m_beyond++;
 			if (m_beyond > 1) { m_have = false; m_beyond = 0; m_back = 0; return; }
 			if (inside) m_back++; else m_back = 0;
 			if (!m_long) m_poke = Math.Max(m_poke, hi); else m_poke = Math.Min(m_poke, lo);

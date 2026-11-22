@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-14.
 // Taken from the source: the Rules line of that heading.
-// Research assumption: ASSUMPTION: Chart is daily. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which on a daily chart is the next session's open. Days-below sweep is the enum, default 2.
+// Research assumption: ASSUMPTION: the rules are daily; Data1 is 1-minute, so each Globex trading date is aggregated into one daily bar (low = the day low, close = the last 1m close) and the daily rules run once, on the first bar of the next trading date. Held days count trading days. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which is the first minutes of the next session. Days-below sweep is the enum, default 2.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -39,7 +39,7 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
+// Chart: Data1 = 1-minute (owner rule). The daily swing builds its daily bars from Data1 by Globex trading date.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
 // Data2: Not applicable. Higher-timeframe bars are built from Data1.
 // Further series: Not applicable
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series, unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Chart is daily. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which on a daily chart is the next session's open. Days-below sweep is the enum, default 2.
+// Other: ASSUMPTION: the rules are daily; Data1 is 1-minute, so each Globex trading date is aggregated into one daily bar (low = the day low, close = the last 1m close) and the daily rules run once, on the first bar of the next trading date. Held days count trading days. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which is the first minutes of the next session. Days-below sweep is the enum, default 2.
 //
 // ## 17. Parameters
 // Each [Input] below is one of this strategy's own parameters. TraceLevel stays on the base.
@@ -131,7 +131,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: Chart is daily. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which on a daily chart is the next session's open. Days-below sweep is the enum, default 2.
+// ASSUMPTION: the rules are daily; Data1 is 1-minute, so each Globex trading date is aggregated into one daily bar (low = the day low, close = the last 1m close) and the daily rules run once, on the first bar of the next trading date. Held days count trading days. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys the next bar, which is the first minutes of the next session. Days-below sweep is the enum, default 2.
 // IOG is disabled. GX exitPlan is not called. Exit orders are sent only from sendExits.
 
 
@@ -152,7 +152,9 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_closes = new List<double>();
 		private int m_below, m_held;
 		private double m_lowBelow, m_stop, m_target, m_entry;
-		private bool m_ready;
+		private bool m_ready, m_hasDay, m_dRoll, m_exitSent;
+		private DateTime m_day = DateTime.MinValue;
+		private double m_dLow, m_dClose, m_dVwap = double.NaN;
 
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_14_WeeklyAvwapReclaim(object _ctx) : base(_ctx) { DaysBelow = EDaysBelow.Two; }
@@ -174,50 +176,62 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EDaysBelow), DaysBelow)) throw new ArgumentException("_A2_14_WeeklyAvwapReclaim: DaysBelow is not a defined EDaysBelow");
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */
 			Vwap1Type = EVwapType.Week; Vwap1DataStream = 1;
-			base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_closes.Clear(); m_below = 0; m_held = 0; m_ready = m_hasDay = m_dRoll = m_exitSent = false; m_day = DateTime.MinValue; base.StartCalc();
 		}
 
 		protected override void CalcBar()
-		{
+		{   // Coder 2026-11-22: Data1 is 1-minute (owner rule), so the daily swing builds its own daily bar per Globex trading date
+			// (low = the day's low, close = the last 1m close of the trading day) and runs the daily rules once, on the first bar of the
+			// next trading date. Held days, the 20-day SMA and the closes-below count are counted in days, not 1-minute bars.
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			double vwap = CurrentVwap1;
-			double atr = DailyContext != null ? DailyContext.Atr20d : double.NaN;
 			int pos = StrategyInfo.MarketPosition;
-			bool sendExits()
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day)
 			{
-				m_held++;
-				bool back = !double.IsNaN(vwap) && Bars.Close[0] < vwap;
-				if (m_held >= 7 || back) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
-				return false;
+				if (m_hasDay) dailyClose(pos);
+				m_day = day; m_hasDay = true; m_dLow = Bars.Low[0]; m_dRoll = false;
 			}
+			else m_dLow = Math.Min(m_dLow, Bars.Low[0]);
+			m_dClose = Bars.Close[0]; m_dVwap = CurrentVwap1; if (rollOn(1)) m_dRoll = true;
+			if (StrategyInfo.MarketPosition > 0 && !m_exitSent) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }   // resting stop and target work every bar
+		}
+
+		private void dailyClose(int pos)
+		{
+			m_exitSent = false;
 			// Analyst MC17 (2024-01-15 MLK): a CME holiday session halts at 12:00 CT and its trades carry the next day's trade date, so
 			// its daily bar is not a settled daily close. It is not counted as a close, a held day or an entry signal; the resting
 			// stop and target stay working.
-			if (IsNoRthDay(Bars.Time[0].Date))
+			if (IsNoRthDay(m_day))
 			{
-				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
-				if (journalOn()) trace(ETraceLevel.Journal, $"A2-14 {Bars.Time[0]:yyyy-MM-dd} holiday session ({_CmeHolidays.Rules.Get(Bars.Time[0].Date).Name}), not a daily close");
+				if (journalOn()) trace(ETraceLevel.Journal, $"A2-14 {m_day:yyyy-MM-dd} holiday session ({_CmeHolidays.Rules.Get(m_day).Name}), not a daily close");
 				return;
 			}
-			if (pos > 0 && sendExits()) return;
-			m_closes.Insert(0, Bars.Close[0]); if (m_closes.Count > 21) m_closes.RemoveAt(21);
-			if (pos != 0 || rollOn(1) || double.IsNaN(vwap) || !(atr > 0)) return;
-			bool below = Bars.Close[0] < vwap;
-			if (below) { m_below++; m_lowBelow = m_below == 1 ? Bars.Low[0] : Math.Min(m_lowBelow, Bars.Low[0]); m_ready = m_below >= (DaysBelow == EDaysBelow.Three ? 3 : 2); return; }
+			double vwap = m_dVwap, close = m_dClose;
+			double atr = DailyContext != null ? DailyContext.Atr20d : double.NaN;
+			if (pos > 0)
+			{
+				m_held++;   // one per completed trading day
+				bool back = !double.IsNaN(vwap) && close < vwap;
+				if (m_held >= 7 || back) { m_lx.Send(); m_exitSent = true; if (journalOn()) trace(ETraceLevel.Journal, $"A2-14 {m_day:yyyy-MM-dd} exit: " + (back ? "daily close below the weekly AVWAP" : "7 trading days held")); return; }
+			}
+			m_closes.Insert(0, close); if (m_closes.Count > 21) m_closes.RemoveAt(21);
+			if (pos != 0 || m_dRoll || double.IsNaN(vwap) || !(atr > 0)) return;
+			bool below = close < vwap;
+			if (below) { m_below++; m_lowBelow = m_below == 1 ? m_dLow : Math.Min(m_lowBelow, m_dLow); m_ready = m_below >= (DaysBelow == EDaysBelow.Three ? 3 : 2); return; }
 			if (!m_ready) { m_below = 0; return; }
 			if (!slopeUp()) { m_below = 0; m_ready = false; return; }
 			double tick = tickSize();
 			double stop = m_lowBelow - 0.1 * atr;
 			double floor = 14 * tick;
-			if (Bars.Close[0] - stop < floor) stop = Bars.Close[0] - floor;
-			double risk = Bars.Close[0] - stop;
+			if (close - stop < floor) stop = close - floor;
+			double risk = close - stop;
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Journal, "A2-14 skip: risk budget"); m_below = 0; m_ready = false; return; }
-			m_stop = stop; m_target = Bars.Close[0] + 2 * risk; m_held = 0; m_below = 0; m_ready = false;
+			m_stop = stop; m_target = close + 2 * risk; m_held = 0; m_below = 0; m_ready = false;
 			m_le.Send(); m_lxStp.Send(m_stop);
-			if (journalOn()) journalArm("A214LE", Bars.Close[0], m_stop, m_target, null);
+			if (journalOn()) journalArm("A214LE", close, m_stop, m_target, null);
 		}
 
 		private bool slopeUp()

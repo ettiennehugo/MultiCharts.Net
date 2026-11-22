@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 15-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
-// Data2: Not applicable. Higher-timeframe bars are built from Data1.
+// Data2: the same instrument on 15-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars for the 15-minute acceptance; the 5-minute HL bars are built from Data1.
 // Further series: Not applicable
 // Warmup: the ATR or average named in the rule.
 //
@@ -151,9 +151,9 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_lxStp, m_lxLmt;
 		private double m_pd, m_stop, m_target, m_hl, m_hlHigh, m_prev5Low, m_prev5High;
 		private int m_above15, m_fiveCount;
-		private DateTime m_day = DateTime.MinValue, m_b15 = DateTime.MinValue, m_b5 = DateTime.MinValue;
+		private DateTime m_day = DateTime.MinValue;
 		private bool m_latched, m_accepted, m_haveHl, m_done, m_wasComplete;
-		private double m_15c, m_5h, m_5l, m_5c;
+		private double m_15c, m_5h = double.NaN, m_5l = double.NaN;
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
@@ -183,7 +183,7 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EAcceptBars), AcceptBars)) throw new ArgumentException("_A2_11_PriorDayVwap: AcceptBars is not a defined EAcceptBars");
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ /* Coder 2026-11-22: a recalc starts the prior-day VWAP latch again */ m_wasComplete = false; m_nativeTime = DateTime.MinValue; base.StartCalc();
 			m_pd = double.NaN;
 		}
 
@@ -194,8 +194,9 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime et = ToEastern(Bars.Time[0]);
+			bool new15 = newNativeBar();   // once per bar, before any return
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_filledSetup = false; m_restOn = false; m_hl = m_hlHigh = double.NaN; }
+			if (day != m_day) { m_day = day; m_above15 = 0; m_accepted = m_haveHl = m_done = false; m_filledSetup = false; m_restOn = false; m_hl = m_hlHigh = double.NaN; m_fiveCount = 0; m_5h = m_5l = m_prev5Low = m_prev5High = double.NaN; }   // Coder 2026-11-22: the 5m state starts fresh each day
 			SessionStats s = Session;
 			if (s != null && s.rthComplete && !m_wasComplete && !double.IsNaN(CurrentVwap1)) m_pd = CurrentVwap1;
 			m_wasComplete = s != null && s.rthComplete;
@@ -204,8 +205,8 @@ namespace PowerLanguage.Strategy
 			if (pos > 0) return;
 			if (pos != 0 || m_done || rollOn(1) || !(m_pd > 0) || s == null || !(s.rthOpen > 0) || s.rthOpen >= m_pd) return;
 			if (!IsRth()) return;
-			bucket(et, 15, ref m_b15, ref m_15c, on15);
-			bucket(et, 5, ref m_b5, ref m_5c, on5);
+			if (new15) { double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v); m_15c = c; on15(); }
+			step5(et);
 			if (!m_haveHl) return;
 			if (!(Bars.Close[0] > m_hlHigh)) return;
 			double tick = tickSize();
@@ -246,14 +247,39 @@ namespace PowerLanguage.Strategy
 			exitPlan(longSide, entry, stop, 1, mkt, name);
 		}
 
-		private void bucket(DateTime et, int minutes, ref DateTime cur, ref double close, Action onClose)
+		// Coder 2026-11-22: the 15-minute acceptance reads closed Data2 15-minute bars (owner rule: Data2 = native timeframe). The 5-minute
+		// HL bars are built from Data1 with end stamps (1m bars hh:01..hh:05 make the bar ending hh:05) and reset every Globex day.
+		private void step5(DateTime et)
 		{
-			int slot = (et.Hour * 60 + et.Minute) / minutes;
-			DateTime b = et.Date.AddMinutes(slot * minutes);
-			if (cur == DateTime.MinValue) { cur = b; close = Bars.Close[0]; if (minutes == 5) { m_5h = Bars.High[0]; m_5l = Bars.Low[0]; } return; }
-			if (b == cur) { close = Bars.Close[0]; if (minutes == 5) { m_5h = Math.Max(m_5h, Bars.High[0]); m_5l = Math.Min(m_5l, Bars.Low[0]); } return; }
-			onClose();
-			cur = b; close = Bars.Close[0]; if (minutes == 5) { m_5h = Bars.High[0]; m_5l = Bars.Low[0]; }
+			m_5h = double.IsNaN(m_5h) ? Bars.High[0] : Math.Max(m_5h, Bars.High[0]);
+			m_5l = double.IsNaN(m_5l) ? Bars.Low[0] : Math.Min(m_5l, Bars.Low[0]);
+			if (et.Minute % 5 != 0) return;
+			on5();
+			m_5h = m_5l = double.NaN;
+		}
+
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
 		}
 
 		private void on15()

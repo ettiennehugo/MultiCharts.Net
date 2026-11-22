@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the SP-08 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range. The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
+// Research assumption: ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range (closed Data2 15-minute bars). The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 15-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 15-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range. The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
+// Other: ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range (closed Data2 15-minute bars). The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range. The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
+// ASSUMPTION: ASSUMPTION: the point of origin is the open of the first 15-minute bar that closes outside an 8-bar 15-minute range (closed Data2 15-minute bars). The first 5-minute higher low that retests that open buys. The stop is the origin minus half the 15-minute range. The target is the breakout high plus the range height.
 // IOG is disabled.
 
 
@@ -145,6 +145,29 @@ namespace PowerLanguage.Strategy
 	public class _SP_08_PointOfOrigin : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_le; private double m_origin, m_range, m_break; private bool m_have, m_done; private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
@@ -168,14 +191,17 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; if (StrategyInfo.MarketPosition == 0) { m_done = false; m_filledSetup = false; m_restOn = false; m_have = false; } }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 160) return;
-			if (sandboxBook()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_have && ((int)tod.TotalMinutes) % 15 == 0)
+			// Coder 2026-11-22: the breakout bar is the last closed Data2 15-minute bar and the range is the 8 closed 15-minute bars before
+			// it; the point of origin is that 15-minute bar's open (it was the open of the last 1-minute bar).
+			if (newNativeBar() && !m_have && nativeReady(8))
 			{
-				double hi = double.MinValue, lo = double.MaxValue;
-				for (int i = 15; i < 15 * 9; i++) { hi = Math.Max(hi, lbBar(i).h); lo = Math.Min(lo, lbBar(i).l); }
-				if (Bars.Close[0] > hi) { m_origin = Bars.Open[0]; m_range = hi - lo; m_break = Bars.High[0]; m_have = m_range > 0; }
+				double hi = double.MinValue, lo = double.MaxValue, o, h, l, c, v;
+				for (int k = 1; k <= 8; k++) { nativeBar(k, out o, out h, out l, out c, out v); hi = Math.Max(hi, h); lo = Math.Min(lo, l); }
+				nativeBar(0, out o, out h, out l, out c, out v);
+				if (c > hi) { m_origin = o; m_range = hi - lo; m_break = h; m_have = m_range > 0; }
 			}
 			if (!m_have || ((int)tod.TotalMinutes) % 5 != 0) return;
 			double barLo = Bars.Low[0], prev = Bars.Low[5], barHi = Bars.High[0];

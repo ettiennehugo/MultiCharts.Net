@@ -164,8 +164,8 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_open = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(270)) || tod > m_rthValueEnd) return;
 			SessionStats s = Session;
@@ -177,7 +177,7 @@ namespace PowerLanguage.Strategy
 			double best = double.MaxValue; Node pick = prof.hvns[0]; bool any = false;
 			foreach (Node n in prof.hvns)
 			{
-				double d = up ? Math.Abs(n.low - s.rthLow) : Math.Abs(n.high - s.rthHigh);
+				double d = up ? Math.Abs(n.peak - s.rthHigh) : Math.Abs(n.peak - s.rthLow);   // Coder 2026-11-22: the peak nearest the trend extreme (the high on an up day); it was nearest the opposite extreme
 				if (d < best) { best = d; pick = n; any = true; }
 			}
 			if (!any) return;

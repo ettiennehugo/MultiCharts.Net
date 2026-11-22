@@ -229,7 +229,9 @@ namespace PowerLanguage.Strategy
 			if (tod > new TimeSpan(9, 30, 0) && tod <= Cfg.driveEnd)
 			{
 				m_hi = Math.Max(m_hi, Bars.High[0]); m_lo = Math.Min(m_lo, Bars.Low[0]);
-				if (TodNormaliser != null && TodNormaliser.Valid(ETodMetric.Range)) { m_medSum += TodNormaliser.Median(ETodMetric.Range); m_slots++; }
+				// Coder 2026-11-22: one median per 5-minute TOD slot, on the slot's last bar (minute % 5 == 4: 09:34, 09:39, 09:44), so the
+				// sum is the three same-slot medians the header names (it added the slot median on every 1-minute bar, about 15 times).
+				if (((int)tod.TotalMinutes) % 5 == 4 && TodNormaliser != null && TodNormaliser.Valid(ETodMetric.Range)) { m_medSum += TodNormaliser.Median(ETodMetric.Range); m_slots++; }
 				if (tod == Cfg.driveEnd) classifyDrive();
 				return;
 			}

@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the YV-12 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Research assumption: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Other: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
 // IOG is disabled.
 
 
@@ -145,6 +145,29 @@ namespace PowerLanguage.Strategy
 	public class _YV_12_PriorDayHigh : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		[Input] public ESandboxSide Side { get; set; }
@@ -164,22 +187,26 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 20) return;
-			if (sandboxBook()) return;
 			double pdh = Session.priorRthHigh, pdl = Session.priorRthLow, atr = DailyContext.Atr20d;
 			if (!(pdh > pdl) || !(atr > 0) || pdh - pdl < 1.5 * atr) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(120)) || ((int)tod.TotalMinutes) % 5 != 0) return;
-			double span = Bars.High[0] - Bars.Low[0]; if (!(span >= atr)) return;
-			double upper = Bars.High[0] - Math.Max(Bars.Open[0], Bars.Close[0]);
-			double lower = Math.Min(Bars.Open[0], Bars.Close[0]) - Bars.Low[0];
+			// Coder 2026-11-22: the wick candle is the last closed Data2 5-minute bar, and it must be "distinct": its range at least
+			// 1.0 x ATR14 of the 5-minute bars (spec). It was one 1-minute bar compared with the daily ATR20, so it almost never fired.
+			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(120)) || !newNativeBar()) return;
+			double bo, bh, bl, bc, bv; nativeBar(0, out bo, out bh, out bl, out bc, out bv);
+			double atr14 = nativeAtr(14);
+			double span = bh - bl; if (!(atr14 > 0) || !(span >= 1.0 * atr14)) return;
+			double upper = bh - Math.Max(bo, bc);
+			double lower = Math.Min(bo, bc) - bl;
 			bool openAtHigh = Session.rthOpen >= pdh - 0.10 * (pdh - pdl);
 			bool openAtLow = Session.rthOpen <= pdl + 0.10 * (pdh - pdl);
-			bool sell = !openAtHigh && Bars.High[0] >= pdh - 0.10 * atr && Bars.High[0] <= pdh + 0.5 * atr && upper >= 0.5 * span && Bars.Close[0] <= Bars.Low[0] + 0.25 * span;
-			bool buy = !openAtLow && Bars.Low[0] <= pdl + 0.10 * atr && Bars.Low[0] >= pdl - 0.5 * atr && lower >= 0.5 * span && Bars.Close[0] >= Bars.High[0] - 0.25 * span;
+			bool sell = !openAtHigh && bh >= pdh - 0.10 * atr && bh <= pdh + 0.5 * atr && upper >= 0.5 * span && bc <= bl + 0.25 * span;
+			bool buy = !openAtLow && bl <= pdl + 0.10 * atr && bl >= pdl - 0.5 * atr && lower >= 0.5 * span && bc >= bh - 0.25 * span;
 			if (!sell && !buy) return;
-			double entry = sell ? Bars.Low[0] - tickSize() : Bars.High[0] + tickSize();
-			double stop = widen(!sell, entry, sell ? Bars.High[0] + tickSize() : Bars.Low[0] - tickSize());
+			double entry = sell ? bl - tickSize() : bh + tickSize();
+			double stop = widen(!sell, entry, sell ? bh + tickSize() : bl - tickSize());
 			double target = sell ? pdl : pdh;
 			if ((sell && !(target < entry)) || (!sell && !(target > entry)) || !budget(entry, stop)) { m_done = true; return; }
 			m_timeStop = 30;

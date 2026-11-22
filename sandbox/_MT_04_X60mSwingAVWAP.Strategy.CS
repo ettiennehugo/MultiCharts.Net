@@ -167,8 +167,8 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			if (a != null && a.Valid && a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; m_filledSetup = false; m_restOn = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
-			if (sandboxBook()) return;
 			if (a == null || !a.Valid || !(a.Sigma > 0) || !(a.SlopeAtr > 0) || !(Bars.Close[0] > a.Value)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 10) return;

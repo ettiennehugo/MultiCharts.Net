@@ -167,9 +167,10 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_life = 0; m_window = -1; }
+			// The book runs before the position return so Rest() sees the fill (one attempt per anchor per day). It resends the
+			// limit for m_life more bars after the arm bar, then stops (before: the life counter ended but the book kept resending).
+			if (sandboxBook()) { if (m_life > 0 && --m_life == 0) m_restOn = false; return; }
 			if (StrategyInfo.MarketPosition != 0) return;
-			if (m_life > 0) { { if (hostGate(false)) m_se.Send(m_limit); } m_life--; if (m_life == 0) return; }
-			if (sandboxBook()) return;
 			if (m_done || !IsRth() || Bars.CurrentBar < 40) return;
 			DateTime et = ToEastern(Bars.Time[0]);
 			int minute = et.Minute, hour = et.Hour;

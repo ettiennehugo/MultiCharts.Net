@@ -166,9 +166,9 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = m_morning = false; m_below = 0; }
+			if (day != m_day) { m_day = day; m_done = m_morning = false; m_below = 0; m_restOn = m_filledSetup = false; }   // Coder 2026-11-22: yesterday's resting stop is not resent today
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
-			if (sandboxBook()) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1;
 			if (double.IsNaN(vwap) || !(sig > 0) || Bars.CurrentBar < 40) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);

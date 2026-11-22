@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the MT-07 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes have held beyond the detrended VAH.
+// Research assumption: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 60-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 60-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes have held beyond the detrended VAH.
+// Other: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes have held beyond the detrended VAH.
+// ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
 // IOG is disabled.
 
 
@@ -145,11 +145,35 @@ namespace PowerLanguage.Strategy
 	public class _MT_07_HtfDetrendedRail : _PS_25_AcceptBeyondRail
 	{
 		private int m_htf;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		public _MT_07_HtfDetrendedRail(object _ctx) : base(_ctx) { }
 		protected override void StartCalc()
 		{
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
+			m_htf = 0; m_nativeTime = DateTime.MinValue;   // a recalc starts the 60-minute count again
 			base.StartCalc();
 		}
 
@@ -157,12 +181,13 @@ namespace PowerLanguage.Strategy
 		{
 			if (Bars.Status == EBarState.Close)
 			{
-				TimeSpan tod = sessionClock(Bars.Time[0]);
 				if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			if (((int)tod.TotalMinutes) % 60 == 0)
+				// Coder 2026-11-22: the 60-minute close is the last closed Data2 60-minute bar (it was one 1-minute close at HH:00).
+				if (newNativeBar())
 				{
+					double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
 					double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0);
-					if (!double.IsNaN(vah) && Bars.Close[0] > vah) m_htf++;
+					if (!double.IsNaN(vah) && c > vah) m_htf++;
 					else m_htf = 0;
 				}
 			}

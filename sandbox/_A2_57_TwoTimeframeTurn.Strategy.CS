@@ -235,7 +235,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0) { sendExits(tod, flat); return; }
 			m_stop = m_entry = m_risk = m_peak = double.NaN;
 			if (new12 && m_validLeft > 0) m_validLeft--;                    // "valid for the next 2 12m bars"
-			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop);
+			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_planStop); }   // braces: no exit stop while flat without an entry; the protective stop is the planned stop (m_stop is NaN while flat)
 		}
 
 		/// <summary>New CLOSED 60m bar: update EMA(13) and the slope state.</summary>

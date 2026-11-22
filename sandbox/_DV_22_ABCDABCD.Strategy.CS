@@ -165,8 +165,8 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 20) return;
-			if (sandboxBook()) return;
 			if (!(isSwingLow(6) && isSwingHigh(4) && isSwingLow(2))) return;
 			double A = Bars.Low[6], B = Bars.High[4], C = Bars.Low[2];
 			if (!(C > A) || !(C < (A + B) / 2.0)) return;

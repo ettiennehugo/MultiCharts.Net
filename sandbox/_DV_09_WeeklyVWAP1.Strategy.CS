@@ -167,8 +167,8 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; if (day.DayOfWeek == DayOfWeek.Monday) { m_upper.Clear(); m_lower.Clear(); } }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || Bars.CurrentBar < 300) return;
-			if (sandboxBook()) return;
 			if (day.DayOfWeek == DayOfWeek.Monday || day.DayOfWeek == DayOfWeek.Tuesday) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }

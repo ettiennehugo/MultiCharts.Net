@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -172,44 +172,73 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; base.StartCalc(); requireRing(1, 2000, "YV-11 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.smaLength = 200; DailyConfig.atrLength = 20; m_nativeTime = DateTime.MinValue; base.StartCalc(); requireRing(1, 2000, "YV-11 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
+
 		protected override void CalcBar()
 		{
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			// Coder 2026-11-22: a missing Data2 no longer returns before the exits; the base, exitBar and the own-order exits still run
+			// and only new entries are blocked. The EMA9 / SMA20 / ATR14 and the signal bar are read from the closed Data2 5-minute bars.
+			bool hasData2 = IsExist(2);
+			if (!hasData2 && journalOn()) trace(ETraceLevel.Error, "Data2 missing");
 			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
-			double sma = smaN(20, 0), ema = ema9();
+			bool fresh = hasData2 && newNativeBar() && nativeReady(31);
+			double sma = fresh ? smaN(20, 0) : double.NaN, ema = fresh ? ema9() : double.NaN;
+			double o5 = 0, h5 = 0, l5 = 0, c5 = 0, v5; if (fresh) nativeBar(0, out o5, out h5, out l5, out c5, out v5);
 			TimeSpan tod = sessionClock(Bars.Time[0]);
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (pos != 0)
 			{
 				bool flat = _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-				bool lost = (pos > 0 && Bars.Close[0] < sma) || (pos < 0 && Bars.Close[0] > sma);
+				bool lost = fresh && ((pos > 0 && c5 < sma) || (pos < 0 && c5 > sma));   // a 5-minute close through the 5-minute SMA20
 				if (flat && journalOn()) trace(ETraceLevel.Journal, "YV-11 " + day.ToString("yyyy-MM-dd") + " flat-by: " + _SandboxRules.FlatByReason(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd) + ", closing " + Math.Abs(pos));
 				if (flat || lost) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 				if (pos > 0) { m_ls.Send(m_stop); if (m_hasTarget) m_lt.Send(m_target); }
 				else { m_ss.Send(m_stop); if (m_hasTarget) m_st.Send(m_target); }
 				return;
 			}
-			if (m_done || !IsRth() || tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || ((int)tod.TotalMinutes) % 5 != 0) return;
-			if (sandboxBook()) return;
-			double atr = 0; for (int k = 0; k < 14; k++) { double h = double.MinValue, l = double.MaxValue; for (int i = 0; i < 5; i++) { h = Math.Max(h, lbBar(k * 5 + i).h); l = Math.Min(l, lbBar(k * 5 + i).l); } atr += h - l; }
+			if (!fresh || m_done || !IsRth() || tod < m_rthStart.Add(TimeSpan.FromMinutes(15))) return;
+			double atr = 0; for (int k = 0; k < 14; k++) { double ko, kh, kl, kc, kv; nativeBar(k, out ko, out kh, out kl, out kc, out kv); atr += kh - kl; }
 			atr /= 14; if (!(atr > 0)) return;
 			double sma5 = smaN(20, 5);
 			double slope = (sma - sma5) / 5.0;
-			bool up = ema > sma && Bars.Close[0] > sma && slope >= 0.10 * atr && Bars.Close[0] - sma <= 2 * atr;
-			bool dn = ema < sma && Bars.Close[0] < sma && slope <= -0.10 * atr && sma - Bars.Close[0] <= 2 * atr;
+			bool up = ema > sma && c5 > sma && slope >= 0.10 * atr && c5 - sma <= 2 * atr;
+			bool dn = ema < sma && c5 < sma && slope <= -0.10 * atr && sma - c5 <= 2 * atr;
 			double gap = Session.rthOpen - Session.priorRthClose;
 			if (up && !(gap >= 0.5 * DailyContext.Atr20d)) return;
 			if (dn && !(gap <= -0.5 * DailyContext.Atr20d)) return;
 			if (!up && !dn) return;
-			double span = Bars.High[0] - Bars.Low[0]; if (!(span > 0)) return;
-			bool doji = Math.Abs(Bars.Close[0] - Bars.Open[0]) <= 0.1 * span;
-			bool tail = up ? (Math.Min(Bars.Open[0], Bars.Close[0]) - Bars.Low[0]) >= 0.5 * span : (Bars.High[0] - Math.Max(Bars.Open[0], Bars.Close[0])) >= 0.5 * span;
+			double span = h5 - l5; if (!(span > 0)) return;
+			bool doji = Math.Abs(c5 - o5) <= 0.1 * span;
+			bool tail = up ? (Math.Min(o5, c5) - l5) >= 0.5 * span : (h5 - Math.Max(o5, c5)) >= 0.5 * span;
 			double zoneLo = Math.Min(ema, sma), zoneHi = Math.Max(ema, sma);
-			if (!(Bars.Low[0] <= zoneHi && Bars.High[0] >= zoneLo) || (!doji && !tail)) return;
-			double entry = up ? Bars.High[0] + tickSize() : Bars.Low[0] - tickSize();
-			m_stop = widen(up, entry, up ? Bars.Low[0] - tickSize() : Bars.High[0] + tickSize());
+			if (!(l5 <= zoneHi && h5 >= zoneLo) || (!doji && !tail)) return;
+			double entry = up ? h5 + tickSize() : l5 - tickSize();
+			m_stop = widen(up, entry, up ? l5 - tickSize() : h5 + tickSize());
 			if (!budget(entry, m_stop)) { m_done = true; return; }
 			double sma200 = DailyContext.Sma200;
 			double risk = Math.Abs(entry - m_stop);
@@ -217,11 +246,11 @@ namespace PowerLanguage.Strategy
 			m_target = sma200;
 			m_restPx = entry; m_restBuy = up; m_restOn = true; m_restQty = 1; if (up) { { if (hostGate(true)) m_le.Send(entry); } m_ls.Send(m_stop); } else { { if (hostGate(false)) m_se.Send(entry); } m_ss.Send(m_stop); }
 		}
-		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) s += lbBar(ago + i).c; return s / n; }
+		private double smaN(int n, int ago) { double s = 0; for (int i = 0; i < n; i++) { double o, h, l, c, v; nativeBar(ago + i, out o, out h, out l, out c, out v); s += c; } return s / n; }
 		private double ema9()
 		{
-			double k = 2.0 / 10.0, e = Bars.Close[30];
-			for (int i = 29; i >= 0; i--) e = lbBar(i).c * k + e * (1 - k);
+			double k = 2.0 / 10.0, o, h, l, c, v, e0; nativeBar(30, out o, out h, out l, out e0, out v); double e = e0;
+			for (int i = 29; i >= 0; i--) { nativeBar(i, out o, out h, out l, out c, out v); e = c * k + e * (1 - k); }
 			return e;
 		}
 

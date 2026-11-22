@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for OF-01. The code is the engines-manual worked example, renamed to the catalogue file stem.
 // Taken from the source: the example's core arm, including its labelled assumptions.
-// Research assumption: where the example labels an assumption, that label still applies. GX is not built, so the example's own exit orders remain. The control-arm exit is pending _GenericExit.
+// Research assumption: where the example labels an assumption, that label still applies. GX is not built, so the example's own exit orders remain. The control-arm exit is pending _GenericExit. A zone lives until its first retest or the roll, not only for the day; its move-away and retest are tracked in ETH too, and the retest limit is sent in RTH only. A sell stack needs the 5-minute close in the bottom 30 percent (the mirror of the buy rule).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry and the example.
@@ -206,13 +206,16 @@ namespace PowerLanguage.Strategy
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_zone = m_armed = m_used = false; }
+			// Coder 2026-11-22: a zone lives until its first retest or the roll (the catalogue gives it no daily expiry); m_used still
+			// allows one trade per Globex day. sandboxBook runs before the position return so Rest() sees the fill.
+			if (day != m_day) { m_day = day; m_used = m_done = false; }
+			if (sandboxBook()) return;
 			if (rollOn(1)) m_zone = false;
 			int pos = StrategyInfo.MarketPosition;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
 			{
-				m_used = true;
+				m_used = true; m_zone = false;   // the zone has had its retest
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
 				else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
@@ -220,7 +223,7 @@ namespace PowerLanguage.Strategy
 			
 			}
 			if (pos != 0 && sendExits()) return;
-			if (!IsRth()) return;
+			bool rth = IsRth();   // Coder 2026-11-22: the zone's move-away and first retest are tracked in ETH too; entries are RTH only, so an ETH retest uses the zone up
 			double tick = tickSize(), h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			double atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (m_zone && !m_used)
@@ -229,22 +232,22 @@ namespace PowerLanguage.Strategy
 				{
 					if (!m_armed && h >= m_zHi + Cfg.awayAtr * atr) m_armed = true;
 					else if (m_armed && l <= m_zHi) { m_used = true; m_zone = false; return; }
-					if (m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, true))
+					if (rth && m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, true))
 					{ m_leLmt.Send(m_zHi, Cfg.contracts); m_lxStp.Send(m_stop); return; }
 				}
 				else
 				{
 					if (!m_armed && l <= m_zLo - Cfg.awayAtr * atr) m_armed = true;
 					else if (m_armed && h >= m_zLo) { m_used = true; m_zone = false; return; }
-					if (m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, false))
+					if (rth && m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, false))
 					{ m_seLmt.Send(m_zLo, Cfg.contracts); m_sxStp.Send(m_stop); return; }
 				}
 			}
-			if (m_zone || m_used) return;
+			if (m_zone || m_used || !rth) return;
 			if (!takeNative()) return;
 			h = BarsOfData(2).High[0]; l = BarsOfData(2).Low[0]; c = BarsOfData(2).Close[0];
 			atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
-			if (h - l <= 0 || (c - l) / (h - l) < 1 - Cfg.closeTopFrac) return;
+			if (h - l <= 0) return;
 			_OrderFlow.StackedResult s = StackedImbalances(0, Cfg.ratio, Cfg.minVol, Cfg.minStack);
 			if (!s.Found || s.Quality > _OrderFlow.FlowQuality.High) return;
 			foreach (double[] run in s.Runs)
@@ -252,6 +255,8 @@ namespace PowerLanguage.Strategy
 				bool buyRun = run[3] > 0;
 				if (buyRun && !_SandboxRules.Allows(Side, true)) continue;
 				if (!buyRun && !_SandboxRules.Allows(Side, false)) continue;
+				// Coder 2026-11-22: a buy stack needs the 5m close in the top 30 percent, a sell stack (the mirror) in the bottom 30 percent
+				if (buyRun ? (c - l) / (h - l) < 1 - Cfg.closeTopFrac : (h - c) / (h - l) < 1 - Cfg.closeTopFrac) continue;
 				double stop = buyRun ? run[0] - tick : run[1] + tick;
 				double entry = buyRun ? run[1] : run[0];
 				double risk = Math.Abs(entry - stop);
@@ -287,6 +292,7 @@ namespace PowerLanguage.Strategy
 			}
 			else
 			{
+				m_seLmt.Send(m_restPx, m_restQty);   // Coder 2026-11-22: the short limit is resent too
 			}
 			return true;
 		}

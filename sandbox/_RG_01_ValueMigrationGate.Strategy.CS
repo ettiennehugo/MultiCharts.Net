@@ -26,7 +26,7 @@
 // Exit: see section 13.
 //
 // ## 5. Timing
-// Signal evaluated: closed bar only, after base.CalcBar.
+// Signal evaluated: closed bar only, after base.CalcBar; the daily check runs once, on the first RTH bar of the trading day (09:30 ET open).
 // Order sent: the order type named in the catalogue (market next bar, stop, or limit).
 // Can fill: the next bar, or later for a resting stop or limit. IOG is disabled.
 //
@@ -157,6 +157,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (!IsRth()) return;   // Coder 2026-11-22: the daily check runs on the first RTH bar (09:30 ET open), not the first Globex bar (18:00 ET), so it sees the session
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			DateTime t0 = Bars.Time[0].Date; VpExtra dev = RangeProfileAfter(1, t0, Bars.Time[0]); VpExtra prior = PriorRthProfile(); double mig = dev != null && prior != null ? dev.poc - prior.poc : double.NaN; if (journalOn()) trace(ETraceLevel.Journal, "RG-01 POC migration " + mig.ToString("0.00") + ". Gate, no order.");
 		}

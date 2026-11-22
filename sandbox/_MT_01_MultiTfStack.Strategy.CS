@@ -222,7 +222,7 @@ namespace PowerLanguage.Strategy
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
 			if (sandboxBook()) return;
 			if (double.IsNaN(m_trigger) && takeNative()) arm(day);
-			if (!double.IsNaN(m_trigger)) m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop);
+			if (!double.IsNaN(m_trigger)) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); }   // braces: no exit stop while flat without an entry
 		}
 
 		private void arm(DateTime day)

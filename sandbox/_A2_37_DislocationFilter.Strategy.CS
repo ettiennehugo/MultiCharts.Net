@@ -146,16 +146,20 @@ namespace PowerLanguage.Strategy
 	{
 		private readonly List<double> m_spread = new List<double>();
 		private DateTime m_day = DateTime.MinValue;
+		protected override void StartCalc()
+		{
+			m_spread.Clear(); m_day = DateTime.MinValue;   // Coder 2026-11-22: a recalc reuses this object, so the spread history is cleared (no lookahead)
+			base.StartCalc();
+		}
 		public _A2_37_DislocationFilter(object _ctx) : base(_ctx) { }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (!IsExist(2))
-			{
-				DateTime day = Bars.Time[0].Date;
-				if (day != m_day) { m_day = day; if (journalOn()) trace(ETraceLevel.Journal, "A2-37 " + day.ToString("yyyy-MM-dd") + " no Data2 pair"); }
+			{   // Coder 2026-11-22: one guard (the second, journalling one was unreachable); the Error and the no-pair journal are once per trading day
+				DateTime day = tradingDayKey(Bars.Time[0]);
+				if (day != m_day) { m_day = day; if (journalOn()) { trace(ETraceLevel.Error, "Data2 missing"); trace(ETraceLevel.Journal, "A2-37 " + day.ToString("yyyy-MM-dd") + " no Data2 pair"); } }
 				return;
 			}
 			IInstrument b2 = BarsOfData(2);

@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the DV-11 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// Research assumption: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 30-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// Other: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 // IOG is disabled.
 
 
@@ -145,6 +145,29 @@ namespace PowerLanguage.Strategy
 	{
 		
 		private IOrderPriced m_le, m_se; private int m_arm; private bool m_done, m_sell; private double m_limit, m_stop; private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		[Input] public ESandboxSide Side { get; set; }
@@ -172,22 +195,26 @@ namespace PowerLanguage.Strategy
 			{
 				sendLimit();
 				if (boundary) m_arm--;
-				if (m_arm == 0) m_done = false; m_filledSetup = false; m_restOn = false;
+				if (m_arm == 0) { m_done = false; m_filledSetup = false; m_restOn = false; }   // braces: only when the limit's life ends
 				return;
 			}
 			if (!boundary || m_done) return;
 			if (sandboxBook()) return;
 			double vwap = CurrentVwap1, sig = CurrentVwapSigma1, atr = DailyContext.Atr20d;
 			if (double.IsNaN(vwap) || !(sig > 0) || !(atr > 0)) return;
-			int above = 0, below = 0;
-			for (int k = 0; k < 10; k++) { if (lbBar(k * 30).c > vwap + sig) above++; if (lbBar(k * 30).c < vwap - sig) below++; }
-			double range = Bars.High[0] - Bars.Low[0];
-			bool failShort = above >= 6 && Bars.Close[0] < vwap + sig - 0.1 * range;
-			bool failLong = below >= 6 && Bars.Close[0] > vwap - sig + 0.1 * range;
+			// Coder 2026-11-22: the thirty-minute closes and the signal bar's range come from the closed Data2 30-minute bars (the range
+			// was the 1-minute bar's). nativeBar(0) is the 30-minute bar that closed on this boundary.
+			if (!nativeReady(10)) return;
+			int above = 0, below = 0; double o, h, l, c, v;
+			for (int k = 0; k < 10; k++) { nativeBar(k, out o, out h, out l, out c, out v); if (c > vwap + sig) above++; if (c < vwap - sig) below++; }
+			nativeBar(0, out o, out h, out l, out c, out v);
+			double range = h - l;
+			bool failShort = above >= 6 && c < vwap + sig - 0.1 * range;
+			bool failLong = below >= 6 && c > vwap - sig + 0.1 * range;
 			if (!failShort && !failLong) return;
 			m_sell = failShort;
 			m_limit = m_sell ? vwap + sig : vwap - sig;
-			m_stop = widen(!m_sell, m_limit, m_sell ? Bars.High[0] + 0.15 * atr : Bars.Low[0] - 0.15 * atr);
+			m_stop = widen(!m_sell, m_limit, m_sell ? h + 0.15 * atr : l - 0.15 * atr);   // beyond the 30-minute signal bar
 			if (!budget(m_limit, m_stop)) { m_done = true; return; }
 			arm(!m_sell, m_limit, m_stop, vwap, m_sell ? "DV11SE" : "DV11LE");
 			m_arm = 8; sendLimit();

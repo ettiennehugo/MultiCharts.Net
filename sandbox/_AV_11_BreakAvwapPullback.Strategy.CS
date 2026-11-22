@@ -226,10 +226,10 @@ namespace PowerLanguage.Strategy
 				return true;
 			
 			}
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 && sendExits()) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_ok || !IsRth()) return;
-			if (sandboxBook()) return;
 			if (!double.IsNaN(m_trigger))
 			{
 				m_restPx = m_trigger; m_restBuy = m_longBreak; m_restOn = true; m_restQty = Cfg.contracts;
@@ -297,12 +297,15 @@ namespace PowerLanguage.Strategy
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
+			// Coder 2026-11-22: the resend carries the protective stop sent with the entry, and the short side is resent too
+			// (its branch was empty, so the short stop entry was cancelled after its first bar).
 			if (m_restBuy)
 			{
-				m_leStp.Send(m_restPx, m_restQty);
+				m_leStp.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop);
 			}
 			else
 			{
+				m_seStp.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop);
 			}
 			return true;
 		}

@@ -189,7 +189,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; m_upLvl = m_dnLvl = double.NaN; }
 			int posNow = StrategyInfo.MarketPosition;
 			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
-			{   // Analyst MC17: the entry is 2 contracts and the GX plan is 1, so close every remaining contract at flat-by or the next day
+			{   // Analyst MC17: close any remaining contract at flat-by or the next day (Coder 2026-11-22: the entry is now 1 contract, the same as the GX plan)
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
 				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
 			}
@@ -205,6 +205,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
 			if (ToEastern(Bars.Time[0]).TimeOfDay < new TimeSpan(10, 0, 0)) return;
+			if (ToEastern(Bars.Time[0]).Minute % 15 != 0) return;   // Coder 2026-11-22 (catalogue: "2 consecutive 15m closes ... enter at the next 15m open"): only the 1m close that ends a 15-minute bar counts
 			SigmaMixtureResult sig = m_gmm.LastSigma;
 			if (sig == null || !sig.ok || sig.levels == null || sig.levels.Length < 2) return;
 			double c = Bars.Close[0];
@@ -235,11 +236,10 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk)
 			{ if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} skip: next centre under 1.2R or missing"); m_done = true; return; }
-			if (journalOn()) trace(ETraceLevel.Warning, "A2-32 multi-contract size 2");
-			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
-			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
+			if (risk * Bars.Info.BigPointValue > equityAvailable(0.01))   // Coder 2026-11-22: size 1 (catalogue single target, header), budget on 1 contract
+			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: risk exceeds 1 percent"); m_done = true; return; }
 			arm(longSide, entry, stop, target);
-			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(1); } else { if (hostGate(false)) m_se.Send(1); }
 		}
 
 		private void arm(bool longSide, double entry, double stop, double target)
