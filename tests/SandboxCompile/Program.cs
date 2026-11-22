@@ -396,10 +396,9 @@ static class Program
 
 	static readonly HashSet<string> NoEtClock = new HashSet<string>(StringComparer.Ordinal) { "_A2_49_MiddayBreakout.Strategy.CS", "_A2_57_TwoTimeframeTurn.Strategy.CS" };
 
-	// Owner 2026-11-22 ("wire flat-by into all 78"): the GX FlatBy studies whose idea is multi-day or overnight by its catalogue
-	// entry. Their arm() template still selects FlatBy, which is the wrong setting, so they are listed for the owner and are not wired.
-	// Remove a name once the owner has ruled (HoldOvernight, or FlatBy and wire it).
-	static readonly HashSet<string> FlatByReview = new HashSet<string>(StringComparer.Ordinal)
+	// Owner 2026-11-22 11:03 CT ("Switch all 19 to hold overnight"): studies whose idea is multi-day or overnight by its catalogue
+	// entry. Their arm() template selects HoldOvernight, and no mustFlatten / EarlyFlatDue / sandbox flat-by path closes them intraday.
+	static readonly HashSet<string> HoldOvernightByOwner = new HashSet<string>(StringComparer.Ordinal)
 	{
 		"AV-04", "AV-09", "LE-01", "LE-02", "LE-03", "LE-05", "LE-06", "LE-07", "PF-01", "PF-08",
 		"SW-04", "VX-01", "VX-02", "VX-03", "VX-04", "VX-05", "VX-08", "YV-03", "YV-09",
@@ -408,11 +407,11 @@ static class Program
 	static string StudyId(string name) { string[] p = name.Split('_'); return p.Length > 2 ? p[1] + "-" + p[2] : name; }
 
 	// Analyst MC17 (A2-35 held over Good Friday 2023): the flat-by cutoff is that day's session end minus 5 minutes.
-	// Owner 2026-11-22: every futures study that selects GX FlatBy reaches GX's flat-by from CalcBar through exitBar(), unless it is
-	// listed in FlatByReview. GX itself handles early closes and holiday halts (PR #146), so no study runs a second early-flat path.
+	// Owner 2026-11-22: every futures study that selects GX FlatBy reaches GX's flat-by from CalcBar through exitBar(), and the owner's
+	// multi-day studies (HoldOvernightByOwner) hold overnight. GX itself handles early closes and holiday halts (PR #146), so no study runs a second early-flat path.
 	static void EarlyFlatChecks(List<string> files)
 	{
-		int gx = 0, mf = 0, review = 0, flatBy = 0, own = 0;
+		int gx = 0, mf = 0, hold = 0, flatBy = 0, own = 0;
 		foreach (string path in files)
 		{
 			string name = Path.GetFileName(path);
@@ -422,22 +421,20 @@ static class Program
 				Check(!Regex.IsMatch(code, @"_SandboxRules\.PastFlat\((sessionClock|tod\b|todNow\b)"), name + " uses the date-aware PastFlat");
 			if (!futures) continue;
 			string id = StudyId(name);
+			if (HoldOvernightByOwner.Contains(id))
+			{
+				hold++;
+				Check(!code.Contains("ESessionExit.FlatBy") && Regex.IsMatch(code, @"GxConfig\.SessionExit = ESessionExit\.HoldOvernight;"), name + " is multi-day by the owner's ruling and its arm() selects HoldOvernight only");
+				Check(!code.Contains("mustFlatten()") && !code.Contains("EarlyFlatDue") && !code.Contains("FlatByReason") && !Regex.IsMatch(code, @"bool flat = _SandboxRules\.PastFlat\("), name + " has no intraday flat-by path that contradicts the overnight hold");
+			}
 			if (code.Contains("ESessionExit.FlatBy"))
 			{
 				flatBy++;
-				if (FlatByReview.Contains(id))
-				{
-					review++;
-					Check(!code.Contains("exitBar();"), name + " is on the multi-day review list, so it is not wired to GX flat-by");
-				}
-				else
-				{
-					string calc = MethodBody(code, @"void\s+CalcBar\s*\(\s*\)");
-					int at = calc.IndexOf("exitBar();", StringComparison.Ordinal);
-					Check(at >= 0, name + " selects GX FlatBy and CalcBar calls exitBar()");
-					Match entry = Regex.Match(calc, @"hostGate\(|(?<![\w.])arm\(");
-					Check(at >= 0 && (!entry.Success || at < entry.Index), name + " runs the flat-by path before any entry or GX arm in CalcBar");
-				}
+				string calc = MethodBody(code, @"void\s+CalcBar\s*\(\s*\)");
+				int at = calc.IndexOf("exitBar();", StringComparison.Ordinal);
+				Check(at >= 0, name + " selects GX FlatBy and CalcBar calls exitBar()");
+				Match entry = Regex.Match(calc, @"hostGate\(|(?<![\w.])arm\(");
+				Check(at >= 0 && (!entry.Success || at < entry.Index), name + " runs the flat-by path before any entry or GX arm in CalcBar");
 			}
 			if (code.Contains("ESessionExit.FlatBy") && code.Contains("exitBar();"))
 			{
@@ -459,9 +456,9 @@ static class Program
 				Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue");
 			}
 		}
-		Check(flatBy == 151, "futures studies that select GX FlatBy: " + flatBy);
+		Check(flatBy == 132, "futures studies that select GX FlatBy: " + flatBy);
 		Check(gx == 132, "GX FlatBy studies with exitBar: " + gx + " (73 before, 59 wired by the owner's 2026-11-22 ruling)");
-		Check(review == FlatByReview.Count && gx + review == flatBy, "multi-day FlatBy studies left for the owner: " + review);
+		Check(hold == HoldOvernightByOwner.Count && hold == 19 && gx == flatBy, "owner's multi-day studies set to HoldOvernight: " + hold + "; every FlatBy study calls exitBar()");
 		Check(own == 1, "own-order flat-by studies that select GX FlatBy (YV-11): " + own);
 		Check(mf >= 15, "mustFlatten studies found: " + mf);
 	}
