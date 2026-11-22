@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the SW-05 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit is the close of the next session, which is MaxHoldDays 1 and a flat at the value end. The AVWAP trail is not sent.
+// Research assumption: ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). The AVWAP trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop at the composite edge, widened to the cost floor. MaxHoldDays is 1. Flat at the session value end.
+// Exit orders: GX. Stop at the composite edge, widened to the cost floor. MaxHoldDays is 1. GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit is the close of the next session, which is MaxHoldDays 1 and a flat at the value end. The AVWAP trail is not sent.
+// Other: ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). The AVWAP trail is not sent.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit is the close of the next session, which is MaxHoldDays 1 and a flat at the value end. The AVWAP trail is not sent.
+// ASSUMPTION: ASSUMPTION: the open must be at least 0.25 times Atr20d outside the 20-session composite value area, and the first hour must close outside. The entry is the bar at RthStart plus 60 minutes. The stop is the composite edge. The exit: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). The AVWAP trail is not sent.
 // IOG is disabled.
 
 

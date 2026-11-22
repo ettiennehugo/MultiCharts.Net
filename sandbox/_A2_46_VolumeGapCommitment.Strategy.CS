@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX exitPlan and exitBar. The stop is the nearer gap edge minus 0.25 times the 5-minute ATR. The target is the far edge. MaxHoldDays is 1.
+// Exit orders: GX exitPlan and exitBar. The stop is the nearer gap edge minus 0.25 times the 5-minute ATR. The target is the far edge. MaxHoldDays is 1. GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight); the entry window stays RthStart plus 15 minutes through plus 5 hours.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.

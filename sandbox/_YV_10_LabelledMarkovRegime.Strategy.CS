@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the YV-10 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position is flat at the next session's value end.
+// Research assumption: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop at 2 times Atr20d. MaxHoldDays 1. Flat at the session value end. No price target.
+// Exit orders: GX. Stop at 2 times Atr20d. MaxHoldDays 1. GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). No price target.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position is flat at the next session's value end.
+// Other: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position is flat at the next session's value end.
+// ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 // IOG is disabled.
 
 

@@ -464,10 +464,10 @@ static class Program
 		Check(mf >= 15, "mustFlatten studies found: " + mf);
 	}
 
-	// Selected-hold studies whose catalogue or header is intraday (reported 2026-11-22, owner to rule; not changed here):
-	// A2-46 (5m entry 09:45-14:30, HoldOvernight + MaxHoldDays 1), SW-05 and YV-10 (header "MaxHoldDays 1. Flat at the session
-	// value end" but arm(..., 1) holds overnight), DV-16 and VW-07 (5m layers, journal-only, unconditional HoldOvernight template).
-	static readonly HashSet<string> IntradayHoldPendingOwner = new HashSet<string>(StringComparer.Ordinal) { "A2-46", "SW-05", "YV-10", "DV-16", "VW-07" };
+	// Owner 2026-11-22 11:48 CT ("Keep all 5 holding overnight"): holds approved although the catalogue entry window is intraday.
+	// A2-46, SW-05 and YV-10 hold overnight with MaxHoldDays 1; DV-16 and VW-07 are journal-only layers whose unused arm()
+	// template holds with MaxHoldDays 5. Code unchanged; their headers describe the hold and cite the ruling.
+	static readonly HashSet<string> HoldApprovedByOwner = new HashSet<string>(StringComparer.Ordinal) { "A2-46", "SW-05", "YV-10", "DV-16", "VW-07" };
 
 	// Top-level arguments of the call whose '(' is at open.
 	static List<string> CallArgs(string code, int open)
@@ -487,10 +487,10 @@ static class Program
 	// Owner 2026-11-22 ("fix the flat-by gaps", AV-02 held intraday trades for 10 sessions): only approved studies may select a GX
 	// hold. A study selects a hold when its arm() sets HoldOvernight unconditionally, or sets it on a hold/holdDays argument and some
 	// arm(...) call passes true or a positive count. Approved: the owner's 19 multi-day studies, a header whose exit line says
-	// "Hold up to N sessions" / "MaxHoldDays is N" with N >= 2, or the reported intraday list above while the owner decides.
+	// "Hold up to N sessions" / "MaxHoldDays is N" with N >= 2, or the owner's five approved holds above.
 	static void HoldChecks(List<string> files)
 	{
-		int holds = 0, byHeader = 0, pending = 0;
+		int holds = 0, byHeader = 0, approved = 0;
 		var headerHold = new Regex(@"^// Exit orders:[^\n]*?(?:Hold up to (\d+) sessions|MaxHoldDays is (\d+))", RegexOptions.Multiline);
 		foreach (string path in files)
 		{
@@ -515,16 +515,17 @@ static class Program
 			}
 			if (!(always || (maybe && holdCall))) continue;
 			holds++;
-			bool owner = HoldOvernightByOwner.Contains(id), pend = IntradayHoldPendingOwner.Contains(id), header = false;
+			bool owner = HoldOvernightByOwner.Contains(id), approved5 = HoldApprovedByOwner.Contains(id), header = false;
 			Match h = headerHold.Match(text);
 			if (h.Success) { int n; header = int.TryParse(h.Groups[1].Success ? h.Groups[1].Value : h.Groups[2].Value, out n) && n >= 2; }
 			if (!owner && header) byHeader++;
-			if (pend) pending++;
-			Check(owner || header || pend, name + " selects a GX hold (HoldOvernight) but is not an approved multi-day study");
+			if (approved5) approved++;
+			Check(owner || header || approved5, name + " selects a GX hold (HoldOvernight) but is not an approved multi-day study");
+			if (approved5) Check(text.Contains("owner decision 2026-11-22: keep holding overnight") && !text.Contains("Flat at the session value end") && !text.Contains("flat at the next session's value end"), name + " header describes the overnight hold and cites the owner's ruling");
 		}
 		string av2 = Src(files, "_AV_02_");
 		Check(av2.Contains("arm(true, entry, stop, peak, \"AV02LE\", false);") && !av2.Contains("\"AV02LE\", true)"), "AV-02 is intraday: arm(..., false) selects GX FlatBy");
-		Check(holds == 35 && byHeader == 11 && pending == IntradayHoldPendingOwner.Count, "hold studies: " + holds + " (19 owner multi-day, " + byHeader + " multi-day by header, " + pending + " intraday pending the owner)");
+		Check(holds == 35 && byHeader == 11 && approved == HoldApprovedByOwner.Count, "hold studies: " + holds + " (19 owner multi-day, " + byHeader + " multi-day by header, " + approved + " intraday-window holds approved by the owner)");
 	}
 
 	// Runs _SandboxRules from the semantic-compile assembly (reflection, so this project keeps no reference to it).
