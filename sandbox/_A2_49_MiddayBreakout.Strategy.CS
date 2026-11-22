@@ -304,7 +304,7 @@ namespace PowerLanguage.Strategy
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
-			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd);
+			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd));
 			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (step == ERest.Resend)
 			{

@@ -364,6 +364,20 @@ static class Program
 		Check(raw["MT_07"].Contains("// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream)."), "MT_07 header: Data2 15m, Data3 60m");
 		// Analyst LE-01 recheck: 'days' is ring occupancy (cap 253); the journal prints the uncapped count and the ring.
 		Check(code("LE_01").Contains("DailyContext.DaysSeen + \" (ring \" + DailyContext.Days + \"/\" + DailyContext.Capacity"), "LE_01 journals the uncapped day count and the ring occupancy");
+		// Resting-order windows use the GX date-aware cutoff (#146), not _SandboxRules.PastFlat.
+		{
+			int books = 0;
+			foreach (var kv in src)
+			{
+				string sb = MethodBody(kv.Value, @"bool\s+sandboxBook\s*\(\s*\)");
+				if (sb.Length == 0 || !sb.Contains("_SandboxRules.Rest(")) continue;
+				Check(!sb.Contains("PastFlat("), kv.Key + " sandboxBook window does not use _SandboxRules.PastFlat");
+				if (sb.Contains("gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, ")) books++;
+			}
+			foreach (string k in new[] { "A2_49", "DV_15" })
+				Check(Regex.IsMatch(code(k), @"bool window = [^;]*!gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\)\);") && !Regex.IsMatch(code(k), @"bool window = [^;]*PastFlat\("), k + " resting window uses the GX date-aware cutoff");
+			Check(books >= 90, "sandboxBook windows on the GX cutoff: " + books);
+		}
 		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
 		Check(Regex.IsMatch(code("A2_28"), @"GxConfig\.BreakEven\s*=\s*scale\s*\?\s*EBreakEven\.AfterT1") && !code("A2_28").Contains("GxConfig.BreakEven = EBreakEven.Off;") && raw["A2_28"].Contains("move A2-28's runner stop to entry after T1"), "A2_28 runner stop to entry after T1 (owner 2026-11-22), noted in the header");
 		Check(code("A2_28").Contains("_SandboxRules.MidT1Points(longSide, entry, target, tickSize())") && code("A2_28").Contains("t1Src = \"mid\"") && code("A2_28").Contains("\" source \" + t1Src")

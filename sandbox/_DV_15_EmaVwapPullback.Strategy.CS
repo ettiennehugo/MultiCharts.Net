@@ -255,7 +255,7 @@ namespace PowerLanguage.Strategy
 			DateTime dayNow = GlobexDate(Bars.Time[0]);
 			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0; }
 			TimeSpan todNow = ToEastern(Bars.Time[0]).TimeOfDay;
-			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
 			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (pos != 0)
 			{
