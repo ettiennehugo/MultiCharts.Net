@@ -74,3 +74,34 @@ Fixed: A2-11 (2023-01-25) and A2-32 (2023-09-08) no longer enter at 15:01 CT; ea
 Still open: `_Test22` A2-28 (69fc801, journal identical to fdc6a95) still closes both lots together on all 64 trades with 0 T1 fills, so neither the void T1 nor the break-even after T1 has been exercised (fail). `_Test30` LE-01 has 1 closed trade (2023-10-10 to 2023-10-19, held overnight) and no entry after that, so it is pending a check for an open position at RUN-END.
 
 Status totals after this update: **21 pass, 3 fail (`_Test6`, `_Test7` pending PR #142; `_Test22`), 4 by-design-0, 1 blocked, 1 pending (`_Test30` LE-01 spot-check)**.
+
+## PR #152 rechecks on e03f6d1 (2026-11-22)
+
+Set1 staged at 17:38 ET from e03f6d1: the batch-1 slots plus `_Test30` LE-01. The GX root files are e03f6d1 merged into main 2e1a397, because the #152 branch predates #142/#146/#151: `_CustomSignal` 068e151f, `_GenericExit` 6907986e, `_DvpEngine` 365836cd. F7 at 17:42:48 ET; runs 17:45-18:01 ET MiniPC clock (16:45-17:01 CT). Rerun: `_Test26` A2-32, `_Test30` LE-01, `_Test11` MT-07, `_Test10` PS-25. `_Test22` A2-28 was not run, because it is waiting for the rebased head with the new T1 placement. Commit column: `pr152 e03f6d1`.
+
+GX regression, run first:
+- D9a `_DvpEngineTest` (runId 3953b235) matches the baseline. Its events file has 182,503 lines, with stripped SHA-256 f7fc033abce6ef94, equal to 7fbe5bff / bcca8d35 / 1ff61444 / 650fe308.
+  - configHash is 80cf8ab6ad9ba5cd, profileHash is 020deca78d6392b7 and RUN-END is bar 188581.
+  - With runId and elapsedMs stripped, the DEGREE/D9A/CAL lines (457) and every other non-PA session-log line (420,356) are identical to the 2026-11-15 13:44 ET log (runId 650fe308).
+  - The 21,478 PA-DVP pivot/BOS lines are gone at Journal level, as expected. The D9a RUN fits() stay numeric.
+- G0 `_TestGate0` (runId 5a654011) still has 35,110 journal lines and 37,225 session-log lines, and the session-log lines are identical to the 2026-11-15 run.
+  - The journal's stripped SHA-256 is 00faa50bc1230df6, not 8f6b25deff509c9f.
+  - Only 2 rows differ, both in maeDollars/maeTicks: G0SE 2024-12-10 08:53 CT is 4 ticks deeper and G0LE 2024-12-30 09:41 CT is 9 ticks deeper. Entries, exits, P&L and MFE are unchanged.
+  - That column is MC's own `pos.MaxDrawDown`, which e03f6d1 does not touch. December 2024 is the month whose @ES ticks were downloaded into QuoteManager earlier today, so this is most likely a data change, not a code change.
+
+Results:
+- **A2-32**: all 105 trades (135 rows) are identical to fdc6a95 run 5a6d9631; only gxPackage differs.
+  - It now logs 39 GX START lines instead of 1, so the exit modes are re-read before each trade. They all resolve to the same modes, so no A2-32 trade changes.
+- **MT-07**: this slot is changed by the fix. On fdc6a95 all 36 trades ran on the first trade's package (b22b158b, no target).
+  - Now 30 trades get their own package. 22 of those exit on their own +2 sigma target, always before the old stop/time exit, and 13 of those 22 fill on the next bar.
+  - Exits are now 22 target / 10 stop / 4 time; they were 26 stop / 10 time. The entries are unchanged.
+- **PS-25**: trades are identical to fdc6a95; only gxPackage differs.
+- **MT-07 and PS-25 logging**: 0 PA-DVP pivot/BOS lines at Journal level. The DVP RUN lines print fits(off) skips(off).
+  - Logs are 497 lines / 0.08 MB (MT-07) and 794 lines / 0.16 MB (PS-25), down from about 67k lines / 9 MB.
+- **LE-01**: resolved. The journal still has the single closed trade from 2023-10-10 to 2023-10-19.
+  - The daily 'LE-01' lines show it flat from 2023-10-20 to 2023-11-03, entering on 2023-11-06, then 'up True pos 1' on every trading day through 2024-12-31.
+  - So the second long is still open at RUN-END under the trend-break rule.
+- **Cutoff and re-entry**: A2-32, MT-07 and PS-25 have 0 entries at or after 14:55 CT, 0 same-day re-entries and 0 overnight holds.
+- **Errors**: the only Errors are A2-32's 26 expected multi-contract 1 percent risk skips. Nothing is dated 2025 or later.
+
+Status totals after this update: **22 pass, 3 fail (`_Test6`, `_Test7` pending PR #142; `_Test22` pending the rebased #152 head), 4 by-design-0, 1 blocked, 0 pending**.
