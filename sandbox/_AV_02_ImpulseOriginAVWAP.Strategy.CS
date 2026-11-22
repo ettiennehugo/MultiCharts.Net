@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop is the nearer of the pullback low minus one tick and AVWAP minus 1 sigma. Target is the impulse high. Hold up to 10 sessions.
+// Exit orders: GX. Stop is the nearer of the pullback low minus one tick and AVWAP minus 1 sigma. Target is the impulse high. GX FlatBy: flat 5 minutes before the regular session end (owner 2026-11-22; was hold up to 10 sessions).
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -184,7 +184,7 @@ namespace PowerLanguage.Strategy
 			double stop = Math.Min(lo - tickSize(), a.Band(-1));
 			stop = widen(true, entry, stop);
 			if (!(peak > entry) || !budget(entry, stop)) { m_done = true; return; }
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, peak, "AV02LE", true); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, peak, "AV02LE", false);   /* owner 2026-11-22 ("fix the flat-by gaps"): intraday, GX FlatBy through exitBar() */ { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

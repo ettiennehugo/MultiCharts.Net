@@ -85,6 +85,7 @@ static class Program
 		CalendarKeyChecks(files);
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
+		HoldChecks(files);
 		GateSourceChecks(files);
 		GateWiringChecks(files);
 		GateRuleProbes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Generated", "bin", "Release", "net8.0", "SandboxLib.dll"));
@@ -461,6 +462,69 @@ static class Program
 		Check(hold == HoldOvernightByOwner.Count && hold == 19 && gx == flatBy, "owner's multi-day studies set to HoldOvernight: " + hold + "; every FlatBy study calls exitBar()");
 		Check(own == 1, "own-order flat-by studies that select GX FlatBy (YV-11): " + own);
 		Check(mf >= 15, "mustFlatten studies found: " + mf);
+	}
+
+	// Selected-hold studies whose catalogue or header is intraday (reported 2026-11-22, owner to rule; not changed here):
+	// A2-46 (5m entry 09:45-14:30, HoldOvernight + MaxHoldDays 1), SW-05 and YV-10 (header "MaxHoldDays 1. Flat at the session
+	// value end" but arm(..., 1) holds overnight), DV-16 and VW-07 (5m layers, journal-only, unconditional HoldOvernight template).
+	static readonly HashSet<string> IntradayHoldPendingOwner = new HashSet<string>(StringComparer.Ordinal) { "A2-46", "SW-05", "YV-10", "DV-16", "VW-07" };
+
+	// Top-level arguments of the call whose '(' is at open.
+	static List<string> CallArgs(string code, int open)
+	{
+		var args = new List<string>(); int depth = 0; var cur = new System.Text.StringBuilder();
+		for (int j = open; j < code.Length; j++)
+		{
+			char ch = code[j];
+			if (ch == '(' || ch == '[' || ch == '{') { if (++depth == 1) continue; }
+			else if (ch == ')' || ch == ']' || ch == '}') { if (--depth == 0) { args.Add(cur.ToString().Trim()); return args; } }
+			else if (ch == ',' && depth == 1) { args.Add(cur.ToString().Trim()); cur.Clear(); continue; }
+			cur.Append(ch);
+		}
+		return args;
+	}
+
+	// Owner 2026-11-22 ("fix the flat-by gaps", AV-02 held intraday trades for 10 sessions): only approved studies may select a GX
+	// hold. A study selects a hold when its arm() sets HoldOvernight unconditionally, or sets it on a hold/holdDays argument and some
+	// arm(...) call passes true or a positive count. Approved: the owner's 19 multi-day studies, a header whose exit line says
+	// "Hold up to N sessions" / "MaxHoldDays is N" with N >= 2, or the reported intraday list above while the owner decides.
+	static void HoldChecks(List<string> files)
+	{
+		int holds = 0, byHeader = 0, pending = 0;
+		var headerHold = new Regex(@"^// Exit orders:[^\n]*?(?:Hold up to (\d+) sessions|MaxHoldDays is (\d+))", RegexOptions.Multiline);
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path), text = File.ReadAllText(path);
+			string code = Regex.Replace(Regex.Replace(text, @"/\*.*?\*/", "", RegexOptions.Singleline), @"//[^\n]*", "");
+			string id = StudyId(name);
+			var sets = Regex.Matches(code, @"GxConfig\.SessionExit = ([^;]*);");
+			bool always = false, maybe = false;
+			foreach (Match s in sets)
+			{
+				string v = s.Groups[1].Value.Trim();
+				if (v == "ESessionExit.HoldOvernight") always = true;
+				else if (v.Contains("ESessionExit.HoldOvernight")) maybe = true;
+			}
+			bool holdCall = false;
+			foreach (Match m in Regex.Matches(code, @"(?<![\w.])arm\("))
+			{
+				if (Regex.IsMatch(code.Substring(Math.Max(0, m.Index - 6), Math.Min(6, m.Index)), @"void\s+$")) continue;
+				List<string> a = CallArgs(code, m.Index + m.Length - 1);
+				string last = a.Count > 0 ? a[a.Count - 1] : "";
+				if (last != "false" && last != "0" && !last.StartsWith("\"") && !last.Contains("?")) holdCall = true;
+			}
+			if (!(always || (maybe && holdCall))) continue;
+			holds++;
+			bool owner = HoldOvernightByOwner.Contains(id), pend = IntradayHoldPendingOwner.Contains(id), header = false;
+			Match h = headerHold.Match(text);
+			if (h.Success) { int n; header = int.TryParse(h.Groups[1].Success ? h.Groups[1].Value : h.Groups[2].Value, out n) && n >= 2; }
+			if (!owner && header) byHeader++;
+			if (pend) pending++;
+			Check(owner || header || pend, name + " selects a GX hold (HoldOvernight) but is not an approved multi-day study");
+		}
+		string av2 = Src(files, "_AV_02_");
+		Check(av2.Contains("arm(true, entry, stop, peak, \"AV02LE\", false);") && !av2.Contains("\"AV02LE\", true)"), "AV-02 is intraday: arm(..., false) selects GX FlatBy");
+		Check(holds == 35 && byHeader == 11 && pending == IntradayHoldPendingOwner.Count, "hold studies: " + holds + " (19 owner multi-day, " + byHeader + " multi-day by header, " + pending + " intraday pending the owner)");
 	}
 
 	// Runs _SandboxRules from the semantic-compile assembly (reflection, so this project keeps no reference to it).
