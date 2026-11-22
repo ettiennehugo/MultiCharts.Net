@@ -187,7 +187,7 @@ namespace PowerLanguage.Strategy
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
 			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
-			base.StartCalc(); requireRing(2, Math.Max(Cfg.smaLong, Math.Max(Cfg.smaExit, Cfg.rsiLength + 1)) + 2, "SW-02 lookback");   // MaxBarsBack 49: daily history from the ring
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(2, Math.Max(Cfg.smaLong, Math.Max(Cfg.smaExit, Cfg.rsiLength + 1)) + 2, "SW-02 lookback");   // MaxBarsBack 49: daily history from the ring
 			m_stop = double.NaN; m_entryBar = -1;
 		}
 

@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: sendExits re-sends the stop and the target while the position is open. Size stays 1 contract.
+// Management: two contracts (coding-plan decision 10; catalogue "T1 1 R; runner trails at sVWAP"). sendExits re-sends the stop on both lots and the 1 R T1 limit on one lot while both are open; the runner exits on the stop, a close below sVWAP from 10:00, or the 11:30 flat.
 // Exit: the catalogue stop, target or time exit, sent only from sendExits. Not the GX wrapper.
 //
 // ## 5. Timing
@@ -29,7 +29,7 @@
 // Can fill: the next bar after the signal bar, or a later bar for a resting stop or limit. IOG is disabled.
 //
 // ## 6. Position and re-entry
-// Position: one contract, long or short as the rule states.
+// Position: two contracts, long only as the rule states.
 // Re-entry: as the catalogue states. Where it is silent, one attempt per session.
 // Same session after a stop: no new entry that session, except where the catalogue allows re-entry.
 //
@@ -50,8 +50,8 @@
 // Skip when: the budget fails, a required average is not ready, or the rule's filter fails.
 //
 // ## 10. Position sizing and risk
-// Size: 1 contract. journalArm records the planned entry.
-// Risk limit: skip when 1 contract times the widened stop times BigPointValue exceeds 1 percent of equity.
+// Size: 2 contracts (coding-plan decision 10); the 1 percent budget is on both. journalArm records the planned entry.
+// Risk limit: skip when 2 contracts times the widened stop times BigPointValue exceed 1 percent of equity (an Error is journalled).
 // Size is never shrunk to fit a stop: yes.
 //
 // ## 11. Orders, execution, and costs
@@ -189,7 +189,7 @@ namespace PowerLanguage.Strategy
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A204LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A204LX", EOrderAction.Sell));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A204LS", EOrderAction.Sell, OrderExit.FromAll));
-			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A204LT", EOrderAction.Sell, OrderExit.FromAll));
+			m_lxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "A204LT", EOrderAction.Sell, OrderExit.FromAll));   // T1: one of the two lots
 		}
 
 		protected override void StartCalc()
@@ -197,10 +197,13 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EInventoryAtr), InventoryAtr)) throw new ArgumentException("_A2_04_OvernightInventory: InventoryAtr is not a defined EInventoryAtr");
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = DateTime.MinValue; m_atr = double.NaN; m_atrCount = 0; m_prevBucketClose = double.NaN; m_nativeTime = DateTime.MinValue;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -221,7 +224,9 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (tod >= new TimeSpan(10, 0, 0) && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen)) { m_lx.Send(); return true; }
-				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
+				// Coder 2026-11-22 (Analyst native retest of #152; catalogue "T1 1 R; runner trails at sVWAP"): T1 takes one of the two lots at
+				// 1 R; the runner stays on the stop, the sVWAP trail and the 11:30 flat. The target exited both lots.
+				m_lxStp.Send(m_stop); if (Math.Abs(StrategyInfo.MarketPosition) >= 2) m_lxLmt.Send(m_target, 1);
 				return false;
 			}
 			if (pos != 0 && sendExits()) return;
@@ -251,7 +256,7 @@ namespace PowerLanguage.Strategy
 			{ if (journalOn()) trace(ETraceLevel.Error, "A2-04 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
 			if (journalOn()) trace(ETraceLevel.Warning, "multi-contract size 2");
 			m_stop = stop; m_target = Bars.Close[0] + risk; m_done = true;
-			m_le.Send(2); m_lxStp.Send(m_stop);
+			(entryOpen() ? m_le : null)?.Send(2); m_lxStp.Send(m_stop);
 			if (journalOn()) journalArm("A204LE", Bars.Close[0], m_stop, m_target, null);
 		}
 

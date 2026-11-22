@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 		private double m_runHi, m_runLo, m_runCl, m_stop, m_buyHigh;
 		private int m_since = -1;
 		private bool m_seen, m_done, m_buying;
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_62_Taylor3Day(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -166,7 +166,10 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; m_hi.Clear(); m_lo.Clear(); m_cl.Clear(); m_seen = false; m_day = DateTime.MinValue; /* Coder 2026-11-22: a recalc reuses this object, so the day history is cleared */ base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; m_hi.Clear(); m_lo.Clear(); m_cl.Clear(); m_seen = false; m_day = DateTime.MinValue; /* Coder 2026-11-22: a recalc reuses this object, so the day history is cleared */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -209,14 +212,14 @@ namespace PowerLanguage.Strategy
 			{
 				m_stop = widen(priorLo, priorLo - 0.5 * atr);
 				if (!budget(priorLo, m_stop)) { m_done = true; return; }
-				m_restPx = priorLo; m_restBuy = true; m_restOn = true; m_restQty = 1; m_buyHigh = 0; m_ll.Send(priorLo); return;
+				m_restPx = priorLo; m_restBuy = true; m_restOn = true; m_restQty = 1; m_buyHigh = 0; (entryOpen() ? m_ll : null)?.Send(priorLo); return;
 			}
 			if (Session.rthOpen < priorCl && clock >= m_rthStart.Add(TimeSpan.FromMinutes(5)) && clock < m_rthStart.Add(TimeSpan.FromMinutes(6)))
 			{
 				double entry = Bars.Close[0];
 				m_stop = widen(entry, priorLo - 0.5 * atr);
 				if (!budget(entry, m_stop)) { m_done = true; return; }
-				m_le.Send(); m_ls.Send(m_stop);
+				(entryOpen() ? m_le : null)?.Send(); m_ls.Send(m_stop);
 			}
 		}
 		private bool classify()
@@ -248,17 +251,17 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
 			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			// Coder 2026-11-22: the buy limit at the prior low is resent every bar for the day (house rule 5); the branch was empty,
 			// so the limit was cancelled after its first bar. Long only: there is no short resting order.
 			if (m_restBuy)
 			{
-				m_ll.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_ll : null)?.Send(m_restPx, m_restQty);
 			}
 			return true;
 		}

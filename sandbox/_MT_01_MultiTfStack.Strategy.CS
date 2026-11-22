@@ -166,7 +166,7 @@ namespace PowerLanguage.Strategy
 		private bool m_done;
 		private double m_trigger = double.NaN, m_stop, m_target;
 
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _MT_01_MultiTfStack(object _ctx) : base(_ctx) { }
 
 		protected override void Create()
@@ -188,7 +188,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); m_day = DateTime.MinValue; }
+ NeedsDaily = true; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_day = DateTime.MinValue; }
 
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -201,6 +201,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -222,7 +225,7 @@ namespace PowerLanguage.Strategy
 			if (m_done || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;
 			if (sandboxBook()) return;
 			if (double.IsNaN(m_trigger) && takeNative()) arm(day);
-			if (!double.IsNaN(m_trigger)) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); }   // braces: no exit stop while flat without an entry
+			if (!double.IsNaN(m_trigger)) { (entryOpen() ? m_leStp : null)?.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_stop); }   // braces: no exit stop while flat without an entry
 		}
 
 		private void arm(DateTime day)
@@ -248,15 +251,15 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
 			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leStp.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_leStp : null)?.Send(m_restPx, m_restQty);
 			}
 			else
 			{

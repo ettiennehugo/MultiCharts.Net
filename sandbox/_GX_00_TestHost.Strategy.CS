@@ -180,7 +180,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_wait = 0;
 			m_nextLong = true;
 		}

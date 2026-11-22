@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the MT-07 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
+// Research assumption: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
+// Other: ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the detrended VAH.
+// ASSUMPTION: This file is PS-25. It sends that entry only after two 60-minute closes (closed Data2 60-minute bars) have held beyond the 60-minute (Data2) DVP stream's VAH (DvpConfig.streams 1 and 2).
 // IOG is disabled.
 
 
@@ -173,25 +173,26 @@ namespace PowerLanguage.Strategy
 		{
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-			m_htf = 0; m_nativeTime = DateTime.MinValue;   // a recalc starts the 60-minute count again
-			base.StartCalc();
+			m_htf = 0; m_htfLogState = -1; m_nativeTime = DateTime.MinValue;   // a recalc starts the 60-minute count again
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
-		protected override void CalcBar()
+		// Coder 2026-11-22 (Analyst native retest of #152: 29 trades 2023-02-07..2023-12-08, none in 2024; catalogue MT-07 "the 60m M-DVP
+		// stream, from its last closed HTF bar, shows the same-direction acceptance state (close beyond its VAH for >= 2 HTF bars)"):
+		// the 60-minute close is now tested against the 60-minute (Data2) DVP stream's VAH, not the 1-minute Data1 rail, and the count
+		// steps after the engines (PS-25 htfStep), not before them. The state change is journalled once per change.
+		protected override void Create() { base.Create(); DvpConfig.streams = new[] { 1, 2 }; }
+		private int m_htfLogState = -1;
+		protected override void htfStep()
 		{
-			if (Bars.Status == EBarState.Close)
-			{
-				if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-				// Coder 2026-11-22: the 60-minute close is the last closed Data2 60-minute bar (it was one 1-minute close at HH:00).
-				if (newNativeBar())
-				{
-					double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
-					double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0);
-					if (!double.IsNaN(vah) && c > vah) m_htf++;
-					else m_htf = 0;
-				}
-			}
-			base.CalcBar();
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			if (!newNativeBar()) return;
+			double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
+			double vah = dvpRailPrice(2, ELevelKind.DvpVah, 0);
+			if (!double.IsNaN(vah) && c > vah) m_htf++;
+			else m_htf = 0;
+			int st = double.IsNaN(vah) ? 0 : m_htf >= 2 ? 2 : 1;
+			if (st != m_htfLogState) { m_htfLogState = st; if (journalOn()) trace(ETraceLevel.Journal, "MT-07 60m DVP " + (st == 0 ? "no fit (warm-up or the window crosses a roll)" : st == 2 ? "accepted above VAH " + vah.ToString("0.00") : "not accepted, VAH " + vah.ToString("0.00"))); }
 		}
 		protected override bool htfAccepted() { return m_htf >= 2; }
 	}

@@ -190,7 +190,7 @@ namespace PowerLanguage.Strategy
 		{
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_ibHist.Clear(); m_day = DateTime.MinValue; m_ibLogged = m_narrow = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0;
 			m_stop = m_target = double.NaN;
 		}
@@ -206,6 +206,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -250,7 +253,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Abs(entry - stop);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-08 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = stop; m_target = edge + side * Cfg.targetIb * ib;
-			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
+			if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "ib", ib.ToString("F2") }, { "edge", edge.ToString("F2") } };

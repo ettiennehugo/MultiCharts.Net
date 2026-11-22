@@ -204,7 +204,7 @@ namespace PowerLanguage.Strategy
 		private bool m_skipDay, m_exitNextRth;
 		private double m_restPx;
 		private bool m_restBuy, m_restOn, m_filledSetup;
-		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
+		private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 
 		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
 
@@ -254,9 +254,9 @@ namespace PowerLanguage.Strategy
 			NoEntryBefore = middayAt();
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
-			m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
+			m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0;
 		}
 
 		private int m_nativeSeen = -1;
@@ -270,6 +270,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(Clock.ToEastern(Bars.Time[0]), Bars.Info.Name, Clock.RthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -279,7 +282,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool held = StrategyInfo.MarketPosition != 0;
 				m_day = day; m_hi = m_lo = double.NaN; m_skipDay = false;
-				m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
+				m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0;
 				FlatBy = Hold == ESessionHold.Overnight ? (TimeSpan?)null : flatAt(day);
 				m_exitNextRth = Hold == ESessionHold.Overnight && held;
 			}
@@ -302,11 +305,11 @@ namespace PowerLanguage.Strategy
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
 			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd);
-			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (step == ERest.Resend)
 			{
-				if (m_restBuy) { m_leLvl.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
-				else { m_seLvl.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+				if (m_restBuy) { (entryOpen() ? m_leLvl : null)?.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { (entryOpen() ? m_seLvl : null)?.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
 			}
 			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
@@ -327,7 +330,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.disasterR * (m_hi - m_lo), Cfg.costFloorTicks * tick);   // floor rule
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = entry - side * r;
-			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }   // stop with the entry
+			if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }   // stop with the entry
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "tradesToday", TradesToday.ToString() } };
@@ -370,9 +373,9 @@ namespace PowerLanguage.Strategy
 			{
 				if (m_filledSetup && m_fillAnchor == side) return;   // one fill of this breakout anchor per day
 				m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = side;
-				if (side > 0) { m_leLvl.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seLvl.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
+				if (side > 0) { (entryOpen() ? m_leLvl : null)?.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_seLvl : null)?.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			}
-			else if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
+			else if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "arm", Arm.ToString() }, { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "zone", frac.ToString("F2") } };

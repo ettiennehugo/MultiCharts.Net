@@ -152,12 +152,13 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			m_logState = 0; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
+		private int m_logState;
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
-			bool late = IsRth() && sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(90)); if (journalOn()) trace(ETraceLevel.Journal, "YV-06 past 90 minutes " + late + ". Module, no order.");
+			bool late = IsRth() && sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(90)); int st = late ? 1 : 2; if (st != m_logState) { m_logState = st; if (journalOn()) trace(ETraceLevel.Journal, "YV-06 past 90 minutes " + late + ". Module, no order."); }   /* Coder 2026-11-22 (Analyst #152 retest, log volume): journalled on change, not every bar */
 		}
 
 		private double widen(bool buy, double entry, double stop)

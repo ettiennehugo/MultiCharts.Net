@@ -235,10 +235,13 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EReference), Reference)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Reference is not a defined EReference");
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
 			DailyConfig.atrLength = Cfg.atrLength; DailyConfig.hvLengths = new[] { Cfg.hvLength };
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_lastDaily = m_day = DateTime.MinValue; m_gateOff = false; m_atr = m_hv = m_stop = double.NaN; m_traded = false;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -269,7 +272,7 @@ namespace PowerLanguage.Strategy
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-64 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_traded = true; return; }
 			double buyAt = Math.Round((reference - band) / tick) * tick, sellAt = Math.Round((reference + band) / tick) * tick;
 			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). Each limit carries its disaster stop.
-			m_leLmt.Send(buyAt, Cfg.contracts); m_seLmt.Send(sellAt, Cfg.contracts);
+			(entryOpen() ? m_leLmt : null)?.Send(buyAt, Cfg.contracts); (entryOpen() ? m_seLmt : null)?.Send(sellAt, Cfg.contracts);
 			m_lxStp.Send(buyAt - r); m_sxStp.Send(sellAt + r);
 			m_r = r; m_stop = double.NaN;
 		}

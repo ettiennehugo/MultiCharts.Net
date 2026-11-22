@@ -164,7 +164,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (!Enum.IsDefined(typeof(ESkewMin), SkewMin)) throw new ArgumentException("_A2_15_LegSkew: SkewMin is not a defined ESkewMin");
 			if (!Enum.IsDefined(typeof(ESkewBand), Band)) throw new ArgumentException("_A2_15_LegSkew: Band is not a defined ESkewBand");
-			base.StartCalc(); requireRing(1, 2000, "A2-15 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "A2-15 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 
 		protected override bool legSkewAllows(int side)

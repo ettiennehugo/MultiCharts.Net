@@ -165,7 +165,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_hist.Clear(); m_lastSlot = -1; m_nativeTime = DateTime.MinValue; base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_hist.Clear(); m_lastSlot = -1; m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
 		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
@@ -192,6 +192,9 @@ namespace PowerLanguage.Strategy
 			return sum / n;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -230,7 +233,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0 && sendExits()) return;
 			if (pos != 0 || !check || double.IsNaN(upper) || rollOn(1)) return;
 			if (!(c30 > upper)) return;
-			m_le.Send();
+			(entryOpen() ? m_le : null)?.Send();
 			if (journalOn()) journalArm("A209LE", Bars.Close[0], double.NaN, double.NaN, null);
 		}
 	}

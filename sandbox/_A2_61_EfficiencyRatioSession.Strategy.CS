@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_hist.Clear(); m_fives.Clear(); m_day = DateTime.MinValue; m_nativeTime = DateTime.MinValue; base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_hist.Clear(); m_fives.Clear(); m_day = DateTime.MinValue; m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
 		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.

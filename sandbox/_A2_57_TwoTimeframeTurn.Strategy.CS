@@ -171,7 +171,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>Catalogue 2.1 / App F #9 (resolved): true when Cfg.contracts at this stop distance risk more than the per-trade budget.</summary>
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 		private bool m_done;
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_57_TwoTimeframeTurn(object _ctx) : base(_ctx) { }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
@@ -206,12 +206,15 @@ namespace PowerLanguage.Strategy
 			HtfStreams = new[] { 2, 3 };
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_last12 = m_last60 = DateTime.MinValue; m_ema = m_slope = double.NaN; m_ema60Count = 0;
 			m_up = m_osTaken = m_slopeDown = false; m_trigger = m_planStop = double.NaN; m_validLeft = 0;
 			m_stop = m_entry = m_risk = m_peak = double.NaN;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(Clock.ToEastern(Bars.Time[0]), Bars.Info.Name, Clock.RthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -235,7 +238,7 @@ namespace PowerLanguage.Strategy
 			if (pos > 0) { sendExits(tod, flat); return; }
 			m_stop = m_entry = m_risk = m_peak = double.NaN;
 			if (new12 && m_validLeft > 0) m_validLeft--;                    // "valid for the next 2 12m bars"
-			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) { m_leStp.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_planStop); }   // braces: no exit stop while flat without an entry; the protective stop is the planned stop (m_stop is NaN while flat)
+			if (m_validLeft > 0 && rthWindow && m_up && !double.IsNaN(m_trigger)) { (entryOpen() ? m_leStp : null)?.Send(m_trigger, Cfg.contracts); m_lxStp.Send(m_planStop); }   // braces: no exit stop while flat without an entry; the protective stop is the planned stop (m_stop is NaN while flat)
 		}
 
 		/// <summary>New CLOSED 60m bar: update EMA(13) and the slope state.</summary>
@@ -326,15 +329,15 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
 			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leStp.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_leStp : null)?.Send(m_restPx, m_restQty);
 			}
 			else
 			{

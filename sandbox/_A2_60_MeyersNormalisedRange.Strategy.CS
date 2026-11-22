@@ -166,8 +166,11 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -205,7 +208,7 @@ namespace PowerLanguage.Strategy
 			m_stop = widen(buy, entry, m_stop);
 			if (!budget(entry, m_stop)) return;
 			m_side = buy ? 1 : -1;
-			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
+			if (buy) { (entryOpen() ? m_le : null)?.Send(); m_ls.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(); m_ss.Send(m_stop); }
 		}
 		private void holdStop(int pos) { if (pos > 0) m_ls.Send(m_stop); else m_ss.Send(m_stop); }
 		private int floorTicks()

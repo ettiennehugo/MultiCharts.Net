@@ -244,6 +244,17 @@ namespace PowerLanguage.Strategy
 			return ERest.Resend;
 		}
 
+		/// <summary>Coder 2026-11-22 (Analyst native retest of #152: A2-28 / A2-35 stopped on the fill bar, then re-entered): a position
+		/// that opens and closes inside one bar never shows MarketPosition != 0 on a bar close, so the position test alone misses
+		/// the fill. entriesToday is the strategy's entry count for this trading day from the position history (TradesToday); a
+		/// rise since the last call is a fill on the resting anchor, whether or not the position is still open.</summary>
+		public static ERest Rest(int position, int entriesToday, ref int seenEntries, ref int prev, ref bool filled, ref int fillAnchor, int anchor, ref bool restOn, bool windowOpen)
+		{
+			if (entriesToday > seenEntries) { filled = true; fillAnchor = anchor; }
+			seenEntries = entriesToday;
+			return Rest(position, ref prev, ref filled, ref fillAnchor, anchor, ref restOn, windowOpen);
+		}
+
 		public static bool Allows(ESandboxSide side, bool buy)
 		{
 			if (side == ESandboxSide.Both) return true;

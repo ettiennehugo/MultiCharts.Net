@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_ls, m_ss;
 		private double m_stop; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxSide Side { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_65_Raschke1stCross(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 		protected override void Create()
 		{
@@ -166,8 +166,11 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc(); requireRing(1, 2000, "A2-65 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "A2-65 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -192,15 +195,15 @@ namespace PowerLanguage.Strategy
 			double entry = Bars.Close[0];
 			m_stop = widen(buy, entry, buy ? entry - 2.5 * atr : entry + 2.5 * atr);
 			if (Math.Abs(entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) return;
-			if (buy) { m_le.Send(); m_ls.Send(m_stop); } else { m_se.Send(); m_ss.Send(m_stop); }
+			if (buy) { (entryOpen() ? m_le : null)?.Send(); m_ls.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(); m_ss.Send(m_stop); }
 		}
 		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			return false;
 		}

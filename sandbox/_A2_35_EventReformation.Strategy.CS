@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _A2_35_EventReformation(object _ctx) : base(_ctx) { Arm = EArm.Acceptance;  Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
@@ -181,7 +181,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EArm), Arm)) throw new ArgumentException("_A2_35_EventReformation: Arm is not a defined EArm");
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
 
@@ -299,8 +299,20 @@ namespace PowerLanguage.Strategy
 			return DateTime.MinValue;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return false;
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -388,9 +400,9 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

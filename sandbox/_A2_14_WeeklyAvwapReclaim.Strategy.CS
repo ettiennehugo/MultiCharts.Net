@@ -176,7 +176,7 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EDaysBelow), DaysBelow)) throw new ArgumentException("_A2_14_WeeklyAvwapReclaim: DaysBelow is not a defined EDaysBelow");
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */
 			Vwap1Type = EVwapType.Week; Vwap1DataStream = 1;
-			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_closes.Clear(); m_below = 0; m_held = 0; m_ready = m_hasDay = m_dRoll = m_exitSent = false; m_day = DateTime.MinValue; base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_closes.Clear(); m_below = 0; m_held = 0; m_ready = m_hasDay = m_dRoll = m_exitSent = false; m_day = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
 		protected override void CalcBar()

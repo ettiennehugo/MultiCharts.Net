@@ -153,7 +153,7 @@ namespace PowerLanguage.Strategy
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
@@ -172,7 +172,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- m_nativeTime = DateTime.MinValue; base.StartCalc(); m_muMinor = double.NaN; m_void = double.NaN; }
+ m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_muMinor = double.NaN; m_void = double.NaN; }
 
 
 		protected override void CalcBar()
@@ -272,8 +272,11 @@ namespace PowerLanguage.Strategy
 			int major = 1 - minor;
 			if (mix.pi[minor] > 0.30) return;
 			m_muMinor = mix.mu[minor]; m_sdMinor = mix.sd[minor]; m_muMajor = mix.mu[major];
-			double lo = Math.Min(m_muMinor, m_muMajor), hi = Math.Max(m_muMinor, m_muMajor), minV = double.MaxValue;   // the void minimum (catalogue T1)
-			for (int k = 0; k < p.Length; k++) if (p[k] > lo && p[k] < hi && v[k] < minV) { minV = v[k]; m_void = p[k]; }
+			// Coder 2026-11-22 (Analyst native retest of #152: both lots always exited together, 0 partials): T1 is the mixture's density
+			// minimum between the two components (ProfileMixture voidPrice, the GMM void). The raw tick histogram's lowest-volume row (ties
+			// to the lowest price) sat at a thin row at or behind the entry, so T1 was never ahead of the entry and GX fell back to
+			// SingleTarget on every trade.
+			if (mix.voidPrice.Length > 0 && !double.IsNaN(mix.voidPrice[0])) m_void = mix.voidPrice[0];
 			m_side = mix.mu[minor] < mix.mu[major] ? 1 : -1;
 		}
 
@@ -293,6 +296,7 @@ namespace PowerLanguage.Strategy
 			// lies between the entry and mu_major, the other lot at mu_major.
 			double t1 = longSide ? m_void - entry : entry - m_void, fin = Math.Abs(target - entry);
 			bool scale = !double.IsNaN(m_void) && t1 > 0 && t1 < fin;
+			if (!scale && journalOn()) trace(ETraceLevel.Journal, "A2-28 void " + m_void + " not between the entry and mu_major: both lots at mu_major");
 			GxConfig.TargetMode = scale ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
 			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = scale ? t1 : 0; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
@@ -313,8 +317,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(longSide, entry, stop, 2, mkt, name);   // the plan covers both contracts sent with Send(2)
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return false;
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -402,9 +418,9 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

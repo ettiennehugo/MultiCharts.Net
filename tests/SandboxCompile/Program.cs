@@ -295,9 +295,69 @@ static class Program
 		Check(!Regex.IsMatch(yv11, @"if\s*\(\s*!IsExist\(2\)\s*\)\s*\{[^}]*return;"), "YV_11 runs its exits when Data2 is missing");
 		Check(code("DV_01").Contains("mins >= -5 && mins < 10") && code("DV_01").Contains("GxConfig.NewsExitMinutes = 5") && code("DV_01").Contains("GxMinutesToNews = minutesToNews(day)"), "DV_01 news blackout [-5, +10] and GX NEWS flatten");
 		Check(!code("TS_04").Contains("new TimeSpan(9, 0, 0)") && !code("TS_04").Contains("configureSessions"), "TS_04 takes its pit clock from ApplyPit, not a hard-coded CL clock");
-		Check(Regex.IsMatch(MethodBody(code("OF_01"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seLmt\.Send\(") && MethodBody(code("OF_01"), @"void\s+CalcBar\s*\(\s*\)").Contains("sandboxBook()"), "OF_01 runs its book and resends the short limit");
+		Check(Regex.IsMatch(MethodBody(code("OF_01"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seLmt( : null\)\?)?\.Send\(") && MethodBody(code("OF_01"), @"void\s+CalcBar\s*\(\s*\)").Contains("sandboxBook()"), "OF_01 runs its book and resends the short limit");
 		Check(Regex.Matches(MethodBody(code("A2_37"), @"void\s+CalcBar\s*\(\s*\)"), @"IsExist\(2\)").Count == 1, "A2_37 has one reachable Data2 guard");
-		Check(Regex.IsMatch(code("AV_11"), @"m_seStp\.Send\(") && Regex.IsMatch(MethodBody(code("AV_11"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seStp\.Send\("), "AV_11 resend covers the short side");
+		Check(Regex.IsMatch(code("AV_11"), @"m_seStp( : null\)\?)?\.Send\(") && Regex.IsMatch(MethodBody(code("AV_11"), @"bool\s+sandboxBook\s*\(\s*\)"), @"m_seStp( : null\)\?)?\.Send\("), "AV_11 resend covers the short side");
+		// Analyst native retest of #152, item 1: no entry on or after the flat-by cutoff bar.
+		var holdHosts = new HashSet<string> { "AV_04", "AV_09", "DV_09", "DV_11", "LE_01", "LE_02", "LE_03", "LE_06", "LE_07", "PF_08", "SW_04", "YV_03", "YV_09" };
+		var overnightOwn = new HashSet<string> { "A2_14", "SW_02", "A2_69", "GX_00" };   // overnight by design, or the GX test harness
+		int cutHosts = 0, cutOwn = 0;
+		foreach (var kv in src)
+		{
+			string c = kv.Value;
+			if (!c.Contains("OrderCreator.")) continue;
+			if (Regex.IsMatch(c, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)"))
+			{
+				if (holdHosts.Contains(kv.Key)) { Check(Regex.IsMatch(c, @"SessionExit\s*=\s*ESessionExit\.HoldOvernight"), kv.Key + " is exempt from the cutoff guard only because GX holds it overnight"); continue; }
+				string hg = MethodBody(c, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)");
+				Check(Regex.IsMatch(hg, @"\)\s*\{\s*if\s*\(\s*entryCutoff\(\)\s*\)\s*return\s+false;"), kv.Key + " hostGate refuses entries on or after the flat-by cutoff bar");
+				cutHosts++;
+				continue;
+			}
+			var entries = new HashSet<string>();
+			foreach (Match em in Regex.Matches(c, @"(m_\w+)\s*=\s*OrderCreator\.\w+\(new SOrderParameters\([^;]*EOrderAction\.(?:Buy|SellShort)\)")) entries.Add(em.Groups[1].Value);
+			if (entries.Count == 0 || overnightOwn.Contains(kv.Key)) continue;
+			Check(c.Contains("bool entryOpen()") && c.Contains("_SandboxRules.PastFlat("), kv.Key + " has the flat-by entry cutoff");
+			foreach (string e in entries)
+				Check(!Regex.IsMatch(c, @"(?<![\w.?])" + e + @"\.Send\("), kv.Key + " " + e + " is sent only through entryOpen()");
+			cutOwn++;
+		}
+		Check(cutHosts >= 70 && cutOwn >= 35, "flat-by entry cutoff covers the hosts (" + cutHosts + ") and the own-entry studies (" + cutOwn + ")");
+		// Item 7 (log volume): the per-bar DVP FIT / DVP RAIL journals are Verbose in the sandbox, and no CalcBar journals at Journal
+		// level on every bar. A top-level Journal statement in CalcBar must follow a once-per-day / on-change return guard.
+		foreach (var kv in src)
+		{
+			string c = kv.Value;
+			if (kv.Key == "KD_08") continue;   // the forward-cone measurement: its DVP FIT journal is the deliverable
+			Check(!Regex.IsMatch(c, @"DvpConfig\.journal(Fits|Rails)\s*=\s*true"), kv.Key + " does not force the DVP journals on");
+			if (Regex.Matches(c, @"base\.StartCalc\(\);").Count == 1)
+				Check(Regex.IsMatch(c, @"DvpConfig\.journalFits\s*=\s*DvpConfig\.journalRails\s*=\s*traceOn\(ETraceLevel\.Verbose\);[^;]*?base\.StartCalc\(\);"), kv.Key + " DVP FIT / RAIL journals are Verbose");
+			string cb = MethodBody(c, @"void\s+CalcBar\s*\(\s*\)");
+			if (cb.Length == 0) continue;
+			cb = cb.Substring(cb.IndexOf('{') + 1, cb.Length - cb.IndexOf('{') - 2);
+			var guard = new Regex(@"if\s*\([^;{]*(==|!=)\s*m_\w+[^;{]*\)\s*return\s*;|if\s*\(\s*!?\w+\s*\)\s*return\s*;|tod\s*!=|m_done\s*=\s*true|m_logged");
+			int depth = 0, start = 0;
+			for (int j = 0; j < cb.Length; j++)
+			{
+				char ch = cb[j];
+				if (ch == '{') depth++;
+				else if (ch == '}') { if (--depth == 0) start = j + 1; }
+				else if (ch == ';' && depth == 0)
+				{
+					string st = cb.Substring(start, j + 1 - start);
+					if (st.Contains("ETraceLevel.Journal") && !Regex.IsMatch(st, @"\breturn\b") && !Regex.IsMatch(st, @"if\s*\(\s*\w+\s*&&\s*journalOn") && !Regex.IsMatch(st, @"!=\s*m_\w*[Ll]og\w*\)"))
+						Check(guard.IsMatch(cb.Substring(0, start)), kv.Key + " CalcBar journals at Journal level only once per day or on change");
+					start = j + 1;
+				}
+			}
+		}
+		Check(code("A2_04").Contains("m_lxLmt.Send(m_target, 1)") && code("A2_04").Contains("Contracts.UserSpecified, \"A204LT\"") && !Regex.IsMatch(raw["A2_04"], @"Size(:| stays) 1 contract"), "A2_04 2 lots: T1 one lot at 1 R, the runner on the stop / sVWAP / 11:30 flat, header agrees");
+		Check(code("MT_07").Contains("dvpRailPrice(2, ELevelKind.DvpVah, 0)") && Regex.IsMatch(code("MT_07"), @"DvpConfig\.streams\s*=\s*new\[\]\s*\{\s*1\s*,\s*2\s*\}") && code("PS_25").Contains("htfStep();"), "MT_07 tests the 60m close against the 60m DVP stream's VAH after the engines step");
+		Check(code("A2_28").Contains("mix.voidPrice[0]") && !Regex.IsMatch(code("A2_28"), @"v\[k\]\s*<\s*minV"), "A2_28 T1 is the mixture void, not the raw histogram's thinnest row");
+		// Item 2: a stop on the fill bar still counts as a fill. Every Rest() call passes today's entry count.
+		foreach (var kv in src)
+			foreach (Match rm in Regex.Matches(kv.Value, @"_SandboxRules\.Rest\(([^;]*)\);"))
+				Check(Regex.IsMatch(rm.Groups[1].Value, @"^\s*[^,]+,\s*TradesToday\s*,\s*ref\s+m_bookEntries\s*,"), kv.Key + " Rest() sees fills through TradesToday");
 	}
 
 	static string MethodBody(string code, string signature)

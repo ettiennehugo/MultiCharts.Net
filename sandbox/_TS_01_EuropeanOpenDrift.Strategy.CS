@@ -228,7 +228,7 @@ namespace PowerLanguage.Strategy
 			HtfStreams = new[] { 2 };         // M-MTF: StartCalc fails loudly if Data2 is missing or another root
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			InstrumentProfile profile = InstrumentProfileOf(1);
 			if (profile == null || !profile.cost.known || profile.costFloorTicks < 1)
 				throw new ArgumentException("_TS_01_EuropeanOpenDrift: Data1 instrument cost is unknown; the floor comes from InstrumentProfile, not a hardcoded ES or MES tick count");
@@ -238,6 +238,9 @@ namespace PowerLanguage.Strategy
 			m_doneDay = DateTime.MinValue; m_stop = double.NaN;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !_SandboxRules.PastFlat(Clock.ToEastern(Bars.Time[0]), Bars.Info.Name, Clock.RthValueEnd); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -288,7 +291,7 @@ namespace PowerLanguage.Strategy
 				journalArm("TS01LE", planned, m_stop, double.NaN, ctx);
 				logSignal("TS-01", +1, planned, m_stop, ctx, true);
 			}
-			m_le.Send(Cfg.contracts);
+			(entryOpen() ? m_le : null)?.Send(Cfg.contracts);
 			m_lxStp.Send(m_stop);   // also protects the entry bar
 		}
 

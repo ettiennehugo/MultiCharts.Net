@@ -183,7 +183,7 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EAcceptBars), AcceptBars)) throw new ArgumentException("_A2_11_PriorDayVwap: AcceptBars is not a defined EAcceptBars");
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ /* Coder 2026-11-22: a recalc starts the prior-day VWAP latch again */ m_wasComplete = false; m_nativeTime = DateTime.MinValue; base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ /* Coder 2026-11-22: a recalc starts the prior-day VWAP latch again */ m_wasComplete = false; m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_pd = double.NaN;
 		}
 
@@ -298,8 +298,20 @@ namespace PowerLanguage.Strategy
 			m_prev5Low = m_5l; m_prev5High = m_5h;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) return false;
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;

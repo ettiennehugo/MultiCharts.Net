@@ -149,7 +149,7 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			m_spread.Clear(); m_day = DateTime.MinValue;   // Coder 2026-11-22: a recalc reuses this object, so the spread history is cleared (no lookahead)
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 		public _A2_37_DislocationFilter(object _ctx) : base(_ctx) { }
 		protected override void CalcBar()
