@@ -78,7 +78,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: poor highs and lows come from the last completed Own RTH profile; MC's Volume Profile is not needed on the chart.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
@@ -138,6 +138,7 @@
 
 
 using System;
+using System.Collections.Generic;
 using PowerLanguage.Function;
 namespace PowerLanguage.Strategy
 {
@@ -146,11 +147,16 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _A2_48_PoorHighsLows(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void Create()
+		{
+			base.Create(); RollDetection = ERollDetection.Series;
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // Coder 2026-11-22 (owner: own-profile path like A2-45/A2-46): poor extremes from completed Own RTH profiles, not MC's Volume Profile (not on the research charts)
+		}
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Coder 2026-11-22: DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */
 			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 		protected override void CalcBar()
@@ -160,10 +166,11 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day == m_day) return;
 			m_day = day;
-			var done = RecentCompletedProfiles(1, 1, Bars.FullSymbolData.Current);
-			bool poorHi = false, poorLo = false;
-			if (done != null && done.Count > 0) { poorHi = IsPoorHigh(done[0]); poorLo = IsPoorLow(done[0]); }
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-48 poor high " + poorHi + " poor low " + poorLo + ". No order: the catalogue says this module never opens a trade.");
+			List<VpExtra> done = migrationProfiles(1, 1);   // Coder 2026-11-22: the last completed Own RTH profile (RecentCompletedProfiles reads MC's Volume Profile only)
+			bool poorHi = false, poorLo = false, have = done != null && done.Count > 0;
+			if (have) { poorHi = IsPoorHigh(done[0]); poorLo = IsPoorLow(done[0]); }
+			// One line per Globex day; "profile none" is the skip count (no completed Own RTH profile yet: warmup, a roll split or a partial session).
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-48 " + day.ToString("yyyy-MM-dd") + " checks profile(" + (have ? "own RTH" : "none") + ") poor high " + poorHi + " poor low " + poorLo + ". No order: the catalogue says this module never opens a trade.");
 		}
 	}
 }
