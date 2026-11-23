@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the A2-62 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a buying day is the session after the lowest RTH low of the prior 10 completed sessions, and then every third session. An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. If the bar trades the prior low and the prior high on the same bar, the limit is not sent. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
+// Research assumption: ASSUMPTION: every 20 sessions the cycle re-anchors: the buying day is the session after the lowest RTH low of the 10 completed sessions before the anchor, then every third session (the phase does not depend on the trend). An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. On a buying day in an uptrend the buy limit at the prior RTH low rests from the RTH open until the session trades the prior RTH high (high first: no trade). A lower open buys at market at 09:35 instead, one entry per day. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a buying day is the session after the lowest RTH low of the prior 10 completed sessions, and then every third session. An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. If the bar trades the prior low and the prior high on the same bar, the limit is not sent. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
+// Other: ASSUMPTION: every 20 sessions the cycle re-anchors: the buying day is the session after the lowest RTH low of the 10 completed sessions before the anchor, then every third session (the phase does not depend on the trend). An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. On a buying day in an uptrend the buy limit at the prior RTH low rests from the RTH open until the session trades the prior RTH high (high first: no trade). A lower open buys at market at 09:35 instead, one entry per day. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: a buying day is the session after the lowest RTH low of the prior 10 completed sessions, and then every third session. An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. If the bar trades the prior low and the prior high on the same bar, the limit is not sent. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
+// ASSUMPTION: every 20 sessions the cycle re-anchors: the buying day is the session after the lowest RTH low of the 10 completed sessions before the anchor, then every third session (the phase does not depend on the trend). An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. On a buying day in an uptrend the buy limit at the prior RTH low rests from the RTH open until the session trades the prior RTH high (high first: no trade). A lower open buys at market at 09:35 instead, one entry per day. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
 // IOG is disabled.
 
 
@@ -149,7 +149,6 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_hi = new List<double>(), m_lo = new List<double>(), m_cl = new List<double>();
 		private DateTime m_day = DateTime.MinValue, m_entryDay = DateTime.MinValue;
 		private double m_runHi, m_runLo, m_runCl, m_stop, m_buyHigh;
-		private int m_since = -1;
 		private bool m_seen, m_done, m_buying;
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_62_Taylor3Day(object _ctx) : base(_ctx) { }
@@ -166,7 +165,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; m_hi.Clear(); m_lo.Clear(); m_cl.Clear(); m_seen = false; m_day = DateTime.MinValue; /* Coder 2026-11-22: a recalc reuses this object, so the day history is cleared */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; m_hi.Clear(); m_lo.Clear(); m_cl.Clear(); m_seen = false; m_day = DateTime.MinValue; m_anchorN = m_origin = -1; m_cls = m_why = ""; /* Coder 2026-11-22: a recalc reuses this object, so the day history is cleared */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
 		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
@@ -178,6 +177,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day)
 			{
 				if (m_seen) { m_hi.Add(m_runHi); m_lo.Add(m_runLo); m_cl.Add(m_runCl); }
+				chkDay();
 				m_day = day; m_seen = false; m_done = false; m_filledSetup = false; m_restOn = false; m_runHi = double.MinValue; m_runLo = double.MaxValue; m_buying = classify();
 			}
 			int pos = StrategyInfo.MarketPosition;
@@ -187,6 +187,12 @@ namespace PowerLanguage.Strategy
 				m_runHi = Math.Max(m_runHi, Bars.High[0]); m_runLo = Math.Min(m_runLo, Bars.Low[0]); m_runCl = Bars.Close[0];
 			}
 			else if (pos == 0) return;
+			if (pos == 0 && m_restOn && m_lo.Count > 0)
+			{   // stop resending the prior-low limit once the prior high trades first, or at 09:35 when the lower-open market buy takes over
+				TimeSpan ck = sessionClock(Bars.Time[0]);
+				bool lowerOpen = Session.rthOpen < m_cl[m_cl.Count - 1] && ck >= m_rthStart.Add(TimeSpan.FromMinutes(5)) && ck < m_rthStart.Add(TimeSpan.FromMinutes(6));
+				if (Session.rthHigh >= m_hi[m_hi.Count - 1] || lowerOpen) m_restOn = false;
+			}
 			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (pos > 0)
 			{
@@ -205,37 +211,61 @@ namespace PowerLanguage.Strategy
 			if (m_done || !m_buying || rollOn(1) || m_lo.Count < 1) return;
 			double priorLo = m_lo[m_lo.Count - 1], priorHi = m_hi[m_hi.Count - 1], priorCl = m_cl[m_cl.Count - 1];
 			double atr = DailyContext.Atr20d;
-			if (!(atr > 0)) return;
+			if (!(atr > 0)) { m_why = "noAtr"; return; }
 			TimeSpan clock = sessionClock(Bars.Time[0]);
-			bool both = Bars.Low[0] <= priorLo && Bars.High[0] >= priorHi;
-			if (!both && Bars.Low[0] <= priorLo && Session.rthHigh < priorHi)
-			{
-				m_stop = widen(priorLo, priorLo - 0.5 * atr);
-				if (!budget(priorLo, m_stop)) { m_done = true; return; }
-				m_restPx = priorLo; m_restBuy = true; m_restOn = true; m_restQty = 1; m_buyHigh = 0; (entryOpen() ? m_ll : null)?.Send(priorLo); return;
-			}
+			// Taylor "any lower open in an uptrend": a market buy at 09:35 when the RTH open is below the prior close. One entry per day,
+			// so it replaces a still-unfilled prior-low limit.
 			if (Session.rthOpen < priorCl && clock >= m_rthStart.Add(TimeSpan.FromMinutes(5)) && clock < m_rthStart.Add(TimeSpan.FromMinutes(6)))
 			{
 				double entry = Bars.Close[0];
 				m_stop = widen(entry, priorLo - 0.5 * atr);
-				if (!budget(entry, m_stop)) { m_done = true; return; }
+				if (!budget(entry, m_stop)) { m_why = "budget"; m_done = true; m_restOn = false; return; }
+				m_restOn = false; m_done = true; m_why = "sentLowerOpen";
 				(entryOpen() ? m_le : null)?.Send(); m_ls.Send(m_stop);
+				return;
 			}
+			// Coder 2026-11-22 (Analyst Set2 follow-up: 0 trades): the low must come before the high. The buy limit at the prior RTH low
+			// now rests from the RTH open until the session trades the prior high (then the day is over for the limit). Before, it was
+			// sent only after a bar had already traded the prior low, so it needed a second touch.
+			if (Session.rthHigh >= priorHi) { m_restOn = false; m_done = true; m_why = "highFirst"; return; }
+			if (m_restOn) return;   // resting; sandboxBook resends it
+			m_stop = widen(priorLo, priorLo - 0.5 * atr);
+			if (!budget(priorLo, m_stop)) { m_why = "budget"; m_done = true; return; }
+			m_restPx = priorLo; m_restBuy = true; m_restOn = true; m_restQty = 1; m_buyHigh = 0; m_why = "limitSent";
+			(entryOpen() ? m_ll : null)?.Send(priorLo);
 		}
+		// Coder 2026-11-22 (Analyst Set2 follow-up: 0 trades): the catalogue cycle. Re-anchor every 20 sessions: the buying day is the
+		// session after the lowest RTH low of the 10 completed sessions before the anchor, then every 3rd session forward (causal).
+		// Before, a buying day needed YESTERDAY to be the 10-session low (rare in an uptrend), the phase was lost whenever the trend
+		// filter failed, and the counter made every 4th session a buying day, not every 3rd.
+		private int m_anchorN = -1, m_origin = -1;
+		private string m_cls = "", m_why = "";
 		private bool classify()
 		{
-			int n = m_lo.Count;
+			int n = m_lo.Count;   // completed sessions; today is session index n
 			// Coder 2026-11-22 (Analyst Set2: ArgumentOutOfRange on the 21st day): the lagged mean reads m_cl[n - 6 - 19] = m_cl[n - 25],
 			// so 25 completed sessions are needed (20 for the mean plus the 5-session lag); the 10-day low needs only 10.
-			if (n < 20 + 5) return false;
+			if (n < 20 + 5) { m_cls = "warmup"; return false; }
+			if (m_anchorN < 0 || n - m_anchorN >= 20)
+			{
+				int arg = n - 10;
+				for (int i = n - 10; i < n; i++) if (m_lo[i] <= m_lo[arg]) arg = i;   // the lowest low (latest on a tie)
+				m_origin = arg + 1; m_anchorN = n;
+				if (journalOn()) trace(ETraceLevel.Journal, "A2-62 cycle anchor: low session " + arg + " -> buying days from session " + m_origin + " every 3rd");
+			}
+			bool phase = (n - m_origin) % 3 == 0;
 			double a = 0, b = 0;
 			for (int i = 0; i < 20; i++) { a += m_cl[n - 1 - i]; b += m_cl[n - 6 - i]; }
-			if (!(a / 20.0 > b / 20.0)) { m_since = -1; return false; }
-			int arg = n - 1;
-			for (int i = n - 10; i < n; i++) if (m_lo[i] <= m_lo[arg]) arg = i;
-			bool buy = arg == n - 1 || m_since == 3;
-			m_since = buy ? 0 : (m_since < 0 ? -1 : m_since + 1);
-			return buy;
+			bool up = a / 20.0 > b / 20.0;
+			m_cls = !phase ? "notBuyingDay(phase " + ((n - m_origin) % 3) + ")" : !up ? "buyingDayNoUptrend" : "buyingDay";
+			return phase && up;
+		}
+		/// <summary>One Journal line per Globex day: the cycle classification and, on a buying day, what happened to the entry.</summary>
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "A2-62 " + m_day.ToString("yyyy-MM-dd") + " checks day(" + m_cls + ") entry(" + (m_buying ? (m_why == "" ? "noRthBar" : m_why) : "-") + ")");
+			m_why = "";
 		}
 		private double widen(double entry, double stop)
 		{

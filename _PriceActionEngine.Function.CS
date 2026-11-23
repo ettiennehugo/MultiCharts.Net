@@ -445,8 +445,11 @@ namespace PowerLanguage.Function
 				else if (m_zzHi - b.l >= thr && m_zzHiBar < b.bar) { m_zzDir = -1; m_zzLo = b.l; m_zzLoT = b.t; m_zzLoBar = b.bar; }
 				return;
 			}
-			if (m_zzDir > 0 && m_zzHi - b.l >= thr) { addPivot(0, true, m_zzHi, m_zzHiT, m_zzHiBar, b.t, b.bar); NewPivotHigh = true; m_zzDir = -1; m_zzLo = b.l; m_zzLoT = b.t; m_zzLoBar = b.bar; }
-			else if (m_zzDir < 0 && b.h - m_zzLo >= thr) { addPivot(0, false, m_zzLo, m_zzLoT, m_zzLoBar, b.t, b.bar); NewPivotLow = true; m_zzDir = 1; m_zzHi = b.h; m_zzHiT = b.t; m_zzHiBar = b.bar; }
+			// Coder 2026-11-22 (Analyst #152: AV-02 logged 231 of 1658 anchors confirmed on the anchor bar itself): a leg extreme set on
+			// THIS bar is never confirmed by this bar's own opposite end (the order of a bar's high and low is unknown), as in the
+			// undecided branch above. The reversal must come on a later bar.
+			if (m_zzDir > 0 && m_zzHi - b.l >= thr && m_zzHiBar < b.bar) { addPivot(0, true, m_zzHi, m_zzHiT, m_zzHiBar, b.t, b.bar); NewPivotHigh = true; m_zzDir = -1; m_zzLo = b.l; m_zzLoT = b.t; m_zzLoBar = b.bar; }
+			else if (m_zzDir < 0 && b.h - m_zzLo >= thr && m_zzLoBar < b.bar) { addPivot(0, false, m_zzLo, m_zzLoT, m_zzLoBar, b.t, b.bar); NewPivotLow = true; m_zzDir = 1; m_zzHi = b.h; m_zzHiT = b.t; m_zzHiBar = b.bar; }
 			if (NewPivotHigh || NewPivotLow) promoteAll(b.t, b.bar);
 		}
 

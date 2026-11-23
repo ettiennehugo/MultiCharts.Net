@@ -4846,6 +4846,18 @@ namespace PowerLanguage.Strategy
 			return ex >= ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At;
 		}
 
+		/// <summary>Coder 2026-11-22 (catalogue §2.1 "no new entries after 15:30; flat by 15:55"): true from minutesBefore minutes
+		/// ahead of the date-aware flat-by cutoff (early closes included) until 18:00 ET. minutesBefore 0 is gxPastFlatCutoff.</summary>
+		protected bool gxPastFlatCutoff(int flatByHHMM, int minutesBefore)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return false; }
+			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
+			ExitSession.FlatDay f = gxFlatDay(ex.Date);
+			if (f.Closed) return false;
+			return ex >= ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At.AddMinutes(-Math.Max(0, minutesBefore));
+		}
+
 		ExitSession.FlatDay gxFlatDay(DateTime day)
 		{
 			day = day.Date;

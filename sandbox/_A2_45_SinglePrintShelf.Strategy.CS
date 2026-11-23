@@ -334,9 +334,14 @@ namespace PowerLanguage.Strategy
 		private DateTime m_cutoffLogDay = DateTime.MinValue;
 		private bool entryCutoff()
 		{
-			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			// Coder 2026-11-22 (Analyst: A2-45 entered 13:01 ET on 2023-11-24 (13:15 close) and was flattened at 13:11): catalogue §2.1
+			// "no new entries after 15:30; flat by 15:55" for intraday ideas, i.e. 25 minutes before the date-aware flat-by cutoff, so an
+			// early close moves it too (13:10 flat -> no entry from 12:45 ET).
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight) return false;
+			if (!gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))   // #146 date-aware cutoff
+				&& !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), 25)) return false;   // and 25 minutes before it
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: no new entries in the 25 minutes before the flat-by cutoff (catalogue 2.1: none after 15:30)"); }
 			return true;
 		}
 		private bool hostGate(bool buy)
