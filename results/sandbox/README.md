@@ -146,3 +146,21 @@ Results:
   - Nothing is dated 2025 or later.
 
 Set2 status: **8 pass (VW-04, PS-09, AV-11, A2-54, A2-46, YV-11, SP-08, DV-01), 2 fail (A2-62 exception, AV-02 never arms), 2 blocked (YV-02 no footprint root, A2-37 no Data2), 12 by-design-0 (A2-76, A2-79, A2-61, TS-07, RG-01/02/04/05/06/08/09/10), 6 zero-trades needing review (YV-12, AV-01, SP-09, A2-45, DV-11, A2-43)**. Batch-1 totals are unchanged: 23 pass, 2 fail, 4 by-design-0, 1 blocked, 0 pending.
+
+## PR #152 Set2 reruns on b7a3db7 (2026-11-22)
+
+Six Set2 slots were rerun on b7a3db7: Set2 staged at 21:32 ET, F7 about 21:33 ET, runs 21:35-22:17 ET MiniPC clock (20:35-21:17 CT). Session log `MCSignal20261122-213509-19088.csv`. The six rows are updated in place, with commit `pr152 b7a3db7 Set2`.
+
+- **A2-62**: the exception is fixed. The run reaches RUN-END on 2024-12-31 (on a71c9a8 it stopped at 2023-01-31 17:01 CT), but it has 0 trades and logs no skip or reason lines.
+- **AV-02** (now pass):
+  - The anchor is now a confirmed Data2 15m zigzag low. 1658 anchors over 2023-2024 (median gap 6.2 h, was about 4 min), each at a 3 x ATR(20) pivot.
+  - 306 trades. The full run reaches 2024-12-31 (it stopped at 2024-12-05 02:21 CT on a71c9a8).
+  - No entry, plan or fill after a cutoff, and nothing held across one. Flat-by exits at 11:56 CT on the 2023-11-23 and 2024-02-19 holiday halts. 71 entries at or after 17:00 CT.
+  - The five holiday variants each match the full run in their window, apart from one warm-up entry each in GoodFriday2023 and MLK2024.
+- **AV-01**: the anchor is now a Data2 60m 3 x ATR(20) zigzag high (506 anchors), but there are still 0 trades and no reason lines.
+- **YV-12**: still 0 trades. The Day-2 filter is in the code, but nothing is logged.
+- **DV-11** (now pass): 145 trades after the per-Globex-day reset. It holds overnight, and 119 entries are at or after 17:00 CT, so evening-session entries are confirmed.
+- **A2-45** (now pass): uses its own RTH profiles; the daily 'checks' line appears on 501 days; 7 trades.
+- **Errors**: only A2-45's 75 one-percent risk skips. Nothing is dated 2025 or later.
+
+Set2 status: **11 pass, 0 fail, 2 blocked (YV-02, A2-37), 12 by-design-0, 5 zero-trades needing review (YV-12, AV-01, SP-09, A2-43, A2-62)**. Batch-1 totals are unchanged: 23 pass, 2 fail, 4 by-design-0, 1 blocked, 0 pending.
