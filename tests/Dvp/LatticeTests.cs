@@ -238,9 +238,9 @@ static partial class Program
 			"DV-5.1 config {layers 1, Fractal, strength s_j, role DVP-S{s}} + per-field preset; shared via findSharedPa (XMKT pattern)");
 		int st = host.IndexOf("private void stepDvp()", StringComparison.Ordinal);
 		string stb = host.Substring(st, host.IndexOf("private ", st + 10, StringComparison.Ordinal) - st);
-		Check(stb.Contains("paHosted(pa)") && stb.Contains("if (rollOn(ds)) pa.OnRoll(b.Time[0]);") && stb.Contains("pa.Step(b);")
+		Check(stb.Contains("paHosted(pa)") && stb.Contains("if (rollResetOn(ds)) pa.OnRoll(b.Time[0]);") && stb.Contains("pa.Step(b);")
 			&& host.Contains("l.Add(\"DVP\")") && host.IndexOf("startExtraPa();", StringComparison.Ordinal) < host.IndexOf("startDvp();", StringComparison.Ordinal),
-			"DV-5.1 owned instances stepped on closed bars with OnRoll on rollOn(ds); hosted twins left to stepExtraPa; DVP named in paConsumers; startExtraPa before startDvp");
+			"DV-5.1 owned instances stepped on closed bars with OnRoll on rollResetOn(ds) (roll + late splice); hosted twins left to stepExtraPa; DVP named in paConsumers; startExtraPa before startDvp");
 	}
 
 

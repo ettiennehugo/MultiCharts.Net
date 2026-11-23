@@ -178,8 +178,8 @@ static partial class Program
 	static void RollBarTest()
 	{
 		string host = File.ReadAllText(Path.Combine(Root(), "_CustomSignal.Strategy.CS"));
-		Check(host.Contains("rollBar = ago == 0 && rollOn(ds)") && host.Contains("if (ds == 1) return m_rollDet.LastRollBar == Bars.FullSymbolData.Current;"),
-			"rollOn(1) host wiring: ringBarOf sets rollBar from rollOn on the closed bar only");
+		Check(host.Contains("rollBar = ago == 0 && rollResetOn(ds)") && host.Contains("if (ds == 1) return m_rollDet.LastRollBar == Bars.FullSymbolData.Current;"),
+			"rollOn(1) host wiring: ringBarOf sets rollBar from rollResetOn (roll + late splice, ruling 2026-11-23 13:31 CT) on the closed bar only");
 		var det = new _RollDetector { series = false, table = false };
 		var ring = new _BarRing(64); var rollBars = new List<int>();
 		int barNo = 0; double prev = double.NaN;

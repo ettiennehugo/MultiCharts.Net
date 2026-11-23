@@ -98,6 +98,7 @@ static class Program
 		TableJournal();
 		Evidence();
 		SpliceLocator();
+		ResetAtSplice();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -748,7 +749,7 @@ static class Program
 			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			Check(Regex.IsMatch(src, @"protected\s+double\s+RollSpliceMinAtr\s*=\s*RollSpliceLocator\.DefaultMinAtr\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollSpliceMinAtr"), "host: RollSpliceMinAtr = 0.4 constant, not an [Input]");
-			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.table\s*&&\s*!m_rollDet\.series\)\s*\{\s*if\s*\(stepped\s*&&\s*m_rollDet\.DayInTable\)\s*m_spliceLoc\.Arm\(m_rollDet\.DayStartDay\);")
+			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.table\s*&&\s*!m_rollDet\.series\)\s*\{\s*if\s*\(stepped\s*&&\s*m_rollDet\.DayInTable\)\s*m_spliceLoc\.Arm\(m_rollDet\.DayStartDay,\s*Bars\.Time\[0\]\);")
 				&& Regex.IsMatch(src, @"m_spliceLoc\.Step\(bar,\s*day,\s*Bars\.Time\[0\],\s*Bars\.Open\[0\],\s*prev,\s*m_gapCal\.Atr,\s*m_rollDet\.DayStart\)")
 				&& Regex.IsMatch(src, @"else\s+if\s*\(stepped\)\s*setSplice\(bar,\s*double\.NaN,\s*false\);\s*\}"), "host: Table arms on the reopen and steps with the carried A; other modes put the offset on the roll bar");
 			Check(Regex.IsMatch(src, @"if\s*\(splice\s*&&\s*m_daily\.Days\s*>\s*0\)\s*m_daily\.OnRoll\(key,\s*double\.IsNaN\(spliceOff\)\s*\?\s*Bars\.Open\[0\]\s*-\s*m_daily\.PrevClose\s*:\s*spliceOff\);")
@@ -756,6 +757,127 @@ static class Program
 			int shift = src.IndexOf("m_dailyAggO += spliceOff; m_dailyAggH += spliceOff; m_dailyAggL += spliceOff;", StringComparison.Ordinal), merge = src.IndexOf("m_dailyAggH = Math.Max(m_dailyAggH, Bars.High[0])", StringComparison.Ordinal);
 			Check(shift > 0 && merge > shift && src.IndexOf("m_dailyTodayOpen += spliceOff;", StringComparison.Ordinal) > 0, "host: an in-session splice shifts today's open and running O/H/L before the splice bar is merged");
 			Check(Regex.IsMatch(src, @"bool\s+splice\s*=\s*rollSpliceOn\(\);\s*double\s+tr\s*=") && Regex.IsMatch(src, @"else\s+if\s*\(traceOn\(ETraceLevel\.Warning\)\s*&&\s*m_spliceBar\s*!=\s*bar\)"), "host: TOD drops the splice bar's range; a located splice is not warned as off-table");
+		}
+	}
+
+	// ---- Owner ruling 2026-11-23 13:31 CT: a LATE splice (not the table reopen bar) fires the AVWAP / VWAP / PRICEACTION / profile
+	// resets again on the switch bar. The host model below is stepRollDetector + rollResetOn: a reset on the roll bar (stepped) and on
+	// a located splice with ResetsAgain; one reset per bar however often the bar is stepped.
+	sealed class ResetRun { public List<int> resets = new List<int>(); public List<int> events = new List<int>(); public List<string> lines = new List<string>(); public int splice = -1; }
+	static ResetRun RunResets(List<IB> bars, HashSet<DateTime> dates, Func<IB, bool> onBar = null)
+	{
+		var r = new ResetRun();
+		var det = new _RollDetector { table = true, dates = dates }; var cal = new RollGapCalibrator(); var loc = new RollSpliceLocator();
+		for (int i = 0; i < bars.Count; i++)
+		{
+			IB b = bars[i]; double prev = i > 0 ? bars[i - 1].c : double.NaN; bool reset = false, late = false;
+			for (int rep = 0; rep < 2; rep++)
+			{
+				cal.AddBar(b.day, b.h, b.l, b.c);
+				bool stepped = det.Step(b.bar, b.day, b.o, prev, "@ES", 0.25);
+				if (stepped && det.DayInTable) loc.Arm(det.DayStartDay, b.time);
+				if (stepped && !r.events.Contains(b.bar)) r.events.Add(b.bar);
+				if (loc.Step(b.bar, b.day, b.time, b.o, prev, cal.Atr, det.DayStart))
+				{
+					r.splice = b.bar;
+					if (loc.ResetsAgain && b.bar != det.LastRollBar) { late = true; r.lines.Add(_RollDetector.ResetAtSpliceLine(loc)); }
+				}
+				bool ev = det.LastRollBar == b.bar;
+				reset |= ev || late;   // rollResetOn: both sides, one answer per bar
+			}
+			if (reset) r.resets.Add(b.bar);
+		}
+		return r;
+	}
+	/// <summary>Toy engine (VWAP-like): sum(close) / n since the last reset. After a re-reset it must equal the mean of post-switch bars.</summary>
+	static double MeanSinceLastReset(List<IB> bars, List<int> resets, int uptoBar)
+	{
+		double sum = 0; int n = 0;
+		foreach (IB b in bars) { if (b.bar > uptoBar) break; if (resets.Contains(b.bar)) { sum = 0; n = 0; } sum += b.c; n++; }
+		return n > 0 ? sum / n : double.NaN;
+	}
+	static double MeanFrom(List<IB> bars, int fromBar, int uptoBar) { double sum = 0; int n = 0; foreach (IB b in bars) if (b.bar >= fromBar && b.bar <= uptoBar) { sum += b.c; n++; } return sum / n; }
+	static int BarAt(List<IB> bars, DateTime t) { foreach (IB b in bars) if (b.time == t) return b.bar; return -1; }
+
+	static void ResetAtSplice()
+	{
+		var d0617 = new DateTime(2024, 6, 17); var d0618 = new DateTime(2024, 6, 18); var d1216 = new DateTime(2024, 12, 16);
+		var table = new HashSet<DateTime> { d0617, new DateTime(2024, 9, 16), d1216 };
+		DateTime from = new DateTime(2024, 4, 15), to = new DateTime(2024, 6, 28);
+		// 1. June 2024 late pattern (ES: switch on 06-17 22:51 CT, trading day 06-18): reset at the table reopen AND at the switch bar
+		{
+			var bars = Intraday(from, to, (d, m) => d == d0618 && m == 1 ? -20 : (m == 0 ? 0.25 : 0));
+			var r = RunResets(bars, table);
+			int reopen = BarAt(bars, new DateTime(2024, 6, 14, 17, 0, 0)), sw = BarAt(bars, new DateTime(2024, 6, 17, 22, 51, 0));
+			Check(r.events.Count == 1 && r.events[0] == reopen, "reset-at-splice June: the roll EVENT stays on the table reopen only");
+			Check(r.resets.Count == 2 && r.resets[0] == reopen && r.resets[1] == sw, "reset-at-splice June: resets at the reopen and again at the 22:51 switch bar: " + string.Join(",", r.resets));
+			Check(One(r.lines) == "ROLL table reset-at-splice(2024-06-17) at(2024-06-17 22:51) via(intrabar) session(+1) rollEvent(2024-06-14 17:00) engines(AVWAP VWAP PRICEACTION PROFILE)",
+				"reset-at-splice June: journal line: " + One(r.lines));
+			int upto = BarAt(bars, new DateTime(2024, 6, 18, 14, 30, 0));
+			double got = MeanSinceLastReset(bars, r.resets, upto), post = MeanFrom(bars, sw, upto), old = MeanSinceLastReset(bars, r.events, upto);
+			Check(Math.Abs(got - post) < 1e-9 && Math.Abs(old - post) > 1, "reset-at-splice June: engine state after the switch is built only from post-switch bars (11d67e1 state carried the one-spread step: " + old.ToString("0.00") + " vs " + post.ToString("0.00") + ")");
+			// MES / NQ / MNQ variant: switch at 06-18 03:32
+			var bars2 = Intraday(from, to, (d, m) => d == d0618 && m == 2 ? 15 : (m == 0 ? 0.25 : 0));
+			var r2 = RunResets(bars2, table);
+			Check(r2.resets.Count == 2 && r2.resets[1] == BarAt(bars2, new DateTime(2024, 6, 18, 3, 32, 0)) && One(r2.lines).Contains("at(2024-06-18 03:32) via(intrabar) session(+1)"), "reset-at-splice June (MES/NQ/MNQ): second reset at 06-18 03:32");
+		}
+		// 2. December 2024 intrabar pattern: switch at 03:32 CT on the table date
+		{
+			var bars = Intraday(new DateTime(2024, 10, 1), new DateTime(2024, 12, 31), (d, m) => d == d1216 && m == 2 ? 18 : (d == d1216 && m == 0 ? 0.5 : 0));
+			var r = RunResets(bars, table);
+			int reopen = BarAt(bars, new DateTime(2024, 12, 13, 17, 0, 0)), sw = BarAt(bars, new DateTime(2024, 12, 16, 3, 32, 0));
+			Check(r.resets.Count == 2 && r.resets[0] == reopen && r.resets[1] == sw && r.events.Count == 1 && r.events[0] == reopen, "reset-at-splice December: reset at the reopen and at the 03:32 intrabar switch; one roll event");
+			Check(One(r.lines) == "ROLL table reset-at-splice(2024-12-16) at(2024-12-16 03:32) via(intrabar) session(+0) rollEvent(2024-12-13 17:00) engines(AVWAP VWAP PRICEACTION PROFILE)", "reset-at-splice December: journal: " + One(r.lines));
+			int upto = BarAt(bars, new DateTime(2024, 12, 16, 14, 30, 0));
+			Check(Math.Abs(MeanSinceLastReset(bars, r.resets, upto) - MeanFrom(bars, sw, upto)) < 1e-9, "reset-at-splice December: post-switch state only");
+		}
+		// 3. aligned reopen splice: exactly one reset, no reset-at-splice line (behaviour unchanged vs 11d67e1)
+		{
+			var bars = Intraday(from, to, (d, m) => d == d0617 && m == 0 ? 25 : 0);
+			var r = RunResets(bars, table);
+			Check(r.resets.Count == 1 && r.resets[0] == BarAt(bars, new DateTime(2024, 6, 14, 17, 0, 0)) && r.splice == r.resets[0] && r.lines.Count == 0, "reset-at-splice aligned: exactly one reset (the reopen), no second line");
+		}
+		// 4. fallback: re-reset on the fallback bar (first bar after the next session)
+		{
+			var bars = Intraday(from, to, (d, m) => d == d0618 && m == 3 ? 2.0 : (d == d0617 && m == 4 ? -1.0 : 0));
+			var r = RunResets(bars, table);
+			int fb = BarAt(bars, new DateTime(2024, 6, 18, 17, 0, 0));
+			Check(r.resets.Count == 2 && r.resets[1] == fb && One(r.lines).StartsWith("ROLL table reset-at-splice(2024-06-17) at(2024-06-18 17:00) via(fallback) session(+2)"), "reset-at-splice fallback: re-reset at the fallback bar: " + One(r.lines));
+		}
+		// 5. ResetsAgain: Reopen session 0 = aligned (no); Reopen session 1, Intrabar, Fallback = late (yes); nothing located = no
+		{
+			var loc = new RollSpliceLocator();
+			Check(!loc.ResetsAgain, "ResetsAgain: false before any result");
+			loc.Arm(d0617); loc.Step(1, d0617, d0617, 100, 50, 30, true);
+			Check(loc.Via == RollSpliceLocator.EVia.Reopen && loc.Session == 0 && !loc.ResetsAgain, "ResetsAgain: aligned reopen -> false");
+			loc.Arm(d0617); loc.Step(2, d0617, d0617, 50, 50, 30, true); loc.Step(3, d0618, d0618, 100, 50, 30, true);
+			Check(loc.Via == RollSpliceLocator.EVia.Reopen && loc.Session == 1 && loc.ResetsAgain, "ResetsAgain: next-session reopen -> true");
+		}
+		// 6. Data n (same root): the late-splice pending fires once on the first Data2 close >= the switch time; a bar that holds both
+		// the roll pending and the splice pending resets once
+		{
+			var ev = new _RollPending(); var sp = new _RollPending();
+			ev.Arm(new DateTime(2024, 6, 14, 17, 0, 0)); sp.Arm(new DateTime(2024, 6, 17, 22, 51, 0));
+			Func<int, DateTime, bool> resetOn = (bar, t) => { bool a = ev.Fire(bar, t), b = sp.Fire(bar, t); return a || b; };
+			Check(resetOn(1, new DateTime(2024, 6, 14, 17, 5, 0)) && !resetOn(2, new DateTime(2024, 6, 17, 22, 50, 0)) && resetOn(3, new DateTime(2024, 6, 17, 22, 55, 0)) && !resetOn(4, new DateTime(2024, 6, 17, 23, 0, 0)),
+				"reset-at-splice Data2 5m: resets at the first close after the reopen and after the switch, once each");
+			ev.Reset(); sp.Reset(); ev.Arm(new DateTime(2024, 6, 14, 17, 0, 0)); sp.Arm(new DateTime(2024, 6, 17, 22, 51, 0));
+			int fires = 0; if (resetOn(7, new DateTime(2024, 6, 18, 16, 0, 0))) fires++; if (resetOn(7, new DateTime(2024, 6, 18, 16, 0, 0))) fires++; if (resetOn(8, new DateTime(2024, 6, 19, 16, 0, 0))) fires++;
+			Check(fires == 2 && !ev.Armed && !sp.Armed, "reset-at-splice Data2 daily: both pendings land on one bar -> one reset (repeat call on the same bar is still that reset)");
+		}
+		// 7. host pins
+		{
+			string root = null;
+			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && root == null; di = di.Parent) if (File.Exists(Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"))) root = di.FullName;
+			Func<string, string> rd = f => root == null ? "" : Regex.Replace(File.ReadAllText(Path.Combine(root, f)), @"//[^\n]*", "");
+			string cs = rd("_CustomSignal.Strategy.CS"), vp = rd("_VolumeProfileBase.Strategy.CS"), vpf = rd("_VolumeProfileFuturesBase.Strategy.CS");
+			Check(Regex.IsMatch(cs, @"protected\s+bool\s+rollResetOn\(int\s+ds\)\s*\{\s*bool\s+ev\s*=\s*rollOn\(ds\),\s*late\s*=\s*rollSpliceResetOn\(ds\);\s*return\s+ev\s*\|\|\s*late;"), "host: rollResetOn = rollOn | late splice, both evaluated");
+			Check(Regex.IsMatch(cs, @"if\s*\(m_spliceLoc\.ResetsAgain\s*&&\s*bar\s*!=\s*m_rollDet\.LastRollBar\)") && cs.Contains("_RollDetector.ResetAtSpliceLine(m_spliceLoc)"), "host: late splice sets the re-reset and journals reset-at-splice");
+			Check(Regex.IsMatch(cs, @"if\s*\(rollResetOn\(ds\)\)\s*pa\.OnRoll") && Regex.IsMatch(cs, @"rollResetOn\(pa\.config\.dataStream\)\)") && Regex.IsMatch(cs, @"rollBar\s*=\s*ago\s*==\s*0\s*&&\s*rollResetOn\(ds\)")
+				&& Regex.IsMatch(cs, @"bool\s+roll\s*=\s*rollResetOn\(AvwapLimits\.dataStream\);") && Regex.IsMatch(cs, @"rollResetOn\(PriceActionConfig\.dataStream\)\)\s*m_pa\.OnRoll"), "host: PA hosts, AVWAP, PA and the ring roll flag use rollResetOn");
+			Check(Regex.IsMatch(vp, @"internal\s+bool\s+vwapRollOn\(int\s+stream\)\s*\{\s*return\s+rollResetOn\(stream\);") && Regex.IsMatch(vp, @"bool\s+roll\s*=\s*rollResetOn\(WeeklyProfiles\.dataStream\);")
+				&& Regex.IsMatch(vpf, @"IList<int>\s+rolls\s*=\s*ResetBars;"), "host: VWAP, weekly profiles and profileCrossesRoll use the reset (roll + late splice) bars");
+			Check(Regex.IsMatch(cs, @"stepRollWindow|_RollWindow") ? !Regex.IsMatch(cs, @"RollWindow[^;\n]*rollResetOn") : true, "host: the roll window does not follow the re-reset");
 		}
 	}
 }

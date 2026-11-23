@@ -732,7 +732,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>M-AVWAP: exchange-session date of a bar (the trading-day key: Globex date on futures) for the Week/Month/Quarter VWAP resets.</summary>
 		internal DateTime vwapSessionDate(DateTime barTime) { return tradingDayKey(barTime); }
 		/// <summary>M-AVWAP: roll signal for the RollDate VWAP reset (§0.3).</summary>
-		internal bool vwapRollOn(int stream) { return rollOn(stream); }
+		internal bool vwapRollOn(int stream) { return rollResetOn(stream); }   // ruling 2026-11-23 13:31 CT: again on a late splice
 
 		// A disabled VWAP slot is not stepped, so its stream is not required on the chart.
 		private void requireDataStream(string name, int stream, EVwapType type)
@@ -3526,7 +3526,7 @@ namespace PowerLanguage.Strategy
 			if (b.Status != EBarState.Close || b.CurrentBar == m_weekLastBar) return;
 			m_weekLastBar = b.CurrentBar;
 			DateTime t = b.Time[0], day = tradingDayKey(t);
-			bool roll = rollOn(WeeklyProfiles.dataStream);
+			bool roll = rollResetOn(WeeklyProfiles.dataStream);   // ruling 2026-11-23 13:31 CT: a late-splice session also splits the week
 			if (day != m_weekSessionDay)
 			{
 				completeWeekSession();

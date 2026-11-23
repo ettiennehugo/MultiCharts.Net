@@ -273,7 +273,7 @@ static class Program
 			&& !_MtfMath.SameRoot(R("@"), R("#C")), "MI-T2 SameRoot: empty roots never match (F1)");
 		string host = File.ReadAllText(Path.Combine("..", "..", "_CustomSignal.Strategy.CS")).Replace("\r\n", "\n");
 		Check(host.Contains("if (!_MtfMath.SameRoot(_MtfMath.SymbolRoot(info.Name), root))")
-			&& host.Contains("if (IsExist(ds) && _MtfMath.SameRoot(_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name), root)) m_rollPending[ds] = new _RollPending();")
+			&& host.Contains("if (IsExist(ds) && _MtfMath.SameRoot(_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name), root)) { m_rollPending[ds] = new _RollPending(); m_splicePending[ds] = new _RollPending(); }")
 			&& !host.Contains("_MtfMath.SymbolRoot(info.Name) != root") && !host.Contains("_MtfMath.SymbolRoot(BarsOfData(ds).Info.Name) == root"),
 			"MI-T2 host: HtfStreams same-root check and roll inheritance use SameRoot (two empty roots never match)");
 	}

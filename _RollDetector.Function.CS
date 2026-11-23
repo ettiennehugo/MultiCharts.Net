@@ -133,6 +133,15 @@ namespace PowerLanguage.Function
 				+ ") gapAtr(" + (warm && !double.IsNaN(r.Gap) ? num(Math.Abs(r.Gap) / r.Atr, "0.000") : "NaN") + ") minAtr(" + num(r.minAtr, "0.0##") + ") found(" + (r.Found ? "1" : "0") + ")";
 		}
 
+		/// <summary>Owner ruling 2026-11-23 13:31 CT: the Journal line when a late splice fires the engine resets a second time.</summary>
+		public static string ResetAtSpliceLine(RollSpliceLocator r)
+		{
+			var inv = System.Globalization.CultureInfo.InvariantCulture;
+			string via = r.Via == RollSpliceLocator.EVia.Reopen ? "reopen" : r.Via == RollSpliceLocator.EVia.Intrabar ? "intrabar" : r.Via == RollSpliceLocator.EVia.Fallback ? "fallback" : "none";
+			return "ROLL table reset-at-splice(" + r.Table.ToString("yyyy-MM-dd", inv) + ") at(" + r.BarTime.ToString("yyyy-MM-dd HH:mm", inv) + ") via(" + via + ") session(+" + r.Session.ToString(inv)
+				+ ") rollEvent(" + (r.ArmTime == DateTime.MinValue ? "-" : r.ArmTime.ToString("yyyy-MM-dd HH:mm", inv)) + ") engines(AVWAP VWAP PRICEACTION PROFILE)";
+		}
+
 		/// <summary>T-R1 (m-instr §7.1 item 3): the Warning text for a day start that is not a Table date and gaps more than k x A,
 		/// else null. Null during the ATR warm-up (the check is skipped). Never a roll.</summary>
 		public static string OffTableWarning(DateTime tradingDay, double gap, double atr, double k)
@@ -323,16 +332,23 @@ namespace PowerLanguage.Function
 		/// <summary>True when a bar qualified (|g| >= minAtr x A); false for the fallback. Replaces the T-R1 k = 1.0 confirmed flag.</summary>
 		public bool Found;
 		public bool Armed { get { return m_armed; } }
+		/// <summary>Bar time of the table reopen that armed the search (the roll event), DateTime.MinValue if not given.</summary>
+		public DateTime ArmTime = DateTime.MinValue;
+		/// <summary>Owner ruling 2026-11-23 13:31 CT: the AVWAP / VWAP / PRICEACTION / profile resets fire again on the offset bar when it
+		/// is NOT the table reopen bar itself (intrabar, a later session's reopen, or the fallback). An aligned reopen splice (Reopen,
+		/// session 0) is the roll bar: no second reset. Valid on the bar Step returned true.</summary>
+		public bool ResetsAgain { get { return Via != EVia.None && !(Via == EVia.Reopen && Session == 0); } }
 
 		public void Reset()
 		{
 			m_armed = false; m_curDay = DateTime.MinValue; m_sessions = 0; m_lastBar = -1; m_bestSession = 0; m_bestGap = m_bestAtr = double.NaN; m_bestTime = DateTime.MinValue;
-			Via = EVia.None; Table = BarTime = GapTime = DateTime.MinValue; Gap = Atr = double.NaN; Session = 0; Found = false;
+			Via = EVia.None; Table = BarTime = GapTime = ArmTime = DateTime.MinValue; Gap = Atr = double.NaN; Session = 0; Found = false;
 		}
 
 		/// <summary>Open the search on the table reopen bar (call before Step for that bar). A window still open is replaced.</summary>
-		public void Arm(DateTime tableDay)
+		public void Arm(DateTime tableDay, DateTime armTime = default(DateTime))
 		{
+			ArmTime = armTime;
 			m_armed = true; Table = tableDay.Date; m_curDay = tableDay.Date; m_sessions = 0;
 			m_bestGap = m_bestAtr = double.NaN; m_bestTime = DateTime.MinValue; m_bestSession = 0;
 		}
