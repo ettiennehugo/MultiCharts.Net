@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			VpExtra c = Composite(1, 10); double nxt = double.NaN; if (c != null) foreach (Node n in c.hvns) if (n.low > Bars.Close[0] && (double.IsNaN(nxt) || n.low < nxt)) nxt = n.low; if (journalOn()) trace(ETraceLevel.Journal, "EX-01 next HVN " + nxt.ToString("0.00") + ". Host target, no order.");
 		}

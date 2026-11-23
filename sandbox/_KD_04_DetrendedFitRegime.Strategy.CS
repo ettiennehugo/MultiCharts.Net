@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double up = dvpRailPrice(1, ELevelKind.DvpSigma, 1), dn = dvpRailPrice(1, ELevelKind.DvpSigma, -1); if (journalOn()) trace(ETraceLevel.Journal, "KD-04 band " + (up - dn).ToString("0.00") + ". Gate only, no order.");
 		}

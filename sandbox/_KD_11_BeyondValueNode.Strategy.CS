@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0); double atr = averageTrueRange(Bars, 14); double z = atr > 0 ? (Bars.Close[0] - vah) / atr : double.NaN; if (journalOn()) trace(ETraceLevel.Journal, "KD-11 VAH distance in ATR " + z.ToString("0.00") + ". Diagnostic, no order.");
 		}

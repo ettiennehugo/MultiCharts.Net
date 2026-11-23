@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vol = Bars.Volume[0];
 			int repeats = Bars.Close[0] == Bars.Close[1] ? 1 : 0;

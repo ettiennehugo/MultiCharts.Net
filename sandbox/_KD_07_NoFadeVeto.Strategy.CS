@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double up2 = dvpRailPrice(1, ELevelKind.DvpSigma, 2); bool beyond = Bars.Close[0] > up2; if (journalOn()) trace(ETraceLevel.Journal, "KD-07 beyond 2 sigma " + beyond + ". Veto only, no order.");
 		}

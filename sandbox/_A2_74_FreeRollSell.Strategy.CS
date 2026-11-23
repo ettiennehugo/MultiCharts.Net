@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-74 GX ScaleOutThenRunner, T1 2.5 R, scale 50, BreakEven AfterT1. No order.");
 		}

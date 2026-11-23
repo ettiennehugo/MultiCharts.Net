@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			bool throttle = false; if (journalOn()) trace(ETraceLevel.Journal, "PF-05 throttle " + throttle + " because this file has no trades. No order.");
 		}

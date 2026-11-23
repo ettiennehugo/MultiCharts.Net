@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double tick = tickSize(); if (journalOn()) trace(ETraceLevel.Error, "L2-06 tick " + tick.ToString("0.00") + ". No queue. No order.");
 		}

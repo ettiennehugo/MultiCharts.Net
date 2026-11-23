@@ -154,7 +154,7 @@ namespace PowerLanguage.Strategy
  EventConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int events = 0; if (EventCalendar != null) events = EventCalendar.EventsOn(m_day).Count; if (journalOn()) trace(ETraceLevel.Error, "L2-05 events " + events + ". No depth withdrawal. No order.");
 		}

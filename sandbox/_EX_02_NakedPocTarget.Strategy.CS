@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double poc = double.NaN; foreach (VpExtra e in NakedPocs(1)) if (e.poc > Bars.Close[0] && (double.IsNaN(poc) || e.poc < poc)) poc = e.poc; if (journalOn()) trace(ETraceLevel.Journal, "EX-02 naked POC " + poc.ToString("0.00") + ". Host target, no order.");
 		}

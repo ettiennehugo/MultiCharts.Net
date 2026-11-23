@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double cvd = CumDelta(0).Value; if (journalOn()) trace(ETraceLevel.Journal, "OF-02 layer CVD " + cvd.ToString("0.00") + ". No order.");
 		}

@@ -191,7 +191,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
 			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
 			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
-			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
+			GxConfig.SessionExit = ESessionExit.HoldOvernight;   /* owner 2026-11-22: multi-day idea, hold overnight */
 			GxConfig.MaxHoldDays = holdDays;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
 			GxConfig.TimeStopMinutes = m_timeStop; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;

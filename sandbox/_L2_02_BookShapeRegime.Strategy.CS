@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double mid = (Bars.High[0] + Bars.Low[0]) / 2.0; double skew = Bars.Close[0] - mid; if (journalOn()) trace(ETraceLevel.Error, "L2-02 close skew " + skew.ToString("0.00") + " is not book shape. No order.");
 		}

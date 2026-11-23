@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop is the nearer of the pullback low minus one tick and AVWAP minus 1 sigma. Target is the impulse high. Hold up to 10 sessions.
+// Exit orders: GX. Stop is the nearer of the pullback low minus one tick and AVWAP minus 1 sigma. Target is the impulse high. GX FlatBy: flat 5 minutes before the regular session end (owner 2026-11-22; was hold up to 10 sessions).
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -162,21 +162,9 @@ namespace PowerLanguage.Strategy
 			base.StartCalc(); requireRing(1, BarRingConfig.MaxAutoBars, "AV-02 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 
-		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
-		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
-		private void sandboxEarlyFlat()
-		{
-			int pos = StrategyInfo.MarketPosition;
-			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
-			string why;
-			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
-			if (journalOn()) trace(ETraceLevel.Journal, "AV-02 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
-			gxNoteExit("FLATBY");
-			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
-		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			if (a == null || !a.Valid || !(a.Sigma > 0)) return;
 			if (a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; m_filledSetup = false; m_restOn = false; }
@@ -196,7 +184,7 @@ namespace PowerLanguage.Strategy
 			double stop = Math.Min(lo - tickSize(), a.Band(-1));
 			stop = widen(true, entry, stop);
 			if (!(peak > entry) || !budget(entry, stop)) { m_done = true; return; }
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, peak, "AV02LE", true); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, peak, "AV02LE", false);   /* owner 2026-11-22 ("fix the flat-by gaps"): intraday, GX FlatBy through exitBar() */ { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)

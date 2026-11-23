@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
  NeedsDaily = true; DailyConfig.atrLength = 20; DailyConfig.smaLength = 200;  base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double sma = DailyContext.Sma200; int sign = Session.priorRthClose > sma ? 1 : -1; if (journalOn()) trace(ETraceLevel.Journal, "RG-06 trend sign " + sign + ". Gate, no order.");
 		}

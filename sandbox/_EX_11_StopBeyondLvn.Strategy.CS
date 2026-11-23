@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
   DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			VpExtra c = Composite(1, 5); double best = double.MaxValue; if (c != null) foreach (Node n in c.lvns) best = Math.Min(best, Math.Min(Math.Abs(Bars.Close[0] - n.low), Math.Abs(Bars.Close[0] - n.high))); if (journalOn()) trace(ETraceLevel.Journal, "EX-11 LVN distance " + best.ToString("0.00") + ". Host stop, no order.");
 		}

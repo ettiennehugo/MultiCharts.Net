@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double oneR = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "EX-07 GX ScaleOutThenRunner T1 1 R. A 1 ATR stand-in is " + oneR.ToString("0.00") + ". No order.");
 		}

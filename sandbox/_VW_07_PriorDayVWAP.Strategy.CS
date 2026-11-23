@@ -65,7 +65,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// No exit orders. This file does not open a position.
+// No exit orders. This file does not open a position. Its unused arm() template selects GX HoldOvernight with MaxHoldDays 5 for a host that arms it (owner decision 2026-11-22: keep holding overnight).
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.

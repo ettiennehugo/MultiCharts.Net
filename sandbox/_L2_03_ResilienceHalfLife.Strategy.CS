@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int bars = Bars.CurrentBar; if (journalOn()) trace(ETraceLevel.Error, "L2-03 bar count " + bars + ". No depth to measure a half-life. No order.");
 		}

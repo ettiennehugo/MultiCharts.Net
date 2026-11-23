@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			bool quiet = (Bars.High[0] - Bars.Low[0]) < averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "RG-05 inside noise " + quiet + ". Gate, no order.");
 		}

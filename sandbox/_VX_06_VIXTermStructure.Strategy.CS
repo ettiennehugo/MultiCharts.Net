@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			if (journalOn()) trace(ETraceLevel.Error, "VX-06 VIX data is unavailable. No order.");
 		}

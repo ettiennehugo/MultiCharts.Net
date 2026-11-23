@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true;  base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double up = dvpRailPrice(1, ELevelKind.DvpSigma, 1); bool stand = Bars.Close[0] > up; if (journalOn()) trace(ETraceLevel.Journal, "RG-10 stand down " + stand + ". Gate, no order.");
 		}

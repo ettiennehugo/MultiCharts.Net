@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double unit = averageTrueRange(Bars, 14); double partial = 1.5 * unit; if (journalOn()) trace(ETraceLevel.Journal, "EX-13 partial distance " + partial.ToString("0.00") + ". GX T1 1.5 R. No order.");
 		}

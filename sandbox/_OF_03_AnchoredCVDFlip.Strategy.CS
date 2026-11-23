@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int sign = Math.Sign(CumDelta(0).Value); if (journalOn()) trace(ETraceLevel.Journal, "OF-03 layer CVD sign " + sign + ". No order.");
 		}

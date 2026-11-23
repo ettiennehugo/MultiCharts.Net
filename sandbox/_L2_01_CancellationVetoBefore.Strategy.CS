@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double range = Bars.High[0] - Bars.Low[0]; if (journalOn()) trace(ETraceLevel.Error, "L2-01 no DOM. Bar range " + range.ToString("0.00") + " is not a cancellation rate. No order.");
 		}

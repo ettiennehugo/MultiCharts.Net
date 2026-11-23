@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vwap = CurrentVwap1, atr = averageTrueRange(Bars, 14); bool trendDay = atr > 0 && Math.Abs(Bars.Close[0] - vwap) > atr; if (journalOn()) trace(ETraceLevel.Journal, "PF-02 trend day " + trendDay + ". Sleeve router, no order.");
 		}

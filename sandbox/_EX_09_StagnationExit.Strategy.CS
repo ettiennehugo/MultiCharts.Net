@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double hi = Math.Min(Bars.High[0], Math.Min(Bars.High[1], Bars.High[2])); double lo = Math.Max(Bars.Low[0], Math.Max(Bars.Low[1], Bars.Low[2])); bool overlap = hi > lo; if (journalOn()) trace(ETraceLevel.Journal, "EX-09 three-bar overlap " + overlap + ". Host exit, no order.");
 		}

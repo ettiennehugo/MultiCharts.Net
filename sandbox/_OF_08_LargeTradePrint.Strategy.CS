@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vol = Bars.Volume[0], mean = 0;
 			for (int i = 1; i <= 20 && i <= Bars.CurrentBar; i++) mean += lbBar(i).v;

@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int streams = Bars.Info != null ? 1 : 0;
 			if (journalOn()) trace(ETraceLevel.Journal, "OF-10 data streams seen " + streams + ". A second footprint is not built. No order.");

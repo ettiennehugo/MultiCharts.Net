@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsRth() || ((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 100) return; var vols = new List<double>(); for (int k = 1; k <= 20; k++) { double v = 0; for (int i = 0; i < 5; i++) v += lbBar(k * 5 + i).v; vols.Add(v); } vols.Sort(); double bar = 0; for (int i = 0; i < 5; i++) bar += lbBar(i).v; bool pass = bar >= vols[10]; if (journalOn()) trace(ETraceLevel.Journal, "YV-05 5m volume gate " + pass + ". No order.");
 		}

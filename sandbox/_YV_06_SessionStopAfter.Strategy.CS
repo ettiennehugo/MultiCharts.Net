@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			bool late = IsRth() && sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(90)); if (journalOn()) trace(ETraceLevel.Journal, "YV-06 past 90 minutes " + late + ". Module, no order.");
 		}
 

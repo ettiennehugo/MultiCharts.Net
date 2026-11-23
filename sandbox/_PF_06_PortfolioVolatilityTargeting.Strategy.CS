@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  NeedsDaily = true; DailyConfig.atrLength = 20; DailyConfig.smaLength = 200;  base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double hv = DailyContext.Hv(20); double multiple = hv > 0 ? Math.Min(1.0, 0.10 / hv) : 0; if (journalOn()) trace(ETraceLevel.Journal, "PF-06 vol multiple " + multiple.ToString("0.00") + ". No order.");
 		}

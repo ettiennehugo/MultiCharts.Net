@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
   DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			DateTime t0 = Bars.Time[0].Date; VpExtra dev = RangeProfileAfter(1, t0, Bars.Time[0]); VpExtra prior = PriorRthProfile(); double mig = dev != null && prior != null ? dev.poc - prior.poc : double.NaN; if (journalOn()) trace(ETraceLevel.Journal, "RG-01 POC migration " + mig.ToString("0.00") + ". Gate, no order.");
 		}

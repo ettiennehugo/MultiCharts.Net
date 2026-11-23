@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int crosses = 0; double vwap = CurrentVwap1; bool trend = !double.IsNaN(vwap) && Math.Abs(Bars.Close[0] - vwap) > averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "RG-04 trend proxy " + trend + " crosses " + crosses + ". Gate, no order.");
 		}

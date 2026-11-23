@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double up = Bars.Volume[0], dn = Bars.Volume[1]; if (journalOn()) trace(ETraceLevel.Error, "L2-07 two bar volumes " + up.ToString("0") + " " + dn.ToString("0") + " are not cancellations. No order.");
 		}

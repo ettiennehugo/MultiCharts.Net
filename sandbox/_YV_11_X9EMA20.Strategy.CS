@@ -176,7 +176,7 @@ namespace PowerLanguage.Strategy
 		protected override void CalcBar()
 		{
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close || Bars.CurrentBar < 40) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			int pos = StrategyInfo.MarketPosition;
 			double sma = smaN(20, 0), ema = ema9();
@@ -185,6 +185,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool flat = _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 				bool lost = (pos > 0 && Bars.Close[0] < sma) || (pos < 0 && Bars.Close[0] > sma);
+				if (flat && journalOn()) trace(ETraceLevel.Journal, "YV-11 " + day.ToString("yyyy-MM-dd") + " flat-by: " + _SandboxRules.FlatByReason(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd) + ", closing " + Math.Abs(pos));
 				if (flat || lost) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
 				if (pos > 0) { m_ls.Send(m_stop); if (m_hasTarget) m_lt.Send(m_target); }
 				else { m_ss.Send(m_stop); if (m_hasTarget) m_st.Send(m_target); }

@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
   base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double cvd = CumDelta(0).Value, prev = CumDelta(5).Value; bool diverge = Bars.Close[0] > Bars.Close[5] && cvd < prev; if (journalOn()) trace(ETraceLevel.Journal, "EX-12 CVD diverge " + diverge + ". Host exit, no order.");
 		}

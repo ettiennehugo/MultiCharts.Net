@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
  NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; DailyConfig.smaLength = 200;  base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double atr = DailyContext.Atr20d; double span = Session.rthHigh - Session.rthLow; bool tight = atr > 0 && span < 0.6 * atr; if (journalOn()) trace(ETraceLevel.Journal, "RG-08 compressed " + tight + ". Gate, no order.");
 		}

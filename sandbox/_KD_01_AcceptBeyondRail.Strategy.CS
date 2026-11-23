@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double poc = dvpRailPrice(1, ELevelKind.DvpPoc, 0); if (journalOn()) trace(ETraceLevel.Journal, "KD-01 lives in PS-25. POC rail " + poc.ToString("0.00") + ". No order.");
 		}

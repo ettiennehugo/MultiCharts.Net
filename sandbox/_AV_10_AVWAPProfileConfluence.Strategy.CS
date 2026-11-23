@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			VpExtra comp = Composite(1, 10);

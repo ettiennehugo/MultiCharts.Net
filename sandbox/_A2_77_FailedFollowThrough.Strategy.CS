@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
 			int checkpoint = 8;
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-77 checkpoint " + checkpoint + " bars. Named host exit when open profit is not positive. No order.");

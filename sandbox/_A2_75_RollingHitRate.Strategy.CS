@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			m_bars++;
 			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-75 throttle N=20 delta=10 scale=0.8 after " + m_bars + " bars. No host trades, no order.");

@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double r = averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "EX-08 R unit " + r.ToString("0.00") + " for b in 0.5 to 2. Diagnostic, no order.");
 		}

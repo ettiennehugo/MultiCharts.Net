@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			VpExtra c = Composite(1, 5); double w = c != null ? c.vah - c.val : double.NaN; if (journalOn()) trace(ETraceLevel.Journal, "EX-03 balance width " + w.ToString("0.00") + ". Host target, no order.");
 		}

@@ -85,6 +85,7 @@ static class Program
 		CalendarKeyChecks(files);
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
+		HoldChecks(files);
 		GateSourceChecks(files);
 		GateWiringChecks(files);
 		GateRuleProbes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Generated", "bin", "Release", "net8.0", "SandboxLib.dll"));
@@ -396,10 +397,22 @@ static class Program
 
 	static readonly HashSet<string> NoEtClock = new HashSet<string>(StringComparer.Ordinal) { "_A2_49_MiddayBreakout.Strategy.CS", "_A2_57_TwoTimeframeTurn.Strategy.CS" };
 
+	// Owner 2026-11-22 11:03 CT ("Switch all 19 to hold overnight"): studies whose idea is multi-day or overnight by its catalogue
+	// entry. Their arm() template selects HoldOvernight, and no mustFlatten / EarlyFlatDue / sandbox flat-by path closes them intraday.
+	static readonly HashSet<string> HoldOvernightByOwner = new HashSet<string>(StringComparer.Ordinal)
+	{
+		"AV-04", "AV-09", "LE-01", "LE-02", "LE-03", "LE-05", "LE-06", "LE-07", "PF-01", "PF-08",
+		"SW-04", "VX-01", "VX-02", "VX-03", "VX-04", "VX-05", "VX-08", "YV-03", "YV-09",
+	};
+
+	static string StudyId(string name) { string[] p = name.Split('_'); return p.Length > 2 ? p[1] + "-" + p[2] : name; }
+
 	// Analyst MC17 (A2-35 held over Good Friday 2023): the flat-by cutoff is that day's session end minus 5 minutes.
+	// Owner 2026-11-22: every futures study that selects GX FlatBy reaches GX's flat-by from CalcBar through exitBar(), and the owner's
+	// multi-day studies (HoldOvernightByOwner) hold overnight. GX itself handles early closes and holiday halts (PR #146), so no study runs a second early-flat path.
 	static void EarlyFlatChecks(List<string> files)
 	{
-		int gx = 0, mf = 0;
+		int gx = 0, mf = 0, hold = 0, flatBy = 0, own = 0;
 		foreach (string path in files)
 		{
 			string name = Path.GetFileName(path);
@@ -408,16 +421,111 @@ static class Program
 			if (!NoEtClock.Contains(name))
 				Check(!Regex.IsMatch(code, @"_SandboxRules\.PastFlat\((sessionClock|tod\b|todNow\b)"), name + " uses the date-aware PastFlat");
 			if (!futures) continue;
+			string id = StudyId(name);
+			if (HoldOvernightByOwner.Contains(id))
+			{
+				hold++;
+				Check(!code.Contains("ESessionExit.FlatBy") && Regex.IsMatch(code, @"GxConfig\.SessionExit = ESessionExit\.HoldOvernight;"), name + " is multi-day by the owner's ruling and its arm() selects HoldOvernight only");
+				Check(!code.Contains("mustFlatten()") && !code.Contains("EarlyFlatDue") && !code.Contains("FlatByReason") && !Regex.IsMatch(code, @"bool flat = _SandboxRules\.PastFlat\("), name + " has no intraday flat-by path that contradicts the overnight hold");
+			}
+			if (code.Contains("ESessionExit.FlatBy"))
+			{
+				flatBy++;
+				string calc = MethodBody(code, @"void\s+CalcBar\s*\(\s*\)");
+				int at = calc.IndexOf("exitBar();", StringComparison.Ordinal);
+				Check(at >= 0, name + " selects GX FlatBy and CalcBar calls exitBar()");
+				Match entry = Regex.Match(calc, @"hostGate\(|(?<![\w.])arm\(");
+				Check(at >= 0 && (!entry.Success || at < entry.Index), name + " runs the flat-by path before any entry or GX arm in CalcBar");
+			}
 			if (code.Contains("ESessionExit.FlatBy") && code.Contains("exitBar();"))
 			{
 				gx++;
-				Check(code.Contains("exitBar(); sandboxEarlyFlat();") && code.Contains("private void sandboxEarlyFlat()") && code.Contains("_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0])"), name + " closes at an early session end after exitBar()");
+			}
+			Check(!code.Contains("sandboxEarlyFlat"), name + " has no sandboxEarlyFlat: GX's own early-close flat-by is the one path (no double FLATBY)");
+			// A study that flattens with its own orders at the cutoff never arms GX, so the two paths cannot both send an exit.
+			if (code.Contains("ESessionExit.FlatBy") && Regex.IsMatch(code, @"bool flat = _SandboxRules\.PastFlat\("))
+			{
+				own++;
+				int arms = Regex.Matches(code, @"(?<![\w.])arm\(").Count - Regex.Matches(code, @"void arm\(").Count;
+				Check(arms == 0, name + " flattens with its own orders and never arms GX (" + arms + " arm calls)");
+				Check(code.Contains("flat-by: \" + _SandboxRules.FlatByReason("), name + " journals its own flat-by exit with the shared reason");
 			}
 			int bare = Regex.Matches(code, @"mustFlatten\(\)").Count, paired = Regex.Matches(code, @"\(mustFlatten\(\) \|\| _SandboxRules\.EarlyFlatDue\(").Count;
-			if (bare > 0) { mf++; Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue"); }
+			if (bare > 0)
+			{
+				mf++;
+				Check(bare == paired, name + " pairs every mustFlatten() with EarlyFlatDue");
+			}
 		}
-		Check(gx >= 73, "GX FlatBy studies with exitBar found: " + gx);
+		Check(flatBy == 132, "futures studies that select GX FlatBy: " + flatBy);
+		Check(gx == 132, "GX FlatBy studies with exitBar: " + gx + " (73 before, 59 wired by the owner's 2026-11-22 ruling)");
+		Check(hold == HoldOvernightByOwner.Count && hold == 19 && gx == flatBy, "owner's multi-day studies set to HoldOvernight: " + hold + "; every FlatBy study calls exitBar()");
+		Check(own == 1, "own-order flat-by studies that select GX FlatBy (YV-11): " + own);
 		Check(mf >= 15, "mustFlatten studies found: " + mf);
+	}
+
+	// Owner 2026-11-22 11:48 CT ("Keep all 5 holding overnight"): holds approved although the catalogue entry window is intraday.
+	// A2-46, SW-05 and YV-10 hold overnight with MaxHoldDays 1; DV-16 and VW-07 are journal-only layers whose unused arm()
+	// template holds with MaxHoldDays 5. Code unchanged; their headers describe the hold and cite the ruling.
+	static readonly HashSet<string> HoldApprovedByOwner = new HashSet<string>(StringComparer.Ordinal) { "A2-46", "SW-05", "YV-10", "DV-16", "VW-07" };
+
+	// Top-level arguments of the call whose '(' is at open.
+	static List<string> CallArgs(string code, int open)
+	{
+		var args = new List<string>(); int depth = 0; var cur = new System.Text.StringBuilder();
+		for (int j = open; j < code.Length; j++)
+		{
+			char ch = code[j];
+			if (ch == '(' || ch == '[' || ch == '{') { if (++depth == 1) continue; }
+			else if (ch == ')' || ch == ']' || ch == '}') { if (--depth == 0) { args.Add(cur.ToString().Trim()); return args; } }
+			else if (ch == ',' && depth == 1) { args.Add(cur.ToString().Trim()); cur.Clear(); continue; }
+			cur.Append(ch);
+		}
+		return args;
+	}
+
+	// Owner 2026-11-22 ("fix the flat-by gaps", AV-02 held intraday trades for 10 sessions): only approved studies may select a GX
+	// hold. A study selects a hold when its arm() sets HoldOvernight unconditionally, or sets it on a hold/holdDays argument and some
+	// arm(...) call passes true or a positive count. Approved: the owner's 19 multi-day studies, a header whose exit line says
+	// "Hold up to N sessions" / "MaxHoldDays is N" with N >= 2, or the owner's five approved holds above.
+	static void HoldChecks(List<string> files)
+	{
+		int holds = 0, byHeader = 0, approved = 0;
+		var headerHold = new Regex(@"^// Exit orders:[^\n]*?(?:Hold up to (\d+) sessions|MaxHoldDays is (\d+))", RegexOptions.Multiline);
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path), text = File.ReadAllText(path);
+			string code = Regex.Replace(Regex.Replace(text, @"/\*.*?\*/", "", RegexOptions.Singleline), @"//[^\n]*", "");
+			string id = StudyId(name);
+			var sets = Regex.Matches(code, @"GxConfig\.SessionExit = ([^;]*);");
+			bool always = false, maybe = false;
+			foreach (Match s in sets)
+			{
+				string v = s.Groups[1].Value.Trim();
+				if (v == "ESessionExit.HoldOvernight") always = true;
+				else if (v.Contains("ESessionExit.HoldOvernight")) maybe = true;
+			}
+			bool holdCall = false;
+			foreach (Match m in Regex.Matches(code, @"(?<![\w.])arm\("))
+			{
+				if (Regex.IsMatch(code.Substring(Math.Max(0, m.Index - 6), Math.Min(6, m.Index)), @"void\s+$")) continue;
+				List<string> a = CallArgs(code, m.Index + m.Length - 1);
+				string last = a.Count > 0 ? a[a.Count - 1] : "";
+				if (last != "false" && last != "0" && !last.StartsWith("\"") && !last.Contains("?")) holdCall = true;
+			}
+			if (!(always || (maybe && holdCall))) continue;
+			holds++;
+			bool owner = HoldOvernightByOwner.Contains(id), approved5 = HoldApprovedByOwner.Contains(id), header = false;
+			Match h = headerHold.Match(text);
+			if (h.Success) { int n; header = int.TryParse(h.Groups[1].Success ? h.Groups[1].Value : h.Groups[2].Value, out n) && n >= 2; }
+			if (!owner && header) byHeader++;
+			if (approved5) approved++;
+			Check(owner || header || approved5, name + " selects a GX hold (HoldOvernight) but is not an approved multi-day study");
+			if (approved5) Check(text.Contains("owner decision 2026-11-22: keep holding overnight") && !text.Contains("Flat at the session value end") && !text.Contains("flat at the next session's value end"), name + " header describes the overnight hold and cites the owner's ruling");
+		}
+		string av2 = Src(files, "_AV_02_");
+		Check(av2.Contains("arm(true, entry, stop, peak, \"AV02LE\", false);") && !av2.Contains("\"AV02LE\", true)"), "AV-02 is intraday: arm(..., false) selects GX FlatBy");
+		Check(holds == 35 && byHeader == 11 && approved == HoldApprovedByOwner.Count, "hold studies: " + holds + " (19 owner multi-day, " + byHeader + " multi-day by header, " + approved + " intraday-window holds approved by the owner)");
 	}
 
 	// Runs _SandboxRules from the semantic-compile assembly (reflection, so this project keeps no reference to it).
@@ -443,6 +551,39 @@ static class Program
 		Check(End(2024, 11, 29) == new TimeSpan(13, 15, 0) && E(2024, 11, 29, 13, 10) && !P(2024, 11, 29, 13, 9), "day after Thanksgiving 2024 flat-by 13:10 ET");
 		Check(End(2024, 6, 3) == new TimeSpan(16, 0, 0) && P(2024, 6, 3, 15, 55) && !P(2024, 6, 3, 15, 54) && !E(2024, 6, 3, 15, 56), "regular day flat-by 15:55 ET, no early flat");
 		Check(!P(2023, 4, 6, 18, 30) && !E(2023, 4, 6, 18, 30), "the 18:00 ET evening belongs to the next Globex date");
+
+		// Shared journal reason for an own-order flat-by (YV-11).
+		MethodInfo reason = r.GetMethod("FlatByReason", new[] { typeof(DateTime), typeof(string), typeof(TimeSpan) });
+		Check(reason != null, "_SandboxRules.FlatByReason found");
+		if (reason != null)
+		{
+			Func<DateTime, string> Why = t => (string)reason.Invoke(null, new object[] { t, "ES", TimeSpan.Zero });
+			Check(Why(new DateTime(2024, 6, 3, 15, 55, 0)) == "regular session ends 16:00 ET", "regular-day flat-by reason: " + Why(new DateTime(2024, 6, 3, 15, 55, 0)));
+			Check(Why(new DateTime(2023, 4, 7, 9, 10, 0)).StartsWith("Good Friday") && Why(new DateTime(2023, 4, 7, 9, 10, 0)).EndsWith(" session ends 09:15 ET"), "Good Friday 2023 flat-by reason: " + Why(new DateTime(2023, 4, 7, 9, 10, 0)));
+			Check(Why(new DateTime(2024, 1, 15, 12, 55, 0)).EndsWith(" session ends 13:00 ET") && !Why(new DateTime(2024, 1, 15, 12, 55, 0)).StartsWith("regular"), "MLK 2024 flat-by reason names the halt");
+		}
+		WiredStudyFlatProbes(r);
+	}
+
+	// Behaviour of the flat-by path a wired study runs (owner 2026-11-22). Every wired study's arm() sets SessionExit = FlatBy and
+	// FlatByHHMM = _SandboxRules.FlatBy(0 or its override, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd); exitBar() lets GX
+	// close at the first FlatByHHMM after the fill. Early closes and holiday halts are GX's (PR #146, tested in ExitEngineTests there).
+	// Representative: OF-08 and RG-04 on @ES 1-minute (CME, Central exchange clock), a regular day and a fill after the cutoff.
+	static void WiredStudyFlatProbes(Type rules)
+	{
+		Type es = rules.Assembly.GetType("PowerLanguage.Function.ExitSession");
+		MethodInfo flatBy = rules.GetMethod("FlatBy", new[] { typeof(int), typeof(string), typeof(string), typeof(TimeSpan) });
+		MethodInfo deadline = es == null ? null : es.GetMethod("FlatByDeadline", new[] { typeof(DateTime), typeof(int) });
+		Check(es != null && flatBy != null && deadline != null, "GX ExitSession.FlatByDeadline and _SandboxRules.FlatBy load from SandboxLib");
+		if (es == null || flatBy == null || deadline == null) return;
+		foreach (string study in new[] { "OF-08", "RG-04" })
+		{
+			int hhmm = (int)flatBy.Invoke(null, new object[] { 0, "CME", "@ES", TimeSpan.Zero });
+			Check(hhmm == 1455, study + " on @ES (CME): GX FlatByHHMM is 14:55 exchange time, 15:55 ET (" + hhmm + ")");
+			Func<DateTime, DateTime> Flat = fillCt => (DateTime)deadline.Invoke(null, new object[] { fillCt, hhmm });
+			Check(Flat(new DateTime(2024, 6, 3, 10, 0, 0)) == new DateTime(2024, 6, 3, 14, 55, 0), study + " regular day 2024-06-03: a 10:00 CT fill flattens at 14:55 CT (15:55 ET)");
+			Check(Flat(new DateTime(2024, 6, 3, 15, 10, 0)) == new DateTime(2024, 6, 4, 14, 55, 0), study + " a fill after the cutoff (15:10 CT) is held to the next session's 14:55 CT");
+		}
 	}
 
 	// Removes the body of every method with this name (brace-matched), so default-off gate arms do not count as reads.

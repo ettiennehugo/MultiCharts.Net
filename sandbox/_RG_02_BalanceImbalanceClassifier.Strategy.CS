@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
   DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			bool balanced = IsBalanced(1, 5, 0.6); if (journalOn()) trace(ETraceLevel.Journal, "RG-02 balanced " + balanced + ". Gate, no order.");
 		}

@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
  DvpConfig.enabled = true; base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			int fam, ranges; dvpFamiliesAt(1, Bars.Close[0], out fam, out ranges); if (journalOn()) trace(ETraceLevel.Journal, "KD-09 families " + fam + " ranges " + ranges + ". Filter only, no order.");
 		}
