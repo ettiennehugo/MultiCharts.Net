@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-20 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 // IOG is disabled.
 
 
@@ -160,6 +160,7 @@ namespace PowerLanguage.Strategy
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "PS-20 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			m_day = m_zoneAt = DateTime.MinValue; m_have = m_done = false; for (int k = 0; k < m_chk.Length; k++) m_chk[k] = 0;
 		}
 
 		protected override void CalcBar()
@@ -167,26 +168,42 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; }
+			if (day != m_day) { chkDay(); m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; m_zoneAt = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
 			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || m_open == DateTime.MinValue) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_have && tod < m_rthStart.Add(TimeSpan.FromMinutes(150)))
+			// Coder 2026-11-22 (owner: PS-20 never traded): SinglePrints() reads only a completed profile (its last bar before the current
+			// bar), so the developing RTH profile runs from the first RTH bar (inclusive: m_open is that bar's close stamp) through the
+			// previous closed bar. The scan runs through the 12:00 bar, so bars closing up to 11:59 are covered, as before.
+			if (!m_have && tod <= m_rthStart.Add(TimeSpan.FromMinutes(150)) && Bars.Time[1] >= m_open)
 			{
-				VpExtra dev = RangeProfileAfter(1, m_open, Bars.Time[0]);
-				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; break; }
+				VpExtra dev = RangeProfile(1, m_open, Bars.Time[1]);
+				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; m_zoneAt = Bars.Time[1]; break; }
+				if (m_have && journalOn()) trace(ETraceLevel.Journal, $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} single-print zone {m_lo}-{m_hi} (profile through {m_zoneAt:HH:mm})");
 			}
 			if (!m_have || ((int)tod.TotalMinutes) % 5 != 0) return;
+			m_chk[0]++;
 			double mid = (m_lo + m_hi) / 2.0;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];
 			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); }
-			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) return;
+			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) { m_chk[1]++; return; }
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, m_lo - tickSize());
 			double target = Session.rthHigh + 0.5 * (m_hi - m_lo);
-			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
+			if (!(target > entry)) { m_chk[2]++; m_done = true; return; }
+			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; return; }
+			m_chk[4]++;
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "PS20LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+		}
+
+		// One Journal line per Globex day (like A2-45): the zone, then the 5m checks after it, no pullback HL, target not above the entry, budget, sent.
+		private int[] m_chk = new int[5]; private DateTime m_zoneAt = DateTime.MinValue;
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "PS-20 " + m_day.ToString("yyyy-MM-dd") + " checks zone(" + (m_have ? m_lo + "-" + m_hi + " @" + m_zoneAt.ToString("HH:mm") : "none") + ") checks5m(" + m_chk[0] + ") noHL(" + m_chk[1] + ") targetNotAbove(" + m_chk[2] + ") budget(" + m_chk[3] + ") sent(" + m_chk[4] + ")");
+			for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
 		}
 
 		private double widen(bool buy, double entry, double stop)
