@@ -16,6 +16,10 @@ namespace PowerLanguage.Function
 	//   - or runs one G0-b canary and publishes the order it wants (Gate0Intent) for the strategy to translate.
 	// A2-39 roll honesty (review: Reset only): every multi-session source (prior profiles, naked POCs, weekly, composite,
 	// week/month AVWAP) restarts at the roll; analysis drops events on a roll session +-1 (review M2).
+	// G0-c (Ettienne 2026-11-23 16:36 CT, REPORT-ONLY TEST, not a policy): with rollArm = BackAdjusted a shadow engine keeps those
+	// sources across the roll and shifts them by the splice offset at the splice bar; every level whose source holds pre-splice
+	// bars is registered once more as type "<T>~BA" (after the Reset levels, so the Reset rows, their controls, Holm and verdicts
+	// stay byte-identical) and scored in G0C lines only (outside the Holm family). No cash-terms arm (no SPX cash data).
 	// Development window only: nothing is registered or traded on a trading day >= DevEnd (2025-01-01).
 	// ============================================================================================
 
@@ -29,6 +33,11 @@ namespace PowerLanguage.Function
 	public enum EGate0Canary { VW08 = 0, A2_24_i = 1, A2_24_ii = 2, A2_24_iii = 3, DV10 = 4, A2_53 = 5, DV01 = 6, PS03 = 7, KD02 = 8 }
 
 	public enum EGate0Entry { None = 0, Market = 1, Limit = 2 }
+
+	/// <summary>A2-39 roll arm of the level study. Reset = the pre-registered policy (multi-session sources restart at the roll).
+	/// BackAdjusted = G0-c report-only arm (Ettienne 2026-11-23 16:36 CT): adds a "~BA" cohort of back-adjusted roll-spanning
+	/// levels next to the unchanged Reset rows. EventStudy mode only. Cash-terms is not built (no SPX cash data).</summary>
+	public enum EGate0RollArm { Reset = 0, BackAdjusted = 1 }
 
 	/// <summary>Educator review G2: the Data1 bar units Gate 0 accepts; every other EResolution member maps to Other.</summary>
 	public enum EGate0BarUnit { Other = 0, Tick = 1, Second = 2, Minute = 3 }
@@ -99,8 +108,11 @@ namespace PowerLanguage.Function
 		public DateTime day;   // Globex trading day (date part used)
 		public double o, h, l, c, v;
 		public bool roll;      // first bar of a new contract (rollOn(1))
+		/// <summary>G0-c only (read when Gate0Engine.spliceFromHost): this bar is the host's roll splice bar (rollSpliceOn()) and
+		/// spliceOffset its price offset (RollSpliceOffset; NaN = this bar's open - the previous Data1 close).</summary>
+		public bool splice; public double spliceOffset;
 		public Gate0Bar(DateTime et, DateTime day, double o, double h, double l, double c, double v, bool roll = false)
-		{ this.et = et; this.day = day.Date; this.o = o; this.h = h; this.l = l; this.c = c; this.v = v; this.roll = roll; }
+		{ this.et = et; this.day = day.Date; this.o = o; this.h = h; this.l = l; this.c = c; this.v = v; this.roll = roll; splice = false; spliceOffset = double.NaN; }
 	}
 
 	/// <summary>What the canary wants on the next bar. Re-read after every Bar() call.</summary>
@@ -134,6 +146,13 @@ namespace PowerLanguage.Function
 		}
 		public void Merge(Gate0Profile p) { foreach (var kv in p.rows) { double x; rows.TryGetValue(kv.Key, out x); rows[kv.Key] = x + kv.Value; } total += p.total; }
 		public bool Empty { get { return rows.Count == 0 || !(total > 0); } }
+		/// <summary>G0-c back-adjust: move every row by k ticks (volumes unchanged).</summary>
+		public void Shift(long k)
+		{
+			if (k == 0 || rows.Count == 0) return;
+			var old = new List<KeyValuePair<long, double>>(rows); rows.Clear();
+			foreach (var kv in old) rows[kv.Key + k] = kv.Value;
+		}
 
 		/// <summary>POC (highest row, the one nearest the profile midpoint on ties) and the value area by two-sided expansion.</summary>
 		public bool ValueArea(double pct, out double poc, out double vah, out double val)
@@ -211,7 +230,11 @@ namespace PowerLanguage.Function
 	public sealed class Gate0Vwap
 	{
 		public double pv, p2v, v;
-		public void Reset() { pv = p2v = v = 0; }
+		/// <summary>G0-c: true while the sums hold back-adjusted pre-splice volume (cleared by Reset).</summary>
+		public bool pre;
+		public void Reset() { pv = p2v = v = 0; pre = false; }
+		/// <summary>G0-c back-adjust: the sums of (p + o) exactly: p2v += 2 o pv + o^2 v, then pv += o v.</summary>
+		public void Shift(double o) { if (!(v > 0)) return; p2v += 2 * o * pv + o * o * v; pv += o * v; pre = true; }
 		public void Add(double price, double vol) { if (!(vol > 0)) return; pv += price * vol; p2v += price * price * vol; v += vol; }
 		public bool Ready { get { return v > 0; } }
 		public double Value { get { return v > 0 ? pv / v : double.NaN; } }
@@ -279,6 +302,7 @@ namespace PowerLanguage.Function
 		public double hCv = double.NaN;                       // this session's KDE h_cv (price units, _ProfileStats.KdeSweep, contiguous 5-fold CV)
 		public double pkSum; public int pkN;                  // Parkinson sum (ln H/L)^2 and count over RTH 5m bars (A2-32)
 		public bool pocNaked = true;                          // POC not traded since this session ended
+		public bool baPre;                                    // G0-c: holds back-adjusted pre-splice bars (shadow engine only)
 		public bool HasRth { get { return !double.IsNaN(rthO); } }
 		/// <summary>A2-32 session sigma in price: sVWAP x sigma_bar x sqrt(n), NaN with fewer than 60 5m bars.</summary>
 		public double SigmaPrice { get { if (pkN < Gate0Engine.ParkinsonMinBars || !vwap.Ready) return double.NaN; return vwap.Value * Math.Sqrt(pkSum / (4.0 * pkN * Math.Log(2))) * Math.Sqrt(pkN); } }
@@ -289,6 +313,7 @@ namespace PowerLanguage.Function
 	public sealed class Gate0DvLevel
 	{
 		public string type = ""; public double price; public int dir; public DateTime validFrom; public int expirySessions; public bool touched;
+		public bool baPre;   // G0-c: built from back-adjusted pre-splice bars (shadow engine only)
 	}
 
 	/// <summary>Per-type Gate-0 result (A2-33 matched-control reaction edge; no binary hold / random placebo in the verdict path).</summary>
@@ -311,6 +336,34 @@ namespace PowerLanguage.Function
 			return string.Format(CultureInfo.InvariantCulture,
 				"G0 type({0}) levels({1}) touched({2}) pairs({3}) edgeR({4:+0.000;-0.000;0.000}) t({5:0.00}) p({6:0.0000}) holm({7:0.0000}) ci95[{8:0.000},{9:0.000}] sessions({10}) halfLife({11:0.0}) tTercile({12:0.00}/{13:0.00}/{14:0.00}) tByAge[{15}] A2-33({16}) => {17}",
 				type, levels, touches, pairs, edge, t, p, pHolm, ciLo, ciHi, sessions, halfLife, tByTercile[0], tByTercile[1], tByTercile[2], AgeList(), a2Verdict, verdict);
+		}
+	}
+
+	/// <summary>G0-c (A2-39 x A2-33) report row: one back-adjusted roll-spanning cohort "&lt;T&gt;~BA" in one window vs the Reset type T.</summary>
+	public sealed class G0cResult
+	{
+		public string type = "", baseType = "", window = ""; public int levels, pairs, basePairs; public bool verdictRun = true;
+		public double edge = double.NaN, t = double.NaN, sd = double.NaN, baseEdge = double.NaN, baseT = double.NaN, baseSd = double.NaN;
+		public double diff = double.NaN, tDiff = double.NaN;
+		public string verdict = "";
+		/// <summary>PASS = t &gt; 2 AND edge &gt;= baseEdge (Ettienne 2026-11-23 16:36 CT); n &lt; 30 pairs on either side = INCONCLUSIVE.
+		/// diff / tDiff (Welch) are reported for information only.</summary>
+		public void Decide()
+		{
+			diff = edge - baseEdge;
+			double se = Math.Sqrt(sd * sd / Math.Max(1, pairs) + baseSd * baseSd / Math.Max(1, basePairs));
+			tDiff = se > 0 ? diff / se : double.NaN;
+			if (pairs < 30 || basePairs < 30) verdict = "INCONCLUSIVE (n<30)";
+			else if (!(t > 2)) verdict = "FAIL (t <= 2)";
+			else if (!(edge >= baseEdge)) verdict = "FAIL (edge below the Reset type)";
+			else verdict = "PASS (t > 2, edge >= Reset type)";
+			if (!verdictRun) verdict = "NOT A VERDICT RUN (Variant 0) - " + verdict;
+		}
+		public string Line()
+		{
+			return string.Format(CultureInfo.InvariantCulture,
+				"G0C type({0}) window({1}) levels({2}) pairs({3}) edgeR({4:+0.000;-0.000;0.000}) t({5:0.00}) | base({6}) pairs({7}) edgeR({8:+0.000;-0.000;0.000}) t({9:0.00}) | diff({10:+0.000;-0.000;0.000}) tDiff({11:0.00}) => {12}",
+				type, window == "dev" ? "dev 2016-2022" : "val 2023-2024", levels, pairs, edge, t, baseType, basePairs, baseEdge, baseT, diff, tDiff, verdict);
 		}
 	}
 
@@ -373,8 +426,22 @@ namespace PowerLanguage.Function
 		// KD-02 (catalogue keller-b5 KD-02, DV-R4): DVP stream bar size in minutes (a canary parameter, not an engine constant; the
 		// catalogue's 15m), time stop in DVP bars, stop rail k (sigma), stop pad in ATR (the DVP snapshot's ATR as of t-1)
 		public int kd02Minutes = 15, kd02TimeStop = 19; public double kd02StopK = 3.0, kd02StopPadAtr = 0.1;
+		/// <summary>A2-39 roll arm (G0-c). Reset = pre-registered behaviour, byte-identical output. BackAdjusted = report-only "~BA"
+		/// cohort next to the Reset rows (EventStudy mode only). Set before Configure.</summary>
+		public EGate0RollArm rollArm = EGate0RollArm.Reset;
+		/// <summary>G0-c: true when the host fills Gate0Bar.splice / spliceOffset (_TestGate0: rollSpliceOn() / RollSpliceOffset);
+		/// false = the roll bar is the splice and the offset is its open - the previous bar's close.</summary>
+		public bool spliceFromHost;
+		/// <summary>G0-c windows (Ettienne 2026-11-23 16:36 CT): decide on dev (trading days before 2023-01-01, data from Jul 2016),
+		/// confirm on validation (2023-01-01 .. 2024-12-31). Nothing on or after DevEnd (2025-01-01) is registered.</summary>
+		public static readonly DateTime G0cValFrom = new DateTime(2023, 1, 1);
+		public const string BaSuffix = "~BA";
+		public static bool IsBaType(string t) { return t != null && t.EndsWith(BaSuffix, StringComparison.Ordinal); }
 
 		internal readonly _LevelStudy study = new _LevelStudy();
+		/// <summary>G0-c: the ~BA cohort's own study (same config, session reference and 5m bars as `study`), so the Reset study,
+		/// its level numbers and controls are untouched. Null in the Reset arm.</summary>
+		internal _LevelStudy baStudy;
 		public readonly Gate0Intent intent = new Gate0Intent();
 		public readonly List<DateTime> rollDays = new List<DateTime>();
 		public readonly List<DateTime> sessionDays = new List<DateTime>();
@@ -407,14 +474,27 @@ namespace PowerLanguage.Function
 		private double m_lastC = double.NaN;
 		private List<Gate0Profile> m_weekProfiles = new List<Gate0Profile>(), m_lastWeek; private int m_lastWeekAge; private DateTime m_weekKey;
 		// DV sources: closed RTH 30m bars across sessions (reset at the roll) with their own profiles
-		private sealed class Bar30 { public double h, l, c; public Gate0Profile prof; }
+		private sealed class Bar30 { public double h, l, c; public Gate0Profile prof; public bool pre; }
 		private Gate0Profile m_block; private double m_blockH, m_blockL, m_blockC;
 		private readonly List<Bar30> m_bars30 = new List<Bar30>();
-		private sealed class DvPending { public string type; public int dir, bars, armCount; public double boxH, boxL, level; public bool rot; }
+		private sealed class DvPending { public string type; public int dir, bars, armCount; public double boxH, boxL, level; public bool rot, pre; }
 		private readonly List<DvPending> m_dvPending = new List<DvPending>();
 		private readonly List<Gate0DvLevel> m_dv = new List<Gate0DvLevel>();
 		private readonly Dictionary<int, int> m_rotCool = new Dictionary<int, int>(); private int m_trendCool;
 		private int m_mp; private bool m_inited;
+		// G0-c: the parent owns a shadow engine (rollArm BackAdjusted, m_shadow) fed the same bars; the shadow keeps the multi-session
+		// sources across the roll, shifts them at the splice and, at each RTH open, captures its candidates whose source holds
+		// pre-splice bars. The parent registers those as "<T>~BA" after its own (Reset) levels.
+		private Gate0Engine m_ba; private bool m_shadow;
+		private readonly List<KeyValuePair<string, double[]>> m_baCands = new List<KeyValuePair<string, double[]>>(); private DateTime m_baCandDay;
+		private readonly HashSet<Gate0Profile> m_baPreProfiles = new HashSet<Gate0Profile>();
+		private bool m_blockPre;
+		/// <summary>G0-c read-outs: splices applied by the shadow, ~BA levels registered by the parent.</summary>
+		public int BaSplices { get { return m_ba != null ? m_ba.m_splices : m_splices; } }
+		public int BaLevels { get; private set; }
+		private int m_splices;
+		/// <summary>G0-c (tests): the shadow engine (null in the Reset arm).</summary>
+		public Gate0Engine BaShadow { get { return m_ba; } }
 
 		// ---- public read-outs (tests) ----
 		public IList<Gate0Session> History { get { return m_hist; } }
@@ -461,6 +541,7 @@ namespace PowerLanguage.Function
 			}
 			if (mode == EGate0Mode.Canary && !((variant >= 0 && variant <= 8) || (variant >= 100 && variant <= 123) || (variant >= 130 && variant <= 133))) return "Canary Variant must be 0..8, 100..123 (A2-53 sweep) or 130..133 (KD-02 sweep)";
 			if (mode != EGate0Mode.Canary && (variant < 0 || variant > 13)) return "level-study Variant must be 0..13";
+			if (rollArm == EGate0RollArm.BackAdjusted && mode != EGate0Mode.EventStudy) return "G0-c RollArm BackAdjusted runs in EventStudy mode only";
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.A2_53) DecodeA253(variant, out a253Gap, out a253Bar, out a253Minutes, out a253Filter);
 			if (mode == EGate0Mode.Canary && m_diag == null) m_diag = new Gate0CanaryDiag();
 			if (mode == EGate0Mode.Canary && Cv == EGate0Canary.KD02)
@@ -475,8 +556,23 @@ namespace PowerLanguage.Function
 			if (mode != EGate0Mode.Canary && variant == 0) study.config.controls = 5;   // memory: overview only, NOT a verdict run
 			m_inited = true;
 			string err = study.Configure();
-			if (err == null && journal != null && StudyMode) journal(PreRegistration());
+			if (err == null && journal != null && StudyMode && !m_shadow) journal(PreRegistration());
+			if (err == null && rollArm == EGate0RollArm.BackAdjusted && !m_shadow)
+			{
+				baStudy = new _LevelStudy { config = study.config, tickSize = tick };
+				m_ba = new Gate0Engine { mode = mode, variant = variant, tick = tick, root = root, seed = seed, vaPct = vaPct, rollArm = EGate0RollArm.BackAdjusted, spliceFromHost = spliceFromHost, m_shadow = true, journal = journal };
+				err = m_ba.Configure();
+				if (err == null && journal != null) journal(G0cPreRegistration());
+			}
 			return err;
+		}
+
+		/// <summary>G0-c pre-registration line (BackAdjusted arm only).</summary>
+		public static string G0cPreRegistration()
+		{
+			return "G0C PRE-REGISTERED (Ettienne 2026-11-23 16:36 CT, report-only test, not a policy): arm(BackAdjusted) = multi-session sources kept across the roll and shifted by the splice offset (ticks) at the splice bar; " +
+				"cohort <T>" + BaSuffix + " = levels whose source holds pre-splice bars, registered after the Reset levels, scored outside the Holm family; Reset rows unchanged; roll session +-1 dropped; " +
+				"PASS = dev (Jul 2016 - 2022) t > 2 AND edgeR >= the Reset type's edgeR (same window); validation 2023-2024 reported to confirm; n < 30 pairs = INCONCLUSIVE; no cash-terms arm (no SPX cash data)";
 		}
 
 		private bool StudyMode { get { return mode != EGate0Mode.Canary; } }
@@ -487,9 +583,11 @@ namespace PowerLanguage.Function
 		public void Bar(Gate0Bar b, int mp = 0)
 		{
 			if (!m_inited) Configure();
+			if (m_ba != null) m_ba.Bar(b);   // G0-c shadow first: it captures its candidates at its own RTH open on this same bar
 			m_mp = mp;
 			if (b.day != m_day) newDay(b);
 			if (b.roll) onRoll(b.day);
+			if (m_shadow && (spliceFromHost ? b.splice : b.roll)) baSplice(b);
 			if (m_kd != null) kd02Feed(b);
 			TimeSpan t = b.et.TimeOfDay;
 			bool rth = IsRthTime(t);
@@ -515,7 +613,7 @@ namespace PowerLanguage.Function
 				s.avHi.Add(tp, b.v); s.avLo.Add(tp, b.v);
 				s.rthC = b.c; s.vwap.Add(tp, b.v); s.profile.Add(b.h, b.l, b.v);
 				if (t <= new TimeSpan(10, 30, 0)) { if (b.h > s.ibH) s.ibH = b.h; if (b.l < s.ibL) s.ibL = b.l; }
-				if (m_block == null) { m_block = new Gate0Profile(tick); m_blockH = double.MinValue; m_blockL = double.MaxValue; }
+				if (m_block == null) { m_block = new Gate0Profile(tick); m_blockH = double.MinValue; m_blockL = double.MaxValue; m_blockPre = false; }
 				m_block.Add(b.h, b.l, b.v); if (b.h > m_blockH) m_blockH = b.h; if (b.l < m_blockL) m_blockL = b.l; m_blockC = b.c;
 				foreach (var old in m_hist) if (old.pocNaked && b.l <= old.poc && old.poc <= b.h) old.pocNaked = false;
 				foreach (var dv in m_dv) if (!dv.touched && b.day >= dv.validFrom && b.l <= dv.price && dv.price <= b.h) dv.touched = true;
@@ -563,23 +661,73 @@ namespace PowerLanguage.Function
 		{
 			if (rollDays.Count == 0 || rollDays[rollDays.Count - 1] != day) rollDays.Add(day);
 			if (m_cur != null) m_cur.roll = true;
-			// A2-39 Reset: forget every multi-session source built on the old contract
-			m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
-			m_bars30.Clear(); m_dvPending.Clear(); m_dv.Clear(); m_rotCool.Clear(); m_trendCool = 0;
+			// A2-39 Reset: forget every multi-session source built on the old contract (the G0-c shadow keeps them; see baSplice)
+			if (!m_shadow)
+			{
+				m_hist.Clear(); m_weekProfiles.Clear(); m_lastWeek = null; m_avWeek.Reset(); m_avMonth.Reset(); m_wkVwap.Reset(); m_avPc.Reset();
+				m_bars30.Clear(); m_dvPending.Clear(); m_dv.Clear(); m_rotCool.Clear(); m_trendCool = 0;
+			}
 			// ATR5/ATR30 restart in Bar(), after the PreBar flush of buckets still open from the old contract (see there).
 			m_atrD.ResetPrev(); m_rollSplice = true;
+		}
+
+		/// <summary>G0-c shadow only: back-adjust every multi-session source (and the open buckets / session) built before this splice
+		/// bar by the splice offset rounded to ticks, and mark it pre-splice. Called before the bar's own data is added.</summary>
+		private void baSplice(Gate0Bar b)
+		{
+			double off = spliceFromHost && !double.IsNaN(b.spliceOffset) ? b.spliceOffset : (double.IsNaN(m_lastC) ? 0 : b.o - m_lastC);
+			long k = (long)Math.Round(off / tick); double o = k * tick;
+			var done = new HashSet<Gate0Profile>();
+			Action<Gate0Profile> shiftProf = pr => { if (pr != null && done.Add(pr)) pr.Shift(k); };
+			foreach (var s in m_hist) baShiftSession(s, o, k, shiftProf);
+			if (m_cur != null) baShiftSession(m_cur, o, k, shiftProf);
+			foreach (var pr in m_weekProfiles) { shiftProf(pr); m_baPreProfiles.Add(pr); }
+			if (m_lastWeek != null) foreach (var pr in m_lastWeek) { shiftProf(pr); m_baPreProfiles.Add(pr); }
+			m_avWeek.Shift(o); m_avMonth.Shift(o); m_wkVwap.Shift(o); m_avPc.Shift(o);
+			foreach (var x in m_bars30) { x.h += o; x.l += o; x.c += o; shiftProf(x.prof); x.pre = true; }
+			if (m_block != null) { shiftProf(m_block); m_blockH += o; m_blockL += o; m_blockC += o; m_blockPre = true; }
+			foreach (var p in m_dvPending) { p.boxH += o; p.boxL += o; p.level += o; p.pre = true; }
+			foreach (var d in m_dv) { d.price += o; d.baPre = true; }
+			foreach (var bk in new[] { m_b1, m_b5, m_b15, m_b30 }) if (bk.open) { bk.o += o; bk.h += o; bk.l += o; bk.c += o; }
+			if (!double.IsNaN(m_lastC)) m_lastC += o;
+			m_splices++;
+			if (journal != null)
+				journal(string.Format(CultureInfo.InvariantCulture, "G0C SPLICE day({0:yyyy-MM-dd}) bar({1:yyyy-MM-dd HH:mm} ET) offset({2:0.00}) offTicks({3}) source({4}) sessions({5}) weekProfiles({6}) dvLevels({7}) dvPending({8}) bars30({9})",
+					b.day, b.et, o, k, spliceFromHost && !double.IsNaN(b.spliceOffset) ? "host" : "open-prevClose", m_hist.Count, m_weekProfiles.Count + (m_lastWeek != null ? m_lastWeek.Count : 0), m_dv.Count, m_dvPending.Count, m_bars30.Count));
+		}
+
+		private static bool finite(double x) { return !double.IsNaN(x) && x > double.MinValue && x < double.MaxValue; }
+		private static void baShiftSession(Gate0Session s, double o, long k, Action<Gate0Profile> shiftProf)
+		{
+			if (finite(s.rthO)) s.rthO += o; if (finite(s.rthH)) s.rthH += o; if (finite(s.rthL)) s.rthL += o; if (finite(s.rthC)) s.rthC += o;
+			if (finite(s.ibH)) s.ibH += o; if (finite(s.ibL)) s.ibL += o; if (finite(s.onH)) s.onH += o; if (finite(s.onL)) s.onL += o;
+			shiftProf(s.profile);
+			shiftKeys(s.tpo, k); shiftKeys(s.tpoLast, k);
+			s.vwap.Shift(o); s.avHi.Shift(o); s.avLo.Shift(o);
+			if (finite(s.poc)) s.poc += o; if (finite(s.vah)) s.vah += o; if (finite(s.val)) s.val += o;
+			for (int i = 0; i < s.closes1m.Count; i++) s.closes1m[i] += o;
+			if (s.rth1m != null) for (int i = 0; i < s.rth1m.Count; i++) { var r = s.rth1m[i]; r.o += o; r.h += o; r.l += o; r.c += o; s.rth1m[i] = r; }
+			// pkSum (ln H/L of 5m bars) and hCv (a bandwidth) are not shifted: ratio / width terms, documented approximation for A2-32
+			s.baPre = true;
+		}
+		private static void shiftKeys(Dictionary<long, int> d, long k)
+		{
+			if (k == 0 || d.Count == 0) return;
+			var old = new List<KeyValuePair<long, int>>(d); d.Clear();
+			foreach (var kv in old) d[kv.Key + k] = kv.Value;
 		}
 
 		private void rthOpen(Gate0Bar b)
 		{
 			m_rthOn = true;
 			var s = m_cur; s.rthO = b.o;
-			m_block = null;
+			m_block = null; m_blockPre = false;
 			if (StudyMode)
 			{
-				study.BeginSession(b.day);
-				m_studyOn = b.day < DevEnd;
-				if (m_studyOn) registerLevels(b);
+				study.BeginSession(b.day); if (baStudy != null) baStudy.BeginSession(b.day);
+				m_studyOn = b.day < DevEnd && !m_shadow;
+				if (m_shadow) { if (b.day < DevEnd) baCapture(b); }
+				else if (m_studyOn) registerLevels(b);
 			}
 			canaryRthOpen(b);
 		}
@@ -608,9 +756,9 @@ namespace PowerLanguage.Function
 		private Bar30 closeBlock()
 		{
 			if (m_block == null || m_block.Empty) { m_block = null; return null; }
-			var bar = new Bar30 { h = m_blockH, l = m_blockL, c = m_blockC, prof = m_block };
+			var bar = new Bar30 { h = m_blockH, l = m_blockL, c = m_blockC, prof = m_block, pre = m_blockPre };
 			m_bars30.Add(bar); if (m_bars30.Count > 40) m_bars30.RemoveAt(0);
-			m_block = null;
+			m_block = null; m_blockPre = false;
 			return bar;
 		}
 
@@ -636,7 +784,7 @@ namespace PowerLanguage.Function
 			m_atr5.Add(h, l, c);
 			if (!IsRthTime(end.TimeOfDay)) return;
 			if (m_cur != null && l > 0 && h >= l) { double x = Math.Log(h / l); m_cur.pkSum += x * x; m_cur.pkN++; }
-			if (StudyMode && m_studyOn) study.Bar(o, h, l, c, v);
+			if (StudyMode && m_studyOn) { study.Bar(o, h, l, c, v); if (baStudy != null) baStudy.Bar(o, h, l, c, v); }
 		}
 		private void on15m(DateTime end, double o, double h, double l, double c, double v)
 		{
@@ -675,7 +823,7 @@ namespace PowerLanguage.Function
 				}
 				if (done)
 				{
-					m_dv.Add(new Gate0DvLevel { type = p.type, price = p.level, dir = p.dir, validFrom = m_day.AddDays(1), expirySessions = p.rot ? DvRotExpirySessions : DvTrendExpirySessions });
+					m_dv.Add(new Gate0DvLevel { type = p.type, price = p.level, dir = p.dir, validFrom = m_day.AddDays(1), expirySessions = p.rot ? DvRotExpirySessions : DvTrendExpirySessions, baPre = p.pre || bar.pre });
 					m_dvPending.RemoveAt(i);
 				}
 				else if (drop) m_dvPending.RemoveAt(i);
@@ -686,15 +834,15 @@ namespace PowerLanguage.Function
 			{
 				int cool; m_rotCool.TryGetValue(R, out cool); if (cool > 0) { m_rotCool[R] = cool - 1; continue; }
 				if (n < R + 1) continue;
-				double bh = double.MinValue, bl = double.MaxValue; var prof = new Gate0Profile(tick);
-				for (int k = n - 1 - R; k < n - 1; k++) { var x = m_bars30[k]; if (x.h > bh) bh = x.h; if (x.l < bl) bl = x.l; prof.Merge(x.prof); }
+				double bh = double.MinValue, bl = double.MaxValue; var prof = new Gate0Profile(tick); bool pre = bar.pre;
+				for (int k = n - 1 - R; k < n - 1; k++) { var x = m_bars30[k]; if (x.h > bh) bh = x.h; if (x.l < bl) bl = x.l; prof.Merge(x.prof); pre |= x.pre; }
 				if (bh - bl > DvRotW * a || bar.h - bar.l < DvBreakAtr * a) continue;
 				int dir = bar.c > bh ? 1 : bar.c < bl ? -1 : 0; if (dir == 0) continue;
 				double poc, vh, vl; if (!prof.ValueArea(vaPct, out poc, out vh, out vl)) continue;
-				var pend = new DvPending { type = "DV_ROT_POC_R" + R, dir = dir, boxH = bh, boxL = bl, level = poc, rot = true, bars = 1 };
+				var pend = new DvPending { type = "DV_ROT_POC_R" + R, dir = dir, boxH = bh, boxL = bl, level = poc, rot = true, bars = 1, pre = pre };
 				double w = bh - bl;
 				if (dir > 0 ? bar.h >= bh + w : bar.l <= bl - w)
-					m_dv.Add(new Gate0DvLevel { type = pend.type, price = poc, dir = dir, validFrom = m_day.AddDays(1), expirySessions = DvRotExpirySessions });
+					m_dv.Add(new Gate0DvLevel { type = pend.type, price = poc, dir = dir, validFrom = m_day.AddDays(1), expirySessions = DvRotExpirySessions, baPre = pre });
 				else m_dvPending.Add(pend);
 				m_rotCool[R] = R;
 			}
@@ -706,7 +854,8 @@ namespace PowerLanguage.Function
 			int td = bar.c > prevHi ? 1 : bar.c < prevLo ? -1 : 0; if (td == 0) return;
 			int s0 = n - 1 - DvTrendLookback; double ext = td > 0 ? double.MaxValue : double.MinValue;
 			for (int k = n - 1 - DvTrendLookback; k < n; k++) { double x = td > 0 ? m_bars30[k].l : m_bars30[k].h; if (td > 0 ? x < ext : x > ext) { ext = x; s0 = k; } }
-			double legHi = double.MinValue, legLo = double.MaxValue; var leg = new Gate0Profile(tick);
+			double legHi = double.MinValue, legLo = double.MaxValue; var leg = new Gate0Profile(tick); bool legPre = false;
+			for (int k = n - 1 - DvTrendLookback; k < n; k++) legPre |= m_bars30[k].pre;
 			for (int k = s0; k < n; k++) { var x = m_bars30[k]; if (x.h > legHi) legHi = x.h; if (x.l < legLo) legLo = x.l; leg.Merge(x.prof); }
 			if (legHi - legLo < DvTrendLegAtr * a) return;
 			m_trendCool = DvTrendLookback / 2;
@@ -717,51 +866,59 @@ namespace PowerLanguage.Function
 				double pr = Math.Round(node[0] / tick) * tick, rv; leg.rows.TryGetValue((long)Math.Round(pr / tick), out rv);
 				if (rv < DvHvnMedianX * med) continue;
 				if (td > 0 ? bar.l <= pr : bar.h >= pr) continue;   // the breakout bar itself is not beyond the level
-				m_dvPending.Add(new DvPending { type = "DV_TREND_HVN", dir = td, level = pr, rot = false, bars = 0 });
+				m_dvPending.Add(new DvPending { type = "DV_TREND_HVN", dir = td, level = pr, rot = false, bars = 0, pre = legPre });
 			}
 		}
 
 		// ================================ levels =================================
 		/// <summary>Raw (type, {price, age, quality}) candidates of the enabled families for the session that opens now.</summary>
-		public List<KeyValuePair<string, double[]>> Candidates()
+		public List<KeyValuePair<string, double[]>> Candidates() { return candidates(null); }
+
+		/// <summary>Candidates; when pre != null it receives, per candidate, whether its source holds back-adjusted pre-splice bars (G0-c shadow).</summary>
+		private List<KeyValuePair<string, double[]>> candidates(List<bool> pre)
 		{
 			var r = new List<KeyValuePair<string, double[]>>();
-			Action<string, double, int, double> addQ = (ty, px, age, q) => { if (px > 0 && !double.IsNaN(px) && px < 1e12 && age >= 1 && age <= MaxAge) r.Add(new KeyValuePair<string, double[]>(ty, new[] { px, age, q })); };
+			bool cpre = false;   // G0-c: source flag of the candidates added next
+			Action<string, double, int, double> addQ = (ty, px, age, q) => { if (px > 0 && !double.IsNaN(px) && px < 1e12 && age >= 1 && age <= MaxAge) { r.Add(new KeyValuePair<string, double[]>(ty, new[] { px, age, q })); if (pre != null) pre.Add(cpre); } };
 			Action<string, double, int> add = (ty, px, age) => addQ(ty, px, age, double.NaN);
 			int n = m_hist.Count;
 			Gate0Session p1 = n > 0 ? m_hist[n - 1] : null;
 			if (Fam(EGate0Family.PriorProfile))
-				for (int a = 1; a <= Math.Min(PriorProfileMaxAge, n); a++) { var s = m_hist[n - a]; add("POC", s.poc, a); add("VAH", s.vah, a); add("VAL", s.val, a); }
+				for (int a = 1; a <= Math.Min(PriorProfileMaxAge, n); a++) { var s = m_hist[n - a]; cpre = s.baPre; add("POC", s.poc, a); add("VAH", s.vah, a); add("VAL", s.val, a); }
 			if (Fam(EGate0Family.NakedPoc))
-				for (int a = 2; a <= Math.Min(NakedPocMaxAge, n); a++) { var s = m_hist[n - a]; if (s.pocNaked) add("NPOC", s.poc, a); }
+				for (int a = 2; a <= Math.Min(NakedPocMaxAge, n); a++) { var s = m_hist[n - a]; cpre = s.baPre; if (s.pocNaked) add("NPOC", s.poc, a); }
+			cpre = p1 != null && p1.baPre;
 			if (p1 != null && Fam(EGate0Family.IbEdge)) { add("IBH", p1.ibH, 1); add("IBL", p1.ibL, 1); }
-			if (m_cur != null && Fam(EGate0Family.Overnight) && m_cur.onH > double.MinValue) { add("ONH", m_cur.onH, 1); add("ONL", m_cur.onL, 1); }
+			if (m_cur != null && Fam(EGate0Family.Overnight) && m_cur.onH > double.MinValue) { cpre = m_cur.baPre; add("ONH", m_cur.onH, 1); add("ONL", m_cur.onL, 1); }
 			if (p1 != null && Fam(EGate0Family.Avwap))
 			{
-				add("AV_PH", p1.avHi.Value, 1); add("AV_PL", p1.avLo.Value, 1);
-				if (m_avWeek.Ready) add("AV_WK", m_avWeek.Value, 1);
-				if (m_avMonth.Ready) add("AV_MO", m_avMonth.Value, 1);
-				if (m_avPc.Ready) add("AV_PC", m_avPc.Value, 1);
+				cpre = p1.baPre; add("AV_PH", p1.avHi.Value, 1); add("AV_PL", p1.avLo.Value, 1);
+				cpre = m_avWeek.pre; if (m_avWeek.Ready) add("AV_WK", m_avWeek.Value, 1);
+				cpre = m_avMonth.pre; if (m_avMonth.Ready) add("AV_MO", m_avMonth.Value, 1);
+				cpre = m_avPc.pre; if (m_avPc.Ready) add("AV_PC", m_avPc.Value, 1);
 			}
+			cpre = p1 != null && p1.baPre;
 			if (p1 != null && Fam(EGate0Family.Vwap) && p1.vwap.Ready)
 			{ double vw = p1.vwap.Value, sd = p1.vwap.Sigma; add("VWAP", vw, 1); if (sd > 0) { add("VWAP+1", vw + sd, 1); add("VWAP-1", vw - sd, 1); } }
 			if (Fam(EGate0Family.Weekly) && m_lastWeek != null && m_lastWeekAge >= 1 && m_lastWeekAge <= 5)
 			{
-				double pc, ph, pl; var w = new Gate0Profile(tick); foreach (var p in m_lastWeek) w.Merge(p);
+				double pc, ph, pl; var w = new Gate0Profile(tick); cpre = false; foreach (var p in m_lastWeek) { w.Merge(p); cpre |= m_baPreProfiles.Contains(p); }
 				if (w.ValueArea(vaPct, out pc, out ph, out pl)) { add("WPOC", pc, m_lastWeekAge); add("WVAH", ph, m_lastWeekAge); add("WVAL", pl, m_lastWeekAge); }
 			}
 			if (Fam(EGate0Family.CompositeVa) && n >= CompositeSessions)
 			{
-				var cp = new Gate0Profile(tick); for (int i = n - CompositeSessions; i < n; i++) cp.Merge(m_hist[i].profile);
+				var cp = new Gate0Profile(tick); cpre = false; for (int i = n - CompositeSessions; i < n; i++) { cp.Merge(m_hist[i].profile); cpre |= m_hist[i].baPre; }
 				double pc, ph, pl; if (cp.ValueArea(vaPct, out pc, out ph, out pl)) { add("CVAH", ph, 1); add("CVAL", pl, 1); }
 			}
+			cpre = p1 != null && p1.baPre;
 			if (p1 != null && Fam(EGate0Family.SinglePrint))
 			{
 				foreach (var run in Gate0Profile.TpoSinglePrints(p1.tpo, SinglePrintMinRows, tick)) { add("SP_HI", run[0], 1); add("SP_LO", run[1], 1); }
 				foreach (var run in p1.profile.SinglePrintRuns(SinglePrintVolFrac, SinglePrintMinRows)) { add("SPV_HI", run[0], 1); add("SPV_LO", run[1], 1); }   // sensitivity arm
 			}
 			if (Fam(EGate0Family.DvSource) && m_cur != null)
-				foreach (var dv in m_dv) if (!dv.touched && dv.validFrom <= m_cur.day) add(dv.type, dv.price, Math.Max(1, SessionsSince(dv.validFrom) - 1 + 1));
+				foreach (var dv in m_dv) if (!dv.touched && dv.validFrom <= m_cur.day) { cpre = dv.baPre; add(dv.type, dv.price, Math.Max(1, SessionsSince(dv.validFrom) - 1 + 1)); }
+			cpre = p1 != null && p1.baPre;
 			if (p1 != null && Fam(EGate0Family.HvnLvn))
 			{
 				List<double[]> hv, lv; p1.profile.Nodes(KdeBandwidthTicks, KdeProminence, out hv, out lv);
@@ -781,7 +938,13 @@ namespace PowerLanguage.Function
 				var g = _ProfileStats.ProfileMixture(xs.ToArray(), ws.ToArray(), GmmMaxK, _ProfileStats.MixtureSeed(p1.day), EGmmNeff.Bars, p1.bars1m, tick);
 				if (g.model != null) for (int k = 0; k < g.K; k++) { addQ("GMM_MU", g.mu[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] - g.sd[k], 1, g.pi[k]); addQ("GMM_EDGE", g.mu[k] + g.sd[k], 1, g.pi[k]); }
 			}
-			if (p1 != null && Fam(EGate0Family.SigmaMixture)) sigmaComposite(addQ);
+			if (p1 != null && Fam(EGate0Family.SigmaMixture))
+			{
+				// G0-c: pre-splice when any of the newest SigmaCompositeSessions sessions with a finite sigma (the pool) is pre-splice
+				cpre = false; int got = 0;
+				for (int i = n - 1; i >= 0 && got < SigmaCompositeSessions; i--) { var s = m_hist[i]; if (double.IsNaN(s.SigmaPrice)) continue; got++; cpre |= s.baPre; }
+				sigmaComposite(addQ);
+			}
 			return r;
 		}
 
@@ -845,6 +1008,26 @@ namespace PowerLanguage.Function
 				string key = type + "@" + px.ToString("R", CultureInfo.InvariantCulture) + "#" + no;
 				study.AddLevel(type, px, age, q, key);
 			}
+			// G0-c: the shadow's pre-splice candidates go to baStudy (the Reset study is untouched)
+			if (baStudy != null && m_ba.m_baCandDay == b.day)
+			{
+				baStudy.SetSessionReference(refPx, sigma);
+				foreach (var kv in m_ba.m_baCands)
+				{
+					no++;
+					string type = kv.Key; double px = Math.Round(kv.Value[0] / tick) * tick; int age = (int)kv.Value[1]; double q = kv.Value[2];
+					string key = type + "@" + px.ToString("R", CultureInfo.InvariantCulture) + "#" + no;
+					if (baStudy.AddLevel(type, px, age, q, key)) BaLevels++;
+				}
+			}
+		}
+
+		/// <summary>G0-c shadow: keep this session's candidates whose source holds pre-splice bars, typed "&lt;T&gt;~BA".</summary>
+		private void baCapture(Gate0Bar b)
+		{
+			m_baCands.Clear(); m_baCandDay = b.day;
+			var pre = new List<bool>(); var c = candidates(pre);
+			for (int i = 0; i < c.Count; i++) if (pre[i]) m_baCands.Add(new KeyValuePair<string, double[]>(c[i].Key + BaSuffix, c[i].Value));
 		}
 
 		/// <summary>True when day is a roll session or the session before / after one (review M2).</summary>
@@ -904,7 +1087,68 @@ namespace PowerLanguage.Function
 				if (journal != null) journal(r.Line());
 			}
 			if (journal != null && !VerdictRun) journal("G0 Variant 0 is an overview only: not a verdict run. Re-run each family (Variant 1..13) with 20 controls for G0-d.");
+			if (baStudy != null)
+			{
+				baStudy.Finish();
+				var baKept = new List<LevelEvent>();
+				foreach (var e in baStudy.Events) if (e.day < DevEnd && !InRollWindow(e.day)) baKept.Add(e);   // G0-c: outside the Reset rows and Holm
+				BaResults = G0cScore(kept, baKept, VerdictRun); if (journal != null) { foreach (var g in BaResults) journal(g.Line()); journal(G0cDoneLine()); } }
 			return res;
+		}
+
+		/// <summary>G0-c results of the last Finish (BackAdjusted arm only; empty otherwise).</summary>
+		public List<G0cResult> BaResults { get; private set; } = new List<G0cResult>();
+
+		/// <summary>Paired A2-33 reaction differences (level R minus the mean R of its touched controls) per type, NaN pairs dropped.</summary>
+		public static Dictionary<string, List<double>> PairDiffsByType(IEnumerable<LevelEvent> ev)
+		{
+			var ctlBy = new Dictionary<string, List<LevelEvent>>(StringComparer.Ordinal); var lv = new List<LevelEvent>();
+			foreach (var e in ev)
+			{
+				if (!e.control) { lv.Add(e); continue; }
+				string k = e.type + "|" + e.day.Ticks + "|" + e.levelNo; List<LevelEvent> c;
+				if (!ctlBy.TryGetValue(k, out c)) ctlBy[k] = c = new List<LevelEvent>(); c.Add(e);
+			}
+			var res = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+			foreach (var e in lv)
+			{
+				List<double> dl; if (!res.TryGetValue(e.type, out dl)) res[e.type] = dl = new List<double>();
+				List<LevelEvent> ctl; ctlBy.TryGetValue(e.type + "|" + e.day.Ticks + "|" + e.levelNo, out ctl);
+				double d = PairedReaction(e, ctl); if (!double.IsNaN(d)) dl.Add(d);
+			}
+			return res;
+		}
+
+		/// <summary>G0-c scoring (Ettienne 2026-11-23 16:36 CT): per ~BA type and window (dev = before 2023-01-01, val = 2023-2024; roll
+		/// session +-1 already dropped), the cohort's paired edge and t vs the SAME window's Reset type ("base"). Decision on dev:
+		/// PASS = t &gt; 2 AND edge &gt;= base edge; n &lt; 30 pairs = INCONCLUSIVE. Validation confirms (same rule). Report only.</summary>
+		public static List<G0cResult> G0cScore(IList<LevelEvent> reset, IList<LevelEvent> ba, bool verdictRun)
+		{
+			var res = new List<G0cResult>();
+			string[] wn = { "dev", "val" }; DateTime[] lo = { DateTime.MinValue, G0cValFrom }, hi = { G0cValFrom, DevEnd };
+			for (int w = 0; w < 2; w++)
+			{
+				var bd = PairDiffsByType(ba.Where(e => e.day >= lo[w] && e.day < hi[w]));
+				var rd = PairDiffsByType(reset.Where(e => e.day >= lo[w] && e.day < hi[w]));
+				var baLevels = ba.Where(e => !e.control && e.day >= lo[w] && e.day < hi[w]).GroupBy(e => e.type).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+				foreach (var kv in baLevels.OrderBy(x => x.Key, StringComparer.Ordinal))
+				{
+					var g = new G0cResult { type = kv.Key, baseType = kv.Key.Substring(0, kv.Key.Length - BaSuffix.Length), window = wn[w], levels = kv.Value, verdictRun = verdictRun };
+					List<double> d; if (bd.TryGetValue(kv.Key, out d)) { g.pairs = d.Count; _LevelStudy.meanT(d, out g.edge, out g.t); g.sd = Sd(d); }
+					List<double> b; if (rd.TryGetValue(g.baseType, out b)) { g.basePairs = b.Count; _LevelStudy.meanT(b, out g.baseEdge, out g.baseT); g.baseSd = Sd(b); }
+					g.Decide(); res.Add(g);
+				}
+			}
+			return res;
+		}
+		private static double Sd(IList<double> x) { int n = x.Count; if (n < 2) return double.NaN; double m = x.Average(); return Math.Sqrt(x.Sum(v => (v - m) * (v - m)) / (n - 1)); }
+
+		private string G0cDoneLine()
+		{
+			int devPass = BaResults.Count(r => r.window == "dev" && r.verdict.StartsWith("PASS")), dev = BaResults.Count(r => r.window == "dev");
+			int valPass = BaResults.Count(r => r.window == "val" && r.verdict.StartsWith("PASS")), val = BaResults.Count(r => r.window == "val");
+			return string.Format(CultureInfo.InvariantCulture, "G0C done arm(BackAdjusted) family({0}) splices({1}) baLevels({2}) devPass({3}/{4}) valPass({5}/{6}) holm(excluded) policy(Reset unchanged){7}",
+				(EGate0Family)variant, BaSplices, BaLevels, devPass, dev, valPass, val, VerdictRun ? "" : " NOT A VERDICT RUN (Variant 0)");
 		}
 
 		/// <summary>A2-33 paired difference: level reaction R minus the mean R of its touched matched controls (NaN if either is missing).</summary>
