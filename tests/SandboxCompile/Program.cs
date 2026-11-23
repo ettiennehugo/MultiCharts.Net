@@ -255,6 +255,7 @@ static class Program
 			new[] { "A2_37", "m_spread.Clear()" }, new[] { "A2_61", "m_hist.Clear()" }, new[] { "A2_61", "m_fives.Clear()" }, new[] { "A2_11", "m_wasComplete = false" }, new[] { "A2_62", "m_hi.Clear()" }, new[] { "A2_62", "m_cl.Clear()" } };
 		foreach (string[] c in clears)
 			Check(MethodBody(code(c[0]), @"void\s+StartCalc\s*\(\s*\)").Contains(c[1]), c[0] + " StartCalc resets " + c[1]);
+		Check(!MethodBody(code("A2_14"), @"void\s+dailyClose\s*\(\s*int\s+pos\s*\)").Contains("m_le.Send(") && MethodBody(code("A2_14"), @"void\s+openEntry\s*\(\s*DateTime\s+day\s*\)").Contains("et.TimeOfDay < m_rthStart"), "A2_14 buys at the next RTH open (catalogue), not the Globex reopen (Analyst MES 12563c11)");
 		Check(raw.ContainsKey("A2_14") && raw["A2_14"].Contains("// Chart: Data1 = 1-minute (owner rule). The daily swing builds its daily bars"), "A2_14 header: Data1 1-minute, daily bars built from it");
 		Check(code("A2_14").Contains("private void dailyClose(int pos)") && Regex.IsMatch(MethodBody(code("A2_14"), @"void\s+dailyClose\s*\(\s*int\s+pos\s*\)"), @"m_held\+\+") && !Regex.IsMatch(MethodBody(code("A2_14"), @"void\s+CalcBar\s*\(\s*\)"), @"m_held\+\+|m_closes\.Insert"), "A2_14 counts held days and daily closes once per trading day, not per 1m bar");
 		Check(Regex.IsMatch(code("VW_04"), @"if \(day != m_day\) \{[^}]*m_restOn = m_filledSetup = false"), "VW_04 new day clears the resting book");

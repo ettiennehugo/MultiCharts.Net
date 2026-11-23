@@ -197,7 +197,11 @@ namespace PowerLanguage.Strategy
 			if (a.AnchorBar != m_anchor)
 			{
 				m_anchor = a.AnchorBar;
-				if (StrategyInfo.MarketPosition == 0) { m_done = false; m_filledSetup = false; m_restOn = false; m_below = 0; m_reclaim = false; }
+				if (StrategyInfo.MarketPosition == 0)
+				{
+					if (m_restOn && journalOn()) trace(ETraceLevel.Journal, $"AV-01 {Bars.Time[0]:yyyy-MM-dd HH:mm} entry stop {m_restPx} cancelled unfilled: a new swing-high anchor");   // Coder 2026-11-23
+					m_done = false; m_filledSetup = false; m_restOn = false; m_below = 0; m_reclaim = false;
+				}
 			}
 			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || rollOn(1)) return;
@@ -384,7 +388,11 @@ namespace PowerLanguage.Strategy
 			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = m_anchor;
 			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			bool resting = m_restOn;
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			// Coder 2026-11-23 (Analyst MES run fba67ab7: 78 sent, 63 trades): the buy stop rests until the flat-by cutoff of its day, then
+			// expires; that anchor is done until a new swing high. The expiry was silent.
+			if (step == ERest.Done && resting && !m_filledSetup && journalOn()) trace(ETraceLevel.Journal, $"AV-01 {Bars.Time[0]:yyyy-MM-dd HH:mm} entry stop {m_restPx} expired unfilled at the flat-by cutoff; anchor done until a new swing high");
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
