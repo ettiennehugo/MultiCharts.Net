@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading exits an open host winner. It has no entry. ASSUMPTION: a climax is a 5-minute range at least twice the mean of the prior 20 same-length ranges. This file journals that bar and does not send an order.
 //

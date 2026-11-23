@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: the impulse anchor is the newest confirmed Data2 (15-minute) zigzag low whose reversal is at least 3 x ATR(20) of Data2 (catalogue: "the low that starts an impulse of >= 3 x ATR (anchor TF), confirmed"; 15m swing for the intraday arm), read as AvwapManager.Latest(SwingLow) with the AVWAP on Data2. The first pullback is a closed Data2 bar after confirmation whose low is inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma and above the anchor low; a Data2 low below the anchor low ends the anchor. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
 //
@@ -162,7 +162,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _AV_02_ImpulseOriginAVWAP(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "AV02"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV02LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "AV02"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV02LE", EOrderAction.Buy)); }
 		/// <summary>Coder 2026-11-22: true once per new closed Data2 bar (M-MTF closed-bar rule); its values come back in the out parameters.</summary>
 		private bool newNativeBar(out DateTime t, out double h, out double l)
 		{

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: poor highs and lows come from the last completed Own RTH profile; MC's Volume Profile is not needed on the chart.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: poor highs and lows come from the last completed Own RTH profile; MC's Volume Profile is not needed on the chart.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue says this module never opens a trade. It journals whether the prior completed profile is a poor high or a poor low, which is the input the host uses for the reduce rule and the stop-placement rule.
 //
@@ -149,7 +149,7 @@ namespace PowerLanguage.Strategy
 		public _A2_48_PoorHighsLows(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // Coder 2026-11-22 (owner: own-profile path like A2-45/A2-46): poor extremes from completed Own RTH profiles, not MC's Volume Profile (not on the research charts)
 		}
 		protected override void StartCalc()

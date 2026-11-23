@@ -76,13 +76,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileBase
 // Engines enabled: M-AVWAP with AvwapEvents = SwingLow. That anchor turns price action on for Data1.
-// Engine settings enabled: RollDetection = Series. AvwapLimits.maxAgeSessions = 60.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). AvwapLimits.maxAgeSessions = 60.
 //
 // ## 16. Pitfalls
 // Lookahead: the averages, RSI and ATR use bars that have closed, including the signal bar, and the order is for the next bar. The AVWAP is the latest valid swing-low anchor.
 // Repaint: Not applicable. The anchor is used from the manager's latest valid value.
 // Survivorship: Not applicable
-// Rolls: Series. A roll bar does not enter. An unadjusted splice still sits inside the 200-bar average.
+// Rolls: Table (CME roll-date table). A roll bar does not enter. An unadjusted splice still sits inside the 200-bar average.
 // Data quality: an RTH daily template is required. A 24-hour daily bar is a different series. Not yet verified on a chart.
 // Other: RSI here is Cutler's simple average, not Wilder's smoothing.
 //
@@ -171,7 +171,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			AvwapEvents = EAvwapAnchor.SwingLow;      // lazy: creates the AVWAP manager; swing anchors force PRICEACTION on (Data1)
 			AvwapLimits.maxAgeSessions = 60;          // daily bars: one session per bar
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "SW02LE", EOrderAction.Buy));

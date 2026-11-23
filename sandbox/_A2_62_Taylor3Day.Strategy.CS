@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: every 20 sessions the cycle re-anchors: the buying day is the session after the lowest RTH low of the 10 completed sessions before the anchor, then every third session (the phase does not depend on the trend). An uptrend is the 20-session mean of RTH closes above that mean from five sessions earlier. On a buying day in an uptrend the buy limit at the prior RTH low rests from the RTH open until the session trades the prior RTH high (high first: no trade). A lower open buys at market at 09:35 instead, one entry per day. The exit limit is the completed buying-day high, which is not known at the entry, so it is not an exitPlan target.
 //
@@ -154,7 +154,7 @@ namespace PowerLanguage.Strategy
 		public _A2_62_Taylor3Day(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A262LE", EOrderAction.Buy));
 			m_ll = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "A262LL", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A262LX", EOrderAction.Sell, OrderExit.FromAll));

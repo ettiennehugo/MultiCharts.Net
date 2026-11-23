@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Chart is 1-minute. The move from the open is a fraction, |close-rthOpen|/rthOpen, averaged over the same clock minute across the last 14 sessions. A gap day uses max(rthOpen, prior RTH close) as the band base. sVWAP is CurrentVwap1 with Vwap1Type Session. Check times are bar-end minutes of :00 and :30. Re-entry is allowed. There is no protective stop in the source; the exit is the band check and the 15:59 flat.
 //
@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			FlatBy = new TimeSpan(15, 59, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A209LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A209LX", EOrderAction.Sell));

@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: the base VWAP slots. No separate engine is switched on.
-// Engine settings enabled: RollDetection = Table. Vwap1Type = Week and Vwap2Type = Month on Data1, set in code. Vwap3Type = Disabled. Table is the roll source for resetPeriodSlotsOnRoll.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). Vwap1Type = Week and Vwap2Type = Month on Data1, set in code. Vwap3Type = Disabled. Table is the roll source for resetPeriodSlotsOnRoll.
 //
 // ## 16. Pitfalls
 // Lookahead: the host high excludes the current bar (High[1] through High[20]). VWAP is the closed-bar slot.
@@ -203,7 +203,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Table;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "AV08SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV08LX", EOrderAction.Sell));

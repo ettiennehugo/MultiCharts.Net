@@ -76,13 +76,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: M-MTF on Data2. The session VWAP slot is on the base.
-// Engine settings enabled: RollDetection = Series. Vwap1Type = Session and Vwap1DataStream = 1, set in code. StartCalc throws if Vwap1Type is not Session. HtfStreams = { 2 }.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). Vwap1Type = Session and Vwap1DataStream = 1, set in code. StartCalc throws if Vwap1Type is not Session. HtfStreams = { 2 }.
 //
 // ## 16. Pitfalls
 // Lookahead: the prior close is the session object's prior RTH close, VWAP is the closed slot, and ATR uses HtfClosedBar.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. The splice day is marked done and does not trade.
+// Rolls: Table (CME roll-date table). The splice day is marked done and does not trade.
 // Data quality: the entry test is an exact 15:00 clock match. A missing bar skips the day. Not yet verified on a chart.
 // Other: the v1 kill in the catalogue applies to this 15:00 arm. A2-06 is a different rule and is not this file.
 //
@@ -191,7 +191,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			// VWAP slot 1 = session VWAP on Data1. These VP-base settings are [Input]s on main: set them in code AND do not edit them in
 			// the Format Signal dialog (see the F-VWAP pitfalls).
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;

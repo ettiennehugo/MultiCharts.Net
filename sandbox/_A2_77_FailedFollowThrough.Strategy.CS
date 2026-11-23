@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading is a checkpoint on a host trade. It has no entry. ASSUMPTION: the checkpoint is 8 closed bars, and a host that is not ahead flats there. GX TimeStopMinutes does not test open profit, so a host keeps this as a named exit. This file only journals the checkpoint.
 //

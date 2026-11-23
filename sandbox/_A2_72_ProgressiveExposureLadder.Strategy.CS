@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is a size ladder, not an entry. Levels are 25, 50 and 100 percent of a base size. ASSUMPTION: this file journals the level a host would use and does not send an order and does not change a production size. A winning closed bar of this study, which never trades, leaves the level at 25.
 //

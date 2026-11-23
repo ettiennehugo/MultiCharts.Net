@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The opening range is the first 15 minutes after RthStart. A_up is ORH plus 0.5 times the range and A_dn is ORL minus 0.5 times the range. ASSUMPTION: eight consecutive 1-minute closes is the half-of-15 hold. The entry window ends at RthStart plus 2 hours. The pivot band is DPP plus or minus the absolute pivot differential of the prior RTH. A long requires the prior close at or above the band low and the current RTH low still above that band. The failure exit (flat when open profit is not positive 15 minutes after entry) is not a GX time stop, because a GX time stop exits a winner too.
 //
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 		public _A2_52_TimeConfirmedOpening(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A252LX", EOrderAction.Sell, OrderExit.FromAll));

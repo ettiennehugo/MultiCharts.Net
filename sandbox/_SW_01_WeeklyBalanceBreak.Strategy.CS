@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes (taken at the flat window) beyond WeeklyComposite(3) by 0.1 times Atr20d; the balance and the composite edge are frozen at the first close. Then, from the next day, the first 60-minute higher low at an RTH hour close, buy; one trade per break. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 //
@@ -150,7 +150,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _SW_01_WeeklyBalanceBreak(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

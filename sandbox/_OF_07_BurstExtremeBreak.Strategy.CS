@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those the example turns on in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings the example sets. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings the example sets. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar. HTF reads use HtfClosedBar when the example does.
@@ -173,7 +173,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			TickConfig.enabled = true;                         // lazy: no DataLoader tick request unless enabled
 			TickConfig.burstZ = 3.0;
 			MaxTradesPerDay = 3; FlatBy = Cfg.flat;

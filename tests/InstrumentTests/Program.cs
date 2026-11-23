@@ -347,6 +347,34 @@ static class Program
 		InstrumentRules.CollectRollDates(gcB, 2024, 2024, "DVP", null, gc2024);
 		Check(gc2024.Contains(gcFebRoll) && gcFebRoll.Year == 2024 && gcFebRoll.Month < 2 && gc2024.TrueForAll(d => d.Year == 2024),
 			"T6 GC 2024 contract-year rolls stay in 2024; February's roll is in January (month before the contract), not a prior calendar year (" + Ds(gcFebRoll) + ")");
+		// T-R2 (sandbox Table migration): every futures root the sandbox runs on has 2023-2024 table dates from the fixed
+		// contract years 2000-2035 the base uses (RollTableFromYear / RollTableToYear); the equity-index four share the ES digest.
+		var trProfiles = new[] {
+			InstrumentProfile.Build(In("@ES", EAssetClass.Future, "ES", 25, 100, 50), null, null),
+			InstrumentProfile.Build(In("@MES", EAssetClass.Future, "MES", 25, 100, 5), null, null),
+			InstrumentProfile.Build(In("@NQ", EAssetClass.Future, "NQ", 25, 100, 20), null, null),
+			InstrumentProfile.Build(In("@MNQ", EAssetClass.Future, "MNQ", 25, 100, 2), null, null),
+			clB, gcB, znB, sixB };
+		foreach (var tp in trProfiles)
+		{
+			var all = new List<DateTime>();
+			int skip = InstrumentRules.CollectCoveredRollDates(tp, 2000, 2035, "ROLL", null, all);
+			bool prod = InstrumentCalendars.IsProduct(tp.calendar);
+			Check(prod ? skip > 0 && all.TrueForAll(d => d.Year >= 2016 && d.Year <= 2026) : skip == 0, "T-R2 " + tp.root + " covered roll dates stay inside the calendar (" + skip + " months skipped)");
+			int n23 = all.Count(d => d.Year == 2023), n24 = all.Count(d => d.Year == 2024);
+			int perYear = 0; for (int m = 1; m <= 12; m++) if (MonthMask.Has(tp.contractMonths, m)) perYear++;
+			bool eq = InstrumentRules.IsEquityIndexQuarterly(tp);
+			Check(n23 >= perYear - 1 && n24 >= perYear - 1 && n23 > 0 && n24 > 0 && (!eq || _RollDetector.DatesDigest(all) == "fdd63bd8f179a8d4"),
+				"T-R2 " + tp.root + " table 2000-2035 has 2023 (" + n23 + ") and 2024 (" + n24 + ") roll dates" + (eq ? ", ES digest" : ""));
+		}
+		var mesAll = new List<DateTime>();
+		InstrumentRules.CollectCoveredRollDates(trProfiles[1], 2000, 2035, "ROLL", null, mesAll);
+		var cl00 = new List<DateTime>();
+		int clSkip = InstrumentRules.CollectCoveredRollDates(clB, 2000, 2035, "ROLL", null, cl00);
+		Check(!cl00.Contains(D(2015, 12, 17)) && cl00.Min().Year == 2016 && cl00.Max().Year == 2026 && cl00.Count == 11 * 12 - 1 && clSkip == 36 * 12 - (11 * 12 - 1),
+			"T-R2 CL contract years 2000-2035 on the 2016-2026 calendar: CLG16 .. CLZ26 (" + cl00.Count + " dates, " + clSkip + " skipped)");
+		Check(mesAll.Contains(D(2024, 6, 17)) && !mesAll.Contains(D(2024, 6, 13)) && mesAll.Contains(D(2024, 3, 11)) && mesAll.Contains(D(2024, 9, 16)) && mesAll.Contains(D(2024, 12, 16)),
+			"T-R2 MES 2024 table dates: 03-11, 06-17 (Monday before the 06-21 expiry; not 06-13), 09-16, 12-16");
 		DateTime esEx, clEx;
 		bool esWin = _RollDetector.SeriesWindow(new DateTime(2020, 4, 15), out esEx);
 		var clRow = InstrumentPresets.Find("CL", EAssetClass.Future);

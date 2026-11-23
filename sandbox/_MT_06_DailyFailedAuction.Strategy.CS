@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: an excess tail is a SinglePrints run on the prior profile that touches the prior high and is at least 4 ticks tall. The first 5-minute lower high within one 5-bar ATR of that high sells. The stop is above the tail. The target is the prior POC.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _MT_06_DailyFailedAuction(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; GxOrderPrefix = "MT06"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "MT06SE", EOrderAction.SellShort)); }
+		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "MT06"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "MT06SE", EOrderAction.SellShort)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading changes a host's stop and target from the host's last 20 trades. This file has no host and no entry. ASSUMPTION: the core is N 20, a 10 point gap under the baseline hit rate, and a 0.8 scale on both stop and target. It journals that throttle and does not send an order.
 //

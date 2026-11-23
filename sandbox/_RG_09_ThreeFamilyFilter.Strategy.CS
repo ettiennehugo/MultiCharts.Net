@@ -79,13 +79,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading is the module form of KD-09. It has no entry. ASSUMPTION: a pass is at least three detrended families within 0.3 ATR, read from dvpFamiliesAt.
 //
@@ -148,7 +148,7 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _RG_09_ThreeFamilyFilter(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series;  }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;  }
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure is the C-period 30-minute bar (the closed Data2 30-minute bar) that trades above the IB and closes back inside, tested once at the C-period close. The sell stop is under that 30-minute bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
 //
@@ -156,7 +156,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _PS_09_IBCPeriod(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS09"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09SE", EOrderAction.SellShort)); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "PS09"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09SE", EOrderAction.SellShort)); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09LE", EOrderAction.Buy)); }
 		protected override void StartCalc()
 		{
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start

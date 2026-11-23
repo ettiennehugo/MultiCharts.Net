@@ -84,6 +84,7 @@ static class Program
 		BookOrderChecks(files);
 		BugfixBatchChecks(files);
 		AtrRollChecks(files);
+		RollTableChecks(files);
 		CalendarKeyChecks(files);
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
@@ -870,5 +871,28 @@ static class Program
 		body = Regex.Replace(body, @"\d+(?:\.\d+)?", "");
 		body = Regex.Replace(body, @"\s+", "");
 		return body;
+	}
+
+	// T-R2 (m-instr §7.1 items 1 and 10, Confirmed by Ettienne 2026-11-22): the CME roll-date table is the roll rule. No sandbox
+	// file uses Series / SeriesOrTable; every file that sets Table fills it from the profile (RollTableFromProfile = true in the
+	// same statement line), keeps the non-futures Off line, and says Table on its header's Engine settings line.
+	static void RollTableChecks(List<string> files)
+	{
+		int table = 0; var bad = new List<string>();
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path), text = File.ReadAllText(path);
+			string code = Regex.Replace(text, @"//[^\n]*", "");
+			if (Regex.IsMatch(code, @"ERollDetection\.(Series|SeriesOrTable)\b")) bad.Add(name + " uses Series / SeriesOrTable");
+			if (!Regex.IsMatch(code, @"RollDetection\s*=\s*ERollDetection\.Table\s*;")) continue;
+			table++;
+			if (!Regex.IsMatch(code, @"RollDetection\s*=\s*ERollDetection\.Table\s*;\s*RollTableFromProfile\s*=\s*true\s*;")) bad.Add(name + " sets Table without RollTableFromProfile = true (T-R1b would throw on an empty table)");
+			if (!Regex.IsMatch(code, @"if\s*\(!isFuturesCategory\(Bars\.Info\.Category\)\)\s*RollDetection\s*=\s*ERollDetection\.Off\s*;")) bad.Add(name + " lost the non-futures Off line");
+			Match h = Regex.Match(text, @"^// Engine settings enabled:[^\n]*$", RegexOptions.Multiline);
+			if (!h.Success || !h.Value.Contains("RollDetection = Table (the CME roll-date table")) bad.Add(name + " header Engine settings line does not say RollDetection = Table");
+			if (Regex.IsMatch(text, @"^// Rolls:[^\n]*\bSeries\b", RegexOptions.Multiline)) bad.Add(name + " header Rolls line still says Series");
+		}
+		foreach (string b in bad) Console.WriteLine("FAIL " + b);
+		Check(bad.Count == 0 && table >= 191, "T-R2 sandbox roll mode: " + table + " Table studies filled from the profile, none on Series / SeriesOrTable (" + bad.Count + " problems)");
 	}
 }

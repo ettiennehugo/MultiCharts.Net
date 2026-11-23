@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This is a cost model, not an entry. It does not set Commission or Slippage. It journals the catalogue buckets (1 tick calm, 2 ticks until a fill log exists, 4 ticks when a fragility flag is on) as text only.
 //

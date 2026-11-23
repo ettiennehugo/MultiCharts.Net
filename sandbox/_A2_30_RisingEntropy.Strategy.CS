@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table) where this file trades.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of the histogram of the last 30 minutes of today's RTH bars, sampled on 5-minute boundaries; H_slope is the change from the sample 15 minutes earlier. The 90th percentile is over the last 60 sessions' slopes at the same clock slot. The breakout is 2 consecutive closed Data2 5-minute closes outside the balance within 60 minutes of the alert, entered at the next 5-minute open. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
 //
@@ -167,7 +167,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			ProfileStats.enabled = true;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A230LE", EOrderAction.Buy));

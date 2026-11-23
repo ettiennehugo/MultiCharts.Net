@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: a 15-minute swing high is a 15-minute high above the two 15-minute highs on each side. Two such highs within 0.25 of their range, at least six 15-minute bars apart, with a pullback of at least that range, then a 15-minute close above both, buys. The developing POC must be at least the midpoint. The stop is the breakout bar's low. The target is one pattern height.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _SP_01_FailedDoubleTop(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "SP01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP01LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "SP01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SP01LE", EOrderAction.Buy)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

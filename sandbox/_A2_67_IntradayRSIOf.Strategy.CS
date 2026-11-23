@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: a 5-minute bar is five 1-minute bars, and the decision is the 1-minute bar whose clock minute is a multiple of 5. RSI is the simple average of the last 10 five-minute changes, not a Wilder RSI, because the base class has no RSI of highs and lows. The long needs three rising 5-minute lows, RSI of lows below 20, and RSI of highs minus RSI of lows above 15. The 2 ATR disaster stop is the catalogue's ablated stop.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		public _A2_67_IntradayRSIOf(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A267LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A267LX", EOrderAction.Sell, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A267LS", EOrderAction.Sell, OrderExit.FromAll));

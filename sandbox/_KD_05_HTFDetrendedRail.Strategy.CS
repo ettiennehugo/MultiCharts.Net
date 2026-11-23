@@ -83,7 +83,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table), inherited from _PS_25_AcceptBeyondRail.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: KD-05 is the MT-07 entry: PS-25's 15-minute rail break only while two 60-minute closes have held beyond the detrended VAH.
 //

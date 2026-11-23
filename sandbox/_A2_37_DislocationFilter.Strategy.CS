@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The hedge ratio is fixed at 1. The spread is ln(Data1 close) minus ln(Data2 close), and z is versus the last 500 closed bars of that spread. A fitted 20-session OLS hedge is not in this file. If Data2 is absent the file journals that and stands aside. It never trades the spread and it sends no order. Persistent means more than 60 percent of the last 60 bars have absolute z above 2.5.
 //

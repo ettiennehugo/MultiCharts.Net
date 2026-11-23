@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the node is dvpRailPrice of DvpHvn. A close beyond the node by 0.10 ATR, with the prior close at or under the node, and the next close still beyond it, buys a stop one tick above the bar. The stop is the lower of the two lows and the node minus 0.5 ATR. The touch-fade is not coded. EX-05 is taken as an ATR trail plus a 41-bar time stop.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _KD_10_FarOutsideBand(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "KD10"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "KD10LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "KD10"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "KD10LE", EOrderAction.Buy)); }
 		protected override void StartCalc() {
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: PriceAction on Data1 (Fractal 2, equal 0.10), ExtraPriceAction draw5 on Data2, FVG on Data2, a local 1-minute FVG detector, EventCalendar (T1 blackout 2/10).
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: rebuilt 2026-11-22 to the catalogue's 1-minute rules; shorts as written, longs mirror (Side input). Window: the sweep bar's Eastern close is in [H:50, H+1:10), H 9..14, RTH. A live bearish 5-minute gap (minTicks 1, 0.15 x ATR14, RTH, 5 sessions, filled on a close) was created before the sweep bar and the sweep bar overlaps it. The sweep bar trades 1 tick above a confirmed isEqual 1-minute swing high (Fractal 2, 0.10 x ATR20, 5 pivots) that no bar since its confirmation traded through. Within 3 bars (sweep bar = 0) a new bearish 1-minute gap forms whose third bar closes at least 0.5 x ATR14 below the swept high. Sell limit at that gap's low edge (High3), working to the window end plus 2 bars; no new order after 15:30. Stop: ITH (sweep bar through displacement bar) plus 1 tick, widened to the cost floor. Target: the nearest 5-minute isEqual low pair's higher low minus 1 tick, at least 0.5R below the entry, else skip. One attempt per window per direction; a tier-1 event blackout (2 min before / 10 min after) vetoes and cancels orders. Bracket only; flat by the session cutoff. The optional session-extreme pairing is dropped.
 //
@@ -174,7 +174,7 @@ namespace PowerLanguage.Strategy
 		public _SP_09_ClockWindowEqual(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SP09"; createGxOrders();
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "SP09"; createGxOrders();
 			m_se = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "SP09SE", EOrderAction.SellShort));
 			m_le = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "SP09LE", EOrderAction.Buy));
 			// Trigger-TF (Data1, 1-minute) swings: Fractal strength 2, isEqual at 0.10 x ATR(20), last 5 pivots.

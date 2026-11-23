@@ -83,7 +83,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table), inherited from _PS_25_AcceptBeyondRail.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This file is PS-25 on the 15-minute Data2 stream (catalogue MT-07: "15m PS-25 entries"). It sends that entry only after two 60-minute closes (closed Data3 60-minute bars) have held beyond the 60-minute (Data3) DVP stream's VAH, and only when the 15-minute +2 sigma target lies inside the 60-minute next-rail distance (DvpConfig.streams 2 and 3).
 //

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The core gap is 0.5 percent of the prior RTH close. ASSUMPTION: the volatility filter is DailyContext.Hv(6) below Hv(100). The inside-day alternative is not coded, because the day before the prior RTH is not a Session field. The entry is the second RTH minute, and only if that bar has not traded back through the prior close. The book's stop-and-reverse at the session extreme is not opened: GX does not reverse, so the extreme is the protective stop and the position is flat at the session value end.
 //
@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		public _A2_53_RTHGapFade(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			GxOrderPrefix = "A253"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A253LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A253SE", EOrderAction.SellShort));

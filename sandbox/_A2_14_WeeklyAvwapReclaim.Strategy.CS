@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: the rules are daily; Data1 is 1-minute, so each Globex trading date is aggregated into one daily bar (low = the day low, close = the last 1m close) and the daily rules run once, on the first bar of the next trading date. Held days count trading days. The week-open AVWAP is CurrentVwap1 with Vwap1Type Week. ATRd is DailyContext.Atr20d. The 20-day SMA and its slope are computed here from stored daily closes. A close back above after N closes below buys at the next RTH open (catalogue): the market order is sent on the last bar before 09:30 ET of the next trading date and fills on the first RTH bar; the target is 2 R from that price, and the trade is skipped when that price is at or below the stop or the risk breaks 1 percent (Coder 2026-11-23; it bought the Globex reopen at 17:0x CT before). Days-below sweep is the enum, default 2.
 //
@@ -163,7 +163,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A214LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A214LX", EOrderAction.Sell));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A214LS", EOrderAction.Sell, OrderExit.FromAll));

@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: M-DAILY (NeedsDaily, dataStream 0, aggregate Data1).
-// Engine settings enabled: RollDetection = Series. DailyConfig.atrLength = 20. DailyConfig.hvLengths = { 20 }. MaxTradesPerDay = 1.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). DailyConfig.atrLength = 20. DailyConfig.hvLengths = { 20 }. MaxTradesPerDay = 1.
 //
 // ## 16. Pitfalls
 // Lookahead: ATR and HV are taken from the prior completed day (PrevDate). Limits are priced from the closed bar and work forward.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. A splice day does not arm. M-DAILY's ATR is reseeded at a roll and stays empty for atrLength sessions.
+// Rolls: Table (CME roll-date table). A splice day does not arm. M-DAILY's ATR is reseeded at a roll and stays empty for atrLength sessions.
 // Data quality: thetaOff is a placeholder. Do not read a result until the owner sets it. Not yet verified on a chart.
 // Other: the fill bar is unprotected. m = 0.5 is the example value and is not the catalogue core.
 //
@@ -213,7 +213,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			MaxTradesPerDay = 1;
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "A264LE", EOrderAction.Buy));
 			m_seLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "A264SE", EOrderAction.SellShort));

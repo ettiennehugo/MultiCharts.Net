@@ -85,7 +85,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is an exit overlay, not an entry. It maps to GX BreakEven AtTrigger, BreakEvenUnit RMultiple, BreakEvenValue 3. ASSUMPTION: the rolling-average-gain alternative is not coded; the numeric rule that is coded in the note is 3R. This file does not open a host trade.
 //

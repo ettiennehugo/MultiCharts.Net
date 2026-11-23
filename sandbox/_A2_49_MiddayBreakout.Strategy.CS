@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: none. The CME session clock is constructed in the signal.
-// Engine settings enabled: RollDetection = Series. NoEntryBefore, NoEntryAfter, FlatBy and MaxTradesPerDay are set in code from A249Config.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). NoEntryBefore, NoEntryAfter, FlatBy and MaxTradesPerDay are set in code from A249Config.
 //
 // ## 16. Pitfalls
 // Lookahead: the range uses bars that have already closed, and the order is for the next bar.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. A splice day does not trade the morning range.
+// Rolls: Table (CME roll-date table). A splice day does not trade the morning range.
 // Data quality: Data1 is 1-minute. The morning range is the 1-minute bars that close through midday. An early close moves FlatBy. Not yet verified on a chart.
 // Other: mustFlatten is false when the position is flat, so the cover order is sent only while short.
 //
@@ -231,7 +231,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			// CS-7 primitives: protected properties, set in code (never [Input])
 			NoEntryBefore = middayAt(); NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = Cfg.maxEntries;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A249LE", EOrderAction.Buy));

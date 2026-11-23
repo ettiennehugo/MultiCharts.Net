@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Chart is 1-minute. AVWAP from the open is the RTH volume-weighted typical price computed here from 09:30, not the engine slot. 5-minute closes are built from Data1 bar-end times. ATR5 is ATR(14) on Data1, which is ATR of 1-minute bars, not of 5-minute bars. The catalogue text is written for a gap up; a gap down is the mirror. One contract, so branch Hold works a 1R limit and also exits on a close through the AVWAP after 1R; branch Fail targets the prior VAH only.
 //
@@ -175,7 +175,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A213LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A213SE", EOrderAction.SellShort));

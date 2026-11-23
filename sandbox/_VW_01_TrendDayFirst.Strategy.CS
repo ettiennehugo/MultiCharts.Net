@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the 10:30 classification clock is RthStart plus 60 minutes, and the 09:45 side check is RthStart plus 15 minutes. A trend day is at most one close through session VWAP since that clock, and the 30-bar VWAP change is above 0.15 times the 5-bar ATR. The developing-POC migration leg of section 2.2 is not applied, because this file has no developing-POC series. A 5-minute higher low is five 1-minute bars. The session-high target is the RTH high at the signal. The VWAP trail named after that target is not sent, because GX has no VWAP trail.
 //
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			Vwap1Type = EVwapType.Session;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW01LE", EOrderAction.Buy));
 			GxOrderPrefix = "VW01"; createGxOrders();

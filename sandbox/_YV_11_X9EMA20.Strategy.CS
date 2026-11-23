@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the signal bar is five 1-minute bars. A long needs the 9 EMA above the 20 SMA, the close above the 20 SMA, a 5-bar slope of at least 0.10 ATR, and no extension beyond 2 ATR. The RTH open must be at least 0.5 Atr20d above the prior close. The trigger is a doji or a lower tail inside the zone between the two averages. The buy stop is one tick above that bar. Adds are not sent. The short is the mirror. A close back through the 20 SMA exits, which is not a GX trail.
 //
@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 		public _YV_11_X9EMA20(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV11LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV11SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV11LX", EOrderAction.Sell, OrderExit.FromAll));

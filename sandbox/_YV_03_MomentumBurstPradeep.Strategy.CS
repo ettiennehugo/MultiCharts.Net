@@ -83,7 +83,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the market-cap scanner is not available, so the chart is the candidate. A prior session whose absolute return is under 2 percent, then a session that is up at least 4 percent from the prior close within 15 minutes of the session open, buys. The stop is the session low, and it is pulled in to half the day's range when that low is farther than 3 percent. The hold is 4 sessions. A close that gives back half the open gain exits.
 //

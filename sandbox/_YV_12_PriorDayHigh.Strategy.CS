@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
@@ -184,7 +184,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _YV_12_PriorDayHigh(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV12"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12SE", EOrderAction.SellShort)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "YV12"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { m_rthRanges.Clear(); m_tSeen = false; m_pOpen = m_pClose = double.NaN; m_day = DateTime.MinValue; m_restUntil = DateTime.MinValue; m_dayState = "noRthBar"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;   /* Coder 2026-11-22: a recalc reuses this object */
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is a cost audit, not an entry. It does not set Commission or Slippage. ASSUMPTION: the journalled slippage scale is one tick times the ratio of today's 14-bar ATR to the 14-bar ATR of 20 sessions ago, and an unable is a bar whose range is below one tick.
 //
@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		private int m_unables;
 		public _A2_59_KaufmanCostUnables(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

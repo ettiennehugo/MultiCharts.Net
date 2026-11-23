@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This is a definition gate, not an entry. The only confluence coded here is whether the 20-session composite POC is within 2 ticks of session VWAP. The other three catalogue sources (5-session HVN, single-print shelf, stable prior POC) are not counted. C is therefore 0 or 1. No order is sent.
 //

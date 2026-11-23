@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the developing POC is the POC of RangeProfileAfter from the first RTH bar of the session to this bar. The 11:00 clock is RthStart plus 90 minutes. The skew is that POC at least 0.5 sigma above session VWAP. A 5-minute higher low at or below VWAP minus 0.25 sigma buys a stop above the bar. The target is the developing POC.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _VW_06_POCVWAPSkew(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.Session; GxOrderPrefix = "VW06"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW06LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Table; RollTableFromProfile = true; Vwap1Type = EVwapType.Session; GxOrderPrefix = "VW06"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW06LE", EOrderAction.Buy)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

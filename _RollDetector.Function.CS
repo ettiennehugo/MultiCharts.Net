@@ -11,7 +11,7 @@ namespace PowerLanguage.Function
 	//           date), AT MOST ONCE per contract (the first qualifying gap wins), or a change in the instrument name;
 	//           (fix-i: was days 1-21 of Mar/Jun/Sep/Dec, every qualifying gap. An 8-tick ES threshold is below an ordinary
 	//           weekend gap, so every Sunday open of the window passed: 72 detections for ~33 rolls on 1-min @ES 2016-2024.)
-	//   Table:  the first bar of a trading day listed in dates.
+	//   Table:  the first bar of a trading day listed in dates (T-R1: the day-start gap is exposed for the confirmation journal).
 	// The name change is checked on every mode (as before). Step is idempotent per bar number. Pure C# (tests/RollTests).
 	// ============================================================================================
 
@@ -46,11 +46,19 @@ namespace PowerLanguage.Function
 		private DateTime m_openWindow = DateTime.MinValue;
 		private readonly List<KeyValuePair<DateTime, double>> m_dayGaps = new List<KeyValuePair<DateTime, double>>();
 
+		/// <summary>T-R1 (m-instr §7.1 items 2-4, Confirmed by Ettienne 2026-11-22): facts of the trading-day start seen by the last
+		/// Step call. DayStart is true only on the first bar of a new trading day (not the chart's first day); DayGap =
+		/// |open - prior close| in points; DayInTable = Table is on and the day is in dates (that bar is a Table roll). The host
+		/// journals TableSpliceLine on a Table roll bar and OffTableWarning on any other day start. Detection is unchanged.</summary>
+		public bool DayStart, DayInTable;
+		public DateTime DayStartDay = DateTime.MinValue;
+		public double DayGap = double.NaN;
+
 		/// <summary>Bars (as passed to Step) on which a roll was detected, oldest first.</summary>
 		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
 		public int LastRollBar { get { return m_rollBars.Count > 0 ? m_rollBars[m_rollBars.Count - 1] : -1; } }
 
-		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; m_seriesLatch = DateTime.MinValue; LastOpen = LastPrevClose = LastGap = double.NaN; MissedExpiry = MissedGapDay = m_openWindow = DateTime.MinValue; MissedGap = double.NaN; m_dayGaps.Clear(); }
+		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; m_seriesLatch = DateTime.MinValue; LastOpen = LastPrevClose = LastGap = double.NaN; DayStart = DayInTable = false; DayStartDay = DateTime.MinValue; DayGap = double.NaN; MissedExpiry = MissedGapDay = m_openWindow = DateTime.MinValue; MissedGap = double.NaN; m_dayGaps.Clear(); }
 
 		/// <summary>Same cut-over as EventRules.RollRuleMondayFrom (this file must stay MC- and EventRules-free for tests/RollTests).</summary>
 		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 4, 1);
@@ -93,6 +101,33 @@ namespace PowerLanguage.Function
 			return h.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
 		}
 
+		/// <summary>T-R1: g > k x A. False while A is NaN (ATR warm-up) or not positive.</summary>
+		public static bool GapConfirmed(double gap, double atr, double k)
+		{
+			return !double.IsNaN(atr) && atr > 0 && !double.IsNaN(gap) && gap > k * atr;
+		}
+
+		static string num(double v, string fmt) { return double.IsNaN(v) ? "NaN" : v.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture); }
+
+		/// <summary>T-R1 (m-instr §7.1 item 2): the Journal line on every Table roll bar. confirmed(1) when g > k x A, confirmed(0)
+		/// otherwise, confirmed(-) during the ATR(20) warm-up (A NaN; atr20 and gapAtr print NaN). An unconfirmed roll is still a roll.</summary>
+		public static string TableSpliceLine(DateTime tradingDay, double gap, double atr, double k)
+		{
+			bool warm = !double.IsNaN(atr) && atr > 0;
+			return "ROLL table splice(" + tradingDay.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") gapPts(" + num(gap, "0.00")
+				+ ") atr20(" + (warm ? num(atr, "0.00") : "NaN") + ") gapAtr(" + (warm ? num(gap / atr, "0.000") : "NaN") + ") k(" + num(k, "0.0##")
+				+ ") confirmed(" + (warm ? (GapConfirmed(gap, atr, k) ? "1" : "0") : "-") + ")";
+		}
+
+		/// <summary>T-R1 (m-instr §7.1 item 3): the Warning text for a day start that is not a Table date and gaps more than k x A,
+		/// else null. Null during the ATR warm-up (the check is skipped). Never a roll.</summary>
+		public static string OffTableWarning(DateTime tradingDay, double gap, double atr, double k)
+		{
+			if (!GapConfirmed(gap, atr, k)) return null;
+			return "ROLL off-table gap(" + tradingDay.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") gapPts(" + num(gap, "0.00")
+				+ ") atr20(" + num(atr, "0.00") + ") gapAtr(" + num(gap / atr, "0.000") + ") k(" + num(k, "0.0##") + ")";
+		}
+
 		/// <summary>Educator review R1: Series tests only the first bar of each trading-day key. On an INTRADAY chart keyed by
 		/// calendar date that bar is the one after midnight, so the 18:00 ET Globex open gap is never tested (Series is
 		/// effectively blind). Daily and longer bars are fine. Returns the warning text, or null when there is nothing to warn.
@@ -114,11 +149,13 @@ namespace PowerLanguage.Function
 		{
 			if (bar == m_lastBar) return false;
 			m_lastBar = bar;
+			DayStart = DayInTable = false;
 			bool newDay = tradingDay != m_lastDay;
 			bool roll = m_lastName != null && name != m_lastName, bySeries = false;
 			if (newDay && m_lastDay != DateTime.MinValue && bar > 1)
 			{
-				if (table && dates != null && dates.Contains(tradingDay.Date)) roll = true;
+				DayStart = true; DayStartDay = tradingDay.Date; DayGap = Math.Abs(open - prevClose);
+				if (table && dates != null && dates.Contains(tradingDay.Date)) { roll = true; DayInTable = true; }
 				DateTime expiry;
 				bool inWindow = seriesWindow != null ? seriesWindow(tradingDay, out expiry) : SeriesWindow(tradingDay, out expiry);
 				if (series && gapTicks > 0 && inWindow && expiry != m_seriesLatch

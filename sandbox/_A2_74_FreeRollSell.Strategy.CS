@@ -85,7 +85,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading is a scale-out for a host that already has a position, and it needs at least two contracts. This study sends one contract and has no entry. ASSUMPTION: the core Y is 2.5. A host expresses it with GX ScaleOutThenRunner, T1 at 2.5 R, T1ScalePct 50, and BreakEven AfterT1.
 //

@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: one contract stands in for the 2x or 3x sleeve. Long on the first bar of a session whose prior close is above DailyContext.Sma200. Flat when the prior close is back under it. There is no protective stop in the heading; the exit is the trend break.
 //
@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _LE_01_X200DayTrend(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LX", EOrderAction.Sell, OrderExit.FromAll)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LX", EOrderAction.Sell, OrderExit.FromAll)); }
 		protected override void StartCalc() {
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: A down bar closes below its open. A doji has a body of at most 0.1 times its range. The run is five down bars and then a doji. ASSUMPTION: RSI is the simple 10-bar average of up and down closes, and the last run bar must have RSI below 10. One contract. The target is half the run, from the high of the first run bar to the low of the run.
 //
@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		public _A2_68_X5BarRun(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			GxOrderPrefix = "A268"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A268LE", EOrderAction.Buy));
 		}

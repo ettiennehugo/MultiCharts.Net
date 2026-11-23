@@ -76,13 +76,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: M-MTF on Data2.
-// Engine settings enabled: RollDetection = Series. HtfStreams = { 2 }. MaxTradesPerDay = 1.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). HtfStreams = { 2 }. MaxTradesPerDay = 1.
 //
 // ## 16. Pitfalls
 // Lookahead: the drift uses two closed 1-minute bars, and ATR uses HtfClosedBar.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. A splice during the drift window clears the reference and does not enter.
+// Rolls: Table (CME roll-date table). A splice during the drift window clears the reference and does not enter.
 // Data quality: the 15:30 and 15:50 tests use an exact clock match, so a missing bar skips the day. Not yet verified on a chart.
 // Other: the protective stop is sent with the entry. Owner 2026-11-15. Variant B is ReversionTo1645.
 //
@@ -178,7 +178,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			MaxTradesPerDay = 1;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TS03LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "TS03SE", EOrderAction.SellShort));

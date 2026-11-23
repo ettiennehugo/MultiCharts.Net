@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is a router, not an entry. ASSUMPTION: the 11:00 close is the close at RthStart plus 90 minutes, and each efficiency ratio uses 18 five-minute closes built from 1-minute bars. A reading at or above the 70th percentile of the trailing sessions is journalled as continuation, and at or below the 30th as reversion.
 //
@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_fives = new List<double>();
 		private readonly List<double> m_hist = new List<double>();
 		public _A2_61_EfficiencyRatioSession(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;

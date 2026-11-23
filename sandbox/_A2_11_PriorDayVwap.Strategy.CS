@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Chart is 1-minute. pdVWAP is CurrentVwap1 (Vwap1Type Session) latched when Session.rthComplete first becomes true. 15-minute and 5-minute closes are built from Data1 bar-end times, not from extra series. A higher low is the first 5-minute bar whose low is above both pdVWAP and the prior 5-minute low. The 1-minute break of structure is a 1-minute close above that 5-minute bar's high. The target is the nearer of prior RTH high and prior VAH, and the trade is skipped when that distance is under 1R.
 //
@@ -178,7 +178,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			GxOrderPrefix = "A211"; createGxOrders();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			FlatBy = new TimeSpan(15, 55, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A211LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A211LX", EOrderAction.Sell));

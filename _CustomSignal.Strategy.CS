@@ -2261,6 +2261,17 @@ namespace PowerLanguage.Strategy
 		protected bool applyRollGapCalibration = false;
 		/// <summary>VPF-4 Table: trading dates (tradingDayKey) on which the continuous series switched contract (set by the strategy).</summary>
 		protected HashSet<DateTime> RollDates { get; } = new HashSet<DateTime>();
+		/// <summary>T-R1 (m-instr §7.1 item 4, k = 1.0 Confirmed by Ettienne 2026-11-22): factor on the detector's Globex-day
+		/// ATR(20) (RollGapCalibrator.Atr) for the Table confirmation flag and the off-table Warning. Not an [Input].</summary>
+		protected double RollGapAtrK = 1.0;
+		/// <summary>T-R2 (m-instr §7.1 item 10): when true and RollDetection is Table / SeriesOrTable, the base StartCalc clears
+		/// RollDates and fills it from the Data1 profile (fillProfileRollDates(RollTableFromYear, RollTableToYear, "ROLL")).
+		/// An explicit per-study switch (the sandbox studies set it in Create), not an auto-fill: a Table host that leaves it
+		/// false and RollDates empty still throws (T-R1b). Not an [Input].</summary>
+		protected bool RollTableFromProfile = false;
+		/// <summary>T-R2: fixed contract years for RollTableFromProfile (as RegimeGate HostConfig.rollFromYear / rollToYear,
+		/// 2000-2035; ES digest fdd63bd8f179a8d4). Fixed years work for every request type and keep the digest stable. Not [Input]s.</summary>
+		protected int RollTableFromYear = 2000, RollTableToYear = 2035;
 
 		private readonly _RollDetector m_rollDet = new _RollDetector();
 		private readonly RollGapCalibrator m_gapCal = new RollGapCalibrator();
@@ -2294,7 +2305,50 @@ namespace PowerLanguage.Strategy
 			m_rollWarned = false;
 			m_rollGlobexKey = false;
 			RollSpliceDiag = null;
+			m_rollTableChecked = false;
+			m_rollGapBar = -1;
 			bindRollWindow();   // M5: Series on a profile without roll facts throws here (StartCalc), after buildProfiles
+			if (RollTableFromProfile && (RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable))
+			{
+				RollDates.Clear();
+				int skipped = 0;
+				if (m_instr == null) fillProfileRollDates(RollTableFromYear, RollTableToYear, "ROLL");   // no profile: the ES quarterly EventRules table
+				else
+				{
+					// a profile without roll facts throws unknown-field:roll (S5). Product calendars (CL / GC / ZN / 6E) are verified
+					// 2016-2026 only, so their contract months outside it are skipped rather than refused (CollectCoveredRollDates).
+					InstrumentProfile rp = InstrumentProfileOf(1);
+					Action<string> rerr = msg => traceAlways(ETraceLevel.Error, rp == null ? null : rp.name, msg);
+					skipped = InstrumentRules.CollectCoveredRollDates(rp, RollTableFromYear, RollTableToYear, "ROLL", rerr, RollDates);
+				}
+				if (traceOn(ETraceLevel.Info))
+				{
+					DateTime lo = DateTime.MaxValue, hi = DateTime.MinValue;
+					foreach (DateTime d in RollDates) { if (d < lo) lo = d; if (d > hi) hi = d; }
+					trace(ETraceLevel.Info, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+						"CFG ROLL table({0} dates {1:yyyy-MM-dd}..{2:yyyy-MM-dd}, contract years {3}-{4}, {5} months outside the product calendar skipped, digest {6}) k({7:0.0##}) mode({8})",
+						RollDates.Count, lo, hi, RollTableFromYear, RollTableToYear, skipped, _RollDetector.DatesDigest(RollDates), RollGapAtrK, RollDetection));
+				}
+			}
+		}
+
+		private bool m_rollTableChecked;
+		private int m_rollGapBar = -1;
+		/// <summary>T-R1b (m-instr §7.1 item 5, Confirmed by Ettienne 2026-11-22): Table / SeriesOrTable on a futures stream with an
+		/// empty RollDates set logs an Error and throws unknown-field:roll at the first closed bar. No auto-fill.</summary>
+		private void requireRollTable()
+		{
+			if (m_rollTableChecked) return;
+			m_rollTableChecked = true;
+			if (!m_rollDet.table || RollDates.Count > 0 || !isFuturesCategory(Bars.Info.Category)) return;
+			string detail = "RollDetection " + RollDetection + " with an empty RollDates set: no Table roll can fire";
+			string action = "fill RollDates in StartCalc (RollTableFromProfile = true, or fillProfileRollDates); there is no auto-fill";
+			InstrumentProfile p = InstrumentProfileOf(1);
+			Action<string> err = msg => traceAlways(ETraceLevel.Error, Bars.Info.Name, msg);
+			if (p != null) InstrumentError.Fail(err, p.Subject("ROLL"), InstrumentReason.UnknownField("roll"), detail, action);
+			string text = InstrumentReason.UnknownField("roll") + ": " + detail + "; " + action;
+			err(text);
+			throw new InvalidOperationException(text);
 		}
 
 		// settings are read live (derived StartCalc may set them after base.StartCalc, as VPF-4 allowed)
@@ -2394,6 +2448,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (Bars.Status != EBarState.Close) return;
 			configureRollDetector();
+			requireRollTable();
 			if (!m_rollWarned)
 			{
 				// educator review R1: Series is blind on intraday calendar-keyed charts. calendarKeyed probe: 01:00 and 20:00 of the
@@ -2412,10 +2467,10 @@ namespace PowerLanguage.Strategy
 			string name = Bars.Info.Name;
 			if (m_rollGlobexKey && m_rollEtTz == null) m_rollEtTz = findTz("Eastern Standard Time");
 			DateTime day = m_rollGlobexKey ? _CmeSessionClock.GlobexTradingDayEt(ToZone(Bars.Time[0], m_rollEtTz)) : tradingDayKey(Bars.Time[0]);
-			if (m_rollDet.series)
+			if (m_rollDet.series || m_rollDet.table)   // T-R1: Table feeds the Globex-day ATR(20) too (confirmation / off-table Warning)
 			{
 				m_gapCal.AddBar(day, Bars.High[0], Bars.Low[0], Bars.Close[0]);
-				if (!m_gapLogged)
+				if (m_rollDet.series && !m_gapLogged)
 				{
 					double tkLog = tickSize();
 					int calTicks = RollGapCalibrator.Ticks(m_gapCal.Atr, tkLog);
@@ -2435,6 +2490,21 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Warning, string.Format(System.Globalization.CultureInfo.InvariantCulture,
 					"ROLL no Series splice for the {0:yyyy-MM-dd} contract: no trading-day first-bar gap >= {1} ticks in its roll window (largest of the last ten day starts {2:0.00} pts on {3:yyyy-MM-dd}); roll consumers did not reset. Check the continuous series splice for {4}.",
 					m_rollDet.MissedExpiry, RollGapTicks, m_rollDet.MissedGap, m_rollDet.MissedGapDay, name));
+			if (m_rollDet.table && m_rollDet.DayStart && bar != m_rollGapBar)
+			{
+				m_rollGapBar = bar;   // stepRollDetector runs more than once per bar (Step is idempotent; the journal must be too)
+				// T-R1: A = ATR(20) of the completed Globex days before this one (AddBar above commits the prior day on this bar)
+				double atrA = m_gapCal.Atr;
+				if (m_rollDet.DayInTable)
+				{
+					if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, _RollDetector.TableSpliceLine(m_rollDet.DayStartDay, m_rollDet.DayGap, atrA, RollGapAtrK));
+				}
+				else if (traceOn(ETraceLevel.Warning))
+				{
+					string off = _RollDetector.OffTableWarning(m_rollDet.DayStartDay, m_rollDet.DayGap, atrA, RollGapAtrK);
+					if (off != null) trace(ETraceLevel.Warning, off + " name(" + name + "): not a roll; check the continuous series splice");
+				}
+			}
 			if (stepped)
 			{
 				double tk = tickSize(), g = m_rollDet.LastGap;

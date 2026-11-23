@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: after RthStart plus 90 minutes, if the developing shape is P, a 1-minute low that undercuts a 5-minute swing low by 1 to 4 ticks and closes back above it buys. The delta comparison is CumDelta being less negative than at the swing bar. If CumDelta is not a number the bar is skipped. The stop is the sweep low. The target is the developing POC.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
 		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _PS_18_PBProfile(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS18"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS18LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "PS18"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS18LE", EOrderAction.Buy)); }
 		protected override void StartCalc()
 		{
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start

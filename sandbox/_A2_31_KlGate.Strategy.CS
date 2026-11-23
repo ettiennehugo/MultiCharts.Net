@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This row is a session classifier, not an entry. At 12:00 it journals D_KL from _ProfileStats.KL between today's developing RTH bars and the prior RTH session. It does not send an order. Thresholds are the catalogue default 0.15 and 0.60.
 //

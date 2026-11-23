@@ -95,6 +95,7 @@ static class Program
 		}
 		FixI();
 		CalibFit();
+		TableJournal();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -390,5 +391,129 @@ static class Program
 		Check(fitted == RollGapCalibrator.C && medTicks == 8, "M9 C is 8 × 0.25 / the upper central ATR, and that day rounds to 8");
 		var det = new _RollDetector { series = true };
 		Check(det.gapTicks == 8 && !cal.Apply, "M9 series b does not change the detector gap (still 8, apply off)");
+	}
+
+	// ---- T-R1 / T-R1b (m-instr §7.1 items 2-5, Confirmed by Ettienne 2026-11-22): Table roll journal ----
+	struct DB { public int bar; public DateTime day; public double o, h, l, c; }
+
+	/// <summary>One bar per Globex trading day (weekdays from..to): open = prior close + gap(day), high/low = open ± 30, close = open.</summary>
+	static List<DB> Daily(DateTime from, DateTime to, Func<DateTime, double> gap)
+	{
+		var l = new List<DB>(); double px = 5200; int bar = 1;
+		for (DateTime d = from; d <= to; d = d.AddDays(1))
+		{
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+			double o = px + (l.Count > 0 ? gap(d) : 0);
+			l.Add(new DB { bar = bar++, day = d, o = o, h = o + 30, l = o - 30, c = o });
+			px = o;
+		}
+		return l;
+	}
+
+	/// <summary>The _CustomSignal.stepRollDetector order: calibrator first (commits the prior day), then Step, then the Table
+	/// journal (TableSpliceLine on a Table roll bar, OffTableWarning on any other day start). Each bar is stepped twice, as the host can.</summary>
+	static List<int> HostTable(List<DB> bars, HashSet<DateTime> dates, double k, List<string> journal, List<string> warnings)
+	{
+		var det = new _RollDetector { table = true, dates = dates };
+		var cal = new RollGapCalibrator();
+		var rolls = new List<int>(); int lastJournal = -1;
+		for (int i = 0; i < bars.Count; i++)
+			for (int rep = 0; rep < 2; rep++)
+			{
+				DB b = bars[i];
+				cal.AddBar(b.day, b.h, b.l, b.c);
+				if (det.Step(b.bar, b.day, b.o, i > 0 ? bars[i - 1].c : double.NaN, "@MES", 0.25)) rolls.Add(b.bar);
+				if (det.DayStart && b.bar != lastJournal)
+				{
+					lastJournal = b.bar;
+					if (det.DayInTable) journal.Add(_RollDetector.TableSpliceLine(det.DayStartDay, det.DayGap, cal.Atr, k));
+					else { string w = _RollDetector.OffTableWarning(det.DayStartDay, det.DayGap, cal.Atr, k); if (w != null) warnings.Add(w); }
+				}
+			}
+		return rolls;
+	}
+
+	static int BarOf(List<DB> bars, DateTime d) { foreach (var b in bars) if (b.day == d) return b.bar; return -1; }
+
+	static void TableJournal()
+	{
+		var d0613 = new DateTime(2024, 6, 13); var d0617 = new DateTime(2024, 6, 17);
+		// the 2024 June table date is the Monday before the 06-21 expiry (EventRules.RollDate: expiry - 4 from 2022-04)
+		Check(_RollDetector.ThirdFriday(2024, 6) == new DateTime(2024, 6, 21) && _RollDetector.ThirdFriday(2024, 6).AddDays(-4) == d0617, "T-R1 ESM24 / MESM24 table date 2024-06-17");
+		var table = new HashSet<DateTime> { new DateTime(2024, 3, 11), d0617, new DateTime(2024, 9, 16) };
+
+		// 1. MES June 2024 (Analyst MES run): the data splices on trading day 2024-06-13 (Thursday, the 06-12 18:00 ET open; +70 pts,
+		// about 1.2 x ATR(20)). The roll resolves to the table date 06-17: one roll there (confirmed(0): an ordinary 0.5 pt gap),
+		// none on 06-13, which logs the off-table Warning instead.
+		{
+			var bars = Daily(new DateTime(2024, 3, 18), new DateTime(2024, 6, 28), d => d == d0613 ? 70 : 0.5);
+			var j = new List<string>(); var w = new List<string>();
+			var rolls = HostTable(bars, table, 1.0, j, w);
+			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617), "T-R1 MES June 2024: the 06-13 data splice resolves to the table date 06-17 (one roll, on 06-17) [" + string.Join(",", rolls) + "]");
+			Check(j.Count == 1 && j[0].StartsWith("ROLL table splice(2024-06-17) gapPts(0.50) atr20(") && j[0].EndsWith(") k(1.0) confirmed(0)"), "T-R1 MES 06-17 table line, unconfirmed (" + string.Join(" | ", j) + ")");
+			Check(w.Count == 1 && w[0].StartsWith("ROLL off-table gap(2024-06-13) gapPts(70.00) atr20(") && w[0].EndsWith(" k(1.0)"), "T-R1 MES 06-13 off-table Warning (" + string.Join(" | ", w) + ")");
+			var m = Regex.Match(j.Count > 0 ? j[0] : "", @"atr20\(([0-9.]+)\) gapAtr\(([0-9.]+)\)");
+			Check(m.Success && double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) is double a20 && a20 > 60 && a20 < 65 && m.Groups[2].Value == "0.008", "T-R1 table line prints A (ATR(20) 60-65: the 06-13 splice's range is in it) and g / A (" + (j.Count > 0 ? j[0] : "") + ")");
+			// the Table splice set is unchanged by the journal: the same detector with no host journal gives the same rolls
+			var plain = new _RollDetector { table = true, dates = table }; var pr = new List<int>();
+			for (int i = 0; i < bars.Count; i++) if (plain.Step(bars[i].bar, bars[i].day, bars[i].o, i > 0 ? bars[i - 1].c : double.NaN, "@MES", 0.25)) pr.Add(bars[i].bar);
+			Check(pr.SequenceEqual(rolls), "T-R1 Table splice set unchanged by the confirmation journal");
+		}
+		// 2. the splice on the table date: confirmed(1), no Warning
+		{
+			var bars = Daily(new DateTime(2024, 3, 18), new DateTime(2024, 6, 28), d => d == d0617 ? 70 : 0.5);
+			var j = new List<string>(); var w = new List<string>();
+			var rolls = HostTable(bars, table, 1.0, j, w);
+			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617) && j.Count == 1 && j[0].Contains("splice(2024-06-17) gapPts(70.00)") && j[0].EndsWith("confirmed(1)") && w.Count == 0,
+				"T-R1 a > k x A gap on the table date is confirmed(1) and warns nothing (" + string.Join(" | ", j) + ")");
+			var j2 = new List<string>(); var w2 = new List<string>();
+			HostTable(bars, table, 2.0, j2, w2);
+			Check(j2.Count == 1 && j2[0].EndsWith("k(2.0) confirmed(0)"), "T-R1 k is applied (k = 2: 70 pts < 2 x ATR -> confirmed(0))");
+		}
+		// 3. ATR warm-up: fewer than 20 true ranges before 06-13 / 06-17. The table roll still fires, prints NaN and confirmed(-);
+		// the off-table check is skipped, so the 06-13 splice warns nothing.
+		{
+			var bars = Daily(new DateTime(2024, 5, 27), new DateTime(2024, 6, 28), d => d == d0613 ? 70 : 0.5);
+			var j = new List<string>(); var w = new List<string>();
+			var rolls = HostTable(bars, table, 1.0, j, w);
+			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617), "T-R1 warm-up: the table roll still fires");
+			Check(j.Count == 1 && j[0] == "ROLL table splice(2024-06-17) gapPts(0.50) atr20(NaN) gapAtr(NaN) k(1.0) confirmed(-)", "T-R1 warm-up line (" + string.Join(" | ", j) + ")");
+			Check(w.Count == 0, "T-R1 warm-up: no off-table Warning");
+		}
+		// 4. thresholds and formats
+		Check(!_RollDetector.GapConfirmed(60, 60, 1.0) && _RollDetector.GapConfirmed(60.01, 60, 1.0) && !_RollDetector.GapConfirmed(100, double.NaN, 1.0) && !_RollDetector.GapConfirmed(100, 0, 1.0),
+			"T-R1 confirmed = g > k x A (strict), never while A is NaN or 0");
+		Check(_RollDetector.OffTableWarning(new DateTime(2024, 6, 13), 60, 60, 1.0) == null
+			&& _RollDetector.OffTableWarning(new DateTime(2024, 6, 13), 90, 60, 1.0) == "ROLL off-table gap(2024-06-13) gapPts(90.00) atr20(60.00) gapAtr(1.500) k(1.0)",
+			"T-R1 off-table Warning text and threshold");
+		Check(_RollDetector.TableSpliceLine(new DateTime(2024, 6, 17), 64, 50, 1.0) == "ROLL table splice(2024-06-17) gapPts(64.00) atr20(50.00) gapAtr(1.280) k(1.0) confirmed(1)", "T-R1 table line format");
+		// 5. DayStart facts reset on a non-start bar; Series-only keeps DayInTable false
+		{
+			var det = new _RollDetector { series = true, dates = table };
+			det.Step(1, new DateTime(2024, 6, 14), 100, 100, "@MES", 0.25); det.Step(2, d0617, 101, 100, "@MES", 0.25);
+			bool start = det.DayStart && !det.DayInTable && det.DayGap == 1;
+			det.Step(3, d0617, 101, 101, "@MES", 0.25);
+			Check(start && !det.DayStart, "T-R1 DayStart only on a day's first bar; DayInTable needs Table");
+		}
+
+		// 6. host source pins (no suite compiles _CustomSignal against MC): k = 1.0, calibrator fed in Table mode, the journal and
+		// Warning levels, T-R1b empty-table throw at the first closed bar, and the fixed-year profile fill.
+		{
+			string path = null;
+			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			Check(Regex.IsMatch(src, @"protected\s+double\s+RollGapAtrK\s*=\s*1\.0\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollGapAtrK"), "T-R1 RollGapAtrK = 1.0, not an [Input]");
+			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.series\s*\|\|\s*m_rollDet\.table\)\s*\{\s*m_gapCal\.AddBar\("), "T-R1 the ATR(20) calibrator is fed in Table mode too");
+			Check(Regex.IsMatch(src, @"trace\(ETraceLevel\.Journal,\s*_RollDetector\.TableSpliceLine\(m_rollDet\.DayStartDay,\s*m_rollDet\.DayGap,\s*atrA,\s*RollGapAtrK\)\)")
+				&& Regex.IsMatch(src, @"_RollDetector\.OffTableWarning\(m_rollDet\.DayStartDay,\s*m_rollDet\.DayGap,\s*atrA,\s*RollGapAtrK\)") && Regex.IsMatch(src, @"trace\(ETraceLevel\.Warning,\s*off\s*\+"),
+				"T-R1 table line at Journal, off-table line at Warning, both with RollGapAtrK");
+			Check(Regex.IsMatch(src, @"configureRollDetector\(\);\s*requireRollTable\(\);")
+				&& Regex.IsMatch(src, @"if\s*\(!m_rollDet\.table\s*\|\|\s*RollDates\.Count\s*>\s*0\s*\|\|\s*!isFuturesCategory\(Bars\.Info\.Category\)\)\s*return;")
+				&& src.Contains("InstrumentReason.UnknownField(\"roll\")") && Regex.IsMatch(src, @"throw\s+new\s+InvalidOperationException\(text\)"),
+				"T-R1b Table / SeriesOrTable with an empty RollDates on futures: Error + unknown-field:roll at the first closed bar");
+			Check(Regex.IsMatch(src, @"protected\s+int\s+RollTableFromYear\s*=\s*2000,\s*RollTableToYear\s*=\s*2035\s*;") && Regex.IsMatch(src, @"protected\s+bool\s+RollTableFromProfile\s*=\s*false\s*;")
+				&& Regex.IsMatch(src, @"InstrumentRules\.CollectCoveredRollDates\(rp,\s*RollTableFromYear,\s*RollTableToYear,\s*""ROLL"""),
+				"T-R2 fixed contract years 2000-2035 (not [Input]s); the profile fill is opt-in per study (no auto-fill)");
+		}
 	}
 }

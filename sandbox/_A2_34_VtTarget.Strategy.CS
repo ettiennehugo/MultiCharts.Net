@@ -84,7 +84,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue trades this only after an event study passes, and only as a runner target. This file journals the top V/T price from the prior RTH session via _ProfileStats and does not send an order. T(p) is minutes of 1-minute bars, which is the window-M definition.
 //
