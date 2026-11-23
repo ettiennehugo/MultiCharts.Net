@@ -128,14 +128,16 @@ static partial class Program
 		Check(bad == 0, "DV-T15 shuffled future: " + ts.Length + " t, " + bad + " differ");
 	}
 
-	// DV-T16: rolls. Windows containing a splice are skipped, a window starting on the roll bar is clean, fits resume after n
-	// post-roll bars, skipShare exact and diagnosticOnly at 0.30 +- one window, ATR ResetPrev on the roll bar.
+	// DV-T16: rolls (DV-7.1 as amended by Ettienne 2026-11-23 14:09 CT). A window with a roll bar at i in [1, n-1] is truncated to
+	// start on that roll bar and fitted once RollMin = 60 post-roll bars have accrued (n = bars since the roll, growing to winLen);
+	// with fewer it is skipped. A window starting on the roll bar is clean. skipShare exact and diagnosticOnly at 0.30 +- one
+	// window, ATR ResetPrev on the roll bar.
 	static void T16()
 	{
 		const int n = 240; int[] rolls = { 1800, 3600 };
 		bool[] hd; RingBar[] s = Series(5000, 16, rolls, null, out hd);
 		var rig = new Rig(Cfg(n), true, false);
-		int wrongSkip = 0, wrongValid = 0, startOnRoll = 0, firstAfter = -1;
+		int wrongSkip = 0, wrongValid = 0, startOnRoll = 0, firstAfter = -1, wrongN = 0, trunc = 0; int rm = DvpConst.RollMinBars;
 		var atr = new Gate0Atr(DvpConst.AtrLen); int atrBad = 0;
 		for (int i = 0; i < s.Length; i++)
 		{
@@ -145,32 +147,37 @@ static partial class Program
 			DvpSnapshot x = rig.e.SnapshotRaw(1, rig.ring, 0);   // window ends at e = i (serves bar i+1)
 			if (BitConverter.DoubleToInt64Bits(x.atr) != BitConverter.DoubleToInt64Bits(atr.Value)) atrBad++;
 			if (i < n - 1) continue;
-			bool cross = rolls.Any(R => R >= i - n + 2 && R <= i);
+			int[] inWin = rolls.Where(R => R >= i - n + 2 && R <= i).ToArray();
+			int since = inWin.Length == 0 ? -1 : i - inWin.Max() + 1;
+			bool cross = since >= 0 && since < rm;
 			if (x.crossesRoll != cross) wrongSkip++;
 			if (x.valid == cross) wrongValid++;
-			if (rolls.Any(R => i == R + n - 1) && x.valid) startOnRoll++;
+			if (x.valid && (x.n != (since >= 0 ? since : n) || x.rollTruncated != (since >= 0))) wrongN++;
+			if (x.valid && x.rollTruncated) trunc++;
+			if (rolls.Any(R => i == R + n - 1) && x.valid && x.n == n && !x.rollTruncated) startOnRoll++;
 			if (i > 1800 && firstAfter < 0 && x.valid) firstAfter = i;
 			if (cross && (rig.e.Snapshot(1, rig.ring, 0) != null || rig.e.RailsOf(1, rig.ring, 0) != null)) wrongValid++;
 		}
-		Check(wrongSkip == 0 && wrongValid == 0, "DV-T16 crossesRoll iff a roll bar is at i in [1, n-1] of the window; skipped windows have no rails (" + wrongSkip + "/" + wrongValid + ")");
-		Check(startOnRoll == 2, "DV-T16 a window starting on the roll bar is clean (" + startOnRoll + "/2)");
-		Check(firstAfter == 1800 + n - 1, "DV-T16 fits resume once n post-roll bars have accrued (first at " + firstAfter + ")");
+		Check(wrongSkip == 0 && wrongValid == 0, "DV-T16 skipped (crossesRoll) iff the newest roll bar in [1, n-1] has < 60 post-roll bars; skipped windows have no rails (" + wrongSkip + "/" + wrongValid + ")");
+		Check(wrongN == 0 && trunc == 2 * (n - rm), "DV-T16 truncated windows: n = bars since the roll bar (60..239), winEff flag set; " + trunc + " truncated, " + wrongN + " wrong");
+		Check(startOnRoll == 2, "DV-T16 a window starting on the roll bar is clean and full (" + startOnRoll + "/2)");
+		Check(firstAfter == 1800 + rm - 1, "DV-T16 fits resume once RollMinBars = 60 post-roll bars have accrued (first at " + firstAfter + ")");
 		DvpStream st = rig.S;
-		Check(st.Skipped == 2 * (n - 1) && st.Eligible == s.Length - (n - 1) && st.SkipShare == (double)(2 * (n - 1)) / (s.Length - (n - 1)) && !st.DiagnosticOnly,
-			"DV-T16 skipShare = 2(n-1)/eligible (" + st.Skipped + "/" + st.Eligible + ")");
+		Check(st.Skipped == 2 * (rm - 1) && st.Truncated == 2 * (n - rm) && st.Eligible == s.Length - (n - 1) && st.SkipShare == (double)(2 * (rm - 1)) / (s.Length - (n - 1)) && !st.DiagnosticOnly,
+			"DV-T16 skipShare = 2(60-1)/eligible, truncated = 2(n-60) (" + st.Skipped + "/" + st.Truncated + "/" + st.Eligible + ")");
 		Check(atrBad == 0, "DV-T16 ATR(20) as of t-1 with ResetPrev on the roll bar (" + atrBad + " differ)");
 		var noReset = new Gate0Atr(DvpConst.AtrLen); for (int i = 0; i <= 1800; i++) noReset.Add(s[i].h, s[i].l, s[i].c);
 		var rs = new Rig(Cfg(n), true, false); for (int i = 0; i <= 1800; i++) rs.Feed(s[i], false);
 		Check(rs.e.SnapshotRaw(1, rs.ring, 0).atr < noReset.Value, "DV-T16 ResetPrev drops the splice gap from the roll bar's true range");
-		// diagnosticOnly at 0.30 +- one window: skipped = 478; eligible 1590 -> 0.3006 (diagnostic), 1600 -> 0.29875 (not)
-		foreach (int E in new[] { 1590, 1600 })
+		// diagnosticOnly at 0.30 +- one window: skipped = 2 x 59 = 118; eligible 393 -> 0.3003 (diagnostic), 394 -> 0.2995 (not)
+		foreach (int E in new[] { 393, 394 })
 		{
-			bool[] h2; RingBar[] s2 = Series(E + n - 1, 30, new[] { 400, 1000 }, null, out h2);
+			bool[] h2; RingBar[] s2 = Series(E + n - 1, 30, new[] { 300, 500 }, null, out h2);
 			var r2 = new Rig(Cfg(n), true, false); for (int i = 0; i < s2.Length; i++) r2.Feed(s2[i], false);
-			Check(r2.S.Eligible == E && r2.S.DiagnosticOnly == (E == 1590), "DV-T16 diagnosticOnly at skipShare " + r2.S.SkipShare.ToString("0.0000", CI) + " = " + r2.S.DiagnosticOnly);
+			Check(r2.S.Eligible == E && r2.S.Skipped == 118 && r2.S.DiagnosticOnly == (E == 393), "DV-T16 diagnosticOnly at skipShare " + r2.S.SkipShare.ToString("0.0000", CI) + " = " + r2.S.DiagnosticOnly);
 		}
 		var rr = new Rig(Cfg(n, 3), true, false); for (int i = 0; i < s.Length; i++) rr.Feed(s[i], false);
-		Check(rr.S.Skipped > 0 && rr.S.Skipped <= 2 * (n - 1 + 2), "DV-T16 skip counting with refitEvery = 3 (" + rr.S.Skipped + ")");
+		Check(rr.S.Skipped > 0 && rr.S.Skipped <= 2 * (rm - 1 + 2) && rr.S.Truncated > 0, "DV-T16 skip counting with refitEvery = 3 (" + rr.S.Skipped + " skipped, " + rr.S.Truncated + " truncated)");
 	}
 
 	// rollOn(1) -> RingBar.rollBar: the host's ringBarOf sets rollBar = (ago == 0 && rollOn(ds)) and rollOn(1) is
@@ -203,6 +210,54 @@ static partial class Program
 	}
 
 	// DV-T16b: journal-on and journal-off runs, and random query patterns, give identical snapshots, endpointDrift and skipShare.
+	// DV-7.1 truncation (Ettienne 2026-11-23 14:09 CT): constants, a late switch (13:31 CT re-reset: roll flags on the reopen AND the
+	// switch bar) counts the 60 bars from the switch, the truncated fit equals an independent fit on the post-roll bars (degree cap
+	// Cap(n), sigma bit-identical), winLen < 60 waits winLen, the journal shows DVP ROLL warmup / resume, winEff(n) and truncated().
+	static void T16Trunc()
+	{
+		Check(DvpConst.RollMinBars == 60 && Cfg().Canon().Contains(";rollMinBars=60;"), "DV-1.10 RollMinBars = 60 is a constant hashed in Canon()");
+		const int n = 240; int reopen = 1800, sw = 1830; int rm = DvpConst.RollMinBars;
+		bool[] hd; RingBar[] s = Series(2400, 41, new[] { reopen, sw }, null, out hd);
+		var rig = new Rig(Cfg(n), true, true);
+		int firstValid = -1, badFit = 0, capBad = 0; var f = new DvpFit(n); double[] y = new double[n], v = new double[n];
+		for (int i = 0; i < s.Length; i++)
+		{
+			rig.Feed(s[i], hd[i]);
+			if (i <= reopen) continue;
+			DvpSnapshot x = rig.e.SnapshotRaw(1, rig.ring, 0);
+			if (x == null || !x.valid) continue;
+			if (firstValid < 0) firstValid = i;
+			if (i < sw + n - 1)
+			{
+				int m = i - sw + 1;
+				for (int k = 0; k < m; k++) { RingBar b = s[sw + k]; y[k] = (b.h + b.l) / 2; v[k] = b.v; }
+				f.Fit(y, v, m, 3, false); f.Choose(x.deg, false);
+				if (x.n != m || !x.rollTruncated || x.sigma != f.SigmaD) badFit++;
+				if (x.dCap > DvpDegree.Cap(m, 3) || x.deg > x.dCap) capBad++;
+			}
+		}
+		Check(firstValid == sw + rm - 1, "DV-7.1 late switch: the 60 post-roll bars count from the switch bar (first fit at " + firstValid + ", want " + (sw + rm - 1) + ")");
+		Check(badFit == 0 && capBad == 0, "DV-7.1 truncated fits = an independent fit on the post-switch bars only (n, sigma bit-identical; dCap = Cap(n)) (" + badFit + "/" + capBad + ")");
+		var j = rig.journal;
+		string warm = j.FirstOrDefault(l => l.StartsWith("DVP ROLL warmup", StringComparison.Ordinal)), res = j.FirstOrDefault(l => l.StartsWith("DVP ROLL resume", StringComparison.Ordinal));
+		Check(j.Count(l => l.StartsWith("DVP ROLL warmup", StringComparison.Ordinal)) == 2 && warm != null && warm.Contains("winLen(240) rollMinBars(60)")
+			&& j.Count(l => l.StartsWith("DVP ROLL resume", StringComparison.Ordinal)) == 1 && res != null && res.EndsWith("winEff(60) winLen(240)"),
+			"DV-11.1 journal: DVP ROLL warmup on each roll bar, one DVP ROLL resume with winEff(60): " + res);
+		Check(j.Any(l => l.StartsWith("DVP FIT", StringComparison.Ordinal) && l.Contains("crossesRoll(0) winEff(60)")) && !j.Any(l => l.Contains("crossesRoll(1) winEff(")),
+			"DV-11.1 FIT lines: winEff(n) on truncated fits only");
+		rig.e.Finish();
+		string run = rig.journal.LastOrDefault(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) ?? "";
+		Check(run.Contains(" skipped(" + (sw - (reopen + 1) + 1 + rm - 1) + ") truncated(" + (n - rm) + ") "), "DV-11.3 DVP RUN skipped()/truncated(): " + run);
+		var rq = new Rig(Cfg(n, 1, false), true, true); for (int i = 0; i < s.Length; i++) rq.Feed(s[i], hd[i]);
+		Check(rq.journal.Count(l => l.StartsWith("DVP ROLL warmup", StringComparison.Ordinal)) == 2 && rq.journal.Count(l => l.StartsWith("DVP ROLL resume", StringComparison.Ordinal)) == 1
+			&& !rq.journal.Any(l => l.StartsWith("DVP FIT", StringComparison.Ordinal)), "DV-11.1 DVP ROLL warmup / resume lines do not need journalFits (sandbox: FIT lines are Verbose)");
+		// winLen 40 < 60: RollMin = winLen, so the first fit after the roll is the clean window starting on the roll bar
+		bool[] h2; RingBar[] s2 = Series(400, 5, new[] { 200 }, null, out h2);
+		var r2 = new Rig(Cfg(40), true, false); int fv = -1;
+		for (int i = 0; i < s2.Length; i++) { r2.Feed(s2[i], false); var x = r2.e.SnapshotRaw(1, r2.ring, 0); if (i > 200 && fv < 0 && x != null && x.valid) fv = i; }
+		Check(r2.S.RollMin == 40 && fv == 200 + 40 - 1, "DV-7.1 winLen 40 < RollMinBars: RollMin = winLen, fits resume at the clean window (" + fv + ")");
+	}
+
 	static void T16b()
 	{
 		bool[] hd; RingBar[] s = Series(4000, 161, new[] { 1700, 3300 }, new[] { 10 }, out hd);
@@ -445,7 +500,7 @@ static partial class Program
 	// DV-R1: golden journal. 15m, 10,000 bars (rev 6, PR-D9: long enough under the default SelfCalibrate config to leave warm-up
 	// and contain a later recheck), two splices. The test regenerates the full series and every DVP FIT and DVP DEGREE line
 	// deterministically and checks their SHA-256 against fixtures/golden.sha256; the committed fixtures/golden_fit_sample.txt
-	// (every 20th FIT line, the lines on either side of each crossesRoll transition, and every DVP DEGREE line) must appear
+	// (every 20th FIT line, the lines on either side of each skipped / truncated / full transition at a roll, and every DVP DEGREE line) must appear
 	// byte-identical, so a mismatch shows readable lines. DVP_WRITE_GOLDEN=1 rewrites the sample and the hashes;
 	// DVP_WRITE_FULL=<dir> also dumps the full series csv and FIT journal there for inspection (not committed).
 	static void R1()
@@ -471,8 +526,9 @@ static partial class Program
 		var sample = new StringBuilder();
 		for (int i = 0; i < fit.Count; i++)
 		{
-			bool cr = fit[i].Contains("crossesRoll(1)");
-			bool edge = (i > 0 && fit[i - 1].Contains("crossesRoll(1)") != cr) || (i + 1 < fit.Count && fit[i + 1].Contains("crossesRoll(1)") != cr);
+			Func<string, int> kind = l => l.Contains("crossesRoll(1)") ? 2 : l.Contains(" winEff(") ? 1 : 0;   // skipped / truncated at a roll (DV-7.1, 14:09 CT) / full
+			int cr = kind(fit[i]);
+			bool edge = (i > 0 && kind(fit[i - 1]) != cr) || (i + 1 < fit.Count && kind(fit[i + 1]) != cr);
 			if (i % 20 == 0 || edge || i == fit.Count - 1) sample.Append(i.ToString(CI)).Append('\t').Append(fit[i]).Append('\n');
 		}
 		for (int i = 0; i < deg.Count; i++) sample.Append("deg").Append(i.ToString(CI)).Append('\t').Append(deg[i]).Append('\n');
@@ -493,7 +549,8 @@ static partial class Program
 		// rechecks after the one that ended warm-up: sel lines after the first whose n reached calibMinScored
 		int firstWarm = deg.FindIndex(l => l.StartsWith("DVP DEGREE sel", StringComparison.Ordinal) && int.Parse(l.Substring(l.LastIndexOf("n(", StringComparison.Ordinal) + 2).TrimEnd(')'), CI) >= Cfg().calibMinScored);
 		int later = firstWarm < 0 ? 0 : deg.Skip(firstWarm + 1).Count(l => l.StartsWith("DVP DEGREE sel", StringComparison.Ordinal));
-		Check(hashSame && sampleSame && fit.Count == 10000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * 239 && warmed && later >= 1
+		Check(hashSame && sampleSame && fit.Count == 10000 - 239 && fit.Count(l => l.Contains("crossesRoll(1)")) == 2 * (DvpConst.RollMinBars - 1)
+			&& fit.Count(l => l.Contains(" winEff(")) == 2 * (240 - DvpConst.RollMinBars) && warmed && later >= 1
 			&& fit.Any(l => l.Contains("warming(0)")) && fit.Any(l => l.Contains("warming(1)")),
 			"DV-R1 golden journal: " + fit.Count + " DVP FIT lines and " + deg.Count + " DVP DEGREE lines, full-run SHA-256 matches fixtures/golden.sha256 (" + hashSame
 			+ "), sample byte-identical (" + sampleSame + "), leaves warm-up (" + warmed + ") with " + later + " later recheck(s)");
@@ -511,8 +568,9 @@ static partial class Program
 
 	// DV-3.8 endpointDrift (accepted reading, Analyst 2 review of #36), refitEvery = 4: on a refit bar whose window ends at E,
 	// drift = (newFit.Yhat(bar E-r) - prevFit.Yhat(bar E-r)) / ATR(t-1), where prevFit is the refit window ending at E-r.
-	// NaN on non-refit bars, when the previous window crosses a roll, or when it is no longer in the ring. Checked against an
-	// independent DvpFit on the raw series.
+	// NaN on non-refit bars, when the previous window is skipped at a roll (fewer than RollMin post-roll bars), or when it is no
+	// longer in the ring. DV-7.1 (Ettienne 2026-11-23 14:09 CT): windows after a roll are truncated at the roll bar, so both fits
+	// may be truncated (each to its own bars since the roll). Checked against an independent DvpFit on the raw series.
 	static void TDriftR4()
 	{
 		const int n = 120, r = 4;
@@ -520,12 +578,19 @@ static partial class Program
 		var rig = new Rig(Cfg(n, r, false), true, false);
 		var nf = new DvpFit(n); var pf = new DvpFit(n);
 		double[] y = new double[n], v = new double[n];
-		int finite = 0, nanRoll = 0, nanWarm = 0, bad = 0, nonRefitNonNaN = 0; double maxErr = 0;
+		int finite = 0, nanRoll = 0, nanWarm = 0, bad = 0, nonRefitNonNaN = 0, truncFinite = 0; double maxErr = 0;
+		int rollMin = Math.Min(DvpConst.RollMinBars, n);
+		Func<int, int> winOf = endIdx =>   // DV-7.1: window length ending at endIdx (0 = skipped at a roll)
+		{
+			for (int k = endIdx; k >= Math.Max(1, endIdx - n + 2); k--) if (s[k].rollBar) { int ne = endIdx - k + 1; return ne >= rollMin ? ne : 0; }
+			return n;
+		};
 		Func<DvpFit, int, bool> fitEnd = (f, endIdx) =>
 		{
-			if (endIdx - n + 1 < 0) return false;
-			for (int k = 0; k < n; k++) { RingBar b = s[endIdx - n + 1 + k]; y[k] = (b.h + b.l) / 2; v[k] = b.v; }
-			return f.Fit(y, v, n, 3, false);
+			int m = winOf(endIdx);
+			if (m == 0 || endIdx - m + 1 < 0) return false;
+			for (int k = 0; k < m; k++) { RingBar b = s[endIdx - m + 1 + k]; y[k] = (b.h + b.l) / 2; v[k] = b.v; }
+			return f.Fit(y, v, m, 3, false);
 		};
 		for (int i = 0; i < s.Length; i++)
 		{
@@ -534,24 +599,23 @@ static partial class Program
 			if (x == null || !x.valid) continue;
 			if (!x.refitBar) { if (!double.IsNaN(x.endpointDrift)) nonRefitNonNaN++; continue; }
 			int e = x.anchorBar - 1, pe = e - r;           // series indices of the new and previous window ends
-			bool prevCrosses = false;
-			for (int k = Math.Max(1, pe - n + 2); k <= pe && k < s.Length; k++) if (s[k].rollBar) prevCrosses = true;
+			bool prevCrosses = pe >= 0 && winOf(pe) == 0;
 			if (pe - n + 1 < 0) { if (double.IsNaN(x.endpointDrift)) nanWarm++; else bad++; continue; }
 			if (prevCrosses) { if (double.IsNaN(x.endpointDrift)) nanRoll++; else bad++; continue; }
 			if (!fitEnd(nf, e) || !fitEnd(pf, pe)) { bad++; continue; }
-			double want = (nf.Yhat(nf.U(n - 1 - r), 1) - pf.Yhat(1, 1)) / x.atr;
+			double want = (nf.Yhat(nf.U(nf.n - 1 - r), 1) - pf.Yhat(1, 1)) / x.atr;
 			double err = Math.Abs(want - x.endpointDrift);
-			if (!(err <= 1e-9 * Math.Max(1, Math.Abs(want)))) bad++; else finite++;
+			if (!(err <= 1e-9 * Math.Max(1, Math.Abs(want)))) bad++; else { finite++; if (nf.n < n) truncFinite++; }
 			maxErr = Math.Max(maxErr, double.IsNaN(err) ? double.PositiveInfinity : err);
 		}
 		Console.WriteLine("  endpointDrift r=4: finite " + finite + ", NaN roll " + nanRoll + ", NaN out-of-ring " + nanWarm + ", max err " + maxErr.ToString("G3", CI));
-		Check(bad == 0 && nonRefitNonNaN == 0 && finite > 200 && nanRoll > 0,
-			"DV-3.8 endpointDrift r=4: " + finite + " refits match independent fit (max err " + maxErr.ToString("G3", CI) + "), " + nanRoll
+		Check(bad == 0 && nonRefitNonNaN == 0 && finite > 200 && nanRoll > 0 && truncFinite > 0,
+			"DV-3.8 endpointDrift r=4: " + finite + " refits match independent fit (" + truncFinite + " truncated at the roll; max err " + maxErr.ToString("G3", CI) + "), " + nanRoll
 			+ " NaN across roll, " + nanWarm + " NaN prev window out of range, 0 non-refit values (bad " + bad + ", nonRefit " + nonRefitNonNaN + ")");
 	}
 
 	static void D3Tests()
 	{
-		T14(); T15(); T16(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); CalibTests(); T27(); T28T29(); TDriftR4(); R1();
+		T14(); T15(); T16(); T16Trunc(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); CalibTests(); T27(); T28T29(); TDriftR4(); R1();
 	}
 }
