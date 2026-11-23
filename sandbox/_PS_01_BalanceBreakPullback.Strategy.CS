@@ -193,6 +193,7 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
@@ -265,30 +266,101 @@ namespace PowerLanguage.Strategy
 			}
 			if (double.IsNaN(m_trigger)) return;
 			if (!legSkewAllows(m_side)) { if (journalOn()) trace(ETraceLevel.Journal, $"PS-01 {day:yyyy-MM-dd} skip: leg skew gate"); m_done = true; return; }
-			if (!hostGate(m_side > 0)) { if (journalOn()) trace(ETraceLevel.Journal, "PS-01 gate " + Gate + " blocked"); return; }
+			if (!hostGate(m_side > 0)) return;   // hostGate journals the decision
 			int qty = ExitMode == ESandboxExit.Partial1R || ExitMode == ESandboxExit.Partial15R ? 2 : Cfg.contracts;
 			if (qty > 1 && journalOn()) trace(ETraceLevel.Warning, "PS-01 multi-contract size " + qty);
 			if (qty > 1 && qty * m_entryRisk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Error, "PS-01 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
-			if (m_side > 0) { m_leStp.Send(m_trigger, qty); m_lxStp.Send(m_stop); }
-			else { m_seStp.Send(m_trigger, qty); m_sxStp.Send(m_stop); }
+			if (m_side > 0) { { if (hostGate(true)) m_leStp.Send(m_trigger, qty); } m_lxStp.Send(m_stop); }
+			else { { if (hostGate(false)) m_seStp.Send(m_trigger, qty); } m_sxStp.Send(m_stop); }
 		}
 
+		// PS-01's own arms (ValueMigration, Balance, Noise, Trend, Compression) keep their rules; the other gates use the shared
+		// GateAllows rule (before this change they always allowed). Not-ready data blocks with a once-per-day Warning.
 		private bool hostGate(bool buy)
 		{
 			if (Gate == ESandboxGate.Off) return true;
-			if (Session == null) return false;
-			VpExtra prior = PriorRthProfile();
-			if (Gate == ESandboxGate.ValueMigration)
+			string notReady = null;
+			bool ok = false;
+			try
 			{
-				if (prior == null) return false;
-				return buy ? Bars.Close[0] >= prior.poc : Bars.Close[0] <= prior.poc;
+				SessionStats s = Session;
+				double atr = averageTrueRange(Bars, 14);
+				_DailyContext d = NeedsDaily ? DailyContext : null;
+				if (s == null) notReady = "session stats not ready";
+				else if (Gate == ESandboxGate.ValueMigration)
+				{
+					VpExtra prior = PriorRthProfile();
+					if (prior == null || !(prior.poc > 0)) notReady = "prior RTH profile not built yet";
+					else ok = buy ? Bars.Close[0] >= prior.poc : Bars.Close[0] <= prior.poc;
+				}
+				else if (Gate == ESandboxGate.Balance) { if (!(atr > 0)) notReady = "ATR(14) not ready"; else ok = (s.rthHigh - s.rthLow) < atr; }
+				else if (Gate == ESandboxGate.Noise) { if (!(atr > 0)) notReady = "ATR(14) not ready"; else ok = (Bars.High[0] - Bars.Low[0]) < atr; }
+				else if (Gate == ESandboxGate.Trend)
+				{
+					double sma = d != null ? d.Sma200 : double.NaN;
+					if (double.IsNaN(sma)) notReady = "daily SMA200 not ready";
+					else ok = buy ? s.priorRthClose > sma : s.priorRthClose < sma;
+				}
+				else if (Gate == ESandboxGate.Compression)
+				{
+					double atr20 = d != null ? d.Atr20d : double.NaN;
+					if (double.IsNaN(atr20)) notReady = "daily ATR20 not ready";
+					else ok = (s.rthHigh - s.rthLow) < 0.6 * atr20;
+				}
+				else
+				{
+					double sma = d != null && _SandboxRules.GateReadsDaily(Gate) ? d.Sma200 : double.NaN;
+					int fam = 0, ranges = 0;
+					if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+					notReady = _SandboxRules.GateNotReady(Gate, double.NaN, sma, s.priorRthClose, atr, DvpConfig.enabled);
+					if (notReady == null) ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], double.NaN, s.rthHigh, s.rthLow, atr, sma, s.priorRthClose, fam);
+				}
 			}
-			double atr = averageTrueRange(Bars, 14);
-			if (Gate == ESandboxGate.Balance) return atr > 0 && (Session.rthHigh - Session.rthLow) < atr;
-			if (Gate == ESandboxGate.Noise) return atr > 0 && (Bars.High[0] - Bars.Low[0]) < atr;
-			if (Gate == ESandboxGate.Trend) return !double.IsNaN(DailyContext.Sma200) && (buy ? Session.priorRthClose > DailyContext.Sma200 : Session.priorRthClose < DailyContext.Sma200);
-			if (Gate == ESandboxGate.Compression) return !double.IsNaN(DailyContext.Atr20d) && (Session.rthHigh - Session.rthLow) < 0.6 * DailyContext.Atr20d;
-			return true;
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
+			gateLog(ok, buy);
+			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, true, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void newDay(DateTime day)
 		{
@@ -317,11 +389,11 @@ namespace PowerLanguage.Strategy
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leStp.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_leStp.Send(m_restPx, m_restQty); }
 			}
 			else
 			{
-				m_seStp.Send(m_restPx, m_restQty);
+				{ if (hostGate(false)) m_seStp.Send(m_restPx, m_restQty); }
 			}
 			return true;
 		}

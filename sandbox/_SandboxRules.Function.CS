@@ -167,6 +167,43 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		/// <summary>
+		/// What a host gate reads, so StartCalc can turn exactly that on when the Gate input is not Off (Off needs nothing).
+		/// ValueMigration reads the prior RTH profile (Own RTH profiles). Trend and FitRegime read the daily SMA200
+		/// (NeedsDaily); compressionUsesDaily is for hosts whose Compression arm reads the daily ATR20 (PS-01). ThreeFamily
+		/// reads the DVP confluence (DvpConfig). Balance, DayType and Noise read ATR(14) and the session only.
+		/// </summary>
+		public static void GateNeeds(ESandboxGate gate, bool compressionUsesDaily, out bool ownRth, out bool daily, out bool dvp)
+		{
+			ownRth = gate == ESandboxGate.ValueMigration;
+			daily = gate == ESandboxGate.Trend || gate == ESandboxGate.FitRegime || (compressionUsesDaily && gate == ESandboxGate.Compression);
+			dvp = gate == ESandboxGate.ThreeFamily;
+		}
+
+		/// <summary>True when the GateAllows arm for this gate reads the daily SMA200.</summary>
+		public static bool GateReadsDaily(ESandboxGate gate) { return gate == ESandboxGate.Trend || gate == ESandboxGate.FitRegime; }
+
+		/// <summary>
+		/// Why the GateAllows inputs for this gate are not ready, or null when they are. A not-ready gate blocks (GateAllows
+		/// would return false on the same inputs); the host logs the reason as a Warning once per day.
+		/// </summary>
+		public static string GateNotReady(ESandboxGate gate, double priorPoc, double sma, double priorClose, double atr, bool dvpOn)
+		{
+			switch (gate)
+			{
+				case ESandboxGate.Off: return null;
+				case ESandboxGate.ValueMigration: return priorPoc > 0 ? null : "prior RTH profile not built yet";
+				case ESandboxGate.Trend: return double.IsNaN(sma) ? "daily SMA200 not ready" : (priorClose > 0 ? null : "prior RTH close unknown");
+				case ESandboxGate.FitRegime: return double.IsNaN(sma) ? "daily SMA200 not ready" : null;
+				case ESandboxGate.ThreeFamily: return dvpOn ? null : "DVP engine off";
+				case ESandboxGate.Balance:
+				case ESandboxGate.DayType:
+				case ESandboxGate.Noise:
+				case ESandboxGate.Compression: return atr > 0 ? null : "ATR(14) not ready";
+				default: return null;
+			}
+		}
+
 		public static bool ScaleExit(ESandboxExit mode, out double t1R, out int scalePct, out bool breakEven)
 		{
 			t1R = 0; scalePct = 0; breakEven = false;
