@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-09 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure trades above the IB and closes back inside. The sell stop is under that bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
+// Research assumption: ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure is the C-period 30-minute bar (the closed Data2 30-minute bar) that trades above the IB and closes back inside, tested once at the C-period close. The sell stop is under that 30-minute bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -39,9 +39,9 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 60-minute.
+// Chart: Data1 = 1-minute. Data2 = 30-minute (Coder 2026-11-22: the C period is a 30-minute bar; it was declared 60-minute and never read).
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 30-minute bars. CalcBar reads the closed Data2 bar that ends at RthStart plus 90 minutes (the C period), through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure trades above the IB and closes back inside. The sell stop is under that bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
+// Other: ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure is the C-period 30-minute bar (the closed Data2 30-minute bar) that trades above the IB and closes back inside, tested once at the C-period close. The sell stop is under that 30-minute bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure trades above the IB and closes back inside. The sell stop is under that bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
+// ASSUMPTION: ASSUMPTION: the IB is the profile's ibHigh and ibLow. The C period is the 30 minutes after RthStart plus 60 minutes. An upside failure is the C-period 30-minute bar (the closed Data2 30-minute bar) that trades above the IB and closes back inside, tested once at the C-period close. The sell stop is under that 30-minute bar. The target is the IB midpoint. The 13:30 time stop is 150 minutes after the C-period close.
 // IOG is disabled.
 
 
@@ -145,9 +145,10 @@ namespace PowerLanguage.Strategy
 	public class _PS_09_IBCPeriod : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_se, m_le; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private bool m_cSeen;   // the C-period Data2 bar has been tested today
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _PS_09_IBCPeriod(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS09"; createGxOrders(); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09SE", EOrderAction.SellShort)); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS09LE", EOrderAction.Buy)); }
@@ -156,30 +157,58 @@ namespace PowerLanguage.Strategy
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
+		}
+
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_cSeen = false; }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
+			// Coder 2026-11-22: the failure is the C period's 30-minute bar, read from Data2 (now declared 30-minute) and tested once
+			// at its close, not any 1-minute bar inside the period.
+			bool fresh = newNativeBar();
+			TimeSpan c1 = m_rthStart.Add(TimeSpan.FromMinutes(90));
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || !Session.ibComplete) return;
-			if (sandboxBook()) return;
-			TimeSpan tod = sessionClock(Bars.Time[0]);
-			TimeSpan c0 = m_rthStart.Add(TimeSpan.FromMinutes(60)), c1 = m_rthStart.Add(TimeSpan.FromMinutes(90));
-			if (tod < c0 || tod > c1) return;
-			bool upFail = Bars.High[0] > Session.ibHigh && Bars.Close[0] < Session.ibHigh;
-			bool dnFail = Bars.Low[0] < Session.ibLow && Bars.Close[0] > Session.ibLow;
+			if (!fresh || m_cSeen || sessionClock(m_nativeTime) != c1) return;   // the closed Data2 bar that ends at the C-period close
+			m_cSeen = true;   // the C-period close: one test per session
+			double cO, cHi, cLo, cClose, cV; nativeBar(0, out cO, out cHi, out cLo, out cClose, out cV);
+			bool upFail = cHi > Session.ibHigh && cClose < Session.ibHigh;
+			bool dnFail = cLo < Session.ibLow && cClose > Session.ibLow;
 			if (!upFail && !dnFail) return;
 			bool sell = upFail;
-			double entry = sell ? Bars.Low[0] - tickSize() : Bars.High[0] + tickSize();
-			double stop = widen(!sell, entry, sell ? Bars.High[0] + tickSize() : Bars.Low[0] - tickSize());
+			double entry = sell ? cLo - tickSize() : cHi + tickSize();
+			double stop = widen(!sell, entry, sell ? cHi + tickSize() : cLo - tickSize());
 			double mid = (Session.ibHigh + Session.ibLow) / 2.0;
 			if ((sell && !(mid < entry)) || (!sell && !(mid > entry)) || !budget(entry, stop)) { m_done = true; return; }
 			m_timeStop = 150;
 			arm(!sell, entry, stop, mid, sell ? "PS09SE" : "PS09LE", 0);
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (sell) { if (hostGate(false)) m_se.Send(entry, m_restQty); } else { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); if (sell) { if (hostGate(false)) m_se.Send(entry, m_restQty); } else { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -212,8 +241,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -301,10 +342,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

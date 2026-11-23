@@ -25,7 +25,7 @@
 // Exit: see section 13.
 //
 // ## 5. Timing
-// Signal evaluated: closed bar only, after base.CalcBar.
+// Signal evaluated: closed bar only, after base.CalcBar; the daily check runs once, on the first RTH bar of the trading day (09:30 ET open).
 // Order sent: market next bar when this file trades.
 // Can fill: the next bar. IOG is disabled.
 //
@@ -154,12 +154,13 @@ namespace PowerLanguage.Strategy
 		protected override void StartCalc()
 		{
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
+			if (!IsRth()) return;   // Coder 2026-11-22: the daily check runs on the first RTH bar (09:30 ET open), not the first Globex bar (18:00 ET), so it sees the session
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day == m_day) return;
 			m_day = day;

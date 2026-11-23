@@ -337,6 +337,16 @@ static class Program
 		for (int i = 0; i < 6; i++) Mid(e, n++, 110 - 2 * i);   // down 10
 		for (int i = 0; i < 6; i++) Mid(e, n++, 100 + 2 * i);
 		Check(e.PivotCount(0, true) >= 1 && e.PivotCount(0, false) >= 1 && e.LastHigh().price == 111, "AtrZigZag alternates high/low pivots");
+		// Coder 2026-11-22: a wide bar that makes the leg's new low cannot confirm that low itself (high/low order unknown).
+		var z = Eng(Cfg(k => { k.pivotMode = EPivotMode.AtrZigZag; k.atrLength = 3; k.volumeLength = 3; k.atrMultiple = 2; }));
+		int m = 0; for (int i = 0; i < 4; i++) Feed(z, m++, 100, 101, 99, 100);
+		for (int i = 0; i < 6; i++) Feed(z, m++, 100 - 2 * i, 101 - 2 * i, 99 - 2 * i, 100 - 2 * i);   // down: undecided -> down leg
+		int lowsBefore = z.PivotCount(0, false);
+		Feed(z, m, 88, 120, 80, 119);   // new low 80 and a high 40 above it on the same bar
+		bool sameBar = z.PivotCount(0, false) > lowsBefore && z.LastLow().confirmBar == z.LastLow().extremeBar;
+		Check(!sameBar, "AtrZigZag never confirms a low on its own bar");
+		m++; Feed(z, m, 119, 121, 117, 120);
+		Check(z.PivotCount(0, false) > lowsBefore && z.LastLow().price == 80 && z.LastLow().confirmBar > z.LastLow().extremeBar, "AtrZigZag confirms that low on the next bar");
 	}
 
 	// ---------------------------------------------------------------- Phase 3 S5: a second PRICEACTION instance

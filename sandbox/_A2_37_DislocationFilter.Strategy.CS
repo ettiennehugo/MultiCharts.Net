@@ -40,9 +40,9 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
-// Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
-// Data2: named in section 22, or Not applicable.
+// Chart: Data1 = @ES 1-minute. Data2 = @NQ 1-minute (required; catalogue pair 1). Pair 2 is a separate run with Data2 = @YM 1-minute.
+// Data1: @ES 1-minute, the leg the filter protects. Tests use data through 2024-12-31 only.
+// Data2: the other index on the same 1-minute bars and the same session template as Data1 (catalogue A2-37: ES vs NQ, and ES vs YM, all 1m). Without Data2 the file journals 'Data2 missing' once a day and stands aside.
 // Further series: Not applicable
 // Warmup: the statistic named in the rule.
 //
@@ -146,16 +146,20 @@ namespace PowerLanguage.Strategy
 	{
 		private readonly List<double> m_spread = new List<double>();
 		private DateTime m_day = DateTime.MinValue;
+		protected override void StartCalc()
+		{
+			m_spread.Clear(); m_day = DateTime.MinValue;   // Coder 2026-11-22: a recalc reuses this object, so the spread history is cleared (no lookahead)
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
+		}
 		public _A2_37_DislocationFilter(object _ctx) : base(_ctx) { }
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (!IsExist(2))
-			{
-				DateTime day = Bars.Time[0].Date;
-				if (day != m_day) { m_day = day; if (journalOn()) trace(ETraceLevel.Journal, "A2-37 " + day.ToString("yyyy-MM-dd") + " no Data2 pair"); }
+			{   // Coder 2026-11-22: one guard (the second, journalling one was unreachable); the Error and the no-pair journal are once per trading day
+				DateTime day = tradingDayKey(Bars.Time[0]);
+				if (day != m_day) { m_day = day; if (journalOn()) { trace(ETraceLevel.Error, "Data2 missing"); trace(ETraceLevel.Journal, "A2-37 " + day.ToString("yyyy-MM-dd") + " no Data2 pair"); } }
 				return;
 			}
 			IInstrument b2 = BarsOfData(2);

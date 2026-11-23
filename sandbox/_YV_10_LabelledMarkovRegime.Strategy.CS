@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the YV-10 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
+// Research assumption: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it at the next trading session's flat-by cutoff (session end minus 5 minutes, early-close aware; an evening entry belongs to the next trading date), if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop at 2 times Atr20d. MaxHoldDays 1. GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). No price target.
+// Exit orders: GX. Stop at 2 times Atr20d. MaxHoldDays 1. GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it at the next trading session's flat-by cutoff (session end minus 5 minutes, early-close aware; an evening entry belongs to the next trading date), if no stop or target fills first (owner decision 2026-11-22: keep holding overnight). No price target.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
+// Other: ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it at the next trading session's flat-by cutoff (session end minus 5 minutes, early-close aware; an evening entry belongs to the next trading date), if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: both
-// ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it on the first bar dated the next calendar day in the exchange clock, if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
+// ASSUMPTION: ASSUMPTION: a day is bull when the sum of the last 20 session returns is at least 5 percent, bear when it is at most -5 percent, otherwise sideways. The signal is the walk-forward probability of bull tomorrow minus bear tomorrow. The HMM agreement arm is not coded. Size stays one contract. The stop is 2 times Atr20d. The position: GX holds it overnight (SessionExit HoldOvernight, no flat at the session value end); MaxHoldDays 1 closes it at the next trading session's flat-by cutoff (session end minus 5 minutes, early-close aware; an evening entry belongs to the next trading date), if no stop or target fills first (owner decision 2026-11-22: keep holding overnight).
 // IOG is disabled.
 
 
@@ -151,7 +151,7 @@ namespace PowerLanguage.Strategy
 		private double m_prev = double.NaN; private bool m_done; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _YV_10_LabelledMarkovRegime(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV10"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV10LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "YV10SE", EOrderAction.SellShort)); }
@@ -160,7 +160,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 
 		protected override void CalcBar()
 		{
@@ -227,8 +227,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -316,10 +328,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

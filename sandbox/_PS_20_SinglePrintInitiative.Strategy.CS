@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-20 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 // IOG is disabled.
 
 
@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_le; private double m_lo, m_hi; private bool m_have, m_done; private DateTime m_day = DateTime.MinValue, m_open = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _PS_20_SinglePrintInitiative(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS20"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS20LE", EOrderAction.Buy)); }
@@ -159,7 +159,8 @@ namespace PowerLanguage.Strategy
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc(); requireRing(1, 2000, "PS-20 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "PS-20 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			m_day = m_zoneAt = DateTime.MinValue; m_have = m_done = false; for (int k = 0; k < m_chk.Length; k++) m_chk[k] = 0;
 		}
 
 		protected override void CalcBar()
@@ -167,26 +168,46 @@ namespace PowerLanguage.Strategy
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; }
+			if (day != m_day) { chkDay(); m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; m_zoneAt = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || m_open == DateTime.MinValue) return;
-			if (sandboxBook()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_have && tod < m_rthStart.Add(TimeSpan.FromMinutes(150)))
+			// Coder 2026-11-22 (owner: PS-20 never traded): SinglePrints() reads only a completed profile (its last bar before the current
+			// bar), so the developing RTH profile runs from the first RTH bar (inclusive: m_open is that bar's close stamp) through the
+			// previous closed bar. The scan runs through the 12:00 bar, so bars closing up to 11:59 are covered, as before.
+			if (!m_have && tod <= m_rthStart.Add(TimeSpan.FromMinutes(150)) && Bars.Time[1] >= m_open)
 			{
-				VpExtra dev = RangeProfileAfter(1, m_open, Bars.Time[0]);
-				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; break; }
+				VpExtra dev = RangeProfile(1, m_open, Bars.Time[1]);
+				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; m_zoneAt = Bars.Time[1]; break; }
+				if (m_have && journalOn()) trace(ETraceLevel.Journal, $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} single-print zone {m_lo}-{m_hi} (profile through {m_zoneAt:HH:mm})");
 			}
 			if (!m_have || ((int)tod.TotalMinutes) % 5 != 0) return;
+			m_chk[0]++;
 			double mid = (m_lo + m_hi) / 2.0;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];
 			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); }
-			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) return;
+			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) { m_chk[1]++; return; }
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, m_lo - tickSize());
-			double target = Session.rthHigh + 0.5 * (m_hi - m_lo);
-			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
+			double rthHigh = Session.rthHigh, zoneH = m_hi - m_lo;
+			double target = rthHigh + 0.5 * zoneH;
+			// Coder 2026-11-22 (Analyst Set3): every plan journals the target, the RTH high it used and the zone height, then its outcome.
+			string plan = $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} plan entry {entry} stop {stop} target {target} = RTH high {rthHigh} + 0.5 x zone height {zoneH} (zone {m_lo}-{m_hi})";
+			if (!(target > entry)) { m_chk[2]++; m_done = true; if (journalOn()) trace(ETraceLevel.Journal, plan + ": skipped, target not above the entry"); return; }
+			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; if (journalOn()) trace(ETraceLevel.Error, plan + ": skipped: risk exceeds 1 percent"); return; }
+			m_chk[4]++;
+			if (journalOn()) trace(ETraceLevel.Journal, plan + ": buy stop sent");
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "PS20LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+		}
+
+		// One Journal line per Globex day (like A2-45): the zone, then the 5m checks after it, no pullback HL, target not above the entry, budget, sent.
+		private int[] m_chk = new int[5]; private DateTime m_zoneAt = DateTime.MinValue;
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "PS-20 " + m_day.ToString("yyyy-MM-dd") + " checks zone(" + (m_have ? m_lo + "-" + m_hi + " @" + m_zoneAt.ToString("HH:mm") : "none") + ") checks5m(" + m_chk[0] + ") noHL(" + m_chk[1] + ") targetNotAbove(" + m_chk[2] + ") budget(" + m_chk[3] + ") sent(" + m_chk[4] + ")");
+			for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -219,8 +240,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -308,10 +341,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

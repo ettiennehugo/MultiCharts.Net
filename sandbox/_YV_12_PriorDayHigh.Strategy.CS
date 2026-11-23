@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the YV-12 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Research assumption: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop at the wick extreme, widened to the cost floor. Target is the other side of the prior range. TimeStopMinutes is 30. Flat at the session value end.
+// Exit orders: GX. Stop at the wick extreme, widened to the cost floor. Break-even at +1 R on a closed bar. Target is the other side of the prior range. TimeStopMinutes is 30. Flat at the session value end.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Other: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: a Day-2 session has a prior RTH range of at least 1.5 times Atr20d. A short needs a 5-minute bar that tags the prior high, with an upper wick of at least half the bar and a close in the bottom quarter. The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The target is the prior low. The long at the prior low is the mirror. The time stop is 30 minutes.
+// ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 // IOG is disabled.
 
 
@@ -145,48 +145,122 @@ namespace PowerLanguage.Strategy
 	public class _YV_12_PriorDayHigh : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_le, m_se; private bool m_done; private DateTime m_day = DateTime.MinValue;
+		// Coder 2026-11-22 (Analyst Set2: 0 trades in 2023-2024): the Day-2 filter follows the YV-12 spec (RangeExpansion): prior RTH range
+		// >= 1.5 x the 20-session median RTH range, or |prior RTH close - open| >= 1.0 x ATR20d. It was prior range >= 1.5 x ATR20d (the
+		// Globex daily ATR), which an RTH range rarely reaches. The level tolerances use the 5-minute ATR14, as the spec says.
+		private readonly List<double> m_rthRanges = new List<double>();
+		private double m_tOpen, m_tHi, m_tLo, m_tClose, m_pOpen = double.NaN, m_pClose = double.NaN; private bool m_tSeen;
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		[Input] public ESandboxSide Side { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _YV_12_PriorDayHigh(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV12"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12SE", EOrderAction.SellShort)); }
-		protected override void StartCalc() {
+		protected override void StartCalc() { m_rthRanges.Clear(); m_tSeen = false; m_pOpen = m_pClose = double.NaN; m_day = DateTime.MinValue; m_restUntil = DateTime.MinValue; m_dayState = "noRthBar"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;   /* Coder 2026-11-22: a recalc reuses this object */
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { chkDay(); rollRthDay(); m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
+			{ SessionStats ss = Session; if (ss != null && ss.rthOpen > 0 && ss.rthHigh > ss.rthLow) { m_tOpen = ss.rthOpen; m_tHi = ss.rthHigh; m_tLo = ss.rthLow; m_tClose = ss.rthClose; m_tSeen = true; } }
+			// Coder 2026-11-22 (spec step 5 "valid 3 bars"): the stop entry works for three Data2 (5-minute) bars, not the rest of the day.
+			if (m_restOn && Bars.Time[0] >= m_restUntil) { m_restOn = false; if (journalOn()) trace(ETraceLevel.Journal, $"YV-12 {Bars.Time[0]:yyyy-MM-dd HH:mm} entry stop expired (3 bars)"); }
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || Bars.CurrentBar < 20) return;
-			if (sandboxBook()) return;
 			double pdh = Session.priorRthHigh, pdl = Session.priorRthLow, atr = DailyContext.Atr20d;
-			if (!(pdh > pdl) || !(atr > 0) || pdh - pdl < 1.5 * atr) return;
+			if (!(pdh > pdl) || !(atr > 0)) { m_dayState = "noPriorDay"; return; }
+			if (!day2(pdh - pdl, atr)) { m_dayState = "notDay2"; return; }
+			m_dayState = "day2";
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(120)) || ((int)tod.TotalMinutes) % 5 != 0) return;
-			double span = Bars.High[0] - Bars.Low[0]; if (!(span >= atr)) return;
-			double upper = Bars.High[0] - Math.Max(Bars.Open[0], Bars.Close[0]);
-			double lower = Math.Min(Bars.Open[0], Bars.Close[0]) - Bars.Low[0];
+			// Coder 2026-11-22: the wick candle is the last closed Data2 5-minute bar, and it must be "distinct": its range at least
+			// 1.0 x ATR14 of the 5-minute bars (spec). It was one 1-minute bar compared with the daily ATR20, so it almost never fired.
+			if (tod < m_rthStart.Add(TimeSpan.FromMinutes(15)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(120)) || !newNativeBar()) return;
+			m_chk[0]++;
+			double bo, bh, bl, bc, bv; nativeBar(0, out bo, out bh, out bl, out bc, out bv);
+			double atr14 = nativeAtr(14);
+			double span = bh - bl; if (!(atr14 > 0) || !(span >= 1.0 * atr14)) { m_chk[1]++; return; }
+			atr = atr14;   // spec step 4: the level tolerances are x ATR14 of the signal timeframe
+			double upper = bh - Math.Max(bo, bc);
+			double lower = Math.Min(bo, bc) - bl;
 			bool openAtHigh = Session.rthOpen >= pdh - 0.10 * (pdh - pdl);
 			bool openAtLow = Session.rthOpen <= pdl + 0.10 * (pdh - pdl);
-			bool sell = !openAtHigh && Bars.High[0] >= pdh - 0.10 * atr && Bars.High[0] <= pdh + 0.5 * atr && upper >= 0.5 * span && Bars.Close[0] <= Bars.Low[0] + 0.25 * span;
-			bool buy = !openAtLow && Bars.Low[0] <= pdl + 0.10 * atr && Bars.Low[0] >= pdl - 0.5 * atr && lower >= 0.5 * span && Bars.Close[0] >= Bars.High[0] - 0.25 * span;
-			if (!sell && !buy) return;
-			double entry = sell ? Bars.Low[0] - tickSize() : Bars.High[0] + tickSize();
-			double stop = widen(!sell, entry, sell ? Bars.High[0] + tickSize() : Bars.Low[0] - tickSize());
-			double target = sell ? pdl : pdh;
-			if ((sell && !(target < entry)) || (!sell && !(target > entry)) || !budget(entry, stop)) { m_done = true; return; }
+			bool wickS = bh >= pdh - 0.10 * atr && bh <= pdh + 0.5 * atr && upper >= 0.5 * span && bc <= bl + 0.25 * span;
+			bool wickB = bl <= pdl + 0.10 * atr && bl >= pdl - 0.5 * atr && lower >= 0.5 * span && bc >= bh - 0.25 * span;
+			if (!wickS && !wickB) { m_chk[2]++; return; }
+			bool sell = wickS && !openAtHigh, buy = wickB && !openAtLow;
+			if (!sell && !buy) { m_chk[3]++; return; }
+			// Coder 2026-11-22: the Side input was declared but never applied.
+			sell = sell && _SandboxRules.Allows(Side, false); buy = buy && _SandboxRules.Allows(Side, true);
+			if (!sell && !buy) { m_chk[4]++; return; }
+			double entry = sell ? bl - tickSize() : bh + tickSize();
+			double stop = widen(!sell, entry, sell ? bh + tickSize() : bl - tickSize());
+			// Coder 2026-11-22 (spec exits table): target the other side of the prior range, PDL + 2 ticks for a short (PDH - 2 ticks for
+			// a long), and skip when it is under 1 R after the floor. It was PDL itself, with no 1 R check.
+			double target = sell ? pdl + 2 * tickSize() : pdh - 2 * tickSize();
+			if (Math.Abs(entry - target) < Math.Abs(entry - stop) || (sell && !(target < entry)) || (!sell && !(target > entry))) { m_chk[5]++; m_done = true; return; }
+			if (!budget(entry, stop)) { m_chk[6]++; m_done = true; return; }
+			m_chk[7]++;
 			m_timeStop = 30;
 			arm(!sell, entry, stop, target, sell ? "YV12SE" : "YV12LE", 0);
-			m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = 1; if (sell) { if (hostGate(false)) m_se.Send(entry); } else { if (hostGate(true)) m_le.Send(entry); }
+			m_restPx = entry; m_restBuy = !sell; m_restOn = true; m_restQty = 1; m_restUntil = Bars.Time[0].AddMinutes(15); if (sell) { if (hostGate(false)) m_se.Send(entry); } else { if (hostGate(true)) m_le.Send(entry); }
 		}
 
+		// One Journal line per Globex day (like A2-45): the day state (notDay2 / noPriorDay / day2), then counts over the 5-minute bars
+		// in the 09:45-11:30 window: bars, notDistinct, noWickAtLevel, openLocation, side, targetUnder1R, budget, sent.
+		private readonly int[] m_chk = new int[8]; private string m_dayState = "noRthBar"; private DateTime m_restUntil = DateTime.MinValue;
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "YV-12 " + m_day.ToString("yyyy-MM-dd") + " checks day(" + m_dayState + ") bars5m(" + m_chk[0] + ") notDistinct(" + m_chk[1] + ") noWickAtLevel(" + m_chk[2] + ") openLocation(" + m_chk[3] + ") side(" + m_chk[4] + ") targetUnder1R(" + m_chk[5] + ") budget(" + m_chk[6] + ") sent(" + m_chk[7] + ")");
+			m_dayState = "noRthBar"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
+		}
+
+		/// <summary>Coder 2026-11-22: closes the Globex day just ended: its RTH range joins the 20-session window; its RTH open/close become the prior ones.</summary>
+		private void rollRthDay()
+		{
+			if (m_tSeen) { m_rthRanges.Add(m_tHi - m_tLo); if (m_rthRanges.Count > 20) m_rthRanges.RemoveAt(0); m_pOpen = m_tOpen; m_pClose = m_tClose; }
+			else { m_pOpen = m_pClose = double.NaN; }
+			m_tSeen = false;
+		}
+		/// <summary>Day2Filter RangeExpansion (spec step 2): prior RTH range >= 1.5 x the 20-session median RTH range, or |prior close - open| >= 1.0 x ATR20d.</summary>
+		private bool day2(double priorRange, double atr20d)
+		{
+			bool body = m_pOpen > 0 && m_pClose > 0 && Math.Abs(m_pClose - m_pOpen) >= 1.0 * atr20d;
+			if (m_rthRanges.Count < 20) return body;
+			var sorted = new List<double>(m_rthRanges); sorted.Sort();
+			double median = 0.5 * (sorted[9] + sorted[10]);
+			return priorRange >= 1.5 * median || body;
+		}
 		private double widen(bool buy, double entry, double stop)
 		{
 			int ticks = 1;
@@ -206,7 +280,10 @@ namespace PowerLanguage.Strategy
 			GxConfig.TargetMode = has ? ETargetMode.SingleTarget : ETargetMode.None;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
 			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
-			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
+			// Owner 2026-11-22 22:48 CT (spec StopManagement = BreakEvenAt1R, primary): the stop moves to the entry once a closed bar
+			// reaches +1 R (GX AtTrigger, R multiple 1.0, judged on the bar close).
+			GxConfig.BreakEven = EBreakEven.AtTrigger; GxConfig.BreakEvenUnit = ETriggerUnit.RMultiple; GxConfig.BreakEvenValue = 1.0;
+			GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
@@ -218,8 +295,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -307,10 +396,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

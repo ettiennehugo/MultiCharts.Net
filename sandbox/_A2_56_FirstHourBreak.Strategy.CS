@@ -235,11 +235,14 @@ namespace PowerLanguage.Strategy
 			MaxTradesPerDay = Reentry ? 2 : 1;
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = DateTime.MinValue; m_fhH = m_fhL = m_stop = m_mark = double.NaN; m_skip = false;
 			m_retried = m_carried = m_carryChecked = false; m_lastSide = 0;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -301,8 +304,8 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(buy - sell, Cfg.costFloorTicks * tick);   // either side risks the first-hour range (+2 ticks), floored
 			if (overRiskBudget(r)) { if (!m_skip && journalOn()) trace(ETraceLevel.Journal, $"A2-56 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_skip = true; return; }
 			if (m_lastSide != 0) m_retried = true;
-			if (buyOk) { m_leStp.Send(buy, Cfg.contracts); m_lxStp.Send(sell); }
-			if (sellOk) { m_seStp.Send(sell, Cfg.contracts); m_sxStp.Send(buy); }
+			if (buyOk) { (entryOpen() ? m_leStp : null)?.Send(buy, Cfg.contracts); m_lxStp.Send(sell); }
+			if (sellOk) { (entryOpen() ? m_seStp : null)?.Send(sell, Cfg.contracts); m_sxStp.Send(buy); }
 			if (journalOn() && Bars.High[0] < buy && Bars.Low[0] > sell && tod == Cfg.fhEnd + TimeSpan.FromMinutes(1))
 			{
 				var ctx = new Dictionary<string, string> { { "fhHigh", m_fhH.ToString("F2") }, { "fhLow", m_fhL.ToString("F2") } };

@@ -224,13 +224,13 @@ namespace PowerLanguage.Strategy
 			Vwap1Type = VwapSlot == EVwapSlot.Week ? EVwapType.Week : EVwapType.Session;
 			Vwap1DataStream = 1;
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                                      // before base.StartCalc (M-DAILY is built there)
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_ema = double.NaN; m_emaBars = 0; m_sideRun = 0; m_side = 0; m_vwap.Clear(); m_vwapDay = DateTime.MinValue;
 		}
 
 		private double m_restPx;
 		private bool m_restBuy, m_restOn, m_filledSetup;
-		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
+		private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 		private DateTime m_orderDay = DateTime.MinValue;
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -243,6 +243,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -250,10 +253,10 @@ namespace PowerLanguage.Strategy
 			double tick = tickSize();
 			int pos = StrategyInfo.MarketPosition;
 			DateTime dayNow = GlobexDate(Bars.Time[0]);
-			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = 0; }
+			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0; }
 			TimeSpan todNow = ToEastern(Bars.Time[0]).TimeOfDay;
-			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (pos != 0)
 			{
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
@@ -262,8 +265,8 @@ namespace PowerLanguage.Strategy
 			}
 			if (step == ERest.Resend)
 			{
-				if (m_restBuy) { m_leLmt.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
-				else { m_seLmt.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+				if (m_restBuy) { (entryOpen() ? m_leLmt : null)?.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { (entryOpen() ? m_seLmt : null)?.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
 			}
 			if (!takeNative()) return;
 			double c = BarsOfData(2).Close[0];
@@ -293,8 +296,8 @@ namespace PowerLanguage.Strategy
 			if (m_filledSetup && m_fillAnchor == anchor) return;          // one fill of this limit per day
 			m_stop = entry - side * d; m_target = entry + side * d;      // 1:1 bracket
 			m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = anchor;
-			if (side > 0) { m_leLmt.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
-			else { m_seLmt.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
+			if (side > 0) { (entryOpen() ? m_leLmt : null)?.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { (entryOpen() ? m_seLmt : null)?.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) logSignal("DV-15", side, entry, m_stop, new Dictionary<string, string> { { "vwap", vw.ToString("F2") }, { "slope", slope.ToString("F2") } }, true);
 		}
 

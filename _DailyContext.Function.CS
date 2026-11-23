@@ -72,7 +72,7 @@ namespace PowerLanguage.Function
 		public Action<string> warnOnce;
 
 		private struct Day { public DateTime date; public double o, h, l, c, rc, rthc, rrc; }   // rc = ratio-adjusted close (return series); rthc / rrc: S2 basis close, level (difference-adjusted) / ratio-adjusted
-		private Day[] m_days; private int m_count, m_next;
+		private Day[] m_days; private int m_count, m_next, m_seen;
 		private double m_atr = double.NaN, m_trSeed; private int m_trSeen;
 		private double m_rsiUp = double.NaN, m_rsiDn = double.NaN, m_rsiSeedUp, m_rsiSeedDn; private int m_rsiSeen;
 		private double m_smaSum;                   // over the last smaLength level closes
@@ -144,7 +144,13 @@ namespace PowerLanguage.Function
 		public double Tsmom(int n) { return n >= 1 && n < m_count ? at(0).rc / at(n).rc - 1 : double.NaN; }
 		/// <summary>(today's open - adjusted previous close) / previous close.</summary>
 		public double GapPct(double todayOpen) { double pc = PrevClose; return pc > 0 && todayOpen > 0 ? (todayOpen - pc) / pc : double.NaN; }
+		/// <summary>Days held in the ring: rises by one per completed trading day up to Capacity (smaLength + 1, or the longest TSMOM
+		/// lookback + 1; 253 for ES), then stays there. It is ring occupancy, not a day count (Analyst LE-01 recheck 2026-11-22).</summary>
 		public int Days { get { return m_count; } }
+		/// <summary>Ring capacity in days.</summary>
+		public int Capacity { get { return m_days != null ? m_days.Length : 0; } }
+		/// <summary>Completed trading days accepted since Reset (not capped).</summary>
+		public int DaysSeen { get { return m_seen; } }
 
 		public string Configure()
 		{
@@ -165,7 +171,7 @@ namespace PowerLanguage.Function
 		public void Reset()
 		{
 			if (!Configured) return;
-			m_count = m_next = 0; m_atr = double.NaN; m_trSeed = 0; m_trSeen = 0;
+			m_count = m_next = m_seen = 0; m_atr = double.NaN; m_trSeed = 0; m_trSeen = 0;
 			m_rsiUp = m_rsiDn = double.NaN; m_rsiSeedUp = m_rsiSeedDn = 0; m_rsiSeen = 0; m_smaSum = 0;
 			m_retCount = m_retNext = 0; m_hv.Clear(); m_hvHistCount = m_hvHistNext = 0; m_s2Warned = false; m_hvFirst.Clear();
 			m_roc1 = m_prevRoc1 = m_lbrUp = m_lbrDn = double.NaN; m_lbrSeedUp = m_lbrSeedDn = 0; m_lbrSeen = 0;
@@ -231,7 +237,7 @@ namespace PowerLanguage.Function
 			// SMA window over level closes
 			if (m_count >= config.smaLength) m_smaSum -= at(config.smaLength - 1).c;
 			m_days[m_next] = new Day { date = date, o = o, h = h, l = l, c = c, rc = rc, rthc = bc, rrc = rrc };
-			m_next = (m_next + 1) % m_days.Length; if (m_count < m_days.Length) m_count++;
+			m_next = (m_next + 1) % m_days.Length; if (m_count < m_days.Length) m_count++; m_seen++;
 			m_smaSum += c;
 			return true;
 		}

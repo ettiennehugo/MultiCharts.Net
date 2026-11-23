@@ -205,7 +205,7 @@ namespace PowerLanguage.Strategy
 			TodBucketMinutes = 30;                   // hosts that read the engine see the 30-minute slot
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_history.Clear(); m_openVol.Clear(); m_day = DateTime.MinValue; Rv30State = ERvState.Unknown; Rv30 = double.NaN;
 		}
 

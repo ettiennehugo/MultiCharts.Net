@@ -167,7 +167,7 @@ namespace PowerLanguage.Strategy
 			RiskUnitDollars = 14 * 12.50;  // 1 R = cost-floor stop of one full-size ES
 		}
 
-		protected override void StartCalc() { base.StartCalc(); m_halted = false; }
+		protected override void StartCalc() { DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_halted = false; }
 
 		protected override void CalcBar()
 		{

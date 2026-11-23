@@ -148,7 +148,7 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue, m_entryDay = DateTime.MinValue;
 		private double m_stop; private int m_side; private bool m_armed;
 		private bool m_done;
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _A2_54_UpGapPullback(object _ctx) : base(_ctx) { }
 		protected override void Create()
 		{
@@ -164,18 +164,22 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_armed = false; }
+			if (day != m_day) { m_day = day; m_armed = false; m_done = false; m_filledSetup = false; m_restOn = false; }
+			if (sandboxBook()) return;   // Coder 2026-11-22: the entry stop is resent every bar of its window (house rule 5); before any position return so Rest() sees the fill
 			int pos = StrategyInfo.MarketPosition;
 			if (pos != 0) { if (m_entryDay == DateTime.MinValue) m_entryDay = day; sendExits(pos, day); return; }
 			m_entryDay = DateTime.MinValue;
-			if (m_armed || rollOn(1) || !IsRth()) return;
+			if (m_armed || m_done || rollOn(1) || !IsRth()) return;
 			SessionStats s = Session;
 			if (!(s.priorRthClose > 0) || !(s.rthOpen > 0)) return;
 			double gap = (s.rthOpen - s.priorRthClose) / s.priorRthClose;
@@ -190,7 +194,10 @@ namespace PowerLanguage.Strategy
 			double floor = Math.Max(atr, floorTicks() * tickSize());
 			if (up && m_stop - s.priorRthClose < floor) m_stop = s.priorRthClose + floor;
 			if (!up && s.priorRthClose - m_stop < floor) m_stop = s.priorRthClose - floor;
-			if (up) { m_se.Send(s.priorRthClose - tickSize()); m_ls.Send(m_stop); } else { m_le.Send(s.priorRthClose + tickSize()); m_ss.Send(m_stop); }
+			// The protective stop sent with the entry is the exit for that side (the short's buy-to-cover stop on an up gap; it was the
+			// long's sell stop before, which protected nothing).
+			m_restPx = up ? s.priorRthClose - tickSize() : s.priorRthClose + tickSize(); m_restBuy = !up; m_restOn = true; m_restQty = 1;
+			if (up) { (entryOpen() ? m_se : null)?.Send(m_restPx, m_restQty); m_ss.Send(m_stop); } else { (entryOpen() ? m_le : null)?.Send(m_restPx, m_restQty); m_ls.Send(m_stop); }
 			m_armed = true;
 		}
 		private void sendExits(int pos, DateTime day)
@@ -213,19 +220,20 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))
+				&& IsRth() && sessionClock(Bars.Time[0]) <= m_rthValueEnd.Subtract(TimeSpan.FromMinutes(30));   // the stop is live until RthValueEnd - 30 min
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_le : null)?.Send(m_restPx, m_restQty); m_ls.Send(m_stop);
 			}
 			else
 			{
-				m_se.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_se : null)?.Send(m_restPx, m_restQty); m_ss.Send(m_stop);
 			}
 			return true;
 		}

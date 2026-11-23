@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the SW-01 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
+// Research assumption: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes (taken at the flat window) beyond WeeklyComposite(3) by 0.1 times Atr20d; the balance and the composite edge are frozen at the first close. Then, from the next day, the first 60-minute higher low at an RTH hour close, buy; one trade per break. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
+// Other: ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes (taken at the flat window) beyond WeeklyComposite(3) by 0.1 times Atr20d; the balance and the composite edge are frozen at the first close. Then, from the next day, the first 60-minute higher low at an RTH hour close, buy; one trade per break. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes beyond WeeklyComposite(3) by 0.1 times Atr20d, then the next day's first 60-minute higher low, buy. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
+// ASSUMPTION: ASSUMPTION: the balance is three completed weekly profiles whose value areas overlap by at least 60 percent of the narrower one. WeeklyProfiles is enabled. Two daily closes (taken at the flat window) beyond WeeklyComposite(3) by 0.1 times Atr20d; the balance and the composite edge are frozen at the first close. Then, from the next day, the first 60-minute higher low at an RTH hour close, buy; one trade per break. The stop is a quarter of the composite width back inside. The target is one width. Hold up to 15 sessions.
 // IOG is disabled.
 
 
@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 		private IOrderMarket m_le; private int m_out; private bool m_done, m_counted; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _SW_01_WeeklyBalanceBreak(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "SW01"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "SW01LE", EOrderAction.Buy)); }
@@ -159,30 +159,81 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; WeeklyProfiles.enabled = true; base.StartCalc(); requireRing(1, 2000, "SW-01 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DailyConfig.atrLength = 20; WeeklyProfiles.enabled = true; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "SW-01 lookback"); m_out = 0; m_counted = false; m_day = DateTime.MinValue; m_readyAfter = DateTime.MaxValue; m_dayState = "noCount"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ }
 
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (sandboxBook()) return;
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_counted = false; }
-			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || CompletedWeeks < 3) return;
-			VpExtra a = Week(1), b = Week(2), c = Week(3), comp = WeeklyComposite(3);
-			if (a == null || b == null || c == null || comp == null) return;
-			if (!overlap(a, b) || !overlap(b, c)) return;
-			double atr = DailyContext.Atr20d; if (!(atr > 0)) return;
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_day) { chkDay(); m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_counted = false; }
+			// Coder 2026-11-22 (Analyst 4fbc309: day(noCount) on 412 of 515 days): m_done is checked after the daily acceptance count.
+			// Before, a budget skip at an hourly check (m_done) returned before the 15:50 count every day, so the break was never
+			// re-checked: out stayed at 2+ for months (2023-05-31 to 2023-08-24) and the same skip repeated each day.
+			if (StrategyInfo.MarketPosition != 0 || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_counted && _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)) { m_counted = true; if (Bars.Close[0] > comp.vah + 0.1 * atr) m_out++; else m_out = 0; }
-			if (m_out < 2 || tod < m_rthStart.Add(TimeSpan.FromMinutes(60)) || tod > m_rthStart.Add(TimeSpan.FromMinutes(61))) return;
+			// Daily acceptance count on the first bar of the flat window (close - 5 minutes). Coder 2026-11-22 (Analyst Set3: 0 trades):
+			// the balance (three overlapping weekly VAs) and the composite edge are taken when the FIRST acceptance close happens and
+			// then frozen. Before, every bar re-checked the latest three weeks, so once the breakout week completed (Week(1) = the
+			// breakout week, whose VA no longer overlaps) the next day's entry check returned early and the break could never trade.
+			if (!m_counted && _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd))
+			{
+				m_counted = true;
+				double atr = DailyContext.Atr20d;
+				if (!(atr > 0)) m_dayState = "noAtr20d";
+				else if (m_out == 0)
+				{
+					string why = balance();
+					if (why != null) m_dayState = why;
+					else if (Bars.Close[0] > m_compVah + 0.1 * atr) { m_eVah = m_compVah; m_eVal = m_compVal; m_out = 1; m_dayState = "accept1"; }
+					else m_dayState = "balanceNoClose";
+				}
+				else if (Bars.Close[0] > m_eVah + 0.1 * atr) { m_out++; m_dayState = "accept" + m_out; if (m_out == 2) m_readyAfter = day; }
+				else { m_out = 0; m_dayState = "acceptFailed"; }
+			}
+			if (m_done) return;
+			// Entry: the first 60-minute higher low on a day AFTER the second acceptance close. Coder 2026-11-22: every RTH hour close
+			// is checked (10:30, 11:30, ... ET), not only 10:30, and one trade per break.
+			if (m_out < 2 || day <= m_readyAfter) return;
+			int mins = (int)(tod - m_rthStart).TotalMinutes;
+			if (mins < 60 || mins % 60 != 0 || Bars.CurrentBar < 130) return;
+			m_chk[0]++;
 			double lo = Bars.Low[0], prev = lbBar(60).l, hi = Bars.High[0];
-			for (int i = 1; i < 60 && i <= Bars.CurrentBar; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(60 + i).l); hi = Math.Max(hi, lbBar(i).h); }
-			if (!(lo > prev)) return;
-			double w = comp.vah - comp.val; if (!(w > 0)) return;
+			for (int i = 1; i < 60; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(60 + i).l); hi = Math.Max(hi, lbBar(i).h); }
+			if (!(lo > prev)) { m_chk[1]++; return; }
+			double w = m_eVah - m_eVal; if (!(w > 0)) { m_chk[2]++; return; }
 			double entry = hi + tickSize();
-			double stop = widen(true, entry, comp.vah - 0.25 * w);
-			if (!budget(entry, stop)) { m_done = true; return; }
+			double stop = widen(true, entry, m_eVah - 0.25 * w);
+			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; if (journalOn()) trace(ETraceLevel.Error, $"SW-01 {Bars.Time[0]:yyyy-MM-dd HH:mm} skipped: risk exceeds 1 percent"); return; }
+			m_chk[4]++;
+			if (journalOn()) trace(ETraceLevel.Journal, $"SW-01 {Bars.Time[0]:yyyy-MM-dd HH:mm} entry {entry} stop {stop} target {entry + w} composite {m_eVal}-{m_eVah} W {w}");
+			m_out = 0;   // one trade per break
 			arm(true, entry, stop, entry + w, "SW01LE", 15); { if (hostGate(true)) m_le.Send(); }
+		}
+
+		// The balance at the first acceptance close: three completed weekly profiles, pairwise VA overlap >= 60 percent of the narrower,
+		// and WeeklyComposite(3). Null when it holds (m_compVah / m_compVal set), else the failing gate for the checks line.
+		private double m_compVah, m_compVal, m_eVah, m_eVal; private DateTime m_readyAfter = DateTime.MaxValue;
+		private string balance()
+		{
+			if (CompletedWeeks < 3) return "weeksLt3";
+			VpExtra a = Week(1), b = Week(2), c = Week(3), comp = WeeklyComposite(3);
+			if (a == null || b == null || c == null) return "weekMissing";
+			if (comp == null) return "compositeMissing(roll)";
+			if (!overlap(a, b) || !overlap(b, c)) return "noOverlap";
+			m_compVah = comp.vah; m_compVal = comp.val;
+			return null;
+		}
+
+		// One Journal line per Globex day (like A2-45): the daily acceptance state, then the hourly entry checks.
+		// day(noCount): the count did not run that day: in a position (held up to 15 days), or no RTH bar reached the flat window (a holiday).
+		private readonly int[] m_chk = new int[5]; private string m_dayState = "noCount";
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "SW-01 " + m_day.ToString("yyyy-MM-dd") + " checks day(" + m_dayState + ") out(" + m_out + ") hourChecks(" + m_chk[0] + ") noHL(" + m_chk[1] + ") noWidth(" + m_chk[2] + ") budget(" + m_chk[3] + ") sent(" + m_chk[4] + ")");
+			m_dayState = "noCount"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
 		}
 		private bool overlap(VpExtra x, VpExtra y)
 		{
@@ -221,8 +272,20 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
 			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
@@ -310,10 +373,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

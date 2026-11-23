@@ -186,7 +186,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- base.StartCalc(); m_shockBar = -1; m_side = 0; }
+ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_shockBar = -1; m_side = 0; }
 
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -199,6 +199,9 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -244,7 +247,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(Cfg.disasterTr * tr, floor);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} skip: disaster stop {r / tick:F0} ticks breaches risk budget"); return; }
 			m_shockBar = BarsOfData(2).CurrentBar; m_shockTr = tr; m_stop = c - side * r;
-			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
+			if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) trace(ETraceLevel.Journal, $"A2-51 {et:yyyy-MM-dd HH:mm} shock TR {tr:F2} = {tr / med:F2} x median; fade {(side > 0 ? "long" : "short")}");
 		}
 

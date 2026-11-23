@@ -244,6 +244,31 @@ namespace PowerLanguage.Strategy
 			return ERest.Resend;
 		}
 
+		/// <summary>Coder 2026-11-22 (Analyst native retest of #152: A2-28 / A2-35 stopped on the fill bar, then re-entered): a position
+		/// that opens and closes inside one bar never shows MarketPosition != 0 on a bar close, so the position test alone misses
+		/// the fill. entriesToday is the strategy's entry count for this trading day from the position history (TradesToday); a
+		/// rise since the last call is a fill on the resting anchor, whether or not the position is still open.</summary>
+		public static ERest Rest(int position, int entriesToday, ref int seenEntries, ref int prev, ref bool filled, ref int fillAnchor, int anchor, ref bool restOn, bool windowOpen)
+		{
+			if (entriesToday > seenEntries) { filled = true; fillAnchor = anchor; }
+			seenEntries = entriesToday;
+			return Rest(position, ref prev, ref filled, ref fillAnchor, anchor, ref restOn, windowOpen);
+		}
+
+		/// <summary>Owner 2026-11-22 16:39 CT (A2-28): "use T1 halfway between entry and mu_major when the void is behind entry".
+		/// T1 distance in points from the entry: the midpoint of entry and target rounded to the tick, kept at least one tick beyond the
+		/// entry and one tick short of the target (the correct side). NaN when the target is less than two ticks away.</summary>
+		public static double MidT1Points(bool longSide, double entry, double target, double tick)
+		{
+			if (!(tick > 0) || double.IsNaN(entry) || double.IsNaN(target)) return double.NaN;
+			long ticks = (long)Math.Round((longSide ? target - entry : entry - target) / tick);
+			if (ticks < 2) return double.NaN;
+			long half = (long)Math.Round(ticks / 2.0, MidpointRounding.AwayFromZero);
+			if (half < 1) half = 1;
+			if (half > ticks - 1) half = ticks - 1;
+			return half * tick;
+		}
+
 		public static bool Allows(ESandboxSide side, bool buy)
 		{
 			if (side == ESandboxSide.Both) return true;

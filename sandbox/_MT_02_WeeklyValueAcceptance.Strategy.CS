@@ -185,10 +185,13 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EAcceptanceDays), AcceptanceDays)) throw new ArgumentException("_MT_02_WeeklyValueAcceptance: AcceptanceDays is not a defined EAcceptanceDays");
 			HtfStreams = new[] { 2 };
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = m_week = m_last60 = DateTime.MinValue; m_vah = m_height = double.NaN; m_heldSessions = 0;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -244,7 +247,7 @@ namespace PowerLanguage.Strategy
 			double r = Bars.Close[0] - m_stop;   // R from the planned (signal-close) entry
 			if (r < Cfg.costFloorTicks * tickSize()) { r = Cfg.costFloorTicks * tickSize(); m_stop = Bars.Close[0] - r; }   // catalogue 2.1: widen to the cost floor
 			if (overRiskBudget(r)) { m_doneWeek = true; journal($"skip: stop {r / tickSize():F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }   // not resized
-			m_le.Send(Cfg.contracts); m_doneWeek = true; m_lxStp.Send(m_stop);
+			(entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_doneWeek = true; m_lxStp.Send(m_stop);
 			var ctx = new Dictionary<string, string> { { "vah", m_vah.ToString() }, { "height", m_height.ToString() }, { "atr20d", atr.ToString("F2") }, { "accept", m_accept.ToString() } };
 			if (journalOn()) { journalArm("MT02LE", Bars.Close[0], m_stop, m_target, ctx); logSignal("MT-02", +1, Bars.Close[0], m_stop, ctx, true); }
 		}

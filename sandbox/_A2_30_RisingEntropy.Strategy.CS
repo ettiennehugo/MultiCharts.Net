@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-30.
 // Taken from the source: the Rules or Analyst 2 specification under that heading.
-// Research assumption: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of today's developing RTH histogram, sampled on 5-minute boundaries. The 90th percentile uses an in-file list of the last 60 same-slot slopes. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
+// Research assumption: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of the histogram of the last 30 minutes of today's RTH bars, sampled on 5-minute boundaries; H_slope is the change from the sample 15 minutes earlier. The 90th percentile is over the last 60 sessions' slopes at the same clock slot. The breakout is 2 consecutive closed Data2 5-minute closes outside the balance within 60 minutes of the alert, entered at the next 5-minute open. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -41,7 +41,7 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
-// Data2: named in section 22, or Not applicable.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars for the breakout and the trail, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the statistic named in the rule.
 //
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series where this file trades.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of today's developing RTH histogram, sampled on 5-minute boundaries. The 90th percentile uses an in-file list of the last 60 same-slot slopes. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
+// Other: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of the histogram of the last 30 minutes of today's RTH bars, sampled on 5-minute boundaries; H_slope is the change from the sample 15 minutes earlier. The 90th percentile is over the last 60 sessions' slopes at the same clock slot. The breakout is 2 consecutive closed Data2 5-minute closes outside the balance within 60 minutes of the alert, entered at the next 5-minute open. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -131,7 +131,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of today's developing RTH histogram, sampled on 5-minute boundaries. The 90th percentile uses an in-file list of the last 60 same-slot slopes. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
+// ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of the histogram of the last 30 minutes of today's RTH bars, sampled on 5-minute boundaries; H_slope is the change from the sample 15 minutes earlier. The 90th percentile is over the last 60 sessions' slopes at the same clock slot. The breakout is 2 consecutive closed Data2 5-minute closes outside the balance within 60 minutes of the alert, entered at the next 5-minute open. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
 // IOG is disabled.
 
 
@@ -146,8 +146,10 @@ namespace PowerLanguage.Strategy
 	{
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
-		private readonly List<double> m_slopes = new List<double>();
-		private double m_hi = double.NaN, m_lo = double.NaN, m_prevH, m_stop, m_target, m_hNow;
+		private readonly Dictionary<int, List<double>> m_slopes = new Dictionary<int, List<double>>();   // H_slope history per clock slot (60 sessions)
+		private readonly Dictionary<int, double> m_hDay = new Dictionary<int, double>();   // today's H_norm per clock slot
+		private int m_outUp, m_outDn;
+		private double m_hi = double.NaN, m_lo = double.NaN, m_stop, m_target;
 		private double m_p1Hi = double.NaN, m_p1Lo = double.NaN, m_p1Close = double.NaN, m_p2Hi = double.NaN, m_p2Lo = double.NaN;
 		private DateTime m_day = DateTime.MinValue;
 		private int m_side;
@@ -177,8 +179,11 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_slopes.Clear(); m_hDay.Clear(); m_nativeTime = DateTime.MinValue; m_hi = m_lo = double.NaN; m_p1Hi = m_p1Lo = m_p1Close = m_p2Hi = m_p2Lo = double.NaN; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -186,9 +191,14 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			if (day != m_day) { if (IsNoRthDay(day)) m_hi = m_lo = double.NaN; else remember(); m_day = day;   /* Analyst MC17: a no-RTH Globex date (holiday halt, abbreviated Good Friday) is not a trading day; the next RTH date logs the balance */ m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_prevH = double.NaN; }
+			if (day != m_day) { if (IsNoRthDay(day)) m_hi = m_lo = double.NaN; else remember(); m_day = day;   /* Analyst MC17: a no-RTH Globex date (holiday halt, abbreviated Good Friday) is not a trading day; the next RTH date logs the balance */ m_alert = m_done = false; m_filledSetup = false; m_restOn = false; m_side = 0; m_hDay.Clear(); m_outUp = m_outDn = 0; }
 			int pos = StrategyInfo.MarketPosition;
-			bool inside = !double.IsNaN(m_hi) && Bars.Close[0] < m_hi && Bars.Close[0] > m_lo;
+			// Coder 2026-11-22 (catalogue Rev 6): the breakout and the trail use closed Data2 5-minute closes ("2 consecutive 5m closes
+			// outside the balance range; enter at the next 5m open"; "trail on a 5m close back inside"); they used 1-minute closes.
+			bool new5 = newNativeBar(); double c5 = double.NaN;
+			if (new5) { double o, h, l, v; nativeBar(0, out o, out h, out l, out c5, out v); }
+			bool inside = new5 && !double.IsNaN(m_hi) && c5 < m_hi && c5 > m_lo;
+			if (IsRth() && tod.Minutes % 5 == 0) sample(tod);   // sampled every RTH 5 minutes, flat or not, so the same-time history is complete
 			bool sendExits()
 			{
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || inside) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
@@ -196,14 +206,15 @@ namespace PowerLanguage.Strategy
 				return false;
 			}
 			if (pos != 0 && sendExits()) return;
-			if (m_done || pos != 0 || !IsRth() || rollOn(1) || double.IsNaN(m_hi)) return;
-			if (tod.Minutes % 5 == 0) sample(tod);
-			if (!m_alert || (Bars.Time[0] - m_alertAt).TotalMinutes > 60) return;
-			bool outUp = Bars.Close[0] > m_hi && Bars.Close[1] > m_hi;
-			bool outDn = Bars.Close[0] < m_lo && Bars.Close[1] < m_lo;
+			if (m_done || pos != 0 || !IsRth() || rollOn(1) || double.IsNaN(m_hi) || !new5) return;
+			if (!m_alert || (Bars.Time[0] - m_alertAt).TotalMinutes > 60) { m_outUp = m_outDn = 0; return; }
+			m_outUp = c5 > m_hi ? m_outUp + 1 : 0;
+			m_outDn = c5 < m_lo ? m_outDn + 1 : 0;
+			bool outUp = m_outUp >= 2;
+			bool outDn = m_outDn >= 2;
 			if (!outUp && !outDn) return;
 			m_side = outUp ? 1 : -1;
-			double entry = Bars.Close[0];
+			double entry = c5;
 			double range = m_hi - m_lo;
 			double tick = tickSize();
 			double stop = m_side > 0 ? m_hi - 0.25 * range : m_lo + 0.25 * range;
@@ -212,35 +223,63 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || risk * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-30 {m_day:yyyy-MM-dd} skip: stop {risk / tick:F0} ticks breaches risk budget"); m_done = true; return; }
 			m_stop = stop; m_target = m_side > 0 ? m_hi + range : m_lo - range; m_done = true;
-			if (m_side > 0) { m_le.Send(); m_lxStp.Send(m_stop); } else { m_se.Send(); m_sxStp.Send(m_stop); }
+			if (m_side > 0) { (entryOpen() ? m_le : null)?.Send(); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(); m_sxStp.Send(m_stop); }
 			if (journalOn()) journalArm(m_side > 0 ? "A230LE" : "A230SE", entry, m_stop, m_target, null);
 		}
-
+		// Coder 2026-11-22 (catalogue: "rolling 30-minute H_norm of today's profile, sampled every 5 minutes; H_slope = 15-minute change.
+		// Alert when H_slope > its 90th percentile (trailing 60 sessions, same time of day)"): the profile is the last 30 minutes of
+		// today's RTH bars, the slope is against the sample 15 minutes earlier, and the percentile is over that clock slot's last 60 sessions.
 		private void sample(TimeSpan tod)
 		{
 			List<RingBar> bars = SessionBars(m_day, true);
-			if (bars == null || bars.Count < 10) return;
+			if (bars == null) return;
+			DateTime from = Bars.Time[0].AddMinutes(-30);
+			List<RingBar> win = bars.FindAll(b => b.time > from);
+			if (win.Count < 10) return;
 			double[] p, v;
-			if (!_ProfileStats.Histogram(bars, null, tickSize(), 2, out p, out v)) return;
-			EntropyResult e = _ProfileStats.Entropy(v, EEntropyRows.DenseRange, bars.Count);
+			if (!_ProfileStats.Histogram(win, null, tickSize(), 2, out p, out v)) return;
+			EntropyResult e = _ProfileStats.Entropy(v, EEntropyRows.DenseRange, win.Count);
 			if (double.IsNaN(e.Hnorm)) return;
-			if (!double.IsNaN(m_prevH))
+			int slot = (int)tod.TotalMinutes;
+			m_hDay[slot] = e.Hnorm;
+			double prev;
+			if (!m_hDay.TryGetValue(slot - 15, out prev)) return;
+			double slope = e.Hnorm - prev;
+			List<double> hist;
+			if (!m_slopes.TryGetValue(slot, out hist)) { hist = new List<double>(); m_slopes[slot] = hist; }
+			if (hist.Count >= 60)
 			{
-				double slope = e.Hnorm - m_prevH;
-				if (m_slopes.Count >= 60)
-				{
-					var copy = new List<double>(m_slopes); copy.Sort();
-					double p90 = copy[(int)(0.9 * (copy.Count - 1))];
-					if (slope > p90 && tod >= new TimeSpan(10, 30, 0)) { m_alert = true; m_alertAt = Bars.Time[0]; }
-				}
-				m_slopes.Add(slope); if (m_slopes.Count > 60) m_slopes.RemoveAt(0);
+				var copy = new List<double>(hist); copy.Sort();
+				double p90 = copy[(int)(0.9 * (copy.Count - 1))];
+				if (slope > p90 && tod >= new TimeSpan(10, 30, 0)) { m_alert = true; m_alertAt = Bars.Time[0]; }
 			}
-			m_prevH = e.Hnorm;
+			hist.Add(slope); if (hist.Count > 60) hist.RemoveAt(0);
 		}
 
-		// Called on the first bar of a new Globex day, after the session stats rolled: priorRth* is the last completed RTH
-		// session. The balance is that session and the one before it. A no-RTH day carries the same prior forward, so it is
-		// not counted twice. NaN until two RTH sessions are known.
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
+
 		private void remember()
 		{
 			m_hi = m_lo = double.NaN;

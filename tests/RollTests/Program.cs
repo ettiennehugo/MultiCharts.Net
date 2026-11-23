@@ -83,6 +83,16 @@ static class Program
 			Check(sr.Count == 1 && sr[0] == s2.First(x => x.day == new DateTime(2025, 3, 18)).bar, "fix-i series: first in-window gap >= 8 ticks only (Mar 18, not the Mar 20 one: one per contract)");
 			Check(Run(new _RollDetector { series = true, gapTicks = 13 }, s2, 0.25).Count == 0, "S4 series: gapTicks threshold respected");
 		}
+		{   // Coder 2026-11-23 (Analyst MES 2024-06): a Series window with no splice is reported once, after the window
+			var dm = new _RollDetector { series = true };
+			Run(dm, s, 0.25);   // window Mon 2025-03-17 .. Fri 03-21; the 03-12 gap (10 ticks) is before it
+			Check(dm.MissedExpiry == new DateTime(2025, 3, 21) && dm.MissedGapDay == new DateTime(2025, 3, 12) && Math.Abs(dm.MissedGap - 2.5) < 1e-9,
+				$"missed Series window reported: expiry {dm.MissedExpiry:yyyy-MM-dd} largest gap {dm.MissedGap} on {dm.MissedGapDay:yyyy-MM-dd}");
+			var s3 = Series(60, (d, m) => d == new DateTime(2025, 3, 18) ? 2.5 : 0.75, d => "ES", start);
+			var dk = new _RollDetector { series = true };
+			Run(dk, s3, 0.25);
+			Check(dk.MissedExpiry == DateTime.MinValue, "a Series window with its splice is not reported as missed");
+		}
 		FixI();
 		CalibFit();
 

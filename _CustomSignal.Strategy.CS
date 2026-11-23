@@ -735,7 +735,7 @@ namespace PowerLanguage.Strategy
 			bool shared = pa != null;
 			if (pa == null)
 			{
-				pa = new _PriceActionEngine { config = c, label = "PA" + ds + "-DVP-S" + str, journal = engineSink(ETraceLevel.Journal), warnOnce = engineSink(ETraceLevel.Warning) };
+				pa = new _PriceActionEngine { config = c, label = "PA" + ds + "-DVP-S" + str, journal = engineSink(ETraceLevel.Verbose),   /* Coder 2026-11-22 (Analyst #152 recheck: 99% of the MT-07/PS-25 log): the DVP lattice pivot / BOS facts are Verbose */ warnOnce = engineSink(ETraceLevel.Warning) };
 				string perr = pa.Configure();
 				if (perr != null) throw new ArgumentException(perr);
 			}
@@ -2429,7 +2429,13 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
-			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
+			DateTime missedBefore = m_rollDet.MissedExpiry;
+			bool stepped = m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize());
+			if (m_rollDet.MissedExpiry != missedBefore && traceOn(ETraceLevel.Warning))
+				trace(ETraceLevel.Warning, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+					"ROLL no Series splice for the {0:yyyy-MM-dd} contract: no trading-day first-bar gap >= {1} ticks in its roll window (largest of the last ten day starts {2:0.00} pts on {3:yyyy-MM-dd}); roll consumers did not reset. Check the continuous series splice for {4}.",
+					m_rollDet.MissedExpiry, RollGapTicks, m_rollDet.MissedGap, m_rollDet.MissedGapDay, name));
+			if (stepped)
 			{
 				double tk = tickSize(), g = m_rollDet.LastGap;
 				RollSpliceDiag = string.Format(System.Globalization.CultureInfo.InvariantCulture, "gapPts({0:0.00}) gapX({1:0.00}) barTime({2:yyyy-MM-dd HH:mm}) prevClose({3:0.00}) open({4:0.00})",
@@ -4646,6 +4652,9 @@ namespace PowerLanguage.Strategy
 			mkt.EntryStop = structuralStop;
 			ensureGx(mkt);
 			gxApplyFlatBy();
+			// Coder 2026-11-22 (Analyst #152 recheck: A2-28 0 T1 fills): a host that changes GxConfig between trades gets those modes
+			// on this trade, not the modes the engine resolved at its first exitPlan.
+			if (StrategyInfo.MarketPosition == 0 && m_gx.Reconfigure()) gxEmitLog();
 			createGxOrders();
 			double stop = m_gx.InitialStop(longSide, plannedEntry, mkt);
 			m_gxMkt = mkt;
@@ -4828,6 +4837,60 @@ namespace PowerLanguage.Strategy
 
 		/// <summary>One exchange-zone trading date for ExitSession.FlatCalendar: the InstrumentFlatCalendar day, its ET end moved into the
 		/// exchange zone. Cached per date.</summary>
+		/// <summary>Coder 2026-11-22 (stack rebased onto #146/#151): the entry side of the GX date-aware flat-by. True from that trading
+		/// date's cutoff (ExitSession.CutoffFor: the earlier of flatByHHMM and the date's early close / holiday halt minus 5 minutes,
+		/// from the instrument calendar) until the next trading date opens (gxTradingDate rollover, 17:00 CT on CME). Closed dates have
+		/// no cutoff. The sandbox entry guards (hostGate entryCutoff, entryOpen) use this, so an entry is never sent on a bar whose
+		/// NEXT bar (where it fills) is at or after the cutoff GX itself flattens at (Coder 2026-11-22, Analyst Set3). flatByHHMM is in the exchange zone.</summary>
+		protected bool gxPastFlatCutoff(int flatByHHMM)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return false; }
+			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
+			ExitSession.FlatDay f = gxFlatDay(ex.Date);
+			if (f.Closed) return false;
+			return ExitSession.EntryBlocked(ex, gxBarInterval(), ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At);   // the NEXT bar (the fill bar) must end before the cutoff
+		}
+
+		/// <summary>Coder 2026-11-22 (catalogue §2.1 "no new entries after 15:30; flat by 15:55"): true from minutesBefore minutes
+		/// ahead of the date-aware flat-by cutoff (early closes included) until 18:00 ET. minutesBefore 0 is gxPastFlatCutoff.</summary>
+		protected bool gxPastFlatCutoff(int flatByHHMM, int minutesBefore)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return false; }
+			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
+			ExitSession.FlatDay f = gxFlatDay(ex.Date);
+			if (f.Closed) return false;
+			return ExitSession.EntryBlocked(ex, gxBarInterval(), ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At.AddMinutes(-Math.Max(0, minutesBefore)));
+		}
+
+		/// <summary>Coder 2026-11-22 (owner 22:50 CT, NoEntryMinutesBeforeFlat): the journal text for a blocked entry, with the actual
+		/// times for this bar's trading date: "no new entries from HH:mm exchange time (flat-by cutoff HH:mm[, early close] minus N min)".</summary>
+		protected string gxEntryCutoffNote(int flatByHHMM, int minutesBefore)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return "at or after the flat-by cutoff"; }
+			DateTime d = gxTradingDate(ex);
+			ExitSession.FlatCutoff c = ExitSession.CutoffFor(d, flatByHHMM, gxFlatDay(d));
+			int m = Math.Max(0, minutesBefore);
+			return "no new entries from " + c.At.AddMinutes(-m).ToString("HH:mm", CultureInfo.InvariantCulture) + " exchange time (flat-by cutoff "
+				+ c.At.ToString("HH:mm", CultureInfo.InvariantCulture) + (string.IsNullOrEmpty(c.EarlyReason) ? "" : ", " + c.EarlyReason) + " minus " + m
+				+ " min; an order fills on the next bar, so the last sending bar is one bar earlier)";
+		}
+
+		/// <summary>Data1 bar size for the entry cutoff: intraday time bars only (zero for tick, volume, daily and longer bars).</summary>
+		private TimeSpan gxBarInterval()
+		{
+			TimeSpan d = TimeSpan.Zero;
+			try
+			{
+				EResolution t = Bars.Info.Resolution.Type;
+				if (t == EResolution.Second || t == EResolution.Minute || t == EResolution.Hour) d = Bars.Info.Resolution.Duration();   // daily and longer, tick, volume: zero
+			}
+			catch (Exception) { d = TimeSpan.Zero; }
+			return d;
+		}
+
 		ExitSession.FlatDay gxFlatDay(DateTime day)
 		{
 			day = day.Date;

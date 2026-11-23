@@ -506,6 +506,28 @@ namespace PowerLanguage.Function
 			}
 		}
 
+		/// <summary>Coder 2026-11-22 (Analyst #152 recheck: A2-28 never filled T1): Start resolves Effective and the feature gates
+		/// (T1On, FinalOn, BreakEven, trail) once per run, so an embedded host that sets GxConfig per trade (TargetMode, BreakEven,
+		/// T1ScalePct, ...) kept the first trade's modes for the whole run. exitPlan calls this while flat: it re-resolves from the
+		/// current Config and re-applies the gates. Returns true when a mode changed; that change gets one START line.</summary>
+		public bool Reconfigure()
+		{
+			var scratch = new List<string>();
+			ExitEffective e = ExitEffective.Resolve(Config, scratch);
+			if (InvalidReason(e.InitialStop, Config, Config.Embedded) != null) e.InitialStop = EInitialStop.AtrMultiple;
+			string pkg = ExitEffective.Hash(e, Config);
+			if (pkg == Package) return false;
+			bool t1 = T1On, fin = FinalOn, beT = BeUsesTrigger, beOff = BeDisabled, trT = TrailUsesTrigger;
+			ExitEffective was = Effective; bool first = Package == null;
+			Effective = e;
+			Package = pkg;
+			ApplyFeatureGates();
+			bool changed = first || t1 != T1On || fin != FinalOn || beT != BeUsesTrigger || beOff != BeDisabled || trT != TrailUsesTrigger
+				|| was.TargetMode != e.TargetMode || was.BreakEven != e.BreakEven || was.TrailMode != e.TrailMode || was.SingleLotMode != e.SingleLotMode;
+			if (changed) { NoteFallbacks(); Log.Add(StartLine(Config, Effective, Package)); }
+			return changed;
+		}
+
 		void ApplyFeatureGates()
 		{
 			T1On = Effective.TargetMode == ETargetMode.ScaleOutThenRunner && Config.T1ScalePct > 0;
@@ -917,6 +939,16 @@ namespace PowerLanguage.Function
 			var same = new DateTime(entry.Year, entry.Month, entry.Day, hour, minute, 0);
 			if (same > entry) return same;
 			return same.AddDays(1);
+		}
+
+		/// <summary>Coder 2026-11-22 (Analyst Set3: GX-00 fills stamped exactly 14:55:00 CT, and 12:10 CT on an early close): an entry
+		/// order sent at a bar's close fills on the NEXT bar, which MultiCharts stamps with that bar's close time. So an entry is
+		/// blocked when the next bar (barClose + barInterval) is at or after the cutoff, not only when this bar is. barInterval is the
+		/// chart bar size (zero for non-time bars, which falls back to barClose >= cutoff).</summary>
+		public static bool EntryBlocked(DateTime barClose, TimeSpan barInterval, DateTime cutoff)
+		{
+			if (barInterval < TimeSpan.Zero || barInterval > TimeSpan.FromDays(1)) barInterval = TimeSpan.Zero;
+			return barClose + barInterval >= cutoff;
 		}
 
 		public static DateTime CutoffOn(DateTime day, int hhmm)

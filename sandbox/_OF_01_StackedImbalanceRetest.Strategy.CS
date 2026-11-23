@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for OF-01. The code is the engines-manual worked example, renamed to the catalogue file stem.
 // Taken from the source: the example's core arm, including its labelled assumptions.
-// Research assumption: where the example labels an assumption, that label still applies. GX is not built, so the example's own exit orders remain. The control-arm exit is pending _GenericExit.
+// Research assumption: where the example labels an assumption, that label still applies. GX is not built, so the example's own exit orders remain. The control-arm exit is pending _GenericExit. A zone lives until its first retest or the roll, not only for the day; its move-away and retest are tracked in ETH too, and the retest limit is sent in RTH only. A sell stack needs the 5-minute close in the bottom 30 percent (the mirror of the buy rule).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry and the example.
@@ -165,7 +165,7 @@ namespace PowerLanguage.Strategy
 
 		[Input] public ESandboxSide Side { get; set; }
 		private bool m_done;
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 		public _OF_01_StackedImbalanceRetest(object _ctx) : base(_ctx) { Side = ESandboxSide.Both; }
 
 		protected override void Create()
@@ -188,7 +188,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- base.StartCalc(); m_day = DateTime.MinValue; }
+ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_day = DateTime.MinValue; }
 
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -201,18 +201,24 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_zone = m_armed = m_used = false; }
+			// Coder 2026-11-22: a zone lives until its first retest or the roll (the catalogue gives it no daily expiry); m_used still
+			// allows one trade per Globex day. sandboxBook runs before the position return so Rest() sees the fill.
+			if (day != m_day) { m_day = day; m_used = m_done = false; }
+			if (sandboxBook()) return;
 			if (rollOn(1)) m_zone = false;
 			int pos = StrategyInfo.MarketPosition;
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
 			{
-				m_used = true;
+				m_used = true; m_zone = false;   // the zone has had its retest
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
 				else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
@@ -220,7 +226,7 @@ namespace PowerLanguage.Strategy
 			
 			}
 			if (pos != 0 && sendExits()) return;
-			if (!IsRth()) return;
+			bool rth = IsRth();   // Coder 2026-11-22: the zone's move-away and first retest are tracked in ETH too; entries are RTH only, so an ETH retest uses the zone up
 			double tick = tickSize(), h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
 			double atr = averageTrueRange(Bars, Cfg.atrLength);
 			if (m_zone && !m_used)
@@ -229,22 +235,22 @@ namespace PowerLanguage.Strategy
 				{
 					if (!m_armed && h >= m_zHi + Cfg.awayAtr * atr) m_armed = true;
 					else if (m_armed && l <= m_zHi) { m_used = true; m_zone = false; return; }
-					if (m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, true))
-					{ m_leLmt.Send(m_zHi, Cfg.contracts); m_lxStp.Send(m_stop); return; }
+					if (rth && m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, true))
+					{ (entryOpen() ? m_leLmt : null)?.Send(m_zHi, Cfg.contracts); m_lxStp.Send(m_stop); return; }
 				}
 				else
 				{
 					if (!m_armed && l <= m_zLo - Cfg.awayAtr * atr) m_armed = true;
 					else if (m_armed && h >= m_zLo) { m_used = true; m_zone = false; return; }
-					if (m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, false))
-					{ m_seLmt.Send(m_zLo, Cfg.contracts); m_sxStp.Send(m_stop); return; }
+					if (rth && m_armed && !(mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) && _SandboxRules.Allows(Side, false))
+					{ (entryOpen() ? m_seLmt : null)?.Send(m_zLo, Cfg.contracts); m_sxStp.Send(m_stop); return; }
 				}
 			}
-			if (m_zone || m_used) return;
+			if (m_zone || m_used || !rth) return;
 			if (!takeNative()) return;
 			h = BarsOfData(2).High[0]; l = BarsOfData(2).Low[0]; c = BarsOfData(2).Close[0];
 			atr = averageTrueRange(BarsOfData(2), Cfg.atrLength);
-			if (h - l <= 0 || (c - l) / (h - l) < 1 - Cfg.closeTopFrac) return;
+			if (h - l <= 0) return;
 			_OrderFlow.StackedResult s = StackedImbalances(0, Cfg.ratio, Cfg.minVol, Cfg.minStack);
 			if (!s.Found || s.Quality > _OrderFlow.FlowQuality.High) return;
 			foreach (double[] run in s.Runs)
@@ -252,6 +258,8 @@ namespace PowerLanguage.Strategy
 				bool buyRun = run[3] > 0;
 				if (buyRun && !_SandboxRules.Allows(Side, true)) continue;
 				if (!buyRun && !_SandboxRules.Allows(Side, false)) continue;
+				// Coder 2026-11-22: a buy stack needs the 5m close in the top 30 percent, a sell stack (the mirror) in the bottom 30 percent
+				if (buyRun ? (c - l) / (h - l) < 1 - Cfg.closeTopFrac : (h - c) / (h - l) < 1 - Cfg.closeTopFrac) continue;
 				double stop = buyRun ? run[0] - tick : run[1] + tick;
 				double entry = buyRun ? run[1] : run[0];
 				double risk = Math.Abs(entry - stop);
@@ -275,18 +283,19 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leLmt.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_leLmt : null)?.Send(m_restPx, m_restQty);
 			}
 			else
 			{
+				(entryOpen() ? m_seLmt : null)?.Send(m_restPx, m_restQty);   // Coder 2026-11-22: the short limit is resent too
 			}
 			return true;
 		}

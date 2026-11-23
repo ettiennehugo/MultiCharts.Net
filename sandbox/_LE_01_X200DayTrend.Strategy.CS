@@ -145,10 +145,10 @@ namespace PowerLanguage.Strategy
 	public class _LE_01_X200DayTrend : _VolumeProfileFuturesBase
 	{
 		private IOrderMarket m_le, m_lx;
-		private bool m_done; private DateTime m_day = DateTime.MinValue;
+		private bool m_done; private DateTime m_day = DateTime.MinValue, m_stateDay = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _LE_01_X200DayTrend(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LE", EOrderAction.Buy)); m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "LE01LX", EOrderAction.Sell, OrderExit.FromAll)); }
@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; DailyConfig.smaLength = 200; base.StartCalc(); }
+ NeedsDaily = true; DailyConfig.smaLength = 200; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
@@ -165,6 +165,14 @@ namespace PowerLanguage.Strategy
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; }
 			bool up = Session.priorRthClose > DailyContext.Sma200 && DailyContext.Sma200 > 0;
 			int pos = StrategyInfo.MarketPosition;
+			// Coder 2026-11-22 (Analyst #152 recheck: 1 trade, none after 2023-10-19): the daily state the rule reads, once per trading day.
+			if (day != m_stateDay)
+			{
+				m_stateDay = day;
+				double sma = DailyContext.Sma200, prc = Session.priorRthClose;
+				if (journalOn()) trace(ETraceLevel.Journal, "LE-01 " + day.ToString("yyyy-MM-dd") + " priorRthClose " + prc.ToString("0.00") + " sma200 " + sma.ToString("0.00") + " days " + DailyContext.DaysSeen + " (ring " + DailyContext.Days + "/" + DailyContext.Capacity + ") up " + up + " pos " + pos + " done " + m_done);
+				if ((double.IsNaN(sma) || double.IsNaN(prc)) && DailyContext.DaysSeen >= 200 && traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "LE-01 " + day.ToString("yyyy-MM-dd") + " daily state not ready (NaN) with " + DailyContext.DaysSeen + " days: no entry");
+			}
 			if (pos > 0 && !up) { m_lx.Send(); return; }
 			if (pos != 0 || m_done || !IsRth() || !up) return;
 			if (sessionClock(Bars.Time[0]) > m_rthStart.Add(TimeSpan.FromMinutes(1))) return;
@@ -291,10 +299,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
