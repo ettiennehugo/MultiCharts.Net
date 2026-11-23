@@ -225,7 +225,9 @@ namespace PowerLanguage.Strategy
 		private bool classify()
 		{
 			int n = m_lo.Count;
-			if (n < 20) return false;
+			// Coder 2026-11-22 (Analyst Set2: ArgumentOutOfRange on the 21st day): the lagged mean reads m_cl[n - 6 - 19] = m_cl[n - 25],
+			// so 25 completed sessions are needed (20 for the mean plus the 5-session lag); the 10-day low needs only 10.
+			if (n < 20 + 5) return false;
 			double a = 0, b = 0;
 			for (int i = 0; i < 20; i++) { a += m_cl[n - 1 - i]; b += m_cl[n - 6 - i]; }
 			if (!(a / 20.0 > b / 20.0)) { m_since = -1; return false; }

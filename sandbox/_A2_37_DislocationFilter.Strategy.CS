@@ -40,9 +40,9 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute.
-// Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
-// Data2: named in section 22, or Not applicable.
+// Chart: Data1 = @ES 1-minute. Data2 = @NQ 1-minute (required; catalogue pair 1). Pair 2 is a separate run with Data2 = @YM 1-minute.
+// Data1: @ES 1-minute, the leg the filter protects. Tests use data through 2024-12-31 only.
+// Data2: the other index on the same 1-minute bars and the same session template as Data1 (catalogue A2-37: ES vs NQ, and ES vs YM, all 1m). Without Data2 the file journals 'Data2 missing' once a day and stands aside.
 // Further series: Not applicable
 // Warmup: the statistic named in the rule.
 //

@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the AV-02 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the impulse anchor is AvwapManager.Latest(SwingLow) once its age is at least the impulse. The first pullback is a 15-minute low inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma, with that low above the anchor bar's low. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
+// Research assumption: ASSUMPTION: the impulse anchor is the newest confirmed Data2 (15-minute) zigzag low whose reversal is at least 3 x ATR(20) of Data2 (catalogue: "the low that starts an impulse of >= 3 x ATR (anchor TF), confirmed"; 15m swing for the intraday arm), read as AvwapManager.Latest(SwingLow) with the AVWAP on Data2. The first pullback is a closed Data2 bar after confirmation whose low is inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma and above the anchor low; a Data2 low below the anchor low ends the anchor. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -39,9 +39,9 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 15-minute.
-// Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Chart: Data1 = 1-minute. Data2 = 15-minute, the same symbol as Data1 (required).
+// Data1: the chart and the orders. Tests use data through 2024-12-31 only.
+// Data2: the anchor timeframe. PRICEACTION AtrZigZag (3 x ATR(20)) and the AVWAP run on Data2; the pullback bar is a closed Data2 bar.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the impulse anchor is AvwapManager.Latest(SwingLow) once its age is at least the impulse. The first pullback is a 15-minute low inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma, with that low above the anchor bar's low. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
+// Other: ASSUMPTION: the impulse anchor is the newest confirmed Data2 (15-minute) zigzag low whose reversal is at least 3 x ATR(20) of Data2 (catalogue: "the low that starts an impulse of >= 3 x ATR (anchor TF), confirmed"; 15m swing for the intraday arm), read as AvwapManager.Latest(SwingLow) with the AVWAP on Data2. The first pullback is a closed Data2 bar after confirmation whose low is inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma and above the anchor low; a Data2 low below the anchor low ends the anchor. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the impulse anchor is AvwapManager.Latest(SwingLow) once its age is at least the impulse. The first pullback is a 15-minute low inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma, with that low above the anchor bar's low. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
+// ASSUMPTION: the impulse anchor is the newest confirmed Data2 (15-minute) zigzag low whose reversal is at least 3 x ATR(20) of Data2 (catalogue: "the low that starts an impulse of >= 3 x ATR (anchor TF), confirmed"; 15m swing for the intraday arm), read as AvwapManager.Latest(SwingLow) with the AVWAP on Data2. The first pullback is a closed Data2 bar after confirmation whose low is inside the band from AVWAP minus 0.25 sigma to AVWAP plus 0.5 sigma and above the anchor low; a Data2 low below the anchor low ends the anchor. The buy stop is the high of that 15-minute bar. The target is the highest high since the anchor. The trail is not sent.
 // IOG is disabled.
 
 
@@ -145,45 +145,70 @@ namespace PowerLanguage.Strategy
 	public class _AV_02_ImpulseOriginAVWAP : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_le; private bool m_done; private int m_anchor = -1;
+		// Coder 2026-11-22 (Analyst Set2: AV-02 never entered; the 1-minute strength-1 SwingLow anchor was replaced every ~4 minutes):
+		// the closed Data2 (15-minute) bars since the oldest live anchor, for the anchor low and the impulse high.
+		private struct NBar { public DateTime t; public double h, l; }
+		private readonly List<NBar> m_nb = new List<NBar>();
+		private const int NativeKeep = 3000;   // ~30 Globex sessions of 15m; anchors expire after AvwapLimits.maxAgeSessions (10)
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private double m_sigLo, m_sigHi;   // the 15-minute pullback bar, for the GX signal-bar fields
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _AV_02_ImpulseOriginAVWAP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "AV02"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV02LE", EOrderAction.Buy)); }
-		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
-		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+		/// <summary>Coder 2026-11-22: true once per new closed Data2 bar (M-MTF closed-bar rule); its values come back in the out parameters.</summary>
+		private bool newNativeBar(out DateTime t, out double h, out double l)
+		{
+			t = DateTime.MinValue; h = l = double.NaN;
+			if (!IsExist(2) || BarsOfData(2).CurrentBar < 3) return false;
+			double o, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
 
 		protected override void StartCalc()
 		{
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, BarRingConfig.MaxAutoBars, "AV-02 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			// Coder 2026-11-22 (Analyst Set2, catalogue AV-02 "the low that starts an impulse of >= 3 x ATR (anchor TF), confirmed"; 15m swing):
+			// the anchor is a Data2 15-minute zigzag low confirmed by a 3 x ATR(20) reversal, not a 1-minute strength-1 fractal.
+			AvwapLimits.dataStream = 2; AvwapLimits.backfillBars = 400;   // a zigzag low can confirm many bars after its extreme
+			PriceActionConfig.dataStream = 2; PriceActionConfig.pivotMode = EPivotMode.AtrZigZag; PriceActionConfig.atrMultiple = 3.0; PriceActionConfig.atrLength = 20;
+			m_nb.Clear(); m_nativeTime = DateTime.MinValue; m_anchor = -1; m_done = false;
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
 		protected override void CalcBar()
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			DateTime nt; double nh, nl;
+			bool fresh = newNativeBar(out nt, out nh, out nl);
+			if (fresh) { m_nb.Add(new NBar { t = nt, h = nh, l = nl }); if (m_nb.Count > NativeKeep) m_nb.RemoveRange(0, m_nb.Count - NativeKeep); }
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			if (a == null || !a.Valid || !(a.Sigma > 0)) return;
 			if (a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; m_filledSetup = false; m_restOn = false; }
 			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
-			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
-			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < a.AgeBars) return;
-			double lo = Bars.Low[0], hi = Bars.High[0];
-			for (int i = 1; i < 15; i++) { lo = Math.Min(lo, lbBar(i).l); hi = Math.Max(hi, lbBar(i).h); }
+			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1) || !fresh) return;
+			if (nt <= a.UsableFrom) return;   // the pullback comes after the confirmation bar
+			// The anchor low is the zigzag extreme (the Data2 bar at AnchorTime); the impulse high is the highest Data2 high since it.
+			int first = -1;
+			for (int i = m_nb.Count - 1; i >= 0; i--) { if (m_nb[i].t < a.AnchorTime) break; first = i; }
+			if (first < 0 || (first == 0 && m_nb[0].t > a.AnchorTime)) return;   // anchor older than the kept Data2 bars (first is the anchor bar, or the first kept bar after it)
+			double anchorLow = m_nb[first].l, peak = m_nb[first].h, minAfter = double.MaxValue;
+			for (int i = first + 1; i < m_nb.Count; i++) { peak = Math.Max(peak, m_nb[i].h); minAfter = Math.Min(minAfter, m_nb[i].l); }
+			if (minAfter < anchorLow) { m_done = true; return; }   // a Data2 low below the anchor low ends this anchor
+			double lo = nl, hi = nh;
 			if (lo < a.Band(-0.25) || lo > a.Band(0.5)) return;
-			int ago = Bars.CurrentBar - a.AnchorBar; if (ago < 15 || ago > Bars.CurrentBar) return;
-			if (!(lo > lbBar(ago).l)) return;
-			double peak = lbBar(ago).h;
-			for (int i = 0; i < ago; i++) peak = Math.Max(peak, lbBar(i).h);
+			if (!(lo > anchorLow)) return;
 			double entry = hi + tickSize();
 			double stop = Math.Min(lo - tickSize(), a.Band(-1));
 			stop = widen(true, entry, stop);
 			if (!(peak > entry) || !budget(entry, stop)) { m_done = true; return; }
+			m_sigLo = lo; m_sigHi = hi;
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, peak, "AV02LE", false);   /* owner 2026-11-22 ("fix the flat-by gaps"): intraday, GX FlatBy through exitBar() */ { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
@@ -211,7 +236,7 @@ namespace PowerLanguage.Strategy
 			GxConfig.TimeStopMinutes = 0; GxConfig.SingleLotMode = ESingleLotMode.ExitAtT1;
 			ExitMarket mkt = new ExitMarket(); mkt.Tick = tickSize();
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
-			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
+			mkt.EntryStop = stop; mkt.SignalLow = m_sigLo; mkt.SignalHigh = m_sigHi;   // the 15-minute pullback bar
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}

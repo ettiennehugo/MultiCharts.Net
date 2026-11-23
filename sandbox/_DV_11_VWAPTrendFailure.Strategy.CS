@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the DV-11 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// Research assumption: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times ATR(14) of the thirty-minute bars. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// Other: ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times ATR(14) of the thirty-minute bars. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times the thirty-minute range. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
+// ASSUMPTION: ASSUMPTION: the weekly VWAP is Vwap1Type Week. A failure short needs at least 6 of the last 10 thirty-minute closes (closed Data2 30-minute bars) above VWAP plus 1 sigma, then a thirty-minute close below that band by 0.1 times ATR(14) of the thirty-minute bars. A limit at the band is live for the next 8 thirty-minute bars. The target is the weekly VWAP. The stop is 0.15 times Atr20d beyond the signal high. The long is the mirror.
 // IOG is disabled.
 
 
@@ -188,7 +188,11 @@ namespace PowerLanguage.Strategy
 		{
 			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			if (StrategyInfo.MarketPosition != 0 || rollOn(1) || Bars.CurrentBar < 300) return;
+			// Coder 2026-11-22 (Analyst Set2: 0 trades in 2023-2024): m_done (a 1 percent budget skip) was never cleared, so the first
+			// skipped setup ended the run. It now lasts for the Globex day. A filled limit is not resent after the trade closes.
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
+			if (StrategyInfo.MarketPosition != 0) { m_arm = 0; return; }
+			if (rollOn(1) || Bars.CurrentBar < 300) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool boundary = ((int)tod.TotalMinutes) % 30 == 0;
 			if (m_arm > 0)
@@ -208,9 +212,10 @@ namespace PowerLanguage.Strategy
 			int above = 0, below = 0; double o, h, l, c, v;
 			for (int k = 0; k < 10; k++) { nativeBar(k, out o, out h, out l, out c, out v); if (c > vwap + sig) above++; if (c < vwap - sig) below++; }
 			nativeBar(0, out o, out h, out l, out c, out v);
-			double range = h - l;
-			bool failShort = above >= 6 && c < vwap + sig - 0.1 * range;
-			bool failLong = below >= 6 && c > vwap - sig + 0.1 * range;
+			double atr30 = nativeAtr(14);   // catalogue DV-11: the close buffer is 0.1 x ATR30m (was the signal bar's range); length 14 is an assumption
+			if (!(atr30 > 0)) return;
+			bool failShort = above >= 6 && c < vwap + sig - 0.1 * atr30;
+			bool failLong = below >= 6 && c > vwap - sig + 0.1 * atr30;
 			if (!failShort && !failLong) return;
 			m_sell = failShort;
 			m_limit = m_sell ? vwap + sig : vwap - sig;

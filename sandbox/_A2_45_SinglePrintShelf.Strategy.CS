@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: shelves, VA migration and the composite HVNs come from completed Own RTH profiles; MC's Volume Profile is not needed on the chart.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
@@ -157,6 +157,7 @@ namespace PowerLanguage.Strategy
 			base.Create();
 			RollDetection = ERollDetection.Series;
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // Coder 2026-11-22 (Analyst Set2: 0 trades): shelves from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			GxOrderPrefix = "A245"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A245LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A245SE", EOrderAction.SellShort));
@@ -166,6 +167,8 @@ namespace PowerLanguage.Strategy
 
 		protected override void StartCalc()
 		{
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Coder 2026-11-22: DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */
+			m_chk = new int[5]; m_chkDay = DateTime.MinValue;
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
@@ -189,23 +192,35 @@ namespace PowerLanguage.Strategy
 			double atr30 = atrOf(30, 14), atr15 = atrOf(15, 14);
 			double vwap = CurrentVwap1;
 			if (!(atr30 > 0) || !(atr15 > 0) || double.IsNaN(vwap)) return;
-			if (!pickShelf(atr30)) return;
+			chkDay();
+			if (!pickShelf(atr30)) { m_chk[0]++; return; }
 			bool up = m_near > Bars.Close[0];
-			if (migrationAgainst(up) || hvnBetween(up)) { m_done = true; return; }
+			// Coder 2026-11-22: the filters skip this decision bar only (catalogue: "skip if..."); they no longer end the day at the first check
+			if (migrationAgainst(up) || hvnBetween(up)) { m_chk[1]++; return; }
 			double priorHigh = blockExtreme(15, 1, true), priorLow = blockExtreme(15, 1, false);
 			double thisLow = blockExtreme(15, 0, false), thisHigh = blockExtreme(15, 0, true);
 			bool bos = up ? Bars.Close[0] > priorHigh && Bars.Close[0] > vwap : Bars.Close[0] < priorLow && Bars.Close[0] < vwap;
-			if (!bos) return;
+			if (!bos) { m_chk[2]++; return; }
 			double entry = Bars.Close[0];
 			double structural = up ? Math.Min(thisLow, priorLow) : Math.Max(thisHigh, priorHigh);
 			structural = up ? structural - tickSize() : structural + tickSize();
 			double atrStop = up ? entry - atr15 : entry + atr15;
 			double stop = up ? Math.Min(structural, atrStop) : Math.Max(structural, atrStop);
 			stop = widen(up, entry, stop);
-			if (up ? m_near - entry < Math.Abs(entry - stop) : entry - m_near < Math.Abs(entry - stop)) { m_done = true; return; }
-			if (!budget(entry, stop)) { m_done = true; return; }
+			if (up ? m_near - entry < Math.Abs(entry - stop) : entry - m_near < Math.Abs(entry - stop)) { m_chk[3]++; m_done = true; return; }
+			if (!budget(entry, stop)) { m_chk[4]++; m_done = true; return; }
 			arm(up, entry, stop, m_near, m_far, up ? "A245LE" : "A245SE", 0);
 			if (up) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
+		}
+		// Coder 2026-11-22: one Journal line per trading day with the decision-bar skip counts, so a zero-trade run shows where it stops.
+		private int[] m_chk = new int[5]; private DateTime m_chkDay = DateTime.MinValue;
+		private void chkDay()
+		{
+			DateTime d = GlobexDate(Bars.Time[0]);
+			if (d == m_chkDay) return;
+			if (m_chkDay != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "A2-45 " + m_chkDay.ToString("yyyy-MM-dd") + " checks noShelf(" + m_chk[0] + ") filter(" + m_chk[1] + ") noBos(" + m_chk[2] + ") t1UnderR(" + m_chk[3] + ") budget(" + m_chk[4] + ")");
+			m_chkDay = d; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
 		}
 		private double blockExtreme(int minutes, int ago, bool high)
 		{
@@ -228,7 +243,7 @@ namespace PowerLanguage.Strategy
 		}
 		private bool migrationAgainst(bool up)
 		{
-			List<VpExtra> profs = RecentCompletedProfiles(1, 2, Bars.FullSymbolData.Current);
+			List<VpExtra> profs = migrationProfiles(1, 2);   // Coder 2026-11-22: completed Own RTH profiles (RecentCompletedProfiles reads MC's Volume Profile only)
 			if (profs == null || profs.Count < 2) return false;
 			double mid0 = (profs[0].vah + profs[0].val) / 2.0, mid1 = (profs[1].vah + profs[1].val) / 2.0;
 			return up ? mid0 < mid1 : mid0 > mid1;
@@ -248,7 +263,7 @@ namespace PowerLanguage.Strategy
 		
 		private bool pickShelf(double atr)
 		{
-			List<VpExtra> profs = RecentCompletedProfiles(1, 5, Bars.FullSymbolData.Current);
+			List<VpExtra> profs = migrationProfiles(1, 5);   // Coder 2026-11-22: completed Own RTH profiles (RecentCompletedProfiles reads MC's Volume Profile only)
 			double best = double.MaxValue; bool any = false;
 			if (profs == null) return false;
 			foreach (VpExtra e in profs)

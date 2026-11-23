@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the AV-01 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the swing-high AVWAP is AvwapManager.Latest(SwingHigh). The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten 60-minute closes. A 15-minute higher low is built from 1-minute bars. The target is the high of the anchor bar. The EX-04 trail is not sent.
+// Research assumption: ASSUMPTION: the swing-high anchor is the newest confirmed Data2 (60-minute) zigzag high with a reversal of at least 3 x ATR(20) of Data2 (catalogue AV-01: "the last significant swing high (k = 3 x ATR on 60m), usable from confirmation"), read as AvwapManager.Latest(SwingHigh) with the AVWAP on Data2. The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten closed Data2 (60-minute) closes. The delta60 margin above the AVWAP is not applied (spec PROPOSED). A 15-minute higher low is built from 1-minute bars. The target is the anchor swing-high price (the Data2 bar high at the anchor time). The EX-04 trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -39,9 +39,9 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 60-minute.
-// Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
+// Chart: Data1 = 1-minute. Data2 = 60-minute, the same symbol as Data1 (required).
+// Data1: the chart, the 15-minute higher low and the orders. Tests use data through 2024-12-31 only.
+// Data2: the anchor and signal timeframe. PRICEACTION AtrZigZag (3 x ATR(20)) and the AVWAP run on Data2; the ten-bars-below count uses closed Data2 bars.
 // Further series: Not applicable
 // Warmup: the average or profile the rule names.
 //
@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the swing-high AVWAP is AvwapManager.Latest(SwingHigh). The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten 60-minute closes. A 15-minute higher low is built from 1-minute bars. The target is the high of the anchor bar. The EX-04 trail is not sent.
+// Other: ASSUMPTION: the swing-high anchor is the newest confirmed Data2 (60-minute) zigzag high with a reversal of at least 3 x ATR(20) of Data2 (catalogue AV-01: "the last significant swing high (k = 3 x ATR on 60m), usable from confirmation"), read as AvwapManager.Latest(SwingHigh) with the AVWAP on Data2. The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten closed Data2 (60-minute) closes. The delta60 margin above the AVWAP is not applied (spec PROPOSED). A 15-minute higher low is built from 1-minute bars. The target is the anchor swing-high price (the Data2 bar high at the anchor time). The EX-04 trail is not sent.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the swing-high AVWAP is AvwapManager.Latest(SwingHigh). The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten 60-minute closes. A 15-minute higher low is built from 1-minute bars. The target is the high of the anchor bar. The EX-04 trail is not sent.
+// ASSUMPTION: the swing-high anchor is the newest confirmed Data2 (60-minute) zigzag high with a reversal of at least 3 x ATR(20) of Data2 (catalogue AV-01: "the last significant swing high (k = 3 x ATR on 60m), usable from confirmation"), read as AvwapManager.Latest(SwingHigh) with the AVWAP on Data2. The daily filter is DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Ten bars below the AVWAP are ten closed Data2 (60-minute) closes. The delta60 margin above the AVWAP is not applied (spec PROPOSED). A 15-minute higher low is built from 1-minute bars. The target is the anchor swing-high price (the Data2 bar high at the anchor time). The EX-04 trail is not sent.
 // IOG is disabled.
 
 
@@ -145,6 +145,21 @@ namespace PowerLanguage.Strategy
 	public class _AV_01_SwingHighAVWAP : _VolumeProfileFuturesBase
 	{
 		private IOrderPriced m_le; private bool m_done, m_reclaim; private int m_below, m_anchor = -1;
+		// Coder 2026-11-22 (Analyst Set2: AV-01 0 trades; the 1-minute strength-1 SwingHigh anchor changed every few minutes, so ten
+		// 60-minute closes below one anchor never happened): the closed Data2 (60-minute) bars, for the count and the anchor high.
+		private struct NBar { public DateTime t; public double h; }
+		private readonly List<NBar> m_nb = new List<NBar>();
+		private const int NativeKeep = 1500;   // ~65 Globex sessions of 60m; anchors expire after AvwapLimits.maxAgeSessions (10)
+		private DateTime m_nativeTime = DateTime.MinValue;
+		/// <summary>True once per new closed Data2 bar (M-MTF closed-bar rule); its values come back in the out parameters.</summary>
+		private bool newNativeBar(out DateTime t, out double h, out double c)
+		{
+			t = DateTime.MinValue; h = c = double.NaN;
+			if (!IsExist(2) || BarsOfData(2).CurrentBar < 3) return false;
+			double o, l, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
@@ -155,6 +170,10 @@ namespace PowerLanguage.Strategy
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 
 		protected override void StartCalc() {
+			// Coder 2026-11-22 (catalogue AV-01: swing high k = 3 x ATR on 60m): the anchor runs on Data2 (60m) as a 3 x ATR(20) zigzag.
+			AvwapLimits.dataStream = 2; AvwapLimits.backfillBars = 400;   // a zigzag high can confirm many bars after its extreme
+			PriceActionConfig.dataStream = 2; PriceActionConfig.pivotMode = EPivotMode.AtrZigZag; PriceActionConfig.atrMultiple = 3.0; PriceActionConfig.atrLength = 20;
+			m_nb.Clear(); m_nativeTime = DateTime.MinValue; m_anchor = -1; m_done = false; m_below = 0; m_reclaim = false;
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
@@ -167,6 +186,10 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			
 			exitBar();
+			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			DateTime nt; double nh, nc;
+			bool fresh = newNativeBar(out nt, out nh, out nc);
+			if (fresh) { m_nb.Add(new NBar { t = nt, h = nh }); if (m_nb.Count > NativeKeep) m_nb.RemoveRange(0, m_nb.Count - NativeKeep); }
 			_Avwap a = anchor(EAvwapAnchor.SwingHigh);
 			if (a == null || !a.Valid) return;
 			if (a.AnchorBar != m_anchor)
@@ -176,29 +199,29 @@ namespace PowerLanguage.Strategy
 			}
 			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
-			if (!(Bars.Close[0] > DailyContext.Sma200)) return;
-			TimeSpan tod = sessionClock(Bars.Time[0]);
-			bool hour = ((int)tod.TotalMinutes) % 60 == 0;
-			if (hour)
-			{
-				if (Bars.Close[0] < a.Value) { m_below++; m_reclaim = false; }
+			if (fresh && nt > a.UsableFrom)
+			{   // closed 60-minute closes after confirmation: ten or more below the AVWAP, then a close above it is the reclaim
+				if (nc < a.Value) { m_below++; m_reclaim = false; }
 				else if (m_below >= 10) m_reclaim = true;
 				else { m_below = 0; m_reclaim = false; }
 			}
+			if (!(Bars.Close[0] > DailyContext.Sma200)) return;
+			TimeSpan tod = sessionClock(Bars.Time[0]);
 			if (!m_reclaim || Bars.Close[0] <= a.Value) return;
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 15 != 0 || Bars.CurrentBar < 30) return;
 			double lo = Bars.Low[0], prev = Bars.Low[15], hi = Bars.High[0];
 			for (int i = 1; i < 15; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(15 + i).l); hi = Math.Max(hi, lbBar(i).h); }
 			if (!(lo > prev) || !(lo > a.Value)) return;
-			int ago = Bars.CurrentBar - a.AnchorBar;
-			if (ago < 0 || ago > Bars.CurrentBar) return;
+			double target = double.NaN;   // the anchor swing high: the Data2 bar high at the anchor time
+			int first = -1;
+			for (int i = m_nb.Count - 1; i >= 0; i--) { if (m_nb[i].t < a.AnchorTime) break; first = i; }
+			if (first > 0 || (first == 0 && m_nb[0].t <= a.AnchorTime)) target = m_nb[first].h;   // the anchor bar (or the first kept bar after it)
+			if (double.IsNaN(target)) return;   // anchor older than the kept Data2 bars
 			double entry = hi + tickSize();
 			double atr = DailyContext.Atr20d;
 			double stop = lo - tickSize();
 			if (atr > 0 && entry - stop < 0.3 * atr) stop = entry - 0.3 * atr;
 			stop = widen(true, entry, stop);
-			double target = lbBar(ago).h;
 			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
 			arm(true, entry, stop, target, "AV01LE", true);
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
