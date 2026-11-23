@@ -168,7 +168,10 @@ namespace PowerLanguage.Strategy
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { chkDay(); m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_counted = false; }
-			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
+			// Coder 2026-11-22 (Analyst 4fbc309: day(noCount) on 412 of 515 days): m_done is checked after the daily acceptance count.
+			// Before, a budget skip at an hourly check (m_done) returned before the 15:50 count every day, so the break was never
+			// re-checked: out stayed at 2+ for months (2023-05-31 to 2023-08-24) and the same skip repeated each day.
+			if (StrategyInfo.MarketPosition != 0 || !IsRth()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			// Daily acceptance count on the first bar of the flat window (close - 5 minutes). Coder 2026-11-22 (Analyst Set3: 0 trades):
 			// the balance (three overlapping weekly VAs) and the composite edge are taken when the FIRST acceptance close happens and
@@ -189,6 +192,7 @@ namespace PowerLanguage.Strategy
 				else if (Bars.Close[0] > m_eVah + 0.1 * atr) { m_out++; m_dayState = "accept" + m_out; if (m_out == 2) m_readyAfter = day; }
 				else { m_out = 0; m_dayState = "acceptFailed"; }
 			}
+			if (m_done) return;
 			// Entry: the first 60-minute higher low on a day AFTER the second acceptance close. Coder 2026-11-22: every RTH hour close
 			// is checked (10:30, 11:30, ... ET), not only 10:30, and one trade per break.
 			if (m_out < 2 || day <= m_readyAfter) return;
@@ -223,6 +227,7 @@ namespace PowerLanguage.Strategy
 		}
 
 		// One Journal line per Globex day (like A2-45): the daily acceptance state, then the hourly entry checks.
+		// day(noCount): the count did not run that day: in a position (held up to 15 days), or no RTH bar reached the flat window (a holiday).
 		private readonly int[] m_chk = new int[5]; private string m_dayState = "noCount";
 		private void chkDay()
 		{
