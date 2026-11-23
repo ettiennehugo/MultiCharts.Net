@@ -303,6 +303,14 @@ static class Program
 		var holdHosts = new HashSet<string> { "AV_04", "AV_09", "DV_09", "DV_11", "LE_01", "LE_02", "LE_03", "LE_06", "LE_07", "PF_08", "SW_04", "YV_03", "YV_09" };
 		var overnightOwn = new HashSet<string> { "A2_14", "SW_02", "A2_69", "GX_00" };   // overnight by design, or the GX test harness
 		int cutHosts = 0, cutOwn = 0;
+		// Owner 2026-11-22 22:50 CT (catalogue 2.1 "no new entries after 15:30"): exempt from NoEntryMinutesBeforeFlat, derived from code.
+		var holdWindowExempt = new HashSet<string> { "A2_46", "AV_01", "AV_03", "AV_05", "AV_12", "MT_04", "MT_05", "SW_01", "SW_03", "SW_05", "SW_06", "YV_10" };   // every arm holds overnight
+		var ownWindowExempt = new HashSet<string> { "A2_62", "TS_03", "VW_05" };   // next-session exit; catalogue entries at 15:50 / 15:30 ET
+		Action<string, string> checkWindowInput = (k, c) =>
+		{
+			Check(Regex.IsMatch(c, @"\[Input\] public int NoEntryMinutesBeforeFlat \{ get; set; \}") && Regex.IsMatch(c, @"\(object _ctx\)\s*:\s*base\(_ctx\)\s*\{[^}]*NoEntryMinutesBeforeFlat = 25;"), k + " declares NoEntryMinutesBeforeFlat with the constructor default 25");
+			Check(raw[k].Contains("// Input: NoEntryMinutesBeforeFlat") && raw[k].Contains("// Default: 25 minutes"), k + " header section 17 documents NoEntryMinutesBeforeFlat");
+		};
 		foreach (var kv in src)
 		{
 			string c = kv.Value;
@@ -311,7 +319,12 @@ static class Program
 			{
 				if (holdHosts.Contains(kv.Key)) { Check(Regex.IsMatch(c, @"SessionExit\s*=\s*ESessionExit\.HoldOvernight"), kv.Key + " is exempt from the cutoff guard only because GX holds it overnight"); continue; }
 				string hg = MethodBody(c, @"bool\s+hostGate\s*\(\s*bool\s+buy\s*\)");
-				Check(MethodBody(c, @"bool\s+entryCutoff\s*\(\s*\)").Contains("!gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))") && !MethodBody(c, @"bool\s+entryCutoff\s*\(\s*\)").Contains("PastFlat("), kv.Key + " entryCutoff uses the GX date-aware cutoff (#146), not a duplicate");
+				string ecb = MethodBody(c, @"bool\s+entryCutoff\s*\(\s*\)");
+				bool hostWindow = ecb.Contains("!gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)");
+				Check((hostWindow || ecb.Contains("!gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))")) && !ecb.Contains("PastFlat("), kv.Key + " entryCutoff uses the GX date-aware cutoff (#146), not a duplicate");
+				// Owner 2026-11-22 22:50 CT: every intraday GX host has the NoEntryMinutesBeforeFlat input (default 25); the all-hold hosts are exempt.
+				Check(hostWindow == !holdWindowExempt.Contains(kv.Key), kv.Key + (hostWindow ? " passes NoEntryMinutesBeforeFlat to the cutoff" : " is exempt from NoEntryMinutesBeforeFlat (every entry held overnight)"));
+				if (hostWindow) checkWindowInput(kv.Key, c);
 				Check(Regex.IsMatch(hg, @"\)\s*\{\s*if\s*\(\s*entryCutoff\(\)\s*\)\s*return\s+false;"), kv.Key + " hostGate refuses entries on or after the flat-by cutoff bar");
 				cutHosts++;
 				continue;
@@ -319,7 +332,10 @@ static class Program
 			var entries = new HashSet<string>();
 			foreach (Match em in Regex.Matches(c, @"(m_\w+)\s*=\s*OrderCreator\.\w+\(new SOrderParameters\([^;]*EOrderAction\.(?:Buy|SellShort)\)")) entries.Add(em.Groups[1].Value);
 			if (entries.Count == 0 || overnightOwn.Contains(kv.Key)) continue;
-			Check(Regex.IsMatch(c, @"bool entryOpen\(\) \{ return !gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\)\); \}"), kv.Key + " has the flat-by entry cutoff (GX date-aware cutoff, #146)");
+			bool ownWindow = Regex.IsMatch(c, @"bool entryOpen\(\) \{ return !gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\), (Hold == ESessionHold\.Overnight \? 0 : )?NoEntryMinutesBeforeFlat\); \}");
+			Check(ownWindow || Regex.IsMatch(c, @"bool entryOpen\(\) \{ return !gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\)\); \}"), kv.Key + " has the flat-by entry cutoff (GX date-aware cutoff, #146)");
+			Check(ownWindow == !ownWindowExempt.Contains(kv.Key), kv.Key + (ownWindow ? " passes NoEntryMinutesBeforeFlat to the cutoff" : " is exempt from NoEntryMinutesBeforeFlat (overnight hold or a catalogue entry after 15:30)"));
+			if (ownWindow) checkWindowInput(kv.Key, c);
 			foreach (string e in entries)
 				Check(!Regex.IsMatch(c, @"(?<![\w.?])" + e + @"\.Send\("), kv.Key + " " + e + " is sent only through entryOpen()");
 			cutOwn++;

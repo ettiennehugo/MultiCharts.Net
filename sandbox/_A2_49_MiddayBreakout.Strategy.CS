@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: a morning high and low exist; the bar closes after 12:00 and the entry window allows it; the close is beyond the morning high or low; the side is against the current position; the widened stop fits the 1% risk budget.
 // Skip when: the day contains a roll (the range would straddle the splice); the risk budget fails; entryAllowed blocks (before 12:00, at or after 15:30, at or after the flat time, or three entries already).
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract (A249Config.contracts).
@@ -119,6 +120,15 @@
 // Effect: an earlier clock shortens the morning range and starts the afternoon sooner. NoEntryBefore uses the same clock.
 // Interactions: Arm and Hold. The range is still the RTH bars that close after 09:30 and at or before this clock.
 // Fixed or research-tuned: fixed default. The other two clocks are the catalogue sweep.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); the Overnight hold arm is not blocked (Hold input).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -206,7 +216,9 @@ namespace PowerLanguage.Strategy
 		private bool m_restBuy, m_restOn, m_filledSetup;
 		private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 
-		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
 
 		private double zoneFrac() { return Zone == EZone.Pct20 ? 0.20 : Zone == EZone.Pct33 ? 0.33 : 0.25; }
 		private TimeSpan middayAt() { return Midday == EMidday.At1130 ? new TimeSpan(11, 30, 0) : Midday == EMidday.At1230 ? new TimeSpan(12, 30, 0) : new TimeSpan(12, 0, 0); }
@@ -272,7 +284,8 @@ namespace PowerLanguage.Strategy
 
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
-		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd)); }   // #146 date-aware cutoff
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd), Hold == ESessionHold.Overnight ? 0 : NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();

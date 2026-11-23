@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the catalogue setup, and the 1 percent budget when an order is sent.
 // Skip when: the statistic is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract where this file trades. journalArm is written by exitPlan when GX is used.
@@ -88,15 +89,17 @@
 // Other: ASSUMPTION: The balance is the prior two RTH sessions stored in this file, not a composite call. H_norm is the Miller-Madow normalised entropy of the histogram of the last 30 minutes of today's RTH bars, sampled on 5-minute boundaries; H_slope is the change from the sample 15 minutes earlier. The 90th percentile is over the last 60 sessions' slopes at the same clock slot. The breakout is 2 consecutive closed Data2 5-minute closes outside the balance within 60 minutes of the alert, entered at the next 5-minute open. The stop and the 1.0 range target and the 15:55 flat would map to GX. The exit on a 5-minute close back inside the balance is not a GX trail mode, so the whole exit stays in sendExits.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: Not applicable
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -157,7 +160,9 @@ namespace PowerLanguage.Strategy
 		private DateTime m_alertAt = DateTime.MinValue;
 
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
-		public _A2_30_RisingEntropy(object _ctx) : base(_ctx) { }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_30_RisingEntropy(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 
 		protected override void Create()
 		{
@@ -183,7 +188,8 @@ namespace PowerLanguage.Strategy
 		}
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
-		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();

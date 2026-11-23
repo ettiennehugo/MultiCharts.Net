@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: flat; RTH; clock from 10:00 through 15:00; EMA warmed up; not a roll bar; at least eight VWAP samples; daily context valid; prior side held for three bars; this bar's range contains the EMA; slope sign matches; absolute slope at least 0.05 × ATR(14); close on the same side of VWAP; the bracket fits the 1% budget.
 // Skip when: the bracket is not positive or breaks the budget.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract.
@@ -111,6 +112,15 @@
 // Effect: a smaller fraction tightens the bracket
 // Interactions: the stop is sent with the limit, so the fill bar is protected. That send is not optional.
 // Fixed or research-tuned: research-tuned. The two members are the catalogue grid. The default is the previous cell.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -187,8 +197,10 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_vwap = new List<double>();   // closed-bar VWAP values, newest last (session-reset aware)
 		private DateTime m_vwapDay = DateTime.MinValue;
 
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _DV_15_EmaVwapPullback(object _ctx) : base(_ctx)
-		{
+		{ NoEntryMinutesBeforeFlat = 25;
 			VwapSlot = EVwapSlot.Session;
 			SlopeMin = ESlopeMin.S005;
 			Bracket = EBracketFrac.F015;
@@ -245,7 +257,8 @@ namespace PowerLanguage.Strategy
 
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
-		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
