@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the catalogue trigger and the 1 percent budget when an order is sent.
 // Skip when: rollOn on a futures profile idea, the profile or average is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract when this file trades.
@@ -88,15 +89,17 @@
 // Other: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: the catalogue core, not a sweep. The sweep stays in the catalogue.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); entries GX holds overnight (SessionExit HoldOvernight) are not blocked.
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -178,7 +181,9 @@ namespace PowerLanguage.Strategy
 		[Input] public ESandboxSide Side { get; set; }
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
-		public _YV_12_PriorDayHigh(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _YV_12_PriorDayHigh(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; Side = ESandboxSide.Both; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "YV12"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12LE", EOrderAction.Buy)); m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "YV12SE", EOrderAction.SellShort)); }
 		protected override void StartCalc() { m_rthRanges.Clear(); m_tSeen = false; m_pOpen = m_pClose = double.NaN; m_day = DateTime.MinValue; m_restUntil = DateTime.MinValue; m_dayState = "noRthBar"; for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;   /* Coder 2026-11-22: a recalc reuses this object */
 			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
@@ -299,11 +304,12 @@ namespace PowerLanguage.Strategy
 		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
 		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
 		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
 		private bool entryCutoff()
 		{
-			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd))) return false;   // #146 date-aware cutoff
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)) return false;   // #146 date-aware cutoff
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: at or after the flat-by cutoff"); }
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)); }
 			return true;
 		}
 		private bool hostGate(bool buy)

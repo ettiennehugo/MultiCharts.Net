@@ -4858,6 +4858,20 @@ namespace PowerLanguage.Strategy
 			return ExitSession.EntryBlocked(ex, gxBarInterval(), ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At.AddMinutes(-Math.Max(0, minutesBefore)));
 		}
 
+		/// <summary>Coder 2026-11-22 (owner 22:50 CT, NoEntryMinutesBeforeFlat): the journal text for a blocked entry, with the actual
+		/// times for this bar's trading date: "no new entries from HH:mm exchange time (flat-by cutoff HH:mm[, early close] minus N min)".</summary>
+		protected string gxEntryCutoffNote(int flatByHHMM, int minutesBefore)
+		{
+			DateTime ex;
+			try { ex = gxExchangeTime(Bars.Time[0]); } catch (Exception) { return "at or after the flat-by cutoff"; }
+			DateTime d = gxTradingDate(ex);
+			ExitSession.FlatCutoff c = ExitSession.CutoffFor(d, flatByHHMM, gxFlatDay(d));
+			int m = Math.Max(0, minutesBefore);
+			return "no new entries from " + c.At.AddMinutes(-m).ToString("HH:mm", CultureInfo.InvariantCulture) + " exchange time (flat-by cutoff "
+				+ c.At.ToString("HH:mm", CultureInfo.InvariantCulture) + (string.IsNullOrEmpty(c.EarlyReason) ? "" : ", " + c.EarlyReason) + " minus " + m
+				+ " min; an order fills on the next bar, so the last sending bar is one bar earlier)";
+		}
+
 		/// <summary>Data1 bar size for the entry cutoff: intraday time bars only (zero for tick, volume, daily and longer bars).</summary>
 		private TimeSpan gxBarInterval()
 		{

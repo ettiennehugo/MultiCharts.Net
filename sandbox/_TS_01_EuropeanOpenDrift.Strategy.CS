@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: flat; the Globex day has not been attempted; the bar is inside the send window; the day is not Closed, NoRth or a halt; ATR60m is positive; the widened stop fits the 1% budget. When the event filter is on, M-EVENT must be enabled, coverage must not be Unknown, and the day must not have a tier-1 event at 08:30 ET.
 // Skip when: the holiday, coverage, event, warmup or budget check fails. A window with no closed bar is journaled and not traded. A disabled event engine fails closed when the filter is on.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract.
@@ -103,6 +104,15 @@
 // Effect: a longer length smooths the disaster stop
 // Interactions: the stop is max(2 × that ATR, the profile cost-floor distance)
 // Fixed or research-tuned: fixed default. The length is now a research input.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -186,7 +196,9 @@ namespace PowerLanguage.Strategy
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
 		private double m_stop = double.NaN;
 
-		public _TS_01_EuropeanOpenDrift(object _ctx) : base(_ctx) { Variant = EVariant.Window0130To0430; AtrLength = 14; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _TS_01_EuropeanOpenDrift(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Variant = EVariant.Window0130To0430; AtrLength = 14; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -240,7 +252,8 @@ namespace PowerLanguage.Strategy
 
 		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
 		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
-		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd)); }   // #146 date-aware cutoff
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
