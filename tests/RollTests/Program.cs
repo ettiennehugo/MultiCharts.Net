@@ -97,6 +97,7 @@ static class Program
 		CalibFit();
 		TableJournal();
 		Evidence();
+		SpliceLocator();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -413,22 +414,30 @@ static class Program
 
 	/// <summary>The _CustomSignal.stepRollDetector order: calibrator first (commits the prior day), then Step, then the Table
 	/// journal (TableSpliceLine on a Table roll bar, OffTableWarning on any other day start). Each bar is stepped twice, as the host can.</summary>
-	static List<int> HostTable(List<DB> bars, HashSet<DateTime> dates, double k, List<string> journal, List<string> warnings)
+	static List<int> HostTable(List<DB> bars, HashSet<DateTime> dates, double k, List<string> journal, List<string> warnings, List<string> splices = null, double minAtr = RollSpliceLocator.DefaultMinAtr)
 	{
 		var det = new _RollDetector { table = true, dates = dates };
 		var cal = new RollGapCalibrator();
-		var rolls = new List<int>(); int lastJournal = -1;
+		var loc = new RollSpliceLocator { minAtr = minAtr };
+		var rolls = new List<int>(); int lastJournal = -1, lastSplice = -1, spliceBar = -1;
 		for (int i = 0; i < bars.Count; i++)
 			for (int rep = 0; rep < 2; rep++)
 			{
 				DB b = bars[i];
 				cal.AddBar(b.day, b.h, b.l, b.c);
-				if (det.Step(b.bar, b.day, b.o, i > 0 ? bars[i - 1].c : double.NaN, "@MES", 0.25)) rolls.Add(b.bar);
+				bool stepped = det.Step(b.bar, b.day, b.o, i > 0 ? bars[i - 1].c : double.NaN, "@MES", 0.25);
+				if (stepped) rolls.Add(b.bar);
+				if (b.bar != lastSplice)
+				{
+					lastSplice = b.bar;
+					if (stepped && det.DayInTable) loc.Arm(det.DayStartDay);
+					if (loc.Step(b.bar, b.day, b.day.AddDays(-1).AddHours(17), b.o, i > 0 ? bars[i - 1].c : double.NaN, cal.Atr, det.DayStart)) { spliceBar = b.bar; if (splices != null) splices.Add(_RollDetector.SpliceLine(loc, 0.25)); }
+				}
 				if (det.DayStart && b.bar != lastJournal)
 				{
 					lastJournal = b.bar;
-					if (det.DayInTable) journal.Add(_RollDetector.TableSpliceLine(det.DayStartDay, det.DayGap, cal.Atr, k));
-					else { string w = _RollDetector.OffTableWarning(det.DayStartDay, det.DayGap, cal.Atr, k); if (w != null) warnings.Add(w); }
+					if (det.DayInTable) journal.Add(_RollDetector.TableRollLine(det.DayStartDay, det.DayGap, cal.Atr, minAtr));
+					else if (spliceBar != b.bar) { string w = _RollDetector.OffTableWarning(det.DayStartDay, det.DayGap, cal.Atr, k); if (w != null) warnings.Add(w); }
 				}
 			}
 		return rolls;
@@ -448,10 +457,12 @@ static class Program
 		// none on 06-13, which logs the off-table Warning instead.
 		{
 			var bars = Daily(new DateTime(2024, 3, 18), new DateTime(2024, 6, 28), d => d == d0613 ? 70 : 0.5);
-			var j = new List<string>(); var w = new List<string>();
-			var rolls = HostTable(bars, table, 1.0, j, w);
+			var j = new List<string>(); var w = new List<string>(); var sp = new List<string>();
+			var rolls = HostTable(bars, table, 1.0, j, w, sp);
 			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617), "T-R1 MES June 2024: the 06-13 data splice resolves to the table date 06-17 (one roll, on 06-17) [" + string.Join(",", rolls) + "]");
-			Check(j.Count == 1 && j[0].StartsWith("ROLL table splice(2024-06-17) gapPts(0.50) atr20(") && j[0].EndsWith(") k(1.0) confirmed(0)"), "T-R1 MES 06-17 table line, unconfirmed (" + string.Join(" | ", j) + ")");
+			Check(j.Count == 1 && j[0].StartsWith("ROLL table roll(2024-06-17) reopenGapPts(0.50) atr20(") && j[0].Contains(") minAtr(0.4) offset(search"), "T-R1 MES 06-17 table roll line (" + string.Join(" | ", j) + ")");
+			Check(sp.Count == 1 && sp[0].StartsWith("ROLL table splice(2024-06-17) at(2024-06-18 17:00) via(fallback) session(+2) gapBar(2024-06-16 17:00) gapPts(+0.50)") && sp[0].EndsWith("found(0)"),
+				"ruling 11:30: a splice BEFORE the table date is outside the search; no bar qualifies, so the fallback applies at the end of the next session (" + string.Join(" | ", sp) + ")");
 			Check(w.Count == 1 && w[0].StartsWith("ROLL off-table gap(2024-06-13) gapPts(70.00) atr20(") && w[0].EndsWith(" k(1.0)"), "T-R1 MES 06-13 off-table Warning (" + string.Join(" | ", w) + ")");
 			var m = Regex.Match(j.Count > 0 ? j[0] : "", @"atr20\(([0-9.]+)\) gapAtr\(([0-9.]+)\)");
 			Check(m.Success && double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) is double a20 && a20 > 60 && a20 < 65 && m.Groups[2].Value == "0.008", "T-R1 table line prints A (ATR(20) 60-65: the 06-13 splice's range is in it) and g / A (" + (j.Count > 0 ? j[0] : "") + ")");
@@ -463,13 +474,14 @@ static class Program
 		// 2. the splice on the table date: confirmed(1), no Warning
 		{
 			var bars = Daily(new DateTime(2024, 3, 18), new DateTime(2024, 6, 28), d => d == d0617 ? 70 : 0.5);
-			var j = new List<string>(); var w = new List<string>();
-			var rolls = HostTable(bars, table, 1.0, j, w);
-			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617) && j.Count == 1 && j[0].Contains("splice(2024-06-17) gapPts(70.00)") && j[0].EndsWith("confirmed(1)") && w.Count == 0,
-				"T-R1 a > k x A gap on the table date is confirmed(1) and warns nothing (" + string.Join(" | ", j) + ")");
-			var j2 = new List<string>(); var w2 = new List<string>();
-			HostTable(bars, table, 2.0, j2, w2);
-			Check(j2.Count == 1 && j2[0].EndsWith("k(2.0) confirmed(0)"), "T-R1 k is applied (k = 2: 70 pts < 2 x ATR -> confirmed(0))");
+			var j = new List<string>(); var w = new List<string>(); var sp = new List<string>();
+			var rolls = HostTable(bars, table, 1.0, j, w, sp);
+			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617) && j.Count == 1 && j[0].StartsWith("ROLL table roll(2024-06-17) reopenGapPts(70.00)") && w.Count == 0
+				&& sp.Count == 1 && sp[0].StartsWith("ROLL table splice(2024-06-17) at(2024-06-16 17:00) via(reopen) session(+0) gapBar(2024-06-16 17:00) gapPts(+70.00) gapTicks(+280)") && sp[0].EndsWith("found(1)"),
+				"ruling 11:30: a reopen jump on the table date is the splice (found(1)), no Warning (" + string.Join(" | ", j) + " | " + string.Join(" | ", sp) + ")");
+			var j2 = new List<string>(); var w2 = new List<string>(); var sp2 = new List<string>();
+			HostTable(bars, table, 1.0, j2, w2, sp2, 1.5);
+			Check(sp2.Count == 1 && sp2[0].Contains("via(fallback)") && sp2[0].Contains("minAtr(1.5)") && sp2[0].EndsWith("found(0)"), "minAtr is applied (1.5: 70 pts < 1.5 x ATR -> fallback)");
 		}
 		// 3. ATR warm-up: fewer than 20 true ranges before 06-13 / 06-17. The table roll still fires, prints NaN and confirmed(-);
 		// the off-table check is skipped, so the 06-13 splice warns nothing.
@@ -478,7 +490,7 @@ static class Program
 			var j = new List<string>(); var w = new List<string>();
 			var rolls = HostTable(bars, table, 1.0, j, w);
 			Check(rolls.Count == 1 && rolls[0] == BarOf(bars, d0617), "T-R1 warm-up: the table roll still fires");
-			Check(j.Count == 1 && j[0] == "ROLL table splice(2024-06-17) gapPts(0.50) atr20(NaN) gapAtr(NaN) k(1.0) confirmed(-)", "T-R1 warm-up line (" + string.Join(" | ", j) + ")");
+			Check(j.Count == 1 && j[0].StartsWith("ROLL table roll(2024-06-17) reopenGapPts(0.50) atr20(NaN) gapAtr(NaN) minAtr(0.4) offset("), "T-R1 warm-up line (" + string.Join(" | ", j) + ")");
 			Check(w.Count == 0, "T-R1 warm-up: no off-table Warning");
 		}
 		// 4. thresholds and formats
@@ -487,7 +499,7 @@ static class Program
 		Check(_RollDetector.OffTableWarning(new DateTime(2024, 6, 13), 60, 60, 1.0) == null
 			&& _RollDetector.OffTableWarning(new DateTime(2024, 6, 13), 90, 60, 1.0) == "ROLL off-table gap(2024-06-13) gapPts(90.00) atr20(60.00) gapAtr(1.500) k(1.0)",
 			"T-R1 off-table Warning text and threshold");
-		Check(_RollDetector.TableSpliceLine(new DateTime(2024, 6, 17), 64, 50, 1.0) == "ROLL table splice(2024-06-17) gapPts(64.00) atr20(50.00) gapAtr(1.280) k(1.0) confirmed(1)", "T-R1 table line format");
+		Check(_RollDetector.TableRollLine(new DateTime(2024, 6, 17), 0.5, 50, 0.4) == "ROLL table roll(2024-06-17) reopenGapPts(0.50) atr20(50.00) gapAtr(0.010) minAtr(0.4) offset(search: first bar to the end of the next session with |open - prior close| >= minAtr x atr20; else fallback)", "table roll line format");
 		// 5. DayStart facts reset on a non-start bar; Series-only keeps DayInTable false
 		{
 			var det = new _RollDetector { series = true, dates = table };
@@ -505,7 +517,7 @@ static class Program
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			Check(Regex.IsMatch(src, @"protected\s+double\s+RollGapAtrK\s*=\s*1\.0\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollGapAtrK"), "T-R1 RollGapAtrK = 1.0, not an [Input]");
 			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.series\s*\|\|\s*m_rollDet\.table\)\s*\{\s*m_gapCal\.AddBar\("), "T-R1 the ATR(20) calibrator is fed in Table mode too");
-			Check(Regex.IsMatch(src, @"trace\(ETraceLevel\.Journal,\s*_RollDetector\.TableSpliceLine\(m_rollDet\.DayStartDay,\s*m_rollDet\.DayGap,\s*atrA,\s*RollGapAtrK\)\)")
+			Check(Regex.IsMatch(src, @"trace\(ETraceLevel\.Journal,\s*_RollDetector\.TableRollLine\(m_rollDet\.DayStartDay,\s*m_rollDet\.DayGap,\s*atrA,\s*RollSpliceMinAtr\)\)")
 				&& Regex.IsMatch(src, @"_RollDetector\.OffTableWarning\(m_rollDet\.DayStartDay,\s*m_rollDet\.DayGap,\s*atrA,\s*RollGapAtrK\)") && Regex.IsMatch(src, @"trace\(ETraceLevel\.Warning,\s*off\s*\+"),
 				"T-R1 table line at Journal, off-table line at Warning, both with RollGapAtrK");
 			Check(Regex.IsMatch(src, @"configureRollDetector\(\);\s*requireRollTable\(\);")
@@ -620,6 +632,130 @@ static class Program
 			string proj = root == null ? "" : File.ReadAllText(Path.Combine(root, "PLStudies.csproj"));
 			Check(probe.Contains("[IOGMode(IOGMode.Disabled)]") && !Regex.IsMatch(Regex.Replace(probe, @"//[^\n]*", ""), @"OrderCreator|\.Send\(") && proj.Contains("<Compile Include=\"_RollEvidenceProbe.Strategy.CS\" />"),
 				"T-R4 probe: IOG disabled, no orders, in PLStudies.csproj");
+		}
+	}
+	// ---- Owner ruling 2026-11-23 11:30 CT: the roll price offset goes on the first bar from the table reopen with |g| >= 0.4 x A ----
+	// Sessions of 6 bars (CT): 17:00 reopen, 22:51, 03:32, 07:30, 08:30, 14:30. Flat bars (H/L = O +- 15), so A = ATR(20) = 30.
+	static readonly int[] s_mins = { 0, 351, 632, 870, 930, 1290 };
+	struct IB { public int bar; public DateTime day, time; public double o, h, l, c; public bool start; }
+	static List<IB> Intraday(DateTime from, DateTime to, Func<DateTime, int, double> gap)
+	{
+		var l = new List<IB>(); double px = 5200; int bar = 1;
+		for (DateTime d = from; d <= to; d = d.AddDays(1))
+		{
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+			DateTime reopen = d.AddDays(d.DayOfWeek == DayOfWeek.Monday ? -3 : -1).AddHours(17);
+			for (int m = 0; m < s_mins.Length; m++)
+			{
+				double o = px + (l.Count > 0 ? gap(d, m) : 0);
+				l.Add(new IB { bar = bar++, day = d, time = reopen.AddMinutes(s_mins[m] + (m > 0 && d.DayOfWeek == DayOfWeek.Monday ? 2880 : 0)), o = o, h = o + 15, l = o - 15, c = o, start = m == 0 });
+				px = o;
+			}
+		}
+		return l;
+	}
+	/// <summary>The host order (stepRollDetector): calibrator, detector, Arm on the table reopen, locator; each bar stepped twice.</summary>
+	static List<RollSpliceLocator> RunSplice(List<IB> bars, HashSet<DateTime> dates, List<string> lines, List<int> spliceBars)
+	{
+		var det = new _RollDetector { table = true, dates = dates }; var cal = new RollGapCalibrator(); var loc = new RollSpliceLocator();
+		var res = new List<RollSpliceLocator>();
+		for (int i = 0; i < bars.Count; i++)
+			for (int rep = 0; rep < 2; rep++)
+			{
+				IB b = bars[i]; double prev = i > 0 ? bars[i - 1].c : double.NaN;
+				cal.AddBar(b.day, b.h, b.l, b.c);
+				bool stepped = det.Step(b.bar, b.day, b.o, prev, "@ES", 0.25);
+				if (stepped && det.DayInTable) loc.Arm(det.DayStartDay);
+				if (loc.Step(b.bar, b.day, b.time, b.o, prev, cal.Atr, det.DayStart)) { lines.Add(_RollDetector.SpliceLine(loc, 0.25)); spliceBars.Add(b.bar); }
+			}
+		return res;
+	}
+	static string One(List<string> l) { return l.Count == 1 ? l[0] : "(" + l.Count + ") " + string.Join(" | ", l); }
+
+	static void SpliceLocator()
+	{
+		var d0617 = new DateTime(2024, 6, 17); var d0618 = new DateTime(2024, 6, 18); var d1216 = new DateTime(2024, 12, 16);
+		var table = new HashSet<DateTime> { d0617, new DateTime(2024, 9, 16), d1216 };
+		DateTime from = new DateTime(2024, 4, 15), to = new DateTime(2024, 6, 28);
+		Check(RollSpliceLocator.DefaultMinAtr == 0.4, "ruling 11:30: minAtr 0.4 (named constant; host RollSpliceMinAtr, not an [Input])");
+		// 1. aligned: the jump is the table-date reopen (6 of 8 dates on ES / MES / NQ / MNQ, T-R4 on fabf1bd)
+		{
+			var l = new List<string>(); var b = new List<int>();
+			var bars = Intraday(from, to, (d, m) => d == d0617 && m == 0 ? 25 : 0);
+			RunSplice(bars, table, l, b);
+			Check(One(l) == "ROLL table splice(2024-06-17) at(2024-06-14 17:00) via(reopen) session(+0) gapBar(2024-06-14 17:00) gapPts(+25.00) gapTicks(+100) atr20(30.00) gapAtr(0.833) minAtr(0.4) found(1)",
+				"splice: aligned reopen jump, on the table roll bar itself: " + One(l));
+		}
+		// 2. June 2024 pattern: the data switches in the NEXT session (ES 06-17 22:51 CT = trading day 06-18; MES / NQ / MNQ 06-18 03:32)
+		{
+			var l = new List<string>(); var b = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0618 && m == 1 ? -20 : (m == 0 ? 0.25 : 0)), table, l, b);
+			Check(One(l) == "ROLL table splice(2024-06-17) at(2024-06-17 22:51) via(intrabar) session(+1) gapBar(2024-06-17 22:51) gapPts(-20.00) gapTicks(-80) atr20(30.00) gapAtr(0.667) minAtr(0.4) found(1)",
+				"splice: ES June 2024, late splice on the 22:51 bar of the next session: " + One(l));
+			var l2 = new List<string>(); var b2 = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0618 && m == 2 ? 15 : (m == 0 ? 0.25 : 0)), table, l2, b2);
+			Check(One(l2).StartsWith("ROLL table splice(2024-06-17) at(2024-06-18 03:32) via(intrabar) session(+1) gapBar(2024-06-18 03:32) gapPts(+15.00) gapTicks(+60) atr20(30.00) gapAtr(0.500)"),
+				"splice: MES / NQ / MNQ June 2024, late splice at 06-18 03:32: " + One(l2));
+		}
+		// 3. December 2024 pattern: tiny reopen gap, the switch is intrabar at 03:32 CT on the table date
+		{
+			var l = new List<string>(); var b = new List<int>();
+			var bars = Intraday(new DateTime(2024, 10, 1), new DateTime(2024, 12, 31), (d, m) => d == d1216 && m == 2 ? 18 : (d == d1216 && m == 0 ? 0.5 : 0));
+			RunSplice(bars, table, l, b);
+			Check(One(l) == "ROLL table splice(2024-12-16) at(2024-12-16 03:32) via(intrabar) session(+0) gapBar(2024-12-16 03:32) gapPts(+18.00) gapTicks(+72) atr20(30.00) gapAtr(0.600) minAtr(0.4) found(1)",
+				"splice: December 2024, intrabar 03:32 jump on the table date: " + One(l));
+		}
+		// 4. no jump: fallback on the first bar after the next session, offset = the largest gap of the window (first one on a tie)
+		{
+			var l = new List<string>(); var b = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0618 && m == 3 ? 2.0 : (d == d0617 && m == 4 ? -1.0 : 0)), table, l, b);
+			Check(One(l) == "ROLL table splice(2024-06-17) at(2024-06-18 17:00) via(fallback) session(+2) gapBar(2024-06-18 07:30) gapPts(+2.00) gapTicks(+8) atr20(30.05) gapAtr(0.067) minAtr(0.4) found(0)",
+				"splice: no qualifying bar -> fallback at the end of the next session with the window's largest gap: " + One(l));
+		}
+		// 5. boundary: A = 30, so 0.39 x A = 11.7 does not qualify and 0.41 x A = 12.3 does (same bar)
+		{
+			var l = new List<string>(); var b = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0617 && m == 2 ? 11.7 : 0), table, l, b);
+			Check(One(l).Contains("via(fallback)") && One(l).Contains("gapBar(2024-06-17 03:32) gapPts(+11.70)") && One(l).Contains("gapAtr(0.390)"), "splice: 0.39 x A does not qualify (fallback, but that bar is the largest gap): " + One(l));
+			var l2 = new List<string>(); var b2 = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0617 && m == 2 ? 12.3 : 0), table, l2, b2);
+			Check(One(l2).Contains("at(2024-06-17 03:32) via(intrabar) session(+0)") && One(l2).Contains("gapAtr(0.410)") && One(l2).EndsWith("found(1)"), "splice: 0.41 x A qualifies: " + One(l2));
+			Check(RollSpliceLocator.Qualifies(12.0, 30, 0.4) && !RollSpliceLocator.Qualifies(11.99, 30, 0.4) && RollSpliceLocator.Qualifies(-12.0, 30, 0.4) && !RollSpliceLocator.Qualifies(50, double.NaN, 0.4) && !RollSpliceLocator.Qualifies(50, 0, 0.4),
+				"splice: |g| >= 0.4 x A inclusive, either sign; never while A is NaN or 0");
+		}
+		// 6. news-sized gap BEFORE the real splice (documented risk): a 0.433 x A gap at 07:30 CT on the table date is taken as the
+		// splice; the real switch at 06-18 03:32 then gets no offset (one offset per roll: nothing is applied twice).
+		{
+			var l = new List<string>(); var b = new List<int>();
+			RunSplice(Intraday(from, to, (d, m) => d == d0617 && m == 3 ? 13 : (d == d0618 && m == 2 ? 25 : 0)), table, l, b);
+			Check(One(l).StartsWith("ROLL table splice(2024-06-17) at(2024-06-17 07:30) via(intrabar) session(+0) gapBar(2024-06-17 07:30) gapPts(+13.00)") && l.Count == 1,
+				"splice: a pre-splice news bar >= 0.4 x A triggers early and the later real jump is not offset again (documented): " + One(l));
+		}
+		// 7. causality and idempotence: nothing before Arm; a repeated bar returns false; warm-up (A NaN) never qualifies
+		{
+			var loc = new RollSpliceLocator();
+			Check(!loc.Step(1, d0617, d0617, 100, 50, 30, true), "splice: no search before Arm");
+			loc.Arm(d0617);
+			Check(loc.Step(2, d0617, d0617, 100, 50, 30, true) && !loc.Step(2, d0617, d0617, 100, 50, 30, true) && !loc.Armed, "splice: one result per bar, then disarmed");
+			loc.Arm(d0617);
+			Check(!loc.Step(3, d0617, d0617, 100, 50, double.NaN, true) && !loc.Step(4, d0618, d0618, 200, 100, double.NaN, true) && loc.Step(5, new DateTime(2024, 6, 19), d0618, 0, 0, 30, true)
+				&& loc.Via == RollSpliceLocator.EVia.Fallback && loc.Gap == 100 && !loc.Found, "splice: warm-up ends in the fallback with the largest gap (100)");
+		}
+		// 8. host pins: the price offset follows rollSpliceOn (M-DAILY history + in-session aggregate before the merge; TOD splice bar);
+		// rollOn (the roll event) is unchanged; Table only; the located splice is not also an off-table Warning.
+		{
+			string path = null;
+			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			Check(Regex.IsMatch(src, @"protected\s+double\s+RollSpliceMinAtr\s*=\s*RollSpliceLocator\.DefaultMinAtr\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollSpliceMinAtr"), "host: RollSpliceMinAtr = 0.4 constant, not an [Input]");
+			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.table\s*&&\s*!m_rollDet\.series\)\s*\{\s*if\s*\(stepped\s*&&\s*m_rollDet\.DayInTable\)\s*m_spliceLoc\.Arm\(m_rollDet\.DayStartDay\);")
+				&& Regex.IsMatch(src, @"m_spliceLoc\.Step\(bar,\s*day,\s*Bars\.Time\[0\],\s*Bars\.Open\[0\],\s*prev,\s*m_gapCal\.Atr,\s*m_rollDet\.DayStart\)")
+				&& Regex.IsMatch(src, @"else\s+if\s*\(stepped\)\s*setSplice\(bar,\s*double\.NaN,\s*false\);\s*\}"), "host: Table arms on the reopen and steps with the carried A; other modes put the offset on the roll bar");
+			Check(Regex.IsMatch(src, @"if\s*\(splice\s*&&\s*m_daily\.Days\s*>\s*0\)\s*m_daily\.OnRoll\(key,\s*double\.IsNaN\(spliceOff\)\s*\?\s*Bars\.Open\[0\]\s*-\s*m_daily\.PrevClose\s*:\s*spliceOff\);")
+				&& !Regex.IsMatch(src, @"if\s*\(roll\s*&&\s*m_daily\.Days\s*>\s*0\)\s*m_daily\.OnRoll"), "host: M-DAILY offset on the splice bar only (never on the table reopen as well)");
+			int shift = src.IndexOf("m_dailyAggO += spliceOff; m_dailyAggH += spliceOff; m_dailyAggL += spliceOff;", StringComparison.Ordinal), merge = src.IndexOf("m_dailyAggH = Math.Max(m_dailyAggH, Bars.High[0])", StringComparison.Ordinal);
+			Check(shift > 0 && merge > shift && src.IndexOf("m_dailyTodayOpen += spliceOff;", StringComparison.Ordinal) > 0, "host: an in-session splice shifts today's open and running O/H/L before the splice bar is merged");
+			Check(Regex.IsMatch(src, @"bool\s+splice\s*=\s*rollSpliceOn\(\);\s*double\s+tr\s*=") && Regex.IsMatch(src, @"else\s+if\s*\(traceOn\(ETraceLevel\.Warning\)\s*&&\s*m_spliceBar\s*!=\s*bar\)"), "host: TOD drops the splice bar's range; a located splice is not warned as off-table");
 		}
 	}
 }

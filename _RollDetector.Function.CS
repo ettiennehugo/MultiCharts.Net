@@ -109,14 +109,28 @@ namespace PowerLanguage.Function
 
 		static string num(double v, string fmt) { return double.IsNaN(v) ? "NaN" : v.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture); }
 
-		/// <summary>T-R1 (m-instr §7.1 item 2): the Journal line on every Table roll bar. confirmed(1) when g > k x A, confirmed(0)
-		/// otherwise, confirmed(-) during the ATR(20) warm-up (A NaN; atr20 and gapAtr print NaN). An unconfirmed roll is still a roll.</summary>
-		public static string TableSpliceLine(DateTime tradingDay, double gap, double atr, double k)
+		/// <summary>Owner ruling 2026-11-23 11:30 CT: the Journal line on every Table roll bar (the table-date reopen). The roll EVENT is
+		/// here (rollOn); the price offset is placed later by <see cref="RollSpliceLocator"/> and journaled by SpliceLine. reopenGapPts =
+		/// |open - prior close| of the reopen bar; gapAtr = that / A (NaN during the ATR(20) warm-up). Replaces the T-R1 confirmed(k) line:
+		/// k = 1.0 missed most real splices (Analyst T-R4, fabf1bd: roll gaps 0.49-1.35 x A, never confirmed on NQ / MNQ).</summary>
+		public static string TableRollLine(DateTime tradingDay, double gap, double atr, double minAtr)
 		{
 			bool warm = !double.IsNaN(atr) && atr > 0;
-			return "ROLL table splice(" + tradingDay.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") gapPts(" + num(gap, "0.00")
-				+ ") atr20(" + (warm ? num(atr, "0.00") : "NaN") + ") gapAtr(" + (warm ? num(gap / atr, "0.000") : "NaN") + ") k(" + num(k, "0.0##")
-				+ ") confirmed(" + (warm ? (GapConfirmed(gap, atr, k) ? "1" : "0") : "-") + ")";
+			return "ROLL table roll(" + tradingDay.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + ") reopenGapPts(" + num(gap, "0.00")
+				+ ") atr20(" + (warm ? num(atr, "0.00") : "NaN") + ") gapAtr(" + (warm ? num(gap / atr, "0.000") : "NaN") + ") minAtr(" + num(minAtr, "0.0##")
+				+ ") offset(search: first bar to the end of the next session with |open - prior close| >= minAtr x atr20; else fallback)";
+		}
+
+		/// <summary>The Journal line on the bar where the roll price offset is applied (located splice or fallback).</summary>
+		public static string SpliceLine(RollSpliceLocator r, double tick)
+		{
+			var inv = System.Globalization.CultureInfo.InvariantCulture;
+			bool warm = !double.IsNaN(r.Atr) && r.Atr > 0;
+			string via = r.Via == RollSpliceLocator.EVia.Reopen ? "reopen" : r.Via == RollSpliceLocator.EVia.Intrabar ? "intrabar" : r.Via == RollSpliceLocator.EVia.Fallback ? "fallback" : "none";
+			return "ROLL table splice(" + r.Table.ToString("yyyy-MM-dd", inv) + ") at(" + r.BarTime.ToString("yyyy-MM-dd HH:mm", inv) + ") via(" + via + ") session(+" + r.Session.ToString(inv)
+				+ ") gapBar(" + (r.GapTime == DateTime.MinValue ? "-" : r.GapTime.ToString("yyyy-MM-dd HH:mm", inv)) + ") gapPts(" + (double.IsNaN(r.Gap) ? "NaN" : r.Gap.ToString("+0.00;-0.00;0.00", inv))
+				+ ") gapTicks(" + (double.IsNaN(r.Gap) || !(tick > 0) ? "NaN" : (r.Gap / tick).ToString("+0;-0;0", inv)) + ") atr20(" + (warm ? num(r.Atr, "0.00") : "NaN")
+				+ ") gapAtr(" + (warm && !double.IsNaN(r.Gap) ? num(Math.Abs(r.Gap) / r.Atr, "0.000") : "NaN") + ") minAtr(" + num(r.minAtr, "0.0##") + ") found(" + (r.Found ? "1" : "0") + ")";
 		}
 
 		/// <summary>T-R1 (m-instr §7.1 item 3): the Warning text for a day start that is not a Table date and gaps more than k x A,
@@ -276,6 +290,88 @@ namespace PowerLanguage.Function
 			else m_atr = (m_atr * (AtrLength - 1) + tr) / AtrLength;
 		}
 	}
+	/// <summary>
+	/// Owner ruling 2026-11-23 11:30 CT (#155, after Analyst's T-R4 run on fabf1bd): in Table mode the roll price offset is applied on
+	/// the FIRST bar, from the table-date reopen on, whose gap g = open - prior close satisfies |g| >= minAtr x A, where A is the carried
+	/// Globex-day ATR(20) (RollGapCalibrator.Atr, the T-R1 / T-R4 A). Reopen and in-session gaps both count. If no bar qualifies by
+	/// the end of the next session, the offset is applied on the first bar after it (the earliest causal "end of the next session"),
+	/// measured as the largest |g| seen in the window (signed): Coder's choice, because it is the splice whenever the spread is real but
+	/// small (pre-2022 carry, warm-up), and a spread model needs rates / dividends the host does not have.
+	/// Causal: one bar at a time, never a later bar. Arm on the table reopen bar BEFORE stepping that bar. Step is idempotent per bar.
+	/// While A is NaN (warm-up) no bar qualifies, so the window ends in the fallback.
+	/// </summary>
+	public sealed class RollSpliceLocator
+	{
+		public const double DefaultMinAtr = 0.4;
+		public enum EVia { None = 0, Reopen = 1, Intrabar = 2, Fallback = 3 }
+
+		/// <summary>Qualifying gap in multiples of A (inclusive).</summary>
+		public double minAtr = DefaultMinAtr;
+
+		private bool m_armed;
+		private DateTime m_curDay = DateTime.MinValue;
+		private int m_sessions, m_lastBar = -1, m_bestSession;
+		private double m_bestGap = double.NaN, m_bestAtr = double.NaN;
+		private DateTime m_bestTime = DateTime.MinValue;
+
+		/// <summary>Result of the last Step that returned true (Via != None only on that bar).</summary>
+		public EVia Via;
+		public DateTime Table = DateTime.MinValue, BarTime = DateTime.MinValue, GapTime = DateTime.MinValue;
+		public double Gap = double.NaN, Atr = double.NaN;
+		/// <summary>Session of the offset bar relative to the table session: 0 = table session, 1 = next, 2 = fallback on the session after.</summary>
+		public int Session;
+		/// <summary>True when a bar qualified (|g| >= minAtr x A); false for the fallback. Replaces the T-R1 k = 1.0 confirmed flag.</summary>
+		public bool Found;
+		public bool Armed { get { return m_armed; } }
+
+		public void Reset()
+		{
+			m_armed = false; m_curDay = DateTime.MinValue; m_sessions = 0; m_lastBar = -1; m_bestSession = 0; m_bestGap = m_bestAtr = double.NaN; m_bestTime = DateTime.MinValue;
+			Via = EVia.None; Table = BarTime = GapTime = DateTime.MinValue; Gap = Atr = double.NaN; Session = 0; Found = false;
+		}
+
+		/// <summary>Open the search on the table reopen bar (call before Step for that bar). A window still open is replaced.</summary>
+		public void Arm(DateTime tableDay)
+		{
+			m_armed = true; Table = tableDay.Date; m_curDay = tableDay.Date; m_sessions = 0;
+			m_bestGap = m_bestAtr = double.NaN; m_bestTime = DateTime.MinValue; m_bestSession = 0;
+		}
+
+		/// <summary>True when the roll price offset applies on this bar; Via / Gap / Atr / Session / Found describe it. prevClose = the
+		/// prior bar's close; atr = A on this bar; dayStart = this is the first bar of its trading day.</summary>
+		public bool Step(int bar, DateTime tradingDay, DateTime barTime, double open, double prevClose, double atr, bool dayStart)
+		{
+			if (bar == m_lastBar) return false;
+			m_lastBar = bar;
+			Via = EVia.None;
+			if (!m_armed) return false;
+			DateTime d = tradingDay.Date;
+			if (d != m_curDay) { m_curDay = d; if (d > Table) m_sessions++; }
+			if (m_sessions >= 2)
+			{
+				m_armed = false; Via = EVia.Fallback; Found = false; Session = 2; BarTime = barTime;
+				Gap = double.IsNaN(m_bestGap) ? 0 : m_bestGap; GapTime = m_bestTime; Atr = m_bestAtr;
+				return true;
+			}
+			double g = double.IsNaN(open) || double.IsNaN(prevClose) ? double.NaN : open - prevClose;
+			if (double.IsNaN(g)) return false;
+			if (Qualifies(g, atr, minAtr))
+			{
+				m_armed = false; Via = dayStart ? EVia.Reopen : EVia.Intrabar; Found = true; Session = m_sessions;
+				Gap = g; Atr = atr; BarTime = GapTime = barTime;
+				return true;
+			}
+			if (double.IsNaN(m_bestGap) || Math.Abs(g) > Math.Abs(m_bestGap)) { m_bestGap = g; m_bestTime = barTime; m_bestAtr = atr; m_bestSession = m_sessions; }
+			return false;
+		}
+
+		/// <summary>|g| >= minAtr x A (inclusive, 1e-9 relative tolerance); false while A is NaN or not positive.</summary>
+		public static bool Qualifies(double g, double atr, double minAtr)
+		{
+			return !double.IsNaN(g) && !double.IsNaN(atr) && atr > 0 && Math.Abs(g) >= minAtr * atr * (1 - 1e-9);
+		}
+	}
+
 	/// <summary>
 	/// T-R4 evidence (specs/sandbox-roll-floor-migration.md T-R4; owner ruling 2026-11-23: run it before #155 merges). Diagnostic
 	/// only: never a roll, never an order, no effect on detection. For each Table date it collects the trading days around it

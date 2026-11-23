@@ -20,8 +20,10 @@
 //     no visible splice. confirmed = the T-R1 flag on the table date's start gap (gap > k x A). "(incomplete window)" = the
 //     chart ended before 5 sessions after the date.
 //   ROLL T-R4 summary aligned(n) dataSpliceOtherDay(n) noVisibleSplice(n) incomplete(n) ...   (on the last bar of the chart)
-//   With TraceLevel Journal (the default here) the T-R1 lines print too: "ROLL table splice(...) confirmed(...)" and any
-//   "ROLL off-table gap(...)" Warning, for a cross-check with the slot runs on 7ba7d37.
+//   With TraceLevel Journal (the default here) the roll lines print too: "ROLL table roll(...)" on the table reopen, "ROLL table
+//   splice(...) at(...) via(reopen|intrabar|fallback) ... found(1|0)" where the price offset is applied (owner ruling 2026-11-23
+//   11:30 CT: first bar with |open - prior close| >= 0.4 x A), and any "ROLL off-table gap(...)" Warning. Each splice at(...) should
+//   match the T-R4 largest(...) bar of the same date; a different, earlier bar is a pre-splice >= 0.4 x A gap taking the offset.
 //
 // CHART (one chart per symbol, four runs): Data1 = @ES, @MES, @NQ, @MNQ, 1 minute, the CME Globex 24h session template the
 //   sandbox slots use. Format Instrument > Settings > Data Range From 2023-01-01 To 2024-12-31. ATR(20) is warm by early

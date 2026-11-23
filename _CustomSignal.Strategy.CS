@@ -986,7 +986,7 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			DateTime time = Bars.Time[0], day = tradingDayKey(time);
 			double h = Bars.High[0], l = Bars.Low[0], c = Bars.Close[0];
-			bool splice = rollOn(1);
+			bool splice = rollSpliceOn();   // the bar that carries the contract jump (owner ruling 2026-11-23); = rollOn(1) outside Table
 			double tr = double.IsNaN(m_todPrevClose) ? h - l : Math.Max(h, m_todPrevClose) - Math.Min(l, m_todPrevClose);
 			int tier = -1;
 			double delta = (TodMetrics & ETodMetric.Delta) != 0 ? todDelta(out tier) : double.NaN;
@@ -1054,6 +1054,16 @@ namespace PowerLanguage.Strategy
 			if (Bars.Status != EBarState.Close) return;
 			DateTime t = Bars.Time[0], key = tradingDayKey(t);
 			bool roll = rollOn(1);
+			// Owner ruling 2026-11-23 11:30 CT: the price offset goes on the splice bar, not on the table reopen (rollSpliceOn). An
+			// in-session splice: today's bars so far are old-contract, so today's open and the running O/H/L move by the same offset
+			// BEFORE this (new-contract) bar is merged; the completed history moves below. One offset per roll, so nothing is counted twice.
+			bool splice = rollSpliceOn();
+			double spliceOff = RollSpliceOffset;
+			if (splice && RollSpliceIntrabar && !double.IsNaN(spliceOff) && key == m_dailyTodayKey)
+			{
+				m_dailyTodayOpen += spliceOff;
+				if (DailyConfig.dataStream <= 0 && key == m_dailyAggDay) { m_dailyAggO += spliceOff; m_dailyAggH += spliceOff; m_dailyAggL += spliceOff; }
+			}
 			if (key != m_dailyTodayKey) { m_dailyTodayKey = key; m_dailyTodayOpen = Bars.Open[0]; }
 			if (!m_dailyBasisLogged)
 			{
@@ -1079,7 +1089,8 @@ namespace PowerLanguage.Strategy
 				int pi = HtfClosedIndex(DailyConfig.dataStream), pno = pb.CurrentBar - pi;
 				if (pno > m_dailyLastStreamBar && tradingDayKey(pb.Time[pi]) < key) { m_dailyLastStreamBar = pno; m_daily.AddDay(tradingDayKey(pb.Time[pi]), pb.Open[pi], pb.High[pi], pb.Low[pi], pb.Close[pi]); }
 			}
-			// §0.3: roll-gap removal as soon as the roll bar is seen (offset = roll-bar open - previous day close).
+			// §0.3: roll-gap removal on the splice bar (rollSpliceOn: the roll bar outside Table; owner ruling 2026-11-23 for Table).
+			// A day-start splice keeps offset = open - previous day close; an in-session or fallback splice uses RollSpliceOffset.
 			// PR #46 review Q3: this is the real spread only if the roll bar is the first new-contract bar, i.e. the trading-day key
 			// starts where the vendor splices. On an ETH futures chart keyed by calendar date a Globex-open (18:00 ET) splice puts
 			// new-contract bars in the evening stub BEFORE the flagged 00:00 bar, so PrevClose is already new-contract and the
@@ -1091,7 +1102,7 @@ namespace PowerLanguage.Strategy
 				m_rollKeyWarned = true;
 				engineSink(ETraceLevel.Warning)?.Invoke("DAILY roll offset on a calendar-keyed intraday futures chart: if the vendor splices at the 18:00 ET Globex open the offset is ~0; key days by the Globex trading day (_CmeSessionClock.GlobexTradingDayEt)");
 			}
-			if (roll && m_daily.Days > 0) m_daily.OnRoll(key, Bars.Open[0] - m_daily.PrevClose);
+			if (splice && m_daily.Days > 0) m_daily.OnRoll(key, double.IsNaN(spliceOff) ? Bars.Open[0] - m_daily.PrevClose : spliceOff);
 			if (DailyConfig.dataStream > 0)
 			{
 				IInstrument db = BarsOfData(DailyConfig.dataStream);
@@ -2264,6 +2275,11 @@ namespace PowerLanguage.Strategy
 		/// <summary>T-R1 (m-instr §7.1 item 4, k = 1.0 Confirmed by Ettienne 2026-11-22): factor on the detector's Globex-day
 		/// ATR(20) (RollGapCalibrator.Atr) for the Table confirmation flag and the off-table Warning. Not an [Input].</summary>
 		protected double RollGapAtrK = 1.0;
+		/// <summary>Owner ruling 2026-11-23 11:30 CT: in Table mode the roll price offset is applied on the first bar from the table-date
+		/// reopen whose |open - prior close| >= RollSpliceMinAtr x A (A = the carried Globex-day ATR(20), RollGapCalibrator.Atr); with
+		/// no such bar by the end of the next session, on the first bar after it (fallback: the largest gap of the window). See
+		/// RollSpliceLocator and rollSpliceOn(). Not an [Input].</summary>
+		protected double RollSpliceMinAtr = RollSpliceLocator.DefaultMinAtr;
 		/// <summary>T-R2 (m-instr §7.1 item 10): when true and RollDetection is Table / SeriesOrTable, the base StartCalc clears
 		/// RollDates and fills it from the Data1 profile (fillProfileRollDates(RollTableFromYear, RollTableToYear, "ROLL")).
 		/// An explicit per-study switch (the sandbox studies set it in Create), not an auto-fill: a Table host that leaves it
@@ -2278,6 +2294,10 @@ namespace PowerLanguage.Strategy
 		/// only _RollEvidenceProbe sets it. Not an [Input].</summary>
 		protected bool RollEvidenceJournal = false;
 		private readonly RollEvidence m_rollEv = new RollEvidence();
+		private readonly RollSpliceLocator m_spliceLoc = new RollSpliceLocator();
+		private int m_spliceBar = -1, m_spliceStepBar = -1;
+		private double m_spliceOffset = double.NaN;
+		private bool m_spliceIntrabar;
 		private readonly List<string> m_rollEvOut = new List<string>();
 		private int m_rollEvBar = -1;
 		private bool m_rollEvDone;
@@ -2317,6 +2337,7 @@ namespace PowerLanguage.Strategy
 			m_rollTableChecked = false;
 			m_rollGapBar = -1;
 			m_rollEv.Reset(); m_rollEvOut.Clear(); m_rollEvBar = -1; m_rollEvDone = false;
+			m_spliceLoc.Reset(); m_spliceBar = m_spliceStepBar = -1; m_spliceOffset = double.NaN; m_spliceIntrabar = false;
 			bindRollWindow();   // M5: Series on a profile without roll facts throws here (StartCalc), after buildProfiles
 			if (RollTableFromProfile && (RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable))
 			{
@@ -2336,8 +2357,8 @@ namespace PowerLanguage.Strategy
 					DateTime lo = DateTime.MaxValue, hi = DateTime.MinValue;
 					foreach (DateTime d in RollDates) { if (d < lo) lo = d; if (d > hi) hi = d; }
 					trace(ETraceLevel.Info, string.Format(System.Globalization.CultureInfo.InvariantCulture,
-						"CFG ROLL table({0} dates {1:yyyy-MM-dd}..{2:yyyy-MM-dd}, contract years {3}-{4}, {5} months outside the product calendar skipped, digest {6}) k({7:0.0##}) mode({8})",
-						RollDates.Count, lo, hi, RollTableFromYear, RollTableToYear, skipped, _RollDetector.DatesDigest(RollDates), RollGapAtrK, RollDetection));
+						"CFG ROLL table({0} dates {1:yyyy-MM-dd}..{2:yyyy-MM-dd}, contract years {3}-{4}, {5} months outside the product calendar skipped, digest {6}) k({7:0.0##}) mode({8}) spliceMinAtr({9:0.0##})",
+						RollDates.Count, lo, hi, RollTableFromYear, RollTableToYear, skipped, _RollDetector.DatesDigest(RollDates), RollGapAtrK, RollDetection, RollSpliceMinAtr));
 				}
 			}
 		}
@@ -2500,6 +2521,27 @@ namespace PowerLanguage.Strategy
 				trace(ETraceLevel.Warning, string.Format(System.Globalization.CultureInfo.InvariantCulture,
 					"ROLL no Series splice for the {0:yyyy-MM-dd} contract: no trading-day first-bar gap >= {1} ticks in its roll window (largest of the last ten day starts {2:0.00} pts on {3:yyyy-MM-dd}); roll consumers did not reset. Check the continuous series splice for {4}.",
 					m_rollDet.MissedExpiry, RollGapTicks, m_rollDet.MissedGap, m_rollDet.MissedGapDay, name));
+			// Owner ruling 2026-11-23 11:30 CT: where the roll PRICE OFFSET goes (rollSpliceOn). The roll EVENT (rollOn) stays on the
+			// table-date reopen. Table only: a located splice (first |g| >= RollSpliceMinAtr x A from the reopen on) or the fallback at the
+			// end of the next session. Series / SeriesOrTable and a name-change roll: the offset is on the roll bar, as before.
+			string spliceLine = null;
+			if (bar != m_spliceStepBar)
+			{
+				m_spliceStepBar = bar;
+				if (m_rollDet.table && !m_rollDet.series)
+				{
+					if (stepped && m_rollDet.DayInTable) m_spliceLoc.Arm(m_rollDet.DayStartDay);
+					else if (stepped) setSplice(bar, double.NaN, false);   // name-change roll: offset at once
+					m_spliceLoc.minAtr = RollSpliceMinAtr;
+					if (m_spliceLoc.Step(bar, day, Bars.Time[0], Bars.Open[0], prev, m_gapCal.Atr, m_rollDet.DayStart))
+					{
+						// a reopen splice keeps the old offset formula (open - M-DAILY previous close), so aligned dates are unchanged
+						setSplice(bar, m_spliceLoc.Via == RollSpliceLocator.EVia.Reopen ? double.NaN : m_spliceLoc.Gap, m_spliceLoc.Via == RollSpliceLocator.EVia.Intrabar);
+						spliceLine = _RollDetector.SpliceLine(m_spliceLoc, tickSize()) + " name(" + name + ")";
+					}
+				}
+				else if (stepped) setSplice(bar, double.NaN, false);
+			}
 			if (m_rollDet.table && m_rollDet.DayStart && bar != m_rollGapBar)
 			{
 				m_rollGapBar = bar;   // stepRollDetector runs more than once per bar (Step is idempotent; the journal must be too)
@@ -2507,14 +2549,15 @@ namespace PowerLanguage.Strategy
 				double atrA = m_gapCal.Atr;
 				if (m_rollDet.DayInTable)
 				{
-					if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, _RollDetector.TableSpliceLine(m_rollDet.DayStartDay, m_rollDet.DayGap, atrA, RollGapAtrK));
+					if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, _RollDetector.TableRollLine(m_rollDet.DayStartDay, m_rollDet.DayGap, atrA, RollSpliceMinAtr));
 				}
-				else if (traceOn(ETraceLevel.Warning))
+				else if (traceOn(ETraceLevel.Warning) && m_spliceBar != bar)   // a located splice on the next reopen is journaled, not warned
 				{
 					string off = _RollDetector.OffTableWarning(m_rollDet.DayStartDay, m_rollDet.DayGap, atrA, RollGapAtrK);
 					if (off != null) trace(ETraceLevel.Warning, off + " name(" + name + "): not a roll; check the continuous series splice");
 				}
 			}
+			if (spliceLine != null && traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, spliceLine);
 			if (RollEvidenceJournal && m_rollDet.table && bar != m_rollEvBar && !m_rollEvDone) stepRollEvidence(bar, day, prev);
 			if (stepped)
 			{
@@ -2525,6 +2568,24 @@ namespace PowerLanguage.Strategy
 				if (m_rollPending != null) foreach (_RollPending p in m_rollPending) if (p != null) p.Arm(Bars.Time[0]);
 			}
 		}
+
+		private void setSplice(int bar, double offset, bool intrabar) { m_spliceBar = bar; m_spliceOffset = offset; m_spliceIntrabar = intrabar; }
+
+		/// <summary>Owner ruling 2026-11-23 11:30 CT: true on the Data1 bar where the roll PRICE OFFSET applies. Table mode: the first bar
+		/// from the table-date reopen with |open - prior close| >= RollSpliceMinAtr x A, or the fallback bar (the first bar after the
+		/// next session). Series / SeriesOrTable / a name-change roll: the roll bar (= rollOn(1)). M-DAILY shifts its history here and the
+		/// TOD normaliser drops this bar's range; rollOn(ds) (the roll event: roll-day skips, roll window, engine resets) is unchanged.</summary>
+		protected bool rollSpliceOn()
+		{
+			if (RollDetection == ERollDetection.Off) return false;
+			stepRollDetector();
+			return m_spliceBar == Bars.FullSymbolData.Current;
+		}
+		/// <summary>The offset to apply on the rollSpliceOn() bar: NaN = open - M-DAILY previous close (a day-start splice, as before),
+		/// else the located in-session bar gap (open - prior close) or the fallback's largest gap.</summary>
+		protected double RollSpliceOffset { get { return m_spliceOffset; } }
+		/// <summary>True when the rollSpliceOn() bar is inside a session (not its first bar): the day's bars before it are old-contract.</summary>
+		protected bool RollSpliceIntrabar { get { return m_spliceIntrabar; } }
 
 		/// <summary>T-R4: feed the evidence collector once per closed Data1 bar (same day key and A as the T-R1 journal) and print its
 		/// lines at Info; on the last bar of the chart the open windows and the summary are printed.</summary>
