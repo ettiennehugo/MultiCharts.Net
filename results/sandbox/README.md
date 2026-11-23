@@ -127,3 +127,22 @@ Results:
 - **Errors**: only A2-28's 13 expected multi-contract 1 percent risk skips. Nothing is dated 2025 or later.
 
 Status totals after this update: **23 pass, 2 fail (`_Test6`, `_Test7` pending PR #142), 4 by-design-0, 1 blocked, 0 pending**.
+
+## PR #152 Set2 on a71c9a8 (2026-11-22)
+
+Set2 (the 29 extras plus `_Test30` AV-02) staged at 18:58 ET from a71c9a8. F7 about 19:00 ET (CompAssms DLL 19:00:59 ET). Runs 19:01-20:57 ET MiniPC clock (18:01-19:57 CT): the 30 'R152 _Test01..30' workspaces plus 5 AV-02 holiday workspaces. Session log `MCSignal20261122-190216-19088.csv`. The Set2 rows are appended below the batch-1 rows with commit `pr152 a71c9a8 Set2`; slot names repeat because Set2 reuses `_Test1`-`_Test30`.
+
+Results:
+- **`_Test8` A2-62 exception** (fail): ArgumentOutOfRangeException ("Index was out of range") from `List.get_Item` in `classify()` (line 230), called from `CalcBar()` (line 181). It was shown at 19:22:45 ET (18:22:45 CT). The study stopped at bar 2023-01-31 17:01 CT, the first bar of the 21st Globex day, with no RUN-END. Cause: `classify()` returns early only when n < 20, but its loop reads `m_cl[n - 6 - i]` for i up to 19, so it needs n >= 25. This bug predates the cutoff change.
+- **Early-close cutoff** (pass): across 8 trading studies there were 0 entries, plans or fills after 12:10 CT on 2023-07-03, 2023-11-24, 2024-07-03, 2024-11-29 or 2024-12-24, or after 08:10 CT on 2023-04-07. Flat-by exits filled at 12:11 CT: SP-08 on 2023-07-03, and DV-01 on 2023-07-03 and 2023-11-24. No trade was held across an early close. DV-01 logged one 12:10 CT 'entry blocked'.
+- **Evening session** (no regression, not conclusive): 0 entries at or after 17:00 CT in any Set2 study. The fdc6a95 and e03f6d1 runs of VW-04, PS-09 and AV-11 also had 0. No 'entry blocked' line falls at or after 17:00 CT, so the cutoff block does not reach the evening. No Set2 trading study enters in the evening, so this set cannot show that evening entries still work.
+- **Same trades**: VW-04 (19), PS-09 (22) and AV-11 (5) have journals identical to e03f6d1 / fdc6a95, with 0 diffs. YV-12, AV-01 and SP-09 had 0 trades again, with the same log line counts. The other slots have no earlier native Set2 run.
+- **A2-45 / A2-46**: no earlier native run in any MCSignal log, so there is no baseline. A2-45 had 0 trades and no sizing lines. A2-46 had 12 trades (14 journal rows), none held overnight, with 94 one-percent risk skips and 106 'multi-contract size 2' Warnings.
+- **AV-02** (fail): 0 entries in all 6 runs. The full run stopped at 2024-12-05 02:21 CT with no RUN-END. The GoodFriday2023, MLK2024, Thanksgiving2023, Thanksgiving2024 and RegularWeek202406 runs ended normally; the second MLK run left no log lines. The SwingLow anchor is replaced every few bars (median 4 min; 0.6% of gaps are 15 min or longer), but an entry needs an anchor at least 15 bars old. So flat-by and holiday handling are never exercised.
+- **Errors**:
+  - A2-46: 94 'skipped: multi-contract risk exceeds 1 percent' (expected).
+  - A2-37: 623 'Data2 missing', one per day. The workspace has no Data2 pair series, so this slot is blocked.
+  - A2-62: the exception above.
+  - Nothing is dated 2025 or later.
+
+Set2 status: **8 pass (VW-04, PS-09, AV-11, A2-54, A2-46, YV-11, SP-08, DV-01), 2 fail (A2-62 exception, AV-02 never arms), 2 blocked (YV-02 no footprint root, A2-37 no Data2), 12 by-design-0 (A2-76, A2-79, A2-61, TS-07, RG-01/02/04/05/06/08/09/10), 6 zero-trades needing review (YV-12, AV-01, SP-09, A2-45, DV-11, A2-43)**. Batch-1 totals are unchanged: 23 pass, 2 fail, 4 by-design-0, 1 blocked, 0 pending.
