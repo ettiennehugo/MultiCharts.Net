@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those the example turns on in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings the example sets. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar. HTF reads use HtfClosedBar when the example does.
 // Repaint: Not applicable when the example uses closed bars only.
 // Survivorship: Not applicable
-// Rolls: as the example sets RollDetection.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table). rollOn(1) skips the roll bar's journal line and the DVP snapshot drops roll-crossing windows (F-ROLL), which were inert while rolls were off.
 // Data quality: Not yet verified on a chart.
 // Other: this is a port of the worked example, not a new rule set. ASSUMPTION: the example's labelled choices stand until an owner changes them.
 //
@@ -159,6 +159,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			DvpConfig.enabled = true; DvpConfig.streams = new[] { 2 };
 			DvpConfig.journalFits = true;    // DVP FIT per fit + DVP RUN (cov_fwd) at run end - the KD-08 measurement
 			DvpConfig.coneMode = EDvpConeMode.Prediction;
@@ -174,6 +175,8 @@ namespace PowerLanguage.Strategy
 			m_nativeSeen = bar;
 			return true;
 		}
+
+		protected override void StartCalc() { if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off; base.StartCalc(); }
 
 		protected override void CalcBar()
 		{

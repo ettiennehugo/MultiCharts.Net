@@ -2272,6 +2272,15 @@ namespace PowerLanguage.Strategy
 		/// <summary>T-R2: fixed contract years for RollTableFromProfile (as RegimeGate HostConfig.rollFromYear / rollToYear,
 		/// 2000-2035; ES digest fdd63bd8f179a8d4). Fixed years work for every request type and keep the digest stable. Not [Input]s.</summary>
 		protected int RollTableFromYear = 2000, RollTableToYear = 2035;
+		/// <summary>T-R4 evidence (owner ruling 2026-11-23, before #155 merges): when true and Table / SeriesOrTable is on, every closed
+		/// Data1 bar feeds a <see cref="RollEvidence"/> and each Table date's +-5-session window is printed at Info ("ROLL T-R4 ..." lines,
+		/// a verdict per date and a summary on the last bar). Diagnostic only: detection, rolls and orders are unchanged. Default false;
+		/// only _RollEvidenceProbe sets it. Not an [Input].</summary>
+		protected bool RollEvidenceJournal = false;
+		private readonly RollEvidence m_rollEv = new RollEvidence();
+		private readonly List<string> m_rollEvOut = new List<string>();
+		private int m_rollEvBar = -1;
+		private bool m_rollEvDone;
 
 		private readonly _RollDetector m_rollDet = new _RollDetector();
 		private readonly RollGapCalibrator m_gapCal = new RollGapCalibrator();
@@ -2307,6 +2316,7 @@ namespace PowerLanguage.Strategy
 			RollSpliceDiag = null;
 			m_rollTableChecked = false;
 			m_rollGapBar = -1;
+			m_rollEv.Reset(); m_rollEvOut.Clear(); m_rollEvBar = -1; m_rollEvDone = false;
 			bindRollWindow();   // M5: Series on a profile without roll facts throws here (StartCalc), after buildProfiles
 			if (RollTableFromProfile && (RollDetection == ERollDetection.Table || RollDetection == ERollDetection.SeriesOrTable))
 			{
@@ -2505,6 +2515,7 @@ namespace PowerLanguage.Strategy
 					if (off != null) trace(ETraceLevel.Warning, off + " name(" + name + "): not a roll; check the continuous series splice");
 				}
 			}
+			if (RollEvidenceJournal && m_rollDet.table && bar != m_rollEvBar && !m_rollEvDone) stepRollEvidence(bar, day, prev);
 			if (stepped)
 			{
 				double tk = tickSize(), g = m_rollDet.LastGap;
@@ -2513,6 +2524,24 @@ namespace PowerLanguage.Strategy
 				if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, $"VPF-4 roll splice detected tradingDay({day:yyyy-MM-dd}) bar({bar}) name({name}) {RollSpliceDiag}");
 				if (m_rollPending != null) foreach (_RollPending p in m_rollPending) if (p != null) p.Arm(Bars.Time[0]);
 			}
+		}
+
+		/// <summary>T-R4: feed the evidence collector once per closed Data1 bar (same day key and A as the T-R1 journal) and print its
+		/// lines at Info; on the last bar of the chart the open windows and the summary are printed.</summary>
+		private void stepRollEvidence(int bar, DateTime day, double prev)
+		{
+			if (m_rollEvBar < 0)
+			{
+				m_rollEv.dates = RollDates; m_rollEv.tick = tickSize(); m_rollEv.k = RollGapAtrK;
+				if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+					"CFG ROLL T-R4 evidence on: dates({0}) digest({1}) sessions(+-{2}) standout({3:0.0#}) k({4:0.0##}) tick({5:R}) name({6})",
+					RollDates.Count, _RollDetector.DatesDigest(RollDates), RollEvidence.Sessions, RollEvidence.StandoutRatio, RollGapAtrK, m_rollEv.tick, Bars.Info.Name));
+			}
+			m_rollEvBar = bar;
+			m_rollEvOut.Clear();
+			m_rollEv.AddBar(day, Bars.Time[0], Bars.Open[0], prev, m_gapCal.Atr, m_rollEvOut);
+			if (Bars.LastBarOnChart) { m_rollEv.Finish(m_rollEvOut); m_rollEvDone = true; }
+			if (traceOn(ETraceLevel.Info)) foreach (string line in m_rollEvOut) trace(ETraceLevel.Info, line);
 		}
 
 		/// <summary>§0.3 / S4: true on the first bar of a new contract on stream ds (unadjusted continuous futures). Data1: the

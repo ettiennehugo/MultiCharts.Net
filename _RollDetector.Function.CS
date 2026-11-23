@@ -276,5 +276,170 @@ namespace PowerLanguage.Function
 			else m_atr = (m_atr * (AtrLength - 1) + tr) / AtrLength;
 		}
 	}
+	/// <summary>
+	/// T-R4 evidence (specs/sandbox-roll-floor-migration.md T-R4; owner ruling 2026-11-23: run it before #155 merges). Diagnostic
+	/// only: never a roll, never an order, no effect on detection. For each Table date it collects the trading days around it
+	/// (<see cref="Sessions"/> before and after, counted in sessions the chart actually has) and, per day, the session-start gap
+	/// (open of the day's first bar minus the prior close: the Globex reopen) and the largest bar-to-bar gap inside the day (open
+	/// minus prior close of every later bar, with its bar time). Each is printed in points, ticks and multiples of the day's
+	/// Globex ATR(20) (the T-R1 A). The day's candidate is the larger of the two absolute gaps. When the window is complete it
+	/// prints one line per day and a verdict:
+	///   aligned                    the largest candidate is on the table date and is >= StandoutRatio x the median of the others;
+	///   data splice on yyyy-MM-dd  the largest candidate is on another day of the window and stands out by the same test;
+	///   no visible splice          no day stands out (the ratio is below StandoutRatio).
+	/// Pure C# (tests/RollTests). The host feeds one closed Data1 bar per AddBar call and calls Finish on the last bar.
+	/// </summary>
+	public sealed class RollEvidence
+	{
+		/// <summary>Sessions before and after the table date (the ruling's +-5).</summary>
+		public const int Sessions = 5;
+		/// <summary>Diagnostic threshold for "stands out": largest candidate / median of the other days' candidates.</summary>
+		public const double StandoutRatio = 2.0;
+
+		public ICollection<DateTime> dates;
+		public double tick = 0.25;
+		public double k = 1.0;
+
+		public sealed class Day
+		{
+			public DateTime day, startTime = DateTime.MinValue, barTime = DateTime.MinValue;
+			public double startGap = double.NaN, barGap = double.NaN, atr = double.NaN;
+			/// <summary>Larger of |startGap| and |barGap| (NaN when neither is known).</summary>
+			public double Candidate
+			{
+				get
+				{
+					double a = double.IsNaN(startGap) ? double.NaN : Math.Abs(startGap), b = double.IsNaN(barGap) ? double.NaN : Math.Abs(barGap);
+					if (double.IsNaN(a)) return b;
+					if (double.IsNaN(b)) return a;
+					return Math.Max(a, b);
+				}
+			}
+			/// <summary>True when the candidate is the session-start gap (ties go to the start).</summary>
+			public bool AtStart { get { return !double.IsNaN(startGap) && (double.IsNaN(barGap) || Math.Abs(startGap) >= Math.Abs(barGap)); } }
+		}
+
+		sealed class Pending { public DateTime table; public List<Day> before = new List<Day>(); public Day target; public List<Day> after = new List<Day>(); }
+
+		private readonly List<Day> m_recent = new List<Day>();   // the last Sessions completed days
+		private readonly List<Pending> m_pending = new List<Pending>();
+		private Day m_cur;
+		private int m_aligned, m_offDate, m_none, m_incomplete;
+
+		/// <summary>Verdict counts so far: aligned, data splice on another date, no visible splice, incomplete windows (Finish).</summary>
+		public int Aligned { get { return m_aligned; } }
+		public int OffDate { get { return m_offDate; } }
+		public int NoVisible { get { return m_none; } }
+		public int Incomplete { get { return m_incomplete; } }
+
+		public void Reset() { m_recent.Clear(); m_pending.Clear(); m_cur = null; m_aligned = m_offDate = m_none = m_incomplete = 0; }
+
+		/// <summary>One closed bar. tradingDay = the detector's day key; prevClose = the prior bar's close (NaN on the first bar);
+		/// atr = the T-R1 A on this bar (ATR(20) of the completed days before it, NaN during warm-up). Lines are appended to output.</summary>
+		public void AddBar(DateTime tradingDay, DateTime barTime, double open, double prevClose, double atr, List<string> output)
+		{
+			DateTime d = tradingDay.Date;
+			double g = double.IsNaN(prevClose) || double.IsNaN(open) ? double.NaN : open - prevClose;
+			if (m_cur == null || d != m_cur.day)
+			{
+				if (m_cur != null) complete(m_cur, output);
+				m_cur = new Day { day = d, startTime = barTime, startGap = m_cur == null ? double.NaN : g, atr = atr };
+				if (dates != null && dates.Contains(d))
+				{
+					var p = new Pending { table = d, target = m_cur };
+					p.before.AddRange(m_recent);
+					m_pending.Add(p);
+				}
+				return;
+			}
+			if (!double.IsNaN(g) && (double.IsNaN(m_cur.barGap) || Math.Abs(g) > Math.Abs(m_cur.barGap))) { m_cur.barGap = g; m_cur.barTime = barTime; }
+		}
+
+		/// <summary>End of data: completes the open day and reports every window still pending (marked incomplete), then a summary line.</summary>
+		public void Finish(List<string> output)
+		{
+			if (m_cur != null) { complete(m_cur, output); m_cur = null; }
+			foreach (Pending p in m_pending) { m_incomplete++; report(p, output, true); }
+			m_pending.Clear();
+			output.Add(string.Format(Inv, "ROLL T-R4 summary aligned({0}) dataSpliceOtherDay({1}) noVisibleSplice({2}) incomplete({3}) sessions(+-{4}) standout({5:0.0#}) k({6:0.0##})",
+				m_aligned, m_offDate, m_none, m_incomplete, Sessions, StandoutRatio, k));
+		}
+
+		private void complete(Day day, List<string> output)
+		{
+			for (int i = 0; i < m_pending.Count; i++)
+			{
+				Pending p = m_pending[i];
+				if (day != p.target && day.day > p.table) p.after.Add(day);
+				if (p.after.Count >= Sessions) { report(p, output, false); m_pending.RemoveAt(i); i--; }
+			}
+			m_recent.Add(day);
+			if (m_recent.Count > Sessions) m_recent.RemoveAt(0);
+		}
+
+		static readonly IFormatProvider Inv = System.Globalization.CultureInfo.InvariantCulture;
+		static string D(DateTime d) { return d.ToString("yyyy-MM-dd", Inv); }
+		static string T(DateTime t) { return t == DateTime.MinValue ? "-" : t.ToString("yyyy-MM-dd HH:mm", Inv); }
+
+		/// <summary>"pts +12.25 ticks +49 atr 0.183" (signed points and ticks; atr = |gap| / A, NaN during warm-up).</summary>
+		public string Gap(double g, double atr)
+		{
+			if (double.IsNaN(g)) return "pts NaN ticks NaN atr NaN";
+			string ticks = tick > 0 ? (g / tick).ToString("+0;-0;0", Inv) : "NaN";
+			string a = !double.IsNaN(atr) && atr > 0 ? (Math.Abs(g) / atr).ToString("0.000", Inv) : "NaN";
+			return "pts " + g.ToString("+0.00;-0.00;0.00", Inv) + " ticks " + ticks + " atr " + a;
+		}
+
+		/// <summary>Median of the values (NaN for none).</summary>
+		public static double Median(List<double> v)
+		{
+			if (v == null || v.Count == 0) return double.NaN;
+			var s = new List<double>(v); s.Sort();
+			int n = s.Count;
+			return n % 2 == 1 ? s[n / 2] : (s[n / 2 - 1] + s[n / 2]) / 2.0;
+		}
+
+		/// <summary>The verdict for a window: index of the largest-candidate day (-1 when none is known) and the standout ratio.</summary>
+		public static string Verdict(List<Day> window, Day target, out int largest, out double ratio)
+		{
+			largest = -1; ratio = double.NaN;
+			for (int i = 0; i < window.Count; i++)
+			{
+				double c = window[i].Candidate;
+				if (double.IsNaN(c)) continue;
+				if (largest < 0 || c > window[largest].Candidate) largest = i;
+			}
+			if (largest < 0) return "no visible splice";
+			var others = new List<double>();
+			for (int i = 0; i < window.Count; i++) if (i != largest && !double.IsNaN(window[i].Candidate)) others.Add(window[i].Candidate);
+			double med = Median(others), top = window[largest].Candidate;
+			ratio = double.IsNaN(med) ? double.NaN : med > 0 ? top / med : (top > 0 ? double.PositiveInfinity : double.NaN);
+			if (!(ratio >= StandoutRatio)) return "no visible splice";
+			return window[largest] == target ? "aligned" : "data splice on " + D(window[largest].day);
+		}
+
+		private void report(Pending p, List<string> output, bool incomplete)
+		{
+			var w = new List<Day>(p.before); w.Add(p.target); w.AddRange(p.after);
+			int largest; double ratio;
+			string verdict = Verdict(w, p.target, out largest, out ratio);
+			int ti = p.before.Count;
+			for (int i = 0; i < w.Count; i++)
+			{
+				Day d = w[i];
+				output.Add("ROLL T-R4 table(" + D(p.table) + ") day(" + D(d.day) + ") rel(" + (i - ti).ToString("+0;-0;0", Inv) + ") start(" + T(d.startTime) + " " + Gap(d.startGap, d.atr)
+					+ ") maxBar(" + T(d.barTime) + " " + Gap(d.barGap, d.atr) + ") atr20(" + (double.IsNaN(d.atr) ? "NaN" : d.atr.ToString("0.00", Inv)) + ") largest(" + (i == largest ? "1" : "0") + ")");
+			}
+			Day t = p.target;
+			string where = largest < 0 ? "-" : w[largest].AtStart ? "start " + T(w[largest].startTime) : "bar " + T(w[largest].barTime);
+			string conf = double.IsNaN(t.atr) || !(t.atr > 0) ? "-" : (_RollDetector.GapConfirmed(double.IsNaN(t.startGap) ? double.NaN : Math.Abs(t.startGap), t.atr, k) ? "1" : "0");
+			if (!incomplete) { if (verdict == "aligned") m_aligned++; else if (verdict.StartsWith("data splice", StringComparison.Ordinal)) m_offDate++; else m_none++; }
+			output.Add("ROLL T-R4 verdict table(" + D(p.table) + ") " + verdict + (incomplete ? " (incomplete window)" : "")
+				+ " | largest(" + (largest < 0 ? "-" : D(w[largest].day)) + " " + where + " " + (largest < 0 ? "" : Gap(w[largest].AtStart ? w[largest].startGap : w[largest].barGap, w[largest].atr))
+				+ ") ratio(" + (double.IsNaN(ratio) ? "NaN" : double.IsInfinity(ratio) ? "inf" : ratio.ToString("0.00", Inv)) + ") tableStart(" + Gap(t.startGap, t.atr) + ") confirmed(" + conf
+				+ ") sessions(" + p.before.Count + " before " + p.after.Count + " after)");
+		}
+	}
+
 	// </roll-detector>
 }

@@ -892,7 +892,19 @@ static class Program
 			if (!h.Success || !h.Value.Contains("RollDetection = Table (the CME roll-date table")) bad.Add(name + " header Engine settings line does not say RollDetection = Table");
 			if (Regex.IsMatch(text, @"^// Rolls:[^\n]*\bSeries\b", RegexOptions.Multiline)) bad.Add(name + " header Rolls line still says Series");
 		}
+		// Owner ruling 2026-11-23: the futures studies that had rolls off move to the table too; TS-01 stays off by design.
+		string[] moved = { "_A2_31_", "_A2_34_", "_A2_36_", "_A2_37_", "_A2_38_", "_A2_40_", "_A2_43_", "_A2_72_", "_A2_73_", "_A2_74_", "_A2_75_", "_A2_76_", "_A2_77_",
+			"_L2_01_", "_L2_02_", "_L2_03_", "_L2_04_", "_L2_05_", "_L2_06_", "_L2_07_", "_KD_08_", "_YV_03_" };
+		foreach (string m in moved)
+		{
+			string f = files.Find(x => Path.GetFileName(x).StartsWith(m, StringComparison.Ordinal));
+			string c = f == null ? "" : Regex.Replace(File.ReadAllText(f), @"//[^\n]*", "");
+			if (!Regex.IsMatch(c, @"RollDetection\s*=\s*ERollDetection\.Table\s*;\s*RollTableFromProfile\s*=\s*true\s*;")) bad.Add(m + " (rolls-off study, owner ruling 2026-11-23) is not on Table");
+		}
+		string ts01 = files.Find(x => Path.GetFileName(x).StartsWith("_TS_01_", StringComparison.Ordinal));
+		if (ts01 == null || Regex.IsMatch(Regex.Replace(File.ReadAllText(ts01), @"//[^\n]*", ""), @"ERollDetection\.(Table|Series|SeriesOrTable)\b")) bad.Add("_TS_01_ must stay with roll detection off (by design)");
+		foreach (string f in files) if (File.ReadAllText(f).Contains("Not migrated to Table (T-R2 review list)")) bad.Add(Path.GetFileName(f) + " header still says Not migrated to Table");
 		foreach (string b in bad) Console.WriteLine("FAIL " + b);
-		Check(bad.Count == 0 && table >= 191, "T-R2 sandbox roll mode: " + table + " Table studies filled from the profile, none on Series / SeriesOrTable (" + bad.Count + " problems)");
+		Check(bad.Count == 0 && table >= 213, "T-R2 sandbox roll mode: " + table + " Table studies filled from the profile, none on Series / SeriesOrTable (" + bad.Count + " problems)");
 	}
 }

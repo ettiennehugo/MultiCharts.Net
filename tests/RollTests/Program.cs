@@ -96,6 +96,7 @@ static class Program
 		FixI();
 		CalibFit();
 		TableJournal();
+		Evidence();
 
 		// 2. table mode
 		var dt = new _RollDetector { table = true, dates = new HashSet<DateTime> { new DateTime(2025, 3, 17), new DateTime(2025, 6, 1) } };
@@ -514,6 +515,111 @@ static class Program
 			Check(Regex.IsMatch(src, @"protected\s+int\s+RollTableFromYear\s*=\s*2000,\s*RollTableToYear\s*=\s*2035\s*;") && Regex.IsMatch(src, @"protected\s+bool\s+RollTableFromProfile\s*=\s*false\s*;")
 				&& Regex.IsMatch(src, @"InstrumentRules\.CollectCoveredRollDates\(rp,\s*RollTableFromYear,\s*RollTableToYear,\s*""ROLL"""),
 				"T-R2 fixed contract years 2000-2035 (not [Input]s); the profile fill is opt-in per study (no auto-fill)");
+		}
+	}
+	// ---- T-R4 evidence collector (owner ruling 2026-11-23): per table date, +-5 sessions of start / max-bar gaps and a verdict ----
+	// sessions: weekdays from `from`, 4 bars each (first bar = the Globex reopen). startGap(day) is added to the first bar's open,
+	// barGap(day) to the third bar's open. A = 50 points; tick 0.25.
+	static List<string> Ev(RollEvidence ev, DateTime from, int days, Func<DateTime, double> startGap, Func<DateTime, double> barGap, bool finish)
+	{
+		var outp = new List<string>(); double px = 5000, prev = double.NaN; DateTime d = from;
+		for (int k = 0; k < days; d = d.AddDays(1))
+		{
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+			k++;
+			for (int m = 0; m < 4; m++)
+			{
+				double o = px + (m == 0 ? startGap(d) : m == 2 ? barGap(d) : 0) + (m == 1 ? 0.25 : 0);
+				ev.AddBar(d, d.AddDays(-1).AddHours(17).AddMinutes(m == 0 ? 0 : 900 + m), o, prev, 50, outp);
+				px = o + (m % 2 == 0 ? 0.5 : -0.5); prev = px;
+			}
+		}
+		if (finish) ev.Finish(outp);
+		return outp;
+	}
+
+	static void Evidence()
+	{
+		var t0617 = new DateTime(2024, 6, 17); var t0613 = new DateTime(2024, 6, 13);
+		var dates = new HashSet<DateTime> { t0617 };
+		Func<DateTime, double> small = d => (d.Day % 3) * 0.25;   // ordinary reopen gaps 0..2 ticks
+		Func<DateTime, double> none = d => 0;
+		DateTime from = new DateTime(2024, 5, 27);
+		// 1. splice on the table date's reopen: aligned
+		{
+			var ev = new RollEvidence { dates = dates, tick = 0.25 };
+			var o = Ev(ev, from, 30, d => d == t0617 ? 20.0 : small(d), none, true);
+			var days = o.FindAll(l => l.StartsWith("ROLL T-R4 table(2024-06-17) day(", StringComparison.Ordinal));
+			string v = o.Find(l => l.StartsWith("ROLL T-R4 verdict table(2024-06-17) ", StringComparison.Ordinal));
+			Check(days.Count == 11 && days[0].Contains("day(2024-06-10) rel(-5)") && days[5].Contains("day(2024-06-17) rel(0)") && days[10].Contains("day(2024-06-24) rel(+5)"),
+				"T-R4 one line per session rel(-5)..rel(+5) (sessions, not calendar days): " + (days.Count > 0 ? days[0] : "none"));
+			Check(v != null && v.Contains(" aligned | largest(2024-06-17 start ") && v.Contains("pts +20.00 ticks +80 atr 0.400") && v.Contains("confirmed(0)") && v.Contains("sessions(5 before 5 after)"),
+				"T-R4 aligned: largest on the table date at the reopen, ticks / atr / T-R1 flag: " + v);
+			Check(days[5].Contains("largest(1)") && days[4].Contains("largest(0)"), "T-R4 the largest day is flagged");
+			Check(ev.Aligned == 1 && ev.OffDate == 0 && ev.NoVisible == 0 && ev.Incomplete == 0 && o[o.Count - 1].StartsWith("ROLL T-R4 summary aligned(1) dataSpliceOtherDay(0) noVisibleSplice(0) incomplete(0)", StringComparison.Ordinal), "T-R4 summary counts");
+			Check(o.TrueForAll(l => l.IndexOf(',') < 0), "T-R4 lines are comma-free (never quoted in the MCSignal CSV)");
+		}
+		// 2. MES June 2024 case: the data splices on 06-13, the table says 06-17
+		{
+			var ev = new RollEvidence { dates = dates, tick = 0.25 };
+			var o = Ev(ev, from, 30, d => d == t0613 ? -15.0 : small(d), none, true);
+			string v = o.Find(l => l.StartsWith("ROLL T-R4 verdict table(2024-06-17) ", StringComparison.Ordinal));
+			Check(v != null && v.Contains(" data splice on 2024-06-13 | largest(2024-06-13 start ") && v.Contains("pts -15.00 ticks -60 atr 0.300") && ev.OffDate == 1,
+				"T-R4 data splice on another day of the window (MES 06-13 vs table 06-17): " + v);
+		}
+		// 3. a splice inside the table date's session (not at the reopen): aligned, where = bar time
+		{
+			var ev = new RollEvidence { dates = dates, tick = 0.25 };
+			var o = Ev(ev, from, 30, small, d => d == t0617 ? 60.0 : 0, true);
+			string v = o.Find(l => l.StartsWith("ROLL T-R4 verdict table(2024-06-17) ", StringComparison.Ordinal));
+			Check(v != null && v.Contains(" aligned | largest(2024-06-17 bar 2024-06-17 08:02 ") && v.Contains("atr 1.200"), "T-R4 an in-session splice counts, with its bar time: " + v);
+		}
+		// 4. no day stands out: no visible splice
+		{
+			var ev = new RollEvidence { dates = dates, tick = 0.25 };
+			var o = Ev(ev, from, 30, d => 1.0 + (d.Day % 2) * 0.25, none, true);
+			string v = o.Find(l => l.StartsWith("ROLL T-R4 verdict table(2024-06-17) ", StringComparison.Ordinal));
+			Check(v != null && v.Contains(" no visible splice | ") && ev.NoVisible == 1, "T-R4 no visible splice when the largest is < 2 x the median: " + v);
+		}
+		// 5. the chart ends 2 sessions after the date: reported at Finish as incomplete, not counted as a verdict
+		{
+			var ev = new RollEvidence { dates = dates, tick = 0.25 };
+			var o = Ev(ev, from, 18, d => d == t0617 ? 20.0 : small(d), none, false);
+			Check(!o.Exists(l => l.StartsWith("ROLL T-R4 verdict", StringComparison.Ordinal)), "T-R4 no verdict before 5 sessions after the date");
+			ev.Finish(o);
+			string v = o.Find(l => l.StartsWith("ROLL T-R4 verdict table(2024-06-17) ", StringComparison.Ordinal));
+			Check(v != null && v.Contains("aligned (incomplete window)") && v.Contains("sessions(5 before 2 after)") && ev.Incomplete == 1 && ev.Aligned == 0, "T-R4 incomplete window at the end of data: " + v);
+		}
+		// 6. helpers: Gap format, warm-up NaN, Median, Verdict on an empty window
+		{
+			var ev = new RollEvidence { tick = 0.25 };
+			Check(ev.Gap(-3.0, 60) == "pts -3.00 ticks -12 atr 0.050" && ev.Gap(2.5, double.NaN) == "pts +2.50 ticks +10 atr NaN" && ev.Gap(double.NaN, 50) == "pts NaN ticks NaN atr NaN", "T-R4 Gap format (signed pts / ticks; atr NaN in warm-up)");
+			Check(RollEvidence.Median(new List<double> { 3, 1, 2 }) == 2 && RollEvidence.Median(new List<double> { 4, 1, 2, 3 }) == 2.5 && double.IsNaN(RollEvidence.Median(new List<double>())), "T-R4 Median");
+			int li; double r;
+			Check(RollEvidence.Verdict(new List<RollEvidence.Day>(), null, out li, out r) == "no visible splice" && li == -1, "T-R4 empty window: no visible splice");
+			Check(RollEvidence.Sessions == 5 && RollEvidence.StandoutRatio == 2.0, "T-R4 window +-5 sessions, standout 2.0 x median");
+		}
+		// 7. host pins: default off, not an [Input]; only _RollEvidenceProbe turns it on; fed once per bar with the T-R1 day key and A
+		{
+			string path = null;
+			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string root = path == null ? null : Path.GetDirectoryName(path);
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			Check(Regex.IsMatch(src, @"protected\s+bool\s+RollEvidenceJournal\s*=\s*false\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollEvidenceJournal"), "T-R4 RollEvidenceJournal defaults false, not an [Input]");
+			Check(Regex.IsMatch(src, @"if\s*\(RollEvidenceJournal\s*&&\s*m_rollDet\.table\s*&&\s*bar\s*!=\s*m_rollEvBar\s*&&\s*!m_rollEvDone\)\s*stepRollEvidence\(bar,\s*day,\s*prev\);")
+				&& Regex.IsMatch(src, @"m_rollEv\.AddBar\(day,\s*Bars\.Time\[0\],\s*Bars\.Open\[0\],\s*prev,\s*m_gapCal\.Atr,\s*m_rollEvOut\);"), "T-R4 host feed: once per bar, the detector's day key and the T-R1 A");
+			var setters = new List<string>();
+			if (root != null)
+				foreach (string f in Directory.GetFiles(root, "*.CS", SearchOption.AllDirectories))
+				{
+					if (f.Contains(Path.DirectorySeparatorChar + "tests" + Path.DirectorySeparatorChar)) continue;
+					if (Regex.IsMatch(Regex.Replace(File.ReadAllText(f), @"//[^\n]*", ""), @"RollEvidenceJournal\s*=\s*true")) setters.Add(Path.GetFileName(f));
+				}
+			Check(setters.Count == 1 && setters[0] == "_RollEvidenceProbe.Strategy.CS", "T-R4 only _RollEvidenceProbe sets RollEvidenceJournal = true: " + string.Join(" ", setters));
+			string probe = root == null ? "" : File.ReadAllText(Path.Combine(root, "_RollEvidenceProbe.Strategy.CS"));
+			string proj = root == null ? "" : File.ReadAllText(Path.Combine(root, "PLStudies.csproj"));
+			Check(probe.Contains("[IOGMode(IOGMode.Disabled)]") && !Regex.IsMatch(Regex.Replace(probe, @"//[^\n]*", ""), @"OrderCreator|\.Send\(") && proj.Contains("<Compile Include=\"_RollEvidenceProbe.Strategy.CS\" />"),
+				"T-R4 probe: IOG disabled, no orders, in PLStudies.csproj");
 		}
 	}
 }

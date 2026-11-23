@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Off: this file does not set a roll mode (Off on futures too; rollOn never fires). Not migrated to Table (T-R2 review list).
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading needs depth changes on both sides. dxFeed has no historical DOM, and this API has no market-by-order flag. The file journals two consecutive bar volumes and sends no order.
 //
@@ -147,7 +147,7 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _L2_07_TwoSidedCancellation(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
 		protected override void StartCalc()
 		{
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
