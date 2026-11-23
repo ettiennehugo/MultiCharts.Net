@@ -395,6 +395,7 @@ static class Program
 				Check(!sb.Contains("PastFlat("), kv.Key + " sandboxBook window does not use _SandboxRules.PastFlat");
 				if (sb.Contains("gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, ")) books++;
 			}
+			Check(Regex.Matches(code("A2_49"), @"if \(overRiskBudget\(r\)\) \{ budgetSkip\(").Count == 2 && Regex.IsMatch(code("A2_49"), @"logSignal\(""A2-49"", side, entry, entry - side \* r, ctx, false\)"), "A2_49 risk-budget skips are taken=false signal events (Analyst run 4ca93ff2)");
 			foreach (string k in new[] { "A2_49", "DV_15" })
 				Check(Regex.IsMatch(code(k), @"bool window = [^;]*!gxPastFlatCutoff\(_SandboxRules\.FlatBy\(0, Bars\.Info\.Exchange, Bars\.Info\.Name, (m_rthValueEnd|Clock\.RthValueEnd)\)\);") && !Regex.IsMatch(code(k), @"bool window = [^;]*PastFlat\("), k + " resting window uses the GX date-aware cutoff");
 			Check(books >= 90, "sandboxBook windows on the GX cutoff: " + books);
