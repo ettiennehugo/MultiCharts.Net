@@ -2429,7 +2429,13 @@ namespace PowerLanguage.Strategy
 				}
 			}
 			double prev = bar > 1 ? Bars.Close[1] : double.NaN;
-			if (m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize()))
+			DateTime missedBefore = m_rollDet.MissedExpiry;
+			bool stepped = m_rollDet.Step(bar, day, Bars.Open[0], prev, name, tickSize());
+			if (m_rollDet.MissedExpiry != missedBefore && traceOn(ETraceLevel.Warning))
+				trace(ETraceLevel.Warning, string.Format(System.Globalization.CultureInfo.InvariantCulture,
+					"ROLL no Series splice for the {0:yyyy-MM-dd} contract: no trading-day first-bar gap >= {1} ticks in its roll window (largest of the last ten day starts {2:0.00} pts on {3:yyyy-MM-dd}); roll consumers did not reset. Check the continuous series splice for {4}.",
+					m_rollDet.MissedExpiry, RollGapTicks, m_rollDet.MissedGap, m_rollDet.MissedGapDay, name));
+			if (stepped)
 			{
 				double tk = tickSize(), g = m_rollDet.LastGap;
 				RollSpliceDiag = string.Format(System.Globalization.CultureInfo.InvariantCulture, "gapPts({0:0.00}) gapX({1:0.00}) barTime({2:yyyy-MM-dd HH:mm}) prevClose({3:0.00}) open({4:0.00})",
