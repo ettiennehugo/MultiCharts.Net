@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the YV-12 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Research assumption: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// Exit orders: GX. Stop at the wick extreme, widened to the cost floor. Target is the other side of the prior range. TimeStopMinutes is 30. Flat at the session value end.
+// Exit orders: GX. Stop at the wick extreme, widened to the cost floor. Break-even at +1 R on a closed bar. Target is the other side of the prior range. TimeStopMinutes is 30. Flat at the session value end.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes.
+// Other: ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes.
+// ASSUMPTION: a Day-2 session (Day2Filter RangeExpansion, owner-approved proxy 2026-11-10) has a prior RTH range of at least 1.5 times the median RTH range of the last 20 completed sessions, or a prior RTH |close - open| of at least 1.0 times Atr20d. A short needs a 5-minute bar whose high is within 0.10 x the 14-bar 5-minute ATR below the prior high (and at most 0.5 x that ATR above it), with an upper wick of at least half the bar, a close in the bottom quarter and a range of at least 1.0 times the 14-bar 5-minute ATR (the 5-minute bar is Data2). The open must not already be at the prior high. The sell stop is one tick under that bar. The stop is the wick high. The sell stop works for 3 Data2 bars. The target is the prior low + 2 ticks (prior high - 2 ticks long); skip when it is under 1 R after the floor. Side picks the direction. The long at the prior low is the mirror. The time stop is 30 minutes. Break-even: the stop moves to the entry once a closed bar reaches +1 R (StopManagement BreakEvenAt1R, owner-approved 2026-11-22 22:48 CT).
 // IOG is disabled.
 
 
@@ -280,7 +280,10 @@ namespace PowerLanguage.Strategy
 			GxConfig.TargetMode = has ? ETargetMode.SingleTarget : ETargetMode.None;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
 			GxConfig.FinalTargetValue = has ? Math.Abs(target - entry) : 0;
-			GxConfig.BreakEven = EBreakEven.Off; GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
+			// Owner 2026-11-22 22:48 CT (spec StopManagement = BreakEvenAt1R, primary): the stop moves to the entry once a closed bar
+			// reaches +1 R (GX AtTrigger, R multiple 1.0, judged on the bar close).
+			GxConfig.BreakEven = EBreakEven.AtTrigger; GxConfig.BreakEvenUnit = ETriggerUnit.RMultiple; GxConfig.BreakEvenValue = 1.0;
+			GxConfig.TrailMode = m_atrTrail ? ETrailMode.Atr : ETrailMode.None;
 			GxConfig.SessionExit = holdDays > 0 ? ESessionExit.HoldOvernight : ESessionExit.FlatBy;
 			GxConfig.MaxHoldDays = holdDays;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(m_flatOverride, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
