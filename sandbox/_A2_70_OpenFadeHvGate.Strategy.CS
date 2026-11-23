@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the gate is on; ATR20d is positive; the RTH open is known; the clock is inside 09:45–15:00 and before the flat; the day has not traded; entryAllowed allows it; the widened stop fits the 1% budget.
 // Skip when: HV20 has turned the gate off; a roll day; the budget fails (the day is then marked traded).
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract.
@@ -111,6 +112,15 @@
 // Effect: PriorClose rests the limits around the prior RTH close and targets that close
 // Interactions: Band. The HV gate does not read this input.
 // Fixed or research-tuned: fixed default. PriorClose is the other catalogue reference.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -193,7 +203,9 @@ namespace PowerLanguage.Strategy
 		private bool m_traded;
 		private double m_r = double.NaN;
 
-		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { Band = EBandMultiple.M100; ThetaOff = EThetaOff.Pct50; Reference = EReference.Open; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_70_OpenFadeHvGate(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Band = EBandMultiple.M100; ThetaOff = EThetaOff.Pct50; Reference = EReference.Open; }
 
 		private double bandMultiple() { return Band == EBandMultiple.M075 ? 0.75 : Band == EBandMultiple.M125 ? 1.25 : 1.0; }
 		private double thetaOff() { return ThetaOff == EThetaOff.Pct30 ? 0.30 : ThetaOff == EThetaOff.Pct40 ? 0.40 : ThetaOff == EThetaOff.Pct70 ? 0.70 : 0.50; }
@@ -235,10 +247,14 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(EReference), Reference)) throw new ArgumentException("_A2_70_OpenFadeHvGate: Reference is not a defined EReference");
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                      // M-DAILY, dataStream 0 = aggregate Data1 per Globex day (roll-adjusted)
 			DailyConfig.atrLength = Cfg.atrLength; DailyConfig.hvLengths = new[] { Cfg.hvLength };
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_lastDaily = m_day = DateTime.MinValue; m_gateOff = false; m_atr = m_hv = m_stop = double.NaN; m_traded = false;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -269,7 +285,7 @@ namespace PowerLanguage.Strategy
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-64 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_traded = true; return; }
 			double buyAt = Math.Round((reference - band) / tick) * tick, sellAt = Math.Round((reference + band) / tick) * tick;
 			// both limits stand; whichever fills first sets the side (MaxTradesPerDay = 1 blocks a second entry). Each limit carries its disaster stop.
-			m_leLmt.Send(buyAt, Cfg.contracts); m_seLmt.Send(sellAt, Cfg.contracts);
+			(entryOpen() ? m_leLmt : null)?.Send(buyAt, Cfg.contracts); (entryOpen() ? m_seLmt : null)?.Send(sellAt, Cfg.contracts);
 			m_lxStp.Send(buyAt - r); m_sxStp.Send(sellAt + r);
 			m_r = r; m_stop = double.NaN;
 		}

@@ -252,7 +252,7 @@ namespace PowerLanguage.Strategy
 			m_clock = null;
 			configureSessions();
 			RollDetection = ERollDetection.Series;   // unadjusted series: detect splices
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_closes.Clear(); m_rthClose = m_rthHigh = m_rthLow = m_atrAtEntry = double.NaN; m_day = m_entryDay = DateTime.MinValue;
 			m_longSetup = m_shortSetup = m_openChecked = m_waitLong = m_waitShort = false; m_sessionsAfter = 0;
 		}

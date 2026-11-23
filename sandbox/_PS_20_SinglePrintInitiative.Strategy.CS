@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-20 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Research assumption: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the catalogue trigger and the 1 percent budget when an order is sent.
 // Skip when: rollOn on a futures profile idea, the profile or average is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract when this file trades.
@@ -85,18 +86,20 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// Other: ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: the catalogue core, not a sweep. The sweep stays in the catalogue.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); entries GX holds overnight (SessionExit HoldOvernight) are not blocked.
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -132,7 +135,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RangeProfileAfter, formed before RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
+// ASSUMPTION: ASSUMPTION: the zone is the first SinglePrints run of at least 4 ticks on today's RTH range profile (RangeProfile from the first RTH bar through the previous closed bar, because SinglePrints reads only a completed profile), scanned through RthStart plus 150 minutes. The entry is the first 5-minute higher low in the upper half of that zone. The stop is under the zone. The target is the session high plus half the zone height. The trail is not sent.
 // IOG is disabled.
 
 
@@ -147,57 +150,69 @@ namespace PowerLanguage.Strategy
 		private IOrderPriced m_le; private double m_lo, m_hi; private bool m_have, m_done; private DateTime m_day = DateTime.MinValue, m_open = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
-		public _PS_20_SinglePrintInitiative(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _PS_20_SinglePrintInitiative(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RangeProfiles.enabled = true; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS20"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "PS20LE", EOrderAction.Buy)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 
 		protected override void StartCalc()
 		{
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc(); requireRing(1, 2000, "PS-20 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "PS-20 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			m_day = m_zoneAt = DateTime.MinValue; m_have = m_done = false; for (int k = 0; k < m_chk.Length; k++) m_chk[k] = 0;
 		}
 
-		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
-		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
-		private void sandboxEarlyFlat()
-		{
-			int pos = StrategyInfo.MarketPosition;
-			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
-			string why;
-			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
-			if (journalOn()) trace(ETraceLevel.Journal, "PS-20 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
-			gxNoteExit("FLATBY");
-			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
-		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; }
+			if (day != m_day) { chkDay(); m_day = day; m_done = m_have = false; m_open = DateTime.MinValue; m_zoneAt = DateTime.MinValue; }
 			if (IsRth() && m_open == DateTime.MinValue) m_open = Bars.Time[0];
+			if (sandboxBook()) return;   // before any position return, so Rest() sees the fill: one attempt per anchor per day
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || m_open == DateTime.MinValue) return;
-			if (sandboxBook()) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
-			if (!m_have && tod < m_rthStart.Add(TimeSpan.FromMinutes(150)))
+			// Coder 2026-11-22 (owner: PS-20 never traded): SinglePrints() reads only a completed profile (its last bar before the current
+			// bar), so the developing RTH profile runs from the first RTH bar (inclusive: m_open is that bar's close stamp) through the
+			// previous closed bar. The scan runs through the 12:00 bar, so bars closing up to 11:59 are covered, as before.
+			if (!m_have && tod <= m_rthStart.Add(TimeSpan.FromMinutes(150)) && Bars.Time[1] >= m_open)
 			{
-				VpExtra dev = RangeProfileAfter(1, m_open, Bars.Time[0]);
-				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; break; }
+				VpExtra dev = RangeProfile(1, m_open, Bars.Time[1]);
+				if (dev != null) foreach (double[] run in SinglePrints(dev, 4)) { m_lo = run[0]; m_hi = run[1]; m_have = true; m_zoneAt = Bars.Time[1]; break; }
+				if (m_have && journalOn()) trace(ETraceLevel.Journal, $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} single-print zone {m_lo}-{m_hi} (profile through {m_zoneAt:HH:mm})");
 			}
 			if (!m_have || ((int)tod.TotalMinutes) % 5 != 0) return;
+			m_chk[0]++;
 			double mid = (m_lo + m_hi) / 2.0;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];
 			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); }
-			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) return;
+			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) { m_chk[1]++; return; }
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, m_lo - tickSize());
-			double target = Session.rthHigh + 0.5 * (m_hi - m_lo);
-			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
-			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "PS20LE", 0); m_le.Send(entry, m_restQty);
+			double rthHigh = Session.rthHigh, zoneH = m_hi - m_lo;
+			double target = rthHigh + 0.5 * zoneH;
+			// Coder 2026-11-22 (Analyst Set3): every plan journals the target, the RTH high it used and the zone height, then its outcome.
+			string plan = $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} plan entry {entry} stop {stop} target {target} = RTH high {rthHigh} + 0.5 x zone height {zoneH} (zone {m_lo}-{m_hi})";
+			if (!(target > entry)) { m_chk[2]++; m_done = true; if (journalOn()) trace(ETraceLevel.Journal, plan + ": skipped, target not above the entry"); return; }
+			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; if (journalOn()) trace(ETraceLevel.Error, plan + ": skipped: risk exceeds 1 percent"); return; }
+			m_chk[4]++;
+			if (journalOn()) trace(ETraceLevel.Journal, plan + ": buy stop sent");
+			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "PS20LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
+		}
+
+		// One Journal line per Globex day (like A2-45): the zone, then the 5m checks after it, no pullback HL, target not above the entry, budget, sent.
+		private int[] m_chk = new int[5]; private DateTime m_zoneAt = DateTime.MinValue;
+		private void chkDay()
+		{
+			if (m_day != DateTime.MinValue && journalOn())
+				trace(ETraceLevel.Journal, "PS-20 " + m_day.ToString("yyyy-MM-dd") + " checks zone(" + (m_have ? m_lo + "-" + m_hi + " @" + m_zoneAt.ToString("HH:mm") : "none") + ") checks5m(" + m_chk[0] + ") noHL(" + m_chk[1] + ") targetNotAbove(" + m_chk[2] + ") budget(" + m_chk[3] + ") sent(" + m_chk[4] + ")");
+			for (int i = 0; i < m_chk.Length; i++) m_chk[i] = 0;
 		}
 
 		private double widen(bool buy, double entry, double stop)
@@ -230,23 +245,81 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
-			VpExtra prior = null;
-			try { prior = PriorRthProfile(); } catch (Exception) { }
-			double poc = prior != null ? prior.poc : double.NaN;
-			double hi = Session != null ? Session.rthHigh : Bars.High[0];
-			double lo = Session != null ? Session.rthLow : Bars.Low[0];
-			double atr = averageTrueRange(Bars, 14);
-			double sma = double.NaN;
-			try { sma = DailyContext.Sma200; } catch (Exception) { }
-			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
-			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			string notReady;
+			try
+			{
+				SessionStats s = Session;
+				if (s != null) { hi = s.rthHigh; lo = s.rthLow; prev = s.priorRthClose; }
+				atr = averageTrueRange(Bars, 14);
+				if (Gate == ESandboxGate.ValueMigration) { VpExtra prior = PriorRthProfile(); if (prior != null) poc = prior.poc; }
+				if (_SandboxRules.GateReadsDaily(Gate) && NeedsDaily) { _DailyContext d = DailyContext; if (d != null) sma = d.Sma200; }
+				if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+				notReady = _SandboxRules.GateNotReady(Gate, poc, sma, prev, atr, DvpConfig.enabled);
+			}
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
 			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
-			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			gateLog(ok, buy);
 			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, false, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void honorExit(double entry, double risk)
 		{
@@ -274,15 +347,15 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_le.Send(m_restPx, m_restQty);
+				{ if (hostGate(true)) m_le.Send(m_restPx, m_restQty); }
 			}
 			else
 			{

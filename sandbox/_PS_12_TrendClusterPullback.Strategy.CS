@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the example's entry conditions, and the 1 percent risk-budget check when the example has one.
 // Skip when: the example journals a skip, a roll day when the example skips rolls, or the risk budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract where the example fixes size. journalArm records the planned entry when the example calls it.
@@ -87,15 +88,17 @@
 // Other: this is a port of the worked example, not a new rule set. ASSUMPTION: the example's labelled choices stand until an owner changes them.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: Not applicable
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -164,8 +167,10 @@ namespace PowerLanguage.Strategy
 		private bool m_valid;
 
 		private bool m_done;
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
-		public _PS_12_TrendClusterPullback(object _ctx) : base(_ctx) { }
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _PS_12_TrendClusterPullback(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 
 		protected override void Create()
 		{
@@ -184,7 +189,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); m_cluster = double.NaN; }
+ DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_cluster = double.NaN; }
 
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -197,6 +202,10 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -222,7 +231,7 @@ namespace PowerLanguage.Strategy
 				if (m_above >= Cfg.validCloses) m_valid = arm();
 				return;
 			}
-			m_leLmt.Send(m_cluster, Cfg.contracts); m_lxStp.Send(m_stop);
+			(entryOpen() ? m_leLmt : null)?.Send(m_cluster, Cfg.contracts); m_lxStp.Send(m_stop);
 			if (Bars.Low[0] <= m_cluster) m_cluster = double.NaN;                      // first touch consumed (filled or not)
 		}
 
@@ -259,14 +268,14 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)
 			{
-				m_leLmt.Send(m_restPx, m_restQty);
+				(entryOpen() ? m_leLmt : null)?.Send(m_restPx, m_restQty);
 			}
 			else
 			{

@@ -109,8 +109,8 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>True on a day whose session ends before the regular close (early close, holiday halt, abbreviated session) once the
-		/// bar is at or past that day's end minus five minutes. GX resolves one FlatByHHMM per run, so the sandbox flattens these days
-		/// itself; on a regular day this is false and GX's flat-by is unchanged.</summary>
+		/// bar is at or past that day's end minus five minutes. The studies' own mustFlatten() exits use this; GX-managed positions get
+		/// the early close from GX itself (PR #146). On a regular day this is false.</summary>
 		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd, out string why)
 		{
 			why = null;
@@ -120,6 +120,17 @@ namespace PowerLanguage.Strategy
 			if (end >= regular || !PastFlat(barEt, symbol, listedSessionEnd)) return false;
 			why = PowerLanguage.Function._CmeHolidays.Rules.Get(gx).Name + " session ends " + end.ToString(@"hh\:mm") + " ET";
 			return true;
+		}
+
+		/// <summary>The reason a sandbox study that flattens with its own orders (YV-11) journals: that Globex date's session end in ET,
+		/// named by the CME calendar on an early close or holiday halt, otherwise "regular". GX-managed studies journal FLATBY in GX's
+		/// EXIT CLOSE line instead.</summary>
+		public static string FlatByReason(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
+		{
+			DateTime gx = PowerLanguage.Function._CmeSessionClock.GlobexTradingDayEt(barEt);
+			TimeSpan regular = RegularCloseEt(symbol, listedSessionEnd), end = SessionEndEt(gx, symbol, listedSessionEnd);
+			string name = end < regular ? PowerLanguage.Function._CmeHolidays.Rules.Get(gx).Name : "regular";
+			return name + " session ends " + end.ToString(@"hh\:mm") + " ET";
 		}
 
 		public static bool EarlyFlatDue(DateTime barEt, string symbol, TimeSpan listedSessionEnd)
@@ -167,6 +178,43 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		/// <summary>
+		/// What a host gate reads, so StartCalc can turn exactly that on when the Gate input is not Off (Off needs nothing).
+		/// ValueMigration reads the prior RTH profile (Own RTH profiles). Trend and FitRegime read the daily SMA200
+		/// (NeedsDaily); compressionUsesDaily is for hosts whose Compression arm reads the daily ATR20 (PS-01). ThreeFamily
+		/// reads the DVP confluence (DvpConfig). Balance, DayType and Noise read ATR(14) and the session only.
+		/// </summary>
+		public static void GateNeeds(ESandboxGate gate, bool compressionUsesDaily, out bool ownRth, out bool daily, out bool dvp)
+		{
+			ownRth = gate == ESandboxGate.ValueMigration;
+			daily = gate == ESandboxGate.Trend || gate == ESandboxGate.FitRegime || (compressionUsesDaily && gate == ESandboxGate.Compression);
+			dvp = gate == ESandboxGate.ThreeFamily;
+		}
+
+		/// <summary>True when the GateAllows arm for this gate reads the daily SMA200.</summary>
+		public static bool GateReadsDaily(ESandboxGate gate) { return gate == ESandboxGate.Trend || gate == ESandboxGate.FitRegime; }
+
+		/// <summary>
+		/// Why the GateAllows inputs for this gate are not ready, or null when they are. A not-ready gate blocks (GateAllows
+		/// would return false on the same inputs); the host logs the reason as a Warning once per day.
+		/// </summary>
+		public static string GateNotReady(ESandboxGate gate, double priorPoc, double sma, double priorClose, double atr, bool dvpOn)
+		{
+			switch (gate)
+			{
+				case ESandboxGate.Off: return null;
+				case ESandboxGate.ValueMigration: return priorPoc > 0 ? null : "prior RTH profile not built yet";
+				case ESandboxGate.Trend: return double.IsNaN(sma) ? "daily SMA200 not ready" : (priorClose > 0 ? null : "prior RTH close unknown");
+				case ESandboxGate.FitRegime: return double.IsNaN(sma) ? "daily SMA200 not ready" : null;
+				case ESandboxGate.ThreeFamily: return dvpOn ? null : "DVP engine off";
+				case ESandboxGate.Balance:
+				case ESandboxGate.DayType:
+				case ESandboxGate.Noise:
+				case ESandboxGate.Compression: return atr > 0 ? null : "ATR(14) not ready";
+				default: return null;
+			}
+		}
+
 		public static bool ScaleExit(ESandboxExit mode, out double t1R, out int scalePct, out bool breakEven)
 		{
 			t1R = 0; scalePct = 0; breakEven = false;
@@ -194,6 +242,31 @@ namespace PowerLanguage.Strategy
 			if (!restOn) return ERest.Look;
 			if (!windowOpen) { restOn = false; return ERest.Done; }
 			return ERest.Resend;
+		}
+
+		/// <summary>Coder 2026-11-22 (Analyst native retest of #152: A2-28 / A2-35 stopped on the fill bar, then re-entered): a position
+		/// that opens and closes inside one bar never shows MarketPosition != 0 on a bar close, so the position test alone misses
+		/// the fill. entriesToday is the strategy's entry count for this trading day from the position history (TradesToday); a
+		/// rise since the last call is a fill on the resting anchor, whether or not the position is still open.</summary>
+		public static ERest Rest(int position, int entriesToday, ref int seenEntries, ref int prev, ref bool filled, ref int fillAnchor, int anchor, ref bool restOn, bool windowOpen)
+		{
+			if (entriesToday > seenEntries) { filled = true; fillAnchor = anchor; }
+			seenEntries = entriesToday;
+			return Rest(position, ref prev, ref filled, ref fillAnchor, anchor, ref restOn, windowOpen);
+		}
+
+		/// <summary>Owner 2026-11-22 16:39 CT (A2-28): "use T1 halfway between entry and mu_major when the void is behind entry".
+		/// T1 distance in points from the entry: the midpoint of entry and target rounded to the tick, kept at least one tick beyond the
+		/// entry and one tick short of the target (the correct side). NaN when the target is less than two ticks away.</summary>
+		public static double MidT1Points(bool longSide, double entry, double target, double tick)
+		{
+			if (!(tick > 0) || double.IsNaN(entry) || double.IsNaN(target)) return double.NaN;
+			long ticks = (long)Math.Round((longSide ? target - entry : entry - target) / tick);
+			if (ticks < 2) return double.NaN;
+			long half = (long)Math.Round(ticks / 2.0, MidpointRounding.AwayFromZero);
+			if (half < 1) half = 1;
+			if (half > ticks - 1) half = ticks - 1;
+			return half * tick;
 		}
 
 		public static bool Allows(ESandboxSide side, bool buy)

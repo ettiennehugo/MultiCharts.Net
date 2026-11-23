@@ -214,11 +214,14 @@ namespace PowerLanguage.Strategy
 			HtfStreams = new[] { 2 };
 			if (Entry == EEntry.A206At1529) NeedsDaily = true;   // σ_daily is ATR20d; see the header assumption
 			DailyConfig.atrRestartOnRoll = false;   // owner 2026-11-16: carry the 20-day ATR over the roll (PR #46); used only when NeedsDaily is on
-			base.StartCalc(); requireRing(1, AtrLength * 5 + 6, "VW-05 lookback");   // MaxBarsBack 49: deep Data1 lookback from the ring
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, AtrLength * 5 + 6, "VW-05 lookback");   // MaxBarsBack 49: deep Data1 lookback from the ring
 			if (Vwap1Type != EVwapType.Session) throw new ArgumentException("_VW_05_LateDayVwap: Vwap1Type must be Session");
 			m_stop = double.NaN; m_tradedDay = DateTime.MinValue;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd)); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -266,7 +269,7 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(atr, Cfg.costFloorTicks * tick);
 			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"VW-05 {Bars.Time[0]:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
 			m_stop = px - a * r;
-			if (a > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
+			if (a > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "vwap", vwap.ToString("F2") }, { "priorClose", s.priorRthClose.ToString("F2") }, { "atr30", atr.ToString("F2") } };

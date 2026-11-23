@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the PS-15 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// Research assumption: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: the catalogue trigger and the 1 percent budget when an order is sent.
 // Skip when: rollOn on a futures profile idea, the profile or average is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract when this file trades.
@@ -85,18 +86,20 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// Other: ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: the catalogue core, not a sweep. The sweep stays in the catalogue.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); entries GX holds overnight (SessionExit HoldOvernight) are not blocked.
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -132,7 +135,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close beyond the near edge and then beyond the midpoint, within three such bars, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
+// ASSUMPTION: ASSUMPTION: the level is the widest LVN on the 5-session composite whose width is at least half a 5-bar ATR. A 5-minute close that crosses the near edge from outside the LVN and then, on a later 5-minute bar within three, a close beyond the midpoint with the far edge still ahead, buys or sells the next bar. The stop is back across the near edge. The target is the far edge.
 // IOG is disabled.
 
 
@@ -144,58 +147,62 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _PS_15_LVNTraverseAfter : _VolumeProfileFuturesBase
 	{
-		private IOrderMarket m_le, m_se; private int m_step; private double m_lo, m_hi; private bool m_done, m_up; private DateTime m_day = DateTime.MinValue;
+		private IOrderMarket m_le, m_se; private int m_step, m_bars; private double m_lo, m_hi, m_prev5 = double.NaN; private bool m_done, m_up; private DateTime m_day = DateTime.MinValue;
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
-		public _PS_15_LVNTraverseAfter(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _PS_15_LVNTraverseAfter(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; RollDetection = ERollDetection.Series; GxOrderPrefix = "PS15"; createGxOrders(); m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS15LE", EOrderAction.Buy)); m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "PS15SE", EOrderAction.SellShort)); }
 		protected override void StartCalc()
 		{
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
-		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
-		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
-		private void sandboxEarlyFlat()
-		{
-			int pos = StrategyInfo.MarketPosition;
-			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
-			string why;
-			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
-			if (journalOn()) trace(ETraceLevel.Journal, "PS-15 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
-			gxNoteExit("FLATBY");
-			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
-		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (sandboxBook()) return;
-			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_step = 0; }
+			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_step = 0; m_prev5 = double.NaN; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
+			double c5 = Bars.Close[0], prev5 = m_prev5; m_prev5 = c5;   // this and the previous RTH 5-minute close
 			VpExtra comp = Composite(1, 5);
 			if (comp == null || comp.lvns == null || comp.lvns.Count == 0) return;
 			double atr = averageTrueRange(Bars, 5); if (!(atr > 0)) return;
 			Node best = comp.lvns[0]; double width = 0;
 			foreach (Node n in comp.lvns) { double w = n.high - n.low; if (w > width) { width = w; best = n; } }
 			if (width < 0.5 * atr) return;
-			double mid = (best.low + best.high) / 2.0;
-			bool up = Bars.Close[0] > best.high;
-			bool dn = Bars.Close[0] < best.low;
-			if (m_step == 0 && (up || dn)) { m_step = 1; m_up = up; m_lo = best.low; m_hi = best.high; return; }
-			if (m_step == 1 && ((m_up && Bars.Close[0] > mid) || (!m_up && Bars.Close[0] < mid)))
+			// Coder 2026-11-22: the traverse runs from outside the LVN through its near edge toward the far edge. A 5-minute close
+			// crosses the near edge from outside (prior 5-minute close below the low for a long), then a close beyond the midpoint within
+			// three 5-minute bars enters. The stop is back across the near edge and the target is the far edge, ahead of the entry.
+			// Before, the first step was a close already beyond the far edge, so the far-edge target sat behind the market.
+			if (m_step == 1 && ++m_bars > 3) m_step = 0;
+			if (m_step == 0)
 			{
-				double entry = Bars.Close[0];
-				double stop = widen(m_up, entry, m_up ? m_lo : m_hi);
+				if (double.IsNaN(prev5)) return;
+				bool up = prev5 < best.low && c5 > best.low;
+				bool dn = prev5 > best.high && c5 < best.high;
+				if (!up && !dn) return;
+				m_step = 1; m_bars = 0; m_up = up; m_lo = best.low; m_hi = best.high;
+				return;   // the midpoint close comes on a later 5-minute bar
+			}
+			double mid = (m_lo + m_hi) / 2.0;
+			if ((m_up && c5 > mid) || (!m_up && c5 < mid))
+			{
+				double entry = c5;
 				double target = m_up ? m_hi : m_lo;
+				if (m_up ? !(target > entry) : !(target < entry)) { m_step = 0; return; }   // already at or past the far edge: no traverse left
+				double stop = widen(m_up, entry, m_up ? m_lo - tickSize() : m_hi + tickSize());
 				if (!budget(entry, stop)) { m_done = true; return; }
 				arm(m_up, entry, stop, target, m_up ? "PS15LE" : "PS15SE", 0);
-				if (m_up) m_le.Send(); else m_se.Send();
+				if (m_up) { if (hostGate(true)) m_le.Send(); } else { if (hostGate(false)) m_se.Send(); }
 			}
 		}
 
@@ -229,23 +236,81 @@ namespace PowerLanguage.Strategy
 			exitPlan(buy, entry, stop, 1, mkt, name);
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
-			VpExtra prior = null;
-			try { prior = PriorRthProfile(); } catch (Exception) { }
-			double poc = prior != null ? prior.poc : double.NaN;
-			double hi = Session != null ? Session.rthHigh : Bars.High[0];
-			double lo = Session != null ? Session.rthLow : Bars.Low[0];
-			double atr = averageTrueRange(Bars, 14);
-			double sma = double.NaN;
-			try { sma = DailyContext.Sma200; } catch (Exception) { }
-			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
-			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			string notReady;
+			try
+			{
+				SessionStats s = Session;
+				if (s != null) { hi = s.rthHigh; lo = s.rthLow; prev = s.priorRthClose; }
+				atr = averageTrueRange(Bars, 14);
+				if (Gate == ESandboxGate.ValueMigration) { VpExtra prior = PriorRthProfile(); if (prior != null) poc = prior.poc; }
+				if (_SandboxRules.GateReadsDaily(Gate) && NeedsDaily) { _DailyContext d = DailyContext; if (d != null) sma = d.Sma200; }
+				if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+				notReady = _SandboxRules.GateNotReady(Gate, poc, sma, prev, atr, DvpConfig.enabled);
+			}
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
 			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
-			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			gateLog(ok, buy);
 			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, false, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void honorExit(double entry, double risk)
 		{
@@ -273,10 +338,10 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

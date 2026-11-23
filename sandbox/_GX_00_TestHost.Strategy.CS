@@ -113,6 +113,22 @@
 // Effect: Alternate flips after each entry
 // Interactions: none
 // Fixed or research-tuned: fixed
+// Input: EntryFlatByHHMM
+// Purpose: native check that the date-aware flat-by cutoff (#146, gxPastFlatCutoff) blocks entries from the cutoff to the evening reopen and not in the evening session (Analyst Set2, 2026-11-22)
+// Default: 0 (off: entries on every bar count, as before)
+// Units: HHMM clock in the exchange zone (ES: 1455 = 15:55 ET, five minutes before the regular close)
+// Range: 0 (off) or a clock 0000-2359
+// Effect: above 0, no entry is sent on a bar whose next bar (the fill bar) is at or after that cutoff (early-close aware, as gxPastFlatCutoff; Coder 2026-11-22, Analyst Set3) until the evening session of the next trading date; one Journal line 'entry blocked: at or after the flat-by cutoff' per day
+// Interactions: EntryEveryBars sets how often an entry is tried, so a small count shows evening entries soon after 17:00 CT
+// Fixed or research-tuned: fixed
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: native check of the #154 entry window (gxPastFlatCutoff(flatBy, minutes)) on a host that enters in the evening session
+// Default: 0 (off: only the EntryFlatByHHMM cutoff)
+// Units: minutes before the flat-by cutoff
+// Range: >= 0
+// Effect: with EntryFlatByHHMM above 0, no entry is sent from this many minutes before the date-aware cutoff until the evening session (fill-bar rule as above)
+// Interactions: EntryFlatByHHMM; 0 here or there turns it off
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -164,6 +180,11 @@ namespace PowerLanguage.Strategy
 		[Input] public int EntryEveryBars { get; set; }
 		// Purpose: entry side. Default: Alternate. Units: ETestGxSide. Range: Long, Short, Alternate. Effect: Alternate flips. Interactions: none. Fixed or research-tuned: fixed
 		[Input] public ETestGxSide EntrySide { get; set; }
+		// Purpose: entry flat-by cutoff, exchange HHMM. Default: 0 (off). Units: HHMM. Range: 0 or 0000-2359. Effect: blocks entries from the cutoff to the evening session. Interactions: EntryEveryBars. Fixed or research-tuned: fixed
+		[Input] public int EntryFlatByHHMM { get; set; }
+		// Purpose: minutes before the entry flat-by cutoff that entries stop. Default: 0 (off). Units: minutes. Range: >= 0. Effect: widens the blocked window. Interactions: EntryFlatByHHMM. Fixed or research-tuned: fixed
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
 
 		private IOrderMarket m_le, m_se;
 		private int m_wait;
@@ -176,11 +197,13 @@ namespace PowerLanguage.Strategy
 			EmbedEngine = true;
 			EntryEveryBars = 30;
 			EntrySide = ETestGxSide.Alternate;
+			EntryFlatByHHMM = 0;
+			NoEntryMinutesBeforeFlat = 0;
 		}
 
 		protected override void StartCalc()
 		{
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_wait = 0;
 			m_nextLong = true;
 		}
@@ -200,6 +223,12 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			if (EmbedEngine) exitBar();
 			if (pos != 0) return;
+			if (EntryFlatByHHMM > 0 && gxPastFlatCutoff(EntryFlatByHHMM, NoEntryMinutesBeforeFlat))
+			{   // Coder 2026-11-22 (Analyst Set2: no study enters in the evening session): the same cutoff the sandbox entries use
+				DateTime day = Bars.Time[0].Date;
+				if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (traceOn(ETraceLevel.Journal)) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(EntryFlatByHHMM, NoEntryMinutesBeforeFlat)); }
+				return;
+			}
 			m_wait++;
 			int every = EntryEveryBars < 1 ? 1 : EntryEveryBars;
 			if (m_wait < every) return;

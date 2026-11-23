@@ -38,11 +38,19 @@ namespace PowerLanguage.Function
 		/// Series took it (NaN when the roll came only from a Table date or a name change).</summary>
 		public double LastOpen = double.NaN, LastPrevClose = double.NaN, LastGap = double.NaN;
 
+		// Coder 2026-11-23 (Analyst MES run: no 2024-06 splice where ES had one): a Series window that closes without a splice is
+		// reported once (MissedExpiry set on the first day after the window), with the largest first-bar gap of the last ten
+		// trading-day starts (the window and the days before it), so the data can be checked. Detection itself is unchanged.
+		public DateTime MissedExpiry = DateTime.MinValue, MissedGapDay = DateTime.MinValue;
+		public double MissedGap = double.NaN;
+		private DateTime m_openWindow = DateTime.MinValue;
+		private readonly List<KeyValuePair<DateTime, double>> m_dayGaps = new List<KeyValuePair<DateTime, double>>();
+
 		/// <summary>Bars (as passed to Step) on which a roll was detected, oldest first.</summary>
 		public IList<int> RollBars { get { return m_rollBars.AsReadOnly(); } }
 		public int LastRollBar { get { return m_rollBars.Count > 0 ? m_rollBars[m_rollBars.Count - 1] : -1; } }
 
-		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; m_seriesLatch = DateTime.MinValue; LastOpen = LastPrevClose = LastGap = double.NaN; }
+		public void Reset() { m_rollBars.Clear(); m_lastDay = DateTime.MinValue; m_lastBar = -1; m_lastName = null; m_seriesLatch = DateTime.MinValue; LastOpen = LastPrevClose = LastGap = double.NaN; MissedExpiry = MissedGapDay = m_openWindow = DateTime.MinValue; MissedGap = double.NaN; m_dayGaps.Clear(); }
 
 		/// <summary>Same cut-over as EventRules.RollRuleMondayFrom (this file must stay MC- and EventRules-free for tests/RollTests).</summary>
 		public static readonly DateTime RollRuleMondayFrom = new DateTime(2022, 4, 1);
@@ -115,6 +123,18 @@ namespace PowerLanguage.Function
 				bool inWindow = seriesWindow != null ? seriesWindow(tradingDay, out expiry) : SeriesWindow(tradingDay, out expiry);
 				if (series && gapTicks > 0 && inWindow && expiry != m_seriesLatch
 					&& Math.Abs(open - prevClose) >= gapTicks * tick - tick * 1e-6) { roll = true; bySeries = true; m_seriesLatch = expiry; }
+				if (series && gapTicks > 0)
+				{
+					m_dayGaps.Add(new KeyValuePair<DateTime, double>(tradingDay.Date, Math.Abs(open - prevClose)));
+					if (m_dayGaps.Count > 10) m_dayGaps.RemoveAt(0);
+					if (!inWindow && m_openWindow != DateTime.MinValue && m_openWindow != m_seriesLatch)
+					{
+						MissedExpiry = m_openWindow; MissedGap = double.NaN; MissedGapDay = DateTime.MinValue;
+						for (int i = 0; i < m_dayGaps.Count - 1; i++)   // not today's (after the window)
+							if (double.IsNaN(MissedGap) || m_dayGaps[i].Value > MissedGap) { MissedGap = m_dayGaps[i].Value; MissedGapDay = m_dayGaps[i].Key; }
+					}
+					m_openWindow = inWindow ? expiry : DateTime.MinValue;
+				}
 			}
 			bool added = false;
 			if (roll && (m_rollBars.Count == 0 || m_rollBars[m_rollBars.Count - 1] != bar)) {

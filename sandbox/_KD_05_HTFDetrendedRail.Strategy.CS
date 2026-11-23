@@ -39,10 +39,10 @@
 // Validated: Not yet verified
 //
 // ## 8. Data
-// Chart: Data1 = 1-minute. Data2 = 60-minute.
+// Chart: Data1 = 1-minute. Data2 = 15-minute (the PS-25 signal stream). Data3 = 60-minute (the HTF stream). Same symbol and session template. Inherited from MT-07.
 // Data1: the chart. Tests use data through 2024-12-31 only.
-// Data2: Not applicable unless CalcBar reads it.
-// Further series: Not applicable
+// Data2: the same instrument on 15-minute bars (owner rule: Data2 = native timeframe, the 15m entry stream). The inherited PS-25 rule reads closed Data2 bars only (HtfClosedBar(2, ...) via signalDs).
+// Further series: Data3 = the same instrument on 60-minute bars, the HTF acceptance stream, read through HtfClosedBar(3, ...) in MT-07.
 // Warmup: the average or profile the rule names.
 //
 // ## 9. Entry and filters
@@ -64,7 +64,7 @@
 // While open: exitBar when section 13 says GX, otherwise sendExits.
 //
 // ## 13. Exits
-// No exit orders. This file does not open a position.
+// Exit orders: GX, inherited from MT-07 / PS-25. Stop and the 15m +2 sigma target (rail price minus entry, in points). Time stop 41 Data2 bars (41 x 15 = 615 minutes). Flat at the session value end.
 // Hard stop: the catalogue stop, widened to the instrument cost floor.
 // Target: the catalogue target when it is a price known at the signal.
 // Time exit: the catalogue clock, taken from the session API when the rule says the session end.
@@ -144,10 +144,13 @@ namespace PowerLanguage.Strategy
 	[IOGMode(IOGMode.Disabled)]
 	public class _KD_05_HTFDetrendedRail : _MT_07_HtfDetrendedRail
 	{
+		private bool m_missingLogged;
 		public _KD_05_HTFDetrendedRail(object _ctx) : base(_ctx) { }
 		protected override void CalcBar()
 		{
-			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
+			// Coder 2026-11-22 (Analyst follow-up): the MT-07 chart, Data2 = 15m and Data3 = 60m; one Error when either is missing.
+			if (Bars.CurrentBar <= 1) m_missingLogged = false;   // a recalc logs again
+			if (!IsExist(2) || !IsExist(3)) { if (!m_missingLogged) { m_missingLogged = true; if (journalOn()) trace(ETraceLevel.Error, (!IsExist(2) ? "Data2 (15m)" : "Data3 (60m)") + " missing"); } return; }
 			base.CalcBar();
 		}
 	}

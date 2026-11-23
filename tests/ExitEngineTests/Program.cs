@@ -41,7 +41,7 @@ static class Program
 		FlatByAfterEntry();
 		FlatByExchangeClock();
 		FlatByFromRegularSession();
-		FlatByEarlyClose();
+		FlatByEarlyClose(); EntryCutoffNextBar();
 		MaxHoldSessions();
 		EmbeddedFillAnchorsStop();
 		Control();
@@ -61,6 +61,7 @@ static class Program
 		FillBarPartialStopKeepsRemainder();
 		Gx2Source();
 		Gx3Source();
+		ReconfigurePerTrade();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -650,6 +651,25 @@ static class Program
 		var e = Eng(c => c.FlatByHHMM = flatBy);
 		e.FlatCalendar = cal;
 		return e;
+	}
+
+	// Coder 2026-11-22 (Analyst Set3: GX-00 fills stamped 14:55:00 CT and 12:10 CT on 2024-11-29): an entry sent at a bar close fills
+	// on the next bar, stamped with its close, so the send bar is blocked when the NEXT bar is at or after the cutoff.
+	static void EntryCutoffNextBar()
+	{
+		Func<DateTime, ExitSession.FlatDay> cme = CmeEquityCt;
+		TimeSpan m1 = TimeSpan.FromMinutes(1);
+		DateTime reg = ExitSession.CutoffFor(new DateTime(2024, 11, 27), 1455, cme(new DateTime(2024, 11, 27))).At;
+		Check(reg == new DateTime(2024, 11, 27, 14, 55, 0), "regular day cutoff 14:55 CT");
+		Check(!ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 53, 0), m1, reg), "14:53 bar may send: it fills on the 14:54 bar");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 54, 0), m1, reg), "14:54 bar is blocked: it would fill on the 14:55 cutoff bar");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 55, 0), m1, reg), "the cutoff bar itself is blocked");
+		DateTime early = ExitSession.CutoffFor(new DateTime(2024, 11, 29), 1455, cme(new DateTime(2024, 11, 29))).At;
+		Check(early == new DateTime(2024, 11, 29, 12, 10, 0), "day after Thanksgiving: 12:15 CT close, cutoff 12:10 CT");
+		Check(!ExitSession.EntryBlocked(new DateTime(2024, 11, 29, 12, 8, 0), m1, early), "12:08 bar may send (fill 12:09)");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 29, 12, 9, 0), m1, early), "12:09 bar is blocked: its fill would be stamped 12:10");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 55, 0), TimeSpan.Zero, reg) && !ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 54, 0), TimeSpan.Zero, reg), "zero interval (non-time bars) falls back to barClose >= cutoff");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 50, 0), TimeSpan.FromMinutes(5), reg) && !ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 45, 0), TimeSpan.FromMinutes(5), reg), "5-minute bars: the 14:50 bar is blocked, 14:45 may send");
 	}
 
 	static void FlatByEarlyClose()
@@ -1343,6 +1363,40 @@ static class Program
 		var back = Bar(true, 4996, 4989, 4991);
 		back.High = 4996; back.Low = 4989; back.Close = 4991;
 		Check(held.Manage(q, back).Reason == "STOP" && !q.Open, "the initial stop still flattens the runner");
+	}
+
+	// Coder 2026-11-22 (Analyst #152 recheck, A2-28: 64 trades, 0 T1 fills): an embedded host that changes TargetMode / BreakEven
+	// between trades. Start resolved the first trade's SingleTarget; without Reconfigure the next ScaleOutThenRunner plan has no T1.
+	static void ReconfigurePerTrade()
+	{
+		var e = Eng(c => { c.Id = "A228"; c.Embedded = true; c.InitialStop = EInitialStop.EntryProvided; c.TargetMode = ETargetMode.SingleTarget; c.T1Unit = ETriggerUnit.Points; c.T1Value = 0; c.T1ScalePct = 50; c.FinalTargetUnit = ETriggerUnit.Points; c.FinalTargetValue = 20; c.BreakEven = EBreakEven.Off; c.TrailMode = ETrailMode.None; c.SingleLotMode = ESingleLotMode.ExitAtT1; });
+		Check(!e.T1On && e.BeDisabled, "the first trade (no valid void) resolves SingleTarget, BreakEven off");
+		// Next trade: a valid void 5 points ahead, mu_major 20 points ahead, BreakEven AfterT1 (A2-28's armGx).
+		e.Config.TargetMode = ETargetMode.ScaleOutThenRunner; e.Config.T1Value = 5; e.Config.BreakEven = EBreakEven.AfterT1;
+		var stale = new ExitPosition();
+		e.Open(stale, true, 5000, 4990, 5000, 4990, 2, 0.25, 50, 100000, "A228LE", new DateTime(2024, 3, 11, 10, 0, 0), 1);
+		Check(double.IsNaN(stale.T1Level) && stale.T1Qty == 0, "without Reconfigure the second trade keeps the first trade's modes: no T1 (the A2-28 bug)");
+		Check(e.Reconfigure() && e.T1On && !e.BeDisabled && e.Effective.TargetMode == ETargetMode.ScaleOutThenRunner, "Reconfigure while flat picks up ScaleOutThenRunner and BreakEven AfterT1");
+		Check(!e.Reconfigure(), "Reconfigure is a no-op when nothing changed");
+		var p = new ExitPosition();
+		var when = new DateTime(2024, 3, 11, 10, 0, 0);
+		e.Open(p, true, 5000, 4990, 5000, 4990, 2, 0.25, 50, 100000, "A228LE", when, 2);
+		Check(Near(p.T1Level, 5005) && p.T1Qty == 1 && Near(p.FinalLevel, 5020) && p.OpenQty == 2, "2 lots: T1 1 lot at the void (entry + 5), the runner at mu_major (entry + 20)");
+		var touch = Bar(true, 5005.25, 4999, 5004);
+		touch.High = 5005.25; touch.Low = 4999; touch.Close = 5004; touch.DeferPartial = true; touch.TimeEt = when.AddMinutes(5);
+		var d = e.Manage(p, touch);
+		WorkingExit w = ExitSession.OrdersAfter(d, p, 2);
+		Check(d.Reason == null && d.SendT1 && d.T1Qty == 1 && w.T1 && w.T1Qty == 1 && w.Stop && w.StopQty == 2, "a touch at the void sends a 1-lot T1 limit; the stop still covers 2");
+		int closed = e.ConfirmReduced(p, 1, 50);
+		Check(closed == 1 && p.T1Filled && p.OpenQty == 1, "MC filling the T1 limit leaves a 1-lot runner");
+		var next = Bar(true, 5009, 5003, 5008);
+		next.High = 5009; next.Low = 5003; next.Close = 5008; next.DeferPartial = true; next.TimeEt = when.AddMinutes(6);
+		e.Manage(p, next);
+		double be = ExitSession.BreakEvenStop(true, 5000, e.Config.BreakEvenOffsetTicks, 0.25);
+		Check(Near(p.Stop, be) && p.Open, "after T1 the runner's stop moves to break-even (entry)");
+		var back = Bar(true, 5004, be - 0.5, be - 0.25);
+		back.High = 5004; back.Low = be - 0.5; back.Close = be - 0.25; back.DeferPartial = true; back.TimeEt = when.AddMinutes(7);
+		Check(e.Manage(p, back).Reason == "STOP" && !p.Open, "the runner exits at break-even, not at the initial stop");
 	}
 
 	static void EmbeddedFillDefersT1()

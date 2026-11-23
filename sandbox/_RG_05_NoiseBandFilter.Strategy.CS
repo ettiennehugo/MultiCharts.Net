@@ -26,7 +26,7 @@
 // Exit: see section 13.
 //
 // ## 5. Timing
-// Signal evaluated: closed bar only, after base.CalcBar.
+// Signal evaluated: closed bar only, after base.CalcBar; the daily check runs once, on the first RTH bar of the trading day (09:30 ET open).
 // Order sent: the order type named in the catalogue (market next bar, stop, or limit).
 // Can fill: the next bar, or later for a resting stop or limit. IOG is disabled.
 //
@@ -153,10 +153,11 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-  base.StartCalc(); }
+  DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			if (!IsRth()) return;   // Coder 2026-11-22: the daily check runs on the first RTH bar (09:30 ET open), not the first Globex bar (18:00 ET), so it sees the session
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			bool quiet = (Bars.High[0] - Bars.Low[0]) < averageTrueRange(Bars, 14); if (journalOn()) trace(ETraceLevel.Journal, "RG-05 inside noise " + quiet + ". Gate, no order.");
 		}

@@ -1608,9 +1608,12 @@ namespace PowerLanguage.Function
 		static void kv(StringBuilder sb, string k, double v) { sb.Append(' ').Append(k).Append('(').Append(F(v)).Append(')'); }
 
 		/// <summary>DV-11.3 DVP RUN line for this stream.</summary>
+		// Coder 2026-11-22 (Analyst #152 recheck: DVP RUN fits(0)): fits / skips count the DVP FIT journal lines (refit-bar snapshots),
+		// so with the FIT journal off (Verbose in the sandbox) they read 0. They now print "off" then. A journal-independent fit count
+		// is not possible here: fits are lazy and query-driven, and the D9a check requires the RUN line not to depend on queries.
 		public string RunLine(string runId)
 		{
-			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + I(FitLines) + ") skips(" + I(SkipLines)
+			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + (Config.journalFits ? I(FitLines) : "off") + ") skips(" + (Config.journalFits ? I(SkipLines) : "off")
 				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
 				+ ") diagnosticOnly(" + (DiagnosticOnly ? "1" : "0") + ") meanCovIn(" + F(MeanCovIn) + ") meanCovFwd(" + F(MeanCovFwd)
 				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")"

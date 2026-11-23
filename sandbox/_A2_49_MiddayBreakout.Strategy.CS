@@ -48,10 +48,11 @@
 // ## 9. Entry and filters
 // All of these must be true: a morning high and low exist; the bar closes after 12:00 and the entry window allows it; the close is beyond the morning high or low; the side is against the current position; the widened stop fits the 1% risk budget.
 // Skip when: the day contains a roll (the range would straddle the splice); the risk budget fails; entryAllowed blocks (before 12:00, at or after 15:30, at or after the flat time, or three entries already).
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract (A249Config.contracts).
-// Risk limit: the trade is skipped when 1 × stop distance × BigPointValue exceeds 1% of equity (riskBudgetFraction).
+// Risk limit: the trade is skipped when 1 × stop distance × BigPointValue exceeds 1% of equity (riskBudgetFraction). A skip writes a Journal line and a taken=false signal event (blocked riskBudget, Coder 2026-11-23). On @ES at $50,000 (1% = $500, 40 ticks) the stop of 1.5 × the morning range (at least 14 ticks) was 54 to 855 ticks on every 2023-2024 break (Analyst run 4ca93ff2), so this arm only trades with MES or more equity.
 // Size is never shrunk to fit a stop: yes. The stop is widened to 14 ticks and the trade is skipped if that width breaks the budget.
 //
 // ## 11. Orders, execution, and costs
@@ -119,6 +120,15 @@
 // Effect: an earlier clock shortens the morning range and starts the afternoon sooner. NoEntryBefore uses the same clock.
 // Interactions: Arm and Hold. The range is still the RTH bars that close after 09:30 and at or before this clock.
 // Fixed or research-tuned: fixed default. The other two clocks are the catalogue sweep.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); the Overnight hold arm is not blocked (Hold input).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -204,9 +214,11 @@ namespace PowerLanguage.Strategy
 		private bool m_skipDay, m_exitNextRth;
 		private double m_restPx;
 		private bool m_restBuy, m_restOn, m_filledSetup;
-		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
+		private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 
-		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_49_MiddayBreakout(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Arm = EArm.CloseBreak; Hold = ESessionHold.DayFlat; Zone = EZone.Pct25; Midday = EMidday.At1200; }
 
 		private double zoneFrac() { return Zone == EZone.Pct20 ? 0.20 : Zone == EZone.Pct33 ? 0.33 : 0.25; }
 		private TimeSpan middayAt() { return Midday == EMidday.At1130 ? new TimeSpan(11, 30, 0) : Midday == EMidday.At1230 ? new TimeSpan(12, 30, 0) : new TimeSpan(12, 0, 0); }
@@ -254,9 +266,9 @@ namespace PowerLanguage.Strategy
 			NoEntryBefore = middayAt();
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = DateTime.MinValue; m_hi = m_lo = m_stop = double.NaN; m_skipDay = false; m_exitNextRth = false;
-			m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
+			m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0;
 		}
 
 		private int m_nativeSeen = -1;
@@ -270,6 +282,10 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd), Hold == ESessionHold.Overnight ? 0 : NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -279,7 +295,7 @@ namespace PowerLanguage.Strategy
 			{
 				bool held = StrategyInfo.MarketPosition != 0;
 				m_day = day; m_hi = m_lo = double.NaN; m_skipDay = false;
-				m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = 0;
+				m_restOn = m_filledSetup = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0;
 				FlatBy = Hold == ESessionHold.Overnight ? (TimeSpan?)null : flatAt(day);
 				m_exitNextRth = Hold == ESessionHold.Overnight && held;
 			}
@@ -301,12 +317,12 @@ namespace PowerLanguage.Strategy
 				m_lo = double.IsNaN(m_lo) ? Bars.Low[0] : Math.Min(m_lo, Bars.Low[0]);
 			}
 			if (pos > 0) m_lxStp.Send(m_stop); else if (pos < 0) m_sxStp.Send(m_stop);
-			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !_SandboxRules.PastFlat(tod, Bars.Info.Name, Clock.RthValueEnd);
-			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			bool window = tod > middayAt() && tod <= Cfg.lastEntry && !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd));
+			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (step == ERest.Resend)
 			{
-				if (m_restBuy) { m_leLvl.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
-				else { m_seLvl.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+				if (m_restBuy) { (entryOpen() ? m_leLvl : null)?.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { (entryOpen() ? m_seLvl : null)?.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
 			}
 			if (m_skipDay || double.IsNaN(m_hi) || tod <= middayAt()) return;
 
@@ -325,9 +341,9 @@ namespace PowerLanguage.Strategy
 			if (!entryAllowed(out why)) { if (journalOn()) logSignal("A2-49", side, Bars.Close[0], double.NaN, new Dictionary<string, string> { { "blocked", why } }, false); return; }
 			double entry = c2;
 			double r = Math.Max(Cfg.disasterR * (m_hi - m_lo), Cfg.costFloorTicks * tick);   // floor rule
-			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
+			if (overRiskBudget(r)) { budgetSkip(side, entry, r, tick, null); return; }
 			m_stop = entry - side * r;
-			if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }   // stop with the entry
+			if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }   // stop with the entry
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "tradesToday", TradesToday.ToString() } };
@@ -364,15 +380,15 @@ namespace PowerLanguage.Strategy
 			string why;
 			if (!entryAllowed(out why)) { if (journalOn()) logSignal("A2-49", side, entry, double.NaN, new Dictionary<string, string> { { "blocked", why }, { "arm", Arm.ToString() } }, false); return; }
 			double r = Math.Max(Cfg.disasterR * width, Cfg.costFloorTicks * tick);
-			if (overRiskBudget(r)) { if (journalOn()) trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); return; }
+			if (overRiskBudget(r)) { budgetSkip(side, entry, r, tick, Arm.ToString()); return; }
 			m_stop = entry - side * r;
 			if (stopEntry)
 			{
 				if (m_filledSetup && m_fillAnchor == side) return;   // one fill of this breakout anchor per day
 				m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = side;
-				if (side > 0) { m_leLvl.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { m_seLvl.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
+				if (side > 0) { (entryOpen() ? m_leLvl : null)?.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_seLvl : null)?.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			}
-			else if (side > 0) { m_le.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { m_se.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
+			else if (side > 0) { (entryOpen() ? m_le : null)?.Send(Cfg.contracts); m_lxStp.Send(m_stop); } else { (entryOpen() ? m_se : null)?.Send(Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn())
 			{
 				var ctx = new Dictionary<string, string> { { "arm", Arm.ToString() }, { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") }, { "zone", frac.ToString("F2") } };
@@ -382,6 +398,19 @@ namespace PowerLanguage.Strategy
 		}
 
 		private bool overRiskBudget(double stopDist) { return Cfg.contracts * stopDist * Bars.Info.BigPointValue > equityAvailable(Cfg.riskBudgetFraction); }
+		/// <summary>Coder 2026-11-23 (Analyst run 4ca93ff2: 0 trades, every logged event "at/after NoEntryAfter"): a break skipped by the
+		/// 1% risk budget was only a Journal trace, so the signal events showed the 15:30 ET block and never the midday breaks. The skip
+		/// is now also a taken=false signal event (blocked = riskBudget, with the stop and the dollars), and the trace names the dollars.</summary>
+		private void budgetSkip(int side, double entry, double r, double tick, string arm)
+		{
+			if (!journalOn()) return;
+			double risk = Cfg.contracts * r * Bars.Info.BigPointValue, cap = equityAvailable(Cfg.riskBudgetFraction);
+			string why = $"riskBudget: stop {r / tick:F0} ticks = ${risk:F0} > {Cfg.riskBudgetFraction:P0} of equity ${cap:F0}";
+			trace(ETraceLevel.Journal, $"A2-49 {Bars.Time[0]:yyyy-MM-dd HH:mm} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2} (${risk:F0} > ${cap:F0})");
+			var ctx = new Dictionary<string, string> { { "blocked", why }, { "mHigh", m_hi.ToString("F2") }, { "mLow", m_lo.ToString("F2") } };
+			if (arm != null) ctx["arm"] = arm;
+			logSignal("A2-49", side, entry, entry - side * r, ctx, false);
+		}
 
 		private TimeSpan flatAt(DateTime day)
 		{

@@ -41,13 +41,14 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 30-minute.
 // Data1: the chart the header names. Tests use data through 2024-12-31 only.
-// Data2: Not applicable. Higher-timeframe bars are built from Data1.
+// Data2: the same instrument on 30-minute bars (owner rule: Data2 = native timeframe). The :00 / :30 decision close is the closed Data2 bar's close, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the ATR or average named in the rule.
 //
 // ## 9. Entry and filters
 // All of these must be true: the catalogue setup and the 1 percent risk-budget check.
 // Skip when: the budget fails, a required average is not ready, or the rule's filter fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract. journalArm records the planned entry.
@@ -88,15 +89,17 @@
 // Other: ASSUMPTION: Chart is 1-minute. The move from the open is a fraction, |close-rthOpen|/rthOpen, averaged over the same clock minute across the last 14 sessions. A gap day uses max(rthOpen, prior RTH close) as the band base. sVWAP is CurrentVwap1 with Vwap1Type Session. Check times are bar-end minutes of :00 and :30. Re-entry is allowed. There is no protective stop in the source; the exit is the band check and the 15:59 flat.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: Not applicable
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -149,7 +152,9 @@ namespace PowerLanguage.Strategy
 		private int m_lastSlot = -1;
 
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
-		public _A2_09_NoiseBandLong(object _ctx) : base(_ctx) { }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_09_NoiseBandLong(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 
 		protected override void Create()
 		{
@@ -165,16 +170,47 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			base.StartCalc();
+			/* Coder 2026-11-22: a recalc reuses this object, so the history from the previous pass is cleared (no lookahead from a reused list) */ m_hist.Clear(); m_lastSlot = -1; m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
+		}
+
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
-			bool check = tod.Seconds == 0 && tod.Minutes % 30 == 0 && tod >= new TimeSpan(9, 30, 0) && tod < new TimeSpan(16, 0, 0);
+			// Coder 2026-11-22: the :00 / :30 decision close is the closed Data2 30-minute bar's close (owner rule: Data2 = native timeframe)
+			bool new30 = newNativeBar();
+			bool check = new30 && tod.Seconds == 0 && tod.Minutes % 30 == 0 && tod >= new TimeSpan(9, 30, 0) && tod < new TimeSpan(16, 0, 0);
+			double c30 = double.NaN; if (check) { double o, h, l, v; nativeBar(0, out o, out h, out l, out c30, out v); }
 			int pos = StrategyInfo.MarketPosition;
 			SessionStats s = Session;
 			double vwap = CurrentVwap1;
@@ -182,7 +218,7 @@ namespace PowerLanguage.Strategy
 			if (check && s != null && s.rthOpen > 0)
 			{
 				int slot = (int)tod.TotalMinutes;
-				double frac = Math.Abs(Bars.Close[0] - s.rthOpen) / s.rthOpen;
+				double frac = Math.Abs(c30 - s.rthOpen) / s.rthOpen;
 				List<double> hist;
 				if (!m_hist.TryGetValue(slot, out hist)) { hist = new List<double>(); m_hist[slot] = hist; }
 				if (hist.Count >= 14)
@@ -197,13 +233,13 @@ namespace PowerLanguage.Strategy
 			bool sendExits()
 			{
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { m_lx.Send(); return true; }
-				if (check && !double.IsNaN(upper) && !double.IsNaN(vwap) && Bars.Close[0] < Math.Max(upper, vwap)) { m_lx.Send(); return true; }
+				if (check && !double.IsNaN(upper) && !double.IsNaN(vwap) && c30 < Math.Max(upper, vwap)) { m_lx.Send(); return true; }
 				return false;
 			}
 			if (pos > 0 && sendExits()) return;
 			if (pos != 0 || !check || double.IsNaN(upper) || rollOn(1)) return;
-			if (!(Bars.Close[0] > upper)) return;
-			m_le.Send();
+			if (!(c30 > upper)) return;
+			(entryOpen() ? m_le : null)?.Send();
 			if (journalOn()) journalArm("A209LE", Bars.Close[0], double.NaN, double.NaN, null);
 		}
 	}

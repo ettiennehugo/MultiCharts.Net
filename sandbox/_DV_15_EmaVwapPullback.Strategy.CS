@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: flat; RTH; clock from 10:00 through 15:00; EMA warmed up; not a roll bar; at least eight VWAP samples; daily context valid; prior side held for three bars; this bar's range contains the EMA; slope sign matches; absolute slope at least 0.05 × ATR(14); close on the same side of VWAP; the bracket fits the 1% budget.
 // Skip when: the bracket is not positive or breaks the budget.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract.
@@ -111,6 +112,15 @@
 // Effect: a smaller fraction tightens the bracket
 // Interactions: the stop is sent with the limit, so the fill bar is protected. That send is not optional.
 // Fixed or research-tuned: research-tuned. The two members are the catalogue grid. The default is the previous cell.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -187,8 +197,10 @@ namespace PowerLanguage.Strategy
 		private readonly List<double> m_vwap = new List<double>();   // closed-bar VWAP values, newest last (session-reset aware)
 		private DateTime m_vwapDay = DateTime.MinValue;
 
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
 		public _DV_15_EmaVwapPullback(object _ctx) : base(_ctx)
-		{
+		{ NoEntryMinutesBeforeFlat = 25;
 			VwapSlot = EVwapSlot.Session;
 			SlopeMin = ESlopeMin.S005;
 			Bracket = EBracketFrac.F015;
@@ -224,13 +236,13 @@ namespace PowerLanguage.Strategy
 			Vwap1Type = VwapSlot == EVwapSlot.Week ? EVwapType.Week : EVwapType.Session;
 			Vwap1DataStream = 1;
 			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */                                      // before base.StartCalc (M-DAILY is built there)
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_ema = double.NaN; m_emaBars = 0; m_sideRun = 0; m_side = 0; m_vwap.Clear(); m_vwapDay = DateTime.MinValue;
 		}
 
 		private double m_restPx;
 		private bool m_restBuy, m_restOn, m_filledSetup;
-		private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
+		private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restAnchor, m_restQty = 1;
 		private DateTime m_orderDay = DateTime.MinValue;
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -243,6 +255,10 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -250,10 +266,10 @@ namespace PowerLanguage.Strategy
 			double tick = tickSize();
 			int pos = StrategyInfo.MarketPosition;
 			DateTime dayNow = GlobexDate(Bars.Time[0]);
-			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = 0; }
+			if (dayNow != m_orderDay) { m_orderDay = dayNow; m_filledSetup = false; m_restOn = false; m_prevPos = m_fillAnchor = m_restAnchor = m_bookEntries = 0; }
 			TimeSpan todNow = ToEastern(Bars.Time[0]).TimeOfDay;
-			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(pos, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
+			bool window = IsRth() && todNow >= Cfg.firstEntry && todNow <= Cfg.lastEntry && !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(pos, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, m_restAnchor, ref m_restOn, window);
 			if (pos != 0)
 			{
 				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return; }
@@ -262,8 +278,8 @@ namespace PowerLanguage.Strategy
 			}
 			if (step == ERest.Resend)
 			{
-				if (m_restBuy) { m_leLmt.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
-				else { m_seLmt.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
+				if (m_restBuy) { (entryOpen() ? m_leLmt : null)?.Send(m_restPx, m_restQty); m_lxStp.Send(m_stop); }
+				else { (entryOpen() ? m_seLmt : null)?.Send(m_restPx, m_restQty); m_sxStp.Send(m_stop); }
 			}
 			if (!takeNative()) return;
 			double c = BarsOfData(2).Close[0];
@@ -293,8 +309,8 @@ namespace PowerLanguage.Strategy
 			if (m_filledSetup && m_fillAnchor == anchor) return;          // one fill of this limit per day
 			m_stop = entry - side * d; m_target = entry + side * d;      // 1:1 bracket
 			m_restPx = entry; m_restBuy = side > 0; m_restOn = true; m_restQty = Cfg.contracts; m_restAnchor = anchor;
-			if (side > 0) { m_leLmt.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
-			else { m_seLmt.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
+			if (side > 0) { (entryOpen() ? m_leLmt : null)?.Send(entry, Cfg.contracts); m_lxStp.Send(m_stop); }
+			else { (entryOpen() ? m_seLmt : null)?.Send(entry, Cfg.contracts); m_sxStp.Send(m_stop); }
 			if (journalOn()) logSignal("DV-15", side, entry, m_stop, new Dictionary<string, string> { { "vwap", vw.ToString("F2") }, { "slope", slope.ToString("F2") } }, true);
 		}
 

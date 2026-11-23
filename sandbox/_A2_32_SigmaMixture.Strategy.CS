@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-32.
 // Taken from the source: the Rules or Analyst 2 specification under that heading.
-// Research assumption: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// Research assumption: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: one contract.
+// Management: two contracts (owner decision 2026-11-22 14:03 ET, coding-plan decision 10): T1 (lot 1) at the next component centre, lot 2 a runner to the centre beyond, stop to entry after T1.
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -48,10 +48,11 @@
 // ## 9. Entry and filters
 // All of these must be true: the catalogue setup, and the 1 percent budget when an order is sent.
 // Skip when: the statistic is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
-// Size: 1 contract where this file trades. journalArm is written by exitPlan when GX is used.
-// Risk limit: skip when 1 contract times the stop distance times BigPointValue exceeds 1 percent of equity.
+// Size: 2 contracts where this file trades (owner decision 2026-11-22: "Make A2-32 2 contracts"). journalArm is written by exitPlan when GX is used.
+// Risk limit: skip when 2 contracts times the stop distance times BigPointValue exceeds 1 percent of equity.
 // Size is never shrunk to fit a stop: yes.
 //
 // ## 11. Orders, execution, and costs
@@ -85,18 +86,20 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series where this file trades.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// Other: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: Not applicable
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); entries GX holds overnight (SessionExit HoldOvernight) are not blocked.
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -131,7 +134,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. One contract, so the 50 percent scale at 0.5 of the way is not sent.
+// ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 // IOG is disabled.
 
 
@@ -155,9 +158,11 @@ namespace PowerLanguage.Strategy
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
-		public _A2_32_SigmaMixture(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_32_SigmaMixture(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
@@ -172,35 +177,24 @@ namespace PowerLanguage.Strategy
 		}
 
 		protected override void StartCalc() {
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- base.StartCalc(); m_gmm = new _GmmProfileTracker(tickSize()); }
+ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_gmm = new _GmmProfileTracker(tickSize()); }
 
 
-		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
-		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
-		private void sandboxEarlyFlat()
-		{
-			int pos = StrategyInfo.MarketPosition;
-			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
-			string why;
-			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-32 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
-			gxNoteExit("FLATBY");
-			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
-		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
-			exitBar(); sandboxEarlyFlat();
+			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
 			if (day != m_day) { m_day = day; m_fed = m_done = false; m_filledSetup = false; m_restOn = false; m_up = m_dn = 0; m_upLvl = m_dnLvl = double.NaN; }
 			int posNow = StrategyInfo.MarketPosition;
 			if (posNow != 0 && (m_entryDay != day || _SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd)))
-			{   // Analyst MC17: the entry is 2 contracts and the GX plan is 1, so close every remaining contract at flat-by or the next day
+			{   // Analyst MC17: close any remaining contract at flat-by or the next day (Coder 2026-11-22: the GX plan now covers both contracts; this stays as a backstop)
 				if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} flat: closing {Math.Abs(posNow)} remaining contract(s) from {m_entryDay:yyyy-MM-dd}");
 				if (posNow > 0) m_lxFlat.Send(posNow); else m_sxFlat.Send(-posNow);
 			}
@@ -216,6 +210,7 @@ namespace PowerLanguage.Strategy
 			}
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth()) return;
 			if (ToEastern(Bars.Time[0]).TimeOfDay < new TimeSpan(10, 0, 0)) return;
+			if (ToEastern(Bars.Time[0]).Minute % 15 != 0) return;   // Coder 2026-11-22 (catalogue: "2 consecutive 15m closes ... enter at the next 15m open"): only the 1m close that ends a 15-minute bar counts
 			SigmaMixtureResult sig = m_gmm.LastSigma;
 			if (sig == null || !sig.ok || sig.levels == null || sig.levels.Length < 2) return;
 			double c = Bars.Close[0];
@@ -246,20 +241,31 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			if (!(risk > 0) || double.IsNaN(target) || (longSide ? target - entry : entry - target) < 1.2 * risk)
 			{ if (journalOn()) trace(ETraceLevel.Journal, $"A2-32 {day:yyyy-MM-dd} skip: next centre under 1.2R or missing"); m_done = true; return; }
+			// Owner decision 2026-11-22 14:03 ET ("Make A2-32 2 contracts", coding-plan decision 10): 2 contracts, budget on both.
 			if (journalOn()) trace(ETraceLevel.Warning, "A2-32 multi-contract size 2");
 			if (2 * risk * Bars.Info.BigPointValue > equityAvailable(0.01))
 			{ if (journalOn()) trace(ETraceLevel.Error, "A2-32 skipped: multi-contract risk exceeds 1 percent"); m_done = true; return; }
-			arm(longSide, entry, stop, target);
-			m_entryDay = m_day; if (longSide) m_le.Send(2); else m_se.Send(2);
+			double runner = double.NaN;   // the next component centre beyond the target, for the second lot
+			for (int i = 0; i < sig.levels.Length; i++)
+			{
+				double lv = sig.levels[i];
+				if (longSide ? lv > target && (double.IsNaN(runner) || lv < runner) : lv < target && (double.IsNaN(runner) || lv > runner)) runner = lv;
+			}
+			arm(longSide, entry, stop, target, runner);
+			m_entryDay = m_day; if (longSide) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
-		private void arm(bool longSide, double entry, double stop, double target)
-		{
+		private void arm(bool longSide, double entry, double stop, double target, double runner)
+		{   // Owner decision 2026-11-22 (2 contracts): 2 lots, the same pattern as A2-28 / A2-45. T1 (50 percent, lot 1) is the catalogue's
+			// single target (the next component centre); lot 2 runs to the next centre beyond it when there is one (otherwise it has no
+			// price target), with the stop moved to entry after T1 and the 15:55 flat-by.
 			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			double t1 = Math.Abs(target - entry), fin = double.IsNaN(runner) ? 0 : Math.Abs(runner - entry);
+			GxConfig.TargetMode = ETargetMode.ScaleOutThenRunner;
+			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = t1; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.FinalTargetValue = fin > t1 ? fin : 0;
+			GxConfig.BreakEven = EBreakEven.AfterT1;
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd);
@@ -269,26 +275,84 @@ namespace PowerLanguage.Strategy
 			try { mkt.Bpv = Bars.Info.BigPointValue; } catch (Exception) { }
 			mkt.EntryStop = stop; mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1;
-			exitPlan(longSide, entry, stop, 1, mkt, longSide ? "A232LE" : "A232SE");
+			exitPlan(longSide, entry, stop, 2, mkt, longSide ? "A232LE" : "A232SE");   // the plan covers both contracts sent with Send(2)
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
-			VpExtra prior = null;
-			try { prior = PriorRthProfile(); } catch (Exception) { }
-			double poc = prior != null ? prior.poc : double.NaN;
-			double hi = Session != null ? Session.rthHigh : Bars.High[0];
-			double lo = Session != null ? Session.rthLow : Bars.Low[0];
-			double atr = averageTrueRange(Bars, 14);
-			double sma = double.NaN;
-			try { sma = DailyContext.Sma200; } catch (Exception) { }
-			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
-			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			string notReady;
+			try
+			{
+				SessionStats s = Session;
+				if (s != null) { hi = s.rthHigh; lo = s.rthLow; prev = s.priorRthClose; }
+				atr = averageTrueRange(Bars, 14);
+				if (Gate == ESandboxGate.ValueMigration) { VpExtra prior = PriorRthProfile(); if (prior != null) poc = prior.poc; }
+				if (_SandboxRules.GateReadsDaily(Gate) && NeedsDaily) { _DailyContext d = DailyContext; if (d != null) sma = d.Sma200; }
+				if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+				notReady = _SandboxRules.GateNotReady(Gate, poc, sma, prev, atr, DvpConfig.enabled);
+			}
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
 			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
-			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			gateLog(ok, buy);
 			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, false, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void honorExit(double entry, double risk)
 		{
@@ -316,9 +380,9 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

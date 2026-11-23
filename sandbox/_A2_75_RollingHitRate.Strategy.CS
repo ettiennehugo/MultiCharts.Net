@@ -153,12 +153,12 @@ namespace PowerLanguage.Strategy
 		{
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			m_bars++;
 			DateTime day = Bars.Time[0].Date; if (day == m_day) return; m_day = day;
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-75 throttle N=20 delta=10 scale=0.8 after " + m_bars + " bars. No host trades, no order.");

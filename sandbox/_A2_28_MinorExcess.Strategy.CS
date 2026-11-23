@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md heading for A2-28.
 // Taken from the source: the Rules or Analyst 2 specification under that heading.
-// Research assumption: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+// Research assumption: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. Two contracts (coding-plan decision 10): GX takes 50 percent at the void minimum (the lowest-volume price between the two means) when it lies before the major mean, and the final target is the major mean, in points from the signal close. The 5-minute confirmation reads closed Data2 5-minute bars (long confirms back above mu_minor + sd_minor, short back below mu_minor - sd_minor). The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. The trigger is a later 1-minute close beyond the high (long) or low (short) of the second 5-minute bar that closed back through the edge.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -20,7 +20,7 @@
 //
 // ## 4. Trade walkthrough
 // Trigger: the catalogue rule, on a closed bar.
-// Management: one contract.
+// Management: two contracts (coding-plan decision 10): T1 (50 percent) at the void minimum, the other lot at mu_major. When the void is not between the entry and mu_major, T1 is the midpoint of entry and mu_major rounded to the tick (owner decision 2026-11-22 16:39 CT: "A2-28: use T1 halfway between entry and mu_major when the void is behind entry"). After T1 the runner's stop moves to entry (GX BreakEven AfterT1; owner decision 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1").
 // Exit: see section 13.
 //
 // ## 5. Timing
@@ -41,16 +41,17 @@
 // ## 8. Data
 // Chart: Data1 = 1-minute. Data2 = 5-minute.
 // Data1: 1-minute unless section 22 says daily. Tests use data through 2024-12-31 only.
-// Data2: named in section 22, or Not applicable.
+// Data2: the same instrument on 5-minute bars (owner rule: Data2 = native timeframe). CalcBar reads closed Data2 bars only, through HtfClosedBar.
 // Further series: Not applicable
 // Warmup: the statistic named in the rule.
 //
 // ## 9. Entry and filters
 // All of these must be true: the catalogue setup, and the 1 percent budget when an order is sent.
 // Skip when: the statistic is not ready, or the budget fails.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
-// Size: 1 contract where this file trades. journalArm is written by exitPlan when GX is used.
+// Size: 2 contracts where this file trades; the 1 percent budget is on both. journalArm is written by exitPlan when GX is used.
 // Risk limit: skip when 1 contract times the stop distance times BigPointValue exceeds 1 percent of equity.
 // Size is never shrunk to fit a stop: yes.
 //
@@ -85,18 +86,20 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series where this file trades.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+// Other: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. Two contracts (coding-plan decision 10): GX takes 50 percent at the void minimum (the lowest-volume price between the two means) when it lies before the major mean, and the final target is the major mean, in points from the signal close. The 5-minute confirmation reads closed Data2 5-minute bars (long confirms back above mu_minor + sd_minor, short back below mu_minor - sd_minor). The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. The trigger is a later 1-minute close beyond the high (long) or low (short) of the second 5-minute bar that closed back through the edge.
 //
 // ## 17. Parameters
-// This file declares no strategy [Input] besides the inherited TraceLevel.
-// Input: none
-// Purpose: Not applicable
-// Default: Not applicable
-// Units: Not applicable
-// Range: Not applicable
-// Effect: Not applicable
-// Interactions: Not applicable
+// Strategy inputs besides the inherited TraceLevel are listed below.
 // Fixed or research-tuned: Not applicable
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware); entries GX holds overnight (SessionExit HoldOvernight) are not blocked.
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -131,7 +134,7 @@
 //
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
-// ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. One contract, so the 50 percent scale at the void is not sent; the GX target is the major mean, in points from the signal close. The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. 5-minute closes are built from Data1.
+// ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. Two contracts (coding-plan decision 10): GX takes 50 percent at the void minimum (the lowest-volume price between the two means) when it lies before the major mean, and the final target is the major mean, in points from the signal close. The 5-minute confirmation reads closed Data2 5-minute bars (long confirms back above mu_minor + sd_minor, short back below mu_minor - sd_minor). The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. The trigger is a later 1-minute close beyond the high (long) or low (short) of the second 5-minute bar that closed back through the edge.
 // IOG is disabled.
 
 
@@ -145,17 +148,19 @@ namespace PowerLanguage.Strategy
 	public class _A2_28_MinorExcess : _VolumeProfileFuturesBase
 	{
 		private IOrderMarket m_le, m_se;
-		private DateTime m_day = DateTime.MinValue, m_b5 = DateTime.MinValue;
+		private DateTime m_day = DateTime.MinValue;
 		private double m_muMinor, m_sdMinor, m_muMajor, m_edge, m_extreme;
 		private int m_side, m_back;
 		private bool m_done, m_inMinor;
-		private double m_5c;
+		private double m_trig = double.NaN, m_void = double.NaN;   // the 1-minute trigger level; the density minimum between the components (T1)
 
 		[Input] public ESandboxGate Gate { get; set; }
 		[Input] public ESandboxExit ExitMode { get; set; }
-		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
+		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
-		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_28_MinorExcess(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 
 		protected override void Create()
 		{
@@ -168,54 +173,70 @@ namespace PowerLanguage.Strategy
 		}
 
 		protected override void StartCalc() {
+			applyGateNeeds();   // before base.StartCalc: the gate input decides which engines start
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- base.StartCalc(); m_muMinor = double.NaN; }
+ m_nativeTime = DateTime.MinValue; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); m_muMinor = double.NaN; m_void = double.NaN; }
 
 
-		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
-		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
-		private void sandboxEarlyFlat()
-		{
-			int pos = StrategyInfo.MarketPosition;
-			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
-			string why;
-			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
-			if (journalOn()) trace(ETraceLevel.Journal, "A2-28 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
-			gxNoteExit("FLATBY");
-			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
-		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
 			if (Bars.Status != EBarState.Close) return;
 			if (sandboxBook()) return;
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			exitBar(); sandboxEarlyFlat();
+			exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]);
-			if (day != m_day) { m_day = day; m_done = m_inMinor = false; m_side = m_back = 0; m_extreme = double.NaN; loadPrior(day); }
+			if (day != m_day) { m_day = day; m_done = m_inMinor = false; m_side = m_back = 0; m_extreme = double.NaN; m_trig = double.NaN; loadPrior(day); }
 			if (StrategyInfo.MarketPosition != 0 || m_done || double.IsNaN(m_muMinor) || !IsRth()) return;
-			double edge = m_muMinor - m_side * m_sdMinor;
-			bool inside = m_side > 0 ? Bars.High[0] >= m_muMinor - m_sdMinor : Bars.Low[0] <= m_muMinor + m_sdMinor;
+			// Coder 2026-11-22: long (minor below major, m_side = 1) trades down into the minor (low <= mu + sd) and confirms back above
+			// mu + sd; short mirrors at mu - sd (catalogue short case). The signs were swapped, so each side tested the other side's edge.
+			double edge = m_muMinor + m_side * m_sdMinor;
+			bool inside = m_side > 0 ? Bars.Low[0] <= edge : Bars.High[0] >= edge;
 			if (inside) { m_inMinor = true; m_extreme = double.IsNaN(m_extreme) ? (m_side > 0 ? Bars.Low[0] : Bars.High[0]) : (m_side > 0 ? Math.Min(m_extreme, Bars.Low[0]) : Math.Max(m_extreme, Bars.High[0])); }
-			step5(ToEastern(Bars.Time[0]), edge);
+			step5(edge);
 		}
 
-		private void step5(DateTime et, double edge)
+		private void step5(double edge)
 		{
-			int slot = (et.Hour * 60 + et.Minute) / 5;
-			DateTime b = et.Date.AddMinutes(slot * 5);
-			if (m_b5 == DateTime.MinValue) { m_b5 = b; m_5c = Bars.Close[0]; return; }
-			if (b == m_b5) { m_5c = Bars.Close[0]; return; }
-			bool back = m_side > 0 ? m_5c > edge : m_5c < edge;
-			m_back = m_inMinor && back ? m_back + 1 : 0;
-			if (m_back >= 2)
+			// Coder 2026-11-22: the 5-minute confirmation reads the closed Data2 5-minute bars (owner rule: Data2 = native timeframe).
+			// The second 5-minute close back through the edge sets the trigger at that bar's high (long) or low (short), and every later
+			// 1-minute close is tested against it (the catalogue's 1m trigger).
+			if (newNativeBar() && nativeReady(1))
 			{
-				bool trig = m_side > 0 ? Bars.Close[0] > m_5c : Bars.Close[0] < m_5c;
-				if (trig) enter();
+				double o, h, l, c, v; nativeBar(0, out o, out h, out l, out c, out v);
+				bool back = m_side > 0 ? c > edge : c < edge;
+				m_back = m_inMinor && back ? m_back + 1 : 0;
+				if (m_back == 2) m_trig = m_side > 0 ? h : l;
+				else if (m_back == 0) m_trig = double.NaN;
+				return;   // the bar that closes the 5-minute bar is not its own trigger
 			}
-			m_b5 = b; m_5c = Bars.Close[0];
+			if (!double.IsNaN(m_trig) && (m_side > 0 ? Bars.Close[0] > m_trig : Bars.Close[0] < m_trig)) { m_trig = double.NaN; enter(); }
+		}
+
+		// Coder 2026-11-22: Data2 (the native timeframe) read through the M-MTF closed-bar rule. newNativeBar() is true once per new
+		// closed Data2 bar; nativeBar(ago) is the ago-th closed Data2 bar; nativeAtr(n) is the mean true range of the last n closed bars.
+		private DateTime m_nativeTime = DateTime.MinValue;
+		private bool nativeReady(int ago) { return IsExist(2) && BarsOfData(2).CurrentBar > ago + 2; }
+		private bool newNativeBar()
+		{
+			if (!nativeReady(0)) return false;
+			DateTime t; double o, h, l, c, v; HtfClosedBar(2, 0, out t, out o, out h, out l, out c, out v);
+			if (t == m_nativeTime) return false;
+			m_nativeTime = t; return true;
+		}
+		private void nativeBar(int ago, out double o, out double h, out double l, out double c, out double v) { DateTime t; HtfClosedBar(2, ago, out t, out o, out h, out l, out c, out v); }
+		private double nativeAtr(int n)
+		{
+			if (!nativeReady(n)) return double.NaN;
+			double sum = 0, o, h, l, c, v, po, ph, pl, pc, pv;
+			for (int k = 0; k < n; k++)
+			{
+				nativeBar(k, out o, out h, out l, out c, out v); nativeBar(k + 1, out po, out ph, out pl, out pc, out pv);
+				sum += Math.Max(h, pc) - Math.Min(l, pc);
+			}
+			return sum / n;
 		}
 
 		private void enter()
@@ -232,12 +253,12 @@ namespace PowerLanguage.Strategy
 			if (!budgetOk(entry, structural)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-28 skip: risk budget"); m_done = true; return; }
 			string name = m_side > 0 ? "A228LE" : "A228SE";
 			armGx(m_side > 0, entry, structural, m_muMajor, _SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), name);
-			if (m_side > 0) m_le.Send(2); else m_se.Send(2);
+			if (m_side > 0) { if (hostGate(true)) m_le.Send(2); } else { if (hostGate(false)) m_se.Send(2); }
 		}
 
 		private void loadPrior(DateTime day)
 		{
-			m_muMinor = double.NaN; m_side = 0;
+			m_muMinor = double.NaN; m_side = 0; m_void = double.NaN;
 			DateTime prev = DateTime.MinValue;
 			int maxAgo = Math.Min(2000, Bars.CurrentBar);
 			for (int ago = 0; ago < maxAgo; ago++)
@@ -256,22 +277,46 @@ namespace PowerLanguage.Strategy
 			int major = 1 - minor;
 			if (mix.pi[minor] > 0.30) return;
 			m_muMinor = mix.mu[minor]; m_sdMinor = mix.sd[minor]; m_muMajor = mix.mu[major];
+			// Coder 2026-11-22 (Analyst native retest of #152: both lots always exited together, 0 partials): T1 is the mixture's density
+			// minimum between the two components (ProfileMixture voidPrice, the GMM void). The raw tick histogram's lowest-volume row (ties
+			// to the lowest price) sat at a thin row at or behind the entry, so T1 was never ahead of the entry and GX fell back to
+			// SingleTarget on every trade.
+			if (mix.voidPrice.Length > 0 && !double.IsNaN(mix.voidPrice[0])) m_void = mix.voidPrice[0];
 			m_side = mix.mu[minor] < mix.mu[major] ? 1 : -1;
 		}
 
 		private bool budgetOk(double entry, double stop)
-		{
+		{   // Coder 2026-11-22: the entry is 2 contracts (coding-plan decision 10), so the 1 percent budget is on 2 contracts (it tested 1)
 			double risk = Math.Abs(entry - stop);
-			return risk > 0 && risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
+			if (journalOn()) trace(ETraceLevel.Warning, "A2-28 multi-contract size 2");
+			bool ok = risk > 0 && 2 * risk * Bars.Info.BigPointValue <= equityAvailable(0.01);
+			if (!ok && journalOn()) trace(ETraceLevel.Error, "A2-28 skipped: multi-contract risk exceeds 1 percent");
+			return ok;
 		}
 
 		private void armGx(bool longSide, double entry, double stop, double target, int flatHHMM, string name)
 		{
 			GxConfig.InitialStop = EInitialStop.EntryProvided;
-			GxConfig.TargetMode = ETargetMode.SingleTarget;
+			// Coder 2026-11-22 (catalogue: "Target: mu_major (T1 50% at the void minimum)"): 2 lots, T1 1 lot at the void minimum when it
+			// lies between the entry and mu_major, the other lot at mu_major.
+			double t1 = longSide ? m_void - entry : entry - m_void, fin = Math.Abs(target - entry);
+			bool scale = !double.IsNaN(m_void) && t1 > 0 && t1 < fin;
+			string t1Src = "void";
+			if (!scale)
+			{   // Owner 2026-11-22 16:39 CT: "A2-28: use T1 halfway between entry and mu_major when the void is behind entry"
+				t1 = _SandboxRules.MidT1Points(longSide, entry, target, tickSize());
+				scale = !double.IsNaN(t1) && t1 > 0 && t1 < fin;
+				t1Src = "mid";
+			}
+			// Coder 2026-11-22 (Analyst #152 recheck): one line per trade at entry with every level the plan uses.
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-28 plan " + (longSide ? "long" : "short") + " entry " + entry.ToString("0.00") + " stop " + stop.ToString("0.00")
+				+ " muMinor " + m_muMinor.ToString("0.00") + " sdMinor " + m_sdMinor.ToString("0.00") + " void " + m_void.ToString("0.00") + " muMajor " + target.ToString("0.00")
+				+ (scale ? " T1 " + (longSide ? entry + t1 : entry - t1).ToString("0.00") + " source " + t1Src + " (1 lot, then the runner's stop to entry)" : " T1 none: void not between the entry and mu_major and mu_major under 2 ticks away, both lots at mu_major"));
+			GxConfig.TargetMode = scale ? ETargetMode.ScaleOutThenRunner : ETargetMode.SingleTarget;
+			GxConfig.T1Unit = ETriggerUnit.Points; GxConfig.T1Value = scale ? t1 : 0; GxConfig.T1ScalePct = 50;
 			GxConfig.FinalTargetUnit = ETriggerUnit.Points;
-			GxConfig.FinalTargetValue = Math.Abs(target - entry);
-			GxConfig.BreakEven = EBreakEven.Off;
+			GxConfig.FinalTargetValue = fin;
+			GxConfig.BreakEven = scale ? EBreakEven.AfterT1 : EBreakEven.Off;   // Owner 2026-11-22 15:18 CT: "Yes, move A2-28's runner stop to entry after T1" (as A2-45)
 			GxConfig.TrailMode = ETrailMode.None;
 			GxConfig.SessionExit = ESessionExit.FlatBy;
 			GxConfig.FlatByHHMM = flatHHMM;
@@ -284,26 +329,84 @@ namespace PowerLanguage.Strategy
 			mkt.EntryStop = stop;
 			mkt.SignalLow = Bars.Low[0]; mkt.SignalHigh = Bars.High[0];
 			mkt.BarKind = EGxBarKind.Minute; mkt.BarMinutes = 1; mkt.ResolutionLabel = "1 min";
-			exitPlan(longSide, entry, stop, 1, mkt, name);
+			exitPlan(longSide, entry, stop, 2, mkt, name);   // the plan covers both contracts sent with Send(2)
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: A2-11 / A2-32 entries filled after the 15:55 ET flat-by cutoff): a study whose
+		// position is flat by the session cutoff sends no entry on or after the cutoff bar (session end minus 5 minutes, early-close
+		// aware) until 18:00 ET. Entries that GX holds overnight (SessionExit HoldOvernight) are not blocked.
+		private DateTime m_cutoffLogDay = DateTime.MinValue;
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryCutoff()
+		{
+			if (GxConfig.SessionExit == ESessionExit.HoldOvernight || !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)) return false;   // #146 date-aware cutoff
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day != m_cutoffLogDay) { m_cutoffLogDay = day; if (journalOn()) trace(ETraceLevel.Journal, "entry blocked: " + gxEntryCutoffNote(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd), NoEntryMinutesBeforeFlat)); }
+			return true;
+		}
 		private bool hostGate(bool buy)
 		{
+			if (entryCutoff()) return false;   // Coder 2026-11-22: no entry on or after the flat-by cutoff bar (it would fill after the cutoff)
 			if (Gate == ESandboxGate.Off) return true;
-			VpExtra prior = null;
-			try { prior = PriorRthProfile(); } catch (Exception) { }
-			double poc = prior != null ? prior.poc : double.NaN;
-			double hi = Session != null ? Session.rthHigh : Bars.High[0];
-			double lo = Session != null ? Session.rthLow : Bars.Low[0];
-			double atr = averageTrueRange(Bars, 14);
-			double sma = double.NaN;
-			try { sma = DailyContext.Sma200; } catch (Exception) { }
-			double prev = Session != null ? Session.priorRthClose : double.NaN;
+			double poc = double.NaN, sma = double.NaN, prev = double.NaN, atr = double.NaN, hi = Bars.High[0], lo = Bars.Low[0];
 			int fam = 0, ranges = 0;
-			if (Gate == ESandboxGate.ThreeFamily) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+			string notReady;
+			try
+			{
+				SessionStats s = Session;
+				if (s != null) { hi = s.rthHigh; lo = s.rthLow; prev = s.priorRthClose; }
+				atr = averageTrueRange(Bars, 14);
+				if (Gate == ESandboxGate.ValueMigration) { VpExtra prior = PriorRthProfile(); if (prior != null) poc = prior.poc; }
+				if (_SandboxRules.GateReadsDaily(Gate) && NeedsDaily) { _DailyContext d = DailyContext; if (d != null) sma = d.Sma200; }
+				if (Gate == ESandboxGate.ThreeFamily && DvpConfig.enabled) dvpFamiliesAt(1, Bars.Close[0], 0.3, out fam, out ranges);
+				notReady = _SandboxRules.GateNotReady(Gate, poc, sma, prev, atr, DvpConfig.enabled);
+			}
+			catch (Exception ex) { notReady = ex.GetType().Name; }
+			if (notReady != null) { gateWarn(notReady); return false; }
 			bool ok = _SandboxRules.GateAllows(Gate, buy, Bars.Close[0], poc, hi, lo, atr, sma, prev, fam);
-			if (!ok && journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + " blocked");
+			gateLog(ok, buy);
 			return ok;
+		}
+
+		// Gate dependencies (owner-approved follow-up to batch 1). Gate is an input, so what it reads is turned on in StartCalc,
+		// before base.StartCalc builds the engines. Gate = Off changes nothing; switching back to Off restores what was forced.
+		private bool m_gateOwnForced, m_gateDailyForced, m_gateDvpForced;
+		private EDevelopingSource m_gateSrcWas; private EOwnProfileWindow m_gateWinWas;
+		private DateTime m_gateWarnDay = DateTime.MinValue;
+		private void applyGateNeeds()
+		{
+			if (m_gateOwnForced) { DevelopingSource = m_gateSrcWas; OwnProfileWindow = m_gateWinWas; m_gateOwnForced = false; }
+			if (m_gateDailyForced) { NeedsDaily = false; m_gateDailyForced = false; }
+			if (m_gateDvpForced) { DvpConfig.enabled = false; m_gateDvpForced = false; }
+			m_gateWarnDay = m_gateLogDay = DateTime.MinValue;
+			bool own, daily, dvp;
+			_SandboxRules.GateNeeds(Gate, false, out own, out daily, out dvp);
+			if (own && !(DevelopingSource == EDevelopingSource.Own && OwnProfileWindow == EOwnProfileWindow.Rth))
+			{ m_gateSrcWas = DevelopingSource; m_gateWinWas = OwnProfileWindow; DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth; m_gateOwnForced = true; }
+			if (daily && !NeedsDaily) { NeedsDaily = true; m_gateDailyForced = true; }
+			if (dvp && !DvpConfig.enabled) { DvpConfig.enabled = true; m_gateDvpForced = true; }
+			if (Gate != ESandboxGate.Off && traceOn(ETraceLevel.Info))
+				trace(ETraceLevel.Info, "gate " + Gate + " needs ownRth(" + own + ") daily(" + daily + ") dvp(" + dvp + ") forced(" + m_gateOwnForced + "," + m_gateDailyForced + "," + m_gateDvpForced + ")");
+		}
+
+		// The decision is journalled when it changes within a Globex day, not on every bar.
+		private DateTime m_gateLogDay = DateTime.MinValue; private int m_gateLogState;
+		private void gateLog(bool ok, bool buy)
+		{
+			int st = (ok ? 1 : 2) + (buy ? 0 : 2);
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateLogDay && st == m_gateLogState) return;
+			m_gateLogDay = day; m_gateLogState = st;
+			if (journalOn()) trace(ETraceLevel.Journal, "gate " + Gate + (ok ? " allowed " : " blocked ") + (buy ? "buy" : "sell"));
+		}
+
+		// A gate whose data is not ready blocks; the reason is a Warning once per Globex day.
+		private void gateWarn(string why)
+		{
+			DateTime day = GlobexDate(Bars.Time[0]);
+			if (day == m_gateWarnDay) return;
+			m_gateWarnDay = day;
+			if (traceOn(ETraceLevel.Warning)) trace(ETraceLevel.Warning, "gate " + Gate + " not ready (" + why + "): blocked");
 		}
 		private void honorExit(double entry, double risk)
 		{
@@ -331,9 +434,9 @@ namespace PowerLanguage.Strategy
 		private bool sandboxBook()
 		{
 			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
-			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
-			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
-			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; m_bookEntries = 0; }   // trading day never blocks today (Rest returned Done forever)
+			bool window = !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, m_rthValueEnd));
+			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday, ref m_bookEntries, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;
 			if (m_restBuy)

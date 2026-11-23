@@ -48,6 +48,7 @@
 // ## 9. Entry and filters
 // All of these must be true: a first-hour high and low exist; the bar is after 10:30 and entryAllowed allows it; hostGate allows it; the position is flat; the day is not a roll day; the widened stop fits the 1% budget.
 // Skip when: rollOn(1); the budget fails; entryAllowed or hostGate refuses. A budget failure is journaled once.
+// Entry cutoff: no entry order is sent when its fill bar would end within NoEntryMinutesBeforeFlat (default 25) minutes of the date-aware flat-by cutoff, or after it (catalogue 2.1, early closes included); evening-session entries are allowed.
 //
 // ## 10. Position sizing and risk
 // Size: 1 contract.
@@ -111,6 +112,15 @@
 // Effect: Overnight keeps a position that is in profit at 15:55. The next RTH open beyond that 15:55 price, in the trade's favour, exits. Otherwise the stop moves to the entry price and the position is flat at 15:55 the next session.
 // Interactions: Not applicable
 // Fixed or research-tuned: fixed default. Overnight is the book hold.
+//
+// Input: NoEntryMinutesBeforeFlat
+// Purpose: no new entry in the last N minutes before the date-aware flat-by cutoff (catalogue 2.1: no new entries after 15:30; flat by 15:55).
+// Default: 25 minutes (owner 2026-11-22 22:50 CT).
+// Units: minutes
+// Range: 0 or more. 0 disables the window (the flat-by cutoff itself still blocks). A negative value acts as 0.
+// Effect: an entry order is not sent when its fill bar (the next bar) would end at or after the cutoff minus N minutes. An early close moves it (ES 13:10 ET flat: none from 12:45 ET). Evening-session entries are not affected.
+// Interactions: the flat-by cutoff (FlatBy, early-close aware).
+// Fixed or research-tuned: fixed
 //
 // ## 18. Acceptance policy
 // Policy: catalogue-default
@@ -191,7 +201,9 @@ namespace PowerLanguage.Strategy
 		private int m_lastSide;
 		private DateTime m_carryDay = DateTime.MinValue;
 
-		public _A2_56_FirstHourBreak(object _ctx) : base(_ctx) { Setup = ESetup.Off; Reentry = false; Hold = EHold.Flat1555; }
+		// Owner 2026-11-22 22:50 CT: minutes before the flat-by cutoff with no new entries (header section 17). Default 25; 0 = off.
+		[Input] public int NoEntryMinutesBeforeFlat { get; set; }
+		public _A2_56_FirstHourBreak(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Setup = ESetup.Off; Reentry = false; Hold = EHold.Flat1555; }
 
 		private _CmeSessionClock Clock { get { if (m_clock == null) m_clock = new _CmeSessionClock(resolveBarTimeZone(Bars.Info)); return m_clock; } }
 		protected override DateTime tradingDayKey(DateTime t) { return Clock.GlobexDate(t); }
@@ -235,11 +247,15 @@ namespace PowerLanguage.Strategy
 			MaxTradesPerDay = Reentry ? 2 : 1;
 			m_clock = null;
 			configureSessions();
-			base.StartCalc();
+			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_day = DateTime.MinValue; m_fhH = m_fhL = m_stop = m_mark = double.NaN; m_skip = false;
 			m_retried = m_carried = m_carryChecked = false; m_lastSide = 0;
 		}
 
+		// Coder 2026-11-22 (Analyst native retest of #152: entries filled after the flat-by cutoff): no entry order is sent on or after
+		// the cutoff bar (session end minus 5 minutes, early-close aware) until 18:00 ET; an order sent on that bar would fill after the cutoff.
+		// Coder 2026-11-22 (owner 22:50 CT): catalogue 2.1 "no new entries after 15:30" as the NoEntryMinutesBeforeFlat input (default 25; 0 = off).
+		private bool entryOpen() { return !gxPastFlatCutoff(_SandboxRules.FlatBy(0, Bars.Info.Exchange, Bars.Info.Name, Clock.RthValueEnd), NoEntryMinutesBeforeFlat); }   // #146 date-aware cutoff
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -301,8 +317,8 @@ namespace PowerLanguage.Strategy
 			double r = Math.Max(buy - sell, Cfg.costFloorTicks * tick);   // either side risks the first-hour range (+2 ticks), floored
 			if (overRiskBudget(r)) { if (!m_skip && journalOn()) trace(ETraceLevel.Journal, $"A2-56 {day:yyyy-MM-dd} skip: stop {r / tick:F0} ticks breaches risk budget {Cfg.riskBudgetFraction:P2}"); m_skip = true; return; }
 			if (m_lastSide != 0) m_retried = true;
-			if (buyOk) { m_leStp.Send(buy, Cfg.contracts); m_lxStp.Send(sell); }
-			if (sellOk) { m_seStp.Send(sell, Cfg.contracts); m_sxStp.Send(buy); }
+			if (buyOk) { (entryOpen() ? m_leStp : null)?.Send(buy, Cfg.contracts); m_lxStp.Send(sell); }
+			if (sellOk) { (entryOpen() ? m_seStp : null)?.Send(sell, Cfg.contracts); m_sxStp.Send(buy); }
 			if (journalOn() && Bars.High[0] < buy && Bars.Low[0] > sell && tod == Cfg.fhEnd + TimeSpan.FromMinutes(1))
 			{
 				var ctx = new Dictionary<string, string> { { "fhHigh", m_fhH.ToString("F2") }, { "fhLow", m_fhL.ToString("F2") } };

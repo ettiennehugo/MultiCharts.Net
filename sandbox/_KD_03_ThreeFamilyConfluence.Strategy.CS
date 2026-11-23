@@ -152,10 +152,10 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- DvpConfig.enabled = true; base.StartCalc(); }
+ DvpConfig.enabled = true; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); }
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double vah = dvpRailPrice(1, ELevelKind.DvpVah, 0), poc = dvpRailPrice(1, ELevelKind.DvpPoc, 0), sig = dvpRailPrice(1, ELevelKind.DvpSigma, 1), atr = averageTrueRange(Bars, 14); int n = 0; if (atr > 0) { if (Math.Abs(Bars.Close[0] - vah) < 0.25 * atr) n++; if (Math.Abs(Bars.Close[0] - poc) < 0.25 * atr) n++; if (Math.Abs(Bars.Close[0] - sig) < 0.25 * atr) n++; } if (journalOn()) trace(ETraceLevel.Journal, "KD-03 families near price " + n + ". Filter only, no order.");
 		}

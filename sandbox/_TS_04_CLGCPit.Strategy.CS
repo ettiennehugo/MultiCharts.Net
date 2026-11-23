@@ -12,7 +12,7 @@
 // ## 2. Provenance
 // Source: specs/trading-idea-catalogue.md, the TS-04 heading and its Analyst 2 specification.
 // Taken from the source: the entry, the filters, the stop, the target and the time exit named there.
-// Research assumption: ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
+// Research assumption: ASSUMPTION: This file runs the PS-01 balance-break rules on the pit clock that _SandboxRules.ApplyPit picks from the chart name: CL 09:00 to 14:30 Eastern, GC 08:20 to 13:30 Eastern (coding-plan decision 9). The value end comes from the session calendar. PS-24 is not a second base.
 //
 // ## 3. Hypothesis
 // Mechanism: the catalogue entry. This file does not add a claim beyond that entry.
@@ -85,7 +85,7 @@
 // Survivorship: Not applicable
 // Rolls: RollDetection Series when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
-// Other: ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
+// Other: ASSUMPTION: This file runs the PS-01 balance-break rules on the pit clock that _SandboxRules.ApplyPit picks from the chart name: CL 09:00 to 14:30 Eastern, GC 08:20 to 13:30 Eastern (coding-plan decision 9). The value end comes from the session calendar. PS-24 is not a second base.
 //
 // ## 17. Parameters
 // This file declares no strategy [Input] besides the inherited TraceLevel.
@@ -132,7 +132,7 @@
 // ## 22. Notes
 // Slot copy: rename the public class, its constructor, and any ArgumentException text that names the class, to _TestNN. Order names stay.
 // Market tag: futures-only
-// ASSUMPTION: This file runs the PS-01 balance-break rules on the CL pit clock, 09:00 to 14:30 Eastern. The GC pit, 08:20 to 13:30, is the other catalogue arm and is not selected. PS-24 is not a second base.
+// ASSUMPTION: This file runs the PS-01 balance-break rules on the pit clock that _SandboxRules.ApplyPit picks from the chart name: CL 09:00 to 14:30 Eastern, GC 08:20 to 13:30 Eastern (coding-plan decision 9). The value end comes from the session calendar. PS-24 is not a second base.
 // IOG is disabled.
 
 
@@ -145,12 +145,8 @@ namespace PowerLanguage.Strategy
 	public class _TS_04_CLGCPit : _PS_01_BalanceBreakPullback
 	{
 		public _TS_04_CLGCPit(object _ctx) : base(_ctx) { }
-		protected override void configureSessions()
-		{
-			base.configureSessions();
-			m_rthStart = new TimeSpan(9, 0, 0);
-			m_rthEnd = new TimeSpan(14, 30, 0);
-			m_rthValueEnd = new TimeSpan(14, 30, 0);
-		}
+		// Coder 2026-11-22 (coding-plan decision 9): no hard-coded CL clock. PS-01's StartCalc applies _SandboxRules.ApplyPit by chart
+		// name (CL 09:00-14:30 ET, GC 08:20-13:30 ET) and takes the value end from the session calendar (RegularCloseEt), so the GC arm
+		// is the same file on a GC chart and early closes follow the calendar.
 	}
 }

@@ -155,13 +155,14 @@ namespace PowerLanguage.Strategy
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc(); requireRing(1, 2000, "YV-05 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+			m_logState = 0; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc(); requireRing(1, 2000, "YV-05 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
+		private int m_logState;
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return;
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
 			if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
-			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsRth() || ((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 100) return; var vols = new List<double>(); for (int k = 1; k <= 20; k++) { double v = 0; for (int i = 0; i < 5; i++) v += lbBar(k * 5 + i).v; vols.Add(v); } vols.Sort(); double bar = 0; for (int i = 0; i < 5; i++) bar += lbBar(i).v; bool pass = bar >= vols[10]; if (journalOn()) trace(ETraceLevel.Journal, "YV-05 5m volume gate " + pass + ". No order.");
+			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsRth() || ((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 100) return; var vols = new List<double>(); for (int k = 1; k <= 20; k++) { double v = 0; for (int i = 0; i < 5; i++) v += lbBar(k * 5 + i).v; vols.Add(v); } vols.Sort(); double bar = 0; for (int i = 0; i < 5; i++) bar += lbBar(i).v; bool pass = bar >= vols[10]; int st = pass ? 1 : 2; if (st != m_logState) { m_logState = st; if (journalOn()) trace(ETraceLevel.Journal, "YV-05 5m volume gate " + pass + ". No order."); }   /* Coder 2026-11-22 (Analyst #152 retest, log volume): journalled on change, not every 5 minutes */
 		}
 
 		private double widen(bool buy, double entry, double stop)
