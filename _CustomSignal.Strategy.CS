@@ -4834,8 +4834,8 @@ namespace PowerLanguage.Strategy
 		/// <summary>Coder 2026-11-22 (stack rebased onto #146/#151): the entry side of the GX date-aware flat-by. True from that trading
 		/// date's cutoff (ExitSession.CutoffFor: the earlier of flatByHHMM and the date's early close / holiday halt minus 5 minutes,
 		/// from the instrument calendar) until the next trading date opens (gxTradingDate rollover, 17:00 CT on CME). Closed dates have
-		/// no cutoff. The sandbox entry guards (hostGate entryCutoff, entryOpen) use this, so an entry is never sent on a bar at or
-		/// after the cutoff GX itself flattens at. flatByHHMM is in the exchange zone.</summary>
+		/// no cutoff. The sandbox entry guards (hostGate entryCutoff, entryOpen) use this, so an entry is never sent on a bar whose
+		/// NEXT bar (where it fills) is at or after the cutoff GX itself flattens at (Coder 2026-11-22, Analyst Set3). flatByHHMM is in the exchange zone.</summary>
 		protected bool gxPastFlatCutoff(int flatByHHMM)
 		{
 			DateTime ex;
@@ -4843,7 +4843,7 @@ namespace PowerLanguage.Strategy
 			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
 			ExitSession.FlatDay f = gxFlatDay(ex.Date);
 			if (f.Closed) return false;
-			return ex >= ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At;
+			return ExitSession.EntryBlocked(ex, gxBarInterval(), ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At);   // the NEXT bar (the fill bar) must end before the cutoff
 		}
 
 		/// <summary>Coder 2026-11-22 (catalogue §2.1 "no new entries after 15:30; flat by 15:55"): true from minutesBefore minutes
@@ -4855,7 +4855,20 @@ namespace PowerLanguage.Strategy
 			if (gxTradingDate(ex) != ex.Date) return false;   // the evening session belongs to the next trading date
 			ExitSession.FlatDay f = gxFlatDay(ex.Date);
 			if (f.Closed) return false;
-			return ex >= ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At.AddMinutes(-Math.Max(0, minutesBefore));
+			return ExitSession.EntryBlocked(ex, gxBarInterval(), ExitSession.CutoffFor(ex.Date, flatByHHMM, f).At.AddMinutes(-Math.Max(0, minutesBefore)));
+		}
+
+		/// <summary>Data1 bar size for the entry cutoff: intraday time bars only (zero for tick, volume, daily and longer bars).</summary>
+		private TimeSpan gxBarInterval()
+		{
+			TimeSpan d = TimeSpan.Zero;
+			try
+			{
+				EResolution t = Bars.Info.Resolution.Type;
+				if (t == EResolution.Second || t == EResolution.Minute || t == EResolution.Hour) d = Bars.Info.Resolution.Duration();   // daily and longer, tick, volume: zero
+			}
+			catch (Exception) { d = TimeSpan.Zero; }
+			return d;
 		}
 
 		ExitSession.FlatDay gxFlatDay(DateTime day)

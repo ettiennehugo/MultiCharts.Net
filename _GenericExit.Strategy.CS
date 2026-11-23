@@ -941,6 +941,16 @@ namespace PowerLanguage.Function
 			return same.AddDays(1);
 		}
 
+		/// <summary>Coder 2026-11-22 (Analyst Set3: GX-00 fills stamped exactly 14:55:00 CT, and 12:10 CT on an early close): an entry
+		/// order sent at a bar's close fills on the NEXT bar, which MultiCharts stamps with that bar's close time. So an entry is
+		/// blocked when the next bar (barClose + barInterval) is at or after the cutoff, not only when this bar is. barInterval is the
+		/// chart bar size (zero for non-time bars, which falls back to barClose >= cutoff).</summary>
+		public static bool EntryBlocked(DateTime barClose, TimeSpan barInterval, DateTime cutoff)
+		{
+			if (barInterval < TimeSpan.Zero || barInterval > TimeSpan.FromDays(1)) barInterval = TimeSpan.Zero;
+			return barClose + barInterval >= cutoff;
+		}
+
 		public static DateTime CutoffOn(DateTime day, int hhmm)
 		{
 			int hour, minute;

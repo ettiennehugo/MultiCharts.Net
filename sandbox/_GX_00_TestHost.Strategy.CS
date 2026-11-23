@@ -118,7 +118,7 @@
 // Default: 0 (off: entries on every bar count, as before)
 // Units: HHMM clock in the exchange zone (ES: 1455 = 15:55 ET, five minutes before the regular close)
 // Range: 0 (off) or a clock 0000-2359
-// Effect: above 0, no entry is sent on or after that cutoff (early-close aware, as gxPastFlatCutoff) until the evening session of the next trading date; one Journal line 'entry blocked: at or after the flat-by cutoff' per day
+// Effect: above 0, no entry is sent on a bar whose next bar (the fill bar) is at or after that cutoff (early-close aware, as gxPastFlatCutoff; Coder 2026-11-22, Analyst Set3) until the evening session of the next trading date; one Journal line 'entry blocked: at or after the flat-by cutoff' per day
 // Interactions: EntryEveryBars sets how often an entry is tried, so a small count shows evening entries soon after 17:00 CT
 // Fixed or research-tuned: fixed
 //

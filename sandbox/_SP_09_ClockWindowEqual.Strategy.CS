@@ -309,7 +309,7 @@ namespace PowerLanguage.Strategy
 			double risk = Math.Abs(entry - stop);
 			double target = drawTarget(buy, pa5, entry, risk);
 			if (double.IsNaN(target)) { m_cNoDraw++; if (journalOn()) trace(ETraceLevel.Journal, $"SP-09 {et:yyyy-MM-dd HH:mm} {side} skipped: no 5m equal {(buy ? "high" : "low")} pair at least 0.5R beyond {entry}"); return; }
-			if (!budget(entry, stop)) { m_cBudget++; if (journalOn()) trace(ETraceLevel.Journal, $"SP-09 {et:yyyy-MM-dd HH:mm} {side} skipped: risk {risk} over 1 percent of equity"); return; }
+			if (!budget(entry, stop)) { m_cBudget++; if (journalOn()) trace(ETraceLevel.Error, $"SP-09 {et:yyyy-MM-dd HH:mm} {side} skipped: risk exceeds 1 percent ({risk} points)"); return; }
 			arm(buy, entry, stop, target, buy ? "SP09LE" : "SP09SE", 0);
 			honorExit(entry, risk);
 			if (m_done) return;

@@ -41,7 +41,7 @@ static class Program
 		FlatByAfterEntry();
 		FlatByExchangeClock();
 		FlatByFromRegularSession();
-		FlatByEarlyClose();
+		FlatByEarlyClose(); EntryCutoffNextBar();
 		MaxHoldSessions();
 		EmbeddedFillAnchorsStop();
 		Control();
@@ -651,6 +651,25 @@ static class Program
 		var e = Eng(c => c.FlatByHHMM = flatBy);
 		e.FlatCalendar = cal;
 		return e;
+	}
+
+	// Coder 2026-11-22 (Analyst Set3: GX-00 fills stamped 14:55:00 CT and 12:10 CT on 2024-11-29): an entry sent at a bar close fills
+	// on the next bar, stamped with its close, so the send bar is blocked when the NEXT bar is at or after the cutoff.
+	static void EntryCutoffNextBar()
+	{
+		Func<DateTime, ExitSession.FlatDay> cme = CmeEquityCt;
+		TimeSpan m1 = TimeSpan.FromMinutes(1);
+		DateTime reg = ExitSession.CutoffFor(new DateTime(2024, 11, 27), 1455, cme(new DateTime(2024, 11, 27))).At;
+		Check(reg == new DateTime(2024, 11, 27, 14, 55, 0), "regular day cutoff 14:55 CT");
+		Check(!ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 53, 0), m1, reg), "14:53 bar may send: it fills on the 14:54 bar");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 54, 0), m1, reg), "14:54 bar is blocked: it would fill on the 14:55 cutoff bar");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 55, 0), m1, reg), "the cutoff bar itself is blocked");
+		DateTime early = ExitSession.CutoffFor(new DateTime(2024, 11, 29), 1455, cme(new DateTime(2024, 11, 29))).At;
+		Check(early == new DateTime(2024, 11, 29, 12, 10, 0), "day after Thanksgiving: 12:15 CT close, cutoff 12:10 CT");
+		Check(!ExitSession.EntryBlocked(new DateTime(2024, 11, 29, 12, 8, 0), m1, early), "12:08 bar may send (fill 12:09)");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 29, 12, 9, 0), m1, early), "12:09 bar is blocked: its fill would be stamped 12:10");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 55, 0), TimeSpan.Zero, reg) && !ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 54, 0), TimeSpan.Zero, reg), "zero interval (non-time bars) falls back to barClose >= cutoff");
+		Check(ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 50, 0), TimeSpan.FromMinutes(5), reg) && !ExitSession.EntryBlocked(new DateTime(2024, 11, 27, 14, 45, 0), TimeSpan.FromMinutes(5), reg), "5-minute bars: the 14:50 bar is blocked, 14:45 may send");
 	}
 
 	static void FlatByEarlyClose()

@@ -190,10 +190,14 @@ namespace PowerLanguage.Strategy
 			if (!(lo > prev) || !(lo >= mid) || !(lo <= m_hi)) { m_chk[1]++; return; }
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, m_lo - tickSize());
-			double target = Session.rthHigh + 0.5 * (m_hi - m_lo);
-			if (!(target > entry)) { m_chk[2]++; m_done = true; return; }
-			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; return; }
+			double rthHigh = Session.rthHigh, zoneH = m_hi - m_lo;
+			double target = rthHigh + 0.5 * zoneH;
+			// Coder 2026-11-22 (Analyst Set3): every plan journals the target, the RTH high it used and the zone height, then its outcome.
+			string plan = $"PS-20 {Bars.Time[0]:yyyy-MM-dd HH:mm} plan entry {entry} stop {stop} target {target} = RTH high {rthHigh} + 0.5 x zone height {zoneH} (zone {m_lo}-{m_hi})";
+			if (!(target > entry)) { m_chk[2]++; m_done = true; if (journalOn()) trace(ETraceLevel.Journal, plan + ": skipped, target not above the entry"); return; }
+			if (!budget(entry, stop)) { m_chk[3]++; m_done = true; if (journalOn()) trace(ETraceLevel.Error, plan + ": skipped: risk exceeds 1 percent"); return; }
 			m_chk[4]++;
+			if (journalOn()) trace(ETraceLevel.Journal, plan + ": buy stop sent");
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "PS20LE", 0); { if (hostGate(true)) m_le.Send(entry, m_restQty); }
 		}
 
