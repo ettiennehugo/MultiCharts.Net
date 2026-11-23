@@ -180,7 +180,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; base.StartCalc(); m_gap = null; }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ base.StartCalc(); m_gap = null; }
 
 		protected override void CalcBar()
 		{
@@ -224,9 +224,12 @@ namespace PowerLanguage.Strategy
 			if (journalOn()) journalArm("DV08LE", m_level, m_level - sd, m_level + br, null);
 		}
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, 0, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

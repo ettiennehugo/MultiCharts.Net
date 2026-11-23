@@ -156,6 +156,7 @@ namespace PowerLanguage.Strategy
 			DevelopingSource = EDevelopingSource.Own;   // [Input] on the base: set in code, not in the Format dialog
 			OwnProfileWindow = EOwnProfileWindow.Rth;
 		}
+		protected override void StartCalc() { DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); }
 
 		protected override void CalcBar()
 		{

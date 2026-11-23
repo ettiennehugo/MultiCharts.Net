@@ -173,6 +173,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			RollDetection = ERollDetection.Series;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "PS24LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "PS24SE", EOrderAction.SellShort));
@@ -189,7 +190,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			HtfStreams = new[] { 2 };
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
 			m_last5 = m_day = DateTime.MinValue; m_runUp = m_runDn = 0; m_tradedToday = false;
 			m_stop = m_target = double.NaN;
 		}

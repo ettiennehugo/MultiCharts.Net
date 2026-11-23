@@ -151,15 +151,31 @@ namespace PowerLanguage.Strategy
 
 		public _MT_04_X60mSwingAVWAP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingLow; GxOrderPrefix = "MT04"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "MT04LE", EOrderAction.Buy)); }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, BarRingConfig.MaxAutoBars, "MT-04 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+		}
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "MT-04 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
 			var mgr = AvwapManager; var a = mgr == null ? null : mgr.Latest(EAvwapAnchor.SwingLow);
 			if (a != null && a.Valid && a.AnchorBar != m_anchor) { m_anchor = a.AnchorBar; if (StrategyInfo.MarketPosition == 0) m_done = false; m_filledSetup = false; m_restOn = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || rollOn(1)) return;
@@ -168,12 +184,12 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0 || Bars.CurrentBar < 10) return;
 			double lo = Bars.Low[0], prev = Bars.Low[5], hi = Bars.High[0];
-			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, Bars.Low[i]); prev = Math.Min(prev, Bars.Low[5 + i]); hi = Math.Max(hi, Bars.High[i]); }
+			for (int i = 1; i < 5; i++) { lo = Math.Min(lo, lbBar(i).l); prev = Math.Min(prev, lbBar(5 + i).l); hi = Math.Max(hi, lbBar(i).h); }
 			if (!(lo > prev) || Math.Abs(lo - a.Value) > 0.5 * a.Sigma) return;
 			int ago = Bars.CurrentBar - a.AnchorBar; if (ago < 0 || ago > Bars.CurrentBar) return;
 			double entry = hi + tickSize();
 			double stop = widen(true, entry, lo - tickSize());
-			double target = Bars.High[ago];
+			double target = lbBar(ago).h;
 			if (!(target > entry) || !budget(entry, stop)) { m_done = true; return; }
 			honorExit(entry, 0); m_restPx = entry; m_restBuy = true; m_restOn = true; m_restQty = _SandboxRules.ScaleQty(ExitMode, false); arm(true, entry, stop, target, "MT04LE", 5); m_le.Send(entry, m_restQty);
 		}
@@ -248,10 +264,13 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = m_anchor;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

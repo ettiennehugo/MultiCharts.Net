@@ -195,7 +195,7 @@ namespace PowerLanguage.Strategy
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- NeedsDaily = true; base.StartCalc(); m_day = DateTime.MinValue; }
+ NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */ DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); m_day = DateTime.MinValue; }
 
 		private int m_nativeSeen = -1;
 		private bool takeNative()
@@ -208,6 +208,19 @@ namespace PowerLanguage.Strategy
 			return true;
 		}
 
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "PS-02 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -216,7 +229,7 @@ namespace PowerLanguage.Strategy
 			if (day != m_day) newDay(day);
 			if (rollOn(1)) m_done = true;
 			int pos = StrategyInfo.MarketPosition;
-			exitBar();
+			exitBar(); sandboxEarlyFlat();
 			if (pos != 0) return;
 			TimeSpan tod = ToEastern(Bars.Time[0]).TimeOfDay;
 			if (m_done || !m_ok || !IsRth() || tod < Cfg.from || tod > Cfg.to) return;

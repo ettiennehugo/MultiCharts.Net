@@ -203,6 +203,9 @@ namespace PowerLanguage.Strategy
 			m_sxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "VW05SS", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		/// <summary>Owner 2026-11-16: the 5-minute ATR reads AtrLength * 5 + 5 Data1 bars back (75 at 14), past MaxBarsBack 49, so it reads the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
@@ -210,7 +213,8 @@ namespace PowerLanguage.Strategy
 			if (AtrLength < 1) throw new ArgumentException("_VW_05_LateDayVwap: AtrLength must be at least 1");
 			HtfStreams = new[] { 2 };
 			if (Entry == EEntry.A206At1529) NeedsDaily = true;   // σ_daily is ATR20d; see the header assumption
-			base.StartCalc();
+			DailyConfig.atrRestartOnRoll = false;   // owner 2026-11-16: carry the 20-day ATR over the roll (PR #46); used only when NeedsDaily is on
+			base.StartCalc(); requireRing(1, AtrLength * 5 + 6, "VW-05 lookback");   // MaxBarsBack 49: deep Data1 lookback from the ring
 			if (Vwap1Type != EVwapType.Session) throw new ArgumentException("_VW_05_LateDayVwap: Vwap1Type must be Session");
 			m_stop = double.NaN; m_tradedDay = DateTime.MinValue;
 		}
@@ -296,13 +300,13 @@ namespace PowerLanguage.Strategy
 			for (int k = n - 1; k >= 0; k--)
 			{
 				int begin = k * w;
-				double h = double.MinValue, l = double.MaxValue, c = Bars.Close[begin];
+				double h = double.MinValue, l = double.MaxValue, c = lbBar(begin).c;
 				for (int j = 0; j < w; j++)
 				{
-					h = Math.Max(h, Bars.High[begin + j]);
-					l = Math.Min(l, Bars.Low[begin + j]);
+					h = Math.Max(h, lbBar(begin + j).h);
+					l = Math.Min(l, lbBar(begin + j).l);
 				}
-				double pc = k == n - 1 ? Bars.Close[begin + w] : prevClose;
+				double pc = k == n - 1 ? lbBar(begin + w).c : prevClose;
 				sum += Math.Max(h - l, Math.Max(Math.Abs(h - pc), Math.Abs(l - pc)));
 				prevClose = c;
 			}

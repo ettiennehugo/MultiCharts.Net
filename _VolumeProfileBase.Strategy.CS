@@ -1217,8 +1217,10 @@ namespace PowerLanguage.Strategy
 		}
 
 		/// <summary>
-		/// VPB-6 (Rev 2.4): completed session profiles for value migration, newest first. Default: the stream's completed
-		/// profiles ending before the calc bar. The futures base returns completed Own RTH profiles when OwnProfileWindow = Rth.
+		/// VPB-6 (Rev 2.4) / VPB-7: completed session profiles for value migration, Composite, IsBalanced, BalanceRange and the
+		/// legacy ValueMigrationScore, newest first. Default: the stream's completed MC profiles ending before the calc bar
+		/// (unchanged behaviour). The futures base returns completed Own RTH profiles when OwnProfileWindow = Rth and
+		/// DevelopingSource = Own on DevProfileDataStream, so those studies do not need MC's Volume Profile on the chart.
 		/// </summary>
 		protected virtual List<VpExtra> migrationProfiles(int stream, int count)
 		{
@@ -1286,7 +1288,7 @@ namespace PowerLanguage.Strategy
 		public VpExtra Composite(int stream, int n)
 		{
 			int cur = streamItemBarIndex(stream);
-			List<VpExtra> src = RecentCompletedProfiles(stream, n, cur);
+			List<VpExtra> src = migrationProfiles(stream, n);
 			if (src.Count == 0) return null;
 			if (m_compositeCache != null && m_compositeStream == stream && m_compositeN == n && m_compositeBar == cur && m_compositeNewest == src[0].startBar)
 				return m_compositeCache;
@@ -1311,7 +1313,7 @@ namespace PowerLanguage.Strategy
 		/// <summary>VPB-7: the last <paramref name="n"/> completed value areas overlap pairwise by >= minVaOverlap of the narrower.</summary>
 		public bool IsBalanced(int stream, int n, double minVaOverlap = 0.6)
 		{
-			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			List<VpExtra> src = migrationProfiles(stream, n);
 			if (src.Count < Math.Max(2, n)) return false;
 			var hi = new List<double>(); var lo = new List<double>();
 			for (int i = src.Count - 1; i >= 0; i--) { hi.Add(src[i].vah); lo.Add(src[i].val); }
@@ -1322,7 +1324,7 @@ namespace PowerLanguage.Strategy
 		public bool BalanceRange(int stream, int n, bool union, out double high, out double low)
 		{
 			high = low = 0;
-			List<VpExtra> src = RecentCompletedProfiles(stream, n, streamItemBarIndex(stream));
+			List<VpExtra> src = migrationProfiles(stream, n);
 			if (src.Count < n || n < 1) return false;
 			high = union ? double.MinValue : double.MaxValue; low = union ? double.MaxValue : double.MinValue;
 			foreach (VpExtra x in src)
@@ -1346,7 +1348,7 @@ namespace PowerLanguage.Strategy
 		public int ValueMigrationScore(int stream, double atr20Daily, int n = 3, double minChangeFraction = 0.10, bool includeDeveloping = true)
 		{
 			if (n < 1 || atr20Daily < 0 || minChangeFraction < 0) return 0;
-			List<VpExtra> src = RecentCompletedProfiles(stream, n + 1, streamItemBarIndex(stream));
+			List<VpExtra> src = migrationProfiles(stream, n + 1);
 			if (src.Count < n + 1) return 0;
 			var pocs = new List<double>(src.Count);
 			for (int i = src.Count - 1; i >= 0; i--) pocs.Add(src[i].poc);   // oldest first

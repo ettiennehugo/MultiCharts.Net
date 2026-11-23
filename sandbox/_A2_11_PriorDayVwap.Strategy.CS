@@ -164,6 +164,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			GxOrderPrefix = "A211"; createGxOrders();
 			RollDetection = ERollDetection.Series;
 			FlatBy = new TimeSpan(15, 55, 0);
@@ -181,10 +182,23 @@ namespace PowerLanguage.Strategy
 
 			if (!Enum.IsDefined(typeof(EAcceptBars), AcceptBars)) throw new ArgumentException("_A2_11_PriorDayVwap: AcceptBars is not a defined EAcceptBars");
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
 			m_pd = double.NaN;
 		}
 
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "A2-11 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
+		}
 		protected override void CalcBar()
 		{
 			base.CalcBar();
@@ -197,7 +211,7 @@ namespace PowerLanguage.Strategy
 			if (s != null && s.rthComplete && !m_wasComplete && !double.IsNaN(CurrentVwap1)) m_pd = CurrentVwap1;
 			m_wasComplete = s != null && s.rthComplete;
 			int pos = StrategyInfo.MarketPosition;
-			exitBar();
+			exitBar(); sandboxEarlyFlat();
 			if (pos > 0) return;
 			if (pos != 0 || m_done || rollOn(1) || !(m_pd > 0) || s == null || !(s.rthOpen > 0) || s.rthOpen >= m_pd) return;
 			if (!IsRth()) return;

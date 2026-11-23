@@ -172,7 +172,7 @@ namespace PowerLanguage.Strategy
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 
 			if (!Enum.IsDefined(typeof(EDaysBelow), DaysBelow)) throw new ArgumentException("_A2_14_WeeklyAvwapReclaim: DaysBelow is not a defined EDaysBelow");
-			NeedsDaily = true;
+			NeedsDaily = true; DailyConfig.atrRestartOnRoll = false;   /* owner 2026-11-16: carry the 20-day ATR over the roll (PR #46) */
 			Vwap1Type = EVwapType.Week; Vwap1DataStream = 1;
 			base.StartCalc();
 		}
@@ -191,6 +191,15 @@ namespace PowerLanguage.Strategy
 				if (m_held >= 7 || back) { m_lx.Send(); return true; }
 				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
 				return false;
+			}
+			// Analyst MC17 (2024-01-15 MLK): a CME holiday session halts at 12:00 CT and its trades carry the next day's trade date, so
+			// its daily bar is not a settled daily close. It is not counted as a close, a held day or an entry signal; the resting
+			// stop and target stay working.
+			if (IsNoRthDay(Bars.Time[0].Date))
+			{
+				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); }
+				if (journalOn()) trace(ETraceLevel.Journal, $"A2-14 {Bars.Time[0]:yyyy-MM-dd} holiday session ({_CmeHolidays.Rules.Get(Bars.Time[0].Date).Name}), not a daily close");
+				return;
 			}
 			if (pos > 0 && sendExits()) return;
 			m_closes.Insert(0, Bars.Close[0]); if (m_closes.Count > 21) m_closes.RemoveAt(21);

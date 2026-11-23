@@ -179,12 +179,15 @@ namespace PowerLanguage.Strategy
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "SW02LS", EOrderAction.Sell, OrderExit.FromAll));
 		}
 
+		/// <summary>Owner 2026-11-16: sma(200) reads 200 Data2 bars back, past MaxBarsBack 49, so Data2 closes come from an engine ring on stream 2 (see _SandboxRules.RingAgo).</summary>
+		private RingBar d2Bar(int ago) { return _SandboxRules.RingAgo(Ring(2), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			if (!Enum.IsDefined(typeof(EFilter), Filter)) throw new ArgumentException("_SW_02_SwingPullback: Filter is not a defined EFilter");
 			if (Filter == EFilter.Composite) { DevelopingSource = EDevelopingSource.Own; DevProfileDataStream = 1; }
-			base.StartCalc();
+			base.StartCalc(); requireRing(2, Math.Max(Cfg.smaLong, Math.Max(Cfg.smaExit, Cfg.rsiLength + 1)) + 2, "SW-02 lookback");   // MaxBarsBack 49: daily history from the ring
 			m_stop = double.NaN; m_entryBar = -1;
 		}
 
@@ -246,13 +249,13 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
-		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += BarsOfData(2).Close[i]; return s / n; }
+		private double sma(int n) { double s = 0; for (int i = 0; i < n; i++) s += d2Bar(i).c; return s / n; }
 
 		/// <summary>Cutler RSI (simple averages) over n closes; 50 when flat.</summary>
 		private double rsi(int n)
 		{
 			double up = 0, dn = 0;
-			for (int i = 0; i < n; i++) { double d = BarsOfData(2).Close[i] - BarsOfData(2).Close[i + 1]; if (d > 0) up += d; else dn -= d; }
+			for (int i = 0; i < n; i++) { double d = d2Bar(i).c - d2Bar(i + 1).c; if (d > 0) up += d; else dn -= d; }
 			return up + dn == 0 ? 50.0 : 100.0 * up / (up + dn);
 		}
 

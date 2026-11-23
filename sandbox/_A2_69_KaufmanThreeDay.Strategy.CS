@@ -248,6 +248,7 @@ namespace PowerLanguage.Strategy
 			if (!Enum.IsDefined(typeof(ETrend), Trend)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Trend is not a defined ETrend");
 			if (!Enum.IsDefined(typeof(EHold), Hold)) throw new ArgumentException("_A2_69_KaufmanThreeDay: Hold is not a defined EHold");
 			if (ProfitTake || Spike) NeedsDaily = true;
+			DailyConfig.atrRestartOnRoll = false;   // owner 2026-11-16: carry the 20-day ATR over the roll (PR #46); used only when NeedsDaily is on
 			m_clock = null;
 			configureSessions();
 			RollDetection = ERollDetection.Series;   // unadjusted series: detect splices

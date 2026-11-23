@@ -182,11 +182,14 @@ namespace PowerLanguage.Strategy
 			m_sxLmt = OrderCreator.Limit(new SOrderParameters(Contracts.Default, "OF07ST", EOrderAction.BuyToCover, OrderExit.FromAll));
 		}
 
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc() {
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
 
 		if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
- base.StartCalc(); m_day = DateTime.MinValue; }
+ base.StartCalc(); requireRing(1, 2000, "OF-07 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */ m_day = DateTime.MinValue; }
 
 		protected override void CalcBar()
 		{
@@ -198,7 +201,7 @@ namespace PowerLanguage.Strategy
 						// Exits. The only place this bar sends an exit order. A later GX exitPlan replaces this local function.
 			bool sendExits()
 			{
-				if (mustFlatten()) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { if (pos > 0) m_lx.Send(); else m_sx.Send(); return true; }
 				if (pos > 0) { m_lxStp.Send(m_stop); m_lxLmt.Send(m_target); } else { m_sxStp.Send(m_stop); m_sxLmt.Send(m_target); }
 				portfolioStop(m_stop);                        // M-PORT: no-op outside Portfolio Trader
 			
@@ -220,7 +223,7 @@ namespace PowerLanguage.Strategy
 			if (ts == null || !ts.valid || !ts.burst) return;
 			if (Bars.CurrentBar <= Cfg.rangeLen) return;
 			double mean = 0;
-			for (int i = 1; i <= Cfg.rangeLen; i++) mean += Bars.High[i] - Bars.Low[i];
+			for (int i = 1; i <= Cfg.rangeLen; i++) mean += lbBar(i).h - lbBar(i).l;
 			mean /= Cfg.rangeLen;
 			if (h - l < Cfg.minRangeMult * mean) return;
 			double stop = (h + l) / 2;

@@ -198,7 +198,7 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			bool sendExits()
 			{
-				if (mustFlatten() || (tod >= new TimeSpan(10, 0, 0) && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen)) { m_lx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero)) || (tod >= new TimeSpan(10, 0, 0) && m_rthDen > 0 && Bars.Close[0] < m_rthNum / m_rthDen)) { m_lx.Send(); return true; }
 				m_lxStp.Send(m_stop); m_lxLmt.Send(m_target);
 				return false;
 			}

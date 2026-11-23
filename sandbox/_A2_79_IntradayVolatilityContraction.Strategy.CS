@@ -149,11 +149,14 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		public _A2_79_IntradayVolatilityContraction(object _ctx) : base(_ctx) { }
 		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; }
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-79 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -162,9 +165,9 @@ namespace PowerLanguage.Strategy
 			TimeSpan t = sessionClock(Bars.Time[0]); if (((int)t.TotalMinutes) % 5 != 0) return;
 			DateTime day = GlobexDate(Bars.Time[0]); if (day == m_day) return; m_day = day;
 			double r1 = 0, r2 = 0, v1 = 0, v2 = 0;
-			for (int i = 0; i < 5; i++) { r1 = Math.Max(r1, Bars.High[i] - Bars.Low[i]); v1 += Bars.Volume[i]; r2 = Math.Max(r2, Bars.High[5 + i] - Bars.Low[5 + i]); v2 += Bars.Volume[5 + i]; }
+			for (int i = 0; i < 5; i++) { r1 = Math.Max(r1, lbBar(i).h - lbBar(i).l); v1 += lbBar(i).v; r2 = Math.Max(r2, lbBar(5 + i).h - lbBar(5 + i).l); v2 += lbBar(5 + i).v; }
 			double atr = 0, baseVol = 0;
-			for (int k = 2; k < 16; k++) { atr += Bars.High[k * 5] - Bars.Low[k * 5]; baseVol += Bars.Volume[k * 5]; }
+			for (int k = 2; k < 16; k++) { atr += lbBar(k * 5).h - lbBar(k * 5).l; baseVol += lbBar(k * 5).v; }
 			atr /= 14; baseVol /= 14;
 			bool gate = r1 <= 0.75 * r2 && r1 <= 0.75 * atr && baseVol > 0 && v1 <= 0.85 * baseVol * 5;
 			if (journalOn()) trace(ETraceLevel.Journal, "A2-79 contraction gate " + gate + ". No order.");

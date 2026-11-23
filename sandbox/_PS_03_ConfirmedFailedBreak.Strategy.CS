@@ -153,18 +153,35 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS03"; createGxOrders();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03SE", EOrderAction.SellShort));
 		}
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc(); requireRing(1, 2000, "PS-03 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
+		}
+
+		/// <summary>Analyst MC17 (A2-35 held over Good Friday 2023): GX resolves one flat-by clock per run, so on an early close,
+		/// holiday halt or abbreviated session the open position is closed here at that day's session end minus 5 minutes.</summary>
+		private void sandboxEarlyFlat()
+		{
+			int pos = StrategyInfo.MarketPosition;
+			if (pos == 0 || GxConfig == null || GxConfig.SessionExit != ESessionExit.FlatBy) return;
+			string why;
+			if (!_SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd, out why)) return;
+			if (journalOn()) trace(ETraceLevel.Journal, "PS-03 " + GlobexDate(Bars.Time[0]).ToString("yyyy-MM-dd") + " flat-by early close: " + why + ", closing " + Math.Abs(pos));
+			gxNoteExit("FLATBY");
+			gxSendExit("FLATBY", false, new ExitPosition(), pos > 0, Math.Abs(pos));
 		}
 		protected override void CalcBar()
 		{
-			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar();
+			base.CalcBar(); if (Bars.Status != EBarState.Close) return; exitBar(); sandboxEarlyFlat();
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; m_filledSetup = false; m_restOn = false; m_back = m_beyond = 0; m_poke = 0; m_have = false; }
 			if (StrategyInfo.MarketPosition != 0 || m_done || !IsRth() || rollOn(1)) return;
 			if (sandboxBook()) return;
@@ -172,7 +189,7 @@ namespace PowerLanguage.Strategy
 			TimeSpan tod = sessionClock(Bars.Time[0]); if (!IsExist(2)) { if (journalOn()) trace(ETraceLevel.Error, "Data2 missing"); return; }
 			if (((int)tod.TotalMinutes) % 5 != 0) return;
 			double hi = Bars.High[0], lo = Bars.Low[0], prevHi = Bars.High[5], prevLo = Bars.Low[5];
-			for (int i = 1; i < 5; i++) { hi = Math.Max(hi, Bars.High[i]); lo = Math.Min(lo, Bars.Low[i]); prevHi = Math.Max(prevHi, Bars.High[5 + i]); prevLo = Math.Min(prevLo, Bars.Low[5 + i]); }
+			for (int i = 1; i < 5; i++) { hi = Math.Max(hi, lbBar(i).h); lo = Math.Min(lo, lbBar(i).l); prevHi = Math.Max(prevHi, lbBar(5 + i).h); prevLo = Math.Min(prevLo, lbBar(5 + i).l); }
 			double tick = tickSize();
 			if (!m_have && hi > prior.vah + tick) { m_have = true; m_long = false; m_poke = hi; m_beyond = Bars.Close[0] > prior.vah ? 1 : 0; m_back = 0; }
 			else if (!m_have && lo < prior.val - tick) { m_have = true; m_long = true; m_poke = lo; m_beyond = Bars.Close[0] < prior.val ? 1 : 0; m_back = 0; }
@@ -264,10 +281,13 @@ namespace PowerLanguage.Strategy
 		}
 
 
+		private DateTime m_bookDay = DateTime.MinValue;
 		private bool sandboxBook()
 		{
+			DateTime bookDay = tradingDayKey(Bars.Time[0]);   // Analyst MC17 (A2-32/A2-35): one trade per anchor per day, so a fill on an earlier
+			if (bookDay != m_bookDay) { m_bookDay = bookDay; m_filledSetup = false; }   // trading day never blocks today (Rest returned Done forever)
 			int anchor = 0;
-			bool window = !_SandboxRules.PastFlat(sessionClock(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
+			bool window = !_SandboxRules.PastFlat(ToEastern(Bars.Time[0]), Bars.Info.Name, m_rthValueEnd);
 			ERest step = _SandboxRules.Rest(StrategyInfo.MarketPosition, ref m_prevPos, ref m_filledSetup, ref m_fillAnchor, anchor, ref m_restOn, window);
 			if (step == ERest.Done) { m_done = true; return true; }
 			if (step != ERest.Resend) return false;

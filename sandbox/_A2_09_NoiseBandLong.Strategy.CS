@@ -196,7 +196,7 @@ namespace PowerLanguage.Strategy
 			}
 			bool sendExits()
 			{
-				if (mustFlatten()) { m_lx.Send(); return true; }
+				if ((mustFlatten() || _SandboxRules.EarlyFlatDue(ToEastern(Bars.Time[0]), Bars.Info.Name, TimeSpan.Zero))) { m_lx.Send(); return true; }
 				if (check && !double.IsNaN(upper) && !double.IsNaN(vwap) && Bars.Close[0] < Math.Max(upper, vwap)) { m_lx.Send(); return true; }
 				return false;
 			}

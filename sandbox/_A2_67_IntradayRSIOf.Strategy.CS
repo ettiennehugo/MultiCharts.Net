@@ -155,11 +155,14 @@ namespace PowerLanguage.Strategy
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A267LX", EOrderAction.Sell, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A267LS", EOrderAction.Sell, OrderExit.FromAll));
 		}
+		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
+		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
+
 		protected override void StartCalc()
 		{
 			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			_SandboxRules.ApplyPit(Bars.Info.Name, ref m_rthStart, ref m_rthEnd, ref m_rthValueEnd, Bars.Sessions != null && Bars.Sessions.Count > 0 ? _SandboxRules.DaytimeEnd(Bars.Sessions[Bars.Sessions.Count - 1].EndTime) : TimeSpan.Zero);
-			base.StartCalc();
+			base.StartCalc(); requireRing(1, 2000, "A2-67 lookback");   /* Analyst MC17: deep Data1 lookback without raising MaxBarsBack 49 */
 		}
 		protected override void CalcBar()
 		{
@@ -188,19 +191,19 @@ namespace PowerLanguage.Strategy
 			int ticks = 1;
 			try { InstrumentProfile p = InstrumentProfileOf(1); if (p != null && p.costFloorTicks > 0) ticks = p.costFloorTicks; } catch (Exception) { }
 			if (entry - m_stop < ticks * tickSize()) m_stop = entry - ticks * tickSize();
-			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { m_done = true; return; }
+			if ((entry - m_stop) * Bars.Info.BigPointValue > equityAvailable(0.01)) { if (journalOn()) trace(ETraceLevel.Journal, "A2-67 skip: stop breaches risk budget"); m_done = true; return; }
 			m_le.Send(); m_done = true; m_ls.Send(m_stop);
 		}
 		private double fiveLow(int ago)
 		{
 			double lo = double.MaxValue;
-			for (int i = ago * 5; i < ago * 5 + 5; i++) lo = Math.Min(lo, Bars.Low[i]);
+			for (int i = ago * 5; i < ago * 5 + 5; i++) lo = Math.Min(lo, lbBar(i).l);
 			return lo;
 		}
 		private double fiveHigh(int ago)
 		{
 			double hi = double.MinValue;
-			for (int i = ago * 5; i < ago * 5 + 5; i++) hi = Math.Max(hi, Bars.High[i]);
+			for (int i = ago * 5; i < ago * 5 + 5; i++) hi = Math.Max(hi, lbBar(i).h);
 			return hi;
 		}
 		private double rsiOf(bool highs, int n)

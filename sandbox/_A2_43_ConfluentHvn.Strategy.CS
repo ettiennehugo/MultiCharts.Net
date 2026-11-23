@@ -148,12 +148,13 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 		}
 		protected override void StartCalc()
 		{
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
-			base.StartCalc();
+			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ base.StartCalc();
 		}
 		protected override void CalcBar()
 		{
