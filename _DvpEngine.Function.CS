@@ -1159,6 +1159,9 @@ namespace PowerLanguage.Function
 		readonly DvpCoef[] m_fwd;
 		int m_fwdCount;
 		long m_pos = -1, m_roll1 = long.MinValue, m_roll0 = long.MinValue;
+		// ruling 2026-11-23 18:46 CT: a MIXED roll bar (RingBar.rollMixed, an intrabar-body splice) is recorded as its next position
+		// (the first single-contract bar) and flagged, so the post-roll window never contains it
+		bool m_rollMixed1, m_rollMixed0;
 		int m_lastBar = int.MinValue;
 		// rev 6 DV-3.10: online degree self-calibration (SelfCalibrate: scorer, ring and fit built here; Calibrate: scorer lazy, journal side)
 		readonly DvpSelfCalib m_self;
@@ -1262,9 +1265,10 @@ namespace PowerLanguage.Function
 			RingBar b = ring[0];
 			if (b.bar == m_lastBar) return false;
 			m_lastBar = b.bar; m_pos++;
-			if (b.rollBar) { m_roll0 = m_roll1; m_roll1 = m_pos; if (RollDetect) m_atr.ResetPrev(); }   // DV-7.3
-			if (b.rollBar && RollDetect && journal != null) { journal(RollWarmupLine(b.time)); m_rollJournalState = 1; }
-			m_atr.Add(b.h, b.l, b.c);
+			bool mixed = b.rollBar && b.rollMixed && RollDetect;
+			if (b.rollBar) { m_roll0 = m_roll1; m_rollMixed0 = m_rollMixed1; m_roll1 = mixed ? m_pos + 1 : m_pos; m_rollMixed1 = mixed; if (RollDetect) m_atr.ResetPrev(); }   // DV-7.3
+			if (b.rollBar && RollDetect && journal != null) { journal(RollWarmupLine(b.time, mixed)); m_rollJournalState = 1; }
+			if (!mixed) m_atr.Add(b.h, b.l, b.c);   // a mixed bar's range holds the contract jump: not a true range (the next bar starts fresh)
 			m_atrHist[(int)(m_pos % m_K)] = m_atr.Value;
 			NewSession = m_pos == 0 || b.tradingDay != SessionDay;   // DV-7.7: tradingDayKey changes, never calendar dates
 			if (NewSession) { Sessions++; SessionDay = b.tradingDay; SessionHalfDay = halfDay; }
@@ -1377,8 +1381,8 @@ namespace PowerLanguage.Function
 		long newestRollByPos(long aPos)
 		{
 			long lo = aPos - m_n + 2;   // i in [1, n-1]
-			if (m_roll1 >= lo && m_roll1 <= aPos) return m_roll1;
-			if (m_roll0 >= lo && m_roll0 <= aPos) return m_roll0;
+			if (m_roll1 >= lo && m_roll1 <= aPos + (m_rollMixed1 ? 1 : 0)) return m_roll1;   // mixed: recorded one bar later; aPos + 1 = 0 clean bars
+			if (m_roll0 >= lo && m_roll0 <= aPos + (m_rollMixed0 ? 1 : 0)) return m_roll0;
 			return long.MinValue;
 		}
 
@@ -1393,11 +1397,14 @@ namespace PowerLanguage.Function
 			crosses = rollCut = false;
 			if (RollDetect)
 			{
-				int last = Math.Min(anchorAgo + m_n - 2, ring.Count - 1);
+				// ruling 2026-11-23 18:46 CT: a mixed roll bar (both contracts) is itself excluded, also at i = 0: n = bars after it
+				int last = Math.Min(anchorAgo + m_n - 1, ring.Count - 1);
 				for (int a = anchorAgo; a <= last; a++)
 					if (ring[a].rollBar)
 					{
-						int nEff = a - anchorAgo + 1;
+						bool mixed = ring[a].rollMixed;
+						if (!mixed && a > anchorAgo + m_n - 2) continue;   // a clean roll bar at i = 0 starts the window: no cut
+						int nEff = mixed ? a - anchorAgo : a - anchorAgo + 1;
 						if (nEff >= RollMin && aPos - nEff + 1 >= 0) { rollCut = true; return nEff; }
 						if (aPos - m_n + 1 < 0 || ring.Count < anchorAgo + m_n) return -1;   // still in the stream's first winLen bars: warm-up
 						crosses = true; return 0;
@@ -1408,16 +1415,20 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>DV-7.1 journal line on a roll bar (journal side).</summary>
-		public string RollWarmupLine(DateTime rollTime)
+		public string RollWarmupLine(DateTime rollTime) { return RollWarmupLine(rollTime, false); }
+
+		/// <summary>DV-7.1 journal line on a roll bar; mixed (18:46 CT) = the roll bar holds both contracts and is left out of the window.</summary>
+		public string RollWarmupLine(DateTime rollTime, bool mixed)
 		{
 			return "DVP ROLL warmup stream(Data" + I(Ds) + ") rollBar(" + rollTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + ") winLen(" + I(m_n)
-				+ ") rollMinBars(" + I(RollMin) + "): windows are truncated at the roll bar and fitted from " + I(RollMin) + " post-roll bars (Ettienne 2026-11-23 14:09 CT)";
+				+ ") rollMinBars(" + I(RollMin) + "): windows are truncated at the roll bar and fitted from " + I(RollMin) + " post-roll bars (Ettienne 2026-11-23 14:09 CT)"
+				+ (mixed ? " mixedBar(1): the roll bar holds both contracts and is excluded; the window starts on the next bar (Ettienne 2026-11-23 18:46 CT)" : "");
 		}
 
 		static bool crossesInRing(_BarRing ring, int anchorAgo, int n)
 		{
 			for (int a = anchorAgo; a <= anchorAgo + n - 2; a++) if (ring[a].rollBar) return true;   // i = n-1-(a-anchorAgo) in [1, n-1]
-			return false;
+			return ring[anchorAgo + n - 1].rollBar && ring[anchorAgo + n - 1].rollMixed;   // a mixed roll bar at i = 0 crosses too (18:46 CT)
 		}
 
 		/// <summary>The snapshot whose window ends endAgo bars back in the ring (endAgo = 1 when ring[0] is the current closed bar t).</summary>

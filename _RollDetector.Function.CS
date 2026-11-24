@@ -126,18 +126,19 @@ namespace PowerLanguage.Function
 		{
 			var inv = System.Globalization.CultureInfo.InvariantCulture;
 			bool warm = !double.IsNaN(r.Atr) && r.Atr > 0;
-			string via = r.Via == RollSpliceLocator.EVia.Reopen ? "reopen" : r.Via == RollSpliceLocator.EVia.Intrabar ? "intrabar" : r.Via == RollSpliceLocator.EVia.Fallback ? "fallback" : "none";
+			string via = RollSpliceLocator.ViaName(r.Via);
 			return "ROLL table splice(" + r.Table.ToString("yyyy-MM-dd", inv) + ") at(" + r.BarTime.ToString("yyyy-MM-dd HH:mm", inv) + ") via(" + via + ") session(+" + r.Session.ToString(inv)
 				+ ") gapBar(" + (r.GapTime == DateTime.MinValue ? "-" : r.GapTime.ToString("yyyy-MM-dd HH:mm", inv)) + ") gapPts(" + (double.IsNaN(r.Gap) ? "NaN" : r.Gap.ToString("+0.00;-0.00;0.00", inv))
 				+ ") gapTicks(" + (double.IsNaN(r.Gap) || !(tick > 0) ? "NaN" : (r.Gap / tick).ToString("+0;-0;0", inv)) + ") atr20(" + (warm ? num(r.Atr, "0.00") : "NaN")
-				+ ") gapAtr(" + (warm && !double.IsNaN(r.Gap) ? num(Math.Abs(r.Gap) / r.Atr, "0.000") : "NaN") + ") minAtr(" + num(r.minAtr, "0.0##") + ") found(" + (r.Found ? "1" : "0") + ")";
+				+ ") gapAtr(" + (warm && !double.IsNaN(r.Gap) ? num(Math.Abs(r.Gap) / r.Atr, "0.000") : "NaN") + ") minAtr(" + num(r.minAtr, "0.0##") + ") found(" + (r.Found ? "1" : "0") + ")"
+				+ (r.Via == RollSpliceLocator.EVia.IntrabarBody ? " test(close - prevClose) openGapPts(" + (double.IsNaN(r.OpenGap) ? "NaN" : r.OpenGap.ToString("+0.00;-0.00;0.00", inv)) + ") mixedBar(1)" : "");
 		}
 
 		/// <summary>Owner ruling 2026-11-23 13:31 CT: the Journal line when a late splice fires the engine resets a second time.</summary>
 		public static string ResetAtSpliceLine(RollSpliceLocator r)
 		{
 			var inv = System.Globalization.CultureInfo.InvariantCulture;
-			string via = r.Via == RollSpliceLocator.EVia.Reopen ? "reopen" : r.Via == RollSpliceLocator.EVia.Intrabar ? "intrabar" : r.Via == RollSpliceLocator.EVia.Fallback ? "fallback" : "none";
+			string via = RollSpliceLocator.ViaName(r.Via);
 			return "ROLL table reset-at-splice(" + r.Table.ToString("yyyy-MM-dd", inv) + ") at(" + r.BarTime.ToString("yyyy-MM-dd HH:mm", inv) + ") via(" + via + ") session(+" + r.Session.ToString(inv)
 				+ ") rollEvent(" + (r.ArmTime == DateTime.MinValue ? "-" : r.ArmTime.ToString("yyyy-MM-dd HH:mm", inv)) + ") engines(AVWAP VWAP PRICEACTION PROFILE)";
 		}
@@ -308,11 +309,34 @@ namespace PowerLanguage.Function
 	/// small (pre-2022 carry, warm-up), and a spread model needs rates / dividends the host does not have.
 	/// Causal: one bar at a time, never a later bar. Arm on the table reopen bar BEFORE stepping that bar. Step is idempotent per bar.
 	/// While A is NaN (warm-up) no bar qualifies, so the window ends in the fallback.
+	/// Owner ruling 2026-11-23 18:46 CT: on intraday Data1 slower than 1 minute (bodyCheck) a bar whose open gap does not qualify is
+	/// also tested on its close - prevClose (same minAtr x A): the switch happened inside the bar (Via IntrabarBody, a mixed bar).
+	/// 1-minute and faster Data1, tick / volume / range bars and Day-or-slower bars keep the open-gap test only.
 	/// </summary>
 	public sealed class RollSpliceLocator
 	{
 		public const double DefaultMinAtr = 0.4;
-		public enum EVia { None = 0, Reopen = 1, Intrabar = 2, Fallback = 3 }
+		/// <summary>IntrabarBody (owner ruling 2026-11-23 18:46 CT): Data1 slower than 1 minute only; the switch happened INSIDE the bar
+		/// (|open - prevClose| below the threshold, |close - prevClose| at or above it). The bar mixes both contracts.</summary>
+		public enum EVia { None = 0, Reopen = 1, Intrabar = 2, Fallback = 3, IntrabarBody = 4 }
+
+		/// <summary>Journal name of a via: reopen / intrabar / fallback / intrabar-body / none.</summary>
+		public static string ViaName(EVia v)
+		{
+			switch (v)
+			{
+				case EVia.Reopen: return "reopen";
+				case EVia.Intrabar: return "intrabar";
+				case EVia.Fallback: return "fallback";
+				case EVia.IntrabarBody: return "intrabar-body";
+				default: return "none";
+			}
+		}
+
+		/// <summary>Owner ruling 2026-11-23 18:46 CT: also test the mid-bar jump close - prevClose when the open gap does not qualify.
+		/// The host sets it only for intraday Data1 slower than 1 minute (Minute size &gt; 1, Hour); never for 1-minute or faster,
+		/// tick / volume / range bars, or Day and slower bars. Default false = the open-gap test only.</summary>
+		public bool bodyCheck;
 
 		/// <summary>Qualifying gap in multiples of A (inclusive).</summary>
 		public double minAtr = DefaultMinAtr;
@@ -327,6 +351,8 @@ namespace PowerLanguage.Function
 		public EVia Via;
 		public DateTime Table = DateTime.MinValue, BarTime = DateTime.MinValue, GapTime = DateTime.MinValue;
 		public double Gap = double.NaN, Atr = double.NaN;
+		/// <summary>IntrabarBody only: the bar's open gap (open - prevClose), which did not qualify; NaN otherwise.</summary>
+		public double OpenGap = double.NaN;
 		/// <summary>Session of the offset bar relative to the table session: 0 = table session, 1 = next, 2 = fallback on the session after.</summary>
 		public int Session;
 		/// <summary>True when a bar qualified (|g| >= minAtr x A); false for the fallback. Replaces the T-R1 k = 1.0 confirmed flag.</summary>
@@ -342,7 +368,7 @@ namespace PowerLanguage.Function
 		public void Reset()
 		{
 			m_armed = false; m_curDay = DateTime.MinValue; m_sessions = 0; m_lastBar = -1; m_bestSession = 0; m_bestGap = m_bestAtr = double.NaN; m_bestTime = DateTime.MinValue;
-			Via = EVia.None; Table = BarTime = GapTime = ArmTime = DateTime.MinValue; Gap = Atr = double.NaN; Session = 0; Found = false;
+			Via = EVia.None; Table = BarTime = GapTime = ArmTime = DateTime.MinValue; Gap = Atr = OpenGap = double.NaN; Session = 0; Found = false;
 		}
 
 		/// <summary>Open the search on the table reopen bar (call before Step for that bar). A window still open is replaced.</summary>
@@ -357,6 +383,13 @@ namespace PowerLanguage.Function
 		/// prior bar's close; atr = A on this bar; dayStart = this is the first bar of its trading day.</summary>
 		public bool Step(int bar, DateTime tradingDay, DateTime barTime, double open, double prevClose, double atr, bool dayStart)
 		{
+			return Step(bar, tradingDay, barTime, open, prevClose, atr, dayStart, double.NaN);
+		}
+
+		/// <summary>Step with the bar's close: with bodyCheck, a bar whose open gap does not qualify but whose close - prevClose does
+		/// is the splice (Via IntrabarBody, Gap = close - prevClose = the net jump from the last old-contract close).</summary>
+		public bool Step(int bar, DateTime tradingDay, DateTime barTime, double open, double prevClose, double atr, bool dayStart, double close)
+		{
 			if (bar == m_lastBar) return false;
 			m_lastBar = bar;
 			Via = EVia.None;
@@ -366,7 +399,7 @@ namespace PowerLanguage.Function
 			if (m_sessions >= 2)
 			{
 				m_armed = false; Via = EVia.Fallback; Found = false; Session = 2; BarTime = barTime;
-				Gap = double.IsNaN(m_bestGap) ? 0 : m_bestGap; GapTime = m_bestTime; Atr = m_bestAtr;
+				Gap = double.IsNaN(m_bestGap) ? 0 : m_bestGap; GapTime = m_bestTime; Atr = m_bestAtr; OpenGap = double.NaN;
 				return true;
 			}
 			double g = double.IsNaN(open) || double.IsNaN(prevClose) ? double.NaN : open - prevClose;
@@ -374,8 +407,18 @@ namespace PowerLanguage.Function
 			if (Qualifies(g, atr, minAtr))
 			{
 				m_armed = false; Via = dayStart ? EVia.Reopen : EVia.Intrabar; Found = true; Session = m_sessions;
-				Gap = g; Atr = atr; BarTime = GapTime = barTime;
+				Gap = g; Atr = atr; BarTime = GapTime = barTime; OpenGap = double.NaN;
 				return true;
+			}
+			if (bodyCheck && !double.IsNaN(close))
+			{
+				double gb = close - prevClose;
+				if (Qualifies(gb, atr, minAtr))
+				{
+					m_armed = false; Via = EVia.IntrabarBody; Found = true; Session = m_sessions;
+					Gap = gb; OpenGap = g; Atr = atr; BarTime = GapTime = barTime;
+					return true;
+				}
 			}
 			if (double.IsNaN(m_bestGap) || Math.Abs(g) > Math.Abs(m_bestGap)) { m_bestGap = g; m_bestTime = barTime; m_bestAtr = atr; m_bestSession = m_sessions; }
 			return false;

@@ -98,6 +98,7 @@ static class Program
 		TableJournal();
 		Evidence();
 		SpliceLocator();
+		SpliceBody();
 		ResetAtSplice();
 
 		// 2. table mode
@@ -750,13 +751,135 @@ static class Program
 			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
 			Check(Regex.IsMatch(src, @"protected\s+double\s+RollSpliceMinAtr\s*=\s*RollSpliceLocator\.DefaultMinAtr\s*;") && !Regex.IsMatch(src, @"\[Input\][^;{]*RollSpliceMinAtr"), "host: RollSpliceMinAtr = 0.4 constant, not an [Input]");
 			Check(Regex.IsMatch(src, @"if\s*\(m_rollDet\.table\s*&&\s*!m_rollDet\.series\)\s*\{\s*if\s*\(stepped\s*&&\s*m_rollDet\.DayInTable\)\s*m_spliceLoc\.Arm\(m_rollDet\.DayStartDay,\s*Bars\.Time\[0\]\);")
-				&& Regex.IsMatch(src, @"m_spliceLoc\.Step\(bar,\s*day,\s*Bars\.Time\[0\],\s*Bars\.Open\[0\],\s*prev,\s*m_gapCal\.Atr,\s*m_rollDet\.DayStart\)")
+				&& Regex.IsMatch(src, @"m_spliceLoc\.Step\(bar,\s*day,\s*Bars\.Time\[0\],\s*Bars\.Open\[0\],\s*prev,\s*m_gapCal\.Atr,\s*m_rollDet\.DayStart,\s*m_spliceLoc\.bodyCheck\s*\?\s*Bars\.Close\[0\]\s*:\s*double\.NaN\)")
 				&& Regex.IsMatch(src, @"else\s+if\s*\(stepped\)\s*setSplice\(bar,\s*double\.NaN,\s*false\);\s*\}"), "host: Table arms on the reopen and steps with the carried A; other modes put the offset on the roll bar");
 			Check(Regex.IsMatch(src, @"if\s*\(splice\s*&&\s*m_daily\.Days\s*>\s*0\)\s*m_daily\.OnRoll\(key,\s*double\.IsNaN\(spliceOff\)\s*\?\s*Bars\.Open\[0\]\s*-\s*m_daily\.PrevClose\s*:\s*spliceOff\);")
 				&& !Regex.IsMatch(src, @"if\s*\(roll\s*&&\s*m_daily\.Days\s*>\s*0\)\s*m_daily\.OnRoll"), "host: M-DAILY offset on the splice bar only (never on the table reopen as well)");
-			int shift = src.IndexOf("m_dailyAggO += spliceOff; m_dailyAggH += spliceOff; m_dailyAggL += spliceOff;", StringComparison.Ordinal), merge = src.IndexOf("m_dailyAggH = Math.Max(m_dailyAggH, Bars.High[0])", StringComparison.Ordinal);
+			int shift = src.IndexOf("m_dailyAggO += spliceOff; m_dailyAggH += spliceOff; m_dailyAggL += spliceOff;", StringComparison.Ordinal), merge = src.IndexOf("m_dailyAggH = Math.Max(m_dailyAggH, bh)", StringComparison.Ordinal);   // 18:46 CT: bh = the sanitised mixed-bar high
 			Check(shift > 0 && merge > shift && src.IndexOf("m_dailyTodayOpen += spliceOff;", StringComparison.Ordinal) > 0, "host: an in-session splice shifts today's open and running O/H/L before the splice bar is merged");
 			Check(Regex.IsMatch(src, @"bool\s+splice\s*=\s*rollSpliceOn\(\);\s*double\s+tr\s*=") && Regex.IsMatch(src, @"else\s+if\s*\(traceOn\(ETraceLevel\.Warning\)\s*&&\s*m_spliceBar\s*!=\s*bar\)"), "host: TOD drops the splice bar's range; a located splice is not warned as off-table");
+		}
+	}
+
+	// ---- Owner ruling 2026-11-23 18:46 CT: Data1 slower than 1 minute (Minute size > 1, Hour) may hold the switch INSIDE a bar
+	// (ES 2024-12-16 03:32 CT inside the 15-minute 03:30-03:45 bar: open gap +0.25, net jump +70.5). After the open-gap test fails the
+	// locator tests close - prevClose against the same 0.4 x A and journals via(intrabar-body). 1-minute and faster, and
+	// Daily / Weekly / Monthly, never run the body test (bodyCheck = false: byte-identical to before).
+	static List<IB> IntradayMin(DateTime from, DateTime to, int minutes, DateTime mixedEnd, double openGap, double body)
+	{
+		var l = new List<IB>(); double px = 6050; int bar = 1;
+		for (DateTime d = from; d <= to; d = d.AddDays(1))
+		{
+			if (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday) continue;
+			DateTime reopen = d.AddDays(-1).AddHours(17);
+			for (DateTime t = reopen.AddMinutes(minutes); t <= d.AddHours(16); t = t.AddMinutes(minutes))
+			{
+				IB b = new IB { bar = bar++, day = d, time = t, start = t == reopen.AddMinutes(minutes) };
+				if (t == mixedEnd) { b.o = px + openGap; b.c = px + openGap + body; b.h = Math.Max(b.o, b.c) + 2; b.l = Math.Min(b.o, b.c) - 2; }
+				else { b.o = px; b.c = px; b.h = px + 15; b.l = px - 15; }
+				l.Add(b); px = b.c;
+			}
+		}
+		return l;
+	}
+	sealed class BodyRun { public List<string> lines = new List<string>(), resets = new List<string>(); public int splice = -1, reopenBar = -1; public RollSpliceLocator.EVia via; public double gap = double.NaN, openGap = double.NaN, offset = double.NaN; public bool intrabar, resetsAgain, found; public int session = -1; }
+	/// <summary>The host order (stepRollDetector) with the 18:46 body test: bodyCheck as the host's spliceBodyCheck(resolution) sets it.</summary>
+	static BodyRun RunBody(List<IB> bars, HashSet<DateTime> dates, bool bodyCheck)
+	{
+		var r = new BodyRun();
+		var det = new _RollDetector { table = true, dates = dates }; var cal = new RollGapCalibrator(); var loc = new RollSpliceLocator { bodyCheck = bodyCheck };
+		for (int i = 0; i < bars.Count; i++)
+			for (int rep = 0; rep < 2; rep++)
+			{
+				IB b = bars[i]; double prev = i > 0 ? bars[i - 1].c : double.NaN;
+				cal.AddBar(b.day, b.h, b.l, b.c);
+				bool stepped = det.Step(b.bar, b.day, b.o, prev, "@ES", 0.25);
+				if (stepped && det.DayInTable) { loc.Arm(det.DayStartDay, b.time); r.reopenBar = b.bar; }
+				if (loc.Step(b.bar, b.day, b.time, b.o, prev, cal.Atr, det.DayStart, loc.bodyCheck ? b.c : double.NaN))
+				{
+					r.lines.Add(_RollDetector.SpliceLine(loc, 0.25)); r.splice = b.bar;
+					r.via = loc.Via; r.gap = loc.Gap; r.openGap = loc.OpenGap; r.resetsAgain = loc.ResetsAgain; r.found = loc.Found; r.session = loc.Session;
+					bool body = loc.Via == RollSpliceLocator.EVia.IntrabarBody;   // host: setSplice(bar, Via == Reopen ? NaN : Gap, Via == Intrabar || body, body)
+					r.offset = loc.Via == RollSpliceLocator.EVia.Reopen ? double.NaN : loc.Gap; r.intrabar = loc.Via == RollSpliceLocator.EVia.Intrabar || body;
+					if (loc.ResetsAgain && b.bar != det.LastRollBar) r.resets.Add(_RollDetector.ResetAtSpliceLine(loc));
+				}
+			}
+		return r;
+	}
+
+	static void SpliceBody()
+	{
+		var d1216 = new DateTime(2024, 12, 16); var table = new HashSet<DateTime> { new DateTime(2024, 9, 16), d1216 };
+		DateTime from = new DateTime(2024, 11, 1), to = new DateTime(2024, 12, 20), sw15 = new DateTime(2024, 12, 16, 3, 45, 0);
+		Check(new RollSpliceLocator().bodyCheck == false, "18:46: bodyCheck defaults off (1-minute, tick, second, daily+ and every caller that does not opt in)");
+		// 1. 15-minute Data1: the 03:30-03:45 bar holds the 03:32 switch (open gap +0.25, net +70.5)
+		{
+			var bars = IntradayMin(from, to, 15, sw15, 0.25, 70.25);
+			BodyRun r = RunBody(bars, table, true);
+			Check(One(r.lines) == "ROLL table splice(2024-12-16) at(2024-12-16 03:45) via(intrabar-body) session(+0) gapBar(2024-12-16 03:45) gapPts(+70.50) gapTicks(+282) atr20(30.00) gapAtr(2.350) minAtr(0.4) found(1) test(close - prevClose) openGapPts(+0.25) mixedBar(1)",
+				"18:46 15m: mid-bar switch 2024-12-16 03:30-03:45 located on the mixed bar, via(intrabar-body), session(+0): " + One(r.lines));
+			Check(r.via == RollSpliceLocator.EVia.IntrabarBody && r.resetsAgain && r.found && r.session == 0 && r.gap == 70.5 && r.openGap == 0.25 && r.splice != r.reopenBar && bars[r.splice - 1].time == sw15,
+				"18:46 15m: ResetsAgain, Gap = close - prevClose = +70.50, OpenGap +0.25, splice bar = the 03:45 bar (not the reopen, not a fallback)");
+			Check(One(r.resets) == "ROLL table reset-at-splice(2024-12-16) at(2024-12-16 03:45) via(intrabar-body) session(+0) rollEvent(2024-12-15 17:15) engines(AVWAP VWAP PRICEACTION PROFILE)",
+				"18:46 15m: reset-at-splice fires on the mixed bar: " + One(r.resets));
+			Check(r.offset == 70.5 && r.intrabar, "18:46 15m: host offset (M-DAILY OnRoll + in-session shift) = +70.50, treated as intrabar");
+			Check(!r.lines.Any(x => x.Contains("fallback")) && !r.lines.Any(x => x.Contains("2024-12-17")), "18:46 15m: no 2-session-late fallback (was at(2024-12-17 17:15) via(fallback) session(+2))");
+			// M-DAILY replica of the host merge (stepDaily): earlier bars shifted by +off, the mixed bar merged as {open + off, close}
+			double off = r.offset, hi = double.MinValue, lo = double.MaxValue, rawHi = double.MinValue, rawLo = double.MaxValue;
+			foreach (IB b in bars.Where(x => x.day == d1216))
+			{
+				bool before = b.bar < r.splice, mixed = b.bar == r.splice;
+				double bh = b.h, bl = b.l;
+				if (before) { bh += off; bl += off; }
+				if (mixed) { double bo = b.o + off; bh = Math.Max(bo, b.c); bl = Math.Min(bo, b.c); }
+				hi = Math.Max(hi, bh); lo = Math.Min(lo, bl); rawHi = Math.Max(rawHi, b.h); rawLo = Math.Min(rawLo, b.l);
+			}
+			Check(hi - lo == 30 && rawHi - rawLo > 100, "18:46 M-DAILY: the splice day's range in new-contract terms is the clean 30 pts (raw mixed day " + (rawHi - rawLo) + ")");
+		}
+		// 2. 5-minute Data1: switch inside the 03:30-03:35 bar
+		{
+			var bars = IntradayMin(from, to, 5, new DateTime(2024, 12, 16, 3, 35, 0), 0.25, 70.25);
+			BodyRun r = RunBody(bars, table, true);
+			Check(One(r.lines).StartsWith("ROLL table splice(2024-12-16) at(2024-12-16 03:35) via(intrabar-body) session(+0) gapBar(2024-12-16 03:35) gapPts(+70.50)") && r.resets.Count == 1 && r.offset == 70.5,
+				"18:46 5m: mid-bar switch located on the 03:35 bar, reset-at-splice, offset +70.50: " + One(r.lines));
+		}
+		// 3. bodyCheck off (1-minute rule, also Daily+): the same mixed bar does NOT trigger; the locator falls back as before
+		{
+			var bars = IntradayMin(from, to, 15, sw15, 0.25, 70.25);
+			BodyRun r = RunBody(bars, table, false);
+			Check(One(r.lines).StartsWith("ROLL table splice(2024-12-16) at(2024-12-17 17:15) via(fallback) session(+2)") && r.via == RollSpliceLocator.EVia.Fallback && !r.found && double.IsNaN(r.openGap) && r.resets.Count == 1,
+				"18:46 bodyCheck off: close - prevClose >= 0.4A with a small open gap does not trigger (pre-18:46 behaviour): " + One(r.lines));
+		}
+		// 4. direct locator: 1-minute (bodyCheck off) small open gap, big close - prevClose -> no trigger; Daily the same
+		{
+			var one = new RollSpliceLocator(); one.Arm(d1216, new DateTime(2024, 12, 15, 17, 0, 0));
+			bool hit = one.Step(1, d1216, new DateTime(2024, 12, 16, 3, 33, 0), 6050.25, 6050, 30, false, 6080);
+			Check(!hit && !one.Found && one.Via == RollSpliceLocator.EVia.None, "18:46 1m: |close - prevClose| = 1.0A with |open - prevClose| = 0.25 does not trigger");
+			var day = new RollSpliceLocator(); day.Arm(d1216, new DateTime(2024, 12, 13, 16, 0, 0));
+			Check(!day.Step(1, d1216, new DateTime(2024, 12, 16, 16, 0, 0), 6050.25, 6050, 30, false, 6120) && !day.Found, "18:46 Daily: no body test (bodyCheck off on Day / Week / Month)");
+		}
+		// 5. bodyCheck on: the open gap is tested first and wins unchanged; a body under 0.4A does not trigger; at 0.4A it does
+		{
+			var a = new RollSpliceLocator { bodyCheck = true }; a.Arm(d1216, new DateTime(2024, 12, 15, 17, 0, 0));
+			Check(a.Step(1, d1216, new DateTime(2024, 12, 16, 3, 45, 0), 6070, 6050, 30, false, 6000) && a.Via == RollSpliceLocator.EVia.Intrabar && a.Gap == 20 && double.IsNaN(a.OpenGap)
+				&& !_RollDetector.SpliceLine(a, 0.25).Contains("test("), "18:46: open gap >= 0.4A wins first (via(intrabar), gap = open - prevClose, no body fields)");
+			var b = new RollSpliceLocator { bodyCheck = true }; b.Arm(d1216, new DateTime(2024, 12, 15, 17, 0, 0));
+			Check(!b.Step(1, d1216, new DateTime(2024, 12, 16, 3, 45, 0), 6050.25, 6050, 30, false, 6061.75) && b.Step(2, d1216, new DateTime(2024, 12, 16, 4, 0, 0), 6061.75, 6061.75, 30, false, 6073.75)
+				&& b.Via == RollSpliceLocator.EVia.IntrabarBody && b.Gap == 12, "18:46: body 11.75 < 12 = 0.4A does not trigger; 12.00 does");
+		}
+		// 6. host pins: typed resolution switch (no enum strings), the body test only when bodyCheck, setSplice intrabar, M-DAILY / ring
+		{
+			string path = null;
+			for (var di = new DirectoryInfo(AppContext.BaseDirectory); di != null && path == null; di = di.Parent) { string fp = Path.Combine(di.FullName, "_CustomSignal.Strategy.CS"); if (File.Exists(fp)) path = fp; }
+			string src = path != null ? Regex.Replace(File.ReadAllText(path), @"//[^\n]*", "") : "";
+			Check(Regex.IsMatch(src, @"protected\s+static\s+bool\s+spliceBodyCheck\(EResolution\s+type,\s*long\s+size\)\s*\{\s*switch\s*\(type\)\s*\{\s*case\s+EResolution\.Minute:\s*return\s+size\s*>\s*1;\s*case\s+EResolution\.Hour:\s*return\s+true;\s*default:\s*return\s+false;\s*\}\s*\}")
+				&& Regex.IsMatch(src, @"m_spliceLoc\.bodyCheck\s*=\s*spliceBodyCheck\(Bars\.Info\.Resolution\.Type,\s*\(long\)Bars\.Info\.Resolution\.Size\);"),
+				"host: bodyCheck = typed EResolution switch (Minute size > 1, Hour; never Tick / Second / 1-minute / Day / Week / Month)");
+			Check(Regex.IsMatch(src, @"bool\s+body\s*=\s*m_spliceLoc\.Via\s*==\s*RollSpliceLocator\.EVia\.IntrabarBody;\s*setSplice\(bar,\s*m_spliceLoc\.Via\s*==\s*RollSpliceLocator\.EVia\.Reopen\s*\?\s*double\.NaN\s*:\s*m_spliceLoc\.Gap,\s*m_spliceLoc\.Via\s*==\s*RollSpliceLocator\.EVia\.Intrabar\s*\|\|\s*body,\s*body\);"),
+				"host: an intrabar-body splice is set as intrabar with offset Gap = close - prevClose");
+			Check(src.Contains("if (splice && m_spliceBody && !double.IsNaN(spliceOff)) { bo += spliceOff; bh = Math.Max(bo, Bars.Close[0]); bl = Math.Min(bo, Bars.Close[0]); }"),
+				"host: M-DAILY merges the mixed bar as {open + offset, close} only (no cross-contract range)");
+			Check(Regex.IsMatch(src, @"rollMixed\s*=\s*ago\s*==\s*0\s*&&\s*rollResetOn\(ds\)\s*&&\s*rollMixedOn\(ds\)"), "host: ringBarOf flags the mixed splice bar (DVP excludes it)");
 		}
 	}
 

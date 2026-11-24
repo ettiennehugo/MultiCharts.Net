@@ -258,6 +258,55 @@ static partial class Program
 		Check(r2.S.RollMin == 40 && fv == 200 + 40 - 1, "DV-7.1 winLen 40 < RollMinBars: RollMin = winLen, fits resume at the clean window (" + fv + ")");
 	}
 
+	// Owner ruling 2026-11-23 18:46 CT: an intrabar-body splice (Data1 slower than 1 minute) puts BOTH contracts in the splice bar. The host
+	// flags it RingBar.rollMixed; DVP keeps it out of every post-roll window (also at i = 0), counts the 60 bars from the NEXT bar, and
+	// keeps its range out of the ATR. rollMixed = false (every 1-minute chart) is unchanged (T16 / T16Trunc / R1 golden).
+	static void T16Mixed()
+	{
+		const int n = 240; int reopen = 1800, sw = 1830; int rm = DvpConst.RollMinBars;
+		bool[] hd; RingBar[] s = Series(2400, 41, new[] { reopen, sw }, null, out hd);
+		var mx = (RingBar[])s.Clone(); RingBar mb = mx[sw]; mb.rollMixed = true; mb.h += 70.5; mx[sw] = mb;   // the 70.5-pt mixed bar
+		var rig = new Rig(Cfg(n), true, true);
+		var atr = new Gate0Atr(DvpConst.AtrLen);
+		int firstValid = -1, badFit = 0, hasMixed = 0, fullAt = -1, iZero = -1, atrBad = 0; var f = new DvpFit(n); double[] y = new double[n], v = new double[n];
+		for (int i = 0; i < mx.Length; i++)
+		{
+			rig.Feed(mx[i], hd[i]);
+			if (mx[i].rollBar) atr.ResetPrev();
+			if (!mx[i].rollMixed) atr.Add(mx[i].h, mx[i].l, mx[i].c);
+			DvpSnapshot x = rig.e.SnapshotRaw(1, rig.ring, 0);
+			if (i >= n && BitConverter.DoubleToInt64Bits(x.atr) != BitConverter.DoubleToInt64Bits(atr.Value)) atrBad++;
+			if (i <= reopen || x == null || !x.valid) continue;
+			if (firstValid < 0) firstValid = i;
+			if (i - x.n + 1 <= sw) hasMixed++;   // the window [i-n+1, i] holds the mixed bar
+			if (x.rollTruncated)
+			{
+				int m = i - sw;   // bars after the mixed bar
+				for (int k = 0; k < m; k++) { RingBar b = mx[sw + 1 + k]; y[k] = (b.h + b.l) / 2; v[k] = b.v; }
+				f.Fit(y, v, m, 3, false); f.Choose(x.deg, false);
+				if (x.n != m || x.sigma != f.SigmaD) badFit++;
+			}
+			if (i == sw + n - 1) iZero = x.rollTruncated && x.n == n - 1 ? 1 : 0;
+			if (fullAt < 0 && !x.rollTruncated && x.n == n) fullAt = i;
+		}
+		Check(firstValid == sw + rm, "18:46 mixed splice bar: the 60 post-roll bars count from the bar AFTER it (first fit at " + firstValid + ", want " + (sw + rm) + "; clean splice " + (sw + rm - 1) + ")");
+		Check(hasMixed == 0 && badFit == 0, "18:46 no fitted window contains the mixed bar; truncated fit = an independent fit on the bars after it (" + hasMixed + "/" + badFit + ")");
+		Check(iZero == 1 && fullAt == sw + n, "18:46 the mixed bar at i = 0 still cuts (n = 239); the first full window starts on the next bar (" + iZero + ", " + fullAt + ")");
+		Check(atrBad == 0, "18:46 ATR(20): the mixed bar's range is left out and the next bar starts fresh (" + atrBad + " differ)");
+		string warm = rig.journal.LastOrDefault(l => l.StartsWith("DVP ROLL warmup", StringComparison.Ordinal)) ?? "";
+		string res = rig.journal.FirstOrDefault(l => l.StartsWith("DVP ROLL resume", StringComparison.Ordinal)) ?? "";
+		Check(warm.Contains("mixedBar(1): the roll bar holds both contracts and is excluded") && rig.journal.Count(l => l.Contains("mixedBar(1)")) == 1 && res.EndsWith("winEff(60) winLen(240)") && res.Contains(mx[sw + rm].time.ToString("yyyy-MM-dd HH:mm:ss", CI)),
+			"18:46 journal: warmup line with mixedBar(1) on the mixed bar only, resume with winEff(60) one bar later: " + res);
+		rig.e.Finish();
+		string run = rig.journal.LastOrDefault(l => l.StartsWith("DVP RUN", StringComparison.Ordinal)) ?? "";
+		Check(run.Contains(" skipped(" + (sw - (reopen + 1) + 1 + rm) + ") truncated(" + (n - rm) + ") "), "18:46 DVP RUN: one more skipped window than a clean splice, truncated unchanged (the i = 0 window is cut too): " + run);
+		// rollMixed on a bar that is not a roll bar is ignored (the host sets it only with rollBar)
+		var ns = (RingBar[])s.Clone(); RingBar nb = ns[1000]; nb.rollMixed = true; ns[1000] = nb;
+		var a1 = new Rig(Cfg(n), true, false); var a2 = new Rig(Cfg(n), true, false); int diff = 0;
+		for (int i = 0; i < s.Length; i++) { a1.Feed(s[i], hd[i]); a2.Feed(ns[i], hd[i]); if (i >= n && a1.Q(1) != a2.Q(1)) diff++; }
+		Check(diff == 0, "18:46 rollMixed without rollBar changes nothing (" + diff + ")");
+	}
+
 	static void T16b()
 	{
 		bool[] hd; RingBar[] s = Series(4000, 161, new[] { 1700, 3300 }, new[] { 10 }, out hd);
@@ -616,6 +665,6 @@ static partial class Program
 
 	static void D3Tests()
 	{
-		T14(); T15(); T16(); T16Trunc(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); CalibTests(); T27(); T28T29(); TDriftR4(); R1();
+		T14(); T15(); T16(); T16Trunc(); T16Mixed(); RollBarTest(); T16b(); T22(); ZeroAllocD3(); T25(); CalibTests(); T27(); T28T29(); TDriftR4(); R1();
 	}
 }
