@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The heading exits an open host winner. It has no entry. ASSUMPTION: a climax is a 5-minute range at least twice the mean of the prior 20 same-length ranges. This file journals that bar and does not send an order.
 //
@@ -171,7 +171,7 @@ namespace PowerLanguage.Strategy
 			return sum / n;
 		}
 		public _A2_76_SellIntoThe(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

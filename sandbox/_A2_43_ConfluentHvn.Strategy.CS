@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This is a definition gate, not an entry. The only confluence coded here is whether the 20-session composite POC is within 2 ticks of session VWAP. The other three catalogue sources (5-session HVN, single-print shelf, stable prior POC) are not counted. C is therefore 0 or 1. No order is sent.
 //
@@ -148,11 +148,13 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 		}
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   /* Analyst MC17 (A2-13): DevelopingSource is an [Input]; the chart's saved value replaces the Create() value, so re-apply it */ DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}

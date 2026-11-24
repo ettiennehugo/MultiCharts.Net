@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), unless the file says otherwise.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Data1 is 1-minute (owner rule); the 09:35 and 09:40 5-minute bars are built from it. oVWAP and sVWAP are volume-weighted typical prices computed here (ETH 18:00-09:29, RTH from 09:30), not the engine VWAP slot, because the engine session may include both. ATR30 is Wilder ATR(14) of the closed Data2 30-minute bars. The opening-5-minute low holds when the 09:40 bar low is at or above the 09:35 bar low. One contract, so the 1R limit and the sVWAP trail are both working and the first exit fills; there is no half-off.
 //
@@ -196,7 +196,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			FlatBy = new TimeSpan(11, 30, 0);
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A204LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A204LX", EOrderAction.Sell));

@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: none. The CME session clock is constructed in the signal.
-// Engine settings enabled: RollDetection = Series. NoEntryBefore = 10:30, NoEntryAfter = 15:00, FlatBy and MaxTradesPerDay = 1 are set in code.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). NoEntryBefore = 10:30, NoEntryAfter = 15:00, FlatBy and MaxTradesPerDay = 1 are set in code.
 //
 // ## 16. Pitfalls
 // Lookahead: the first hour is closed before the stops are priced, and the stops work forward.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. A splice day is skipped.
+// Rolls: Table (CME roll-date table). A splice day is skipped.
 // Data quality: the journal arm lines are written once, on the bar one minute after 10:30, and only when that bar has not already touched either stop. Not yet verified on a chart.
 // Other: both stops rest at once. Whichever fills first is the trade. The other entry is not a second position because MaxTradesPerDay is 1.
 //
@@ -216,7 +216,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			NoEntryBefore = Cfg.fhEnd; NoEntryAfter = Cfg.lastEntry; FlatBy = Cfg.flat; MaxTradesPerDay = 1;
 			m_leStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "A256LE", EOrderAction.Buy));
 			m_seStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "A256SE", EOrderAction.SellShort));

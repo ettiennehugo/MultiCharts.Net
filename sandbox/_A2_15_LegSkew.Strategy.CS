@@ -83,7 +83,7 @@
 // Lookahead: orders are sent from a closed bar for a later bar.
 // Repaint: Not applicable. Closed bars only.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series, unless the file says otherwise.
+// Rolls: RollDetection Table (CME roll-date table), inherited from _PS_01_BalanceBreakPullback.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This is a gate on PS-01, not a second entry. The breakout leg runs from its swing origin (the lowest low for a long, highest high for a short, of today's RTH Data1 bars up to the acceptance bar) to the leg extreme (the highest high for a long, lowest low for a short, from the acceptance bar to now); the pullback after the extreme is not part of the leg. Leg POC is RangeProfile over those bars, leg AVWAP the volume-weighted close of the same bars. ATR5 is ATR(14) of the 5-minute Data2 stream (catalogue units), not of the 1-minute host bars. Every evaluated setup writes one journal line with the skew, threshold and direction. Favourable means skew above the threshold in the trade direction. Neutral means absolute skew at or under 0.2. The PS-01 base gate returns true, so the host trade list is unchanged.
 //

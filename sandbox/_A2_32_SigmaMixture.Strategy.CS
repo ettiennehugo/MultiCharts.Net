@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table) where this file trades.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Levels come from _GmmProfileTracker.LastSigma.levels after each RTH close. The break is of the nearest translated component centre. The catalogue edge is z_k plus or minus one component sigma; that edge is not a separate field on SigmaMixtureResult, so the centre is used. The target is the next centre, passed to GX as a point distance. Flat 15:55. Two contracts (owner decision 2026-11-22 14:03 ET, "Make A2-32 2 contracts"): T1, lot 1, at the next centre; lot 2 runs to the centre beyond it, with the stop at entry after T1. A 50 percent scale at 0.5 of the way is not used.
 //
@@ -167,7 +167,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			ProfileStats.enabled = true;
 			GxOrderPrefix = "A232"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A232LE", EOrderAction.Buy));

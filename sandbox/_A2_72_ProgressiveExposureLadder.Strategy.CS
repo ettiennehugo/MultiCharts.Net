@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is a size ladder, not an entry. Levels are 25, 50 and 100 percent of a base size. ASSUMPTION: this file journals the level a host would use and does not send an order and does not change a production size. A winning closed bar of this study, which never trades, leaves the level at 25.
 //
@@ -147,7 +147,8 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		private int m_level = 25;
 		public _A2_72_ProgressiveExposureLadder(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
+		protected override void StartCalc() { if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose); base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();

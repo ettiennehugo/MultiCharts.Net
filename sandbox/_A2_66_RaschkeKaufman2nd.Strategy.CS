@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the trend is SMA(11) above SMA(80), and the oscillator whose stochastic is taken is SMA(11) minus SMA(80). Slow %K is the 3-bar mean of the 14-bar stochastic of that oscillator. The state machine is trend up, then stochastic below 50, then above 50, then a long when it is below 20. One entry per trend leg. The exit is stochastic above 95 or SMA(11) back under SMA(80), which is not a GX target.
 //
@@ -155,7 +155,7 @@ namespace PowerLanguage.Strategy
 		public _A2_66_RaschkeKaufman2nd(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A266LE", EOrderAction.Buy));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A266LX", EOrderAction.Sell, OrderExit.FromAll));
 			m_ls = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A266LS", EOrderAction.Sell, OrderExit.FromAll));

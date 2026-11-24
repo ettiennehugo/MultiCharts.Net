@@ -40,7 +40,7 @@ static class Program
 	static void Main()
 	{
 		Validation(); Presets(); Warmup(); IndicatorsMatchNaive(); FlatTops(); LabelsAndEqual(); Breakouts(); Bos(); OutOfOrder();
-		ResetEqualsFresh(); Roll(); MonotonicAndImmutable(); CandleRules(); ChangedXor(); StepClosedOnly(); ZigZag();
+		ResetEqualsFresh(); Roll(); RollResetAtSplice(); MonotonicAndImmutable(); CandleRules(); ChangedXor(); StepClosedOnly(); ZigZag();
 		ExtraCanon(); ExtraIndependent(); ExtraSharing(); ExtraRollOnData2(); PresetPerField();
 		Console.WriteLine($"PriceActionTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
@@ -247,6 +247,26 @@ static class Program
 		Check(all.Where(p => p.isHigh && p.layer == 0).All(p => p.seq > s0), "M3 seq keeps increasing across the roll");
 		Check(j.Any(s => s.Contains("roll reset at " + rollT.ToString("yyyy-MM-dd HH:mm:ss"))), "M3 journal 'roll reset' with bar time");
 		Check(seqBefore > 0, "fixture formed pivots before the roll");
+	}
+
+	// Owner ruling 2026-11-23 13:31 CT: a late splice re-fires OnRoll on the switch bar (host rollResetOn): pivots, structure and ATR
+	// after the switch are built only from post-switch bars; two "roll reset" lines (reopen, switch)
+	static void RollResetAtSplice()
+	{
+		var j = new List<string>();
+		var e = Eng(Cfg(k => { k.atrLength = 10; k.volumeLength = 10; }), j);
+		var pre = RandomBars(200, 3, 4000); var mid = RandomBars(40, 5, 4000); var post = RandomBars(60, 4, 4060);
+		int n = 0;
+		for (int i = 0; i < 200; i++, n++) e.Add(n, T0.AddMinutes(n), pre[i][0], pre[i][1], pre[i][2], pre[i][3], pre[i][4]);
+		DateTime reopen = T0.AddMinutes(n); e.OnRoll(reopen);
+		for (int i = 0; i < 40; i++, n++) e.Add(n, T0.AddMinutes(n), mid[i][0], mid[i][1], mid[i][2], mid[i][3], mid[i][4]);   // old contract after the reopen
+		DateTime sw = T0.AddMinutes(n); e.OnRoll(sw);
+		Check(e.LastHigh() == null && e.Structure() == EStructure.Unknown && !e.IsWarm, "13:31 re-reset: state cleared again at the switch bar");
+		var piv = new List<_Pivot>();
+		for (int i = 0; i < 60; i++, n++) { e.Add(n, T0.AddMinutes(n), post[i][0], post[i][1], post[i][2], post[i][3], post[i][4]); if (e.NewPivotHigh) piv.Add(e.LastHigh()); if (e.NewPivotLow) piv.Add(e.LastLow()); }
+		double tr = 0; for (int i = 50; i < 60; i++) { double pc = post[i - 1][3]; tr += Math.Max(post[i][1], pc) - Math.Min(post[i][2], pc); }
+		Check(piv.Count > 0 && piv.All(p => p.extremeTime >= sw) && Near(e.Atr, tr / 10), "13:31 re-reset: pivots and ATR after the switch from post-switch bars only");
+		Check(j.Count(s => s.Contains("roll reset at")) == 2 && j.Any(s => s.Contains("roll reset at " + reopen.ToString("yyyy-MM-dd HH:mm:ss"))) && j.Any(s => s.Contains("roll reset at " + sw.ToString("yyyy-MM-dd HH:mm:ss"))), "13:31 re-reset: journal 'roll reset' at the reopen and at the switch");
 	}
 
 	// [H2][H4] 2000 bars: bar numbers and seq strictly increasing; pivot fields never change (snapshot compare)

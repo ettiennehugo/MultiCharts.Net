@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Trade-size entropy is not computed in _TickStream, and the catalogue says the row is not yet buildable. The file journals that and does not invent a detector.
 //
@@ -144,6 +144,8 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _A2_38_MetaorderDrift(object _ctx) : base(_ctx) { }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
+		protected override void StartCalc() { if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose); base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();

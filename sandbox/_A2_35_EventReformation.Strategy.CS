@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table) where this file trades.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: CPI, NFP and FOMC decision times come from EventCalendar.EventsOn. The T+1 to T+20 profile is RangeProfileAfter. The acceptance arm is the default; it counts 5-minute closes (the 1m close on each 5-minute boundary after T+20) and enters at the next 5-minute open. Its stop, point target and flat time go through GX. Size is 2 contracts (catalogue "T1 50% at 0.5x" and coding-plan decision 10): GX takes T1, 1 lot, at 0.5 x the VA height beyond the edge and the other lot at 1.0 x. The failed-break arm is the other enum value and also uses GX, with the new POC as the point target. Nothing is sent before T+20.
 //
@@ -176,7 +176,7 @@ namespace PowerLanguage.Strategy
 		{
 			base.Create();
 			RangeProfiles.enabled = true;   // RangeProfileAfter returns null while RangeProfiles is off
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			EventConfig.enabled = true;
 			GxOrderPrefix = "A235"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A235LE", EOrderAction.Buy));

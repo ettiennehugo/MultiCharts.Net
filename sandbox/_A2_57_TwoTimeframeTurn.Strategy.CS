@@ -77,7 +77,7 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: those the example turns on in Create or StartCalc.
-// Engine settings enabled: RollDetection and the other protected settings the example sets. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings the example sets. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders are sent from a closed bar for a later bar. HTF reads use HtfClosedBar when the example does.
@@ -187,7 +187,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;   // unadjusted series: rollOn(1) below needs detection on (default is Off)
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;   // unadjusted series: rollOn(1) below needs detection on (default is Off)
 			m_leStp = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "A257LE", EOrderAction.Buy));
 			m_lxStp = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A257LS", EOrderAction.Sell, OrderExit.FromAll));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A257LX", EOrderAction.Sell));

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: shelves, VA migration and the composite HVNs come from completed Own RTH profiles; MC's Volume Profile is not needed on the chart.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs. DevelopingSource = Own and OwnProfileWindow = Rth: shelves, VA migration and the composite HVNs come from completed Own RTH profiles; MC's Volume Profile is not needed on the chart.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: A shelf is a SinglePrints run of at least 4 rows on a completed profile from the last 5 sessions. The near edge is the edge closer to price. ASSUMPTION: two contracts (coding-plan decision 10): GX takes T1 (60 percent, 1 lot) at the near edge minus 1 tick, moves the stop to entry, and runs the other lot to the far edge minus 1 tick. The decision bar is a 1-minute close whose session clock is on a 15-minute boundary. The 10:00 clock is RthStart plus 30 minutes.
 //
@@ -160,7 +160,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			Vwap1Type = EVwapType.Session; Vwap1DataStream = 1;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // Coder 2026-11-22 (Analyst Set2: 0 trades): shelves from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			GxOrderPrefix = "A245"; createGxOrders();

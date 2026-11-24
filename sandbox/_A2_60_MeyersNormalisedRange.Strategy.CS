@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: NHR uses n = 6 and a = 0.75. The buy is the highest NHR of the last 6 closed bars above 0.50 while the highest NLR of those bars stays below 1.05. ASSUMPTION: the short is the sign flip of that pair. The 1.5 ATR stop is the catalogue's added disaster stop, not a tested target. An opposite signal flats the position and does not reverse on the same bar, because GX does not reverse; the next closed bar may enter. Indicators reset at RthStart.
 //
@@ -159,7 +159,7 @@ namespace PowerLanguage.Strategy
 		public _A2_60_MeyersNormalisedRange(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A260LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A260SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A260LX", EOrderAction.Sell, OrderExit.FromAll));

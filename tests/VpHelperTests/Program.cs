@@ -156,6 +156,15 @@ static class Program
 		var tr = RangeProfileBuilder.Build(rr, t, t.AddMinutes(6), 0.25, new RangeProfileConfig { rollPolicy = ERangeRollPolicy.Truncate }, null);
 		Check(tr != null && tr.bars == 3 && tr.startBar == 4 && tr.isPartial, "VP-1 T3 Truncate starts at the roll bar");
 		Check(RangeProfileBuilder.Build(rr, t.AddMinutes(4), t.AddMinutes(6), 0.25, cfg, null) != null, "VP-1 roll on the first bar is fine");
+		// owner ruling 2026-11-23 13:31 CT: a late splice also flags its ring bar (host rollResetOn). Reopen roll at bar 3 (old contract
+		// 100), switch at bar 6 (new contract 110): Truncate starts at the switch, so the profile holds post-switch prices only
+		var lr = new _BarRing(20);
+		for (int i = 1; i <= 9; i++) { double lp = i >= 6 ? 110 : 100; lr.Add(B(i, t.AddMinutes(i), lp, lp + 1, lp, lp + 0.5, 10, null, true, i == 3 || i == 6)); }
+		var lt = RangeProfileBuilder.Build(lr, t, t.AddMinutes(9), 0.25, new RangeProfileConfig { rollPolicy = ERangeRollPolicy.Truncate }, null);
+		Check(lt != null && lt.startBar == 6 && lt.bars == 4 && lt.low >= 110 && lt.isPartial, "13:31 re-reset: Truncate profile starts at the late-splice bar (post-switch prices only)");
+		var lh = new RangeProfileHandle(0, t.AddMinutes(3), null, 0.25, cfg);
+		bool closedAtSwitch = false; for (int i = 3; i <= 9 && !closedAtSwitch; i++) closedAtSwitch = lh.Step(lr.At(i - 1), null) && i == 6;
+		Check(closedAtSwitch && lh.CrossesRoll && lh.Bars == 3, "13:31 re-reset: a profile opened at the reopen closes at the switch bar with crossesRoll (no mixed-contract profile)");
 
 		// T4 coverage: 390 RTH slots (09:30-16:00 open), 5 bars removed
 		DateTime rth0 = D0.AddHours(9).AddMinutes(30);

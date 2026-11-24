@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: the chart has no daily stream, so a completed Globex day is the daily bar. On a roll the stored highs and lows are shifted by the roll bar's open minus the prior completed close, the same offset M-DAILY uses. IOG is off, so the entry stop is sent at a bar close and rests afterwards. An open already through that stop is a market order for the next bar.
 //
@@ -158,7 +158,7 @@ namespace PowerLanguage.Strategy
 		public _PF_08_DonchianTurtleDaily(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PF08LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PF08SE", EOrderAction.SellShort));
 			m_leM = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "PF08LG", EOrderAction.Buy));

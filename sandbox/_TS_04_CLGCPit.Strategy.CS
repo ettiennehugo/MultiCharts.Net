@@ -83,7 +83,7 @@
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table), inherited from _PS_01_BalanceBreakPullback.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This file runs the PS-01 balance-break rules on the pit clock that _SandboxRules.ApplyPit picks from the chart name: CL 09:00 to 14:30 Eastern, GC 08:20 to 13:30 Eastern (coding-plan decision 9). The value end comes from the session calendar. PS-24 is not a second base.
 //

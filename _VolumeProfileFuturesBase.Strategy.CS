@@ -568,7 +568,7 @@ namespace PowerLanguage.Strategy
 		/// </summary>
 		protected override bool profileCrossesRoll(VpExtra e)
 		{
-			IList<int> rolls = RollBars;
+			IList<int> rolls = ResetBars;   // roll bars plus late-splice bars (ruling 2026-11-23 13:31 CT)
 			if (e == null || rolls.Count == 0 || e.dataStream > 1) return false;
 			int cur = Bars.FullSymbolData.Current;
 			for (int i = 0; i < rolls.Count; i++)

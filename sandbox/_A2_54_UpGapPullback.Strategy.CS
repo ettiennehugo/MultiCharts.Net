@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the gap threshold is 0.4 percent, the middle of the catalogue set 0.2, 0.4 and 0.6. An up gap sells a stop at the prior RTH close minus one tick; a down gap buys a stop at the prior close plus one tick. The stop is live from RthStart plus 15 minutes until RthValueEnd minus 30 minutes. The protective stop is the session extreme at the fill plus one tick, and it is no tighter than one 14-bar ATR. The exit is the next RTH open, which is not a GX FlatBy because FlatBy is the same session.
 //
@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		public _A2_54_UpGapPullback(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A254LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "A254SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "A254LX", EOrderAction.Sell, OrderExit.FromAll));

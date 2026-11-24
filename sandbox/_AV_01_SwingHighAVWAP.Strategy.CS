@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs. AvwapLimits.dataStream = 2, AvwapLimits.backfillBars = 400; PriceActionConfig.dataStream = 2, pivotMode = AtrZigZag, atrMultiple = 3.0, atrLength = 20.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: the swing-high anchor is the newest confirmed Data2 (60-minute) zigzag high with a reversal of at least 3 x ATR(20) of Data2 (catalogue AV-01: "the last significant swing high (k = 3 x ATR on 60m), usable from confirmation"), read as AvwapManager.Latest(SwingHigh) with the AVWAP on Data2. The daily filter is the last completed daily close (DailyContext.PrevClose) above DailyContext.Sma200 after DailyConfig.smaLength is set to 50. Zigzag pivots never confirm on their own bar (engine fix 2026-11-22). Ten bars below the AVWAP are ten closed Data2 (60-minute) closes. The delta60 margin above the AVWAP is not applied (spec PROPOSED). A 15-minute higher low is built from 1-minute bars. The target is the anchor swing-high price (the Data2 bar high at the anchor time). The EX-04 trail is not sent.
 //
@@ -165,7 +165,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_bookEntries; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _AV_01_SwingHighAVWAP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; AvwapEvents = EAvwapAnchor.SwingHigh; GxOrderPrefix = "AV01"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV01LE", EOrderAction.Buy)); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; AvwapEvents = EAvwapAnchor.SwingHigh; GxOrderPrefix = "AV01"; createGxOrders(); m_le = OrderCreator.Stop(new SOrderParameters(Contracts.Default, "AV01LE", EOrderAction.Buy)); }
 		/// <summary>Analyst MC17 run: Data1 lookback past MaxBarsBack 49 comes from the engine ring (see _SandboxRules.RingAgo).</summary>
 		private RingBar lbBar(int ago) { return _SandboxRules.RingAgo(Ring(1), ago); }
 

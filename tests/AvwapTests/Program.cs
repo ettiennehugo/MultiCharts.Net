@@ -25,7 +25,7 @@ static class Program
 
 	static void Main()
 	{
-		Calendar(); Validation(); SwingBackfill(); BackfillOutOfRing(); ReplaceEvictExpire(); Roll(); Gap(); Climax(); PeriodOpens(); TouchSlopeBands(); Breakout(); Placebos();
+		Calendar(); Validation(); SwingBackfill(); BackfillOutOfRing(); ReplaceEvictExpire(); Roll(); RollResetAtSplice(); Gap(); Climax(); PeriodOpens(); TouchSlopeBands(); Breakout(); Placebos();
 		Console.WriteLine($"AvwapTests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
 	}
@@ -110,6 +110,32 @@ static class Program
 		var held = m.Anchors.ToList();
 		m.OnRoll(D0.AddMinutes(3));
 		Check(m.Anchors.Count == 0 && held.All(a => a.Expired && a.ExpireReason == "roll") && j.Count(s => s.Contains("invalidated (roll)")) == 3, "§0.3 roll invalidates every live anchor (journaled)");
+	}
+
+	// Owner ruling 2026-11-23 13:31 CT: a late splice re-fires OnRoll on the switch bar (host rollResetOn). Anchors formed between the
+	// table reopen and the switch (old-contract prices) are invalidated; afterwards anchors and the fallback TR are post-switch only.
+	static void RollResetAtSplice()
+	{
+		foreach (bool reReset in new[] { true, false })
+		{
+			var j = new List<string>(); double z = 0;
+			var m = Mgr(EAvwapAnchor.VolumeClimax, l => l.replaceSameType = false, j); m.volumeZ = () => z;
+			int n = 0;
+			for (int i = 0; i < 25; i++) m.Add(Bar(n++, D0.AddMinutes(n), 100, 101, 99, 100, 10), new AvwapPaEvents());
+			m.OnRoll(D0.AddMinutes(n));                                            // table-date reopen (roll event)
+			z = 4; for (int i = 0; i < 2; i++) m.Add(Bar(n++, D0.AddMinutes(n), 100, 101, 99, 100, 10), new AvwapPaEvents());   // old contract, anchors form
+			int sw = n; z = 0;
+			if (reReset) m.OnRoll(D0.AddMinutes(n));                              // late switch bar: reset again
+			for (int i = 0; i < 20; i++) { if (i == 3) z = 4; else z = 0; m.Add(Bar(n++, D0.AddMinutes(n), 110, 111, 109, 110, 10), new AvwapPaEvents()); }   // new contract (+10 spread)
+			if (reReset)
+			{
+				Check(m.Anchors.Count == 1 && m.Anchors.All(a => a.AnchorBar >= sw && Math.Abs(a.Value - 110) < 1e-9) && j.Count(s => s.Contains("invalidated (roll)")) == 2,
+					"13:31 re-reset: pre-switch anchors invalidated at the switch; live anchors and values from post-switch bars only");
+				Check(Math.Abs(m.FallbackTrAvg - 2.0) < 1e-9, "13:31 re-reset: switch-bar TR skipped, fallback TR = new contract only (2.00): " + m.FallbackTrAvg);
+			}
+			else
+				Check(m.Anchors.Any(a => a.AnchorBar < sw) && Math.Abs(m.FallbackTrAvg - 2.45) < 1e-9, "11d67e1 (no re-reset): an old-contract anchor survives and the 10-pt step enters the fallback TR (2.45): " + m.FallbackTrAvg);
+		}
 	}
 
 	static void Gap()

@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: the edge is the prior RTH value area. A poke is a 5-minute high at least one tick beyond VAH with no more than one close beyond it. After two 5-minute closes back inside, a lower high sells a stop one tick under that bar. The target is the prior POC. One contract, so the second target is not sent.
 //
@@ -157,7 +157,7 @@ namespace PowerLanguage.Strategy
 		public _PS_03_ConfirmedFailedBreak(object _ctx) : base(_ctx) { NoEntryMinutesBeforeFlat = 25; Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series; GxOrderPrefix = "PS03"; createGxOrders();
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; GxOrderPrefix = "PS03"; createGxOrders();
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // PriorRthProfile() is built from Own RTH profiles; null without this
 			m_le = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03LE", EOrderAction.Buy));
 			m_se = OrderCreator.Stop(new SOrderParameters(Contracts.UserSpecified, "PS03SE", EOrderAction.SellShort));

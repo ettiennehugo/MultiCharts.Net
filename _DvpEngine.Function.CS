@@ -31,6 +31,10 @@ namespace PowerLanguage.Function
 		public const int RowFloorTicks = 1;
 		public const string RollAdjust = "None";
 		public const int MinBars = 12;
+		/// <summary>DV-7.1 (Ettienne 2026-11-23 14:09 CT): after a roll a window is truncated to the bars since the (newest) roll bar,
+		/// min(winLen, bars since the roll), and fitted once at least this many stream bars have accrued (min(RollMinBars, winLen)).
+		/// Not an input; hashed through Canon().</summary>
+		public const int RollMinBars = 60;
 		public const int AtrLen = 20;      // Wilder, Gate0Atr
 		public const int HoldBars = 40;    // MFE/MAE horizon
 		public const int MaxDegree = 3;    // DV-1.2
@@ -159,7 +163,7 @@ namespace PowerLanguage.Function
 				.Append(";calibMarginRel=").Append(R(calibMarginRel)).Append(";calibStep=").Append(calibStep);
 			sb.Append(";const{confMode=").Append(DvpConst.ConfMode).Append(";minFamilies=").Append(DvpConst.MinFamilies);
 			sb.Append(";reportWeights=VA:").Append(R(DvpConst.ReportWeightVa)).Append(",POC:").Append(R(DvpConst.ReportWeightPoc));
-			sb.Append(";rowFloor=").Append(DvpConst.RowFloorTicks).Append("tick;rollAdjust=").Append(DvpConst.RollAdjust);
+			sb.Append(";rowFloor=").Append(DvpConst.RowFloorTicks).Append("tick;rollAdjust=").Append(DvpConst.RollAdjust).Append(";rollMinBars=").Append(DvpConst.RollMinBars);
 			sb.Append(";minBars=").Append(DvpConst.MinBars).Append(";ATR_LEN=").Append(DvpConst.AtrLen).Append(";HOLD_BARS=").Append(DvpConst.HoldBars).Append(";P2_PASSED=").Append(DvpConst.P2_PASSED ? 1 : 0);   // DV-9.3
 			sb.Append(";CALIB_K=").Append(R(DvpConst.CalibK)).Append(";CALIB_RECHECK=").Append(DvpConst.CalibRecheck).Append("}}");
 			return sb.ToString();
@@ -763,6 +767,8 @@ namespace PowerLanguage.Function
 		public bool valid, crossesRoll, lowR2, refitBar, calibrating, manValid, diagnosticOnly;
 		/// <summary>rev 6 DV-3.10.4 / DV-11.1: the stream was warming for this window; the first refit after a degree switch.</summary>
 		public bool warming, degChanged;
+		/// <summary>DV-7.1 (14:09 CT): the window was truncated at the newest roll bar (n &lt; winLen; journaled as winEff(n)).</summary>
+		public bool rollTruncated;
 		public double atr, sigma, sigmaAtr, r2, dw, skew, yhatEnd, slopeEnd, slope1, slope1SigmaPerBar, endpointDrift, uT, yhatT,
 			pocZ, vaLoZ, vaHiZ, entropy, concentration, concentrationOcc, tailVol, inSampleCov2, rthShare;
 
@@ -770,7 +776,7 @@ namespace PowerLanguage.Function
 		{
 			this.ds = ds; this.endBar = endBar; this.tPrev = tPrev; t0 = default(DateTime);
 			anchorBar = int.MinValue; sinceRefit = 0; n = 0; deg = -1; dCap = 0; manRowsEff = 0;
-			valid = crossesRoll = lowR2 = refitBar = calibrating = manValid = diagnosticOnly = warming = degChanged = false;
+			valid = crossesRoll = lowR2 = refitBar = calibrating = manValid = diagnosticOnly = warming = degChanged = rollTruncated = false;
 			atr = sigma = sigmaAtr = r2 = dw = skew = yhatEnd = slopeEnd = slope1 = slope1SigmaPerBar = endpointDrift = uT = yhatT = double.NaN;
 			pocZ = vaLoZ = vaHiZ = entropy = concentration = concentrationOcc = tailVol = inSampleCov2 = rthShare = double.NaN;
 		}
@@ -1153,6 +1159,9 @@ namespace PowerLanguage.Function
 		readonly DvpCoef[] m_fwd;
 		int m_fwdCount;
 		long m_pos = -1, m_roll1 = long.MinValue, m_roll0 = long.MinValue;
+		// ruling 2026-11-23 18:46 CT: a MIXED roll bar (RingBar.rollMixed, an intrabar-body splice) is recorded as its next position
+		// (the first single-contract bar) and flagged, so the post-roll window never contains it
+		bool m_rollMixed1, m_rollMixed0;
 		int m_lastBar = int.MinValue;
 		// rev 6 DV-3.10: online degree self-calibration (SelfCalibrate: scorer, ring and fit built here; Calibrate: scorer lazy, journal side)
 		readonly DvpSelfCalib m_self;
@@ -1173,7 +1182,11 @@ namespace PowerLanguage.Function
 		// counters
 		public long BarsSeen { get { return m_pos + 1; } }
 		public long Eligible { get; private set; }     // windows after warm-up (DV-7.4)
-		public long Skipped { get; private set; }      // of which crossing a roll
+		public long Skipped { get; private set; }      // of which crossing a roll with fewer than RollMin post-roll bars (no fit)
+		public long Truncated { get; private set; }    // of which truncated at a roll (fitted on >= RollMin post-roll bars; DV-7.1 14:09 CT)
+		/// <summary>DV-7.1 (14:09 CT): post-roll bars needed before a truncated window is fitted: min(RollMinBars, winLen).</summary>
+		public int RollMin { get { return Math.Min(DvpConst.RollMinBars, m_n); } }
+		int m_rollJournalState;   // journal side: 1 after a roll bar until the first window with >= RollMin post-roll bars (DVP ROLL resume)
 		public long FitsComputed { get; private set; } // snapshot window fits actually run (laziness counter, DV-T22)
 		public long CalibFits { get; private set; }    // calibrator grid fits (DV-T22 rev 6: one per sampled grid window)
 		public long FitLines { get; private set; }
@@ -1252,8 +1265,10 @@ namespace PowerLanguage.Function
 			RingBar b = ring[0];
 			if (b.bar == m_lastBar) return false;
 			m_lastBar = b.bar; m_pos++;
-			if (b.rollBar) { m_roll0 = m_roll1; m_roll1 = m_pos; if (RollDetect) m_atr.ResetPrev(); }   // DV-7.3
-			m_atr.Add(b.h, b.l, b.c);
+			bool mixed = b.rollBar && b.rollMixed && RollDetect;
+			if (b.rollBar) { m_roll0 = m_roll1; m_rollMixed0 = m_rollMixed1; m_roll1 = mixed ? m_pos + 1 : m_pos; m_rollMixed1 = mixed; if (RollDetect) m_atr.ResetPrev(); }   // DV-7.3
+			if (b.rollBar && RollDetect && journal != null) { journal(RollWarmupLine(b.time, mixed)); m_rollJournalState = 1; }
+			if (!mixed) m_atr.Add(b.h, b.l, b.c);   // a mixed bar's range holds the contract jump: not a true range (the next bar starts fresh)
 			m_atrHist[(int)(m_pos % m_K)] = m_atr.Value;
 			NewSession = m_pos == 0 || b.tradingDay != SessionDay;   // DV-7.7: tradingDayKey changes, never calendar dates
 			if (NewSession) { Sessions++; SessionDay = b.tradingDay; SessionHalfDay = halfDay; }
@@ -1263,7 +1278,20 @@ namespace PowerLanguage.Function
 			if (aPos - m_n + 1 >= 0)
 			{
 				Eligible++;
-				if (RollDetect && crossesByPos(aPos)) Skipped++;
+				long rp = RollDetect ? newestRollByPos(aPos) : long.MinValue;
+				if (rp != long.MinValue)
+				{
+					if (aPos - rp + 1 >= RollMin)
+					{
+						Truncated++;
+						if (m_rollJournalState == 1 && journal != null)   // DV-11.1 (14:09 CT): first window fitted again after the roll (pos-based, query-independent)
+						{
+							m_rollJournalState = 0;
+							journal("DVP ROLL resume stream(Data" + I(Ds) + ") barTime(" + b.time.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + ") winEff(" + I(aPos - rp + 1) + ") winLen(" + I(m_n) + ")");
+						}
+					}
+					else Skipped++;
+				}
 			}
 			calibStep(ring, b, journal);   // rev 6 DV-3.10.5: (1) track/score, (2) recheck + degree history, (3) grid sample
 			if (journal != null)
@@ -1301,7 +1329,7 @@ namespace PowerLanguage.Function
 			}
 			if (!Calib.IsGrid(m_pos) || m_pos - m_n + 1 < 0) return;   // (3) the fixed grid; positions before the first full window are not samples
 			if (ring.Count < m_n || (RollDetect && crossesInRing(ring, 0, m_n))) { Calib.GridSkip(); return; }
-			if (!loadAndFit(m_calFit, ring, 0, false)) { Calib.GridSkip(); return; }
+			if (!loadAndFit(m_calFit, ring, 0, false, m_n)) { Calib.GridSkip(); return; }   // DV-7.1 14:09 CT: the grid samples full windows only
 			CalibFits++;
 			Calib.Sample(m_calFit, m_pos, b.time, b.tradingDay);
 		}
@@ -1349,16 +1377,58 @@ namespace PowerLanguage.Function
 			return head("change") + " from(" + I(m_self.LastFrom) + ") to(" + I(m_self.Current) + ") n(" + I(m_self.Count) + ")";
 		}
 
-		bool crossesByPos(long aPos)
+		/// <summary>Newest roll position at i in [1, n-1] of the full window anchored at aPos, or long.MinValue.</summary>
+		long newestRollByPos(long aPos)
 		{
 			long lo = aPos - m_n + 2;   // i in [1, n-1]
-			return (m_roll1 >= lo && m_roll1 <= aPos) || (m_roll0 >= lo && m_roll0 <= aPos);
+			if (m_roll1 >= lo && m_roll1 <= aPos + (m_rollMixed1 ? 1 : 0)) return m_roll1;   // mixed: recorded one bar later; aPos + 1 = 0 clean bars
+			if (m_roll0 >= lo && m_roll0 <= aPos + (m_rollMixed0 ? 1 : 0)) return m_roll0;
+			return long.MinValue;
+		}
+
+		/// <summary>
+		/// DV-7.1 (Ettienne 2026-11-23 14:09 CT): the window length for the window anchored anchorAgo bars back (stream position aPos).
+		/// A roll bar at i in [1, n-1] truncates the window to start on the newest roll bar: n = bars since that roll bar (inclusive),
+		/// fitted when n &gt;= RollMin (rollCut = true, never crossing the splice), else skipped (crosses = true, returns 0). No roll:
+		/// winLen, or -1 while the stream has not yet seen winLen bars (warm-up). RollDetection off: rolls are ignored (rollMode None).
+		/// </summary>
+		int windowAt(_BarRing ring, int anchorAgo, long aPos, out bool crosses, out bool rollCut)
+		{
+			crosses = rollCut = false;
+			if (RollDetect)
+			{
+				// ruling 2026-11-23 18:46 CT: a mixed roll bar (both contracts) is itself excluded, also at i = 0: n = bars after it
+				int last = Math.Min(anchorAgo + m_n - 1, ring.Count - 1);
+				for (int a = anchorAgo; a <= last; a++)
+					if (ring[a].rollBar)
+					{
+						bool mixed = ring[a].rollMixed;
+						if (!mixed && a > anchorAgo + m_n - 2) continue;   // a clean roll bar at i = 0 starts the window: no cut
+						int nEff = mixed ? a - anchorAgo : a - anchorAgo + 1;
+						if (nEff >= RollMin && aPos - nEff + 1 >= 0) { rollCut = true; return nEff; }
+						if (aPos - m_n + 1 < 0 || ring.Count < anchorAgo + m_n) return -1;   // still in the stream's first winLen bars: warm-up
+						crosses = true; return 0;
+					}
+			}
+			if (aPos - m_n + 1 < 0 || ring.Count < anchorAgo + m_n) return -1;
+			return m_n;
+		}
+
+		/// <summary>DV-7.1 journal line on a roll bar (journal side).</summary>
+		public string RollWarmupLine(DateTime rollTime) { return RollWarmupLine(rollTime, false); }
+
+		/// <summary>DV-7.1 journal line on a roll bar; mixed (18:46 CT) = the roll bar holds both contracts and is left out of the window.</summary>
+		public string RollWarmupLine(DateTime rollTime, bool mixed)
+		{
+			return "DVP ROLL warmup stream(Data" + I(Ds) + ") rollBar(" + rollTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + ") winLen(" + I(m_n)
+				+ ") rollMinBars(" + I(RollMin) + "): windows are truncated at the roll bar and fitted from " + I(RollMin) + " post-roll bars (Ettienne 2026-11-23 14:09 CT)"
+				+ (mixed ? " mixedBar(1): the roll bar holds both contracts and is excluded; the window starts on the next bar (Ettienne 2026-11-23 18:46 CT)" : "");
 		}
 
 		static bool crossesInRing(_BarRing ring, int anchorAgo, int n)
 		{
 			for (int a = anchorAgo; a <= anchorAgo + n - 2; a++) if (ring[a].rollBar) return true;   // i = n-1-(a-anchorAgo) in [1, n-1]
-			return false;
+			return ring[anchorAgo + n - 1].rollBar && ring[anchorAgo + n - 1].rollMixed;   // a mixed roll bar at i = 0 crosses too (18:46 CT)
 		}
 
 		/// <summary>The snapshot whose window ends endAgo bars back in the ring (endAgo = 1 when ring[0] is the current closed bar t).</summary>
@@ -1423,13 +1493,16 @@ namespace PowerLanguage.Function
 			snap.sinceRefit = off; snap.refitBar = off == 0;
 			snap.atr = m_pos - ePos < m_K && ePos >= 0 ? m_atrHist[(int)(ePos % m_K)] : double.NaN;
 			snap.warming = WarmingAt(aPos);   // DV-3.10.4: the degree state of the window ending at the anchor
-			if (aPos - m_n + 1 < 0 || ring.Count < aAgo + m_n) return;   // warm-up: no fit (DV-7.1 "fits resume after n bars")
-			snap.anchorBar = ring[aAgo].bar; snap.t0 = ring[aAgo + m_n - 1].time;
-			if (RollDetect && crossesInRing(ring, aAgo, m_n)) { snap.crossesRoll = true; return; }   // skipped: no rails
+			bool crosses, rollCut;
+			int nW = windowAt(ring, aAgo, aPos, out crosses, out rollCut);
+			if (nW < 0) return;   // warm-up: no fit
+			snap.anchorBar = ring[aAgo].bar;
+			if (crosses) { snap.t0 = ring[Math.Min(aAgo + m_n - 1, ring.Count - 1)].time; snap.crossesRoll = true; return; }   // skipped: < RollMin post-roll bars, no rails
+			snap.t0 = ring[aAgo + nW - 1].time; snap.rollTruncated = rollCut;
 			if (s.fitAnchor != snap.anchorBar)
 			{
 				s.fitAnchor = snap.anchorBar;
-				s.fitOk = fitWindow(s.fit, ring, aAgo, true, aPos);
+				s.fitOk = fitWindow(s.fit, ring, aAgo, true, aPos, nW);
 				s.rthShare = m_rthShare;
 				if (s.fitOk)
 				{
@@ -1465,10 +1538,10 @@ namespace PowerLanguage.Function
 		/// in effect after bar aPos (DV-3.10.7; no fit when it is not in the history), Calibrate reports d = 1 with every d fitted,
 		/// Fixed1 d = 1. aPos &lt; 0 = no degree needed (the drift's previous window, evaluated at the current degree). No allocation.
 		/// </summary>
-		bool fitWindow(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll, long aPos)
+		bool fitWindow(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll, long aPos, int n)
 		{
 			FitsComputed++;
-			if (!loadAndFit(fit, ring, anchorAgo, loadAll)) return false;
+			if (!loadAndFit(fit, ring, anchorAgo, loadAll, n)) return false;   // a truncated window keeps dCap = Cap(n) (Choose clamps d to it)
 			int d = 1;
 			if (m_self != null && aPos >= 0) { d = m_self.DegreeAt(aPos); if (d < 1) return false; }
 			fit.Choose(d, Config.degMode == EDvpDegMode.Calibrate);
@@ -1476,10 +1549,9 @@ namespace PowerLanguage.Function
 		}
 
 		/// <summary>Loads the n-bar window ending at anchorAgo (oldest first) and fits every degree up to dCap. No allocation.</summary>
-		bool loadAndFit(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll)
+		bool loadAndFit(DvpFit fit, _BarRing ring, int anchorAgo, bool loadAll, int n)
 		{
 			DvpConfig c = Config;
-			int n = m_n;
 			double vol = 0, rth = 0;
 			for (int i = 0; i < n; i++)
 			{
@@ -1505,17 +1577,21 @@ namespace PowerLanguage.Function
 		double drift(Slot s, _BarRing ring, int aAgo)
 		{
 			int pAgo = aAgo + m_r;
-			if (ring.Count < pAgo + m_n || m_pos - (aAgo + m_r) - m_n + 1 < 0) return double.NaN;
-			if (RollDetect && crossesInRing(ring, pAgo, m_n)) return double.NaN;
+			if (pAgo >= ring.Count) return double.NaN;
+			// DV-7.1 (14:09 CT): the previous window follows the same rule (truncated at the newest roll bar, or skipped)
+			bool pCross, pCut;
+			int pn = windowAt(ring, pAgo, m_pos - pAgo, out pCross, out pCut);
+			if (pn <= 0 || pCross) return double.NaN;
+			DvpFit f = s.fit;
+			if (f.n - 1 - m_r < 0) return double.NaN;
 			int pBar = ring[pAgo].bar;
 			Slot o = s == m_s0 ? m_s1 : m_s0;
 			DvpFit prev;
 			if (o.fitAnchor == pBar) { if (!o.fitOk) return double.NaN; prev = o.fit; }
-			else { if (!fitWindow(m_prevFit, ring, pAgo, false, -1)) return double.NaN; prev = m_prevFit; }
-			DvpFit f = s.fit;
+			else { if (!fitWindow(m_prevFit, ring, pAgo, false, -1, pn)) return double.NaN; prev = m_prevFit; }
 			// rev 6 DV-3.8: both fits at the current degree f.Deg (Yhat clamps to the previous fit's valid degrees), so a degree switch
 			// never shows up as drift
-			double now = f.Yhat(f.U(m_n - 1 - m_r), f.Deg), was = prev.Yhat(1, f.Deg);
+			double now = f.Yhat(f.U(f.n - 1 - m_r), f.Deg), was = prev.Yhat(1, f.Deg);
 			return (now - was) / s.snap.atr;
 		}
 
@@ -1574,6 +1650,7 @@ namespace PowerLanguage.Function
 			else sb.Append("NaN");
 			sb.Append(") manRowsEff(").Append(ok ? I(s.manRowsEff) : "NaN").Append(") rthShare(").Append(F(s.rthShare))
 				.Append(") crossesRoll(").Append(s.crossesRoll ? '1' : '0').Append(')');
+			if (ok && s.rollTruncated) sb.Append(" winEff(").Append(I(s.n)).Append(')');   // DV-7.1 / DV-11.1 (14:09 CT): truncated at the roll
 			kv(sb, "sigma", s.sigma); kv(sb, "sigmaAtr", s.sigmaAtr); kv(sb, "r2", s.r2); kv(sb, "dw", s.dw); kv(sb, "skew", s.skew);
 			kv(sb, "yhatEnd", s.yhatEnd); kv(sb, "slopeEnd", s.slopeEnd); kv(sb, "slope1", s.slope1); kv(sb, "endpointDrift", s.endpointDrift);
 			kv(sb, "pocZ", s.pocZ); kv(sb, "vaLoZ", s.vaLoZ); kv(sb, "vaHiZ", s.vaHiZ); kv(sb, "entropy", s.entropy);
@@ -1614,7 +1691,7 @@ namespace PowerLanguage.Function
 		public string RunLine(string runId)
 		{
 			return "DVP RUN runId(" + runId + ") stream(Data" + I(Ds) + ") bars(" + I(BarsSeen) + ") fits(" + (Config.journalFits ? I(FitLines) : "off") + ") skips(" + (Config.journalFits ? I(SkipLines) : "off")
-				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
+				+ ") eligible(" + I(Eligible) + ") skipped(" + I(Skipped) + ") truncated(" + I(Truncated) + ") skipShare(" + F(SkipShare) + ") rollDetect(" + (RollDetect ? "On" : "Off")
 				+ ") diagnosticOnly(" + (DiagnosticOnly ? "1" : "0") + ") meanCovIn(" + F(MeanCovIn) + ") meanCovFwd(" + F(MeanCovFwd)
 				+ ") meanCovFwdFlat(" + F(MeanCovFwdFlat) + ") fallbacks(" + I(FallbackCount) + ") sessions(" + I(Sessions) + ") fwdDropped(" + FwdDropped.ToString(CultureInfo.InvariantCulture) + ")"
 				+ CalibRun();

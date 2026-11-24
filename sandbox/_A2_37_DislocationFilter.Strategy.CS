@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table). Data2 (@NQ / @YM) is another root, so it does not inherit the Data1 roll (S4.3); the ln spread is not roll-adjusted (both legs roll on the same table date) and this file does not call rollOn.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The hedge ratio is fixed at 1. The spread is ln(Data1 close) minus ln(Data2 close), and z is versus the last 500 closed bars of that spread. A fitted 20-session OLS hedge is not in this file. If Data2 is absent the file journals that and stands aside. It never trades the spread and it sends no order. Persistent means more than 60 percent of the last 60 bars have absolute z above 2.5.
 //
@@ -148,10 +148,12 @@ namespace PowerLanguage.Strategy
 		private DateTime m_day = DateTime.MinValue;
 		protected override void StartCalc()
 		{
+			if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off;
 			m_spread.Clear(); m_day = DateTime.MinValue;   // Coder 2026-11-22: a recalc reuses this object, so the spread history is cleared (no lookahead)
 			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 		}
 		public _A2_37_DislocationFilter(object _ctx) : base(_ctx) { }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
 		protected override void CalcBar()
 		{
 			base.CalcBar();

@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: ASSUMPTION: adjacent HVNs on the 10-session composite are the gap edges, and the price width must be at least one 30-minute ATR. The 0.35 row-volume test is not applied because the volume of the rows between two nodes is not a public field. The 30-minute ATR is the mean of 14 non-overlapping 30 one-minute ranges. The 5-minute closes and ATR5 come from closed Data2 5-minute bars. The window is RthStart plus 15 minutes through RthStart plus 5 hours. Two contracts (coding-plan decision 10): GX takes T1, 1 lot, at the far gap edge minus 1 tick and the other lot at the far node's peak; the trailing runner needs a third lot and is not sent.
 //
@@ -154,7 +154,7 @@ namespace PowerLanguage.Strategy
 		public _A2_46_VolumeGapCommitment(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
 		protected override void Create()
 		{
-			base.Create(); RollDetection = ERollDetection.Series;
+			base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			DevelopingSource = EDevelopingSource.Own; OwnProfileWindow = EOwnProfileWindow.Rth;   // composites from Own RTH profiles, not MC's Volume Profile (not on the research charts)
 			GxOrderPrefix = "A246"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A246LE", EOrderAction.Buy));

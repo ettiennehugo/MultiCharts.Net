@@ -554,6 +554,7 @@
     <Compile Include="_DailyContext.Function.CS" />
     <Compile Include="_MtfMath.Function.CS" />
     <Compile Include="_MtfProbe.Strategy.CS" />
+    <Compile Include="_RollEvidenceProbe.Strategy.CS" />
     <Compile Include="_PriceActionEngine.Function.CS" />
     <Compile Include="_TickStream.Function.CS" />
     <Compile Include="_TodNormaliser.Function.CS" />

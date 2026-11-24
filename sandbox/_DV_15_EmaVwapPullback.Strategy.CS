@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: M-DAILY (NeedsDaily).
-// Engine settings enabled: RollDetection = Series. Vwap1Type = Session and Vwap1DataStream = 1, set in code. FlatBy = 15:55.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). Vwap1Type = Session and Vwap1DataStream = 1, set in code. FlatBy = 15:55.
 //
 // ## 16. Pitfalls
 // Lookahead: the side is the prior run, the slope uses VWAP values already stored, and the limit works forward.
 // Repaint: the EMA is a running value updated on the closed bar. It is not recomputed from the future.
 // Survivorship: Not applicable
-// Rolls: Series. A roll bar does not enter. ATR20d reseeds after a roll.
+// Rolls: Table (CME roll-date table). A roll bar does not enter. ATR20d reseeds after a roll.
 // Data quality: which VWAP Dale meant is not stated in the extract. This arm uses the session slot. Not yet verified on a chart.
 // Other: the fill bar is unprotected.
 //
@@ -212,7 +212,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			Vwap1DataStream = 1;
 			FlatBy = Cfg.flat;
 			m_leLmt = OrderCreator.Limit(new SOrderParameters(Contracts.UserSpecified, "DV15LE", EOrderAction.Buy));

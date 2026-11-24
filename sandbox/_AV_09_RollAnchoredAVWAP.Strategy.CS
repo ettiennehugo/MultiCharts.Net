@@ -77,13 +77,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table) when the base is the futures profile base.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: There is no roll flag on EAvwapAnchor and no public custom-anchor call. ASSUMPTION: the roll anchor is CurrentVwap1 with Vwap1Type RollDate, which re-anchors at the roll. Two consecutive RTH closes on the same side of that VWAP are the two-day acceptance. The entry is the next session's second 60-minute bar when it is a higher low (long) or lower high (short) and it closes on that side. The stop is the more distant extreme of the two acceptance sessions.
 //
@@ -152,7 +152,7 @@ namespace PowerLanguage.Strategy
 		private double m_restPx; private bool m_restBuy, m_restOn, m_filledSetup; private int m_prevPos, m_fillAnchor, m_restQty = 1;
 
 		public _AV_09_RollAnchoredAVWAP(object _ctx) : base(_ctx) { Gate = ESandboxGate.Off; ExitMode = ESandboxExit.Off; }
-		protected override void Create() { base.Create(); RollDetection = ERollDetection.Series; Vwap1Type = EVwapType.RollDate;
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; Vwap1Type = EVwapType.RollDate;
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09LE", EOrderAction.Buy));
 			m_se = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09SE", EOrderAction.SellShort));
 			m_lx = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.Default, "AV09LX", EOrderAction.Sell, OrderExit.FromAll));

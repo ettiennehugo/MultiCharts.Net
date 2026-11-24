@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: This row is a session classifier, not an entry. At 12:00 it journals D_KL from _ProfileStats.KL between today's developing RTH bars and the prior RTH session. It does not send an order. Thresholds are the catalogue default 0.15 and 0.60.
 //
@@ -150,7 +150,8 @@ namespace PowerLanguage.Strategy
 
 		public _A2_31_KlGate(object _ctx) : base(_ctx) { }
 
-		protected override void Create() { base.Create(); ProfileStats.enabled = true; }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; ProfileStats.enabled = true; }
+		protected override void StartCalc() { if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose); base.StartCalc(); }
 
 		protected override void CalcBar()
 		{

@@ -16,6 +16,9 @@ namespace PowerLanguage.Function
 		public int bar; public DateTime time; public DateTime tradingDay;
 		public double o, h, l, c, v, up, down;
 		public bool rth; public bool rollBar;
+		/// <summary>Owner ruling 2026-11-23 18:46 CT: this roll bar holds BOTH contracts (an intrabar-body splice on Data1 slower than
+		/// 1 minute, or the Data n bar containing it). Ring consumers that start a post-roll window keep it out. False otherwise.</summary>
+		public bool rollMixed;
 	}
 
 	public sealed class BarRingConfig

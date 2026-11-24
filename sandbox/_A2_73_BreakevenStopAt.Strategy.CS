@@ -79,13 +79,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: set in Create.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), with the other protected settings set in code. They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series when the base is the futures profile base.
+// Rolls: RollDetection Table (CME roll-date table; owner ruling 2026-11-23: the studies that had rolls off move to the table).
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: The catalogue entry is an exit overlay, not an entry. It maps to GX BreakEven AtTrigger, BreakEvenUnit RMultiple, BreakEvenValue 3. ASSUMPTION: the rolling-average-gain alternative is not coded; the numeric rule that is coded in the note is 3R. This file does not open a host trade.
 //
@@ -147,7 +147,8 @@ namespace PowerLanguage.Strategy
 	{
 		private DateTime m_day = DateTime.MinValue;
 		public _A2_73_BreakevenStopAt(object _ctx) : base(_ctx) { }
-		protected override void Create() { base.Create(); }
+		protected override void Create() { base.Create(); RollDetection = ERollDetection.Table; RollTableFromProfile = true; }
+		protected override void StartCalc() { if (!isFuturesCategory(Bars.Info.Category)) RollDetection = ERollDetection.Off; DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose); base.StartCalc(); }
 		protected override void CalcBar()
 		{
 			base.CalcBar();

@@ -761,6 +761,39 @@ namespace PowerLanguage.Function
 			if (n == 0)
 				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "no roll dates in " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo), "add a preset row / cost for " + s.Root);
 		}
+
+		/// <summary>T-R2 (sandbox Table migration): CollectRollDates over fixed contract years (the base's 2000-2035) without
+		/// stepping outside the verified CME product calendar. CmeRates / CmeFx / CmeEnergy / CmeMetals refuse any date outside
+		/// 2016-2026, so on those calendars a contract month is taken only when the month before it and the contract month itself
+		/// are covered (every preset roll falls in that span: CL in the month before, GC / ZN before first notice, 6E in the month).
+		/// For CL that is CLG16 .. CLZ26. Other calendars (CmeEquityIndex: ES / MES / NQ / MNQ) are exactly CollectRollDates.
+		/// Returns the number of contract months skipped (0 off the product calendars).</summary>
+		public static int CollectCoveredRollDates(InstrumentProfile p, int yearFrom, int yearTo, string engine, Action<string> errorSink, ICollection<DateTime> into)
+		{
+			if (p == null || !InstrumentCalendars.IsProduct(p.calendar)) { CollectRollDates(p, yearFrom, yearTo, engine, errorSink, into); return 0; }
+			int from = yearFrom, to = yearTo, skipped = 0;
+			RequireRollFacts(p, engine, errorSink);
+			string eng = string.IsNullOrEmpty(engine) ? "ROLL" : engine;
+			InstrumentSubject s = p.Subject(eng);
+			if (yearFrom < 1970 || yearTo > 2100 || yearTo < yearFrom)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "contract-year range " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo) + " is inverted or outside 1970..2100", "pass yearFrom <= yearTo with both years inside 1970..2100");
+			InstrumentPresetRow row = RollRow(p);
+			int n = 0;
+			for (int y = from; y <= to; y++)
+				for (int m = 1; m <= 12; m++)
+				{
+					if (!MonthMask.Has(p.contractMonths, m)) continue;
+					DateTime first = new DateTime(y, m, 1);
+					if (!_CmeHolidays.Rules.Product.Covers(first.AddMonths(-1)) || !_CmeHolidays.Rules.Product.Covers(first.AddMonths(1).AddDays(-1))) { skipped++; continue; }
+					DateTime? r = Roll(row, y, m, p.isBusinessDay, s, errorSink);
+					if (r == null) continue;
+					into.Add(r.Value.Date);
+					n++;
+				}
+			if (n == 0)
+				InstrumentError.Fail(errorSink, s, InstrumentReason.UnknownField("roll"), "no roll dates in " + InstrumentText.Int(yearFrom) + ".." + InstrumentText.Int(yearTo) + " inside the product calendar", "add a preset row / cost for " + s.Root);
+			return skipped;
+		}
 	}
 
 	/// <summary>§4.5 derived session fields (MC-free) over the stream's Sessions list in session (= bar) time. Sessions are a weekly

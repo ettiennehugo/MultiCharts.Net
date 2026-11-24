@@ -78,13 +78,13 @@
 // ## 15. Dependencies
 // Base class: _VolumeProfileFuturesBase
 // Engines enabled: those set in Create or StartCalc.
-// Engine settings enabled: set in code. They are not strategy inputs.
+// Engine settings enabled: set in code. RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol). They are not strategy inputs.
 //
 // ## 16. Pitfalls
 // Lookahead: orders from a closed bar.
 // Repaint: Not applicable.
 // Survivorship: Not applicable
-// Rolls: RollDetection Series where this file trades.
+// Rolls: RollDetection Table (CME roll-date table) where this file trades.
 // Data quality: Not yet verified on a chart.
 // Other: ASSUMPTION: Prior-session mixture is ProfileMixture K<=2 on SessionBars of the previous RTH day. The minor component is the smaller weight. Two contracts (coding-plan decision 10): GX takes 50 percent at the void minimum (the lowest-volume price between the two means) when it lies before the major mean, and the final target is the major mean, in points from the signal close. The 5-minute confirmation reads closed Data2 5-minute bars (long confirms back above mu_minor + sd_minor, short back below mu_minor - sd_minor). The 1.2 ATR cap is applied to the structural stop before exitPlan. ATR5 is averageTrueRange(Bars, 14) on the 1-minute chart. The trigger is a later 1-minute close beyond the high (long) or low (short) of the second 5-minute bar that closed back through the edge.
 //
@@ -165,7 +165,7 @@ namespace PowerLanguage.Strategy
 		protected override void Create()
 		{
 			base.Create();
-			RollDetection = ERollDetection.Series;
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;
 			ProfileStats.enabled = true;
 			GxOrderPrefix = "A228"; createGxOrders();
 			m_le = OrderCreator.MarketNextBar(new SOrderParameters(Contracts.UserSpecified, "A228LE", EOrderAction.Buy));

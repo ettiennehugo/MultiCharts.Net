@@ -76,13 +76,13 @@
 // ## 15. Dependencies
 // Base class: _CustomSignal
 // Engines enabled: none. The CME session clock is constructed in the signal.
-// Engine settings enabled: RollDetection = Series, set in StartCalc before base.StartCalc.
+// Engine settings enabled: RollDetection = Table (the CME roll-date table from the Data1 profile, contract years 2000-2035, RollTableFromProfile; Off on a non-futures symbol), set in StartCalc before base.StartCalc.
 //
 // ## 16. Pitfalls
 // Lookahead: the setup uses completed RTH closes, and the order is sent on a closed bar for the next bar.
 // Repaint: Not applicable
 // Survivorship: Not applicable
-// Rolls: Series. rollOn(1) clears the close list. The catalogue does not require this.
+// Rolls: Table (CME roll-date table). rollOn(1) clears the close list. The catalogue does not require this.
 // Data quality: the lower-open test uses the RTH open against the prior RTH close, not the Globex close. Not yet verified on a chart.
 // Other: bars stamped 18:00–23:59 ET belong to the next Globex day, so the close test also requires the clock to be before 17:00.
 //
@@ -251,7 +251,7 @@ namespace PowerLanguage.Strategy
 			DailyConfig.atrRestartOnRoll = false;   // owner 2026-11-16: carry the 20-day ATR over the roll (PR #46); used only when NeedsDaily is on
 			m_clock = null;
 			configureSessions();
-			RollDetection = ERollDetection.Series;   // unadjusted series: detect splices
+			RollDetection = ERollDetection.Table; RollTableFromProfile = true;   // unadjusted series: detect splices
 			DvpConfig.journalFits = DvpConfig.journalRails = traceOn(ETraceLevel.Verbose);   /* Coder 2026-11-22 (Analyst #152 retest: MT-07 wrote 1.42M DVP FIT/RAIL lines): the per-bar DVP journals are Verbose, not Journal */ base.StartCalc();
 			m_closes.Clear(); m_rthClose = m_rthHigh = m_rthLow = m_atrAtEntry = double.NaN; m_day = m_entryDay = DateTime.MinValue;
 			m_longSetup = m_shortSetup = m_openChecked = m_waitLong = m_waitShort = false; m_sessionsAfter = 0;
