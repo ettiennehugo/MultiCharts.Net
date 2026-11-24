@@ -192,6 +192,14 @@ namespace PowerLanguage.Strategy
 			// skipped setup ended the run. It now lasts for the Globex day. A filled limit is not resent after the trade closes.
 			DateTime day = GlobexDate(Bars.Time[0]); if (day != m_day) { m_day = day; m_done = false; }
 			if (StrategyInfo.MarketPosition != 0) { m_arm = 0; return; }
+			// Coder 2026-11-23 (Analyst #155 DV-11 ThreeFamily): a fill-bar stop leaves MarketPosition == 0, so the m_arm loop used to
+			// resend the limit with GX disarmed. After exitBar, a dead arm is cleared; a fill-bar stop also ends the session (header §6).
+			if (m_arm > 0 && !GxArmed)
+			{
+				m_arm = 0;
+				if (GxFillBarStopped) m_done = true;
+				return;
+			}
 			if (rollOn(1) || Bars.CurrentBar < 300) return;
 			TimeSpan tod = sessionClock(Bars.Time[0]);
 			bool boundary = ((int)tod.TotalMinutes) % 30 == 0;
@@ -199,7 +207,7 @@ namespace PowerLanguage.Strategy
 			{
 				sendLimit();
 				if (boundary) m_arm--;
-				if (m_arm == 0) { m_done = false; m_filledSetup = false; m_restOn = false; }   // braces: only when the limit's life ends
+				if (m_arm == 0) { m_done = false; m_filledSetup = false; m_restOn = false; exitDisarm(); }   // braces: only when the limit's life ends
 				return;
 			}
 			if (!boundary || m_done) return;
