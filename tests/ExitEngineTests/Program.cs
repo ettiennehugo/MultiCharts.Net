@@ -61,6 +61,7 @@ static class Program
 		FillBarPartialStopKeepsRemainder();
 		Gx2Source();
 		Gx3Source();
+		GxFillBarUnarmed();
 		ReconfigurePerTrade();
 		Console.WriteLine("ExitEngineTests: " + s_pass.ToString(CultureInfo.InvariantCulture) + " passed, " + s_fail.ToString(CultureInfo.InvariantCulture) + " failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
@@ -1567,5 +1568,86 @@ static class Program
 		foreach (string f in new[] { "_StopsAndTargets.Strategy.CS", "_Stops_And_Targets.Strategy.CS", "_ExitStatic.Strategy.CS", "_StpOrLim_Exit.Strategy.CS", "_ExitHalfRiskHalfRoll.Strategy.CS" })
 			if (File.ReadAllText(Path.Combine(root, f)).IndexOf("SUPERSEDED by GX", StringComparison.Ordinal) >= 0) n++;
 		Check(n == 5, "five legacy exit studies marked superseded");
+	}
+	static string MethodBody(string src, string signature)
+	{
+		int at = src.IndexOf(signature, StringComparison.Ordinal);
+		if (at < 0) return "";
+		int brace = src.IndexOf('{', at);
+		if (brace < 0) return "";
+		int depth = 0;
+		for (int i = brace; i < src.Length; i++)
+		{
+			if (src[i] == '{') depth++;
+			else if (src[i] == '}')
+			{
+				depth--;
+				if (depth == 0) return src.Substring(at, i - at + 1);
+			}
+		}
+		return src.Substring(at);
+	}
+
+	static void GxFillBarUnarmed()
+	{
+		string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+		string src = File.ReadAllText(Path.Combine(root, "_CustomSignal.Strategy.CS"));
+		string dv11 = File.ReadAllText(Path.Combine(root, "sandbox", "_DV_11_VWAPTrendFailure.Strategy.CS"));
+		string rules = File.ReadAllText(Path.Combine(root, "sandbox", "_SandboxRules.Function.CS"));
+
+		Check(src.IndexOf("protected bool GxArmed { get { return m_gxArmed; } }", StringComparison.Ordinal) >= 0, "GxArmed is a protected read-only property");
+		Check(src.IndexOf("protected bool GxFillBarStopped { get { return m_gxFillStopLogged; } }", StringComparison.Ordinal) >= 0, "GxFillBarStopped is a protected read-only property");
+		Check(src.IndexOf("protected void exitDisarm()", StringComparison.Ordinal) >= 0, "exitDisarm exists");
+
+		string snap = MethodBody(src, "private void gxSnapArmMark()");
+		Check(snap.IndexOf("this.NetProfit", StringComparison.Ordinal) >= 0 && snap.IndexOf("this.TotalTrades", StringComparison.Ordinal) >= 0, "exitPlan snapshots NetProfit and TotalTrades");
+		Check(src.IndexOf("gxSnapArmMark();", StringComparison.Ordinal) >= 0 && src.IndexOf("try { m_gxArmNet = this.NetProfit; m_gxHaveArmNet = true; } catch (Exception) { m_gxHaveArmNet = false; }\n\t\t\tgxSendFillBarStop();", StringComparison.Ordinal) < 0, "exitPlan uses gxSnapArmMark rather than NetProfit alone");
+
+		string closed = MethodBody(src, "private bool gxArmTradeClosed()");
+		Check(closed.IndexOf("this.NetProfit != m_gxArmNet", StringComparison.Ordinal) >= 0 && closed.IndexOf("this.TotalTrades != m_gxArmTrades", StringComparison.Ordinal) >= 0, "a 0-dollar fill-bar stop is still detected via TotalTrades");
+
+		string note = MethodBody(src, "private void gxNoteEmbeddedFillStop()");
+		Check(note.IndexOf("if (!gxArmTradeClosed()) return;", StringComparison.Ordinal) >= 0 && note.IndexOf("m_gxArmed = false;", StringComparison.Ordinal) >= 0 && note.IndexOf("m_gxFillStopLogged = true;", StringComparison.Ordinal) >= 0, "FILLBAR-STOP sets GxArmed false and GxFillBarStopped true");
+		Check(note.IndexOf("if (m_gxFillStopLogged || !m_gxArmed || !m_gxHaveArmNet) return;", StringComparison.Ordinal) < 0, "FILLBAR-STOP no longer requires a NetProfit change");
+
+		string bar = MethodBody(src, "protected void exitBar()");
+		Check(bar.IndexOf("if (!m_gxArmed && !m_gxGate.EngineOpen) return;", StringComparison.Ordinal) >= 0, "the original unarmed-flat early return remains for non-embedded paths");
+		int silent = bar.IndexOf("if (!m_gxArmed && !m_gxGate.EngineOpen) return;", StringComparison.Ordinal);
+		int guard = bar.IndexOf("if (m_gxOrders && !m_gxArmed && !m_gxGate.EngineOpen)", StringComparison.Ordinal);
+		Check(guard >= 0 && silent > guard, "the unarmed-position safeguard runs before the silent return");
+		Check(bar.IndexOf("gxFlattenUnarmed(pos);", StringComparison.Ordinal) >= 0, "exitBar flattens an unarmed embedded position");
+		Check(bar.IndexOf("EXIT Info: GX UNARMED-FLAT", StringComparison.Ordinal) >= 0, "the flat bar after an emergency close is logged");
+
+		string flat = MethodBody(src, "private void gxFlattenUnarmed(int pos)");
+		Check(flat.IndexOf("if (!m_gxUnarmedLogged)", StringComparison.Ordinal) >= 0 && flat.IndexOf("EXIT Error: GX UNARMED-POSITION", StringComparison.Ordinal) >= 0, "unarmed flatten logs Error once");
+		Check(flat.IndexOf("traceAlways(ETraceLevel.Error", StringComparison.Ordinal) >= 0, "the unarmed Error is written even when TraceLevel is None");
+		Check(flat.IndexOf("m_gxLX.Send(qty)", StringComparison.Ordinal) >= 0 && flat.IndexOf("m_gxSX.Send(qty)", StringComparison.Ordinal) >= 0, "emergency flatten covers Long and Short");
+		Check(flat.IndexOf("EOrderAction.Buy,", StringComparison.Ordinal) < 0 && flat.IndexOf("EOrderAction.SellShort", StringComparison.Ordinal) < 0 && flat.IndexOf("m_gxLE", StringComparison.Ordinal) < 0 && flat.IndexOf("m_gxSE", StringComparison.Ordinal) < 0, "emergency flatten is close-only and does not flip a side");
+		Check(flat.IndexOf("m_gxExitReason = \"UNARMED\";", StringComparison.Ordinal) >= 0, "the emergency flatten records reason UNARMED");
+
+		string disarm = MethodBody(src, "protected void exitDisarm()");
+		Check(disarm.IndexOf("StrategyInfo.MarketPosition != 0", StringComparison.Ordinal) >= 0 && disarm.IndexOf("m_gxArmed = false;", StringComparison.Ordinal) >= 0, "exitDisarm is a no-op while a position is open");
+
+		string reset = MethodBody(src, "private void gxResetRun()");
+		Check(reset.IndexOf("m_gxHaveArmTrades = false;", StringComparison.Ordinal) >= 0 && reset.IndexOf("m_gxUnarmedLogged = false;", StringComparison.Ordinal) >= 0 && reset.IndexOf("m_gxEmergencyFlat = false;", StringComparison.Ordinal) >= 0, "StartCalc clears the unarmed-safeguard state");
+
+		// Normal trade path is unchanged: a live, armed position still opens the engine and sends GX exits.
+		Check(bar.IndexOf("if (m_gxGate.BeginPosition(gxPositionEntryTime()))", StringComparison.Ordinal) >= 0 && bar.IndexOf("gxSendWorkingStop(longSide, guard)", StringComparison.Ordinal) >= 0 && bar.IndexOf("GenerateStopLoss", StringComparison.Ordinal) < 0, "a normal in-position bar still opens the engine and sends working exits");
+		string plan = MethodBody(src, "protected double exitPlan(bool longSide, double plannedEntry, double structuralStop, int qty, ExitMarket mkt, string entryOrderName)");
+		Check(plan.IndexOf("m_gxArmed = true;", StringComparison.Ordinal) >= 0 && plan.IndexOf("gxSendFillBarStop();", StringComparison.Ordinal) >= 0 && plan.IndexOf("m_gxFillStopLogged = false;", StringComparison.Ordinal) >= 0, "a fresh exitPlan still arms GX and the fill-bar stop");
+
+		// DV-11 resting-limit loop: after exitBar, an unarmed arm is cleared and not resent; fill-bar stop sets m_done.
+		string calc = MethodBody(dv11, "protected override void CalcBar()");
+		int exitAt = calc.IndexOf("exitBar();", StringComparison.Ordinal);
+		int unarmedAt = calc.IndexOf("if (m_arm > 0 && !GxArmed)", StringComparison.Ordinal);
+		int sendLoop = calc.IndexOf("if (m_arm > 0)", unarmedAt + 1, StringComparison.Ordinal);
+		Check(exitAt >= 0 && unarmedAt > exitAt && sendLoop > unarmedAt, "DV-11 checks !GxArmed after exitBar before the resting resend");
+		string unarmed = unarmedAt >= 0 && sendLoop > unarmedAt ? calc.Substring(unarmedAt, sendLoop - unarmedAt) : "";
+		Check(unarmed.IndexOf("m_arm = 0;", StringComparison.Ordinal) >= 0 && unarmed.IndexOf("if (GxFillBarStopped) m_done = true;", StringComparison.Ordinal) >= 0 && unarmed.IndexOf("sendLimit()", StringComparison.Ordinal) < 0, "DV-11 clears the arm and ends the session after a fill-bar stop, and does not resend");
+		string loop = sendLoop >= 0 ? calc.Substring(sendLoop) : "";
+		Check(loop.IndexOf("exitDisarm();", StringComparison.Ordinal) >= 0, "DV-11 disarms GX when the resting limit expires unfilled");
+
+		// Other resting GX strategies already go through Rest(TradesToday), which sees a same-bar fill-and-stop.
+		Check(rules.IndexOf("entriesToday is the strategy's entry count", StringComparison.Ordinal) >= 0 && rules.IndexOf("public static ERest Rest(int position, int entriesToday, ref int seenEntries", StringComparison.Ordinal) >= 0, "Rest(TradesToday) already treats a fill-bar stop as a fill");
 	}
 }

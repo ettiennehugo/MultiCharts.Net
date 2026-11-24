@@ -89,6 +89,7 @@ static class Program
 		EarlyFlatChecks(files);
 		RuntimeFlatChecks(root);
 		HoldChecks(files);
+		FillBarUnarmedChecks(files, root);
 		GateSourceChecks(files);
 		GateWiringChecks(files);
 		GateRuleProbes(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Generated", "bin", "Release", "net8.0", "SandboxLib.dll"));
@@ -845,6 +846,55 @@ static class Program
 			code = code.Substring(0, m.Index) + code.Substring(end + 1);
 		}
 		return code;
+	}
+
+
+	// Coder 2026-11-23: a fill-and-stop on the same bar leaves MarketPosition == 0, so a resting entry that only checks
+	// position will resend unarmed. DV-11 had its own 8-bar loop. Every other GX priced entry resends only through
+	// Rest(TradesToday), which already treats that same-bar fill as Done.
+	static void FillBarUnarmedChecks(List<string> files, string root)
+	{
+		string dv11Path = Path.Combine(root, "sandbox", "_DV_11_VWAPTrendFailure.Strategy.CS");
+		string dv11 = File.ReadAllText(dv11Path);
+		string calc = MethodBody(dv11, @"void\s+CalcBar\s*\(\s*\)");
+		Check(calc.IndexOf("if (m_arm > 0 && !GxArmed)", StringComparison.Ordinal) >= 0, "DV-11 refuses to resend a resting limit when GX is disarmed");
+		Check(calc.IndexOf("if (GxFillBarStopped) m_done = true;", StringComparison.Ordinal) >= 0, "DV-11 ends the session after a fill-bar stop (header §6)");
+		Check(calc.IndexOf("exitDisarm();", StringComparison.Ordinal) >= 0, "DV-11 calls exitDisarm when the resting limit expires unfilled");
+		int unarmedAt = calc.IndexOf("if (m_arm > 0 && !GxArmed)", StringComparison.Ordinal);
+		int sendLoop = unarmedAt >= 0 ? calc.IndexOf("sendLimit();", unarmedAt, StringComparison.Ordinal) : -1;
+		int guardEnd = unarmedAt >= 0 ? calc.IndexOf("if (rollOn(1)", unarmedAt, StringComparison.Ordinal) : -1;
+		Check(unarmedAt >= 0 && guardEnd > unarmedAt && (sendLoop < 0 || sendLoop > guardEnd), "DV-11 does not call sendLimit in the unarmed-arm clear");
+
+		var ownLoop = new List<string>();
+		int restToday = 0, restOld = 0, exitPlan = 0;
+		foreach (string path in files)
+		{
+			string name = Path.GetFileName(path);
+			string text = File.ReadAllText(path);
+			if (text.IndexOf("exitPlan(", StringComparison.Ordinal) < 0) continue;
+			exitPlan++;
+			string body = MethodBody(text, @"void\s+CalcBar\s*\(\s*\)");
+			if (body.IndexOf("if (m_arm > 0)", StringComparison.Ordinal) >= 0 && body.IndexOf(".Send(", StringComparison.Ordinal) >= 0
+				&& body.IndexOf("sandboxBook()", StringComparison.Ordinal) >= 0)
+			{
+				// A private countdown that resends after exitPlan, besides the book.
+				if (body.IndexOf("if (m_arm > 0 && !GxArmed)", StringComparison.Ordinal) < 0
+					&& body.IndexOf("if (!GxArmed)", StringComparison.Ordinal) < 0)
+					ownLoop.Add(name);
+			}
+			if (text.IndexOf("_SandboxRules.Rest(", StringComparison.Ordinal) >= 0)
+			{
+				if (text.IndexOf("_SandboxRules.Rest(StrategyInfo.MarketPosition, TradesToday,", StringComparison.Ordinal) >= 0
+					|| text.IndexOf("_SandboxRules.Rest(pos, TradesToday,", StringComparison.Ordinal) >= 0)
+					restToday++;
+				else
+					restOld++;
+			}
+		}
+		Check(ownLoop.Count == 0, "every GX study with its own resting resend loop guards !GxArmed: " + string.Join(", ", ownLoop.ToArray()));
+		Check(restOld == 0 && restToday > 0, "every GX Rest() caller uses the TradesToday overload (" + restToday + " studies)");
+		Check(exitPlan > 50, "audited exitPlan sandbox studies: " + exitPlan);
+		Check(File.ReadAllText(Path.Combine(root, "sandbox", "_SandboxRules.Function.CS")).IndexOf("public static ERest Rest(int position, int entriesToday, ref int seenEntries", StringComparison.Ordinal) >= 0, "Rest(TradesToday) still detects a same-bar fill-and-stop");
 	}
 
 	// Comments and quoted names are removed so two placeholders that differ only by an order name still match.

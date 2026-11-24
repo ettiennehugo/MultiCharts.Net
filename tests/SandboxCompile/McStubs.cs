@@ -450,6 +450,7 @@ namespace PowerLanguage.Strategy
 		public PortfolioSignalObject(object ctx) { }
 		public double InitialCapital;
 		public double NetProfit;
+		public int TotalTrades;
 		public double Commission;
 		public double Slippage;
 		protected PowerLanguage.BarsStub Bars = new PowerLanguage.BarsStub();

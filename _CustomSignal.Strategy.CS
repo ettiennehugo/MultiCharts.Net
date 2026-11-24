@@ -2013,6 +2013,10 @@ namespace PowerLanguage.Strategy
 		private double m_gxStopDist;
 		private double m_gxFillStopDl;
 		private double m_gxArmNet;
+		private int m_gxArmTrades;
+		private bool m_gxHaveArmTrades;
+		private bool m_gxUnarmedLogged;
+		private bool m_gxEmergencyFlat;
 		private readonly ExitOpenGate m_gxGate = new ExitOpenGate();
 		private ExitConfig m_gxCfg = new ExitConfig { Embedded = true, InitialStop = EInitialStop.EntryProvided };
 		private ExitSession m_gx;
@@ -2952,6 +2956,10 @@ namespace PowerLanguage.Strategy
 			m_gxStopDist = 0;
 			m_gxFillStopDl = 0;
 			m_gxArmNet = 0;
+			m_gxArmTrades = 0;
+			m_gxHaveArmTrades = false;
+			m_gxUnarmedLogged = false;
+			m_gxEmergencyFlat = false;
 			m_gxGate.OnFlat();
 			m_gx = null;
 			m_gxPos = null;
@@ -4770,6 +4778,12 @@ namespace PowerLanguage.Strategy
 		/// <summary>Minutes to the next news event. NaN = no news exit. The host sets it before exitBar. Not read unless GX is on.</summary>
 		protected double GxMinutesToNews { get; set; } = double.NaN;
 
+		/// <summary>True after exitPlan until a normal close, a fill-bar stop, or exitDisarm. Derived strategies check this after exitBar before resending a resting entry.</summary>
+		protected bool GxArmed { get { return m_gxArmed; } }
+
+		/// <summary>True after exitBar has seen a fill-bar stop for the current arm. Cleared by the next exitPlan.</summary>
+		protected bool GxFillBarStopped { get { return m_gxFillStopLogged; } }
+
 		/// <summary>Create the GX exit orders. Call from the derived Create when the strategy will call exitPlan. The base Create does not call this.</summary>
 		protected void createGxOrders()
 		{
@@ -4912,7 +4926,7 @@ namespace PowerLanguage.Strategy
 			double bpv = mkt.Bpv > 0 ? mkt.Bpv : 0;
 			m_gxFillStopDl = m_gxStopDist * bpv;
 			m_gxFillStopLogged = false;
-			try { m_gxArmNet = this.NetProfit; m_gxHaveArmNet = true; } catch (Exception) { m_gxHaveArmNet = false; }
+			gxSnapArmMark();
 			gxSendFillBarStop();
 			return stop;
 		}
@@ -5167,18 +5181,46 @@ namespace PowerLanguage.Strategy
 			}
 		}
 
+		/// <summary>Snapshot NetProfit and TotalTrades at exitPlan so a 0-dollar fill-bar stop is still visible (NetProfit alone would miss it).</summary>
+		private void gxSnapArmMark()
+		{
+			try { m_gxArmNet = this.NetProfit; m_gxHaveArmNet = true; } catch (Exception) { m_gxHaveArmNet = false; }
+			try { m_gxArmTrades = this.TotalTrades; m_gxHaveArmTrades = true; } catch (Exception) { m_gxHaveArmTrades = false; }
+		}
+
+		/// <summary>True when a trade closed since exitPlan: NetProfit moved, or TotalTrades increased (covers a fill-bar stop that nets to 0).</summary>
+		private bool gxArmTradeClosed()
+		{
+			if (m_gxHaveArmNet)
+			{
+				try { if (this.NetProfit != m_gxArmNet) return true; } catch (Exception) { }
+			}
+			if (m_gxHaveArmTrades)
+			{
+				try { if (this.TotalTrades != m_gxArmTrades) return true; } catch (Exception) { }
+			}
+			return false;
+		}
+
 		/// <summary>The built-in stop closed the trade before the first in-position bar. Log it once and drop the arm.</summary>
 		private void gxNoteEmbeddedFillStop()
 		{
-			if (m_gxFillStopLogged || !m_gxArmed || !m_gxHaveArmNet) return;
-			double net;
-			try { net = this.NetProfit; }
-			catch (Exception) { return; }
-			if (net == m_gxArmNet) return;
+			if (m_gxFillStopLogged || !m_gxArmed) return;
+			if (!gxArmTradeClosed()) return;
 			m_gxFillStopLogged = true;
 			m_gxArmed = false;
 			m_gxFillStopDl = 0;
 			if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: GX FILLBAR-STOP " + m_gxPrefix + " - closed on its fill bar by the built-in stop measured from the fill");
+		}
+
+		/// <summary>Drop a still-flat embedded arm so GenerateStopLoss is not kept after a resting entry expires unfilled. No-op when a position is open or GX was never used.</summary>
+		protected void exitDisarm()
+		{
+			if (!m_gxUsed || StrategyInfo.MarketPosition != 0) return;
+			m_gxArmed = false;
+			m_gxFillStopDl = 0;
+			m_gxHaveArmNet = false;
+			m_gxHaveArmTrades = false;
 		}
 
 		/// <summary>One closed bar of an embedded GX trade, including the flat bar after the exit. No-op until exitPlan has been called. Sends only exits that reduce the open side. EXIT CLOSE is written once, on the flat bar.</summary>
@@ -5188,6 +5230,12 @@ namespace PowerLanguage.Strategy
 			int pos = StrategyInfo.MarketPosition;
 			if (pos == 0)
 			{
+				if (m_gxEmergencyFlat)
+				{
+					if (traceOn(ETraceLevel.Info)) trace(ETraceLevel.Info, "EXIT Info: GX UNARMED-FLAT " + m_gxPrefix + " - emergency close filled, position is flat");
+					m_gxEmergencyFlat = false;
+					m_gxUnarmedLogged = false;
+				}
 				bool wasOpen = m_gxGate.EngineOpen;
 				gxLogFlatClose();
 				if (wasOpen)
@@ -5199,11 +5247,18 @@ namespace PowerLanguage.Strategy
 					m_gxStopDist = 0;
 					m_gxFillStopDl = 0;
 					m_gxHaveArmNet = false;
+					m_gxHaveArmTrades = false;
 					if (m_gxPos != null) m_gxPos.Open = false;
 					m_gxArmed = false;
 				}
 				else gxNoteEmbeddedFillStop();
 				if (m_gxArmed) gxSendFillBarStop();
+				return;
+			}
+			// Embedded GX only (createGxOrders / exitPlan). Wrapper journal via gxAttachSession does not take this path.
+			if (m_gxOrders && !m_gxArmed && !m_gxGate.EngineOpen)
+			{
+				gxFlattenUnarmed(pos);
 				return;
 			}
 			if (!m_gxArmed && !m_gxGate.EngineOpen) return;
@@ -5281,6 +5336,38 @@ namespace PowerLanguage.Strategy
 				if (qf > lots) qf = lots;
 				if (longSide) m_gxLT.Send(m_gxPos.FinalLevel, qf); else m_gxST.Send(m_gxPos.FinalLevel, qf);
 			}
+		}
+
+		/// <summary>Close-only market exit for an open position after GX was disarmed (a leaked unarmed entry). Logs Error once; resends the flatten each bar until flat. Does not reverse a side.</summary>
+		private void gxFlattenUnarmed(int pos)
+		{
+			if (!m_gxUnarmedLogged)
+			{
+				m_gxUnarmedLogged = true;
+				string when = "";
+				try { when = Bars.Time[0].ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); } catch (Exception) { }
+				string line = "EXIT Error: GX UNARMED-POSITION " + m_gxPrefix
+					+ " pos(" + pos.ToString(CultureInfo.InvariantCulture) + ")"
+					+ (when.Length > 0 ? " at(" + when + ")" : "")
+					+ " - open position with GX disarmed; sending a close-only market exit";
+				string symbol = "";
+				try { symbol = Bars.Info.Name; } catch (Exception) { }
+				try { traceAlways(ETraceLevel.Error, symbol, line); } catch (Exception) { }
+				try { Output.WriteLine(line); } catch (Exception) { }
+				if (traceOn(ETraceLevel.Error)) trace(ETraceLevel.Error, line);
+			}
+			createGxOrders();
+			int qty = gxOpenLots(pos);
+			if (pos > 0)
+			{
+				if (m_gxLX != null) m_gxLX.Send(qty);
+			}
+			else if (pos < 0)
+			{
+				if (m_gxSX != null) m_gxSX.Send(qty);
+			}
+			m_gxEmergencyFlat = true;
+			m_gxExitReason = "UNARMED";
 		}
 
 		/// <summary>FromAll stop, no quantity. It covers the position the MM fills, on the fill bar and after.</summary>
