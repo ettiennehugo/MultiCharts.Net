@@ -176,6 +176,16 @@ namespace PowerLanguage.Strategy
 	//   verdict  (§2.3, n = pairs): n < 30 PARK (no evaluation); 30 <= n < 150 PARK (inconclusive); n >= 150: PASS on
 	//              A2-33 "keep..." with |t| >= 2, PASS on "trade top-quality tercile only", else PARK (kill). Variant 0
 	//              lines are prefixed "NOT A VERDICT RUN".
+	//   G0-c (RollArm = BackAdjusted, EventStudy only; Ettienne 2026-11-23 16:36 CT; REPORT-ONLY TEST, the policy stays Reset):
+	//     every row above is byte-identical to the Reset run. A shadow engine keeps the multi-session sources across the roll and
+	//     shifts them by the splice offset (ticks) at the splice bar; levels whose source holds pre-splice bars are registered as
+	//     "<T>~BA" after the Reset levels and scored only in G0C lines (outside the Holm family):
+	//     G0C PRE-REGISTERED: ...                       (StartCalc)
+	//     G0C SPLICE day() bar() offset() offTicks() source(host|open-prevClose) sessions() weekProfiles() dvLevels() dvPending() bars30()
+	//     G0C type(T~BA) window(dev 2016-2022|val 2023-2024) levels() pairs() edgeR() t() | base(T) pairs() edgeR() t() | diff() tDiff() => verdict
+	//     G0C done arm(BackAdjusted) family() splices() baLevels() devPass(a/b) valPass(a/b) holm(excluded) policy(Reset unchanged)
+	//     verdict: PASS = t > 2 AND edgeR >= the Reset type's edgeR in the same window (decide on dev, confirm on val);
+	//     INCONCLUSIVE when either side has < 30 pairs. No cash-terms arm (no SPX cash data).
 	//   Canary mode journals each fill and closed trade, then totals: all, ex-roll window (session before / of / after a
 	//   roll), 2016-2024 and 2019-2024 (A2-24's own window). Read the NET PF in the Strategy Performance Report too:
 	//   > 1.0 = BUG to investigate, <= 1.0 = plumbing behaves.
@@ -184,13 +194,16 @@ namespace PowerLanguage.Strategy
 	{
 		[Input] public EGate0Mode Mode { get; set; }
 		[Input] public int Variant { get; set; }
+		/// <summary>A2-39 roll arm. Reset (default) = the pre-registered run, output unchanged. BackAdjusted = G0-c report-only arm
+		/// (Ettienne 2026-11-23 16:36 CT, EventStudy mode only): adds "&lt;T&gt;~BA" G0C lines; see the header.</summary>
+		[Input] public EGate0RollArm RollArm { get; set; }
 
 		private Gate0Engine m_g0;
 		private bool m_done, m_configured, m_windowChecked;
 		private IOrderMarket m_le, m_se, m_lx, m_sx;
 		private IOrderPriced m_leLmt, m_seLmt, m_leStp, m_seStp, m_lxStp, m_sxStp, m_lxLmt, m_sxLmt;
 
-		public _TestGate0(object _ctx) : base(_ctx) { Mode = EGate0Mode.EventStudy; Variant = 1; }
+		public _TestGate0(object _ctx) : base(_ctx) { Mode = EGate0Mode.EventStudy; Variant = 1; RollArm = EGate0RollArm.Reset; }
 
 		protected override void Create()
 		{
@@ -251,6 +264,7 @@ namespace PowerLanguage.Strategy
 			if (resErr != null) throw new ArgumentException("_TestGate0: " + resErr);
 			InstrumentProfile p1 = InstrumentProfileOf(1);
 			m_g0 = new Gate0Engine { mode = Mode, variant = Variant, tick = tickSize(), root = p1 != null ? p1.root : _MtfMath.SymbolRoot(Bars.Info.Name),
+				rollArm = RollArm, spliceFromHost = RollArm == EGate0RollArm.BackAdjusted,
 				journal = engineSink(ETraceLevel.Journal), warn = engineSink(ETraceLevel.Warning), debug = engineSink(ETraceLevel.Debug),
 				error = msg => traceAlways(ETraceLevel.Error, Bars.Info.Name, msg) };
 			m_tradeKeys = new HashSet<string>(); m_gross = m_net = 0; m_trades.Clear();
@@ -275,6 +289,8 @@ namespace PowerLanguage.Strategy
 			if (!m_configured || Bars.Status != EBarState.Close) return;
 			DateTime t = Bars.Time[0];
 			var b = new Gate0Bar(ToEastern(t), GlobexDate(t), Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], Bars.Volume[0], rollOn(1));
+			// G0-c: the host's splice bar and offset (Series detection: the roll bar, offset NaN = open - previous Data1 close)
+			if (RollArm == EGate0RollArm.BackAdjusted) { b.splice = rollSpliceOn(); b.spliceOffset = b.splice ? RollSpliceOffset : double.NaN; }
 			int mp = Math.Sign(StrategyInfo.MarketPosition);
 			if (!m_done) m_g0.Bar(b, mp);
 			if (!m_done && (b.day >= Gate0Engine.DevEnd || Bars.LastBarOnChart)) finish();

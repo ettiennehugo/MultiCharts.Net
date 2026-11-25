@@ -382,8 +382,132 @@ static class Program
 			Check(same && nodes > 1000, "DV-T12a Gate0Profile.Nodes bit-identical to the pre-extraction code on 2000 random profiles (" + nodes + " nodes)");
 		}
 
+		G0cTests();
+
 		Console.WriteLine($"Gate0Tests: {s_pass} passed, {s_fail} failed");
 		Environment.Exit(s_fail == 0 ? 0 : 1);
+	}
+
+	// ---- G0-c back-adjusted arm (Ettienne 2026-11-23 16:36 CT): report-only, Reset output byte-identical ----
+	static List<Gate0Bar> G0cBars(int seed, DateTime start, int days, int[] rollAt, double gap)
+	{
+		var r = new Random(seed); var res = new List<Gate0Bar>(); double px = 4000; int sd = 0;
+		for (int d = 0; d < days; d++)
+		{
+			var day = start.AddDays(d); if (day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday) continue;
+			bool roll = Array.IndexOf(rollAt, sd) >= 0; sd++; bool first = true;
+			if (roll) px += gap;
+			for (var t = day.AddHours(-6).AddMinutes(1); t <= day.AddHours(16); t = t.AddMinutes(1))
+			{
+				double o = px, c = Math.Round((px + (r.NextDouble() - 0.5) * 2.2 + (4000 - px) * 0.0005) * 4) / 4; px = c;
+				res.Add(new Gate0Bar(t, day, o, Math.Max(o, c) + 0.25, Math.Min(o, c) - 0.25, c, 50 + r.Next(200), roll && first)); first = false;
+			}
+		}
+		return res;
+	}
+
+	static string StudyCsv(Gate0Engine e) { var w = new System.IO.StringWriter(); e.study.WriteCsv(w); return w.ToString(); }
+
+	static void G0cTests()
+	{
+		// shifts are exact
+		var pf = new Gate0Profile(0.25); pf.Add(100, 99, 40); pf.Add(100.5, 100.5, 10); double pc0, ph0, pl0, pc1, ph1, pl1; pf.ValueArea(0.7, out pc0, out ph0, out pl0);
+		pf.Shift(8); pf.ValueArea(0.7, out pc1, out ph1, out pl1);
+		Check(Near(pc1, pc0 + 2) && Near(ph1, ph0 + 2) && Near(pl1, pl0 + 2) && Near(pf.total, 50), "G0-c Gate0Profile.Shift(8 ticks) moves POC/VAH/VAL by 2.00, volume unchanged");
+		var vw = new Gate0Vwap(); vw.Add(100, 3); vw.Add(104, 1); double m0 = vw.Value, s0 = vw.Sigma; vw.Shift(-12.5);
+		var vr = new Gate0Vwap(); vr.Add(87.5, 3); vr.Add(91.5, 1);
+		Check(Near(vw.Value, m0 - 12.5) && Near(vw.Sigma, s0, 1e-9) && Near(vw.p2v, vr.p2v, 1e-6) && vw.pre, "G0-c Gate0Vwap.Shift: exact sums of (p + o), sigma unchanged, marked pre");
+		vw.Reset(); Check(!vw.pre, "G0-c Gate0Vwap.Reset clears pre");
+
+		// configuration
+		var c1 = new Gate0Engine { tick = 0.25, mode = EGate0Mode.Canary, variant = 0, rollArm = EGate0RollArm.BackAdjusted };
+		Check(c1.Configure() == "G0-c RollArm BackAdjusted runs in EventStudy mode only", "G0-c BackAdjusted refused in Canary mode");
+		var c2 = new Gate0Engine { tick = 0.25, mode = EGate0Mode.ControlFL, variant = 2, rollArm = EGate0RollArm.BackAdjusted };
+		Check(c2.Configure() != null, "G0-c BackAdjusted refused in ControlFL mode");
+		var jr = new List<string>(); var cr = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 2, journal = jr.Add }; cr.Configure();
+		Check(cr.rollArm == EGate0RollArm.Reset && cr.BaShadow == null && cr.baStudy == null && !jr.Any(x => x.StartsWith("G0C")), "G0-c default arm is Reset: no shadow, no ~BA study, no G0C line");
+		var jb = new List<string>(); var cb = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 2, journal = jb.Add, rollArm = EGate0RollArm.BackAdjusted }; cb.Configure();
+		Check(cb.BaShadow != null && cb.baStudy != null && jb.Count == 2 && jb[0].StartsWith("G0 PRE-REGISTERED") && jb[1] == Gate0Engine.G0cPreRegistration(), "G0-c BackAdjusted: one G0 and one G0C PRE-REGISTERED line (the shadow journals no G0 line)");
+		Check(Gate0Engine.G0cPreRegistration().Contains("t > 2 AND edgeR >= the Reset type's edgeR") && Gate0Engine.G0cPreRegistration().Contains("no cash-terms arm"), "G0-c pre-registration states the pass rule and the missing cash-terms arm");
+
+		// splice: the shadow shifts the pre-roll history by the offset; the parent (Reset) clears it
+		{
+			var bars = G0cBars(5, new DateTime(2022, 3, 1), 40, new[] { 20 }, 37.4);
+			var jl = new List<string>(); var e = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 2, journal = jl.Add, rollArm = EGate0RollArm.BackAdjusted }; e.Configure();
+			double[] pocs = null; double off = double.NaN; bool after = false, histOk = false, preOk = false, parentCleared = false;
+			for (int i = 0; i < bars.Count; i++)
+			{
+				var b = bars[i];
+				if (b.roll)
+				{
+					// the shadow's completed sessions, plus the session the roll bar's new day closes (its POC from its profile)
+					double cp, ch, cl; e.BaShadow.Current.profile.ValueArea(0.70, out cp, out ch, out cl);
+					pocs = e.BaShadow.History.Select(x => x.poc).Concat(new[] { cp }).ToArray(); off = Math.Round((b.o - bars[i - 1].c) / 0.25) * 0.25;
+				}
+				e.Bar(b);
+				if (b.roll && !after)
+				{
+					after = true; var sh = e.BaShadow.History;
+					histOk = sh.Count == pocs.Length && sh.Select(x => x.poc).Zip(pocs, (x, y) => Near(x, y + off)).All(x => x);
+					preOk = sh.All(x => x.baPre) && e.BaShadow.Current.baPre; parentCleared = e.History.Count == 0;
+				}
+			}
+			Check(pocs != null && pocs.Length >= 10 && histOk, "G0-c shadow: every pre-roll session POC moves by the splice offset (" + off + ", " + (pocs == null ? 0 : pocs.Length) + " sessions)");
+			Check(preOk && parentCleared, "G0-c shadow marks the shifted sessions pre-splice; the Reset parent still clears its history");
+			var sl = jl.Where(x => x.StartsWith("G0C SPLICE")).ToList();
+			Check(sl.Count == 1 && sl[0].Contains("offset(" + off.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ") offTicks(" + (long)Math.Round(off / 0.25) + ") source(open-prevClose)"), "G0-c one G0C SPLICE line with the offset in points and ticks (" + (sl.Count > 0 ? sl[0] : "none") + ")");
+			e.Finish();
+			Check(e.BaLevels > 0 && e.baStudy.Events.All(x => Gate0Engine.IsBaType(x.type)) && !e.study.Events.Any(x => Gate0Engine.IsBaType(x.type)), "G0-c ~BA levels go to the ~BA study only (" + e.BaLevels + ")");
+			Check(e.baStudy.Events.Where(x => !x.control).All(x => x.type == "NPOC~BA"), "G0-c Variant 2 cohort is NPOC~BA only");
+		}
+
+		// host splice: a late splice bar (not the roll bar) with the host offset, NaN = open - previous close
+		{
+			Func<double, List<string>> run = hostOff =>
+			{
+				var bars = G0cBars(9, new DateTime(2022, 3, 1), 30, new[] { 15 }, 0);
+				var jl = new List<string>(); var e = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = 2, journal = jl.Add, rollArm = EGate0RollArm.BackAdjusted, spliceFromHost = true }; e.Configure();
+				int ri = bars.FindIndex(x => x.roll);
+				for (int i = 0; i < bars.Count; i++) { var b = bars[i]; if (i == ri + 540) { b.splice = true; b.spliceOffset = hostOff; } e.Bar(b); }
+				return jl.Where(x => x.StartsWith("G0C SPLICE")).ToList();
+			};
+			var h = run(12.3);
+			Check(h.Count == 1 && h[0].Contains("offset(12.25) offTicks(49) source(host)") && h[0].Contains(" 03:01 ET)"), "G0-c spliceFromHost: shifts at the host splice bar (03:01, not the 21:01 roll bar) by the host offset rounded to ticks (" + (h.Count > 0 ? h[0] : "none") + ")");
+			var n = run(double.NaN);
+			Check(n.Count == 1 && n[0].Contains("source(open-prevClose)"), "G0-c spliceFromHost with a NaN host offset uses open - previous close");
+		}
+
+		// Reset rows byte-identical: the Reset arm and the BackAdjusted arm on the same bars (2 rolls, dev and val windows)
+		{
+			var bars = G0cBars(13, new DateTime(2022, 8, 1), 230, new[] { 30, 93 }, -21.75);
+			bool allSame = true; int g0c = 0, ba = 0; var sameList = new List<string>(); bool both = false;
+			foreach (int v in new[] { 1, 2, 5, 7, 8, 10, 13 })
+			{
+				var jr2 = new List<string>(); var jb2 = new List<string>();
+				var er = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = v, journal = jr2.Add }; er.Configure();
+				var eb = new Gate0Engine { tick = 0.25, mode = EGate0Mode.EventStudy, variant = v, journal = jb2.Add, rollArm = EGate0RollArm.BackAdjusted }; eb.Configure();
+				foreach (var b in bars) { er.Bar(b); eb.Bar(b); }
+				er.Finish(); eb.Finish();
+				var nonG0c = jb2.Where(x => !x.StartsWith("G0C ")).ToList();
+				bool same = jr2.SequenceEqual(nonG0c) && StudyCsv(er) == StudyCsv(eb);
+				allSame &= same; g0c += jb2.Count - nonG0c.Count; ba += eb.BaLevels; if (!same) sameList.Add("v" + v);
+				both |= eb.BaResults.Any(x => x.window == "dev") && eb.BaResults.Any(x => x.window == "val");
+				Check(jb2.Last().StartsWith("G0C done arm(BackAdjusted) family(" + (EGate0Family)v + ") splices(2) baLevels(" + eb.BaLevels + ")") && jb2.Last().Contains("holm(excluded) policy(Reset unchanged)"), "G0-c done line v" + v + ": " + jb2.Last());
+				Check(eb.BaResults.All(x => x.Line() != null && jb2.Contains(x.Line())), "G0-c every G0C result is journaled v" + v);
+			}
+			Check(allSame, "G0-c Reset rows byte-identical in the BackAdjusted run (journal minus G0C lines, and the Reset study CSV) for Variants 1,2,5,7,8,10,13 " + string.Join(",", sameList));
+			Check(g0c > 0 && ba > 0 && both, "G0-c the BackAdjusted runs add G0C lines (" + g0c + ") and ~BA levels (" + ba + ") in both windows");
+		}
+
+		// verdict rule
+		Func<int, double, double, int, double, string> dec = (n, t, e, bn, be) => { var g = new G0cResult { pairs = n, t = t, edge = e, sd = 1, basePairs = bn, baseEdge = be, baseSd = 1 }; g.Decide(); return g.verdict; };
+		Check(dec(29, 5, 1, 200, 0) == "INCONCLUSIVE (n<30)" && dec(200, 5, 1, 29, 0) == "INCONCLUSIVE (n<30)", "G0-c n < 30 pairs on either side -> INCONCLUSIVE");
+		Check(dec(100, 2.0, 0.3, 500, 0.1) == "FAIL (t <= 2)", "G0-c t = 2 fails (t must exceed 2)");
+		Check(dec(100, 2.5, 0.09, 500, 0.1) == "FAIL (edge below the Reset type)", "G0-c edge below the Reset type fails");
+		Check(dec(100, 2.5, 0.1, 500, 0.1) == "PASS (t > 2, edge >= Reset type)" && dec(100, 2.5, 0.3, 500, -0.2) == "PASS (t > 2, edge >= Reset type)", "G0-c t > 2 and edge >= Reset edge passes (equal edge included)");
+		var gl = new G0cResult { type = "NPOC~BA", baseType = "NPOC", window = "dev", levels = 61, pairs = 40, t = 2.5, edge = 0.2, sd = 0.5, basePairs = 300, baseEdge = 0.1, baseSd = 0.6 }; gl.Decide();
+		Check(gl.Line() == "G0C type(NPOC~BA) window(dev 2016-2022) levels(61) pairs(40) edgeR(+0.200) t(2.50) | base(NPOC) pairs(300) edgeR(+0.100) t(NaN) | diff(+0.100) tDiff(" + gl.tDiff.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ") => PASS (t > 2, edge >= Reset type)", "G0-c line format: " + gl.Line());
+		Check(Gate0Engine.G0cValFrom == new DateTime(2023, 1, 1) && Gate0Engine.DevEnd == new DateTime(2025, 1, 1), "G0-c windows: dev < 2023-01-01, val 2023-2024, nothing from 2025");
 	}
 
 	static bool SameNodes(List<double[]> a, List<double[]> b)
